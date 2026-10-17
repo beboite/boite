@@ -22,28 +22,31 @@ export interface Parsed {
   last?: number;
   before?: number;
   limit?: number;
-  level?: 'info' | 'warn' | 'error';
+  level?: 'debug' | 'info' | 'warn' | 'error';
   /** `threads --project`: one project by id, name or folder. */
   project?: string;
   /** `threads --archived`: the archived threads instead. */
   archived: boolean;
   /** `answer --skip`: resolve a question without an answer. */
   skip: boolean;
-  /** `stewards set --all`: every project. */
-  all: boolean;
-  /** `stewards set --can a,b`: the capabilities. */
-  can?: string;
-  /** `stewards set --quiet`: no notices. */
-  quiet: boolean;
+  /** `settings request|open --why <text>`: the reason the card shows the user. */
+  why?: string;
+  /** `settings agent --agent <name>`: the agent, by name or id; omitted, the one whose conversation this is. */
+  agent?: string;
   /** Another core's address; its token comes from BOITE_TOKEN, never the command line. */
   core?: string;
+  /** `--context`, `--keep`, `--drop`, `--tools`, `--rules`, `--rules-file`, as typed: `contextRequest` reads them. */
+  context?: { preset?: string; keep?: string; drop?: string; tools?: string; rules?: string; rulesFile?: string };
 }
 
-const BOOLEAN_OPTIONS = ['json', 'multiple', 'worktree', 'wait', 'archived', 'skip', 'all', 'quiet'] as const;
+/** The flags that start a thread or a subagent without part of the user's setup. */
+const CONTEXT_FLAGS = { '--context': 'preset', '--keep': 'keep', '--drop': 'drop', '--tools': 'tools', '--rules': 'rules', '--rules-file': 'rulesFile' } as const;
+
+const BOOLEAN_OPTIONS = ['json', 'multiple', 'worktree', 'wait', 'archived', 'skip'] as const;
 const NUMBER_OPTIONS = ['timeout', 'last', 'before'] as const;
 
 export function parse(argv: string[]): Parsed {
-  const parsed: Parsed = { positional: [], json: false, multiple: false, worktree: false, wait: false, archived: false, skip: false, all: false, quiet: false, thread: undefined, dataDir: undefined, channel: 'stable' };
+  const parsed: Parsed = { positional: [], json: false, multiple: false, worktree: false, wait: false, archived: false, skip: false, thread: undefined, dataDir: undefined, channel: 'stable' };
   const number = (flag: string, raw: string): number => {
     const value = Number(raw);
     if (!Number.isFinite(value) || value < 0) throw new Usage(`${flag} needs a number, got ${raw}`);
@@ -59,6 +62,12 @@ export function parse(argv: string[]): Parsed {
     };
     // `boite browser` takes agent-browser's own flags (-i, --text, --timeout...); only these stay global.
     if (parsed.positional[0] === 'browser' && parsed.positional.length > 1 && !['--json', '--thread', '--data-dir', '--core', '--channel'].includes(arg)) { parsed.positional.push(arg); continue; }
+    // `boite logs` and `boite issue` parse their own filters (logs-cli.ts).
+    if ((parsed.positional[0] === 'logs' || parsed.positional[0] === 'issue') && !['--json', '--thread', '--data-dir', '--core', '--channel', '--help', '-h'].includes(arg)) {
+      // A value comes next and is passed the same way; a global flag after it stays global.
+      parsed.positional.push(arg);
+      continue;
+    }
     const boolean = BOOLEAN_OPTIONS.find(key => arg === `--${key}`);
     const numeric = NUMBER_OPTIONS.find(key => arg === `--${key}`);
     if (boolean !== undefined) parsed[boolean] = true;
@@ -67,16 +76,18 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--title') parsed.title = next();
     else if (arg === '--name') parsed.name = next();
     else if (arg === '--project') parsed.project = next();
-    else if (arg === '--can') parsed.can = next();
+    else if (arg === '--why') parsed.why = next();
+    else if (arg === '--agent') parsed.agent = next();
     else if (arg === '--core') parsed.core = next();
     else if (arg === '--limit') {
       const value = number(arg, next());
-      if (!Number.isInteger(value) || value < 1 || value > 200) throw new Usage('--limit needs an integer from 1 to 200');
+      // The widest any command takes (`boite logs`); a command with a lower cap checks its own.
+      if (!Number.isInteger(value) || value < 1 || value > 1000) throw new Usage('--limit needs an integer from 1 to 1000');
       parsed.limit = value;
     }
     else if (arg === '--level') {
       const value = next();
-      if (value !== 'info' && value !== 'warn' && value !== 'error') throw new Usage('--level expects info, warn or error');
+      if (value !== 'debug' && value !== 'info' && value !== 'warn' && value !== 'error') throw new Usage('--level expects debug, info, warn or error');
       parsed.level = value;
     }
     else if (arg === '--thread') parsed.thread = next();
@@ -93,6 +104,7 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--effort') parsed.effort = next();
     else if (arg === '--speed') parsed.speed = next();
     else if (arg === '--profile') parsed.profile = next();
+    else if (Object.hasOwn(CONTEXT_FLAGS, arg)) parsed.context = { ...parsed.context, [CONTEXT_FLAGS[arg as keyof typeof CONTEXT_FLAGS]]: next() };
     else if (arg.startsWith('--')) throw new Usage(`unknown flag ${arg}`);
     else parsed.positional.push(arg);
   }
@@ -105,4 +117,25 @@ export function requiredText(args: string[], start: number, message: string, tri
   if (trim) text = text.trim();
   if (text.length === 0) throw new Usage(message);
   return text;
+}
+
+/**
+ * The `context` a spawn or a new thread sends, from `--context <preset>`,
+ * `--keep`/`--drop <part,part>`, `--tools <Tool,Tool>` and `--rules <text>` or
+ * `--rules-file <path>`; undefined when none was given. The core checks the values.
+ */
+export function contextRequest(parsed: Parsed, readFile: (path: string) => string): Record<string, unknown> | undefined {
+  const flags = parsed.context;
+  if (flags === undefined) return undefined;
+  if (flags.rules !== undefined && flags.rulesFile !== undefined) throw new Usage('--rules and --rules-file exclude each other');
+  const list = (value: string | undefined) => value === undefined ? undefined : value.split(',').map(item => item.trim()).filter(Boolean);
+  const rules = flags.rulesFile === undefined ? flags.rules : readFile(flags.rulesFile);
+  const request: Record<string, unknown> = {
+    ...(flags.preset === undefined ? {} : { preset: flags.preset }),
+    ...(flags.keep === undefined ? {} : { keep: list(flags.keep) }),
+    ...(flags.drop === undefined ? {} : { drop: list(flags.drop) }),
+    ...(flags.tools === undefined ? {} : { tools: list(flags.tools) }),
+    ...(rules === undefined ? {} : { rules }),
+  };
+  return request;
 }

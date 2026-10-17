@@ -31,6 +31,8 @@ test('background updates preserve a mutation error and a changed client gets a n
   const store = source as unknown as Store;
   const view = new AgentsView(store);
   try {
+    // On screen: the view follows `agents.changed`.
+    view.start();
     await view.refresh();
     view.error = 'This change was refused';
     await view.refresh();
@@ -117,7 +119,7 @@ test('a snapshot that no longer touches kept history restarts that kind and drop
 function directory() {
   const base = new FakeAgents(() => {}).snapshot();
   const record = { revision: 1, createdAt: 1 };
-  const profile = (id: string, name: string, updatedAt: number, status: AgentEntities['profile']['status'] = 'active') => ({ ...record, id, updatedAt, name, domain: `${name} domain`, instructions: '', avatar: '', selection: { providerId: 'p', accountId: 'a', model: null, effort: null, permissionMode: 'default' as const }, status, tools: [], accountIntegration: 'provider' as const });
+  const profile = (id: string, name: string, updatedAt: number, status: AgentEntities['profile']['status'] = 'active') => ({ ...record, id, updatedAt, name, domain: `${name} domain`, instructions: '', avatar: '', selection: { providerId: 'p', accountId: 'a', model: null, effort: null, permissionMode: 'default' as const }, status, tools: [] });
   const snapshot: AgentsSnapshot = {
     ...base,
     profiles: [profile('mira', 'Mira', 10), profile('atlas', 'Atlas', 20), profile('lin', 'Lin', 90, 'archived')],
@@ -240,4 +242,28 @@ test('a read mark survives a new view of the same core', async () => {
     await second.refresh();
     expect(second.readAt).toEqual({ 'profile:mira': 40 });
   } finally { first.close(); second.close(); localStorage.clear(); }
+});
+
+test('a return visit draws the last snapshot at once and nothing is fetched while the page is away', async () => {
+  const snapshot = new FakeAgents(() => {}).snapshot();
+  let changed: (() => void) | null = null;
+  const off = vi.fn(() => { changed = null; });
+  const call = vi.fn().mockResolvedValue(snapshot);
+  const store = { client: { call, on: vi.fn((_: string, listener: () => void) => { changed = listener; return off; }) } } as unknown as Store;
+  const view = AgentsView.of(store);
+  try {
+    view.start();
+    await expect.poll(() => view.snapshot).not.toBeNull();
+    view.pause();
+    expect(off).toHaveBeenCalledOnce();
+    expect(changed).toBeNull();
+    const calls = call.mock.calls.length;
+    // The page comes back: the same view, its snapshot already there.
+    const again = AgentsView.of(store);
+    expect(again).toBe(view);
+    expect(again.snapshot).not.toBeNull();
+    again.start();
+    expect(changed).not.toBeNull();
+    await expect.poll(() => call.mock.calls.length).toBe(calls + 1);
+  } finally { view.close(); }
 });

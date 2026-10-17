@@ -1,3 +1,4 @@
+import { errorText } from '../errors';
 import type {
   KeybindingCommand,
   Keybindings,
@@ -7,14 +8,20 @@ import type {
   Settings,
   TelemetryState
 } from '@boite/contracts';
-import { chordLabel, commandForKey, isMac, resolveBindings, type KeyScope } from '../keybindings';
+import { chordLabel, commandForKey, isMac, resolveBindings, type BindingTable, type KeyScope } from '../keybindings';
 import { strings } from '../strings';
 import type { StoreContext } from './context';
 
 /** What the core keeps for the whole machine: its settings, the scheduler, the keybindings file and telemetry. */
 export class CoreSettings {
   scheduler = $state<SchedulerState | null>(null);
-  settings = $state<Settings | null>(null);
+  #settings = $state<Settings | null>(null);
+  get settings(): Settings | null { return this.#settings; }
+  set settings(value: Settings | null) {
+    this.#settings = value;
+    // Every arrival, whether read, pushed by the core or answered to a save.
+    this.ctx.models.syncFavorites();
+  }
   /** The keybindings file as the core last read it; null until the first `keybindings.get`. */
   keybindings = $state<Keybindings | null>(null);
   /** Every command with its chord: the defaults, the file's entries over them. */
@@ -39,9 +46,16 @@ export class CoreSettings {
   // The keyboard
   // -------------------------------------------------------------------------
 
+  /** The last keydown's answer: the composer asks for its chords, then the app for its own, all on one key. */
+  #lastKey: { event: KeyboardEvent; scope: KeyScope; table: BindingTable; command: KeybindingCommand | null } | null = null;
+
   /** The command this keydown is bound to, or null when the key is nobody's. A terminal asks for its own first. */
   commandForKey(event: KeyboardEvent, scope: KeyScope = 'app'): KeybindingCommand | null {
-    return commandForKey(this.ctx.store.bindings, event, isMac(), scope);
+    const table = this.ctx.store.bindings, last = this.#lastKey;
+    if (last?.event === event && last.scope === scope && last.table === table) return last.command;
+    const command = commandForKey(table, event, isMac(), scope);
+    this.#lastKey = { event, scope, table, command };
+    return command;
   }
 
   /** True while this keydown is the chord of that one command. */
@@ -69,7 +83,7 @@ export class CoreSettings {
         : await client.call('keybindings.set', { command: id, chord });
       return null;
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      return errorText(error);
     }
   }
 
@@ -81,7 +95,7 @@ export class CoreSettings {
       this.keybindings = await client.call('keybindings.reset', {});
       return null;
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      return errorText(error);
     }
   }
 

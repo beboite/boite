@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX_BYTES, MESSAGE_SENT_MAX_BYTES, RPC_MAX_FRAME_BYTES, TOOL_OUTPUT_PREVIEW_CHARS, type Message } from '@boite/contracts';
+import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES, READING_PAGE_BYTES, MESSAGE_PAGE_MAX_BYTES, MESSAGE_SENT_MAX_BYTES, RPC_MAX_FRAME_BYTES, type Message } from '@boite/contracts';
 import { echoThread, startTestCore } from './harness';
 
 test('a saved reading position shares one byte budget across both halves and keeps every history cursor', async () => {
@@ -85,7 +85,8 @@ test('a compact first page keeps complete history and retrieves tool output on d
     const page = await client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, compactTools: true });
     expect(page.messages).toHaveLength(40);
     expect(page.messagesBefore).toBe('history-110');
-    expect(page.messages.at(-1)!.parts[0]).toMatchObject({ outputDeferred: true, output: output.slice(0, TOOL_OUTPUT_PREVIEW_CHARS) });
+    // A folded card that succeeded reads none of its output.
+    expect(page.messages.at(-1)!.parts[0]).toMatchObject({ outputDeferred: true, output: '' });
     expect(JSON.stringify(page).length).toBeLessThan(20_000);
     expect(await client.call('messages.toolOutput', { threadId, messageId: 'history-149', toolId: 'big' })).toEqual({ output });
     const older = await client.call('messages.list', { threadId, before: page.messagesBefore!, compactTools: true });
@@ -99,6 +100,62 @@ test('a compact first page keeps complete history and retrieves tool output on d
     const other = await echoThread(harness, client);
     await expect(client.call('messages.toolOutput', { threadId: other.threadId, messageId: 'history-149', toolId: 'big' })).rejects.toThrow('not a message of thread');
     await expect(client.call('messages.toolOutput', { threadId, messageId: 'history-149', toolId: 'missing' })).rejects.toThrow('not a tool of message');
+  } finally { await harness.stop(); }
+});
+
+test('a first page holds about a screen: successful outputs stay on the core, the byte budget cuts the page, live calls stay whole', async () => {
+  const harness = await startTestCore();
+  try {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    // Turns of 30 commands with a few kilobytes of output each, none past 16 KiB:
+    // forty of them weighed megabytes before, for one screen of folded runs.
+    const output = 'line of command output\n'.repeat(200);
+    const run = (turn: number) => Array.from({ length: 30 }, (_, index) => ({ type: 'tool' as const, toolId: `cmd-${turn}-${index}`, name: 'Bash', input: { command: `step ${index}` }, output, status: 'done' as const }));
+    harness.core.journal.append({ type: 'message.started', threadId, version: 1, payload: {} }, () => {
+      for (let index = 0; index < 40; index++) {
+        harness.core.journal.putMessage({ id: `turn-${index}`, threadId, turnId: 'runs', role: 'assistant', state: 'complete', createdAt: index,
+          parts: [...run(index), { type: 'tool', toolId: `failed-${index}`, name: 'Bash', input: { command: 'bun test' }, output, status: 'error' }, { type: 'text', text: `Answer ${index}` }] });
+      }
+    });
+    const light = { compactTools: true, compactToolParts: true } as const;
+    const whole = await client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, ...light });
+    expect(whole.messages).toHaveLength(40);
+    expect(whole.messages[0]!.parts[0]).toMatchObject({ output: '', outputDeferred: true });
+    // A failed call keeps the output its opened card reads the error from.
+    expect(whole.messages[0]!.parts[30]).toMatchObject({ output, status: 'error' });
+    expect(whole.messages[0]!.parts[30]).not.toHaveProperty('outputDeferred');
+
+    const page = await client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...light });
+    expect(Buffer.byteLength(JSON.stringify(page.messages))).toBeLessThanOrEqual(INITIAL_PAGE_BYTES);
+    expect(page.messages.length).toBeGreaterThan(1);
+    expect(page.messages.length).toBeLessThan(40);
+    expect(page.messages.at(-1)!.id).toBe('turn-39');
+    expect(page.messagesBefore).toBe(page.messages[0]!.id);
+    // The pages above it walk back to the first message with no gap.
+    const ids = page.messages.map(message => message.id);
+    for (let before = page.messagesBefore; before;) {
+      const older = await client.call('messages.list', { threadId, before, maxBytes: READING_PAGE_BYTES, ...light });
+      expect(Buffer.byteLength(JSON.stringify(older.messages))).toBeLessThanOrEqual(READING_PAGE_BYTES);
+      ids.unshift(...older.messages.map(message => message.id));
+      before = older.before;
+    }
+    expect(ids).toEqual(Array.from({ length: 40 }, (_, index) => `turn-${index}`));
+    // One message above the budget still comes, so paging advances; a resume tail is never cut.
+    expect((await client.call('threads.get', { threadId, maxBytes: 1, ...light })).messages.map(message => message.id)).toEqual(['turn-39']);
+    const tail = await client.call('threads.get', { threadId, after: 'turn-20', maxBytes: 1, ...light });
+    expect(tail.messagesFrom).toBe('turn-20');
+    expect(tail.messages).toHaveLength(20);
+    await expect(client.call('threads.get', { threadId, maxBytes: 0 })).rejects.toThrow('threads.get.maxBytes');
+    await expect(client.call('messages.list', { threadId, before: 'turn-39', maxBytes: 1.5 })).rejects.toThrow('messages.list.maxBytes');
+    // Opening the card brings the whole call back.
+    expect((await client.call('messages.toolPart', { threadId, messageId: 'turn-39', toolId: 'cmd-39-0' })).part).toMatchObject({ output });
+
+    // A call that finishes while the thread is open keeps its output: a card open on it keeps what it showed.
+    await client.call('threads.get', { threadId, limit: 1, ...light, open: {} });
+    const live = client.next('message.part', event => event.messageId === 'turn-39');
+    harness.core.bus.emit('message.part', { threadId, messageId: 'turn-39', partIndex: 0, part: run(39)[0]! });
+    expect((await live).part).toMatchObject({ output });
   } finally { await harness.stop(); }
 });
 
@@ -119,7 +176,7 @@ test('a message whose stored tool outputs exceed one frame opens compacted and r
     expect(Buffer.byteLength(JSON.stringify(harness.core.journal.getMessage('images')))).toBeGreaterThan(RPC_MAX_FRAME_BYTES);
     const opened = await client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, compactTools: true });
     expect(opened.messages.map(message => message.id).slice(-3)).toEqual(['before-images', 'images', 'after-images']);
-    expect(opened.messages.at(-2)!.parts[0]).toMatchObject({ outputDeferred: true, output: image.slice(0, TOOL_OUTPUT_PREVIEW_CHARS) });
+    expect(opened.messages.at(-2)!.parts[0]).toMatchObject({ outputDeferred: true, output: '' });
     const newest = await client.call('threads.get', { threadId, limit: 1, compactTools: true });
     const older = await client.call('messages.list', { threadId, before: newest.messagesBefore!, compactTools: true });
     expect(older.messages.map(message => message.id).slice(-2)).toEqual(['before-images', 'images']);
@@ -141,9 +198,10 @@ test('no message keeps a thread from opening: heavy inputs, documents and texts 
     const writes = Array.from({ length: 4 }, (_, index) => ({ type: 'tool' as const, toolId: `write-${index}`, name: 'Write', status: 'done' as const,
       input: { file_path: `out-${index}.txt`, content: file }, output: 'written',
       documents: [{ kind: 'diff' as const, path: `out-${index}.txt`, oldText: '', newText: file }] }));
-    // Calls under every per-call threshold whose sum still outweighs a message's budget.
-    const many = Array.from({ length: 300 }, (_, index) => ({ type: 'tool' as const, toolId: `grep-${index}`, name: 'Grep', status: 'done' as const,
-      input: { pattern: `p${index}`, note: 'n'.repeat(15_000) }, output: 'o'.repeat(15_000) }));
+    // Calls under every per-call threshold whose inputs alone still outweigh a message's budget;
+    // their outputs fold away whatever their length.
+    const many = Array.from({ length: 600 }, (_, index) => ({ type: 'tool' as const, toolId: `grep-${index}`, name: 'Grep', status: 'done' as const,
+      input: { pattern: `p${index}`, note: 'n'.repeat(15_000) }, output: 'o'.repeat(300) }));
     const parts: Record<string, Message['parts']> = { writes, many, prose: [{ type: 'text', text: 'é'.repeat(9_000_000) }], last: [{ type: 'text', text: 'last' }] };
     harness.core.journal.append({ type: 'message.started', threadId, version: 1, payload: {} }, () => {
       for (const [index, id] of Object.keys(parts).entries()) {

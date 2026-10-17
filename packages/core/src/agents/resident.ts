@@ -1,13 +1,23 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type { AgentAccountGrant, AgentBrain, AgentProfile, AgentRuntimeConfig, AgentScope, AgentSelection, AgentWork, RpcParams } from '@boite/contracts';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, relative, sep } from 'node:path';
+import type { AgentAccountGrant, AgentBrain, AgentBrainRoot, AgentProfile, AgentRuntimeConfig, AgentScope, AgentSelection, AgentWork, RpcParams } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { checkEffort, checkModel } from '../threads/selection.ts';
 import { ids, integer, object, text } from './validation.ts';
 import { OPEN_WORK } from './repository.ts';
 import { withLoad } from '../threads/records.ts';
+import { slugOf } from '../worktree.ts';
+
+const BRAIN_ROOT = 'agents:brain-root';
+const BRAIN_DIR = 'agents:brain-dir:';
+/** What a new agent's brain starts with. */
+const BRAIN_FILES: Record<string, string> = {
+  'AGENTS.md': '# Individual brain\n\nKeep reusable procedures in skills/. Use scoped memory for group and mission findings.\n',
+  'MEMORY.md': '',
+};
+const inside = (root: string, path: string) => { const rel = relative(root, path); return rel === '' || rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
 
 export const sameRoute = (a: Pick<AgentSelection,'providerId'|'accountId'|'model'>, b: Pick<AgentSelection,'providerId'|'accountId'|'model'>) => a.providerId === b.providerId && a.accountId === b.accountId && a.model === b.model;
 
@@ -21,13 +31,21 @@ export class ResidentAgents {
     if (saved) return { ...saved, defaultRoute: agent.selection };
     const model = agent.selection.model ?? this.core.providers.require(agent.selection.providerId).models.find(m => m.default)?.id ?? this.core.providers.require(agent.selection.providerId).models[0]?.id;
     if (!model) throw refused('default model: choose a model for this agent');
-    return { defaultRoute:{...agent.selection,model}, allowedRoutes:[{...agent.selection,model,id:'default',name:'Default'}], subagents:{enabled:false,paused:false,profiles:[]}, compactAfterTurns:12,maxRunMinutes:10 };
+    // Subagents are on by default: an agent splits its work the way a thread does, on any granted model.
+    return { defaultRoute:{...agent.selection,model}, allowedRoutes:[{...agent.selection,model,id:'default',name:'Default'}], subagents:{enabled:true,paused:false,profiles:[],anyModel:true}, compactAfterTurns:12,maxRunMinutes:10,autoMemory:true };
   }
   grants(): AgentAccountGrant[] { return (this.core.journal.getSetting('agents:account-grants') as AgentAccountGrant[] | undefined) ?? []; }
   accountAllowed(agentId: string, accountId: string): boolean { const grant=this.grants().find(g=>g.accountId===accountId); return !grant || grant.agentIds===null || grant.agentIds.includes(agentId); }
+  /**
+   * A main route must be one of the allowed routes. A child runs on a listed
+   * subagent profile; with none listed it runs on any model of a granted
+   * account, unless the owner turned free model choice off.
+   */
   allowed(agentId: string, selection: AgentSelection, child=false): boolean {
     const config=this.config(agentId);
-    return this.accountAllowed(agentId,selection.accountId) && (child ? config.subagents.profiles : config.allowedRoutes).some(p=>sameRoute(p,{...selection,model:selection.model??config.defaultRoute.model}));
+    if(!this.accountAllowed(agentId,selection.accountId))return false;
+    if(child&&config.subagents.profiles.length===0)return config.subagents.anyModel!==false;
+    return (child ? config.subagents.profiles : config.allowedRoutes).some(p=>sameRoute(p,{...selection,model:selection.model??config.defaultRoute.model}));
   }
   route(agentId: string, value: AgentSelection): AgentSelection {
     object(value,'route');
@@ -48,7 +66,8 @@ export class ResidentAgents {
     if(new Set(routes.map(r=>r.id)).size!==routes.length)throw refused('allowedRoutes: route ids must be unique');
     const subagents=this.core.delegation.validateConfig(v.subagents);
     for(const p of subagents.profiles)this.route(agent.id,{...p,permissionMode:selection.permissionMode});
-    const config:AgentRuntimeConfig={defaultRoute:selection,allowedRoutes:routes,subagents,compactAfterTurns:integer(v.compactAfterTurns,'compactAfterTurns',2,100),maxRunMinutes:integer(v.maxRunMinutes,'maxRunMinutes',1,120)};
+    if(v.autoMemory!==undefined&&typeof v.autoMemory!=='boolean')throw refused('autoMemory: expected true or false');
+    const config:AgentRuntimeConfig={defaultRoute:selection,allowedRoutes:routes,subagents,compactAfterTurns:integer(v.compactAfterTurns,'compactAfterTurns',2,100),maxRunMinutes:integer(v.maxRunMinutes,'maxRunMinutes',1,120),autoMemory:v.autoMemory!==false};
     const saved=this.records.transaction(()=>{
       // saveProfile validates the permission mode. Persist policy first in the same transaction.
       this.core.journal.setSetting(`agents:runtime:${agent.id}`,config);
@@ -93,18 +112,96 @@ export class ResidentAgents {
     }
     for(const thread of this.core.journal.listThreads()){
       const owner=this.ownerOf(thread.id);if(!owner||!thread.parentThreadId)continue;
-      if(!this.allowed(owner,thread,true)||this.records.get('profile',owner).status!=='active')this.core.delegation.stop(thread.id);
+      if(!this.allowed(owner,thread,true)||this.records.get('profile',owner).status!=='active')this.core.delegation.stop(thread.id,undefined,'owner');
     }
+  }
+  /** Where brains live: the folder the owner chose, else the core's data directory. */
+  brainRoot():AgentBrainRoot {
+    const custom=this.core.journal.getSetting(BRAIN_ROOT) as string|undefined;
+    return custom?{path:custom,custom:true}:{path:join(this.core.dataDir,'agent-workspaces'),custom:false};
+  }
+  /** A folder name under `root` for the agent: its name, numbered past `used` names and folders that already hold files. */
+  private folderFor(agentId:string, root:string, used:Set<string>):string {
+    const base=slugOf(this.records.get('profile',agentId).name).replace(/^thread$/,'agent');
+    let folder=base;
+    for(let n=2;used.has(folder)||existsSync(join(root,folder))&&readdirSync(join(root,folder)).length>0;n++)folder=`${base}-${n}`;
+    return folder;
+  }
+  /**
+   * An agent's brain folder. The default keeps the historical
+   * `agent-workspaces/<id>/brain`; a chosen root holds one folder per agent,
+   * named after it the first time it lands there and kept through renames.
+   */
+  brainPath(agentId:string, root:AgentBrainRoot=this.brainRoot()):string {
+    if(!root.custom)return join(root.path,agentId,'brain');
+    const saved=this.core.journal.getSetting(`${BRAIN_DIR}${agentId}`) as string|undefined;
+    if(saved)return join(root.path,saved);
+    const used=new Set(this.records.list('profile').filter(p=>p.id!==agentId).flatMap(p=>{const d=this.core.journal.getSetting(`${BRAIN_DIR}${p.id}`) as string|undefined;return d?[d]:[];}));
+    const folder=this.folderFor(agentId,root.path,used);
+    this.core.journal.setSetting(`${BRAIN_DIR}${agentId}`,folder);
+    return join(root.path,folder);
   }
   brain(agentId:string):AgentBrain {
     this.records.get('profile',agentId);
-    const path=join(this.core.dataDir,'agent-workspaces',agentId,'brain');
+    const path=this.brainPath(agentId);
     mkdirSync(join(path,'skills'),{recursive:true});
-    const initial:Record<string,string>={'AGENTS.md':'# Individual brain\n\nKeep reusable procedures in skills/. Use scoped memory for group and mission findings.\n','MEMORY.md':''};
-    for(const [name,content] of Object.entries(initial))if(!existsSync(join(path,name)))writeFileSync(join(path,name),content,{flag:'wx'});
+    for(const [name,content] of Object.entries(BRAIN_FILES))if(!existsSync(join(path,name)))writeFileSync(join(path,name),content,{flag:'wx'});
     const instructions=readFileSync(join(path,'AGENTS.md'),'utf8'),memory=readFileSync(join(path,'MEMORY.md'),'utf8');
     const revision=createHash('sha256').update(JSON.stringify([instructions,memory])).digest('hex');
     return{path,instructions,memory,revision};
+  }
+  /**
+   * Move every brain under a new root, or back to the default with null. A
+   * destination that already holds files refuses the whole change before
+   * anything moves; so does an agent at work, whose prompt names its folder.
+   */
+  setBrainRoot(value:string|null):AgentBrainRoot {
+    let root:AgentBrainRoot;
+    if(value===null)root={path:join(this.core.dataDir,'agent-workspaces'),custom:false};
+    else {
+      const raw=text(value,'path',4096);
+      if(!isAbsolute(raw))throw refused(`path: expected an absolute folder, got ${raw}`);
+      try{mkdirSync(raw,{recursive:true});}catch(error){throw refused(`path: cannot create ${raw}: ${(error as Error).message}`);}
+      const path=realpathSync(raw);
+      if(!statSync(path).isDirectory())throw refused(`path: ${path} is not a folder`);
+      const data=realpathSync(this.core.dataDir),fallback=join(data,'agent-workspaces');
+      if(path!==fallback&&(inside(data,path)||inside(path,data)))throw refused(`path: ${path} holds the core's own data; choose a folder of its own`);
+      root=path===fallback?{path:join(this.core.dataDir,'agent-workspaces'),custom:false}:{path,custom:true};
+    }
+    if(this.records.withStatus('run',['accepted','running']).length||this.core.workforce.memory.busy())throw refused('agents are at work; move their brains once they finish');
+    const current=this.brainRoot();
+    if(current.path===root.path&&current.custom===root.custom)return root;
+    // A new root names its folders afresh, and nothing is written until every destination checked out.
+    const used=new Set<string>();
+    const plan=this.records.list('profile').map(agent=>{
+      const from=this.brainPath(agent.id,current);
+      if(!root.custom)return{agent,from,to:join(root.path,agent.id,'brain'),folder:null};
+      const folder=this.folderFor(agent.id,root.path,used);used.add(folder);
+      return{agent,from,to:join(root.path,folder),folder};
+    });
+    const moves=plan.filter(m=>m.from!==m.to&&existsSync(m.from));
+    for(const {to} of moves)if(existsSync(to)&&readdirSync(to).length>0)throw refused(`path: ${to} already holds files; empty it or choose another folder`);
+    const move=(from:string,to:string)=>{
+      mkdirSync(join(to,'..'),{recursive:true});
+      if(existsSync(to))rmdirSync(to);
+      try{renameSync(from,to);}
+      catch(error){
+        if((error as NodeJS.ErrnoException).code!=='EXDEV')throw error;
+        cpSync(from,to,{recursive:true,errorOnExist:true});rmSync(from,{recursive:true,force:true});
+      }
+    };
+    const done:{from:string;to:string}[]=[];
+    try{for(const m of moves){move(m.from,m.to);done.push(m);}}
+    catch(error){
+      // Put back what moved, so every brain stays where the settings say it is.
+      for(const m of done.reverse()){try{move(m.to,m.from);}catch(back){this.core.log('error',`Brain ${m.to} could not move back to ${m.from}: ${(back as Error).message}`);}}
+      throw refused(`path: moving the brains failed and was undone: ${(error as Error).message}`);
+    }
+    for(const {agent,folder} of plan){if(folder)this.core.journal.setSetting(`${BRAIN_DIR}${agent.id}`,folder);else this.core.journal.deleteSetting(`${BRAIN_DIR}${agent.id}`);}
+    if(root.custom)this.core.journal.setSetting(BRAIN_ROOT,root.path);else this.core.journal.deleteSetting(BRAIN_ROOT);
+    this.core.log('info',`Agent brains now live under ${root.path}; ${moves.length} moved`);
+    this.core.workforce.changed();
+    return root;
   }
   saveBrain(p:RpcParams<'agents.brain.save'>):AgentBrain {
     const brain=this.brain(p.agentId);

@@ -1,13 +1,18 @@
-import { createHash, createPublicKey, verify } from 'node:crypto';
-import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
+import { createHash, createPublicKey, verify, type KeyObject } from 'node:crypto';
+import { chmodSync, closeSync, createReadStream, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { unzipSync } from 'fflate';
+import { Unzip, UnzipInflate } from 'fflate';
 import shellConfig from '../../../../apps/shell/src-tauri/tauri.conf.json';
 
 export const UPDATE_PUBLIC_KEY = shellConfig.plugins.updater.pubkey;
 const REPOSITORY = 'https://github.com/beboite/boite';
 const API = 'https://api.github.com/repos/beboite/boite/releases?per_page=100';
 const MAX_ARCHIVE_BYTES = 160 * 1024 * 1024;
+const MAX_UNPACKED_BYTES = 400 * 1024 * 1024;
+/** Compressed bytes inflated per step: each step holds the event loop for a few milliseconds. */
+const UNPACK_CHUNK_BYTES = 64 * 1024;
+/** Lets timers and sockets run: a read stream hands buffered chunks over without going round the event loop. */
+const nextTurn = () => new Promise<void>(resolve => setImmediate(resolve));
 const VERSION = /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/;
 
 export interface ServerOffer { version: string; publishedAt: string; url: string; signature: string }
@@ -46,8 +51,10 @@ export async function findServerOffer(current: string, arch: string, signal: Abo
   return { version, publishedAt: release.published_at, url: expected, signature: payload.signature };
 }
 
-/** Tauri's base64-encoded Minisign packet, including the trusted comment signature. */
-export function verifyPayload(bytes: Uint8Array, signature: string, publicKey = UPDATE_PUBLIC_KEY): void {
+interface Minisign { prehashed: boolean; key: KeyObject; signed: Buffer; comment: string; global: Buffer }
+
+/** Tauri's base64-encoded Minisign packet, including the trusted comment signature, checked against the publisher key. */
+function readSignature(signature: string, publicKey: string): Minisign {
   const lines = Buffer.from(signature, 'base64').toString('utf8').trim().split('\n');
   const keyLines = Buffer.from(publicKey, 'base64').toString('utf8').trim().split('\n');
   const key = Buffer.from(keyLines[1] ?? '', 'base64');
@@ -62,15 +69,33 @@ export function verifyPayload(bytes: Uint8Array, signature: string, publicKey = 
   const algorithm = packet.subarray(0, 2).toString();
   // Tauri also publishes legacy Ed packets; both formats authenticate the whole payload.
   if (algorithm !== 'ED' && algorithm !== 'Ed') throw new Error('Update signature algorithm must be Ed25519');
-  const data = algorithm === 'ED' ? createHash('blake2b512').update(bytes).digest() : bytes;
   const signingKey = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), key.subarray(10)]), format: 'der', type: 'spki' });
-  const signed = packet.subarray(10);
-  if (!verify(null, data, signingKey, signed) || !verify(null, Buffer.concat([signed, Buffer.from(comment)]), signingKey, global)) {
+  return { prehashed: algorithm === 'ED', key: signingKey, signed: packet.subarray(10), comment, global };
+}
+
+/** `data` is the whole payload, or its BLAKE2b-512 digest for a prehashed packet. */
+function checkSignature(minisign: Minisign, data: Uint8Array): void {
+  const { key, signed, comment, global } = minisign;
+  if (!verify(null, data, key, signed) || !verify(null, Buffer.concat([signed, Buffer.from(comment)]), key, global)) {
     throw new Error('Update signature verification failed; the installation was left unchanged');
   }
 }
 
-export async function downloadPayload(offer: ServerOffer, file: string, signal: AbortSignal, progress: (received: number, total: number | null) => void): Promise<string> {
+export function verifyPayload(bytes: Uint8Array, signature: string, publicKey = UPDATE_PUBLIC_KEY): void {
+  const minisign = readSignature(signature, publicKey);
+  checkSignature(minisign, minisign.prehashed ? createHash('blake2b512').update(bytes).digest() : bytes);
+}
+
+/**
+ * Downloads the archive to `file` and verifies its signature over every byte
+ * before it returns its SHA-256. A prehashed packet is checked against a digest
+ * taken chunk by chunk as the bytes arrive, so the archive is never held in
+ * memory; only a legacy packet, which signs the bytes themselves, reads it back.
+ */
+export async function downloadPayload(offer: ServerOffer, file: string, signal: AbortSignal, progress: (received: number, total: number | null) => void, publicKey = UPDATE_PUBLIC_KEY): Promise<string> {
+  const minisign = readSignature(offer.signature, publicKey);
+  const sha256 = createHash('sha256');
+  const blake = minisign.prehashed ? createHash('blake2b512') : null;
   const stalled = new AbortController();
   let timer: ReturnType<typeof setTimeout>;
   const arm = () => { clearTimeout(timer); timer = setTimeout(() => stalled.abort(new Error('Update download received no data for 30 seconds')), 30_000); };
@@ -91,6 +116,8 @@ export async function downloadPayload(offer: ServerOffer, file: string, signal: 
       received += chunk.byteLength;
       if (received > MAX_ARCHIVE_BYTES) throw new Error('Update archive exceeds 160 MB');
       writeSync(handle, chunk);
+      sha256.update(chunk);
+      blake?.update(chunk);
       if (Date.now() - last >= 250) { progress(received, total); last = Date.now(); }
     }
     if (total !== null && received !== total) throw new Error('Update download ended before the complete archive arrived');
@@ -99,26 +126,65 @@ export async function downloadPayload(offer: ServerOffer, file: string, signal: 
     clearTimeout(timer!);
     if (handle !== undefined) closeSync(handle);
   }
-  const bytes = readFileSync(file);
-  verifyPayload(bytes, offer.signature);
-  return createHash('sha256').update(bytes).digest('hex');
+  checkSignature(minisign, blake === null ? readFileSync(file) : blake.digest());
+  return sha256.digest('hex');
 }
 
-/** Signed archives contain regular files only; no archive path is passed to an external extractor. */
-export function unpackPayload(file: string, directory: string, version: string): void {
-  const entries = unzipSync(readFileSync(file));
-  const manifest = JSON.parse(Buffer.from(entries['server-release.json'] ?? []).toString('utf8')) as { version?: unknown };
-  if (manifest.version !== version) throw new Error('Signed server archive version does not match the update offer');
-  for (const required of ['boite-core', 'boite', 'ui/index.html']) if (!entries[required]?.length) throw new Error(`Signed archive is missing ${required}`);
+const unsafePath = (name: string): boolean => name.includes('\\') || name.split('/').some(part => !part || part === '.' || part === '..');
+
+/**
+ * Signed archives contain regular files only; no archive path is passed to an
+ * external extractor. The archive is read and inflated a chunk at a time and
+ * each entry is written as it inflates, so neither the archive nor its files are
+ * held in memory and the event loop runs between chunks. Only the archive's own
+ * names land here: a name outside the four allowed is refused before a byte of
+ * it is written, and the version and required files are checked once all are.
+ * A cancelled update stops at the next chunk.
+ */
+export async function unpackPayload(file: string, directory: string, version: string, signal?: AbortSignal): Promise<void> {
+  const written = new Map<string, number>();
+  const open = new Set<number>();
+  let manifest: Buffer[] = [];
   let size = 0;
-  for (const [name, bytes] of Object.entries(entries)) {
+  const unzip = new Unzip(entry => {
+    const name = entry.name;
     if (name !== 'boite-core' && name !== 'boite' && name !== 'server-release.json' && !name.startsWith('ui/')) throw new Error(`Unexpected server archive file: ${name}`);
-    if (name.includes('\\') || name.split('/').some(part => !part || part === '.' || part === '..')) throw new Error(`Unsafe server archive path: ${name}`);
-    size += bytes.length;
-    if (size > 400 * 1024 * 1024) throw new Error('Unpacked server archive exceeds 400 MB');
+    if (unsafePath(name)) throw new Error(`Unsafe server archive path: ${name}`);
     const target = join(directory, name);
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-    writeFileSync(target, bytes, { mode: 0o600 });
-    chmodSync(target, name === 'boite' || name === 'boite-core' ? 0o755 : 0o644);
+    const handle = openSync(target, 'w', 0o600);
+    open.add(handle);
+    // A name listed twice keeps its last copy, as reading the whole archive at once did.
+    written.set(name, 0);
+    if (name === 'server-release.json') manifest = [];
+    entry.ondata = (error, data, final) => {
+      if (error) throw error;
+      size += data.length;
+      if (size > MAX_UNPACKED_BYTES) throw new Error('Unpacked server archive exceeds 400 MB');
+      writeSync(handle, data);
+      written.set(name, written.get(name)! + data.length);
+      if (name === 'server-release.json') manifest.push(Buffer.from(data));
+      if (final) {
+        open.delete(handle);
+        closeSync(handle);
+        chmodSync(target, name === 'boite' || name === 'boite-core' ? 0o755 : 0o644);
+      }
+    };
+    entry.start();
+  });
+  unzip.register(UnzipInflate);
+  try {
+    for await (const chunk of createReadStream(file, { highWaterMark: UNPACK_CHUNK_BYTES })) {
+      unzip.push(chunk as Buffer);
+      await nextTurn();
+      signal?.throwIfAborted();
+    }
+    unzip.push(new Uint8Array(0), true);
+  } finally {
+    for (const handle of open) closeSync(handle);
   }
+  if (open.size > 0) throw new Error('Signed server archive ended inside a file');
+  const release = JSON.parse(Buffer.concat(manifest).toString('utf8') || 'null') as { version?: unknown } | null;
+  if (release?.version !== version) throw new Error('Signed server archive version does not match the update offer');
+  for (const required of ['boite-core', 'boite', 'ui/index.html']) if (!written.get(required)) throw new Error(`Signed archive is missing ${required}`);
 }

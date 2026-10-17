@@ -1,14 +1,15 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ExternalLink, RotateCw } from '@lucide/svelte';
+  import { RotateCw } from '@lucide/svelte';
+  import { subscriptionProxyName } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { browserBridge } from '../lib/browser-bridge';
   import { watchBrowserBounds } from '../lib/browser-bounds';
   import { browserPresentation } from '../lib/browser-presentation';
-  import { openExternal } from '../lib/links';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import { secureId } from '../lib/secure-id';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
+  import GatewayOpenButton from './GatewayOpenButton.svelte';
   let { store, onNative }: { store: Store; onNative?: () => void } = $props();
   let configuring = $state(false);
   let slot = $state<HTMLDivElement>();
@@ -45,12 +46,12 @@
     {#if store.owner}<button type="button" class="ghost small" onclick={() => configuring = !configuring} data-testid="subscription-proxy-configure"><span class="ui-label">{strings.subscriptionProxy.configure}</span></button>{/if}
     {#if !configuring && proxy}
       <button type="button" class="ghost icon" aria-label={strings.browser.reload} title={strings.browser.reload} onclick={reload} data-testid="subscription-proxy-reload"><RotateCw size={16} /></button>
-      <button type="button" class="ghost small" onclick={() => void openExternal(proxy!.dashboardUrl)} data-testid="subscription-proxy-open"><ExternalLink size={16} /><span class="ui-label">{strings.subscriptionProxy.openDashboard}</span></button>
+      <GatewayOpenButton {store} />
     {/if}
   </header>
   {#if configuring}<SubscriptionProxySettings {store} />{:else if proxy?.enabled}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
-    {#if !browserBridge.paints}<p class="hint" role={mixedContent ? 'alert' : undefined} data-testid="subscription-proxy-browser-hint">{mixedContent ? strings.subscriptionProxy.mixedContent : strings.subscriptionProxy.signInHint}</p>{/if}
+    {#if !browserBridge.paints}<p class="hint" role={mixedContent ? 'alert' : undefined} data-testid="subscription-proxy-browser-hint">{mixedContent ? strings.subscriptionProxy.mixedContent : fill(strings.subscriptionProxy.signInHint, { name: subscriptionProxyName(proxy.kind) })}</p>{/if}
     <div class="slot" bind:this={slot} aria-busy={loading} data-testid="subscription-proxy-slot">
       {#if preview}<img src={preview} alt={strings.usage.limits} />{/if}
       {#if !browserBridge.paints && !mixedContent}<iframe bind:this={frame} src={proxy.dashboardUrl} title={strings.usage.limits} referrerpolicy="no-referrer" data-browser-id={id} onload={() => { loading = false; }}></iframe>{/if}

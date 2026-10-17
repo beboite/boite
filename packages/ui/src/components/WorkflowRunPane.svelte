@@ -4,12 +4,14 @@
   import { confirm } from '../lib/confirm.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { formatTokens } from '../lib/tokens';
-  import { isLive, retryable, runProgress, runTokens } from '../lib/workflow-view';
-  import AgentElapsed from './AgentElapsed.svelte';
+  import { formatTokens } from '../lib/format';
+  import { totalTokens } from '../lib/usage';
+  import { isLive, retryable, runProgress } from '../lib/workflow-view';
+  import Elapsed from './Elapsed.svelte';
   import WorkflowDetail from './WorkflowDetail.svelte';
   import WorkflowGraph from './WorkflowGraph.svelte';
-  import WorkflowMark from './WorkflowMark.svelte';
+  import StatusMark from './StatusMark.svelte';
+  import { workflowTone } from '../lib/thread-state';
 
   /** One run inside the subagents surface: its graph, and one step's detail over it once picked. */
   let { store, run, onback }: { store: Store; run: WorkflowRun; onback: () => void } = $props();
@@ -18,7 +20,7 @@
   let node = $derived(run.nodes.find(entry => entry.id === selectedId) ?? null);
   let profiles = $derived(store.delegation?.config.profiles ?? []);
   let progress = $derived(runProgress(run));
-  let tokens = $derived(runTokens(run));
+  let tokens = $derived(totalTokens(run.usage));
 
   // A reload hands a new object per run; only the id says it is another run.
   let runId = $derived(run.id);
@@ -28,8 +30,19 @@
     selectedId = null;
   });
 
+  /**
+   * A step run by one subagent opens its conversation in the chat; a step with
+   * several items, or none started, opens its detail here.
+   */
+  function pick(id: string): void {
+    const instances = run.nodes.find(entry => entry.id === id)?.instances ?? [];
+    const threadId = instances.length === 1 ? instances[0]!.threadId : null;
+    if (threadId) void store.open(threadId);
+    else selectedId = id;
+  }
+
   async function stop(): Promise<void> {
-    const ok = await confirm.ask({ title: fill(strings.workflow.stopTitle, { name: run.name }), body: strings.workflow.stopBody, confirmLabel: strings.workflow.stop, cancelLabel: strings.workflow.cancel, danger: true });
+    const ok = await confirm.ask({ title: fill(strings.workflow.stopTitle, { name: run.name }), body: strings.workflow.stopBody, confirmLabel: strings.workflow.stop, cancelLabel: strings.common.cancel, danger: true });
     if (ok) await store.controlWorkflow(run, 'stop');
   }
 </script>
@@ -40,10 +53,10 @@
     <div class="title">
       <h2><Workflow size={15} strokeWidth={1.75} /><span class="ui-label">{run.name}</span></h2>
       <p class="meta" data-testid="workflow-meta">
-        <WorkflowMark status={run.status} run />
+        <StatusMark {...workflowTone(run.status, true)} />
         <span class="ui-label">{strings.workflow.status[run.status]}</span>
         <span class="ui-label">·</span><span class="ui-label">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span>
-        <span class="ui-label">·</span><AgentElapsed startedAt={run.createdAt} finishedAt={run.finishedAt} active={run.status === 'running'} />
+        <span class="ui-label">·</span><Elapsed startedAt={run.createdAt} finishedAt={run.finishedAt} active={run.status === 'running'} />
         {#if tokens > 0}<span class="ui-label">·</span><span class="ui-label">{fill(strings.workflow.tokens, { tokens: formatTokens(tokens) })}</span>{/if}
       </p>
     </div>
@@ -70,7 +83,7 @@
     {#if node}
       <WorkflowDetail {store} {run} {node} {profiles} onback={() => (selectedId = null)} />
     {:else}
-      <WorkflowGraph {run} {profiles} {selectedId} onselect={(id) => (selectedId = id)} />
+      <WorkflowGraph {run} {profiles} {selectedId} onselect={pick} />
     {/if}
   </div>
 </section>

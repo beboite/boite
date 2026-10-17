@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { Clock, Minimize2 } from '@lucide/svelte';
+  import { Clock, Minimize2, ScanEye } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
-  import type { ThreadCapabilities } from '@boite/contracts';
+  import { threadActive, type ThreadCapabilities } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import { contextPercent, contextLevel } from '../lib/tokens';
   import { count, time } from '../lib/format';
@@ -20,6 +20,18 @@
   const percent = $derived(context ? contextPercent(context) : null);
   const protocol = $derived(thread ? store.providerOf(thread.providerId)?.protocol : null);
   let capabilities = $state<ThreadCapabilities | null>(null);
+  /** The thread whose last request is shown; it stays the one opened even if the user navigates. */
+  let shapeOf = $state<string | null>(null);
+  /** Loaded on first use: the view stays out of the startup chunk. */
+  let ShapeDialog = $state.raw<typeof import('./AgentShapeDialog.svelte').default | null>(null);
+  function showShape() {
+    if (!thread) return;
+    const id = thread.id;
+    popup.hide();
+    // Offline, or after an update removed the old chunk, the dialog cannot load: say so.
+    void import('./AgentShapeDialog.svelte').then(module => { ShapeDialog = module.default; shapeOf = id; })
+      .catch((error: unknown) => store.reportError(error, 'minor'));
+  }
   let capabilityFailed = $state(false);
   let capabilityPending = $state(false);
   $effect(() => {
@@ -53,7 +65,7 @@
   ] : [{name: strings.thread.contextUsed, count: context?.tokens ?? 0, kind: 'input'}]);
   // A running turn may refresh the cache. Hide the old timer until it finishes.
   let now = $state(Date.now());
-  const activeTurn = $derived(thread?.status === 'queued' || thread?.status === 'running' || thread?.status === 'waiting');
+  const activeTurn = $derived(thread ? threadActive(thread.status) : false);
   const cache = $derived(experimentOn('prompt-cache') && !activeTurn ? thread?.promptCache ?? null : null);
   const cacheNow = $derived(cache && thread ? promptCacheState(cache, thread, now) : null);
   $effect(() => {
@@ -116,6 +128,9 @@
       {:else}<p class="note">{strings.thread.contextNoReading}</p>{/if}
       <button type="button" class="compact" data-testid="context-compact" disabled={reason !== null} title={reason ?? strings.composer.compact} onclick={() => void compact()}><Minimize2 size={14} /><span class="ui-label">{strings.composer.compact}</span></button>
       {#if reason}<p class="note">{reason}</p>{/if}
+      {#if protocol === 'claude-sdk'}
+        <button type="button" class="shape" data-testid="context-agent-shape" onclick={showShape}><ScanEye size={14} /><span class="ui-label">{strings.agentShape.open}</span></button>
+      {/if}
       {#if cache && cacheNow}
         <div class="cache-detail" data-testid="prompt-cache-detail">
           <div class="heading"><span>{strings.thread.cacheTitle}</span><span class="mono state" data-state={cacheNow.kind}>{cacheNow.kind === 'warm' ? strings.thread.cacheLeft(remaining(cacheNow.secondsLeft))
@@ -131,6 +146,7 @@
     </div>
   {/if}
 </div>
+{#if shapeOf && ShapeDialog}<ShapeDialog {store} threadId={shapeOf} onclose={() => { shapeOf = null; }} />{/if}
 
 <style>
   .context { position: relative; flex: none; color: var(--color-muted-foreground); }
@@ -164,5 +180,6 @@
   dd { margin: 0; }
   i { width: 7px; height: 7px; border-radius: var(--radius-sm); }
   .note { font-size: var(--text-xs); line-height: 1.5; color: var(--color-muted-foreground); margin: 8px 0 0; }
-  .compact { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 14px; font-size: var(--text-sm); }
+  .compact, .shape { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 14px; font-size: var(--text-sm); }
+  .shape { margin-top: 8px; }
 </style>

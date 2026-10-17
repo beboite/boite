@@ -1,48 +1,40 @@
 /**
  * The commands that drive other threads: list them, read one, send it a
- * message, stop, archive, rename, move or delete it, answer what it asks,
- * decide its permissions, and assign stewards.
+ * message, stop, archive, rename, move or delete it, answer what it asks and
+ * decide its permissions.
  *
  * The same words serve two callers. The owner at a terminal (no agent
  * environment, `core.json` or `--core` with `BOITE_TOKEN`) reaches every
  * thread through the owner methods, and a message it sends is the user's own
- * prompt. A steward, the agent of a thread the owner assigned projects to,
- * goes through `steward.*` and coordination: the core holds it to its grant,
- * and its messages reach a thread marked as the steward's, never as the user's.
+ * prompt. A persistent agent the owner entrusted projects to goes through
+ * `resident.*` and coordination from its direct conversation: the core holds
+ * it to its projects, and its messages reach a thread marked as its own, never
+ * as the user's. Deleting threads and deciding permissions stay the owner's.
  */
-import { STEWARD_CAPABILITIES, STEWARD_DEFAULT_CAPABILITIES } from '@boite/contracts';
-import type {
-  PermissionRequest, Project, QuestionRequest, StewardCapability, StewardGrant, StewardThread, ThreadSummary,
-} from '@boite/contracts';
+import type { PermissionRequest, Project, ProjectThreadRow, QuestionRequest, RpcParams, ThreadSummary } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import { requiredText, Usage, type Parsed } from './cli-args.ts';
 
 type Printer = (lines: string[], value: unknown) => void;
-export type Caller = 'owner' | 'steward';
+export type Caller = 'owner' | 'agent';
 
 /** Commands this file answers, with the words that follow them. */
-export const CONTROL_COMMANDS = ['threads', 'thread', 'questions', 'answer', 'permissions', 'allow', 'deny', 'stewards', 'steward'] as const;
+export const CONTROL_COMMANDS = ['threads', 'thread', 'questions', 'answer', 'permissions', 'allow', 'deny'] as const;
 /** `thread` actions this file answers; `new` and `move <project>` without a target stay with the agent's own commands. */
 const THREAD_ACTIONS = ['show', 'send', 'stop', 'archive', 'unarchive', 'remove', 'rename'] as const;
 
 export const CONTROL_HELP = `  threads [--project <p>] [--archived]
                                  threads you may drive: every one as the owner,
-                                 those of your projects as a steward
+                                 those of the projects entrusted to you as an agent
   thread show <id>               state, pending questions and permissions, last answer
-  thread send <id> <text>        the owner's prompt, or the steward's message
-  thread stop|archive|unarchive|remove <id>
+  thread send <id> <text>        the owner's prompt, or the agent's message
+  thread stop|archive|unarchive|remove <id>   (remove: owner only)
   thread rename <id> <title>
   thread move <project> <id>     move another thread (without <id>: this one)
   questions [<id>]               pending questions
   answer <id> <question-id> <option|text ...> (--skip)
   permissions [<id>]             pending tool permissions
-  allow|deny <id> <request-id>
-  stewards                       the steward grants (owner)
-  stewards set <thread> <project ...> [--all] [--can <a,b>] [--quiet]
-  stewards revoke <thread>
-  steward                        this thread's own grant
-                                 capabilities: ${STEWARD_CAPABILITIES.join(', ')}
-                                 default: ${STEWARD_DEFAULT_CAPABILITIES.join(', ')}`;
+  allow|deny <id> <request-id>   (owner only)`;
 
 export function isControlCommand(parsed: Parsed): boolean {
   const [command, action] = parsed.positional;
@@ -67,14 +59,13 @@ function statusOf(row: { status: string; archived: boolean }): string {
   return row.archived ? `${row.status},archived` : row.status;
 }
 
-function threadLine(row: StewardThread): string {
+function threadLine(row: ProjectThreadRow): string {
   const facts = [
     row.project ? `project=${JSON.stringify(row.project)}` : null,
     row.branch ? `branch=${row.branch}` : null,
     row.questions ? `questions=${row.questions}` : null,
     row.permissions ? `permissions=${row.permissions}` : null,
     row.pullRequest ? `pr=#${row.pullRequest.number}:${row.pullRequest.state}` : null,
-    row.self ? '(this thread)' : null,
   ].filter(Boolean).join(' ');
   return `${row.id} ${statusOf(row)} ${JSON.stringify(row.title)}${facts ? ` ${facts}` : ''}`;
 }
@@ -87,11 +78,6 @@ function questionLines(question: QuestionRequest): string[] {
 
 function permissionLine(request: PermissionRequest): string {
   return `permission ${request.id} (${request.threadId}): ${request.toolName}${request.description ? ` ${request.description}` : ''}`;
-}
-
-function grantLines(grant: StewardGrant, projects: Pick<Project, 'id' | 'name'>[]): string[] {
-  const names = grant.allProjects ? 'every project' : grant.projectIds.map(id => projects.find(project => project.id === id)?.name ?? id).join(', ');
-  return [`steward: ${grant.threadId}`, `projects: ${names}`, `can: ${grant.capabilities.join(', ') || 'read only'}`, `notices: ${grant.notify ? 'on' : 'off'}`];
 }
 
 /** Option ids or labels become `optionIds`; anything else is free text. */
@@ -108,16 +94,6 @@ export function answerOf(question: QuestionRequest, words: string[]): { optionId
     if (!question.allowText) throw new Usage(`question ${question.id} expects ${question.options.map(option => option.id).join(', ')}`);
   }
   return { optionIds: [], text: words.join(' ') };
-}
-
-export function capabilitiesOf(raw: string | undefined): StewardCapability[] {
-  if (raw === undefined) return [...STEWARD_DEFAULT_CAPABILITIES];
-  const names = raw.split(',').map(name => name.trim()).filter(Boolean);
-  if (names.length === 1 && names[0] === 'all') return [...STEWARD_CAPABILITIES];
-  for (const name of names) {
-    if (!STEWARD_CAPABILITIES.includes(name as StewardCapability)) throw new Usage(`--can: unknown capability ${name}; expected ${STEWARD_CAPABILITIES.join(', ')} or all`);
-  }
-  return names as StewardCapability[];
 }
 
 /** A project by id, name (any case) or folder, among the owner's list, as the core's own finder does. */
@@ -144,8 +120,8 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
     if (!owner) throw new Error(`${what} is the owner's; ask the user`);
   };
 
-  /** Owner rows in the same shape a steward reads, so both print alike. */
-  const ownerRows = async (projectQuery: string | undefined, archived: boolean): Promise<StewardThread[]> => {
+  /** Owner rows in the same shape an agent reads, so both print alike. */
+  const ownerRows = async (projectQuery: string | undefined, archived: boolean): Promise<ProjectThreadRow[]> => {
     const projects = await client.call('projects.list', {});
     const projectId = projectQuery === undefined ? undefined : projectOf(projects, projectQuery).id;
     const [threads, questions, permissions] = await Promise.all([
@@ -158,10 +134,10 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
       .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 200)
       .map(thread => ownerRow(thread, projects, questions, permissions));
   };
-  const ownerRow = (thread: ThreadSummary, projects: Project[], questions: QuestionRequest[], permissions: PermissionRequest[]): StewardThread => ({
+  const ownerRow = (thread: ThreadSummary, projects: Project[], questions: QuestionRequest[], permissions: PermissionRequest[]): ProjectThreadRow => ({
     id: thread.id, title: thread.title, projectId: thread.projectId,
     project: projects.find(project => project.id === thread.projectId)?.name ?? null,
-    status: thread.status, archived: thread.archived, branch: thread.branch, self: thread.id === threadId,
+    status: thread.status, archived: thread.archived, branch: thread.branch,
     questions: questions.filter(question => question.threadId === thread.id).length,
     permissions: permissions.filter(request => request.threadId === thread.id).length,
     pullRequest: thread.pullRequest ?? null, updatedAt: thread.updatedAt, lastCompletedAt: null,
@@ -173,16 +149,16 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
   };
   const pendingQuestions = async (target: string | undefined): Promise<QuestionRequest[]> => {
     if (owner) return client.call('questions.list', target === undefined ? {} : { threadId: target });
-    if (target !== undefined) return (await client.call('steward.thread', { threadId, target })).questions;
-    const rows = await client.call('steward.threads', { threadId });
-    const details = await Promise.all(rows.filter(row => row.questions > 0 && !row.self).map(row => client.call('steward.thread', { threadId, target: row.id })));
+    if (target !== undefined) return (await client.call('resident.thread', { threadId, target })).questions;
+    const rows = await client.call('resident.threads', { threadId });
+    const details = await Promise.all(rows.filter(row => row.questions > 0).map(row => client.call('resident.thread', { threadId, target: row.id })));
     return details.flatMap(detail => detail.questions);
   };
   const pendingPermissions = async (target: string | undefined): Promise<PermissionRequest[]> => {
     if (owner) return client.call('permissions.list', target === undefined ? {} : { threadId: target });
-    if (target !== undefined) return (await client.call('steward.thread', { threadId, target })).permissions;
-    const rows = await client.call('steward.threads', { threadId });
-    const details = await Promise.all(rows.filter(row => row.permissions > 0 && !row.self).map(row => client.call('steward.thread', { threadId, target: row.id })));
+    if (target !== undefined) return (await client.call('resident.thread', { threadId, target })).permissions;
+    const rows = await client.call('resident.threads', { threadId });
+    const details = await Promise.all(rows.filter(row => row.permissions > 0).map(row => client.call('resident.thread', { threadId, target: row.id })));
     return details.flatMap(detail => detail.permissions);
   };
 
@@ -191,7 +167,7 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
       const project = parsed.project;
       const rows = owner
         ? await ownerRows(project, parsed.archived)
-        : await client.call('steward.threads', { threadId, ...(project === undefined ? {} : { project }), ...(parsed.archived ? { archived: true } : {}) });
+        : await client.call('resident.threads', { threadId, ...(project === undefined ? {} : { project }), ...(parsed.archived ? { archived: true } : {}) });
       print(rows.length === 0 ? ['threads: none'] : rows.map(threadLine), rows);
       return;
     }
@@ -205,8 +181,8 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
           const moved = await client.call('threads.move', { threadId: target, projectId: projectOf(projects, project).id });
           print([`moved: ${moved.id}`, `project: ${projectOf(projects, project).name}`, `cwd: ${moved.cwd}`], moved);
         } else {
-          const result = await client.call('steward.act', { threadId, target, action: 'move', project });
-          print([threadLine(result.thread!)], result);
+          const result = await client.call('resident.act', { threadId, target, action: 'move', project });
+          print([threadLine(result.thread)], result);
         }
         return;
       }
@@ -223,7 +199,7 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
           const detail = { thread: ownerRow(thread, projects, questions, permissions), questions, permissions, lastAnswer: answer && answer.length > 4000 ? `${answer.slice(0, 3900)}\n[Truncated.]` : answer };
           print([threadLine(detail.thread), `cwd: ${thread.cwd}`, ...questions.flatMap(questionLines), ...permissions.map(permissionLine), `last answer: ${detail.lastAnswer ?? '(none)'}`], detail);
         } else {
-          const detail = await client.call('steward.thread', { threadId, target });
+          const detail = await client.call('resident.thread', { threadId, target });
           print([threadLine(detail.thread), ...detail.questions.flatMap(questionLines), ...detail.permissions.map(permissionLine), `last answer: ${detail.lastAnswer ?? '(none)'}`], detail);
         }
         return;
@@ -237,7 +213,9 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
         } else {
           const self = (await client.call('collaboration.get', { threadId })).self;
           const letter = await client.call('collaboration.send', { threadId, to: { coreId: self.coreId, threadId: target }, text, requestId: parsed.requestId ?? crypto.randomUUID() });
-          print([`message: ${letter.id}`, `status: ${letter.status}`, `as: ${letter.origin === 'steward' ? 'steward' : 'agent'}`, 'Its answer comes back as an agent message; do not poll.'], letter);
+          print(letter.origin === 'resident'
+            ? [`message: ${letter.id}`, `status: ${letter.status}`, 'as: the agent of its project', 'Its next answer comes back to you as a notice; do not poll.']
+            : [`message: ${letter.id}`, `status: ${letter.status}`, 'as: agent', 'Its answer comes back as an agent message; do not poll.'], letter);
         }
         return;
       }
@@ -247,15 +225,16 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
           const thread = await client.call('threads.update', { threadId: target, title });
           print([`renamed: ${thread.id} ${JSON.stringify(thread.title)}`], thread);
         } else {
-          const result = await client.call('steward.act', { threadId, target, action: 'rename', title });
-          print([threadLine(result.thread!)], result);
+          const result = await client.call('resident.act', { threadId, target, action: 'rename', title });
+          print([threadLine(result.thread)], result);
         }
         return;
       }
       if (action !== 'stop' && action !== 'archive' && action !== 'unarchive' && action !== 'remove') throw new Usage(`thread: unknown action ${action}`);
       if (!owner) {
-        const result = await client.call('steward.act', { threadId, target, action });
-        print(result.thread === null ? [`${action}: ${target}`] : [threadLine(result.thread)], result);
+        if (action === 'remove') ownerOnly('deleting a thread');
+        const result = await client.call('resident.act', { threadId, target, action: action as Exclude<typeof action, 'remove'> });
+        print([threadLine(result.thread)], result);
         return;
       }
       if (action === 'stop') {
@@ -282,7 +261,7 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
       if (!question) throw new Error(`no pending question ${questionId} in ${target}`);
       if (parsed.skip) {
         if (owner) await client.call('questions.skip', { threadId: target, questionId });
-        else await client.call('steward.answer', { threadId, target, questionId, optionIds: [], skip: true });
+        else await client.call('resident.answer', { threadId, target, questionId, optionIds: [], skip: true });
         print([`skipped: ${questionId}`], { ok: true });
         return;
       }
@@ -290,7 +269,7 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
       if (words.length === 0) throw new Usage('answer needs option ids, labels or a text after the question id');
       const answer = answerOf(question, words);
       if (owner) await client.call('questions.answer', { threadId: target, questionId, ...answer });
-      else await client.call('steward.answer', { threadId, target, questionId, ...answer });
+      else await client.call('resident.answer', { threadId, target, questionId, ...answer });
       print([`answered: ${questionId}`], { ok: true, ...answer });
       return;
     }
@@ -303,38 +282,10 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
     case 'deny': {
       const target = want(0, 'a thread id');
       const requestId = want(1, 'a request id (boite permissions lists them)');
-      if (owner) {
-        if (!(await pendingPermissions(target)).some(request => request.id === requestId)) throw new Error(`no pending permission ${requestId} in ${target}`);
-        await client.call('permissions.answer', { requestId, decision: command });
-      } else await client.call('steward.permission', { threadId, target, requestId, decision: command });
+      ownerOnly('deciding a tool permission');
+      if (!(await pendingPermissions(target)).some(request => request.id === requestId)) throw new Error(`no pending permission ${requestId} in ${target}`);
+      await client.call('permissions.answer', { requestId, decision: command });
       print([`${command === 'allow' ? 'allowed' : 'denied'}: ${requestId}`], { ok: true });
-      return;
-    }
-    case 'steward': {
-      const view = await client.call('steward.get', { threadId });
-      print(view.grant === null ? ['steward: no; the owner assigns projects in Communication settings or with boite stewards set'] : grantLines(view.grant, view.projects), view);
-      return;
-    }
-    case 'stewards': {
-      ownerOnly('assigning stewards');
-      const action = rest[0] ?? 'list';
-      const projects = await client.call('projects.list', {});
-      if (action === 'list') {
-        const grants = await client.call('stewards.list', {});
-        print(grants.length === 0 ? ['stewards: none'] : grants.flatMap(grant => [...grantLines(grant, projects), '']).slice(0, -1), grants);
-      } else if (action === 'set') {
-        const steward = want(1, 'the steward thread id');
-        const names = rest.slice(2);
-        if (!parsed.all && names.length === 0) throw new Usage('stewards set needs projects after the thread, or --all');
-        const grant = await client.call('stewards.set', { grant: {
-          threadId: steward, allProjects: parsed.all, projectIds: parsed.all ? [] : names.map(name => projectOf(projects, name).id),
-          capabilities: capabilitiesOf(parsed.can), notify: !parsed.quiet,
-        } });
-        print(grantLines(grant, projects), grant);
-      } else if (action === 'revoke') {
-        const result = await client.call('stewards.revoke', { threadId: want(1, 'the steward thread id') });
-        print(['revoked'], result);
-      } else throw new Usage(`stewards: unknown action ${action}`);
       return;
     }
     case 'projects': {
@@ -361,7 +312,7 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
  * the most recent thread anywhere; `--model` replaces the model. The brief is
  * the user's own first prompt.
  */
-export async function ownerThreadNew(client: CoreClient, parsed: Parsed, rest: string[], print: Printer): Promise<void> {
+export async function ownerThreadNew(client: CoreClient, parsed: Parsed, rest: string[], print: Printer, context?: Record<string, unknown>): Promise<void> {
   const query = rest[1];
   if (query === undefined) throw new Usage('thread new needs a project name, id or folder');
   const prompt = requiredText(rest, 2, 'thread new needs a brief after the project');
@@ -376,7 +327,7 @@ export async function ownerThreadNew(client: CoreClient, parsed: Parsed, rest: s
   const created = await client.call('threads.create', {
     projectId: project.id, providerId: base.providerId, accountId: base.accountId, title: parsed.title ?? prompt.trim().split('\n')[0]!.slice(0, 80),
     ...(model === undefined ? {} : { model }), effort: parsed.model === undefined ? base.effort : null, permissionMode: base.permissionMode,
-    ...(parsed.worktree ? { worktree: {} } : {}),
+    ...(parsed.worktree ? { worktree: {} } : {}), ...(context === undefined ? {} : { context: context as RpcParams<'threads.create'>['context'] }),
   });
   const turn = await client.call('turns.start', { threadId: created.id, prompt, clientRequestId: parsed.requestId ?? crypto.randomUUID() });
   print([`thread: ${created.id}`, `title: ${created.title}`, `project: ${project.name}`, `cwd: ${created.cwd}`, `agent: ${created.providerId} ${created.model ?? 'default'}`, `turn: ${turn.id}`], { thread: created, turn });

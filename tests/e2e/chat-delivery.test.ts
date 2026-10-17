@@ -20,7 +20,7 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]')`);
   await page.click('[data-thread-id="t-trace"]');
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('commands stay folded while live text remains visible during parallel activity', async () => {
   await update(`
@@ -67,7 +67,7 @@ test('a reasoning without text shows no empty fold and leaves once the agent mov
     await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width < 720 });
     await page.click(id('thinking-toggle'));
     expect(await page.evaluate(`document.querySelector('${id('thinking-toggle')} .caret') === null`)).toBe(true);
-    expect(await page.evaluate(`document.querySelector('${id('thinking-part')} .fold').classList.contains('open')`)).toBe(false);
+    expect(await page.evaluate(`document.querySelector('${id('thinking-part')} .disclosure-fold').classList.contains('open')`)).toBe(false);
     await capture(`chat-delivery-empty-thinking-${width < 720 ? 'phone' : 'desktop'}`);
   }
   await update(`thread.messages.at(-1).parts.push({ type:'tool', toolId:'second', name:'Bash', input:{command:'timeout 5 true'}, output:null, status:'running' });`);

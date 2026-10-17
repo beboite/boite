@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, setSystemTime, test } from 'bun:test';
 import { GROUP_INVITE_PREFIX, type CoordinationConfig } from '@boite/contracts';
 import { createHash } from 'node:crypto';
 import { connect } from '../src/client.ts';
@@ -380,13 +380,13 @@ test('a ticket is refused when forged, expired, for another machine or from outs
   await join(a, c);
   await outsider.core.group.create('Home');
   const owner = { principal: 'owner' as const, sessionId: null, threadId: null };
-  const forB = a.core.group.ticket(id(b), owner).ticket;
+  const forB = a.core.group.clients.ticket(id(b), owner).ticket;
   const [payload, signature] = forB.split('.') as [string, string];
   const tampered = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(payload, 'base64url').toString()), role: 'owner', sub: `core:${id(c)}` })).toString('base64url');
   await refusedHello(b, '', { ticket: `${tampered}.${signature}` }, 'signature');
   await refusedHello(c, '', { ticket: forB }, 'another machine');
   await refusedHello(outsider, '', { ticket: forB }, 'another machine');
-  expect(() => b.core.group.admit(forB, { name: 't', version: '1' }, Date.now() + 5 * 60_000)).toThrow('expired');
+  expect(() => b.core.group.clients.admit(forB, { name: 't', version: '1' }, Date.now() + 5 * 60_000)).toThrow('expired');
   await refusedHello(b, '', { ticket: 'nonsense' }, 'malformed');
   // A core in no group has nothing to check a ticket against.
   const alone = await machine();
@@ -419,7 +419,7 @@ test('a phone paired with one member reaches the others as a device, and one rev
   const ticket = await phone.call('group.ticket', { coreId: id(b) });
   const deviceId = `${id(a)}:${phone.session!.id}`;
   expect(parseTicket(ticket.ticket).payload).toMatchObject({ sub: `device:${deviceId}`, role: 'device' });
-  expect(a.core.group.view('owner')?.devices).toEqual([{ id: deviceId, name: 'pwa', role: 'device' }]);
+  expect(a.core.group.view('owner')?.devices).toEqual([{ id: deviceId, name: 'pwa', role: 'device', by: id(a), legacy: true }]);
   const onB = await connect(b.url, '', { ticket: ticket.ticket, client: { name: 'pwa', version: '1' } });
   expect(onB.principal).toBe('session');
   await expect(onB.call('projects.add', { path: b.dataDir })).rejects.toThrow('owner only');
@@ -433,7 +433,7 @@ test('a phone paired with one member reaches the others as a device, and one rev
   await waitFor(() => b.core.sessions.list(null).length === 0);
   await refusedHello(b, onB.session!.token, undefined, 'token is wrong');
   // And no member vouches for it again.
-  expect(() => b.core.group.admit(ticket.ticket, { name: 'pwa', version: '1' })).toThrow();
+  expect(() => b.core.group.clients.admit(ticket.ticket, { name: 'pwa', version: '1' })).toThrow();
   phone.close();
   onB.close();
 });
@@ -464,7 +464,7 @@ test('a removed machine is told, leaves, and its keys die on the members that st
   await join(a, c);
   await waitFor(() => members(b).length === 3 && members(c).length === 3);
   // b's shell holds an owner key on a.
-  const key = await connect(a.url, '', { ticket: b.core.group.ticket(id(a), { principal: 'owner', sessionId: null, threadId: null }).ticket });
+  const key = await connect(a.url, '', { ticket: b.core.group.clients.ticket(id(a), { principal: 'owner', sessionId: null, threadId: null }).ticket });
   await hangUp(a, key);
   expect(a.core.sessions.list(null)).toHaveLength(1);
 
@@ -492,6 +492,69 @@ test('a machine removed while it was unreachable learns it from the first member
   await (b.core.group as unknown as { syncPending(): Promise<void> }).syncPending();
   expect(b.core.group.view('owner')).toBeNull();
   expect(b.core.journal.getSetting('group')).toBeUndefined();
+});
+
+test('a member that stops answering waits longer each time, unless the roster changes or it is heard from', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  type Store = { syncPending(): Promise<void>; pending: Set<Promise<unknown>> };
+  const store = a.core.group as unknown as Store;
+  // A change is offered from a microtask: let it start, then wait for every exchange in flight on both sides.
+  const settle = async () => {
+    await Bun.sleep(0);
+    for (const side of [store, b.core.group as unknown as Store]) while (side.pending.size > 0) await Promise.allSettled([...side.pending]);
+  };
+  await settle();
+  type Exchange = (peer: { coreId: string }, operation: string, payload: unknown) => Promise<unknown>;
+  // Neither machine reaches the other: any signed request from b, a directory read included, would end a's wait.
+  let down = true;
+  let offers = 0;
+  const cut = (from: TestCore, count: boolean) => {
+    const wire = from.core.coordination as unknown as { exchange: Exchange };
+    const real = wire.exchange.bind(wire);
+    wire.exchange = async (peer, operation, payload) => {
+      if (count && operation === 'group.sync' && peer.coreId === id(b)) offers += 1;
+      if (down) throw new Error('peer request failed');
+      return real(peer, operation, payload);
+    };
+    return () => { wire.exchange = real; };
+  };
+  const restore = [cut(a, true), cut(b, false)];
+  /** Offers to b made by one more round. */
+  const round = async () => { const before = offers; await store.syncPending(); return offers - before; };
+  try {
+    // A change goes out at once; b does not answer.
+    a.core.group.rename('Studio');
+    await settle();
+    expect(offers).toBeGreaterThan(0);
+    expect(await round()).toBe(0);
+    // Its 30 second wait over, it is offered the same roster again and fails again: the next wait is a minute.
+    setSystemTime(new Date(Date.now() + 31_000));
+    expect(await round()).toBe(1);
+    setSystemTime(new Date(Date.now() + 31_000));
+    expect(await round()).toBe(0);
+    setSystemTime();
+    // Another change still reaches it at once.
+    const before = offers;
+    a.core.group.rename('Office');
+    await settle();
+    expect(offers).toBeGreaterThan(before);
+    expect(await round()).toBe(0);
+    // b speaks, signed, past its quota: turned away, it is still up, and a offers it the roster on its next round.
+    down = false;
+    const rates = (a.core.coordination as unknown as { rates: Map<string, { since: number; count: number }> }).rates;
+    rates.set(id(b), { since: Date.now(), count: 120 });
+    await expect(b.core.coordination.request(b.core.group.peers().find((peer) => peer.coreId === id(a))!, 'directory', {})).rejects.toThrow();
+    rates.set(id(b), { since: Date.now(), count: 0 });
+    await settle();
+    expect(await round()).toBe(1);
+    await waitFor(() => b.core.group.view('owner')?.name === 'Office');
+  } finally {
+    setSystemTime();
+    for (const undo of restore) undo();
+  }
 });
 
 test('leaving tells the others first, and the last member leaving ends the group', async () => {
@@ -803,12 +866,12 @@ test('a ticket stays spent across a restart of the machine it was used on', asyn
   const b = await machine();
   await a.core.group.create('Home');
   await join(a, b);
-  const ticket = a.core.group.ticket(id(b), { principal: 'owner', sessionId: null, threadId: null }).ticket;
-  const first = b.core.group.admit(ticket, { name: 'shell', version: '1' });
+  const ticket = a.core.group.clients.ticket(id(b), { principal: 'owner', sessionId: null, threadId: null }).ticket;
+  const first = b.core.group.clients.admit(ticket, { name: 'shell', version: '1' });
   expect(first.role).toBe('owner');
   const before = b.core.group;
   const restarted = restart(b);
-  expect(() => restarted.admit(ticket, { name: 'shell', version: '1' })).toThrow('already used');
+  expect(() => restarted.clients.admit(ticket, { name: 'shell', version: '1' })).toThrow('already used');
   expect(b.core.sessions.list(null)).toHaveLength(1);
   await before.close();
 });
@@ -818,7 +881,7 @@ test('keys die with what they stood for even when the core stopped between the r
   const b = await machine();
   await a.core.group.create('Home');
   await join(a, b);
-  const key = b.core.group.admit(a.core.group.ticket(id(b), { principal: 'owner', sessionId: null, threadId: null }).ticket, { name: 'shell', version: '1' });
+  const key = b.core.group.clients.admit(a.core.group.clients.ticket(id(b), { principal: 'owner', sessionId: null, threadId: null }).ticket, { name: 'shell', version: '1' });
   const roster = b.core.journal.getSetting('group') as Roster;
   // The removal of `a` reached the journal, the session it vouched for was not dropped yet: the core died there.
   b.core.journal.setSetting('group', { ...roster, cores: roster.cores.map((core) => (core.coreId === id(a) ? { ...core, rev: 50, removed: true } : core)) });

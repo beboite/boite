@@ -1,14 +1,14 @@
 /**
  * How two threads relate, and what a recipient reads about a letter's sender
  * beside the letter: that relation, the sender's task and the recipient's own
- * message it answers. Read from the journal each time: a delegation or a
- * steward grant can begin after a letter was written.
+ * message it answers. Read from the journal each time: a delegation or an
+ * entrusted project can begin after a letter was written.
  */
 import type { AgentAddress, AgentLetter, AgentRelation } from '@boite/contracts';
 import { excerpt, type LetterContext } from './coordination-letter.ts';
 import type { Core } from './core.ts';
 
-/** How `other` relates to `threadId`: who started whom, delegation, the steward, else where it is. */
+/** How `other` relates to `threadId`: who started whom, delegation, the agent the project is entrusted to, else where it is. */
 export function relationOf(core: Core, localCore: string, threadId: string, other: AgentAddress): AgentRelation {
   if (other.coreId !== 'local' && other.coreId !== localCore) return 'machine';
   const self = core.journal.getThread(threadId);
@@ -18,21 +18,32 @@ export function relationOf(core: Core, localCore: string, threadId: string, othe
   if (core.threads.spawns.originOf(peer.id)?.threadId === self.id) return 'started';
   if (self.parentThreadId === peer.id) return 'parent';
   if (peer.parentThreadId === self.id) return 'child';
-  if (core.stewards.over(peer.id, self.id) !== null) return 'steward';
-  if (core.stewards.over(self.id, peer.id) !== null) return 'stewarded';
+  if (core.workforce.projects.over(peer.id, self.id) !== null) return 'resident';
   return self.projectId === peer.projectId ? 'project' : 'other-project';
 }
 
 /** Each letter with the relation of its other end to `threadId`, worked out once per correspondent. */
 export function withRelations(core: Core, localCore: string, threadId: string, letters: AgentLetter[]): AgentLetter[] {
-  const known = new Map<string, AgentRelation>();
+  const known = new Map<string, AgentRelation | undefined>();
   return letters.map(letter => {
     const other = letter.from.coreId === localCore && letter.from.threadId === threadId ? letter.to : letter.from;
     const key = `${other.coreId}/${other.threadId}`;
-    const relation = known.get(key) ?? relationOf(core, localCore, threadId, other);
+    const relation = known.has(key) ? known.get(key) : enriched(core, threadId, () => relationOf(core, localCore, threadId, other), undefined);
     known.set(key, relation);
-    return { ...letter, relation };
+    return relation === undefined ? letter : { ...letter, relation };
   });
+}
+
+/**
+ * Enrichment reads journal rows a corrupt or older entry can break. It must not
+ * stop delivery: claimed letters are already marked delivered, and a throw in
+ * `deliver` would pause the thread. The failure goes to the diagnostic log.
+ */
+function enriched<T>(core: Core, threadId: string, read: () => T, fallback: T): T {
+  try { return read(); } catch (error) {
+    try { core.logs.warn(`letter context unreadable: ${error instanceof Error ? error.message : String(error)}`, { source: 'coordination', event: 'coordination.context-failed', threadId }); } catch { /* A failed log write is dropped too. */ }
+    return fallback;
+  }
 }
 
 /**
@@ -42,20 +53,20 @@ export function withRelations(core: Core, localCore: string, threadId: string, l
  * resources only, never its chat.
  */
 export function senderContext(core: Core, localCore: string, threadId: string): (letter: AgentLetter) => LetterContext {
-  return letter => {
+  return letter => enriched<LetterContext>(core, threadId, () => {
     const relation = relationOf(core, localCore, threadId, letter.from);
     const local = relation !== 'machine';
     // A row older than its field, or a peer that left it out, must not stop delivery.
     const resources = typeof letter.from.resources === 'string' ? letter.from.resources.trim() : '';
     // An ordinary letter reached this thread because its sender is a contact it may already read with
-    // `boite agents read`; a steward's conversation is not, so a steward without resources says nothing more.
-    const about = resources ? excerpt(resources) : local && letter.origin !== 'steward' ? openingRequest(core, letter.from.threadId) : undefined;
+    // `boite agents read`; the conversation of the agent a project is entrusted to spans the user's other work, so it says nothing more.
+    const about = resources ? excerpt(resources) : local && letter.origin !== 'resident' ? openingRequest(core, letter.from.threadId) : undefined;
     const answered = letter.replyTo
       ? core.journal.db.query("SELECT data FROM coordination_letters WHERE id = ? AND thread_id = ? AND direction = 'out'").get(letter.replyTo, threadId) as { data: string } | null
       : null;
     const yours = answered ? excerpt((JSON.parse(answered.data) as AgentLetter).text) : undefined;
     return { relation, ...(about ? { about } : {}), ...(yours ? { yours } : {}) };
-  };
+  }, {});
 }
 
 /** The first thing asked in a local thread, as its user or starter wrote it. */

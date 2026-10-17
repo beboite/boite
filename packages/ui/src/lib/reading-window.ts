@@ -1,5 +1,22 @@
 import type { Message } from '@boite/contracts';
+import { tick, untrack } from 'svelte';
 import type { Store } from './store.svelte';
+
+/**
+ * A first page holds about one screen, and a list that does not reach past
+ * its viewport by `reach` gets no scroll to page with: `page` asks for the
+ * pages beside it at once. The caller's effect runs this again after each
+ * page lands, until the list is long enough or the thread is whole; a failed
+ * page changes no row and is not asked again until something does.
+ */
+export function fillShort(box: HTMLElement | undefined, open: boolean, navigating: () => boolean, reach: number, page: (box: HTMLElement) => void): void {
+  if (!box || !open) return;
+  void tick().then(() => {
+    // A list with no height is hidden, not short: it would page in the whole thread unseen.
+    if (!box.isConnected || !box.clientHeight || navigating() || box.scrollHeight - box.clientHeight > reach) return;
+    untrack(() => page(box));
+  });
+}
 
 /**
  * Asks for the page below a window `threads.get` cut around a reading
@@ -23,11 +40,22 @@ export function pullNewer(store: Store, box: HTMLElement, reach: number): void {
  * just been laid out, right whether they landed in the window or in the spacer
  * above it. The store itself refuses a second call while one is in flight and
  * a call with no cursor left.
+ *
+ * That total counts the rows the window mounts just above the reader at their
+ * estimate, while they draw at their real height: 850 px more for four tool
+ * runs on a desktop on 2026-10-13, and the anchor kept on the next measurement
+ * held the text there. Once the window is drawn, `nodeOf(head)` is put back
+ * where it stood on screen when the call left.
  */
-export function pullOlder(store: Store, box: HTMLElement, reach: number, head: string | undefined, above: (head: string | undefined) => number, moved: () => void): void {
+export function pullOlder(store: Store, box: HTMLElement, reach: number, head: string | undefined, above: (head: string | undefined) => number, moved: () => void, nodeOf?: (id: string) => HTMLElement | undefined): void {
   if (box.scrollTop > reach) return;
   if (store.messagesBefore === null || store.loadingOlder) return;
   const topBefore = box.scrollTop;
+  const offset = (): number | null => {
+    const node = head === undefined ? undefined : nodeOf?.(head);
+    return node?.isConnected ? node.getBoundingClientRect().top - box.getBoundingClientRect().top : null;
+  };
+  const stood = offset();
   void store.loadOlder().then((added) => {
     if (added === 0) return;
     requestAnimationFrame(() => {
@@ -35,6 +63,12 @@ export function pullOlder(store: Store, box: HTMLElement, reach: number, head: s
       if (grew <= 0) return;
       box.scrollTop = topBefore + grew;
       moved();
+      void tick().then(() => {
+        const now = stood === null ? null : offset();
+        if (now === null || stood === null || Math.abs(now - stood) <= 1) return;
+        box.scrollTop += now - stood;
+        moved();
+      });
     });
   });
 }

@@ -2,13 +2,15 @@
   import { untrack, type Snippet } from 'svelte';
   import { Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
-  import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
+  import { clampSidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../lib/prefs';
   import { strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
   import LimitsGlance from './LimitsGlance.svelte';
   import WhipButton from './WhipButton.svelte';
+  import UpdatesNotice from './UpdatesNotice.svelte';
+  import ResizeHandle from './ResizeHandle.svelte';
 
   /**
    * The column on the left of the window, for the thread list and the Agents
@@ -54,6 +56,13 @@
 
   let rail = $state<HTMLElement | undefined>(undefined);
   let folded: boolean | undefined;
+  /**
+   * Whether this list was folded since it was drawn. Only then does its
+   * arrival slide in from the window's edge: a list drawn by a page change
+   * (Threads to Agents, back from Settings) or at boot replaces the one that
+   * stood there, so it stands still and only its rows change.
+   */
+  let wasFolded = $state(untrack(() => store.sidebarCollapsed));
   let sliding: ReturnType<typeof setTimeout> | undefined;
   let marked: HTMLElement | undefined;
 
@@ -73,6 +82,7 @@
     const now = store.sidebarCollapsed;
     const was = folded;
     folded = now;
+    if (now) wasFolded = true;
     const row = untrack(() => rail)?.parentElement;
     if (was === undefined || was === now || !row) return;
     unmark();
@@ -85,24 +95,7 @@
   // change, a page change, must not ease.
   $effect(() => unmark);
 
-  function startResize(event: PointerEvent) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    const handle = event.currentTarget as HTMLElement;
-    const start = event.clientX,
-      width = store.sidebarWidth;
-    handle.setPointerCapture(event.pointerId);
-    const move = (e: PointerEvent) => (store.sidebarWidth = clampSidebar(width + e.clientX - start));
-    const end = () => {
-      handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', end);
-      handle.removeEventListener('pointercancel', end);
-      store.setSidebarWidth(store.sidebarWidth);
-    };
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', end);
-    handle.addEventListener('pointercancel', end);
-  }
+  let resizeFrom = 0;
 </script>
 
 <aside
@@ -111,6 +104,7 @@
   class:drawer
   class:open={drawer && store.sidebarOpen}
   class:collapsed={store.sidebarCollapsed}
+  class:was-folded={wasFolded}
   style:--sidebar-width={`${store.sidebarWidth}px`}
   aria-label={label}
   data-testid={testid}
@@ -122,7 +116,9 @@
   </div>
   <div class="foot">
     {@render lead?.()}
+    <span class="grow"></span>
     {@render foot?.()}
+    <UpdatesNotice />
     {#if work.shows('sidebar.limits')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>
@@ -133,24 +129,26 @@
       title={`${strings.sidebar.settings}${store.keyHint('settings')}`}
       aria-label={strings.sidebar.settings}
       data-testid="nav-settings"
+      data-preload-view="settings"
       onclick={() => store.showSettings()}><Settings size={16} /></button
     >
   </div>
-  <button
-    class="resize"
-    aria-label={strings.sidebar.resize}
-    title={strings.sidebar.resize}
-    data-testid={kind === 'sidebar' ? 'sidebar-resize' : 'agents-resize'}
-    onpointerdown={startResize}
-    ondblclick={() => store.setSidebarWidth(SIDEBAR_DEFAULT)}
-    onkeydown={(e) => {
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        e.preventDefault();
-        store.setSidebarWidth(store.sidebarWidth + (e.key === 'ArrowLeft' ? -16 : 16));
-      }
-      if (e.key === 'Home') store.setSidebarWidth(SIDEBAR_DEFAULT);
-    }}
-  ></button>
+  <div class="resize">
+    <ResizeHandle
+      orientation="vertical"
+      edge="right"
+      label={strings.sidebar.resize}
+      testid={kind === 'sidebar' ? 'sidebar-resize' : 'agents-resize'}
+      value={store.sidebarWidth}
+      min={SIDEBAR_MIN}
+      max={SIDEBAR_MAX}
+      onstart={() => { resizeFrom = store.sidebarWidth; }}
+      onmove={(delta) => (store.sidebarWidth = clampSidebar(resizeFrom + delta))}
+      onend={() => store.setSidebarWidth(store.sidebarWidth)}
+      onstep={(delta) => store.setSidebarWidth(store.sidebarWidth + delta)}
+      onreset={() => store.setSidebarWidth(SIDEBAR_DEFAULT)}
+    />
+  </div>
 </aside>
 
 <style>
@@ -175,66 +173,50 @@
        mask, not a scroll-driven animation, because tests and closing elements
        wait on every running animation and that one would never end. */
     --fade: 10px;
-    padding: var(--fade) 6px;
+    /* Shorter on top: the head's tools sit right above, and a deeper fade
+       there opened a wider gap under them than between them and the switch. */
+    --fade-top: 6px;
+    padding: var(--fade-top) 6px var(--fade);
     display: flex;
     flex-direction: column;
-    mask-image: linear-gradient(to bottom, transparent, black var(--fade), black calc(100% - var(--fade)), transparent);
+    mask-image: linear-gradient(to bottom, transparent, black var(--fade-top), black calc(100% - var(--fade)), transparent);
   }
   .scroll > :global(*) { flex-shrink: 0; }
   .foot {
     display: flex;
-    align-items: center;
-    /* One row of equal buttons across the whole width, a dock rather than two
-       clumps around a gap: each takes its share, so the targets grow with the
-       column instead of leaving its middle empty. */
+    /* The machine button alone on the left, the others together on the
+       right, at the bottom: square targets as tall as the composer's, whose
+       lower edge meets the chat card's instead of floating above it. */
+    align-items: flex-end;
     gap: 4px;
-    min-height: 44px;
     box-sizing: border-box;
     margin: 0 10px;
-    padding: 6px 0;
+    padding-top: 8px;
+  }
+  .grow { flex: 1; }
+  /* Five square buttons and their gaps need 220 pixels: below that, the
+     update button's arrival closes the gaps instead of pushing Settings out. */
+  @container sidebar (max-width: 219.98px) {
+    .foot:has(:global(.update-trigger)) { gap: 0; }
   }
   .control {
     display: contents;
   }
-  .foot :global(button.icon),
-  .foot :global(.machines:has(.trigger)) {
-    /* A basis, not 0: a button's border counts in its base size and a bare
-       wrapper has none, so a 0 basis left the machine button 2 px short. */
-    flex: 1 1 var(--control-sm);
-    min-width: var(--control-sm);
+  .foot :global(button.icon) {
+    flex: none;
+    width: var(--control-lg);
     height: var(--control-lg);
   }
-  .foot :global(button.icon) { width: auto; }
+  .foot :global(.machines) { min-width: var(--control-lg); }
   .foot :global(.machines .menu),
-  .foot :global(.machines .trigger) { width: 100%; height: 100%; }
-  /* With one machine the wrapper stays, empty, for its connection state: out
-     of the row, or it would still take a gap. */
+  .foot :global(.machines .trigger) { height: var(--control-lg); max-width: 100%; }
+  .foot :global(.machines .trigger:not(:has(.name))) { width: var(--control-lg); }
+  /* With one machine the wrapper stays, empty, for its connection state. */
   .foot :global(.machines:not(:has(.trigger))) { display: none; }
-  /* A machine filter names the machine: that button keeps its text's width,
-     up to MachineStatus's own cap. */
-  .foot :global(.machines.filtered) { flex: 0 1 auto; max-width: 160px; }
-  .foot :global(.machines.filtered .trigger) { width: auto; max-width: 100%; }
   .foot :global(button.icon.active) { background: var(--color-active); color: var(--color-foreground); }
 
-  /* Centred in the frame's gap between the list and the card beside it. */
-  .resize {
-    position: absolute;
-    top: 0;
-    right: calc(var(--frame-gap) / -2 - 3px);
-    bottom: 0;
-    width: 6px;
-    height: auto;
-    padding: 0;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    cursor: col-resize;
-    z-index: 5;
-  }
-  .resize:hover,
-  .resize:focus-visible {
-    background: var(--color-edge);
-  }
+  /* The edge that drags the width, centred in the frame gap (ResizeHandle). */
+  .resize { display: contents; }
   @media (min-width: 721px) {
     /* Folding slides it out past the window's left edge and the chat card
        widens with it: a margin as wide as the list and its gap gives that room
@@ -251,7 +233,8 @@
       margin-left: calc(-1 * var(--slide-room));
       transition: margin-left var(--dur-slide-out) var(--ease-slide), opacity var(--dur-2) var(--ease-out-quint), display var(--dur-slide-out) allow-discrete;
     }
-    @starting-style { .rail:not(.collapsed) { opacity: 0; margin-left: calc(-1 * var(--slide-room)); } }
+    /* Unfolding only (`wasFolded`): a list drawn open stands where it is. */
+    @starting-style { .rail.was-folded:not(.collapsed) { opacity: 0; margin-left: calc(-1 * var(--slide-room)); } }
   }
   @media (max-width: 720px) {
     .rail.drawer {

@@ -1,19 +1,21 @@
-import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, type PreviewReference } from '@boite/contracts';
+import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, threadActive, type PreviewReference, type RpcParams } from '@boite/contracts';
 import { untrack } from 'svelte';
 import type { Attachment, Message, MessageId, MessagePart, ThreadId, ThreadSummary, Turn, TurnInFlightData } from '@boite/contracts';
 import { drainQueue, SENDING_PREFIX, sentPrompt } from '../composer-queue';
 import { restorePreviewMentions } from '../preview-mentions';
 import { activityCommand, isActivityCommand } from '../activity-command';
-import { RpcFailure, readyAgain, wasUnanswered } from '../client';
+import { RpcFailure, readyAgain, wasUnanswered, type Client } from '../client';
 import { titleFrom } from '../format';
+import { patchFields } from '../thread-rows';
 import { DRAFT_STASH_KEY } from '../prefs';
 import { editPreviewMentions, insertPreviewMention } from '../preview-mentions';
 import { showPreviewReference } from '../preview-navigation';
 import { strings } from '../strings';
 import { unresolvedAssetId } from '../draft-attachments';
 import { secureId } from '../secure-id';
-import type { Choice } from '../store.svelte';
+import type { Choice, Draft } from '../store.svelte';
 import type { StoreContext } from './context';
+import { draftKey } from './drafts.svelte';
 
 /**
  * A prompt written while its machine could not be reached: the outbox. It goes
@@ -31,6 +33,14 @@ export type QueuedPrompt = { text: string; attachments: Attachment[]; previewRef
 
 /** What became of one outbox prompt: taken, still to send, or refused with the core's reason. */
 export type Delivery = 'sent' | 'wait' | { failed: string };
+
+type SubmissionInput = { choice: Choice; attachments: Attachment[]; previewReferences: PreviewReference[] };
+
+type PendingSend = { id: string; prompt: string; attachments: Attachment[]; previewReferences: PreviewReference[]; selectionVersion: number };
+
+function emptyPrompt(prompt: string, attachments: Attachment[], previewReferences: PreviewReference[]): boolean {
+  return prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0;
+}
 
 /** The refusal `turns.start` answers while the thread already runs a turn, or null for any other error. */
 function turnInFlight(error: unknown): TurnInFlightData | null {
@@ -80,7 +90,7 @@ export class Composer {
 
   previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
   composerInsertions = new Map<string, (start: number, end: number, text: string) => void>();
-  pendingSends = new Map<string, { id: string; prompt: string; attachments: Attachment[]; previewReferences: PreviewReference[]; selectionVersion: number }>();
+  pendingSends = new Map<string, PendingSend>();
   /**
    * The prompt each thread (or the draft, under its own key) has on its way to
    * the core. The timeline draws it at once with both receipts off, so a slow
@@ -346,25 +356,31 @@ export class Composer {
   }
 
   private async submitOwned(prompt: string, choice: Choice, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<{ navigation: number | null } | null> {
+    const draft = this.ctx.store.draft;
+    const unpin = this.ctx.draftStartup.uploads.pin(attachments);
+    try { return await this.submitCurrent(prompt, choice, attachments, previewReferences); }
+    finally { unpin(); this.ctx.draftStartup.finish(draft); }
+  }
+
+  private async submitCurrent(prompt: string, choice: Choice, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<{ navigation: number | null } | null> {
     const s = this.ctx.store;
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     const navigation = s.navigationGeneration;
     const owner = () => this.ctx.client === client && this.ctx.clientGeneration === clientGeneration;
     const current = () => owner() && s.navigationGeneration === navigation;
-    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return null; }
-    if (!client || (prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) || s.connection !== 'ready') return null;
-    attachments = attachments.map(item => ({ ...item }));
-    previewReferences = $state.snapshot(previewReferences);
-    choice = { ...choice };
-    try {
-      if (activityCommand(prompt) && previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
-    } catch (error) { this.ctx.fail(error); return null; }
-    if (s.draft && !s.openThread) {
+    const input = this.submissionInput(client, prompt, choice, attachments, previewReferences);
+    if (!input || !client) return null;
+    choice = input.choice;
+    attachments = input.attachments;
+    previewReferences = input.previewReferences;
+    const reservation = s.draft && !s.openThread ? this.ctx.draftStartup.take(s.draft, choice) : null;
+    if (reservation) choice = reservation.choice;
+    if (s.draft && !s.openThread && !reservation) {
       const draft = s.draft;
       const selection = s.draftChoice;
       const prepared = await s.prepareDraftChoice(choice);
-      if (!prepared || !current() || s.draft !== draft || s.draftChoice !== selection || s.openThread) return null;
+      if (!prepared || !this.currentDraftSelection(draft, selection, current)) return null;
       choice = prepared;
     }
     s.remember(choice);
@@ -373,10 +389,53 @@ export class Composer {
     }
     const draft = s.draft;
     if (!draft) return null;
-    const projectId = draft.projectId ?? (await this.ctx.projects.ensureDrafts());
+    const projectId = reservation?.projectId ?? draft.projectId ?? (await this.ctx.projects.ensureDrafts());
     if (projectId === null || !current() || s.draft !== draft) return null;
     const composer = this.composerStates[DRAFT_STASH_KEY];
-    const created = await s.createThread({
+    const overlap = s.core?.features?.draftPreparation === true;
+    const created = await this.createDraftThread(projectId, prompt, choice, draft, {
+      ...(reservation ? { preparationId: reservation.preparationId } : {}),
+      ...(overlap ? { subscribe: true } : {})
+    });
+    if (!created || !owner()) {
+      if (reservation) void client.call('drafts.release', { preparationId: reservation.preparationId }).catch(() => undefined);
+      return null;
+    }
+    const originalDraft = this.adoptCreated(created, draft, composer, current);
+    const followupNavigation = originalDraft ? await this.openCreated(created.id, owner, overlap) : null;
+    if (!owner()) return null;
+    try { return await s.send(prompt, created.id, attachments, previewReferences) ? { navigation: followupNavigation } : null; }
+    finally {
+      if (overlap && !originalDraft && owner() && this.ctx.threads.subscribedThreadId !== created.id && s.delegationSelectedAgentId !== created.id) {
+        void client.call('threads.unsubscribe', { threadId: created.id }).catch(() => undefined);
+      }
+    }
+  }
+
+  /** Validate and copy user input before asynchronous preparation can change its source. */
+  private submissionInput(client: Client | null, prompt: string, choice: Choice, attachments: Attachment[], previewReferences: PreviewReference[]): SubmissionInput | null {
+    const s = this.ctx.store;
+    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return null; }
+    if (!client || emptyPrompt(prompt, attachments, previewReferences) || s.connection !== 'ready') return null;
+    attachments = attachments.map(item => ({ ...item }));
+    previewReferences = $state.snapshot(previewReferences);
+    choice = { ...choice };
+    try {
+      if (activityCommand(prompt) && previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
+    } catch (error) { this.ctx.fail(error); return null; }
+    return { choice, attachments, previewReferences };
+  }
+
+  /** Prepared selection belongs to the same draft and navigation that requested it. */
+  private currentDraftSelection(draft: Draft, selection: Choice | null, current: () => boolean): boolean {
+    const s = this.ctx.store;
+    return current() && s.draft === draft && s.draftChoice === selection && !s.openThread;
+  }
+
+  private createDraftThread(projectId: string, prompt: string, choice: Choice, draft: Draft, preparation: Pick<RpcParams<'threads.create'>, 'preparationId' | 'subscribe'>): Promise<ThreadSummary | null> {
+    const s = this.ctx.store;
+    return s.createThread({
+      ...preparation,
       projectId,
       providerId: choice.providerId,
       accountId: choice.accountId,
@@ -388,23 +447,29 @@ export class Composer {
       ...(draft.worktree ? { worktree: {} } : {}),
       ...(draft.incognito && s.draftInDrafts ? { incognito: true } : {})
     }, { navigate: false });
-    if (!created || !owner()) return null;
+  }
+
+  /** Creation keeps its input even when navigation has moved to another draft. */
+  private adoptCreated(created: ThreadSummary, draft: Draft, composer: Composer['composerStates'][string] | undefined, current: () => boolean): boolean {
+    const s = this.ctx.store;
     const originalDraft = current() && s.draft === draft && !s.openThread;
-    if (!s.draft || s.draft.projectId !== draft.projectId || originalDraft) this.ctx.drafts.forget(draft.projectId);
+    // Only this draft is forgotten: the project's other drafts stay.
+    if (!s.draft || draftKey(s.draft) !== draftKey(draft) || originalDraft) this.ctx.drafts.forget(draftKey(draft));
     if (composer) {
       this.composerStates[created.id] = composer;
       if (this.composerStates[DRAFT_STASH_KEY] === composer && (!s.draft || originalDraft)) delete this.composerStates[DRAFT_STASH_KEY];
     }
-    let followupNavigation: number | null = null;
     this.adopt(created.id);
-    if (originalDraft) {
-      const opening = s.open(created.id);
-      const openingGeneration = s.navigationGeneration;
-      await opening;
-      if (owner() && s.navigationGeneration === openingGeneration && this.ctx.threads.openThread?.id === created.id) followupNavigation = openingGeneration;
-    }
-    if (!owner()) return null;
-    return await s.send(prompt, created.id, attachments, previewReferences) ? { navigation: followupNavigation } : null;
+    return originalDraft;
+  }
+
+  private async openCreated(threadId: string, owner: () => boolean, overlap: boolean): Promise<number | null> {
+    const s = this.ctx.store;
+    const opening = s.open(threadId, true, overlap ? { liveCreation: true } : {});
+    const openingGeneration = s.navigationGeneration;
+    if (!overlap) await opening;
+    else void opening;
+    return owner() && s.navigationGeneration === openingGeneration && this.ctx.threads.openThread?.id === threadId ? openingGeneration : null;
   }
 
   /**
@@ -428,7 +493,7 @@ export class Composer {
     if (!sent) return false;
     if (projectId !== undefined && client === this.ctx.client && clientGeneration === this.ctx.clientGeneration && sent.navigation === s.navigationGeneration) {
       // Null names the drafts, which the send has made by now.
-      s.startDraft(projectId);
+      s.startDraft(projectId, { fresh: true });
       s.draftChoice = { ...choice };
     }
     return true;
@@ -506,6 +571,12 @@ export class Composer {
   }
 
   private async start(prompt: string, threadId: string | undefined, attachments: Attachment[], previewReferences: PreviewReference[], request?: OutboxRequest): Promise<Delivery> {
+    const unpin = this.ctx.draftStartup.uploads.pin(attachments);
+    try { return await this.startCurrent(prompt, threadId, attachments, previewReferences, request); }
+    finally { unpin(); }
+  }
+
+  private async startCurrent(prompt: string, threadId: string | undefined, attachments: Attachment[], previewReferences: PreviewReference[], request?: OutboxRequest): Promise<Delivery> {
     const s = this.ctx.store;
     const connection = this.ctx.connection;
     if (attachments.some(unresolvedAssetId)) {
@@ -516,102 +587,150 @@ export class Composer {
     const clientGeneration = this.ctx.clientGeneration;
     if (!client || !threadId || s.connection !== 'ready') return 'wait';
     // An empty outbox entry has nothing to deliver; an empty prompt typed now is not sent.
-    if (prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) return request ? 'sent' : 'wait';
+    if (emptyPrompt(prompt, attachments, previewReferences)) return request ? 'sent' : 'wait';
     // Held outside the try: a send whose machine does not come back joins the outbox with them.
-    let sent: { id: string; prompt: string; attachments: Attachment[]; previewReferences: PreviewReference[]; selectionVersion: number } | undefined;
+    let sent: PendingSend | undefined;
     let target: Choice | null = null;
-    const unsettled = (): Delivery => !this.ctx.currentClient(client, clientGeneration) || s.connection !== 'ready' ? 'wait' : { failed: strings.composer.outboxSettings };
+    const unsettled = (): Delivery => this.deliveryCurrent(client, clientGeneration) ? { failed: strings.composer.outboxSettings } : 'wait';
     try {
       // Reconnect snapshots must land before a new stream starts mutating the thread.
       await connection.reloading?.essential;
-      if (!this.ctx.currentClient(client, clientGeneration) || s.connection !== 'ready') return 'wait';
+      if (!this.deliveryCurrent(client, clientGeneration)) return 'wait';
       const activity = activityCommand(prompt);
-      if (activity) {
-        if (previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
-        const accepted = await client.call('threads.activity.set', { threadId, ...activity, ...(attachments.length ? { attachments } : {}) }).catch((error: unknown) => {
-          if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
-            throw new Error(strings.errors.activityUnsupported.replace('{machine}', s.core?.hostname ?? strings.app.name));
-          }
-          throw error;
-        });
-        if (this.ctx.currentClient(client, clientGeneration) && s.openThread?.id === threadId) s.openThread.activity = accepted;
-        return 'sent';
-      }
-      const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(thread => thread.id === threadId);
-      if (thread) {
-        const current: Choice = { providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
-          effort: thread.effort, permissionMode: thread.permissionMode, speed: thread.speed ?? null };
-        // An outbox prompt goes out on the model, effort and speed it was written
-        // with, if the thread moved off them meanwhile; never on another agent.
-        const written = request?.choice && request.choice.providerId === current.providerId && request.choice.accountId === current.accountId ? request.choice : null;
-        target = written ? { ...current, model: written.model, effort: written.effort, speed: written.speed ?? null } : s.composerChoice(current);
-        if (target.model !== current.model || (written && (target.effort !== current.effort || target.speed !== current.speed))) {
-          const revision = thread.selectionVersion ?? 0;
-          const prepared = await s.prepareDraftChoice(target);
-          if (!prepared || !this.ctx.currentClient(client, clientGeneration)) return unsettled();
-          if (!(await s.update(threadId, { model: prepared.model, effort: prepared.effort, speed: prepared.speed ?? null,
-            expectedSelectionVersion: revision }))) return unsettled();
-          if (!this.ctx.currentClient(client, clientGeneration)) return 'wait';
-        }
+      if (activity) return await this.sendActivity(client, clientGeneration, threadId, activity, attachments, previewReferences);
+      const selection = this.deliverySelection(threadId, request);
+      target = selection?.target ?? null;
+      if (selection?.needsUpdate) {
+        const outcome = await this.alignSelection(threadId, selection.target, selection.revision, client, clientGeneration, unsettled);
+        if (!this.ctx.currentClient(client, clientGeneration)) return 'wait';
+        if (outcome) return outcome;
       }
       // The key is left out when there is nothing to carry: a turn with no
       // image sends the params it always sent.
-      const selectionVersion = (s.openThread?.id === threadId ? s.openThread : s.threads.find((thread) => thread.id === threadId))?.selectionVersion ?? 0;
-      if (request) {
-        sent = { id: request.id, prompt, attachments: [...attachments], previewReferences: $state.snapshot(previewReferences), selectionVersion };
-      } else {
-        let pending = this.pendingSends.get(threadId);
-        if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || JSON.stringify(pending.previewReferences) !== JSON.stringify(previewReferences) || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.kind !== attachments[i]?.kind || a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
-          pending = { id: secureId(), prompt, attachments: [...attachments], previewReferences: JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[], selectionVersion };
-          this.pendingSends.set(threadId, pending);
-        }
-        sent = pending;
-      }
+      sent = this.rememberPending(threadId, prompt, attachments, previewReferences, request);
+      const selectionVersion = sent.selectionVersion;
       const ask = sent;
-      const start = () => client.call('turns.start', { threadId, prompt, clientRequestId: ask.id, expectedSelectionVersion: selectionVersion,
-        ...(attachments.length > 0 ? { attachments } : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) });
+      const start = async () => {
+        const payload = this.ctx.draftStartup.uploads.payload(attachments);
+        const params = { threadId, prompt, clientRequestId: ask.id, expectedSelectionVersion: selectionVersion,
+          ...(attachments.length > 0 ? payload : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) };
+        try { return await client.call('turns.start', params); }
+        catch (error) {
+          if (!(error instanceof RpcFailure) || (error.data as { reason?: string } | undefined)?.reason !== 'attachment-upload-expired' ||
+            !payload.attachmentIds || !this.ctx.currentClient(client, clientGeneration)) throw error;
+          this.ctx.draftStartup.uploads.forget(attachments);
+          // The original bytes and request id survive the refused lease.
+          return client.call('turns.start', { ...params, attachments, attachmentIds: undefined });
+        }
+      };
       // A socket lost under the call, or an answer that never came, loses the answer, maybe not the turn:
       // the same request id asks once more, and the core answers with the turn it took.
-      const accepted = await start().catch(async (error: unknown) => {
-        if (!wasUnanswered(error) || !this.ctx.currentClient(client, clientGeneration) || !(await readyAgain(client)) || !this.ctx.currentClient(client, clientGeneration)) throw error;
-        await connection.reloading?.essential;
-        if (!this.ctx.currentClient(client, clientGeneration) || (!request && this.pendingSends.get(threadId) !== ask)) throw error;
-        return start();
-      });
+      const accepted = await this.retryUnanswered(start, client, clientGeneration, threadId, ask, request);
       if (this.ctx.currentClient(client, clientGeneration)) {
+        this.ctx.draftStartup.uploads.forget(attachments);
         if (!request) { this.pendingSends.delete(threadId); this.accepted(threadId, accepted); }
         this.promptFocus = { threadId, turnId: accepted.id, after: null };
       }
       return 'sent';
     } catch (error) {
-      // A detached client's answer must not restore input or thread rows into its replacement.
-      if (!this.ctx.currentClient(client, clientGeneration)) return 'wait';
-      const early = turnInFlight(error);
-      if (early) {
-        this.markInFlight(early);
-        if (request) return 'wait';
-        const held = this.composerStates[early.thread.id]!;
-        takeOutgoing(held);
-        held.queued.unshift({ text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
-        // The queue shows it from here on.
-        delete this.staged[early.thread.id];
-        return 'sent';
-      }
-      // An outbox prompt waits for the machine; only the core's own refusal stops it.
-      if (request) return wasUnanswered(error) || s.connection !== 'ready' ? 'wait' : { failed: this.ctx.reason(error) };
-      // The machine did not come back in time, or still does not answer: the
-      // prompt joins the outbox under the request id it already went out with,
-      // so a turn the core took is answered, not started twice. Handing the
-      // text back to the box is what made the user send it again.
-      if (sent && wasUnanswered(error) && this.pendingSends.get(threadId) === sent) {
-        this.pendingSends.delete(threadId);
-        this.queuePrompt(threadId, { text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) }, { choice: target, id: sent.id, head: true });
-        delete this.staged[threadId];
-        return 'sent';
-      }
-      this.ctx.fail(error);
-      return { failed: this.ctx.reason(error) };
+      return this.failDelivery(error, client, clientGeneration, threadId, prompt, attachments, previewReferences, request, sent, target);
     }
+  }
+
+  private deliveryCurrent(client: Client, clientGeneration: number): boolean {
+    return this.ctx.currentClient(client, clientGeneration) && this.ctx.store.connection === 'ready';
+  }
+
+  private async sendActivity(client: Client, clientGeneration: number, threadId: string, activity: NonNullable<ReturnType<typeof activityCommand>>, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<Delivery> {
+    const s = this.ctx.store;
+    if (previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
+    const accepted = await client.call('threads.activity.set', { threadId, ...activity, ...(attachments.length ? { attachments } : {}) }).catch((error: unknown) => {
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
+        throw new Error(strings.errors.activityUnsupported.replace('{machine}', s.core?.hostname ?? strings.app.name));
+      }
+      throw error;
+    });
+    if (this.ctx.currentClient(client, clientGeneration) && s.openThread?.id === threadId) s.openThread.activity = accepted;
+    return 'sent';
+  }
+
+  /** Outbox input restores only model settings, never its original agent or account. */
+  private deliverySelection(threadId: string, request?: OutboxRequest): { target: Choice; revision: number; needsUpdate: boolean } | null {
+    const s = this.ctx.store;
+    const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(thread => thread.id === threadId);
+    if (!thread) return null;
+    const current: Choice = { providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
+      effort: thread.effort, permissionMode: thread.permissionMode, speed: thread.speed ?? null };
+    const written = request?.choice && request.choice.providerId === current.providerId && request.choice.accountId === current.accountId ? request.choice : null;
+    const target = written ? { ...current, model: written.model, effort: written.effort, speed: written.speed ?? null } : s.composerChoice(current);
+    const needsUpdate = target.model !== current.model || !!(written && (target.effort !== current.effort || target.speed !== current.speed));
+    return { target, revision: thread.selectionVersion ?? 0, needsUpdate };
+  }
+
+  private async alignSelection(threadId: string, target: Choice, revision: number, client: Client, clientGeneration: number, unsettled: () => Delivery): Promise<Delivery | undefined> {
+    const s = this.ctx.store;
+    const prepared = await s.prepareDraftChoice(target);
+    if (!prepared || !this.ctx.currentClient(client, clientGeneration)) return unsettled();
+    if (!(await s.update(threadId, { model: prepared.model, effort: prepared.effort, speed: prepared.speed ?? null,
+      expectedSelectionVersion: revision }))) return unsettled();
+    if (!this.ctx.currentClient(client, clientGeneration)) return 'wait';
+  }
+
+  /** Unchanged input reuses its request id after an uncertain answer. */
+  private rememberPending(threadId: string, prompt: string, attachments: Attachment[], previewReferences: PreviewReference[], request?: OutboxRequest): PendingSend {
+    const s = this.ctx.store;
+    const selectionVersion = (s.openThread?.id === threadId ? s.openThread : s.threads.find((thread) => thread.id === threadId))?.selectionVersion ?? 0;
+    if (request) {
+      return { id: request.id, prompt, attachments: [...attachments], previewReferences: $state.snapshot(previewReferences), selectionVersion };
+    }
+    let pending = this.pendingSends.get(threadId);
+    if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || JSON.stringify(pending.previewReferences) !== JSON.stringify(previewReferences) || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.kind !== attachments[i]?.kind || a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
+      pending = { id: secureId(), prompt, attachments: [...attachments], previewReferences: JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[], selectionVersion };
+      this.pendingSends.set(threadId, pending);
+    }
+    return pending;
+  }
+
+  private retryUnanswered(start: () => Promise<Turn>, client: Client, clientGeneration: number, threadId: string, ask: PendingSend, request?: OutboxRequest): Promise<Turn> {
+    const connection = this.ctx.connection;
+    return start().catch(async (error: unknown) => {
+      if (!wasUnanswered(error) || !this.ctx.currentClient(client, clientGeneration) || !(await readyAgain(client)) || !this.ctx.currentClient(client, clientGeneration)) throw error;
+      await connection.reloading?.essential;
+      if (!this.ctx.currentClient(client, clientGeneration) || (!request && this.pendingSends.get(threadId) !== ask)) throw error;
+      return start();
+    });
+  }
+
+  /** Failed delivery either waits, holds early input, or records a durable outbox request. */
+  private failDelivery(error: unknown, client: Client, clientGeneration: number, threadId: string, prompt: string, attachments: Attachment[], previewReferences: PreviewReference[], request: OutboxRequest | undefined, sent: PendingSend | undefined, target: Choice | null): Delivery {
+    const s = this.ctx.store;
+    // A detached client's answer must not restore input or thread rows into its replacement.
+    if (!this.ctx.currentClient(client, clientGeneration)) return 'wait';
+    const early = turnInFlight(error);
+    if (early) {
+      this.markInFlight(early);
+      if (request) return 'wait';
+      const held = this.composerStates[early.thread.id]!;
+      takeOutgoing(held);
+      held.queued.unshift({ text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
+      // The queue shows it from here on.
+      delete this.staged[early.thread.id];
+      return 'sent';
+    }
+    // An outbox prompt waits for the machine; only the core's own refusal stops it.
+    if (request) return wasUnanswered(error) || s.connection !== 'ready' ? 'wait' : { failed: this.ctx.reason(error) };
+    // The machine did not come back in time, or still does not answer: the
+    // prompt joins the outbox under the request id it already went out with,
+    // so a turn the core took is answered, not started twice. Handing the
+    // text back to the box is what made the user send it again.
+    if (sent && wasUnanswered(error) && this.pendingSends.get(threadId) === sent) {
+      this.pendingSends.delete(threadId);
+      this.queuePrompt(threadId, { text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) }, { choice: target, id: sent.id, head: true });
+      delete this.staged[threadId];
+      return 'sent';
+    }
+    this.ctx.fail(error);
+    return { failed: this.ctx.reason(error) };
   }
 
   /**
@@ -626,9 +745,9 @@ export class Composer {
     const s = this.ctx.store;
     // The core refused because a turn is in flight, even when its row has not
     // moved off idle yet: waiting is what the composer must do.
-    const row: ThreadSummary = ['queued', 'running', 'waiting'].includes(thread.status) ? thread : { ...thread, status: 'running' };
+    const row: ThreadSummary = threadActive(thread.status) ? thread : { ...thread, status: 'running' };
     this.ctx.threads.upsertThread(row);
-    if (s.openThread?.id === row.id) Object.assign(s.openThread, row);
+    if (s.openThread?.id === row.id) patchFields(s.openThread, row);
     this.composerStates[row.id] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
   }
 

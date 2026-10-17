@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { bytes, clockTime, elapsed, levelName, millis, quotaResetTime, quotaWindowName, relativeTime } from './format';
+import { bytes, clockTime, effortName, elapsed, formatTokens, levelName, longDay, millis, quotaResetTime, quotaWindowName, relativeTime } from './format';
 import { setLocaleSetting } from './i18n.svelte';
 
 test('elapsed reads like a stopwatch', () => {
@@ -60,5 +60,12 @@ test('durations, sizes, effort levels and quota windows follow the language the 
     expect(quotaWindowName('Credits')).toBe('Crédits');
     expect(quotaResetTime(friday)).toBe('vendredi 20:55');
     expect(levelName({ id: 'none', label: 'None' })).toBe('Aucun');
+    // A subagent row names its model's effort in French, an unknown id as sent.
+    const model = { effort: { levels: [{ id: 'high', label: 'High' }] } };
+    expect(effortName(model, 'high')).toBe('Élevé');
+    expect(effortName(model, 'turbo')).toBe('turbo');
+    // A day heading and a token count, whatever language the OS speaks.
+    expect(longDay(new Date(2026, 8, 15, 10, 31).getTime())).toBe('mardi 15 septembre');
+    expect(formatTokens(84_400).replace(/\s/g, ' ')).toBe('84,4 k');
   } finally { await setLocaleSetting('en'); }
 });

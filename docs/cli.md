@@ -33,7 +33,7 @@ explicit stop tool when that is intended.
 
 The fixed tools expose this thread's location, projects, runtime capabilities,
 authorized contact directory/search/read/send, delegation get/spawn/send/stop/wait/result,
-fork summary merge-back, plan get/set and asynchronous questions. Every call injects the authenticated
+fork summary merge-back, plan get/set, asynchronous questions and settings cards. Every call injects the authenticated
 source thread and reaches the existing RPC access and relationship checks.
 Arguments cannot select an arbitrary RPC method or another source thread.
 There are no command execution, file access or diagnostic log tools. Mutation
@@ -63,9 +63,9 @@ pages to recover transcript output. Do not repeat a mutation to recover a
 truncated response. The stdio input frame is limited to 64 KiB.
 
 Implementation: `packages/core/src/mcp/`, pinned
-`@modelcontextprotocol/server` 2.3.0 and Zod 4.6.5. The source CLI dispatch is
-already included in the normal core build and sidecar, so no extra executable
-or staging path is required. See the official SDK
+`@modelcontextprotocol/server` 2.3.1 and Zod 4.6.7 in `packages/core/package.json`.
+The source CLI dispatch is included in the normal core build and sidecar, so
+no extra executable or staging path is required. See the official SDK
 [stdio guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/serving/stdio.md)
 and [tool guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/servers/tools.md).
 
@@ -171,10 +171,56 @@ panel, waits until it is ready and prints the `adb -s <serial>` or
 `boite pr link <url>` verifies a GitHub pull request and saves its link in the
 current conversation. Link each PR in a stack. `boite pr list` returns them
 in dependency order; `boite pr refresh` updates titles and states from GitHub.
+Without a refresh, a listed PR is read again at most once a minute, and one
+saved as merged is kept as saved.
 `boite pr unlink <url>` removes the saved link without changing the PR.
 An agent can manage links only in its own conversation. Paired devices can
 read the list. Lookup uses the local `gh` login and the configured `GH_HOST`.
 At most 20 PRs can be linked to one conversation.
+
+### Watching a pull request
+
+`boite pr watch [<url|number>]` asks Boite to babysit a PR for the agent, so
+the agent ends its turn instead of polling CI. With nothing named it watches
+the conversation's only linked PR, or its only open one; a number names a
+linked PR; a URL not linked yet is linked first. It prints what the first
+read saw (head, checks running and failed, a conflict) and wakes nothing for
+it. `boite pr unwatch [<url|number>]` stops one watch, or all of them.
+
+The core (`packages/core/src/pull-request-watch.ts`) wakes the conversation
+with one message, a `pull-request` turn, when:
+
+- a check fails, each failure once; a rerun that fails again counts again;
+- every check the base branch requires finished without failing (every check
+  when none is required), including a required check that appears already
+  passed, and never while another run of the same check on that commit still
+  goes;
+- someone other than the account `gh` signs in as posts a comment, a review or
+  an inline review comment, replies included, or a bot rewrites one;
+- the branch starts to conflict with its base.
+
+The message names each change with its link. A change waits 20 seconds for
+the rest of its burst and for a running turn to end, then everything waiting
+goes out together; the same state never wakes twice.
+
+Each watched PR costs one GraphQL query a minute, a fingerprint of its state,
+mergeability, head, check counts by state, comment and review counts, edits
+and `updatedAt`. Only when it moves does the core read the checks one by one
+(with whether each is required) and the comments, reviews and inline comments,
+100 a page up to 10 pages each; remarks are read again every 30 minutes
+regardless, for edits the fingerprint cannot see. GitHub's rate limit pauses
+every read, from two minutes doubling up to 15; an unreachable GitHub or a
+missing `gh` pauses that watch the same way. Neither ends it.
+
+A watch ends on merge or close, on Stop, on archive or Mark done, on removal
+and on unwatch. It survives a core restart (`pr-watches:<thread>` in the
+journal settings). A thread at rest with a watch reads as watching, not done,
+in the sidebar. The thread header carries a chip with the watched numbers;
+its menu shows each watch's last status and stops one, on a phone too. The
+owner's Tasks panel lists them the same way. A paired phone may stop a watch,
+never start one. Delegated agents and
+persistent agent sessions cannot watch: their parent or Agents owns the work.
+At most 10 PRs per conversation.
 
 ## How an agent finds the core
 
@@ -193,7 +239,8 @@ The CLI says hello with that token and becomes the `agent` principal of that
 one thread. `AGENT_METHODS` in `packages/core/src/access.ts` lists its allowed
 calls and reasons. Each call is bound to that authenticated thread; delegation
 and coordination additionally check relationships and authorized contacts.
-An owner-only method such as `files.write`, `trace.get` or `core.logs` is refused. The
+An owner-only method such as `files.write`, `trace.get` or `core.logs` is refused;
+the anonymized `diagnostics.*` view is the agent's ([diagnostics](#diagnostics)). The
 token is forgotten when the thread is
 archived or removed, a socket an agent already opened with it is closed at the
 same moment, and the token is never written to disk.
@@ -216,14 +263,15 @@ since the first frame carries the token.
 
 The commands that drive other threads (`threads`, `thread show|send|stop|
 archive|unarchive|remove|rename`, `thread move <project> <id>`, `questions`,
-`answer`, `permissions`, `allow`, `deny`, `stewards`, `projects
-archive|unarchive|remove`) and `thread new` need no `--thread` from a terminal.
-There they use the owner methods: `thread send` is the owner's own prompt,
-queued behind a running turn, and `thread new` copies the agent of `--thread`,
-else of the project's most recent thread (`--model` replaces the model). Inside
-a thread the same words act as the [steward](stewards.md) the owner made that
-thread, held to its projects and capabilities, and its messages reach other
-threads as the steward's letters, never as the user's.
+`answer`, `permissions`, `allow`, `deny`, `projects archive|unarchive|remove`)
+and `thread new` need no `--thread` from a terminal. There they use the owner
+methods: `thread send` is the owner's own prompt, queued behind a running turn,
+and `thread new` copies the agent of `--thread`, else of the project's most
+recent thread (`--model` replaces the model). Inside the direct conversation of
+a [persistent agent](agents.md#projects-entrusted-to-an-agent) the same words
+reach the threads of the projects the owner entrusted to it, through
+`resident.*`, and its messages reach them as that agent's letters, never as the
+user's. Deleting a thread and deciding a tool permission stay the owner's.
 
 ## Commands
 
@@ -231,7 +279,7 @@ threads as the steward's letters, never as the user's.
 boite where                      thread, title, project, cwd, branch, worktree, agent
 boite thread move <project>      move this thread to another project (name, id or
                                  folder) when this turn ends
-boite thread new <project> <brief> [--worktree] [--title <title>]
+boite thread new <project> <brief> [--worktree] [--title <title>] [context flags]
                                  start a thread in a project; its first answer
                                  comes back as an agent message
 boite projects                   the projects added to Boite
@@ -240,9 +288,9 @@ boite projects add <folder> [--name <name>]
 boite projects archive|unarchive|remove <project>
                                  the owner's; removing leaves the folder on disk
 boite threads [--project <p>] [--archived]
-                                 every thread as the owner, a steward's own
+                                 every thread as the owner, an agent's projects'
 boite thread show <id>           state, pending questions and permissions, last answer
-boite thread send <id> <text>    the owner's prompt, or the steward's letter
+boite thread send <id> <text>    the owner's prompt, or the agent's letter
 boite thread stop|archive|unarchive|remove <id>
 boite thread rename <id> <title>
 boite thread move <project> <id> move another thread
@@ -250,10 +298,8 @@ boite questions [<id>]           pending questions
 boite answer <id> <question-id> <option|text ...> [--skip]
 boite permissions [<id>]         pending tool permissions
 boite allow|deny <id> <request-id>
-boite stewards [set <thread> <project ...> [--all] [--can <a,b>] [--quiet] | revoke <thread>]
-boite steward                    this thread's steward grant
 boite attach <file>               publish a file snapshot in chat, at most 512 MB
-boite view <file.html>            draw the page at the end of the answer (--title <text>)
+boite view <file.html>            draw the page where a line ![title](file.html) of the answer places it, else at its end (--title <text>)
 boite view help                   the rules of a page: layout, the app's look, theme, motion, checks
 boite view example                a complete page in the app's look, to start from
 boite preview <file.html>          open a local HTML artifact and its neighbouring assets
@@ -285,15 +331,25 @@ boite agent remember <json>
 boite agent routines
 boite agent schedule <json>
 boite delegate models|profiles|list
-boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>]
+boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [context flags]
 boite delegate send <thread-id> <text>
 boite delegate wait [thread-id] [--timeout <s>]
 boite delegate result <thread-id> <turn-id> [offset]
 boite delegate stop [thread-id]
+boite delegate resume [thread-id]
 boite workflow help|check|run|list|show|extend|pause|resume|stop|retry
 boite workflow output|templates|save|start
 boite help
 ```
+
+The context flags, `--context light|neutral`, `--keep|--drop <parts>`,
+`--tools <Tool,...>` and `--rules <text>` or `--rules-file <path>`, start the
+thread without part of the user's setup ([context modes](context-modes.md)).
+`--worktree` runs the child in a git worktree of its own instead of the
+parent's checkout ([delegation](delegation.md#children-in-their-own-worktree)).
+`delegate send` to a child that waits on a question answers that question, and
+`delegate wait` returns `needs_input` as soon as a child asks something
+([delegation](delegation.md#questions-from-a-child)).
 
 Coordination commands are documented in [coordination](coordination.md#agent-commands),
 child controls in [delegation](delegation.md#agent-commands), and plan/output
@@ -427,6 +483,65 @@ unless the "Asynchronous
 questions" setting is off. Codex asks natively (`delivery: "async"`), and
 Boite draws those cards the same way.
 
+`settings` helps a lost user set Boite up. Bare, it lists the settings an agent
+may ask about, one row each: key, value as JSON, the page and card it sits on
+(`agentCpuCapPercent 75 resources#limits`). The list is `REQUESTABLE_SETTINGS`
+in `packages/contracts/src/setting-requests.ts`; credentials, account ids and
+browser profiles are not in it. `settings request <key> <value> --why <text>`
+draws a settings card the same way `ask` draws a question: the agent keeps
+working and the card outlives the turn and a restart. The value is JSON when it
+parses (`60`, `false`, `null`, `["https://a.example"]`) and the bare word
+otherwise. It is refused when the key is not in the list (the refusal lists
+them), when `settings.set` would refuse the value, when the setting already
+holds it, or when a card on that key is already open in the thread.
+
+The card shows the reason, the setting's name, the current value struck
+through, the proposed one and where it sits in Settings. Apply calls
+`settings.set`, the call the Settings page makes, so only the owner can use it.
+A change card's button to Settings (Show in Settings beside Apply, Open
+Settings without it) also needs the owner, so a paired device answers a change
+card with Refuse only. An open card's Open Settings is offered to any client
+whose Settings draws that card. No button to Settings appears where the card is
+missing: a paired device's Settings lacks the owner pages (Providers,
+Plugins, Protection, Brain) and the owner's cards on shared pages (worktrees,
+privacy, execution, browser origins, auto-compact), and a phone browser's
+Settings lacks some cards of the computer's. The card never answers "applied"
+itself: the core closes every open card whose setting left the value it was
+asked from, whoever moved it, from the card or from the page. The agent then
+reads `applied: <key> is now <value>` or `changed: the user set <key> to
+<value>, not <proposed>`. Refuse sends `refused: <key> stays <value>`. A
+sensitive setting has no Apply: the network ones, the guards that keep agents
+quiet and their memory protection, history retention and where worktrees go.
+Its card opens Settings on the setting's card, which rings once in the accent
+colour, and closes when the user changes it there.
+
+`settings open <page>[#<card>] --why <text>` points at a page for what is not
+one value, a provider login (`accounts#provider-claude`) or a device to add
+(`machines#machines`). Open Settings goes there with the same ring and sends
+`opened: the user opened Settings at <page>`; Dismiss sends `dismissed`. The
+MCP tools `boite_settings` and `boite_settings_request` do the same.
+
+`settings agent [key]` reads a persistent agent's settings a card may change:
+`projects` (those entrusted to it), `model`, `effort`, `autoMemory` (the memory
+pass), `subagents` and `maxRunMinutes`. It prints the agent's name, each value
+and, for projects, models and efforts, the choices. `--agent <name or id>`
+names the agent; in an agent's own conversation it defaults to that agent.
+`settings agent request <key> <value> --why <text>` draws the card. `projects`
+takes `+name -name` edits or a whole list (`Notes,Other`, or JSON), resolved
+by name or id and stored as ids; the other keys read their value as `settings
+request` does. The refusals are the same, plus an unknown or ambiguous agent
+(the refusal lists them) and a model the agent's policy does not allow.
+
+The card names the agent and the change; for projects, each project added or
+removed has a tick the owner can clear before Apply. Apply calls
+`agents.settings.apply`, owner only, which writes through the agent's own
+settings checks. Any change to the agent, from the card or from its settings
+page, settles every card it answers; a card about an agent that is archived or
+removed closes unanswered. The asking thread reads `applied: <agent>'s <key>
+is now <value>`, `changed: the user set <agent>'s <key> to <value>, not
+<proposed>` or `refused: <agent>'s <key> stays <value>`, projects by name
+(`are` and `stay` for them).
+
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).
 
@@ -455,28 +570,61 @@ child has none, whatever the parent runs on. Tiers come from `boite delegate mod
 a spawn naming a speed on a model or profile on an agent-owned list not read yet is
 refused and says to list the delegation models and spawn again. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;
-only the owner can change profiles or resume a paused team.
+`delegate resume` lifts that pause, a crash's, or the owner's Stop once the
+owner wrote again, continues the children whose last turn stopped, or only the
+one named, and resumes the workflow runs a pause held
+([delegation](delegation.md#stop-pause-and-resume)). Only the owner changes
+profiles or lifts the pause set in Subagents > Settings.
 [Workflows](workflows.md) run a JSON plan of such children: `workflow help`
 prints the whole format, `workflow run` starts it and opens it in the panel,
 and the results come back as one message when the run ends.
 
-## Owner diagnostics
+## Diagnostics
 
-Outside a thread, an owner can read recent structured diagnostics without
-selecting a conversation:
+`boite logs` reads Boite's own diagnostics: the core, the desktop shell and the
+clients. Lines are oldest first, one record each:
 
-```sh
-boite logs --limit 50 --level error
-boite logs --thread <thread-id> --limit 100 --json
-boite logs --data-dir <data-directory> --level warn
+```text
+2026-10-10 14:03:22.120Z ERROR shell main-thread/shell.main-thread.blocked main thread blocked for 6.2 s, command notify started 6.2 s ago and has not returned {blockedMs=6200, command=notify, commandRunningMs=6200}
+2026-10-10 14:03:25.002Z INFO  core  turns/turn.finished [thr_x claude/claude-opus-5-5 <thr_parent turn=trn_y] (41.3 s) Turn finished: done {status=done, outputTokens=812}
 ```
 
-The CLI reads the owner credential from that core's `core.json`. `--thread`
-filters the history; it is optional. Each text row carries timestamp, level,
-source/event and available thread, turn and request correlation. `--json` keeps
-the record fields. [Trace](trace.md#structured-diagnostics) owns rotation,
-redaction, output exclusions and query bounds. Inside a thread the CLI remains
-an agent and cannot gain this access by changing a data-directory flag.
+```sh
+boite logs --min-level warn --since 2h        # warnings and errors of the last two hours
+boite logs --origin shell --min-level debug   # the desktop window's detail
+boite logs --search memory-guard --since 1d
+boite logs problems --since 24h               # grouped, with the threads they touched
+boite logs export --out report.txt            # the anonymized file a developer reads
+boite issue draft --title "Window froze" --description-file what-happened.md
+boite issue submit --title "Window froze" --description-file what-happened.md
+boite logs help
+```
+
+Filters: `--limit` (default 100), `--min-level` (default `info`), `--since`
+(`30m`, `2h`, `1d` or a date), `--origin core|shell|ui`, `--search`. A value
+that starts with `--` goes after an equals sign: `--search=--verbose`. Owner
+only: `--level` (exact), `--turn` and `--anonymize`, plus the global `--thread`
+to read one conversation. Agent only:
+`--mine`, the thread and the threads it started without the records about no
+thread; by default an agent reads those records plus its own family, never
+another conversation's. `--json` keeps the records.
+
+From a terminal outside a thread, the CLI reads the owner credential from that
+core's `core.json` (`--data-dir` picks another) and prints the stored records,
+credentials already removed. Inside a thread the CLI is that thread's agent:
+it reads the anonymized `diagnostics.*` view, and only while the owner leaves
+agent access on. Changing a data-directory flag does not change that.
+
+`logs export` prints where the core saved the file (`<dataDir>/logs/exports/`)
+and, with `--out`, also writes it relative to the working directory.
+`issue draft` prints the issue body and a prefilled GitHub link without
+sending anything. From the owner's terminal, `issue submit` creates it on
+`beboite/boite` with `gh` when `gh` is signed in, or prints that link and the
+export to attach. Inside a thread, `issue submit` publishes nothing: the
+issue would be public and signed by the owner's GitHub login, so the agent
+gives the user the link and the user submits it, or submits it from
+Settings > Diagnostics. [Trace](trace.md#structured-diagnostics)
+owns the record format, rotation, anonymization and query bounds.
 
 ## Where the command lives
 

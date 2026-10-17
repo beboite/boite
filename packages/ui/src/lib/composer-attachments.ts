@@ -5,6 +5,9 @@ import { IMAGE_SOURCE_MAX_BYTES, isReducible, prepareImage, type ImageCodec } fr
 import { fill, strings } from './strings';
 import type { Store } from './store.svelte';
 
+/** Files dropped on the shell window, wherever they land (`lib/native-drop.ts`). */
+export { receiveDroppedFiles } from './native-drop';
+
 export interface Holder {
   /** What is attached now, read again before each file: a removal made meanwhile counts. */
   held(): Attachment[];

@@ -38,6 +38,8 @@ interface CoreFile {
   token: string;
   pid: number;
   startedAt: number;
+  /** `ProcessPlatform.startKey` of this core, where the OS has one (Linux). */
+  startKey?: string;
   version: string;
 }
 
@@ -148,6 +150,21 @@ function startedAfter(pid: number, lockedAt: number | null, startedAt: (pid: num
   return started !== null && started > lockedAt + LOCK_CLOCK_MARGIN_MS;
 }
 
+/** Is the live process wearing `pid` the core that wrote the lock? */
+function sameRun(
+  pid: number,
+  lockedAt: number | null,
+  lockedKey: string | null,
+  startedAt: (pid: number) => number | null,
+  bootedAt: () => number,
+  startKey: (pid: number) => string | null,
+): boolean {
+  const key = lockedKey === null ? null : startKey(pid);
+  if (key !== null) return key === lockedKey;
+  const beforeBoot = lockedAt !== null && lockedAt < bootedAt() - LOCK_CLOCK_MARGIN_MS;
+  return !beforeBoot && !startedAfter(pid, lockedAt, startedAt);
+}
+
 /**
  * The journal holds every conversation and the push private key. Under the
  * usual umask a Linux home directory would leave it readable by any local
@@ -175,11 +192,15 @@ export function prepareDataDir(dataDir: string): void {
  * holder that started after the lock was written is not the core that wrote it.
  * Nor is any process when the lock predates the last boot: that is the only
  * test macOS can make, since `startedAt` cannot read a start time there.
+ * Where the OS names a run with a key (Linux), the key decides alone: the
+ * Linux start time and boot time both follow every step of the wall clock,
+ * so after an NTP step the live holder would look like a stranger.
  */
 export function lockDataDir(
   dataDir: string,
   startedAt: (pid: number) => number | null = processPlatform.startedAt,
   bootedAt: () => number = () => Date.now() - uptime() * 1000,
+  startKey: (pid: number) => string | null = pid => processPlatform.startKey?.(pid) ?? null,
 ): () => void {
   const file = join(dataDir, 'core.lock');
   const release = (): void => {
@@ -192,22 +213,24 @@ export function lockDataDir(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const handle = openSync(file, 'wx');
-      writeFileSync(handle, `${JSON.stringify({ pid: process.pid, startedAt: Date.now() }, null, 2)}\n`, 'utf8');
+      const key = startKey(process.pid);
+      writeFileSync(handle, `${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }) }, null, 2)}\n`, 'utf8');
       closeSync(handle);
       return release;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       let holder: number | null = null;
       let lockedAt: number | null = null;
+      let lockedKey: string | null = null;
       try {
-        const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number; startedAt: number }>;
+        const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number; startedAt: number; startKey: string }>;
         holder = typeof parsed.pid === 'number' ? parsed.pid : null;
         lockedAt = typeof parsed.startedAt === 'number' ? parsed.startedAt : null;
+        lockedKey = typeof parsed.startKey === 'string' ? parsed.startKey : null;
       } catch {
         holder = null;
       }
-      const beforeBoot = lockedAt !== null && lockedAt < bootedAt() - LOCK_CLOCK_MARGIN_MS;
-      if (holder !== null && holder !== process.pid && !beforeBoot && alive(holder) && !startedAfter(holder, lockedAt, startedAt)) {
+      if (holder !== null && holder !== process.pid && alive(holder) && sameRun(holder, lockedAt, lockedKey, startedAt, bootedAt, startKey)) {
         throw new Error(
           `another core is already running on ${dataDir} (pid ${holder}). Close it, or start this one with --data-dir on a directory of its own.`,
         );
@@ -394,11 +417,13 @@ export function main(argv: string[]): void {
     return;
   }
   withUtf8Locale(process.env, process.platform);
-  if (argv[0] === 'update-apply') {
+  // The update worker, and the recovery its unit runs however the worker ended.
+  if (argv[0] === 'update-apply' || argv[0] === 'update-recover') {
+    const command = argv[0];
     void (async () => {
-      if (!processPlatform.serverUpdates || !argv[1]) throw new Error('update-apply expects a private server update plan on Linux');
-      const { applyServerUpdate } = await import('./server-update/apply.ts');
-      await applyServerUpdate(argv[1], processPlatform.serverUpdates);
+      if (!processPlatform.serverUpdates || !argv[1]) throw new Error(`${command} expects a private server update plan on Linux`);
+      const { applyServerUpdate, recoverServerUpdate } = await import('./server-update/apply.ts');
+      await (command === 'update-apply' ? applyServerUpdate : recoverServerUpdate)(argv[1], processPlatform.serverUpdates);
     })().catch(error => { process.stderr.write(`boite-core update: ${messageOf(error)}\n`); process.exitCode = 1; });
     return;
   }
@@ -424,9 +449,6 @@ export function main(argv: string[]): void {
         process.stderr.write(
           `pairing link for the ${grant.role} role, good for one use until ${new Date(grant.expiresAt).toISOString()}\n`,
         );
-        if (grant.code && grant.codeExpiresAt) {
-          process.stderr.write(`or type the code ${grant.code} in the installed app, until ${new Date(grant.codeExpiresAt).toISOString()}\n`);
-        }
         process.exit(0);
       },
       (error: unknown) => {
@@ -487,7 +509,7 @@ export function main(argv: string[]): void {
       const entry = process.argv[1];
       const bundleHash = entry?.endsWith('.js') && existsSync(entry)
         ? createHash('sha256').update(readFileSync(entry)).digest('hex') : undefined;
-      core = new Core({ dataDir, token, channel: flags.channel, bundleHash, onShutdown: () => shutdown() });
+      core = new Core({ dataDir, token, channel: flags.channel, bundleHash, onShutdown: () => shutdown(), dataDirKind: flags.dataDir || process.env.BOITE_DATA_DIR ? 'custom' : 'default' });
     } catch (error) {
       // A journal from a newer release, among others: say why and leave the data as it is.
       unlock();
@@ -502,10 +524,11 @@ export function main(argv: string[]): void {
       // An address the operator named is the only one this core answers on.
       server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port, preferredPorts: PREFERRED_PORTS[flags.channel], tailnet: !flags.hostExplicit });
     } catch (error) {
+      try { core.logs.error(`The server could not listen on ${host}:${flags.port}: ${messageOf(error)}`, { source: 'startup', event: 'startup.listen-failed', data: { port: flags.port, explicitPort: flags.portExplicit } }); } catch { /* The refusal below still runs. */ }
       const deadline = setTimeout(() => { unlock(); refuseToStart(error); }, SHUTDOWN_TIMEOUT_MS);
       deadline.unref();
       void core.close()
-        .catch(closeError => core.log('error', `startup cleanup failed: ${messageOf(closeError)}`))
+        .catch(closeError => { try { core.log('error', `startup cleanup failed: ${messageOf(closeError)}`); } catch { /* the unlock below still runs */ } })
         .finally(() => {
           clearTimeout(deadline);
           unlock();
@@ -522,12 +545,15 @@ export function main(argv: string[]): void {
       core.log('info', `listening on ${host} because listenOnLan is ${settings.listenOnLan ? 'on' : 'off'}`);
     }
 
+    // The shell tells this core from a later process that got its pid by this key.
+    const startKey = processPlatform.startKey?.(process.pid) ?? null;
     const state: CoreFile = {
       port: server.port,
       host,
       token,
       pid: process.pid,
       startedAt: core.startedAt,
+      ...(startKey === null ? {} : { startKey }),
       version: core.version,
     };
     // The file carries the token that owns this core, so it is the owner's to
@@ -549,24 +575,39 @@ export function main(argv: string[]): void {
       // long. Honour it rather than ignoring it, which used to leave no way out
       // short of killing the process.
       if (stopping) {
-        core.log('warn', 'second shutdown signal, exiting now');
+        try { core.log('warn', 'second shutdown signal, exiting now', { source: 'core', event: 'core.shutdown.forced' }); } catch { /* Forced exit must not depend on logging. */ }
         process.exit(1);
       }
       stopping = true;
+      const shutdownAt = performance.now();
+      const step = (event: string, message: string, since: number): number => {
+        const now = performance.now();
+        try { core.logs.info(`${message} in ${Math.round(now - since)} ms`, { source: 'core', event, durationMs: now - since }); } catch { /* Shutdown goes on without its record. */ }
+        return now;
+      };
+      const running = core.scheduler.state();
+      // A log that throws must not keep the shutdown from arming its deadline.
+      try {
+        core.logs.info(`Shutdown started with ${running.running.length} running and ${running.queued.length} queued turns`, {
+          source: 'core', event: 'core.shutdown.started', data: { running: running.running.length, queued: running.queued.length, exitCode: typeof process.exitCode === 'number' ? process.exitCode : null },
+        });
+      } catch { /* shutdown goes on */ }
+      let stepAt = shutdownAt;
       // A driver that never answers its stop must not hold the process open, and
       // a rejection anywhere in the chain must not skip unlock() and the exit.
       const deadline = setTimeout(() => {
-        core.log('error', `shutdown did not finish in ${SHUTDOWN_TIMEOUT_MS} ms, exiting`);
+        try { core.log('error', `shutdown did not finish in ${SHUTDOWN_TIMEOUT_MS} ms, exiting`, { source: 'core', event: 'core.shutdown.timeout', durationMs: SHUTDOWN_TIMEOUT_MS }); } catch { /* The unlock and exit below still run. */ }
         unlock();
         process.exit(1);
       }, SHUTDOWN_TIMEOUT_MS);
       deadline.unref();
       void core
         .drain()
-        .then(() => server.stop())
-        .then(() => core.close())
+        .then(() => { stepAt = step('core.shutdown.drained', 'Running turns drained', stepAt); return server.stop(); })
+        .then(() => { stepAt = step('core.shutdown.server-stopped', 'Server stopped', stepAt); return core.close(); })
         .catch((error: unknown) => {
-          core.log('error', `shutdown failed: ${messageOf(error)}`);
+          // A throw here would surface as an unhandled rejection after the exit is decided.
+          try { core.log('error', `shutdown failed: ${messageOf(error)}`, { source: 'core', event: 'core.shutdown.failed', durationMs: performance.now() - shutdownAt }); } catch { /* the exit below still runs */ }
         })
         .finally(() => {
           clearTimeout(deadline);
@@ -574,7 +615,10 @@ export function main(argv: string[]): void {
           process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0);
         });
     };
-    process.on('SIGINT', shutdown);
+    const signalled = (signal: string, next: string): void => {
+      try { core.logs.info(`Received ${signal}: ${next}`, { source: 'core', event: 'core.signal', data: { signal } }); } catch { /* Logging must not block shutdown. */ }
+    };
+    process.on('SIGINT', () => { signalled('SIGINT', stopping ? 'exiting now' : 'shutting down'); shutdown(); });
     // What a service manager sends for a restart, an update or a reboot. The
     // first one hands the running turns to the next core: each ends its tool
     // call, 30 seconds at most, and resumes after the restart. A second one
@@ -582,6 +626,7 @@ export function main(argv: string[]): void {
     let terms = 0;
     process.on('SIGTERM', () => {
       terms += 1;
+      signalled('SIGTERM', stopping || terms > 2 ? 'shutting down now' : terms === 1 ? 'handing running turns to the next core' : 'stopping running turns');
       if (stopping || terms > 2) shutdown();
       else if (terms === 1) core.requestHandoffShutdown();
       else core.requestShutdown();
@@ -590,7 +635,8 @@ export function main(argv: string[]): void {
     // line, stops the turns and releases the lock on the way out; the process
     // never carries on after an error nobody expected.
     const fatal = (kind: string) => (error: unknown): void => {
-      core.log('error', `${kind}: ${messageOf(error)}`);
+      // A throw here would skip the shutdown and come back to this handler.
+      try { core.log('error', `${kind}: ${messageOf(error)}`, { source: 'core', event: 'core.fatal', data: { kind, ...(error instanceof Error ? { name: error.name, stack: (error.stack ?? '').split('\n').slice(1, 4).map(line => line.trim()).join(' | ') } : {}) } }); } catch { /* Stderr and shutdown below still run. */ }
       process.stderr.write(`boite-core ${kind}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
       process.exitCode = 1;
       shutdown();
@@ -604,6 +650,7 @@ export function main(argv: string[]): void {
     // can arrive twice (from the kernel and from `bun run` passing it on) and is
     // never the operator asking to hurry, so a repeat does not cut the shutdown short.
     process.on('SIGHUP', () => {
+      if (!stopping) signalled('SIGHUP', 'the terminal closed, shutting down');
       if (!stopping) shutdown();
     });
   }, refuseToStart);

@@ -1,9 +1,12 @@
 import type { Project, ProjectId } from '@boite/contracts';
+import { wasDropped } from '../client';
 import { strings } from '../strings';
 import { work } from '../work-prefs.svelte';
 import type { Draft } from '../store.svelte';
 import type { StoreContext } from './context';
 import { retainRows } from './snapshot-reads';
+import { created, draftKey } from './drafts.svelte';
+import { secureId } from '../secure-id';
 
 /** The projects in the sidebar, the draft a new thread starts as, and where the app lands. */
 export class Projects {
@@ -215,18 +218,27 @@ export class Projects {
   /**
    * Puts a project away or brings it back. Put away, the screen leaves it:
    * the thread or draft that was open in it gives way to where the app lands.
+   * A machine that is not connected still shows the projects it last sent:
+   * the choice is kept on this device and sent when the machine is back.
    */
   async archiveProject(projectId: ProjectId, archived: boolean): Promise<boolean> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return false;
-    try {
-      const project = await client.call('projects.archive', { projectId, archived });
-      if (!this.ctx.currentClient(client, clientGeneration)) return false;
-      this.upsertProject(project);
-    } catch (error) {
-      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
-      return false;
+    if (client.state !== 'ready') {
+      const project = this.projects.find((p) => p.id === projectId);
+      if (!project) return false;
+      this.#writePending({ ...this.#readPending(), [projectId]: archived });
+      this.upsertProject(withArchived(project, archived));
+    } else {
+      try {
+        const project = await client.call('projects.archive', { projectId, archived });
+        if (!this.ctx.currentClient(client, clientGeneration)) return false;
+        this.upsertProject(project);
+      } catch (error) {
+        if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+        return false;
+      }
     }
     const s = this.ctx.store;
     if (archived && (s.openThread?.projectId === projectId || this.draft?.projectId === projectId)) {
@@ -238,6 +250,79 @@ export class Projects {
       await s.openWhereLeft();
     }
     return true;
+  }
+
+  /** Per core, like the last project: archive choices made while it was away. */
+  #pendingKey(): string { return 'boite.pendingArchive.v1:' + JSON.stringify([this.ctx.store.endpointUrl, this.ctx.store.core?.dataDir]); }
+  #readPending(): Record<string, boolean> {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(this.#pendingKey()) ?? '{}');
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
+      return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'));
+    } catch {
+      return {};
+    }
+  }
+  #writePending(pending: Record<string, boolean>): void {
+    try {
+      if (Object.keys(pending).length === 0) localStorage.removeItem(this.#pendingKey());
+      else localStorage.setItem(this.#pendingKey(), JSON.stringify(pending));
+    } catch { /* storage unavailable: the choice lasts until this client reloads */ }
+  }
+
+  /**
+   * A list the machine sent on reconnect, with the archive choices made while
+   * it was away laid over it, so the sidebar does not show them undone while
+   * they are sent.
+   */
+  withPendingArchives(projects: Project[]): Project[] {
+    const pending = this.#readPending();
+    if (Object.keys(pending).length === 0) return projects;
+    return projects.map((project) => {
+      const archived = pending[project.id];
+      return archived === undefined ? project : withArchived(project, archived);
+    });
+  }
+
+  /**
+   * Sends the archive choices made while the machine was away. A project the
+   * machine no longer lists drops its choice; a call the connection lost keeps
+   * it for the next reconnect.
+   */
+  sendPendingArchives(listed: Project[]): Promise<void> {
+    // Two loads close together would send the same choice twice.
+    this.#sending = this.#sending.then(() => this.#sendPending(listed));
+    return this.#sending;
+  }
+  #sending: Promise<void> = Promise.resolve();
+
+  async #sendPending(listed: Project[]): Promise<void> {
+    const client = this.ctx.client;
+    const generation = this.ctx.clientGeneration;
+    const pending = this.#readPending();
+    if (!client || Object.keys(pending).length === 0) return;
+    const byId = new Map(listed.map((p) => [p.id, p]));
+    for (const [projectId, archived] of Object.entries(pending)) {
+      if (!this.ctx.currentClient(client, generation) || client.state !== 'ready') return;
+      const listedProject = byId.get(projectId);
+      if (listedProject) {
+        try {
+          const project = await client.call('projects.archive', { projectId, archived });
+          if (this.ctx.currentClient(client, generation)) this.upsertProject(project);
+        } catch (error) {
+          // Lost with the connection: the next reconnect sends it again.
+          if (wasDropped(error) || client.state !== 'ready' || !this.ctx.currentClient(client, generation)) return;
+          // Refused: the machine's own state stands.
+          this.ctx.fail(error);
+          this.upsertProject(listedProject);
+        }
+      }
+      const rest = this.#readPending();
+      if (rest[projectId] === archived) {
+        delete rest[projectId];
+        this.#writePending(rest);
+      }
+    }
   }
 
   /**
@@ -304,26 +389,43 @@ export class Projects {
     }
   }
 
-  #archivePolicyWrites = $state<string[]>([]);
+  /** Project policy writes under way, by policy, client generation and project. */
+  #policyWrites = $state<string[]>([]);
 
   projectAutoArchiveMergedPrBusy(projectId: ProjectId): boolean {
-    return this.#archivePolicyWrites.includes(JSON.stringify([this.ctx.clientGeneration, projectId]));
+    return this.#policyWrites.includes(JSON.stringify(['merged', this.ctx.clientGeneration, projectId]));
   }
 
-  async setProjectAutoArchiveMergedPr(projectId: ProjectId, enabled: boolean): Promise<void> {
+  projectAutoRemoveWorktreesBusy(projectId: ProjectId): boolean {
+    return this.#policyWrites.includes(JSON.stringify(['worktrees', this.ctx.clientGeneration, projectId]));
+  }
+
+  setProjectAutoArchiveMergedPr(projectId: ProjectId, enabled: boolean): Promise<void> {
+    return this.#setPolicy('merged', projectId, (project) => project.autoArchiveMergedPr !== undefined,
+      (client) => client.call('projects.setAutoArchiveMergedPr', { projectId, enabled }));
+  }
+
+  /** Settled worktrees removed on their own; absent on a core that cannot. */
+  setProjectAutoRemoveWorktrees(projectId: ProjectId, enabled: boolean): Promise<void> {
+    return this.#setPolicy('worktrees', projectId, (project) => project.autoRemoveWorktrees !== undefined,
+      (client) => client.call('projects.setAutoRemoveWorktrees', { projectId, enabled }));
+  }
+
+  async #setPolicy(policy: string, projectId: ProjectId, known: (project: Project) => boolean, write: (client: NonNullable<StoreContext['client']>) => Promise<Project>): Promise<void> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
-    if (!client || !this.ctx.store.owner || this.ctx.store.connection !== 'ready' || this.projects.find(project => project.id === projectId)?.autoArchiveMergedPr === undefined) return;
-    const key = JSON.stringify([clientGeneration, projectId]);
-    if (this.#archivePolicyWrites.includes(key)) return;
-    this.#archivePolicyWrites = [...this.#archivePolicyWrites, key];
+    const current = this.projects.find(project => project.id === projectId);
+    if (!client || !this.ctx.store.owner || this.ctx.store.connection !== 'ready' || !current || !known(current)) return;
+    const key = JSON.stringify([policy, clientGeneration, projectId]);
+    if (this.#policyWrites.includes(key)) return;
+    this.#policyWrites = [...this.#policyWrites, key];
     try {
-      const project = await client.call('projects.setAutoArchiveMergedPr', { projectId, enabled });
+      const project = await write(client);
       if (this.ctx.currentClient(client, clientGeneration)) this.upsertProject(project);
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     } finally {
-      this.#archivePolicyWrites = this.#archivePolicyWrites.filter(pending => pending !== key);
+      this.#policyWrites = this.#policyWrites.filter(pending => pending !== key);
     }
   }
 
@@ -344,7 +446,7 @@ export class Projects {
   async dropProject(projectId: ProjectId): Promise<void> {
     this.ctx.projectReads.change(projectId, null);
     const s = this.ctx.store;
-    this.ctx.drafts.forget(projectId);
+    this.ctx.drafts.forgetProject(projectId);
     for (const thread of s.threads.filter(t => t.projectId === projectId)) delete s.composerStates[thread.id];
     this.projects = this.projects.filter((p) => p.id !== projectId);
     s.threads = s.threads.filter((t) => t.projectId !== projectId);
@@ -361,15 +463,24 @@ export class Projects {
   // The draft
   // -------------------------------------------------------------------------
 
-  /** An empty chat in a project, composer focused. Nothing reaches the core until the first send. */
-  startDraft(projectId?: ProjectId | null, options: { refresh?: boolean } = {}): void {
+  /**
+   * A chat in a project, composer focused. Nothing reaches the core until the
+   * first send. `draftId` reopens that saved draft, in its own project;
+   * `fresh` opens an empty one beside the project's other drafts; neither
+   * resumes the project's most recently parked draft.
+   */
+  startDraft(projectId?: ProjectId | null, options: { refresh?: boolean; fresh?: boolean; draftId?: string } = {}): void {
     const s = this.ctx.store;
     const { threads, workbench } = this.ctx;
     // Named, a project; null, the drafts; unnamed, the project on screen, in
     // either preset, so work spread over several folders stays in its folder.
     // With nothing on screen, where this device opens: the drafts or the last project.
     const drafts = s.draftsProject?.id ?? null;
-    const target = projectId === null ? drafts
+    const owner = options.draftId === undefined ? undefined : this.ctx.drafts.projectOf(options.draftId);
+    const draftId = owner === undefined ? undefined : options.draftId;
+    // A draft gone since its row was drawn (deleted, sent) opens an empty one, never another parked draft.
+    const fresh = options.fresh === true || (options.draftId !== undefined && owner === undefined);
+    const target = owner !== undefined ? owner : projectId === null ? drafts
       : projectId ?? s.openProject?.id ?? (work.current.startIn === 'drafts' ? drafts : s.lastProject());
     threads.rememberReadingThread();
     void threads.unsubscribe();
@@ -378,7 +489,7 @@ export class Projects {
     s.trace = [];
     workbench.tracedThreadId = null;
     this.ctx.requests.keepRequestsOf(null);
-    this.ctx.drafts.resume(target);
+    this.ctx.drafts.resume(target, { fresh, ...(draftId === undefined ? {} : { draftId }) });
     this.ctx.drafts.persist();
     if (target !== null) this.collapsedProjects = this.collapsedProjects.filter(id => id !== target);
     if (target !== null) this.rememberProject(target);
@@ -397,13 +508,14 @@ export class Projects {
     const target = projectId ?? this.ctx.store.draftsProject?.id ?? null;
     if (!draft || draft.projectId === target) return;
     if (target !== null && !this.projects.some((p) => p.id === target)) return;
-    if (this.ctx.drafts.has(target)) { this.ctx.store.error = strings.errors.draftExists; return; }
     const project = target === null ? null : this.projects.find((p) => p.id === target);
     // The drafts folder is no repository: the worktree switch does not follow the draft there.
     const drafts = target === null || project?.kind === 'drafts';
-    this.ctx.drafts.forget(draft.projectId);
+    // Its saved copy, if any, still names the old project: the open draft replaces it.
+    this.ctx.drafts.forget(draftKey(draft));
     const { incognito, ...kept } = draft;
-    this.draft = { ...kept, ...(incognito && drafts ? { incognito } : {}), projectId: target, worktree: drafts || project?.repository !== true ? false : draft.worktreeExplicit ? draft.worktree : project?.worktreeDefault === true };
+    // A draft keeps its id; one opened before ids existed gets one and a creation time, so its old project key stays that project's.
+    this.draft = { ...kept, ...(draft.id ? {} : { id: secureId(), createdAt: created() }), ...(incognito && drafts ? { incognito } : {}), projectId: target, worktree: drafts || project?.repository !== true ? false : draft.worktreeExplicit ? draft.worktree : project?.worktreeDefault === true };
     if (target === null) return;
     this.rememberProject(target);
     this.collapsedProjects = this.collapsedProjects.filter((id) => id !== target);
@@ -423,4 +535,10 @@ export class Projects {
     if (!draft) return;
     this.draft = { ...draft, worktree, worktreeExplicit: true };
   }
+}
+
+function withArchived(project: Project, archived: boolean): Project {
+  if (archived) return { ...project, archived: true };
+  const { archived: _, ...rest } = project;
+  return rest;
 }

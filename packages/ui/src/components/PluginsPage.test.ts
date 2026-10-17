@@ -30,7 +30,7 @@ async function open(edit?: (rows: PluginState[]) => void): Promise<void> {
   }
   const store = { client, providers: [] } as unknown as Store;
   mounted = mount(PluginsPage, { target: document.body, props: { store } });
-  await vi.waitFor(() => expect(row('kebacc-switcher')).not.toBeNull());
+  await vi.waitFor(() => expect(row('bots')).not.toBeNull());
 }
 
 function type(selector: string, value: string): void {
@@ -43,11 +43,12 @@ function type(selector: string, value: string): void {
 test('each section holds its plugins, every state drawn with what the owner can do next', async () => {
   await open();
   const installed = q('[data-testid="plugins-installed"]')!;
-  const recommended = q('[data-testid="plugins-recommended"]')!;
-  expect([...installed.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['bots', 'grok-seats', 'pool-legacy', 'seat-pool']);
-  expect([...recommended.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['kebacc-switcher']);
-
-  expect(row('kebacc-switcher')?.querySelector('[data-testid="plugin-install"]')).not.toBeNull();
+  expect([...installed.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['bots', 'douane', 'grok-seats', 'pool-legacy', 'seat-pool']);
+  // Every recommended plugin is installed: the section has nothing to say and is not drawn.
+  expect(q('[data-testid="plugins-recommended"]')).toBeNull();
+  // A recommended plugin links its source from its name; a URL one shows the repository and commit instead.
+  expect(row('bots')?.querySelector('[data-testid="plugin-home"]')?.getAttribute('href')).toBe('https://github.com/beboite/bots');
+  expect(row('seat-pool')?.querySelector('[data-testid="plugin-home"]')).toBeNull();
   expect(row('grok-seats')?.querySelector('[data-testid="plugin-progress"]')?.getAttribute('aria-valuenow')).toBe('45');
   expect(row('grok-seats')?.querySelector('[data-testid="plugin-cancel"]')).not.toBeNull();
   expect(row('seat-pool')?.textContent).toContain('github.com/example/seat-pool');
@@ -77,7 +78,8 @@ test('a running desktop app can be stopped, then started again, its state follow
 
   appButton('bots', 'stop')!.click();
   await vi.waitFor(() => expect(app('bots')?.getAttribute('data-app-status')).toBe('stopped'));
-  expect(app('bots')?.textContent).toContain('Stopped · starts again only when you start it');
+  // It still starts with Boite, so the line says no more than stopped.
+  expect(app('bots')?.textContent).not.toContain('starts again only when you start it');
   expect(appButton('bots', 'stop')).toBeNull();
 
   appButton('bots', 'start')!.click();
@@ -85,6 +87,33 @@ test('a running desktop app can be stopped, then started again, its state follow
   appButton('bots', 'restart')!.click();
   await vi.waitFor(() => expect(appButton('bots', 'restart')?.disabled).toBe(false));
   expect(app('bots')?.getAttribute('data-app-status')).toBe('running');
+});
+
+const autostart = (id: string) => row(id)?.querySelector<HTMLInputElement>('[data-testid="plugin-autostart"]') ?? null;
+
+test('Start with Boite switches the app and the gateway apart from what runs now, and an older core shows no switch', async () => {
+  await open();
+  expect(autostart('bots')?.checked).toBe(true);
+  expect(autostart('bots')?.closest('label')?.textContent).toContain('Start with Boite');
+  autostart('bots')!.click();
+  await vi.waitFor(() => expect(autostart('bots')?.checked).toBe(false));
+  // The row stays where it was under the pointer.
+  expect([...document.querySelectorAll('[data-testid="plugins-installed"] [data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin')).slice(0, 2)).toEqual(['bots', 'douane']);
+  // What runs now is left alone.
+  expect(app('bots')?.getAttribute('data-app-status')).toBe('running');
+  appButton('bots', 'stop')!.click();
+  await vi.waitFor(() => expect(app('bots')?.textContent).toContain('Stopped · starts again only when you start it'));
+
+  // Douane has the same switch on its gateway.
+  expect(autostart('douane')?.checked).toBe(true);
+  autostart('douane')!.click();
+  await vi.waitFor(() => expect(autostart('douane')?.checked).toBe(false));
+  expect(row('douane')?.querySelector('[data-testid="plugin-gateway"]')?.getAttribute('data-gateway-status')).toBe('running');
+
+  unmount(mounted!); mounted = undefined; client?.close(); document.body.innerHTML = '';
+  await open((rows) => { for (const plugin of rows) { if (plugin.app) delete plugin.app.autostart; if (plugin.gateway) delete plugin.gateway.autostart; } });
+  expect(autostart('bots')).toBeNull();
+  expect(autostart('douane')).toBeNull();
 });
 
 test('a crashed desktop app shows its exit code and why, and one with no desktop cannot start', async () => {
@@ -159,7 +188,7 @@ test('a refused manifest shows the file, the field and what was expected, with n
   expect(q('[data-testid="plugin-preview"]')).toBeNull();
 });
 
-test('uninstalling a URL plugin takes its row away; the recommended one goes back to Recommended', async () => {
+test('uninstalling a URL plugin takes its row away; the recommended one goes back to Recommended and installs again', async () => {
   await open();
   const { confirm } = await import('../lib/confirm.svelte');
   const ask = vi.spyOn(confirm, 'ask').mockResolvedValue(true);
@@ -169,13 +198,74 @@ test('uninstalling a URL plugin takes its row away; the recommended one goes bac
     (row('grok-seats')!.querySelector('[data-testid="plugin-cancel"]') as HTMLElement).click();
     await vi.waitFor(() => expect(row('grok-seats')).toBeNull());
 
-    (row('kebacc-switcher')!.querySelector('[data-testid="plugin-install"]') as HTMLElement).click();
-    await vi.waitFor(() => expect(q('[data-testid="plugins-installed"]')?.contains(row('kebacc-switcher'))).toBe(true), { timeout: 3000 });
-    await vi.waitFor(() => expect(row('kebacc-switcher')?.querySelectorAll('[data-testid="plugin-pool"]').length).toBe(3));
-    (row('kebacc-switcher')!.querySelector('[data-testid="plugin-uninstall"]') as HTMLElement).click();
-    await vi.waitFor(() => expect(q('[data-testid="plugins-recommended"]')?.contains(row('kebacc-switcher'))).toBe(true));
+    (row('bots')!.querySelector('[data-testid="plugin-uninstall"]') as HTMLElement).click();
+    await vi.waitFor(() => expect(q('[data-testid="plugins-recommended"]')?.contains(row('bots'))).toBe(true));
+    // Not installed: the Install button is all it needs, no state line, no update check.
+    expect(row('bots')?.querySelector('.state')).toBeNull();
+    expect(row('bots')?.querySelector('[data-testid="plugin-updates"]')).toBeNull();
+    expect(row('bots')?.querySelector('[data-testid="plugin-check-updates"]')).toBeNull();
+
+    (row('bots')!.querySelector('[data-testid="plugin-install"]') as HTMLElement).click();
+    await vi.waitFor(() => expect(q('[data-testid="plugins-installed"]')?.contains(row('bots'))).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(app('bots')?.getAttribute('data-app-status')).toBe('running'));
+    expect(q('[data-testid="plugins-recommended"]')).toBeNull();
     expect(ask).toHaveBeenCalledTimes(2);
   } finally {
     ask.mockRestore();
   }
+});
+
+test('a recommended plugin with an update source says what it last found, and a check offers the newer release', async () => {
+  await open((rows) => {
+    const bots = rows.find((plugin) => plugin.id === 'bots')!;
+    bots.updates = { ...bots.updates!, checkedAt: Date.now() - 3 * 3_600_000 };
+  });
+  const bots = () => row('bots')!;
+  const line = () => bots().querySelector('[data-testid="plugin-updates-line"]')?.textContent ?? '';
+  expect(line()).toBe('Up to date · checked 3 hr. ago');
+  expect(bots().querySelector('[data-testid="plugin-update"]')).toBeNull();
+
+  (bots().querySelector('[data-testid="plugin-check-updates"]') as HTMLElement).click();
+  await vi.waitFor(() => expect(bots().querySelector('[data-testid="plugin-update"]')?.textContent).toBe('Update to v0.1.10'));
+  expect(line()).toBe('Found at github.com/beboite/bots, main at 6b2e4d8 · checked now');
+  expect(bots().textContent).toContain('Installed · v0.1.10 available');
+
+  (bots().querySelector('[data-testid="plugin-update"]') as HTMLElement).click();
+  await vi.waitFor(() => expect(bots().getAttribute('data-status')).toBe('installed'), { timeout: 3000 });
+  await vi.waitFor(() => expect(bots().querySelector('h3')?.textContent).toContain('v0.1.10'), { timeout: 3000 });
+  expect(bots().querySelector('[data-testid="plugin-update"]')).toBeNull();
+});
+
+test('an ignored release and a failed check read as quiet notes, never alarms', async () => {
+  await open((rows) => {
+    const bots = rows.find((plugin) => plugin.id === 'bots')!;
+    bots.updates = { ...bots.updates!, ignored: '0.1.8 found there, older than 0.1.9; Boite never goes back.' };
+  });
+  const updates = row('bots')!.querySelector('[data-testid="plugin-updates"]')!;
+  expect(updates.textContent).toContain('Not offered: 0.1.8 found there, older than 0.1.9; Boite never goes back.');
+  expect(updates.querySelector('[role="alert"], .bad')).toBeNull();
+});
+test('Douane\'s row shows its gateway on loopback, stops and starts it, and its uninstall says the sign-ins stay', async () => {
+  await open();
+  const strip = () => q('[data-testid="plugin-gateway"][data-plugin="douane"]');
+  await vi.waitFor(() => expect(strip()?.dataset.gatewayStatus).toBe('running'));
+  expect(q('[data-testid="plugin-gateway-state"]')?.textContent).toContain('0.3.0 on 127.0.0.1:8787');
+  // The page runs at a loopback address, beside its core: the dashboard opens from here.
+  expect(q('[data-testid="plugin-gateway-open"]')?.textContent).toContain('Open Douane');
+
+  q('[data-testid="plugin-gateway-stop"]')!.click();
+  await vi.waitFor(() => expect(strip()?.dataset.gatewayStatus).toBe('stopped'));
+  // It starts with Boite, so a stop holds only until then and the line says stopped.
+  expect(q('[data-testid="plugin-gateway-state"]')?.textContent).toContain('Stopped');
+  expect(q('[data-testid="plugin-gateway-state"]')?.textContent).not.toContain('starts again only when you start it');
+  q('[data-testid="plugin-gateway-start"]')!.click();
+  await vi.waitFor(() => expect(strip()?.dataset.gatewayStatus).toBe('running'));
+
+  const { confirm } = await import('../lib/confirm.svelte');
+  const ask = vi.spyOn(confirm, 'ask').mockResolvedValue(false);
+  q('[data-testid="plugin-uninstall"][data-plugin="douane"]')!.click();
+  await vi.waitFor(() => expect(ask).toHaveBeenCalled());
+  expect(ask.mock.calls[0]![0].body).toMatch(/sign-ins, settings and database stay in .*douane/);
+  expect(strip()).not.toBeNull();
+  ask.mockRestore();
 });

@@ -17,6 +17,7 @@
  * `thread/start` and `thread/resume`, and `CODEX_FAKE_DEAF=1` answers `turn/interrupt` without
  * ending the turn.
  * `CODEX_FAKE_NO_LIVE_SETTINGS=1` is a server with no `turn/settings/update`.
+ * `CODEX_FAKE_SLOW_MODELS=<ms>` delays the answer to `model/list`.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
@@ -25,12 +26,12 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
+const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block|limits|flood)\]/g;
 const CHUNKS = 3;
 
 type Directive =
   | 'command' | 'command-failed' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
-  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents';
+  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents' | 'limits' | 'flood';
 
 let threadCounter = 0;
 let turnCounter = 0;
@@ -41,6 +42,13 @@ let planEnabled = false;
 let experimentalApi = false;
 /** The thread was opened `ephemeral`, the way the core asks for a title. */
 let ephemeral = false;
+/** `CODEX_FAKE_ARCHIVED=1`: every thread is archived outside Boite until this process unarchives it. */
+const unarchived = new Set<string>();
+
+/** The config overrides of a thread open, on a line of its own so the counts of the open lines stay. */
+function logConfig(method: string, params: Record<string, unknown>): void {
+  log(`config:${method} ${JSON.stringify(params['config'] ?? null)}`);
+}
 /**
  * The turns an interrupt already arrived for, and what is waiting on one. A
  * real server knows a turn from the moment it answers `turn/start`, so an
@@ -48,6 +56,9 @@ let ephemeral = false;
  * rather than dropped: the driver sends one the instant it learns the turn id.
  */
 const interrupted = new Set<string>();
+/** Resolved by the next `account/rateLimits/read`, so a rolling update can follow it. */
+let rateLimitsRead: (() => void) | null = null;
+
 const waiting = new Map<string, () => void>();
 
 function awaitInterrupt(turnId: string): Promise<void> {
@@ -230,6 +241,22 @@ async function runTurn(turnId: string, text: string): Promise<void> {
   if (text.includes('[retry-progress]')) {
     notify('error', { threadId, turnId: 'previous-native-turn', error: { message: 'stale retry' }, willRetry: true });
     notify('error', { threadId, turnId, error: { message: 'provider overloaded' }, willRetry: true });
+  }
+  // The first `[at-capacity]` turn of a test is refused the way GPT models are when overloaded; the next one passes.
+  const refusedBefore = existsSync(process.env['CODEX_FAKE_LOG'] ?? '') && readFileSync(process.env['CODEX_FAKE_LOG']!, 'utf8').includes('at-capacity refused');
+  if (text.includes('[at-capacity]') && !refusedBefore) {
+    log('at-capacity refused');
+    const error = { message: 'Selected model is at capacity. Please try a different model.', codexErrorInfo: 'serverOverloaded', additionalDetails: null };
+    notify('error', { threadId, turnId, error, willRetry: false });
+    notify('turn/completed', { threadId, turn: { ...(turnRecord(turnId, 'failed') as object), error } });
+    return;
+  }
+  // A spent five-hour window, reported the way the app-server does before the turn fails on it.
+  if (text.includes('[usage-limited]')) {
+    notify('account/rateLimits/updated', { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: 4_102_444_800 }, secondary: { usedPercent: 40, windowDurationMins: 10080, resetsAt: 4_102_444_000 } } });
+    const error = { message: 'You\'ve hit your usage limit. Try again at 3:45 PM.', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null };
+    notify('turn/completed', { threadId, turn: { ...(turnRecord(turnId, 'failed') as object), error } });
+    return;
   }
   if (planEnabled && text.includes('[tasks]')) notify('turn/plan/updated', { threadId, turnId, plan: [{ step: 'Inspect source', status: 'completed' }, { step: 'Run checks', status: 'inProgress' }] });
   const directives = directivesOf(text);
@@ -421,9 +448,35 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         notify('item/started', { item: commandItem(itemId, 'inProgress', null), threadId, turnId, startedAtMs: Date.now() });
         notify('item/commandExecution/outputDelta', { threadId, turnId, itemId, delta: 'line one\n' });
         notify('item/started', { item: { type: 'sleep', id: 'sleep-1', durationMs: 50 }, threadId, turnId, startedAtMs: Date.now() });
-        await Bun.sleep(600);
+        // Longer than one redraw beat, so the running card is drawn once.
+        await Bun.sleep(1_200);
         notify('item/completed', { item: { type: 'sleep', id: 'sleep-1', durationMs: 50 }, threadId, turnId, completedAtMs: Date.now() });
         notify('item/completed', { item: commandItem(itemId, 'completed', 'line one\nline two\n'), threadId, turnId, completedAtMs: Date.now() });
+        break;
+      }
+      case 'limits': {
+        // Sparse rolling updates: only the weekly window, and no reset credits.
+        const update = (usedPercent: number) => notify('account/rateLimits/updated', { rateLimits: {
+          limitId: 'codex', limitName: null, primary: null, secondary: { usedPercent, windowDurationMins: 10080, resetsAt: 1_900_000_000 },
+          credits: null, planType: null, rateLimitReachedType: null, individualLimit: null, spendControlReached: null, normalModelSlug: null } });
+        const read = new Promise<void>((resolve) => { rateLimitsRead = resolve; });
+        update(30);
+        await read;
+        await Bun.sleep(50);
+        update(35);
+        await Bun.sleep(50);
+        break;
+      }
+      case 'flood': {
+        // A chatty command: 200 deltas of 100 characters, faster than one redraw beat.
+        itemCounter += 1;
+        const itemId = `item-${itemCounter}`;
+        notify('item/started', { item: commandItem(itemId, 'inProgress', null), threadId, turnId, startedAtMs: Date.now() });
+        for (let index = 0; index < 200; index++) {
+          notify('item/commandExecution/outputDelta', { threadId, turnId, itemId, delta: `${String(index).padStart(4, '0')}${'x'.repeat(95)}\n` });
+        }
+        await Bun.sleep(1_300);
+        notify('item/completed', { item: commandItem(itemId, 'completed', 'flood done'), threadId, turnId, completedAtMs: Date.now() });
         break;
       }
       case 'late-context':
@@ -519,6 +572,8 @@ function handle(method: string, raw: unknown): unknown {
       };
     case 'account/rateLimits/read':
       log(`account/rateLimits/read ${JSON.stringify(params)}`);
+      rateLimitsRead?.();
+      rateLimitsRead = null;
       return { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300 },
         credits: { hasCredits: true, unlimited: false, balance: '42.5' } },
         rateLimitResetCredits: process.env['CODEX_FAKE_RESET_CREDITS']
@@ -553,11 +608,29 @@ function handle(method: string, raw: unknown): unknown {
         notify('account/login/completed', { loginId: 'fake-login', success: true, error: null });
       }, 200);
       return { type: 'chatgptDeviceCode', loginId: 'fake-login', verificationUrl: 'https://example.invalid/device', userCode: 'TEST-CODE' };
-    case 'model/list':
+    case 'model/list': {
       log('model/list');
       // One page, and a null cursor: the driver stops asking on that.
-      return { data: MODELS, nextCursor: null };
+      const slow = Number(process.env['CODEX_FAKE_SLOW_MODELS'] ?? '0');
+      const page = { data: MODELS, nextCursor: null };
+      return slow > 0 ? new Promise((resolve) => setTimeout(() => resolve(page), slow)) : page;
+    }
+    case 'config/read': {
+      log(`config/read cwd=${textOf(params['cwd'])} noPlugins=${process.argv.includes('features.plugins=false') && process.argv.includes('features.apps=false')}`);
+      if (process.env['CODEX_FAKE_CONFIG_READ_ERROR'] === '1') throw new Error('unknown method config/read');
+      // `CODEX_FAKE_CONFIG_READ_HANG=1`: a Codex that never answers it.
+      if (process.env['CODEX_FAKE_CONFIG_READ_HANG'] === '1') return new Promise(() => undefined);
+      // `CODEX_FAKE_MCP=<json>`: the `mcp_servers` table of the effective config.
+      // `CODEX_FAKE_GRACE=<ms>`: the user's own `mcp_optional_startup_grace_ms`; Codex answers null when unset.
+      const grace = process.env['CODEX_FAKE_GRACE'];
+      return { config: { mcp_servers: JSON.parse(process.env['CODEX_FAKE_MCP'] ?? '{}'), mcp_optional_startup_grace_ms: grace === undefined ? null : Number(grace) }, origins: {}, layers: null };
+    }
+    case 'thread/unarchive':
+      log(`thread/unarchive ${textOf(params['threadId'])}`);
+      unarchived.add(textOf(params['threadId']));
+      return { thread: threadRecord() };
     case 'thread/start': {
+      logConfig(method, params);
       planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
       threadCounter += 1;
       threadId = `codex-fake-${crypto.randomUUID().slice(0, 8)}-${threadCounter}`;
@@ -578,6 +651,7 @@ function handle(method: string, raw: unknown): unknown {
       return { data: [{ id: process.env['CODEX_FAKE_FORK_IGNORE_CUT'] === '1' ? 'later-native-turn' : forkBoundary }], nextCursor: null };
     }
     case 'thread/fork': {
+      logConfig(method, params);
       log(`thread/fork threadId=${textOf(params['threadId'])} lastTurnId=${textOf(params['lastTurnId'])} cwd=${textOf(params['cwd'])} model=${textOf(params['model'])} approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} excludeTurns=${params['excludeTurns'] === true} planEnabled=${(params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true} accountHome=${process.env['CODEX_HOME'] ?? ''}`);
       if (process.env['CODEX_FAKE_FORK_ERROR'] === '1') throw new Error('native fork refused');
       forkBoundary = textOf(params['lastTurnId']);
@@ -590,6 +664,7 @@ function handle(method: string, raw: unknown): unknown {
       if (process.env['CODEX_FAKE_FORK_ARCHIVE_ERROR'] === '1') throw new Error('archive refused');
       return {};
     case 'thread/resume': {
+      logConfig(method, params);
       planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
       ephemeral = false;
       threadId = textOf(params['threadId']);
@@ -599,6 +674,10 @@ function handle(method: string, raw: unknown): unknown {
       const answer = (): unknown => {
         // `CODEX_FAKE_LOST=1`: the rollout of every thread is gone, in the real server's words.
         if (process.env['CODEX_FAKE_LOST'] === '1') throw new Error(`no rollout found for thread id ${threadId}`);
+        // The real server's refusal of a thread archived in the Codex app or CLI.
+        if (process.env['CODEX_FAKE_ARCHIVED'] === '1' && !unarchived.has(threadId)) {
+          throw new Error(`session ${threadId} is archived. Run \`codex unarchive ${threadId}\` to unarchive it.`);
+        }
         return { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
       };
       const slow = Number(process.env['CODEX_FAKE_SLOW_START'] ?? '0');

@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { crc32, deflateSync } from 'node:zlib';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { MessagePart } from '@boite/contracts';
 import { waitFor } from './harness.ts';
 import {
+  answerEach,
   assistant,
   calls,
   claudeThread,
@@ -19,6 +21,31 @@ import {
 } from './fixtures/claude-query.ts';
 
 useClaudeHarness();
+
+/** A grey 8-bit PNG of the given size, written by hand so the test needs no encoder. */
+function greyPng(width: number, height: number): string {
+  const chunk = (type: string, body: Buffer): Buffer => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(body.length);
+    const typed = Buffer.concat([Buffer.from(type, 'ascii'), body]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(typed) >>> 0);
+    return Buffer.concat([length, typed, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 0; // greyscale
+  const rows = Buffer.alloc((width + 1) * height, 128);
+  for (let row = 0; row < height; row += 1) rows[row * (width + 1)] = 0; // no filter
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(rows)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]).toString('base64');
+}
 
 test('Claude Agent tools reach Team while child text remains on its sidechain', async () => {
   const client = await harness.connect();
@@ -130,6 +157,73 @@ describe('claude driver', () => {
     expect(assistants[0]?.parts).toEqual([
       { type: 'thinking', text: 'let me check', startedAt: expect.any(Number), finishedAt: expect.any(Number) },
       { type: 'text', text: 'pong' },
+    ]);
+  });
+
+  test('the CLI is asked for summarized thinking and tool summaries, and a summary labels the calls it names', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    scripted((fake) => {
+      fake.emit(init('sess-sum'));
+      fake.emit(assistant('sess-sum', [
+        { type: 'tool_use', id: 'toolu_a', name: 'Read', input: { file_path: 'rules.md' } },
+        { type: 'tool_use', id: 'toolu_b', name: 'Read', input: { file_path: 'data.txt' } },
+      ]));
+      fake.emit(toolResult('sess-sum', 'toolu_a', 'rules'));
+      fake.emit(toolResult('sess-sum', 'toolu_b', 'data'));
+      fake.emit(assistant('sess-sum', [{ type: 'tool_use', id: 'toolu_c', name: 'Bash', input: { command: 'wc -l data.txt' } }]));
+      // Written once the first batch finished; it names only that batch, and an
+      // id this turn never drew is skipped rather than drawn as an empty card.
+      fake.emit(sdk({ type: 'tool_use_summary', summary: ' Read rules.md and data.txt ', preceding_tool_use_ids: ['toolu_a', 'toolu_b', 'toolu_gone'], uuid: 'u1', session_id: 'sess-sum' }));
+      fake.emit(toolResult('sess-sum', 'toolu_c', '4 data.txt'));
+      fake.emit(success('sess-sum'));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'count')).toBe('done');
+
+    const options = calls.at(-1)!.options;
+    expect(options.extraArgs).toEqual({ 'thinking-display': 'summarized' });
+    expect(options.thinking).toBeUndefined();
+    expect(options.env?.CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES).toBe('1');
+
+    const thread = await client.call('threads.get', { threadId });
+    const tools = thread.messages.flatMap((message) => message.parts).filter((part) => part.type === 'tool');
+    expect(tools.map((part) => [part.toolId, part.summary ?? null])).toEqual([
+      ['toolu_a', 'Read rules.md and data.txt'],
+      ['toolu_b', 'Read rules.md and data.txt'],
+      ['toolu_c', null],
+    ]);
+    expect(tools.every((part) => part.status === 'done')).toBe(true);
+  });
+
+  test('a summary that lands after the cards were written keeps their input and output', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted(fake => fake.emit(init('sess-late')));
+    const turn = await client.call('turns.start', { threadId, prompt: 'write it' });
+    await waitFor(() => calls[0]?.prompts.length === 1);
+    const fake = queries[0]!;
+    const content = 'x'.repeat(4096);
+    fake.emit(assistant('sess-late', [{ type: 'tool_use', id: 'toolu_w', name: 'Write', input: { file_path: 'a.txt', content } }]));
+    fake.emit(toolResult('sess-late', 'toolu_w', 'written'));
+    // A result ahead of its call: the card gets its input after it finished.
+    fake.emit(toolResult('sess-late', 'toolu_r', 'rules'));
+    fake.emit(assistant('sess-late', [{ type: 'tool_use', id: 'toolu_r', name: 'Read', input: { file_path: 'rules.md' } }]));
+    await waitFor(() => harness.core.journal.listMessages(threadId).some(m => m.parts.some(p => p.type === 'tool' && p.toolId === 'toolu_r' && p.name === 'Read')));
+    // A follow-up cuts the answer, so the cards' message is closed and written before the label lands.
+    expect(await client.call('turns.steer', { threadId, turnId: turn.id, prompt: 'and?', clientRequestId: 'claude_late_01' })).toEqual({ accepted: true });
+    await waitFor(() => calls[0]?.prompts.length === 2);
+    const finished = client.next('turn.finished', record => record.id === turn.id);
+    fake.emit(sdk({ type: 'tool_use_summary', summary: 'Wrote a.txt, read rules.md', preceding_tool_use_ids: ['toolu_w', 'toolu_r'], uuid: 'u-late', session_id: 'sess-late' }));
+    fake.emit(success('sess-late'));
+    expect((await finished).status).toBe('done');
+
+    const tools = harness.core.journal.listMessages(threadId).flatMap(m => m.parts).filter(p => p.type === 'tool');
+    expect(tools).toEqual([
+      expect.objectContaining({ toolId: 'toolu_w', name: 'Write', input: { file_path: 'a.txt', content }, output: 'written', status: 'done', summary: 'Wrote a.txt, read rules.md', documents: [expect.objectContaining({ newText: content })] }),
+      expect.objectContaining({ toolId: 'toolu_r', name: 'Read', input: { file_path: 'rules.md' }, inputText: null, output: 'rules', status: 'done', summary: 'Wrote a.txt, read rules.md' }),
     ]);
   });
 
@@ -340,31 +434,76 @@ describe('claude driver', () => {
     expect(documentsOf('toolu_bash')).toBeUndefined();
   });
 
+  test('on Claude 5.1+, the second of two thinking blocks before a tool call is the progress text', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const reasoning = 'The failure points at the parser.';
+    const update = "Now I'll run the parser tests.";
+    // One API message per model: what 5.1+ and 5.0 send ahead of the same call.
+    const turn = (model: string, sessionId: string, toolId: string) => (fake: { emit(message: SDKMessage): void; end(): void }) => {
+      const event = (body: unknown) => fake.emit(streamEvent(sessionId, body));
+      fake.emit(init(sessionId));
+      event({ type: 'message_start', message: { id: `msg_${model}`, model } });
+      [reasoning, update].forEach((text, index) => {
+        event({ type: 'content_block_start', index, content_block: { type: 'thinking', thinking: '' } });
+        event({ type: 'content_block_delta', index, delta: { type: 'thinking_delta', thinking: text } });
+        event({ type: 'content_block_stop', index });
+      });
+      event({ type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: toolId, name: 'Bash', input: {} } });
+      event({ type: 'content_block_stop', index: 2 });
+      fake.emit(sdk({ ...(assistant(sessionId, [{ type: 'thinking', thinking: reasoning, signature: 's' }]) as object), message: { id: `msg_${model}`, model, content: [{ type: 'thinking', thinking: reasoning, signature: 's' }] } }));
+      fake.emit(sdk({ ...(assistant(sessionId, []) as object), message: { id: `msg_${model}`, model, content: [{ type: 'thinking', thinking: update, signature: 's' }] } }));
+      fake.emit(sdk({ ...(assistant(sessionId, []) as object), message: { id: `msg_${model}`, model, content: [{ type: 'tool_use', id: toolId, name: 'Bash', input: { command: 'bun test' } }] } }));
+      fake.emit(toolResult(sessionId, toolId, 'ok'));
+      fake.emit(success(sessionId));
+      fake.end();
+    };
+    const partsOf = async () => {
+      const thread = await client.call('threads.get', { threadId });
+      return (thread.messages.filter((message) => message.role === 'assistant').at(-1)?.parts ?? []).map((part: MessagePart) => part.type === 'tool' ? { type: 'tool' } : { type: part.type, text: (part as { text?: string }).text });
+    };
+
+    scripted(turn('claude-opus-5-5', 'sess-progress', 'tool_new'));
+    expect(await runTurn(client, threadId, 'fix it')).toBe('done');
+    // The reasoning stays folded, the update reads as the agent's own words.
+    expect(await partsOf()).toEqual([{ type: 'thinking', text: reasoning }, { type: 'text', text: update }, { type: 'tool' }]);
+
+    scripted(turn('claude-opus-5', 'sess-reasoning', 'tool_old'));
+    expect(await runTurn(client, threadId, 'fix it again')).toBe('done');
+    // A 5.0 model writes its updates as text: both blocks are reasoning.
+    expect(await partsOf()).toEqual([{ type: 'thinking', text: reasoning + update }, { type: 'tool' }]);
+  });
+
   test('an image attachment rides beside the text as a content block', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
 
-    scripted((fake) => {
-      fake.emit(init('sess-image'));
-      fake.emit(assistant('sess-image', [{ type: 'text', text: 'i see it' }]));
-      fake.emit(success('sess-image'));
-    });
+    // Like the CLI, the fake answers once it has read the prompt.
+    scripted(() => undefined, answerEach('sess-image'));
 
     const PNG =
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    // Stored when the composer's cap was 2048 px, or sent by a client that does not reduce.
+    const WIDE = greyPng(2048, 64);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
     await client.call('turns.start', {
       threadId,
       prompt: 'what is this',
-      attachments: [{ kind: 'image', mimeType: 'image/png', data: PNG, name: 'pixel.png' }],
+      attachments: [
+        { kind: 'image', mimeType: 'image/png', data: PNG, name: 'pixel.png' },
+        { kind: 'image', mimeType: 'image/png', data: WIDE, name: 'wide.png' },
+      ],
     });
     expect((await finished).status).toBe('done');
 
-    const sent = JSON.parse(calls[0]?.prompts[0] ?? '[]') as unknown[];
-    expect(sent).toEqual([
+    const sent = JSON.parse(calls[0]?.prompts[0] ?? '[]') as { type: string; text?: string; source?: { type: string; media_type: string; data: string } }[];
+    expect(sent.slice(0, 2)).toEqual([
       { type: 'text', text: 'what is this' },
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
     ]);
+    // Past 2000 px Claude refuses a request with more than 20 images: the wide one is fitted.
+    const fitted = await new Bun.Image(Buffer.from(sent[2]?.source?.data ?? '', 'base64')).metadata();
+    expect({ width: fitted.width, height: fitted.height, format: fitted.format }).toEqual({ width: 2000, height: 63, format: 'png' });
   });
 
   test('supportedCommands lists the slash commands, and commands_changed moves the list', async () => {

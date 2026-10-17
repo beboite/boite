@@ -19,6 +19,20 @@ const EXIT_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 20_000;
 const POLL_MS = 100;
 const WAIT_DIAGNOSTIC_TIMEOUT_MS = 250;
+/** What a page that left an evaluate hanging is doing: frames drawn in a second, fonts and animations still pending. */
+const HUNG_PAGE = `new Promise((resolve) => {
+  let frames = 0;
+  const tick = () => { frames += 1; requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+  setTimeout(() => resolve({
+    framesInOneSecond: frames,
+    visibility: document.visibilityState,
+    fonts: document.fonts.status,
+    loadingFonts: [...document.fonts].filter((f) => f.status === 'loading').map((f) => f.family + ' ' + f.weight),
+    animations: document.getAnimations().filter((a) => a.playState !== 'finished').slice(0, 8)
+      .map((a) => (a.animationName ?? a.transitionProperty ?? a.id) + ' ' + a.playState + ' .' + String(a.effect?.target?.className ?? '?').split(' ')[0]),
+  }), 1000);
+})`;
 
 /**
  * Candidates in order; `BOITE_E2E_BROWSER` overrides all of them. Helium comes
@@ -93,6 +107,11 @@ export interface BrowserOptions {
   experiments?: string[];
   /** Extra Chromium switches, such as the fake camera a scan test reads its code from. */
   args?: string[];
+  /**
+   * Terminals draw on the GPU, as on a user's device. Off by default: the DOM
+   * renderer puts the screen's text in `.xterm-rows`, which most tests read.
+   */
+  terminalGpu?: boolean;
 }
 
 /** How a browser that never got as far as its page fails: the only failures `launch` tries again. */
@@ -160,7 +179,7 @@ export class BrowserPage {
     socket.addEventListener('close', () => {
       for (const pending of this.#pending.values()) {
         clearTimeout(pending.timer);
-        pending.reject(new Error('the devtools socket closed'));
+        pending.reject(new Error('the devtools socket closed, the browser exited or was killed (bun test kills every process a file started when one of its tests or hooks times out)'));
       }
       this.#pending.clear();
     });
@@ -254,6 +273,10 @@ export class BrowserPage {
       await page.send('Runtime.enable', {});
       await page.send('Network.enable', {});
       if (options.showTour !== true) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
+      if (options.terminalGpu !== true) {
+        // Only on a fresh profile: a test that turns the GPU on and reloads keeps its choice.
+        await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `try { if (localStorage.getItem('boite.terminalGpu') === null) localStorage.setItem('boite.terminalGpu', 'off'); } catch {}` });
+      }
       if (options.experiments !== undefined) {
         const stored = JSON.stringify(JSON.stringify(options.experiments));
         await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('boite.experiments', ${stored}); } catch {}` });
@@ -306,11 +329,20 @@ export class BrowserPage {
   /** The one place raw devtools JSON is handled. */
   send(method: string, params: Record<string, unknown>, timeoutMs = CALL_TIMEOUT_MS): Promise<unknown> {
     if (this.#closed) return Promise.reject(new Error('the browser is closed'));
+    // A send on a closed socket is dropped without an error, and each call then
+    // waited out its whole timeout: after `bun test` killed the browser of a
+    // file whose test timed out, every later test of that file spent 20 s on a
+    // "Runtime.evaluate timed out" that looked like a hung renderer.
+    if (this.#socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error(`the devtools socket closed before ${method}: the browser exited or was killed. bun test kills every process a file started when one of its tests or hooks times out, so look for the file's first failure`));
+    }
     const id = this.#nextId++;
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`${method} timed out`));
+        // Name the expression: every hung evaluate otherwise reports the same line of this file.
+        const what = typeof params.expression === 'string' ? `: ${params.expression.replace(/\s+/g, ' ').slice(0, 160)}` : '';
+        reject(new Error(`${method} timed out${what}`));
       }, timeoutMs);
       this.#pending.set(id, { resolve, reject, timer });
       this.#socket.send(JSON.stringify({ id, method, params }));
@@ -320,12 +352,22 @@ export class BrowserPage {
   /** Untyped expressions return a by-value JavaScript result; callers can name a narrower shape. */
   evaluate(expression: string, timeoutMs?: number): Promise<string | number | boolean | object | null | undefined>;
   evaluate<T>(expression: string, timeoutMs?: number): Promise<T>;
-  async evaluate<T>(expression: string, timeoutMs = CALL_TIMEOUT_MS): Promise<T> {
+  async evaluate<T>(expression: string, timeoutMs?: number): Promise<T> {
     const raw = (await this.send('Runtime.evaluate', {
       expression,
       returnByValue: true,
       awaitPromise: true,
-    }, timeoutMs)) as {
+    }, timeoutMs ?? CALL_TIMEOUT_MS).catch(async (error: unknown) => {
+      // A direct call that hangs says what the page was waiting on: a promise
+      // that never settles (fonts, an animation) or a page that stopped drawing.
+      if (timeoutMs !== undefined || !(error instanceof Error) || !error.message.includes('timed out')) throw error;
+      const state = await this.send('Runtime.evaluate', { expression: HUNG_PAGE, returnByValue: true, awaitPromise: true }, 3_000)
+        .then((result) => JSON.stringify((result as { result?: { value?: unknown } }).result?.value))
+        .catch(() => 'the page did not answer either: its main thread is busy');
+      throw new Error(`${error.message}
+Page: ${state}
+In flight: ${JSON.stringify(this.#inFlight())}`);
+    })) as {
       result?: { value?: unknown };
       exceptionDetails?: {
         text?: string;
@@ -451,21 +493,30 @@ export class BrowserPage {
    * rendered, such as one inside a folded `content-visibility` section, never
    * gets that update: a theme change left its colour transitions finished
    * with their promises pending, and the wait hung until the call timed out.
+   * Content can also stop being drawn during the wait (a phone's chat body
+   * covered by the list), so each frame looks again.
    */
   async settleAnimations(): Promise<void> {
     // The page gives up first, so the frame pump never outlives the call.
-    const settled = await this.evaluate<boolean>(`new Promise((resolve) => {
-      let live = true;
-      const done = (ok) => { if (!live) return; live = false; resolve(ok); };
-      const frame = () => { if (live) requestAnimationFrame(frame); };
+    const running = await this.evaluate<string[] | null>(`new Promise((resolve) => {
+      let live = true, fonts = false;
+      const done = (ok) => { if (!live) return; live = false; resolve(ok ? null : watched.filter((a) => !ended.has(a) && drawn(a))
+        .map((a) => (a.animationName ?? a.transitionProperty ?? a.id) + ' on .' + String(a.effect?.target?.className ?? '?').split(' ')[0] + ' ' + a.playState).concat(fonts ? [] : [...document.fonts].filter((f) => f.status === 'loading').map((f) => 'font ' + f.family + ' ' + f.weight + ' loading').concat(['document.fonts ' + document.fonts.status]))); };
+      const drawn = (a) => !(a.effect instanceof KeyframeEffect) || a.effect.target?.checkVisibility?.({ contentVisibilityAuto: true }) !== false;
+      const ended = new Set();
+      const watched = document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity && drawn(a));
+      for (const a of watched) a.finished.then(() => ended.add(a), () => ended.add(a));
+      document.fonts.ready.then(() => { fonts = true; });
+      const frame = () => {
+        if (!live) return;
+        if (fonts && watched.every((a) => ended.has(a) || !drawn(a))) return done(true);
+        requestAnimationFrame(frame);
+      };
       requestAnimationFrame(frame);
       setTimeout(() => done(false), ${CALL_TIMEOUT_MS - 5_000});
-      Promise.all([document.fonts.ready, ...document.getAnimations()
-        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
-        .filter((a) => !(a.effect instanceof KeyframeEffect) || a.effect.target?.checkVisibility?.({ contentVisibilityAuto: true }) !== false)
-        .map((a) => a.finished.catch(() => {}))]).then(() => done(true));
     })`);
-    if (!settled) throw new Error(`animations still running ${(CALL_TIMEOUT_MS - 5_000) / 1000} s after settleAnimations()`);
+    if (running) throw new Error(`animations still running ${(CALL_TIMEOUT_MS - 5_000) / 1000} s after settleAnimations(): ${running.join(', ')}
+In flight: ${JSON.stringify(this.#inFlight())}`);
   }
 
   async screenshot(path: string): Promise<void> {

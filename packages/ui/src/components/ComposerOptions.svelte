@@ -11,13 +11,15 @@
   import { strings } from '../lib/strings';
   import { levelName } from '../lib/format';
 
-  let { levels, effort, speeds, speed, modes, modeLabel, modeHint, mode, worktree, canAttach, busy, onattach, oneffort, onspeed, onmode, onworktree } : {
+  let { levels, effort, agentDefault = false, speeds, speed, modes, modeLabel, modeHint, mode, worktree, canAttach, busy, onattach, oneffort, onspeed, onmode, onworktree } : {
     levels: EffortLevel[]; effort: string | null;
     speeds: { id: string; label: string }[]; speed: string | null;
     /** The composer's list, the most open first; the panel reads it the other way. */
     modes: PermissionMode[]; modeLabel: (mode: PermissionMode) => string; modeHint: (mode: PermissionMode) => string;
     mode: PermissionMode; worktree: boolean | null; canAttach: boolean; busy: boolean;
-    onattach: () => void; oneffort: (id: string) => void;
+    onattach: () => void; oneffort: (id: string | null) => void;
+    /** The model has no default level: a Default choice hands the level back to the agent. */
+    agentDefault?: boolean;
     onspeed: (id: string | null) => void; onmode: (id: PermissionMode) => void;
     onworktree: () => void;
   } = $props();
@@ -55,6 +57,7 @@
       {/if}
       {#if levels.length}
         <fieldset disabled={busy}><legend>{strings.composer.effortTitle}</legend><div class="choices">
+          {#if agentDefault}<label class:selected={!levels.some(level => level.id === effort)} title={strings.composer.effortDefaultHint}><input type="radio" name="mobile-effort" value="" checked={!levels.some(level => level.id === effort)} onchange={() => oneffort(null)} /><span class="ui-label">{strings.composer.effortDefault}</span></label>{/if}
           {#each levels as level (level.id)}<label class:selected={effort === level.id}><input type="radio" name="mobile-effort" value={level.id} checked={effort === level.id} onchange={() => oneffort(level.id)} /><span class="ui-label">{levelName(level)}</span></label>{/each}
         </div></fieldset>
       {/if}
@@ -90,10 +93,8 @@
   .choices label:focus-within { outline: 2px solid var(--color-accent); outline-offset: 2px; }
   input { position: absolute; opacity: 0; width: 1px; height: 1px; }
   .worktree span:first-of-type { flex: 1; }
-  .switch { width: 30px; height: 18px; padding: 3px; background: var(--color-edge); border-radius: var(--radius-xl); }
-  .switch::after { content: ''; display: block; width: 12px; height: 12px; border-radius: var(--radius-xl); background: var(--color-foreground); transition: transform var(--dur-2); }
-  .switch.on { background: var(--color-accent); }
-  .switch.on::after { transform: translateX(12px); }
+  /* The shared switch (app.css), at the size of the button's text. */
+  .switch { --switch-width: 32px; --switch-height: 20px; }
   .worktree { margin-top: 12px; }
 
   @media (max-width: 720px) {

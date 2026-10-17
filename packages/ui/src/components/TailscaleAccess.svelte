@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import type { TailscaleStatus } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
@@ -28,7 +29,7 @@
     try {
       status = method === 'tailscale.enable' ? await client.call(method, { replace }) : await client.call(method, {});
     } catch (reason) {
-      failure = reason instanceof Error ? reason.message : String(reason);
+      failure = errorText(reason);
     } finally {
       busy = false;
     }
@@ -65,10 +66,10 @@
     if (ok) await call('tailscale.disable');
   }
 
-  /** A phone's link through the new address, shown with its QR code in the pairing card above. */
+  /** A phone's link through the new address, shown with its QR code in the group card above. */
   function pair() {
-    void store.mintPairing('device');
-    requestAnimationFrame(() => document.getElementById('settings-devices')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }));
+    void store.addDevice();
+    requestAnimationFrame(() => document.getElementById('settings-group')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }));
   }
 
   let sentence = $derived.by(() => {

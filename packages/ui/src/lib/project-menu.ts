@@ -1,4 +1,4 @@
-import { Archive, ArrowDown, ArrowLeft, ArrowUp, Copy, GitBranch, History, Import, Plus, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
+import { Archive, ArrowDown, ArrowLeft, ArrowUp, Copy, FolderMinus, GitBranch, History, Import, Plus, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
 import type { Project } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import { workspace } from './workspace.svelte';
@@ -54,6 +54,11 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
             get checked() { return (owner.projects.find(current => current.id === project.id)?.autoArchiveMergedPr ?? project.autoArchiveMergedPr) === true; },
             get disabled() { return owner.client !== client || owner.clientGeneration !== clientGeneration || !owner.owner || owner.connection !== 'ready' || owner.projectAutoArchiveMergedPrBusy(project.id); }
           }] : []),
+          ...(project.kind !== 'drafts' && project.repository !== false && project.autoRemoveWorktrees !== undefined ? [{
+            id: 'auto-remove-worktrees', label: strings.sidebar.autoRemoveWorktrees, glyph: FolderMinus,
+            get checked() { return (owner.projects.find(current => current.id === project.id)?.autoRemoveWorktrees ?? project.autoRemoveWorktrees) === true; },
+            get disabled() { return owner.client !== client || owner.clientGeneration !== clientGeneration || !owner.owner || owner.connection !== 'ready' || owner.projectAutoRemoveWorktreesBusy(project.id); }
+          }] : []),
           ...(project.kind === 'drafts' ? [] : [{ id: 'refresh-icon', label: strings.sidebar.refreshIcon, glyph: RefreshCw, disabled: project.missing === true }])
         ]
       : []),
@@ -77,7 +82,8 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
       if (action === 'manage') return contextMenu.follow(management, pick);
       if (action === 'back') return contextMenu.follow(main, pick);
       if (action === 'move-up' || action === 'move-down') reorder?.move(action === 'move-up' ? -1 : 1);
-      if (action === 'new') await workspace.select(owner, undefined, project.id);
+      // A new thread is a new draft: one already written there stays in the list.
+      if (action === 'new') await workspace.select(owner, undefined, project.id, { fresh: true });
       if (action === 'copy') await owner.copy(project.path);
       if (action === 'archived') {
         if (workspace.active !== owner) await workspace.select(owner);
@@ -93,6 +99,11 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
         if (owner.client !== client || owner.clientGeneration !== clientGeneration) return;
         const current = owner.projects.find(projectOnOwner => projectOnOwner.id === project.id);
         if (current?.autoArchiveMergedPr !== undefined) await owner.setProjectAutoArchiveMergedPr(project.id, !current.autoArchiveMergedPr);
+      }
+      if (action === 'auto-remove-worktrees') {
+        if (owner.client !== client || owner.clientGeneration !== clientGeneration) return;
+        const current = owner.projects.find(projectOnOwner => projectOnOwner.id === project.id);
+        if (current?.autoRemoveWorktrees !== undefined) await owner.setProjectAutoRemoveWorktrees(project.id, !current.autoRemoveWorktrees);
       }
       if (action === 'worktrees') {
         if (workspace.active !== owner) await workspace.select(owner);

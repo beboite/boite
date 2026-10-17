@@ -2,19 +2,28 @@
 
 A plugin is one native executable. Boite downloads it over https, checks it
 against the SHA-256 its manifest publishes, and runs it for the features the
-manifest names. There are two features today: account pools, which save and
-switch the default login of an agent CLI, and desktop apps, which Boite starts
-beside itself with the owner's access ([Desktop apps](#desktop-apps)).
+manifest names. There are three features today: account pools, which save and
+switch the default login of an agent CLI, desktop apps, which Boite starts
+beside itself with the owner's access ([Desktop apps](#desktop-apps)), and
+gateways, which Boite runs in the background for the subscription proxy
+([Gateways](#gateways)).
 
-Settings > Plugins has three sections:
+Settings > Plugins has three sections. Installed and Recommended are drawn
+only when they hold a plugin:
 
 - Installed: every plugin on this core, with its version, the commit it came
   from, its pools and its errors.
 - Recommended: the plugins Boite ships a manifest for and that are not
   installed yet, in the order Boite lists them. Today that is
-  [Bots](https://github.com/beboite/bots), the desktop companion, first, then
-  [kebacc-switcher](https://github.com/kebab1337420/kebacc-switch).
+  [Bots](https://github.com/beboite/bots), the desktop companion, and
+  [Douane](https://github.com/beboite/douane), the subscription gateway. A row there
+  carries the name, version, a link to the source, the description and
+  Install, with no state line.
 - Add from a git URL: any repository with a `boite-plugin.json` at its root.
+
+A plugin installed as recommended that a later Boite no longer lists, such as
+kebacc-switcher before 2026-10-16, stays under Installed with its pools until
+the owner uninstalls it; it no longer receives updates.
 
 Plugins are administration of the machine that hosts the core, so every
 `plugins.*` method is owner only and the phone settings leave the page to the
@@ -59,7 +68,7 @@ Put `boite-plugin.json` at the root of the repository:
 | `homepage` | An https URL with a host and no user or password, at most 2048 characters. The page links to it as the source code. |
 | `executable` | The file name Boite saves the download as: a letter or digit, then letters, digits, `_` and `-`, 64 characters at most, no extension. Boite adds `.exe` on Windows. |
 | `artifacts` | An object keyed by platform, at least one of `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`. Each value is `{ "url", "sha256" }`: an https URL as for `homepage`, and the file's SHA-256 as 64 lowercase hexadecimal characters. |
-| `provides` | An object naming at least one feature, among `accountPools` and `desktopApp`. `accountPools` is `{ "providers": [...] }`: a non-empty list of distinct provider ids among `antigravity`, `antigravity-cli`, `claude`, `codex`, `grok`, `muse`, `opencode` and `pi`. `desktopApp` is `{}`, an object with no field ([Desktop apps](#desktop-apps)). A plugin may provide both. |
+| `provides` | An object naming at least one feature, among `accountPools`, `desktopApp` and `gateway`. `accountPools` is `{ "providers": [...] }`: a non-empty list of distinct provider ids among `antigravity`, `antigravity-cli`, `claude`, `codex`, `grok`, `muse`, `opencode` and `pi`. `desktopApp` and `gateway` are `{}`, objects with no field ([Desktop apps](#desktop-apps), [Gateways](#gateways)). A plugin may provide several. |
 
 The platform key is `process.platform` and `process.arch` of the machine that
 runs the core, joined by a hyphen. A core on a Linux server downloads the
@@ -159,10 +168,10 @@ running; the app then talks to the core like any client.
 `desktopApp` takes no field; any key in it is refused. The artifact is the
 app's single release executable.
 
-The core starts an installed, enabled app:
+The core starts an installed app:
 
-- when the core starts;
-- right after its install or an update finishes;
+- when the core starts, if Start with Boite is on (`autostart`);
+- right after its install or an update finishes, if it is on (`enabled`);
 - when the owner clicks Start or Restart in Settings > Plugins
   (`plugins.app {id, action: "start" | "stop" | "restart"}`).
 
@@ -187,18 +196,25 @@ browser's host.
 Exits and stops:
 
 - An exit with code 0 leaves the app stopped. It starts again on the next core
-  start or when the owner starts it.
+  start while Start with Boite is on, or when the owner starts it.
 - Any other exit, or a signal, starts it again after 2 seconds, then 10, then
   30. A fourth crash within five minutes leaves it crashed, with the exit code
   and a message on its row, until the owner starts it.
-- Stop kills the app's process tree and turns it off: it does not start with
-  the core again until the owner starts it. Start and Restart turn it back on.
+- Stop kills the app's process tree and turns it off until the next core
+  start, or for good while Start with Boite is off. Start and Restart turn it
+  back on.
 - Uninstall kills it first. An update kills it before the new executable
   replaces the old one, and starts the new one after.
 - Core shutdown kills it.
 
-Whether the app is on is kept in `<dataDir>/plugins/<id>/app.json`, across core
-restarts and updates. A first install turns it on.
+Start with Boite is the switch under the app's state on its row
+(`plugins.autostart {id, autostart}`). It decides only what the next core
+start does: nothing running starts or stops when it changes.
+
+Both choices are kept in `<dataDir>/plugins/<id>/app.json`
+(`{"enabled": true, "autostart": true}`), across core restarts and updates. A
+first install turns both on. A file written before `autostart` existed starts
+with the core when it was left on, as that core did.
 
 A Linux core with neither `DISPLAY` nor `WAYLAND_DISPLAY` set has no desktop to
 show a window on: it does not start the app, and the row says so.
@@ -209,9 +225,12 @@ and Restart. `plugins.app` answers with the plugin's state, and every change is
 announced by `plugins.updated`. The state is `PluginState.app`:
 
 ```ts
-{ enabled: boolean; status: 'stopped' | 'starting' | 'running' | 'crashed' | 'unavailable';
+{ enabled: boolean; autostart: boolean; status: 'stopped' | 'starting' | 'running' | 'crashed' | 'unavailable';
   pid: number | null; exitCode: number | null; error: string | null; startedAt: number | null }
 ```
+
+A core older than `plugins.autostart` sends no `autostart`, and the row shows
+no switch.
 
 ### Showing Boite
 
@@ -223,15 +242,113 @@ agent id is 1 to 200 characters. The core sends the `ui.reveal` event to every
 owner connection except desktop-app plugins, the caller included, and answers
 `{delivered}`, the number of connections it reached.
 
+A thread or an agent on another machine of the user's Boite takes that
+machine's core id as `coreId`, on a thread target as on an agent one:
+`{ "kind": "thread", "threadId", "coreId" }`. The id is the 64 hex character
+fingerprint `collaboration.peers` and `group.get` list. The core accepts it
+when it is a member of its group or a machine trusted for coordination, and
+refuses any other with `target.coreId`; it cannot see that machine's journal,
+so the thread id there is only checked for length (1 to 200). The core's own
+id means the core itself and is dropped from the event, so a target on this
+core reads the same with or without it. A core that understands `coreId` says
+so in its `hello` answer, `core.features.revealMachines`. An older core drops
+the field, refuses a thread it does not have and opens its own agent page, so
+an app checks the flag before it names a machine.
+
 The desktop shell connected to the core it started on the same computer
 answers it: it unminimizes and focuses its window, then opens the thread, the
 Agents page on that agent (switching the Resident agents experiment on if it was
-off), or the app updates in Settings, Machines. Browser tabs, paired devices and
-windows following another machine do
+off), or the app updates in Settings, Machines. A target with `coreId` opens on
+the window's machine whose core has that id; when the window has no such
+machine, or has it but not connected, it says so on the page it shows and opens
+nothing. Browser tabs, paired devices and windows following another machine do
 nothing.
 
 `ui.reveal` is owner-only, as is the event: a paired device or an agent that
 calls it is refused, and neither receives it.
+
+## Gateways
+
+A plugin that provides `gateway` is a subscription gateway speaking Douane's
+runtime contract, such as [Douane](https://github.com/beboite/douane). Boite
+runs it in the background; the subscription proxy's local mode points at it
+([providers](providers.md#douane-on-this-machine)).
+
+```json
+"provides": { "gateway": {} }
+```
+
+`gateway` takes no field; any key in it is refused. The executable answers:
+
+- `<executable> --config <file>`: it reads the TOML file Boite wrote, whose
+  relative paths resolve from the file's folder.
+- `GET /health` with `{"status":"ok","version":"<version>"}` once it serves.
+- `GET /admin/api/summary` with `in_flight`, the requests it is serving, open
+  on loopback without a token.
+
+Its data lives outside the plugin directory, so an uninstall keeps it:
+`<dataDir>/douane/` for Douane, `<dataDir>/gateways/<id>/` for any other. Boite
+writes `<executable>.toml` there once:
+
+```toml
+[server]
+listen = "127.0.0.1:8787"
+auth_dir = "auth"
+database = "douane.sqlite"
+```
+
+and afterwards only moves its `listen` line, because the gateway saves its own
+settings into the same file. The port is the one remembered for the plugin
+(journal setting `gateway-port:<id>`) when it is free, 8787 otherwise, any free
+port last; a new port is remembered and, for Douane, written into the proxy's
+URLs.
+
+The core runs it:
+
+- when the core starts while Start with Boite is on, after its install or an
+  update while it is on, and on Start or Restart
+  (`plugins.gateway {id, action: "start" | "stop" | "restart"}`);
+- from its data directory, through the core's process launcher as
+  `plugin:<id>:gateway`, with no window and no `DISPLAY` requirement;
+- with the core's environment minus every agent variable, `BOITE_TOKEN` and
+  `BOITE_CORE_URL`: a gateway never talks to the core. `NO_COLOR=1` is added.
+
+Its stdout and stderr go to the core log line by line (`source: plugins`,
+`event: gateway.output`), never to a client. It counts as started once
+`/health` answers, within 30 seconds; one that stays silent is stopped and
+treated as a crash. Crashes, Stop, uninstall and core shutdown follow the
+[desktop apps](#desktop-apps)' rules: 2, 10 and 30 seconds, then `crashed`
+after a fourth exit within five minutes; whether it is on and whether it
+starts with Boite are kept in `<dataDir>/plugins/<id>/gateway.json`, and the
+same switch sits on its row.
+
+An update waits until `in_flight` reads 0 (five minutes at most, then it goes
+ahead), stops the gateway, keeps the old executable as `<executable>.previous`
+and starts the new one. The old one is deleted once the new one answers
+`/health`. When it does not, the old one goes back and starts again, and the
+update fails with the reason, keeping the version that worked.
+
+On Linux, a gateway a dead core left running is stopped at the next start when
+its command line still names this configuration (`gateway.pid` in its data
+directory). Elsewhere the core's Job Object (Windows) or service manager takes
+it down with the core.
+
+`PluginState.gateway` carries its state:
+
+```ts
+{ enabled: boolean; autostart: boolean; status: 'stopped' | 'starting' | 'running' | 'updating' | 'crashed';
+  port: number; version: string | null; pid: number | null; exitCode: number | null;
+  error: string | null; startedAt: number | null; dataDir: string }
+```
+
+Douane's row in Settings > Plugins shows it with Start, Stop and Restart, Open
+Douane (its dashboard, beside the core only) and Move my connections to Douane,
+which moves this machine's sign-ins into the plugin (`subscriptionProxy.move`
+with `target: "plugin"`, [providers](providers.md#moving-connections-to-douane)).
+Its uninstall confirmation says where the sign-ins stay.
+`BOITE_DOUANE_BINARY=<path>` runs that executable for Douane instead of the
+installed one; a `.ts` or `.js` path runs with the core's Bun, which is how the
+tests' fake Douane starts.
 
 ## Install and run
 
@@ -239,7 +356,7 @@ A recommended plugin installs from its row. A plugin from a URL takes two
 steps:
 
 1. The owner pastes the repository URL and, optionally, a branch, tag or commit
-   (the default branch otherwise), then clicks Read manifest. The core fetches
+   (the default branch otherwise), then clicks Preview. The core fetches
    that one commit and reads the manifest (`plugins.inspect`). The page shows
    the name, version, source commit, download URL, SHA-256, the command lines
    and the pools. Nothing is downloaded or run yet.
@@ -261,7 +378,8 @@ then records the install:
 <dataDir>/plugins/seat-pool/
   seat-pool.exe        the executable (no extension off Windows)
   installed.json       what was installed, from where, when
-  app.json             a desktop app only: whether it is on, once changed
+  app.json             a desktop app only: whether it is on and starts with Boite, once changed
+  gateway.json         a gateway only: whether it is on and starts with Boite, once changed
 ```
 
 ```json
@@ -287,14 +405,75 @@ fails keeps the version that worked.
 
 Updating:
 
-- A recommended plugin shows Update when Boite ships a newer version of its
-  manifest.
+- A recommended plugin shows Update to X.Y.Z when a newer version is
+  available: either Boite ships a newer entry, or the plugin's update source
+  publishes a newer release (see [Updates from the source](#updates-from-the-source)).
+  The newest of the two wins, and the version installed is never replaced by
+  an older one. The row shows the download's progress, Cancel and any error.
 - A URL plugin updates when the owner reads the same URL again at a newer ref;
   the preview names the version it replaces.
 - An id already installed from another URL is refused, so one repository cannot
   take over another's install.
 - Reinstall downloads again from the manifest recorded in `installed.json`,
   without fetching the repository.
+
+### Updates from the source
+
+A recommended entry may name an update source, so a plugin release reaches
+installed copies without a Boite release:
+
+```json
+"updates": { "repository": "https://github.com/beboite/bots", "ref": "main" }
+```
+
+The field sits in Boite's reviewed list only. A plugin's own
+`boite-plugin.json` refuses it like any unknown field, so a plugin cannot point
+Boite anywhere else.
+
+When the core checks:
+
+- a minute after it starts, then every six hours, for the recommended plugins
+  that are installed. A core whose owner never installed one sends nothing.
+- when the owner clicks Check for updates on the plugin's row
+  (`plugins.checkUpdates {id?}`), whether it is installed or not. A check
+  finished less than ten seconds before answers instead of a new read.
+- when the owner installs or updates the plugin, before the download: a first
+  install brings the release the source names, not a pinned entry several
+  releases behind. A source that fails or takes more than 15 seconds leaves
+  the newest version already known.
+- A read that fails waits 15 minutes, then twice as long each time, up to six
+  hours. The row shows the failure as a quiet note, never as an install error.
+
+The core reads `boite-plugin.json` at the ref through the same git path,
+limits and rules as `plugins.inspect`. It offers the manifest found only when:
+
+- it passes every manifest rule: every artifact https, with a SHA-256;
+- its `id`, `name`, `homepage`, `executable` and `provides` are those of the
+  reviewed entry;
+- its version is strictly newer, by semver, than both the entry and the
+  version installed;
+- it has an artifact for the core's platform.
+
+Otherwise it is not offered, and the row says why under the plugin. A release
+taken back at the source stops being offered at the next check. Installing
+what was found is the owner's click. It takes the usual path: download, SHA-256
+check, and a desktop app stopped before the binary is replaced and started
+after. `installed.json` records the manifest that was installed, as for any
+install, with no new field, so an older core still reads it.
+
+`PluginState.updates` carries the source, whether a check is running, when the
+last one finished and the next is due, the release on offer (version, commit,
+time), and the reason a release was ignored or the check failed. Every change is
+announced by `plugins.updated`. An older core sends no `updates` field, and the
+UI then shows no check.
+
+When a check finds a release, the owner's conversation view shows a notice in
+its top right corner: « B.O.T.S 0.1.10 est disponible », with Plus tard and
+Mettre à jour. It waits while Settings are open, where the Plugins page shows
+the same update. It
+shows once per version and machine: either answer holds until a newer version.
+The answers are kept in the window's local storage. A paired device sees no
+notice and cannot call `plugins.checkUpdates`.
 
 Uninstall deletes `<dataDir>/plugins/<id>/`, which is everything an install
 wrote. Whatever the program itself saved elsewhere, such as the logins in its
@@ -355,6 +534,21 @@ token or thread, so an agent cannot borrow the app's access, and an app is no
 more trusted than any other executable you install: install one only from a
 publisher you trust.
 
+An update source moves part of that trust from the Boite review to the
+plugin's repository. Whoever can push to its ref can offer new binaries, and
+the SHA-256 then only proves the download is the one the manifest names. They
+cannot:
+
+- offer anything until the owner clicks Update;
+- change the id, name, homepage, executable or features: a plugin that wants
+  the owner token or an account pool it did not have needs a Boite pull
+  request;
+- send an older version, an http download or a download without a digest;
+- point Boite at another repository, since the source sits in Boite's list.
+
+A recommended entry should name a source only when its publisher guards that
+ref like a release.
+
 ## Test a plugin locally
 
 1. Build the release binaries and take their digests:
@@ -384,8 +578,12 @@ The core tests show a whole install without the network:
 Run them from `packages/core`:
 
 ```sh
-bun test test/plugins.test.ts test/plugin-manifest.test.ts
+bun test test/plugins.test.ts test/plugin-manifest.test.ts test/plugin-updates.test.ts
 ```
+
+`plugin-updates.test.ts` swaps the source read for a published manifest, and
+its clock for one the test moves, to cover the checks, the backoff and every
+refusal without waiting hours.
 
 ## Getting recommended
 
@@ -395,13 +593,21 @@ entry:
 
 - the artifact URLs pinned to a tagged release, not a moving `latest`;
 - the SHA-256 of each artifact, which the reviewer checks against the download;
-- a `homepage` where the source is public.
+- a `homepage` where the source is public;
+- optionally `updates`, the repository and ref where the plugin's
+  `boite-plugin.json` describes its latest release. Name a branch only you can
+  push to, and keep that manifest's id, name, homepage, executable and
+  features as reviewed.
 
 The core parses the list when it loads, and `plugin-manifest.test.ts` fails on
 an entry the reader refuses. Once recommended, the id is reserved: nobody can
 add a plugin with that id from a URL.
 
-Updating a recommended plugin is the same pull request with a new `version`,
-URLs and digests. Installed copies then show Update.
-`BOITE_E2E_KEBACC_INSTALL=1` runs the real download of kebacc-switcher and its
+With an update source, a release is a push of the new `boite-plugin.json` to
+that ref, after its artifacts are published. Installed copies find it within
+six hours or at the owner's Check for updates. Without one, updating is the
+same pull request with a new `version`, URLs and digests. A pinned entry newer
+than what the source offers wins. Bump the entry now and then anyway: a fresh
+install never reads the source by itself until the plugin is installed.
+`BOITE_E2E_PLUGIN_INSTALL=1` runs the real download of Bots and its
 uninstall in a temporary data directory ([development](development.md)).

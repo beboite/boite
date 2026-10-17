@@ -27,6 +27,8 @@ let origin = '';
 let long = '';
 let short = '';
 let fileBytes = 0;
+/** Other threads the reader visits before coming back, enough to push the long one out of the reading cache. */
+const others: string[] = [];
 
 beforeAll(async () => {
   const seeded = await startCoreWithLongThread();
@@ -39,6 +41,10 @@ beforeAll(async () => {
   const client = await connect(core.url, core.token, { client: { name: 'test', version: '0' }, timeoutMs: 30_000 });
   try {
     await client.call('settings.set', { browserOrigins: [origin] });
+    const { projectId, accountId } = await client.call('threads.get', { threadId: short, limit: 1 });
+    for (let index = 0; index < 16; index++) {
+      others.push((await client.call('threads.create', { projectId: projectId!, providerId: 'echo', accountId, title: `Visit ${index}` })).id);
+    }
     const page = await client.call('threads.get', { threadId: long, limit: 40, compactTools: true, compactFiles: true, compactImages: true });
     const parts = (id: string) => page.messages.find((message) => message.id === id)!.parts;
     // The picture and the file this test fetches really are left on the core by the first page.
@@ -76,10 +82,16 @@ function reveal(id: string, options: { top?: boolean; near?: string } = {}): str
       if (near) return box.bottom <= view.top && box.bottom > view.top - 300 ? box.bottom - view.top : null;
       return box.bottom > view.top && box.top < view.bottom ? box.top - view.top : null;
     };
+    // Pages read by position fill a screen ahead of the reader, so a message already held can sit
+    // below the view: the steps go down to it then, and up to anything else.
+    const index = (mid) => ${STORE}.openThread.messages.findIndex((message) => message.id === mid);
+    const shown = () => [...timeline.querySelectorAll('[data-mid]')].find((node) => node.getBoundingClientRect().bottom > timeline.getBoundingClientRect().top)?.dataset.mid.split('#')[0] ?? '';
     for (let step = 0; step < 1500 && offset() === null; step += 1) {
-      timeline.scrollTop = Math.max(0, timeline.scrollTop - (near ? 100 : 200));
+      const below = index('${id}') >= 0 && index(shown()) >= 0 && index('${id}') > index(shown());
+      timeline.scrollTop = Math.max(0, timeline.scrollTop + (below ? 1 : -1) * (near ? 100 : 200));
       timeline.dispatchEvent(new Event('scroll'));
-      await settle(${STORE}.loadingOlder ? 300 : 40);
+      // A stretch not read yet is on screen or on its way: its page lands before the next step.
+      await settle(${STORE}.loadingOlder || ${STORE}.loadingRange || timeline.querySelector('[data-testid=timeline-gap]') ? 300 : 40);
     }
     for (let nudge = 0; ${options.top === true} && nudge < 10 && offset() !== null && Math.abs(offset()) > 2; nudge += 1) {
       timeline.scrollTop += offset();
@@ -88,6 +100,35 @@ function reveal(id: string, options: { top?: boolean; near?: string } = {}): str
     }
     if (offset() !== null) return true;
     return JSON.stringify({ top: timeline.scrollTop, count: ${STORE}.openThread.messages.length, rendered: [...timeline.querySelectorAll('[data-mid]')].map((n) => n.dataset.mid).slice(0, 3) });
+  })()`;
+}
+
+/**
+ * Brings the reader within the 400 px trigger of the top, waits for the page
+ * above to land and be measured, and answers how far the row that was first on
+ * the page moved on screen. Main moved it 850 px at 1280x900 on 2026-10-13.
+ */
+function landingDrift(): string {
+  return `(async () => {
+    const timeline = document.querySelector('[data-testid=timeline]');
+    const settle = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const count = ${STORE}.openThread.messages.length;
+    // By row id: the window drops and draws the row again while the page lands.
+    const top = (id) => timeline.querySelector('[data-mid="' + id + '"]')?.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+    let head = '', before = 0;
+    // Up as a reader scrolls, until the step that sends the page: its first drawn row is the one held.
+    for (let step = 0; step < 400 && !${STORE}.loadingOlder && !${STORE}.loadingRange && ${STORE}.openThread.messages.length === count; step += 1) {
+      timeline.scrollTop = Math.max(0, timeline.scrollTop - 200);
+      timeline.dispatchEvent(new Event('scroll'));
+      // A screen of rows still being read has no row to follow yet.
+      head = timeline.querySelector('[data-mid]')?.dataset.mid ?? head;
+      before = head ? top(head) : before;
+      await settle(60);
+    }
+    for (let wait = 0; wait < 300 && ${STORE}.openThread.messages.length === count; wait += 1) await settle(50);
+    await settle(800);
+    const after = top(head);
+    return ${STORE}.openThread.messages.length > count && Number.isFinite(after) ? Math.round(after - before) || 0 : 'no page landed under ' + head;
   })()`;
 }
 
@@ -138,9 +179,20 @@ for (const phone of [true, false]) {
       expect(await page.evaluate<boolean | string>(reveal(PICTURE), 120_000)).toBe(true);
       await page.screenshot(join(artifacts, `thread-reopen-picture-${name}.png`));
 
-      // Far up, past what the reading cache keeps, the reader stops on one message and leaves.
+      // Pages hold about one screen: the next one above lands under a reader whose text stays put.
+      expect(await page.evaluate<number | string>(landingDrift(), 30_000)).toBe(0);
+
+      // Far up, the reader stops on one message and leaves. Sixteen other visits push this one
+      // out of the reading cache, which a light thread now fits; the place read is kept for 32.
       expect(await page.evaluate<boolean | string>(reveal(FAR, { top: true }), 120_000)).toBe(true);
       await page.waitFor(inView(FAR));
+      // The page finds them in its own list: no id from outside is written into the expression.
+      const visited = await page.evaluate<number>(`(async () => {
+        const visits = ${STORE}.threads.filter((thread) => thread.title.startsWith('Visit ')).map((thread) => thread.id);
+        for (const id of visits) await ${STORE}.open(id);
+        return visits.length;
+      })()`, 60_000);
+      expect(visited).toBe(others.length);
       await open(short);
       await open(long);
 

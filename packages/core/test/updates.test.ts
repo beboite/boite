@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { HarnessUpdate } from '@boite/contracts';
@@ -8,7 +8,9 @@ import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { npmInstallOf } from '../src/providers/npm.ts';
+import { resolveCommand } from '../src/providers/resolve.ts';
 import { compareVersions, inside, readVersion } from '../src/providers/updates.ts';
+import type { ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { holdAccountTurns, echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -91,8 +93,9 @@ async function start(
   updater = 'update',
   updateEnv?: Record<string, string>,
   program?: (dataDir: string) => { kind: 'path' | 'file'; value: string },
+  coreOptions?: Parameters<typeof startTestCore>[0],
 ): Promise<{ client: CoreClient; state: string }> {
-  harness = await startTestCore();
+  harness = await startTestCore(coreOptions);
   // Only the fixture: a check must never run the agents of the machine the tests run on.
   harness.core.updates.only = new Set(['update-fake']);
   harness.core.updates.npmLatest = async (name) => {
@@ -141,14 +144,56 @@ describe('harness updates', () => {
     const dir = mkdtempSync(join(tmpdir(), 'boite-npm-'));
     try {
       const { prefix, link } = npmLayout(dir);
-      expect(npmInstallOf(link)).toEqual({ prefix, packageDir: join(prefix, 'lib', 'node_modules', '@boite-test', 'fake-agent') });
-      expect(npmInstallOf('/usr/lib/node_modules/opencode-ai/bin/opencode.exe')).toEqual({ prefix: '/usr', packageDir: '/usr/lib/node_modules/opencode-ai' });
+      expect(npmInstallOf(link)).toEqual({ prefix, packageDir: join(prefix, 'lib', 'node_modules', '@boite-test', 'fake-agent'), name: '@boite-test/fake-agent' });
+      expect(npmInstallOf('/usr/lib/node_modules/opencode-ai/bin/opencode.exe')).toEqual({ prefix: '/usr', packageDir: '/usr/lib/node_modules/opencode-ai', name: 'opencode-ai' });
       // pnpm and Bun keep their globals elsewhere, and a native install is no npm install.
       expect(npmInstallOf('/home/u/.bun/install/global/node_modules/x/bin/x')).toBeNull();
       expect(npmInstallOf('/home/u/.local/share/claude/versions/2.1.285')).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test.skipIf(process.platform !== 'win32')('a Windows npm install is known by its shim in the prefix, a bare node_modules is not', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'boite-npm-'));
+    try {
+      const prefix = join(realpathSync(dir), 'npm');
+      const packageDir = join(prefix, 'node_modules', '@boite-test', 'fake-agent');
+      const program = join(packageDir, 'bin', 'fake-agent.exe');
+      mkdirSync(dirname(program), { recursive: true });
+      writeFileSync(program, '');
+      writeFileSync(join(packageDir, 'package.json'), JSON.stringify({ name: '@boite-test/fake-agent', bin: { 'fake-agent': 'bin/fake-agent.exe' } }));
+      // pnpm's global store has the same shape and keeps its shims elsewhere.
+      expect(npmInstallOf(program)).toBeNull();
+      writeFileSync(join(prefix, 'fake-agent.cmd'), '@echo off');
+      expect(npmInstallOf(program)).toEqual({ prefix, packageDir, name: '@boite-test/fake-agent' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform === 'win32')('an npm install of the package the registry names is installed by npm at that version, not by the agent\'s updater', async () => {
+    let layout!: ReturnType<typeof npmLayout>;
+    // The agent's own updater fails, as `claude update` did when its five-second `npm view` ran out.
+    const { client, state } = await start('npm', 'update-broken', undefined, (dataDir) => {
+      layout = npmLayout(dataDir);
+      return { kind: 'file', value: layout.link };
+    });
+    const calls = join(harness!.dataDir, 'npm-calls.txt');
+    const cli = join(harness!.dataDir, 'npm-cli.js');
+    writeFileSync(cli, [
+      "const { appendFileSync, writeFileSync } = require('node:fs');",
+      `appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), prefix: process.env.npm_config_prefix }) + '\\n');`,
+      `writeFileSync(${JSON.stringify(state)}, process.argv.at(-1).split('@').at(-1));`,
+    ].join('\n'));
+    harness!.core.updates.npmCli = () => ({ executable: process.execPath, script: cli });
+    expect(only(await client.call('providers.updates', { refresh: true })).latest).toBe('1.1.0');
+    const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.1.0', 20000);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    await changed;
+    const ran = readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { args: string[]; prefix: string });
+    expect(ran).toEqual([{ args: ['install', '-g', '--allow-scripts=@boite-test/fake-agent', '@boite-test/fake-agent@1.1.0'], prefix: layout.prefix }]);
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 
   test('an agent that checks by itself is read, updated by its own updater, and traced', async () => {
@@ -294,6 +339,39 @@ describe('harness updates', () => {
     expect(only(await changed)).toMatchObject({ current: '1.2.0', message: null });
     expect(readFileSync(state, 'utf8')).toBe('1.2.0');
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  });
+
+  test.skipIf(process.platform === 'win32' || !['x64', 'arm64'].includes(process.arch))('codex installed by Bun updates through the launcher that names its install, while its sessions skip that launcher', async () => {
+    // `bun install -g @openai/codex`: the platform package hoisted beside the launcher, no `lib/node_modules`.
+    const root = join(tmpdir(), `boite-bun-codex-${newToken().slice(0, 8)}`);
+    const global = join(root, '.bun', 'install', 'global', 'node_modules', '@openai');
+    const os = process.platform === 'darwin' ? 'darwin' : 'linux';
+    const triple = `${process.arch === 'x64' ? 'x86_64' : 'aarch64'}-${os === 'darwin' ? 'apple-darwin' : 'unknown-linux-musl'}`;
+    const launcher = join(global, 'codex', 'bin', 'codex.js');
+    const binary = join(global, `codex-${os}-${process.arch}`, 'vendor', triple, 'bin', 'codex');
+    const bin = join(root, '.bun', 'bin');
+    for (const dir of [dirname(launcher), dirname(binary), bin]) mkdirSync(dir, { recursive: true });
+    // The launcher tells the binary how it was installed; the binary alone cannot tell.
+    writeFileSync(launcher, `#!/bin/sh\nFAKE_MANAGED_BY_NPM=1 exec '${process.execPath}' "$@"\n`);
+    writeFileSync(binary, `#!/bin/sh\nexec '${process.execPath}' "$@"\n`);
+    chmodSync(launcher, 0o755);
+    chmodSync(binary, 0o755);
+    symlinkSync('../install/global/node_modules/@openai/codex/bin/codex.js', join(bin, 'codex'));
+    const saved = process.env['PATH'];
+    process.env['PATH'] = [bin, saved].join(delimiter);
+    try {
+      const { client, state } = await start('command', 'update-launched', undefined, () => ({ kind: 'path', value: 'codex' }));
+      expect(resolveCommand({ detect: {}, executable: [{ kind: 'path', value: 'codex' }], isolation: {} })?.executable).toBe(realpathSync(binary));
+      await client.call('providers.updates', { refresh: true });
+      const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'failed' || (list[0]?.state === 'idle' && list[0]?.current === '1.2.0'), 20000);
+      await client.call('providers.update', { providerId: 'update-fake' });
+      expect(only(await changed)).toMatchObject({ state: 'idle', current: '1.2.0', message: null });
+      expect(readFileSync(state, 'utf8')).toBe('1.2.0');
+      await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+    } finally {
+      process.env['PATH'] = saved;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test.skipIf(!unixUser)('an npm install is updated into its own prefix, and one this user cannot write is refused before its updater runs', async () => {
@@ -505,7 +583,10 @@ describe('harness updates', () => {
   });
 
   test('an update asked for during a check waits for it, and a second one is refused while the first runs', async () => {
-    const { client } = await start('npm');
+    // The updater holds until the test opens its gate: "while the first runs" must not
+    // depend on a real updater outlasting a turn start and a round trip, which a fast
+    // runner's does not.
+    const { client, state } = await start('npm', 'update-gated');
     await client.call('providers.updates', { refresh: true });
 
     const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
@@ -533,6 +614,7 @@ describe('harness updates', () => {
     const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
     await checked;
     await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/already updating/);
+    writeFileSync(`${state}.go`, '');
     const updated = only(await changed);
     await waitFor(() => harness?.core.journal.getTurn(turn.id)?.status === 'done', 20000);
     expect(harness!.core.journal.getTurn(turn.id)!.startedAt!).toBeGreaterThanOrEqual(updated.checkedAt!);
@@ -553,6 +635,65 @@ describe('harness updates', () => {
     const loaded = await client.call('providers.reload', {});
     expect(loaded.rejected).toHaveLength(1);
     expect(loaded.rejected[0]?.field).toContain('update.latestNpm');
+  });
+
+  test('one click starts every agent and Boite together, and Boite installs only once the agents are done', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'boite-update-everything-'));
+    let stops = 0;
+    let downloads = 0;
+    const platform: ServerUpdatePlatform = {
+      inspect: async () => ({ directory: join(root, 'install'), executable: join(root, 'install', 'boite-core'), service: 'test.service' }),
+      launch: async (_run, _executable, plan) => { writeFileSync(join(dirname(plan), 'ready'), ''); },
+      control: async () => undefined,
+      mainPid: async () => process.pid,
+    };
+    try {
+      const { client, state } = await start('npm', 'update', undefined, undefined, {
+        onShutdown: () => { stops++; },
+        serverUpdates: { platform, pollMs: 5,
+          findOffer: async () => ({ version: '2.0.0-beta.2', publishedAt: '2026-10-01T00:00:00Z', url: 'https://example.test/signed.zip', signature: 'signed' }),
+          prepare: async () => { downloads++; return 'a'.repeat(64); } },
+      });
+      await client.call('providers.updates', { refresh: true });
+      expect((await client.call('core.updateStatus', { refresh: true })).phase).toBe('available');
+
+      // Bad requests are refused by field before anything starts.
+      await expect(client.call('core.updateEverything', { agents: 'update-fake' as never, server: null })).rejects.toThrow(/agents/);
+      await expect(client.call('core.updateEverything', { agents: [], server: 7 as never })).rejects.toThrow(/server/);
+
+      // The registry read after the updater is the moment no process of the update runs:
+      // held here, it is the gap an idle restart would slip into.
+      let open = (): void => {};
+      const registry = new Promise<void>((done) => (open = done));
+      let asked = false;
+      harness!.core.updates.npmLatest = async () => {
+        asked = true;
+        await registry;
+        return '1.1.0';
+      };
+      const answer = await client.call('core.updateEverything', { agents: ['update-fake', 'not-a-provider' as never], server: '2.0.0-beta.2' });
+      expect(answer.agents).toEqual(['update-fake']);
+      expect(answer.failed.map((entry) => entry.providerId)).toEqual(['not-a-provider']);
+      expect(answer.serverError).toBeNull();
+      // The fixture's download is instant: by the answer it may already wait for the gate.
+      expect(['downloading', 'waiting']).toContain(answer.server.phase);
+
+      // The download ran beside the agent's update; the install waits for it to land.
+      await waitFor(() => asked);
+      expect(readFileSync(state, 'utf8')).toBe('1.2.0');
+      expect(harness!.core.procs.liveCount('update:update-fake')).toBe(0);
+      await waitFor(() => harness!.core.serverUpdates.snapshot().phase === 'waiting');
+      expect(downloads).toBe(1);
+      await Bun.sleep(60);
+      expect(harness!.core.serverUpdates.snapshot().phase).toBe('waiting');
+      expect(harness!.core.updates.updating('update-fake')).toBe(true);
+      expect(stops).toBe(0);
+
+      open();
+      await waitFor(() => harness!.core.serverUpdates.snapshot().phase === 'installing', 20000);
+      await waitFor(() => stops === 1);
+      expect(harness!.core.updates.updating('update-fake')).toBe(false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   test('an updater waiting on a check cannot start after the store closes', async () => {

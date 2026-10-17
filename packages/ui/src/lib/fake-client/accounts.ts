@@ -1,5 +1,5 @@
 /** Accounts, their quotas and the fake sign-in a login runs. */
-import { RpcErrorCode, subscriptionProxyOf, type Account, type AccountQuota, type GatewayQuotaEntry, type QuotaWindow, type RpcEvents, type SubscriptionProxyQuotas } from '@boite/contracts';
+import { RpcErrorCode, subscriptionProxyOf, threadActive, type Account, type AccountQuota, type GatewayQuotaEntry, type QuotaWindow, type RpcEvents, type SubscriptionProxyQuotas } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { sessionStatus } from './checks';
 import { DATA_DIR } from './shared';
@@ -59,8 +59,16 @@ function quotas(ctx: FakeContext): AccountQuota[] {
 }
 
 function accountQuotas(ctx: FakeContext): AccountQuota[] {
-  const accounts = [...ctx.accounts, { id: 'quota:antigravity-cli', providerId: 'antigravity', label: 'Antigravity CLI' }];
+  const accounts = [...ctx.accounts, { id: 'quota:antigravity-cli', providerId: 'antigravity-cli', label: 'Antigravity CLI' }];
   const proxied = (providerId: string) => subscriptionProxyOf(ctx.settings, ctx.providers.find(provider => provider.id === providerId)) !== null;
+  // As the core: a managed Antigravity account reads its own sign-in, so one
+  // not signed in yet reports why instead of limits.
+  const signedOut = (account: (typeof accounts)[number]) => account.providerId === 'antigravity'
+    && 'status' in account && account.status === 'unauthenticated';
+  // As the core: the agy source is read by default once agy is found, until the user picks.
+  const enabled = (id: string) => id === 'quota:antigravity-cli'
+    ? ctx.quotaEnabled[id] ?? ctx.providers.find((provider) => provider.id === 'antigravity-cli')?.available === true
+    : ctx.quotaEnabled[id] !== false;
   return accounts.map((account, index) => ({
     ...(ctx.quotaExtras && ctx.quotaEnabled[account.id] !== false && ['claude', 'codex'].includes(account.providerId) ? {
       resetCredits: { availableCount: Math.max(0, (account.providerId === 'claude' ? 1 : 2) - (ctx.quotaResetsUsed[account.id] ?? 0)), nextExpiresAt: Date.now() + 7 * 86400_000 },
@@ -69,11 +77,11 @@ function accountQuotas(ctx: FakeContext): AccountQuota[] {
         : { kind: 'balance' as const, enabled: null, remaining: 42, limit: null, unlimited: false },
     } : {}),
     accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' || account.providerId === 'opencode-v2' ? 'OpenCode Go' : ctx.providers.find((p) => p.id === account.providerId)?.name ?? account.providerId,
-    label: account.label, enabled: account.id === 'quota:antigravity-cli' ? ctx.quotaEnabled[account.id] === true : ctx.quotaEnabled[account.id] !== false,
+    label: account.label, enabled: enabled(account.id),
     // The CLI's own account reports nothing: its limits come from the `quota:antigravity-cli` source.
-    status: proxied(account.providerId) || ctx.providers.find(provider => provider.id === account.providerId)?.enabled === false || account.providerId === 'echo' || account.providerId === 'pi' || account.providerId === 'antigravity-cli' || account.id === 'a-antigravity' ? 'unsupported' : ctx.quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? 'disabled' : 'ready',
-    checkedAt: Date.now(), error: null,
-    windows: proxied(account.providerId) || ctx.quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? [] : (ctx.quotaResetsUsed[account.id] ?? 0) > 0 ? [
+    status: proxied(account.providerId) || ctx.providers.find(provider => provider.id === account.providerId)?.enabled === false || account.providerId === 'echo' || account.providerId === 'pi' || account.providerId === 'antigravity-cli' && account.id !== 'quota:antigravity-cli' ? 'unsupported' : !enabled(account.id) ? 'disabled' : signedOut(account) ? 'unavailable' : 'ready',
+    checkedAt: signedOut(account) ? null : Date.now(), error: signedOut(account) && ctx.quotaEnabled[account.id] !== false ? 'Sign in to Antigravity in Providers to see its limits.' : null,
+    windows: proxied(account.providerId) || !enabled(account.id) || signedOut(account) ? [] : (ctx.quotaResetsUsed[account.id] ?? 0) > 0 ? [
       { id: 'primary', label: '5 hours', usedPercent: 0, resetsAt: null },
       { id: 'secondary', label: 'Weekly', usedPercent: 0, resetsAt: null },
     ] : [
@@ -219,7 +227,7 @@ export function accountMethods(ctx: FakeContext) {
       const account = ctx.accounts.find(a => a.id === params.accountId);
       if (!account) throw ctx.notFound('account', params.accountId);
       // As the core: only a turn in flight keeps the account, a conversation that names it does not.
-      const busy = [...ctx.threads.values()].some((t) => t.accountId === params.accountId && (['queued', 'running', 'waiting'].includes(t.status) || ctx.inFlight.has(t.id)));
+      const busy = [...ctx.threads.values()].some((t) => t.accountId === params.accountId && (threadActive(t.status) || ctx.inFlight.has(t.id)));
       if (busy) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this account is running a turn; stop it or wait for it before removing the account', data: { accountId: params.accountId } });
       }
@@ -302,7 +310,7 @@ export function accountMethods(ctx: FakeContext) {
       const id = `login:${account.id}`;
       const cwd = account.isolationDir ?? 'C:\\Users\\you';
       if (!ctx.terminals.has(id)) {
-        ctx.terminals.set(id, { cwd, output: `PS ${cwd}> & ${provider.id} auth login\r\n${FAKE_LOGIN_MENU}`, line: '' });
+        ctx.terminals.set(id, { cwd, output: `PS ${cwd}> & ${provider.id} auth login\r\n${FAKE_LOGIN_MENU}`, line: '', history: [] });
       }
       const shell = ctx.terminals.get(id)!;
       return { id, cwd: shell.cwd, output: shell.output };

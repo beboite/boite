@@ -66,7 +66,7 @@ test.skipIf(process.platform !== 'linux' || process.env.BOITE_E2E_SERVER_UPDATE 
     writeFileSync(join(next, 'boite-core'), `#!${process.execPath}\nBun.serve({hostname:'127.0.0.1',port:${port},fetch:()=>Response.json({ok:true,version:'2.1.0',pid:process.pid})});\n`);
     writeFileSync(join(next, 'ui', 'index.html'), '<!doctype html><title>Updated server</title>');
     const archive = serverBundle(join(next, 'boite-core'), join(next, 'ui'), '2.1.0');
-    const payload = join(operation, 'payload.zip'); writeFileSync(payload, archive); unpackPayload(payload, join(operation, 'stage'), '2.1.0');
+    const payload = join(operation, 'payload.zip'); writeFileSync(payload, archive); await unpackPayload(payload, join(operation, 'stage'), '2.1.0');
     const plan: ServerUpdatePlan = { id, installation: { directory: install, executable, service: unit }, dataDir: data,
       previousVersion: before.version, version: '2.1.0', originalPid: before.pid, healthUrl: `${url}/health`, archiveHash: createHash('sha256').update(archive).digest('hex') };
     const file = join(operation, 'plan.json'); writeFileSync(file, JSON.stringify(plan), { mode: 0o600 });

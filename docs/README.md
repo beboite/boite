@@ -16,25 +16,26 @@
 - [Context](context.md): context usage and compaction.
 - [Prompt cache timer](prompt-cache.md): how long a thread's cache stays warm, per provider, and the sources.
 - [Agent coordination](coordination.md): messages between agents, machine links and limits.
-- [Stewards](stewards.md): an agent assigned to projects that drives their threads while the owner is away.
 - [Groups](groups.md): machines that connect to each other, their phones, Tailscale addresses and trust.
-- [Persistent agents](agents.md): the Agents page, robots, planned tasks, threads an agent runs, groups, missions, memory and background execution.
+- [Persistent agents](agents.md): the Agents page, robots, projects entrusted to an agent, its memory pass and brain folder, planned tasks, groups, missions and background execution.
 - [Subagents](delegation.md): child conversations on by default, model profiles, live steering and usage.
 - [Workflows](workflows.md): JSON plans of delegated steps, fan-out, conditions, templates and the graph.
+- [Context modes](context-modes.md): starting a conversation without the user's instruction files, guides, MCP servers or hooks, with rules of its own.
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.
 - [Analytics](analytics.md): optional telemetry, consent, collected fields and data controls.
+- [Diagnostics](diagnostics.md): Boite's own logs, the Settings page, anonymized exports, issue reports and what a client reports.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
 - [The right panel](panel.md): browser, changes, files, tasks, workflows and trace beside the chat.
 - [The agent's browser](browser.md): the headless browser an agent drives on its machine, watched from any device.
 - [Devices](devices.md): iOS Simulators and Android emulators the agent opens in the Device panel.
 - [Chat files and previews](chat-files.md): files an agent publishes, file links, inline previews, and the pages an agent draws in its answer.
-- [Experiments](experiments.md): browser comments, resident agents and other unfinished switches.
+- [Experiments](experiments.md): browser comments, resident agents, edge scrollbars, load on press and other unfinished switches.
 - [The thread terminal](terminal.md): the shell under the chat, and sign-ins that need one.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.
 - [Titles](titles.md): automatic and manual conversation titles.
 - [Session import](imports.md): bringing in a Claude Code conversation.
 - [Phone access](phone.md): pairing, permissions and offline behavior.
-- [Android app](android.md): the APK each nightly publishes, its host and its signing key.
+- [Android app](android.md): the nightly APK, one built for another host, and its signing key.
 - [Voice dictation](voice.md): local Whisper, API transcription and microphone access.
 - [Headless server](server.md): Docker, persistent storage and remote access.
 - [Plugins](plugins.md): recommended plugins, adding one from a git URL, and writing your own.
@@ -43,6 +44,7 @@
 
 - [Contributing](../CONTRIBUTING.md): setup and checks before a pull request.
 - [Development](development.md): local runs, test fixtures and captures.
+- [Adding an RPC method](development.md#adding-an-rpc-method): contract, domain handlers, permissions and refusal tests.
 - [Architecture](architecture.md): the core, clients, journal and drivers.
 - [Providers](providers.md): descriptors, protocols and supported capabilities.
 - [Process tracing](trace.md): resource use and platform limits.

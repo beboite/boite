@@ -52,10 +52,13 @@ describe('claude driver: questions and background work', () => {
     fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [] }));
     fake.emit(sdk({ type: 'system', subtype: 'task_notification', session_id: sessionId, task_id: 'bash-1', tool_use_id: 'toolu_bg', status: 'completed', output_file: '', summary: 'sleep 25 finished' }));
     fake.emit(init(sessionId));
+    fake.emit(sdk({ type: 'system', subtype: 'api_retry', session_id: sessionId, attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 529, error: 'overloaded' }));
     fake.emit(assistant(sessionId, [{ type: 'text', text: 'FINISHED' }]));
     fake.emit(success(sessionId));
     await cleared;
     const turn = await woke;
+    // Output adopted before its turn opened is diagnosed once, not again when handed over.
+    expect(await harness.core.logs.select(record => record.event === 'driver.api.retry' && record.threadId === threadId, 10)).toHaveLength(1);
     expect(turn.status).toBe('done');
     expect(turn.execution?.operation).toBe('background');
     const messages = harness.core.journal.listMessages(threadId).filter((m) => m.turnId === turn.id);
@@ -66,6 +69,34 @@ describe('claude driver: questions and background work', () => {
     expect(calls[0]!.prompts).toHaveLength(1);
     // Nothing left to keep it for: the cold rule closes it now.
     await waitFor(() => (queries[0] as unknown as { ended: boolean }).ended);
+  });
+
+  test('a run the CLI starts by itself and retries before any output holds the CLI and fails its turn visibly', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const sessionId = 'sess-bg-retry';
+    scripted((fake) => {
+      fake.emit(init(sessionId));
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [{ task_id: 'mon-ci', task_type: 'monitor', description: 'watch CI' }] }));
+      fake.emit(success(sessionId));
+    });
+    expect(await runTurn(client, threadId, 'watch the CI')).toBe('done');
+    const fake = queries[0]!;
+    const opened = client.next('turn.started', (turn) => turn.threadId === threadId, 5000);
+    const woke = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    // The monitor ends, the CLI answers its notification, and the API refuses:
+    // no output until every retry is spent, which takes minutes for real.
+    fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [] }));
+    fake.emit(sdk({ type: 'system', subtype: 'task_notification', session_id: sessionId, task_id: 'mon-ci', status: 'completed', output_file: '', summary: 'CI failed' }));
+    fake.emit(sdk({ type: 'system', subtype: 'api_retry', session_id: sessionId, attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 503, error: 'server_error' }));
+    // The wake turn opens on the retry alone and keeps the CLI from the idle window.
+    expect((await opened).execution?.operation).toBe('background');
+    expect(fake.closes).toBe(0);
+    const said = 'API Error: 503 no available subscription for this model';
+    fake.emit(sdk({ ...(success(sessionId) as object), is_error: true, result: said, api_error_status: 503 }));
+    const turn = await woke;
+    expect(turn.status).toBe('error');
+    expect(turn.error).toContain('no available subscription');
   });
 
   test('a resume that reports the dead background work of the previous CLI still answers the prompt', async () => {
@@ -220,13 +251,36 @@ describe('claude driver: questions and background work', () => {
     const fake = queries[0]!;
     const threads = harness.core.threads.deferred;
     const wake = threads.wake.bind(threads);
-    threads.wake = () => {};
+    const woken = Promise.withResolvers<void>();
+    threads.wake = () => woken.resolve();
     fake.emit(assistant(sessionId, [{ type: 'text', text: 'ON ITS OWN' }]));
-    await Bun.sleep(50);
+    await woken.promise;
     threads.wake = wake;
+    await client.call('threads.update', { threadId, model: 'claude-opus-5' });
+    const control = Promise.withResolvers<void>();
+    const changing = Promise.withResolvers<void>();
+    const setModel = fake.setModel.bind(fake);
+    fake.setModel = async model => {
+      changing.resolve();
+      await control.promise;
+      await setModel(model);
+    };
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
-    await client.call('turns.start', { threadId, prompt: 'second' });
-    await Bun.sleep(100);
+    const turn = await client.call('turns.start', { threadId, prompt: 'second' });
+    await changing.promise;
+    try {
+      // A follow-up must not pass the initial prompt while its settings are pending.
+      expect(calls[0]!.prompts).toEqual(['first']);
+      expect(await client.call('turns.steer', { threadId, turnId: turn.id, prompt: 'follow-up', clientRequestId: 'claude_takeover_01' })).toEqual({ accepted: false });
+      expect(calls[0]!.prompts).toEqual(['first']);
+    } finally {
+      control.resolve();
+    }
+    await waitFor(() => calls[0]?.prompts.length === 2);
+    expect(calls[0]!.prompts).toEqual(['first', 'second']);
+    expect(await client.call('turns.steer', { threadId, turnId: turn.id, prompt: 'follow-up', clientRequestId: 'claude_takeover_01' })).toEqual({ accepted: true });
+    await waitFor(() => calls[0]?.prompts.length === 3);
+    expect(calls[0]!.prompts).toEqual(['first', 'second', 'follow-up']);
     // The CLI's own run ends: that result is not the user's.
     fake.emit(success(sessionId));
     await Bun.sleep(100);
@@ -234,6 +288,47 @@ describe('claude driver: questions and background work', () => {
     fake.emit(assistant(sessionId, [{ type: 'text', text: 'answer to second' }]));
     fake.emit(success(sessionId));
     expect((await finished).status).toBe('done');
+    harness.core.settings.set({ warmProcessMinutes: 0 });
+  });
+
+  test('a prompt the CLI folds into the run a monitor event started ends with that run, stopped tasks and all', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const sessionId = 'sess-bg-folded';
+    harness.core.settings.set({ warmProcessMinutes: 5 });
+    scripted((fake) => {
+      fake.emit(init(sessionId));
+      fake.emit(sdk({ type: 'system', subtype: 'task_started', session_id: sessionId, task_id: 'mon-pr', description: 'watch PR', task_type: 'monitor' }));
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [{ task_id: 'mon-pr', task_type: 'monitor', description: 'watch PR' }] }));
+      fake.emit(assistant(sessionId, [{ type: 'text', text: 'watching' }]));
+      fake.emit(success(sessionId));
+    });
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    // A monitor event starts a run of the CLI's own; the core hears of it as
+    // the next turn comes in.
+    const fake = queries[0]!;
+    const threads = harness.core.threads.deferred;
+    const wake = threads.wake.bind(threads);
+    const woken = Promise.withResolvers<void>();
+    threads.wake = () => woken.resolve();
+    fake.emit(init(sessionId));
+    fake.emit(assistant(sessionId, [{ type: 'tool_use', id: 'toolu_gh', name: 'Bash', input: { command: 'gh pr checks' } }]));
+    await woken.promise;
+    threads.wake = wake;
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'answer in json' });
+    await waitFor(() => calls[0]?.prompts.length === 2);
+    // The CLI takes the prompt between tool rounds, stops its monitor and
+    // answers: one result, which names the prompt it folded in.
+    fake.emit(toolResult(sessionId, 'toolu_gh', 'pending'));
+    fake.emit(assistant(sessionId, [{ type: 'tool_use', id: 'toolu_stop', name: 'TaskStop', input: { task_id: 'mon-pr' } }]));
+    fake.emit(sdk({ type: 'system', subtype: 'task_notification', session_id: sessionId, task_id: 'mon-pr', status: 'stopped', output_file: '', summary: 'stopped' }));
+    fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [] }));
+    fake.emit(toolResult(sessionId, 'toolu_stop', 'Successfully stopped task: mon-pr'));
+    fake.emit(assistant(sessionId, [{ type: 'text', text: '{"status":"pending"}' }]));
+    fake.emit(sdk({ ...(success(sessionId) as object), user_message_uuid: calls[0]!.ids[1], user_message_uuids: [calls[0]!.ids[1]] }));
+    expect((await finished).status).toBe('done');
+    expect((await client.call('threads.get', { threadId })).status).not.toBe('running');
     harness.core.settings.set({ warmProcessMinutes: 0 });
   });
 

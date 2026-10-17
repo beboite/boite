@@ -37,16 +37,22 @@ export function markQueuedStopped(core: Core, turnId: TurnId): void {
  * running is closed as failed. Left open, it keeps its spinner and its clock
  * ticking on a turn that is over, and reads as an agent still at work.
  */
-export function closeTools(core: Core, threadId: ThreadId, turnId: TurnId): void {
-  // Read whole first: each close rewrites a row of the table being walked.
-  for (const { id: messageId, parts } of [...core.journal.walkTurnMessages(threadId, turnId)]) {
-    parts.forEach((part, partIndex) => {
-      if (part.type !== 'tool' || part.status !== 'running') return;
+export function closeTools(core: Core, threadId: ThreadId, turnId: TurnId): number {
+  let closed = 0;
+  // Read whole first: each close rewrites a row of the table being walked. Large
+  // values stay in part_blobs until a running tool is found; only that part reads them back.
+  for (const { id: messageId, parts } of [...core.journal.walkTurnMessages(threadId, turnId, { blobs: false })]) {
+    parts.forEach((stored, partIndex) => {
+      if (stored.type !== 'tool' || stored.status !== 'running') return;
+      const part = core.journal.messagePart(messageId, partIndex)?.part;
+      if (part?.type !== 'tool') return;
+      closed += 1;
       const payload = { messageId, partIndex, part: { ...part, status: 'error' as const } };
       core.journal.append({ type: 'message.part', threadId, version: 1, payload }, () => core.journal.setMessagePart(messageId, partIndex, payload.part));
       core.bus.emit('message.part', { threadId, ...payload });
     });
   }
+  return closed;
 }
 
 /** Compare the durable execution identity before writing a late provider result. */
@@ -89,6 +95,7 @@ export function reportSettlementError(core: Core, threadId: ThreadId, turnId: Tu
 export async function settleTurn(core: Core, state: Settlement): Promise<Completion | null> {
   const { running, finished } = state;
   let retry = 0;
+  const settleAt = performance.now();
   for (;;) {
     if (core.journal.isClosed()) return null;
     try {
@@ -96,12 +103,30 @@ export async function settleTurn(core: Core, state: Settlement): Promise<Complet
       // a later terminal rollback cannot lose the streamed answer.
       core.journal.releaseTurn(running.id);
       core.bus.flush();
-      return core.journal.db.transaction(() => {
-        if (!ownsTurn(core.journal.getTurn(running.id), state)) return null;
-        if (state.result.status !== 'done') closeTools(core, running.threadId, running.id);
+      // Logged once the transaction commits: a rollback must not leave a record of what did not
+      // happen, and a diagnostic storage failure must not abort or retry the settlement.
+      const notes: (() => void)[] = [];
+      const settled = core.journal.db.transaction(() => {
+        const owned = core.journal.getTurn(running.id);
+        if (!ownsTurn(owned, state)) {
+          notes.push(() => core.logs.warn(`Turn result ${state.result.status} discarded: the journal holds the turn as ${owned?.status ?? 'missing'} with another execution, so a newer run owns it`, {
+            source: 'turns', event: 'turn.settlement.abandoned', threadId: running.threadId, turnId: running.id, data: { result: state.result.status, journalStatus: owned?.status ?? null },
+          }));
+          return null;
+        }
+        const toolsClosed = state.result.status !== 'done' ? closeTools(core, running.threadId, running.id) : 0;
+        if (toolsClosed > 0) notes.push(() => core.logs.info(`${toolsClosed} tool calls still running were marked failed because the turn ended ${state.result.status}`, { source: 'turns', event: 'turn.tools-closed', threadId: running.threadId, turnId: running.id, data: { tools: toolsClosed, status: state.result.status } }));
         core.journal.append({ type: 'turn.finished', threadId: running.threadId, version: 1, payload: finished }, () => core.journal.putTurn(finished));
-        return finishThread(core, state);
+        const completion = finishThread(core, state);
+        const attempts = retry;
+        if (attempts > 0) notes.push(() => core.logs.info(`Turn settled after ${attempts} failed persistence attempts`, { source: 'turns', event: 'turn.settlement.recovered', threadId: running.threadId, turnId: running.id, durationMs: performance.now() - settleAt, data: { retries: attempts } }));
+        if (!completion.threadOwned) notes.push(() => core.logs.debug('Turn settled, but a newer turn owns the thread status', { source: 'turns', event: 'turn.settlement.not-owner', threadId: running.threadId, turnId: running.id }));
+        return completion;
       })();
+      for (const note of notes) {
+        try { note(); } catch { /* A diagnostic storage failure must not break a committed settlement. */ }
+      }
+      return settled;
     } catch (error) {
       reportSettlementError(core, running.threadId, running.id, `persistence attempt ${++retry}`, error);
       if (core.stopping || core.journal.isClosed()) return null;

@@ -1,8 +1,9 @@
 /** Core settings, the scheduler they size, keybindings and telemetry. */
-import { KEYBINDING_COMMANDS, parseChord, RpcErrorCode, checkSettingsPatch } from '@boite/contracts';
+import { KEYBINDING_COMMANDS, parseChord, RpcErrorCode, checkSettingsPatch, keepLaterFavorites } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 import { gatewayQuotas } from './accounts';
+import { settleSettings } from './requests';
 
 export function settingsMethods(ctx: FakeContext) {
   return {
@@ -15,6 +16,12 @@ export function settingsMethods(ctx: FakeContext) {
       if (key !== undefined && key !== null && (typeof key !== 'string' || key.length > 4096 || !key.trim() || /[\u0000-\u0020\u007f]/.test(key))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'subscriptionProxy.key must be null or a non-empty token without whitespace' });
       const checked = checkSettingsPatch({ subscriptionProxy });
       if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
+      // As the core: local mode stores the Douane plugin's loopback URLs, whatever was sent.
+      const proxy = checked.patch.subscriptionProxy;
+      if (proxy?.mode === 'local') {
+        const port = ctx.plugins.gatewayPort('douane');
+        checked.patch.subscriptionProxy = { ...proxy, kind: 'douane', baseUrl: `http://127.0.0.1:${port}/v1`, dashboardUrl: `http://127.0.0.1:${port}/admin/` };
+      }
       ctx.settings = { ...ctx.settings, ...checked.patch };
       ctx.emit('settings.updated', { ...ctx.settings });
       // As the core: another gateway starts its quotas over.
@@ -75,9 +82,10 @@ export function settingsMethods(ctx: FakeContext) {
       if (titleModel && ctx.providers.find(p => p.id === titleModel.providerId)?.titles !== true) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `titleModel names ${titleModel.providerId}, which is not a loaded provider that writes titles`, data: { field: 'titleModel' } });
       }
-      ctx.settings = { ...ctx.settings, ...checked.patch };
+      ctx.settings = { ...ctx.settings, ...keepLaterFavorites(ctx.settings, checked.patch) };
       ctx.emit('scheduler.updated', structuredClone(ctx.scheduler));
       ctx.emit('settings.updated', { ...ctx.settings });
+      settleSettings(ctx, ctx.settings);
       if (checked.patch.subscriptionProxy) ctx.emit('subscriptionProxy.quotasUpdated', gatewayQuotas(ctx));
       return { ...ctx.settings };
     },

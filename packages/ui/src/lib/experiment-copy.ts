@@ -16,6 +16,8 @@ export function experimentCopy(): Record<ExperimentId, { title: string; hint: st
     'preview-comments': strings.experiments.previewComments,
     'resident-agents': strings.experiments.residentAgents,
     goal2: strings.experiments.goal2,
-    whip: strings.experiments.whip
+    whip: strings.experiments.whip,
+    'edge-scrollbars': strings.experiments.edgeScrollbars,
+    'press-preload': strings.experiments.pressPreload
   };
 }

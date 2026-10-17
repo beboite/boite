@@ -1,8 +1,10 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
-import type { PullRequestsRpcMethods, PullRequestsRpcEvents } from './pull-requests';
+import type { PullRequestsRpcMethods, PullRequestsRpcEvents, PullRequestWatch } from './pull-requests';
 import type { MobileDevicesRpcMethods, MobileDevicesRpcEvents } from './mobile-devices';
+import type { CoreLogContext, CoreLogLevel, CoreLogRecord, CoreLogsQuery, DiagnosticsRpcMethods } from './diagnostics';
+export * from './diagnostics';
 export * from './pull-requests';
 export * from './browser';
 export * from './browser-remote';
@@ -11,6 +13,9 @@ export * from './agents';
 export * from './workflows';
 export * from './workflow-plan';
 export * from './thread-focus';
+export * from './context-mode';
+export * from './delegation-input';
+import type { ContextPreset, ContextRequest, ThreadContextMode } from './context-mode';
 
 /**
  * Boite 2 wire contract: the JSON-RPC methods and events between the core
@@ -356,8 +361,14 @@ export interface ModelInfo {
   legacy?: boolean;
   /** A small mark next to the name in the picker. */
   badge?: 'new';
-  /** Reasoning effort this model offers. A model without it has no effort control. */
-  effort?: { levels: EffortLevel[]; default: string };
+  /**
+   * Reasoning effort this model offers. A model without it has no effort control.
+   * `default` is the level the agent runs this model on when none is picked;
+   * absent when the agent decides it itself and the core cannot read it (pi
+   * knows only the level of the model its session is on), so a thread on that
+   * model sends no level until the user picks one.
+   */
+  effort?: { levels: EffortLevel[]; default?: string };
   /** Native service tiers advertised for this model; absent means no speed control. */
   speeds?: SpeedTier[];
 }
@@ -580,7 +591,8 @@ export interface SubscriptionProxyQuotas {
 /** Provider-reported limits, never inferred from Boite's token ledger. */
 export interface AccountQuota extends QuotaReading {
   /**
-   * Account id, `quota:antigravity-cli` for the opt-in local CLI quota source, or
+   * Account id, `quota:antigravity-cli` for the agy login's quota source (on by
+   * default once agy is found), or
    * `proxy:<provider>:<entry>` for an entry of the subscription gateway.
    */
   accountId: AccountId;
@@ -635,7 +647,7 @@ export interface PluginArtifact {
   sha256: string;
 }
 
-/** What Boite does with the executable: account pools, a desktop app, or both. */
+/** What Boite does with the executable: account pools, a desktop app, a gateway, or several. */
 export interface PluginProvides {
   /** The executable answers the account pool commands for these providers. */
   accountPools?: { providers: ProviderId[] };
@@ -645,12 +657,55 @@ export interface PluginProvides {
    * token in `BOITE_TOKEN`. No fields today.
    */
   desktopApp?: Record<string, never>;
+  /**
+   * The executable is a subscription gateway speaking Douane's runtime
+   * contract: the core runs it in the background with `--config <file>` it
+   * writes, on a loopback port, and the subscription proxy's local mode points
+   * at it. No fields today.
+   */
+  gateway?: Record<string, never>;
+}
+
+/** Where a gateway plugin stands. Null on a plugin that provides no gateway. */
+export interface PluginGatewayState {
+  /** Whether the core runs it. True after a first install, kept across restarts and updates. */
+  enabled: boolean;
+  /**
+   * Whether the core starts it when the core starts, whatever a stop left
+   * `enabled` at. True after a first install. Absent from cores older than
+   * `plugins.autostart`.
+   */
+  autostart?: boolean;
+  /**
+   * `starting`: launched and not answering `/health` yet, or waiting to start
+   * again after a crash. `updating`: a newer release waits for the requests in
+   * flight to end. `crashed`: it failed four times in five minutes; it waits
+   * for the owner.
+   */
+  status: 'stopped' | 'starting' | 'running' | 'updating' | 'crashed';
+  /** The loopback port it listens on, or will at its next start. */
+  port: number;
+  /** What its `/health` reported, once it answered. */
+  version: string | null;
+  pid: number | null;
+  exitCode: number | null;
+  /** Why it is not running, when Boite knows. Never its own output. */
+  error: string | null;
+  startedAt: Timestamp | null;
+  /** Where its configuration, sign-ins and database live; an uninstall keeps them. */
+  dataDir: string;
 }
 
 /** Where a desktop-app plugin stands. Null on a plugin that provides no desktop app. */
 export interface PluginAppState {
   /** Whether the core starts the app. True after a first install, kept across restarts and updates. */
   enabled: boolean;
+  /**
+   * Whether the core starts the app when the core starts, whatever a stop
+   * left `enabled` at. True after a first install. Absent from cores older
+   * than `plugins.autostart`.
+   */
+  autostart?: boolean;
   /**
    * `stopped`: not running, after a stop, a clean exit or before the first start.
    * `crashed`: it failed four times in five minutes; it waits for the owner.
@@ -668,8 +723,14 @@ export interface PluginAppState {
 /**
  * What `ui.reveal` shows in the owner's desktop window: a thread, an agent's
  * page, or the app updates in Settings. `agentId` is 1 to 200 characters.
+ * `coreId` names the machine the thread or the agent lives on: another member
+ * of this core's group or a machine trusted for coordination. Missing, or this
+ * core's own id, means this core.
  */
-export type UiRevealTarget = { kind: 'thread'; threadId: ThreadId } | { kind: 'agent'; agentId: string } | { kind: 'update' };
+export type UiRevealTarget =
+  | { kind: 'thread'; threadId: ThreadId; coreId?: string }
+  | { kind: 'agent'; agentId: string; coreId?: string }
+  | { kind: 'update' };
 
 export interface PluginManifest {
   schema: 1;
@@ -703,6 +764,12 @@ export interface PluginRejected {
   message: string;
 }
 
+/**
+ * Where a move sends the logins: the configured proxy's Douane (absent), or
+ * `plugin`, the Douane plugin this core runs, whatever the proxy points at.
+ */
+export type GatewayMoveTarget = 'proxy' | 'plugin';
+
 export interface PluginState {
   id: string;
   name: string;
@@ -731,6 +798,35 @@ export interface PluginState {
   rejected: PluginRejected | null;
   /** The desktop app the plugin provides, null when it provides none. */
   app: PluginAppState | null;
+  /** The gateway the plugin provides, null when it provides none. Absent from cores older than gateway plugins. */
+  gateway?: PluginGatewayState | null;
+  /**
+   * Where Boite looks for this recommended plugin's newer releases, and what
+   * it last found there. Null when its entry names no update source. Absent
+   * from cores older than update sources.
+   */
+  updates?: PluginUpdates | null;
+}
+
+/**
+ * A recommended plugin's update source and its last check. The source is the
+ * reviewed list's, never the plugin's own: docs/plugins.md, Updating.
+ */
+export interface PluginUpdates {
+  /** The https repository and the ref whose `boite-plugin.json` is read. */
+  source: { url: string; ref: string };
+  /** A check is running now. */
+  checking: boolean;
+  /** When the last check finished, successful or not. */
+  checkedAt: Timestamp | null;
+  /** When the core checks again by itself, null when it does not. */
+  nextCheckAt: Timestamp | null;
+  /** A newer release the last check found and accepted; `availableVersion` then names it. */
+  available: { version: string; commit: string; checkedAt: Timestamp } | null;
+  /** Why the manifest read there was not offered: not newer, another id, no artifact here. Not an error. */
+  ignored: string | null;
+  /** Why the last check could not read the source. Checks back off after one. */
+  error: string | null;
 }
 
 /** What `plugins.inspect` read, shown to the owner before anything is downloaded. */
@@ -777,6 +873,13 @@ export interface Project {
   worktreeDefault?: boolean;
   /** Automatically hide a quiescent worktree conversation after its exact PR merges. Missing means enabled. */
   autoArchiveMergedPr?: boolean;
+  /**
+   * Remove a worktree the core created once every thread in it is archived or
+   * done and its work is settled: the exact head merged in a PR, or nothing
+   * missing from every other branch. Absent from a core older than this field;
+   * otherwise true unless the owner turned it off.
+   */
+  autoRemoveWorktrees?: boolean;
   /**
    * The folder holds a `.git`, read on every answer rather than stored: the
    * test `threads.create.worktree` applies. Absent before the core's first
@@ -932,6 +1035,24 @@ export interface ThreadArchiveReason {
   archivedAt: Timestamp;
 }
 
+/**
+ * The core removed the worktree this thread worked in while it was archived.
+ * `cwd` still names the folder, which no longer exists: the thread can be read
+ * and restored but not continued there.
+ */
+export interface ThreadWorktreeRemoval {
+  /** The folder that was removed, the thread's `cwd` at the time. */
+  path: string;
+  /** The branch checked out there, null on a detached HEAD. */
+  branch: string | null;
+  /** The local branch went too. A kept branch can be checked out again by hand. */
+  branchDeleted: boolean;
+  /** `pr-merged`: the checkout's exact tip was a merged PR's head. `clean`: no change and no commit missing from every other branch. */
+  reason: 'pr-merged' | 'clean';
+  pullRequest?: { number: number; url: string };
+  removedAt: Timestamp;
+}
+
 /** Provenance of a copied conversation; native history and seeded history remain distinct. */
 export const JOURNAL_INSPECTION_TABLES = ['threads', 'turns', 'messages', 'turn_requests', 'background_observations', 'coordination_letters'] as const;
 export type JournalInspectionTable = typeof JOURNAL_INSPECTION_TABLES[number];
@@ -965,12 +1086,22 @@ export interface ForkOrigin {
 export interface ThreadSummary {
   /** Date marked done, or automatically archived after a PR merge. Cleared on restore or manual archive. */
   doneAt?: Timestamp | null;
+  /**
+   * When the core last archived it, the order Ctrl+Shift+T and the archived
+   * list follow on every client. Null once restored; missing on threads
+   * archived by an older core, which fall back to `updatedAt`.
+   */
+  archivedAt?: Timestamp | null;
   forkOrigin?: ForkOrigin;
 
   /** Durable explanation for an automatic archive; absent for manual archives and restored conversations. */
   archiveReason?: ThreadArchiveReason;
+  /** Set once the core removed this thread's worktree, kept after a restore while `cwd` still names it. */
+  worktreeRemoved?: ThreadWorktreeRemoval | null;
   /** Core-owned delegation relationship. Absent on ordinary conversations. */
   parentThreadId?: ThreadId | null;
+  /** What the conversation starts without, fixed at creation. Absent: the whole setup. */
+  contextMode?: ThreadContextMode | null;
   /** Last accepted user message, independent of assistant activity and renames. */
   lastUserMessageAt?: Timestamp | null;
   pullRequest?: { number: number; url: string; state: 'OPEN' | 'CLOSED' | 'MERGED' } | null;
@@ -1031,6 +1162,13 @@ export interface ThreadSummary {
    */
   backgroundWork?: { kinds: BackgroundTask['kind'][]; since: Timestamp } | null;
   /**
+   * A delegated agent whose turn ended on background work: still waiting for
+   * it to wake the agent, or interrupted because it ended without doing so
+   * (`backgroundWait`). Null otherwise and on threads that are not delegated
+   * agents; missing on older cores.
+   */
+  backgroundWait?: BackgroundWait | null;
+  /**
    * A move asked for while the thread's turn ran, applied when that turn
    * ends (`threads.move`, `agent.move`). In memory only: null after a core
    * restart, and missing on older cores.
@@ -1046,6 +1184,12 @@ export interface ThreadSummary {
   moveNote?: MoveNotice | null;
   /** Answers accepted by the core, waiting for the running agent or the next turn. In memory only. */
   pendingAnswers?: string[];
+  /**
+   * The pull requests the thread's agent watches (`threads.watchPullRequest`):
+   * a thread at rest with one reads as watching, not done, since the watch
+   * will wake it. Empty when none; missing on older cores.
+   */
+  pullRequestWatches?: PullRequestWatch[];
   /**
    * Questions the agent asked without stopping (`boite ask`, Codex's own)
    * that still wait for the user. The status stays `running` or `idle`, so a
@@ -1078,8 +1222,36 @@ export interface ThreadSummary {
    * lifetime is unknown or no turn has finished. Missing on older cores.
    */
   promptCache?: PromptCache | null;
+  /**
+   * What the core plans to try again by itself after a provider refused a
+   * turn for availability (`ThreadRetry`). Null when nothing is planned;
+   * missing on older cores.
+   */
+  retry?: ThreadRetry | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+/**
+ * An automatic retry the core planned after a provider refused a turn for
+ * availability rather than for a fault of the request (docs/usage.md).
+ * `capacity`: the model was at capacity; the same turn tries again at `at`,
+ * the `attempt`th of `attempts` tries, and the thread stays running meanwhile.
+ * `usage-limit`: the subscription window was spent and `autoResumeLimitedThreads`
+ * is on; a new turn resumes the thread at `at`, shortly after `resetsAt`, and
+ * the plan survives a core restart. `turns.cancelRetry` or Stop cancels either.
+ */
+export interface ThreadRetry {
+  kind: 'capacity' | 'usage-limit';
+  /** The turn the provider refused. */
+  turnId: TurnId;
+  /** When the core tries again. */
+  at: Timestamp;
+  /** This try's number, from 1; always 1 for a usage limit. */
+  attempt: number;
+  attempts: number;
+  /** When the spent window resets, for a usage limit; null for capacity. */
+  resetsAt: Timestamp | null;
 }
 
 export interface Usage {
@@ -1089,6 +1261,21 @@ export interface Usage {
   cacheWriteTokens: number;
   /** API-equivalent cost. On a subscription this is not money spent; the UI says so. */
   costUsdEquivalent: number | null;
+}
+
+/** Public API prices in US dollars per million tokens. */
+export interface TokenRates {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** The public model a usage row was priced as, with the rates its tokens were charged. */
+export interface UsagePrice {
+  /** The id in the core's price list, such as `claude-opus-5-5`. */
+  model: string;
+  rates: TokenRates;
 }
 
 /**
@@ -1104,14 +1291,21 @@ export interface UsageHistoryRow {
   turns: number;
   /** Turns among them that carried a usage report. */
   reported: number;
-  /** Turns among them that carried an API-equivalent price. */
+  /**
+   * Turns among them with an API-equivalent cost: every reported turn when the
+   * row has a `price`, else the turns whose agent reported a cost.
+   */
   priced: number;
   /**
    * Sums over the reported turns. `inputTokens` never includes the cache reads,
    * whatever the provider counts, so the four token fields add up to the tokens
-   * processed. `costUsdEquivalent` is null when no turn of the row was priced.
+   * processed. `costUsdEquivalent` is the tokens at `price`'s rates, or the sum
+   * of the costs the agent reported when no rate matched the model; null when
+   * neither gave one.
    */
   usage: Usage;
+  /** The public rates the row was priced at. Null when none matched its model; absent from an older core. */
+  price?: UsagePrice | null;
 }
 
 export interface UsageHistoryThread {
@@ -1147,8 +1341,10 @@ export type TurnExecution = Pick<ThreadSummary,
    * started finished; the turn carries no prompt of the user's.
    * `resume`: the core restarted over a running turn and opened this one so
    * the agent carries on (`docs/restart-handoff.md`).
+   * `pull-request`: a pull request the agent watches needs a look; the turn
+   * carries what changed (`threads.watchPullRequest`).
    */
-  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume';
+  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume' | 'pull-request';
   /** A `compact` the core opened by the `autoCompact` setting, not one the user asked for. */
   automatic?: true;
 };
@@ -1179,14 +1375,14 @@ export interface Turn {
 /**
  * Whether Boite opened this turn itself to carry on the user's last request:
  * background work it left finished, a delegated agent or another agent wrote
- * back, the core resumed after a restart, or the context was compacted on its
- * own. The user's message, not this turn, is where the request started.
+ * back, a pull request it watches changed, the core resumed after a restart,
+ * or the context was compacted on its own. The user's message, not this turn, is where the request started.
  */
 export function continuesRequest(turn: Pick<Turn, 'execution'>): boolean {
   const execution = turn.execution;
   if (!execution) return false;
   const operation = execution.operation;
-  return operation === 'background' || operation === 'delegation' || operation === 'coordination' || operation === 'resume' || execution.automatic === true;
+  return operation === 'background' || operation === 'delegation' || operation === 'coordination' || operation === 'resume' || operation === 'pull-request' || execution.automatic === true;
 }
 
 /** Queue order: `queuedAt`, then id, so every client and the core agree on a tie. */
@@ -1256,7 +1452,7 @@ export type ToolDocument =
   /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
   | { kind: 'image'; mimeType: string; data: string; alt: string | null };
 
-export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
+export { IMAGE_MIME_TYPES, IMAGE_MAX_EDGE, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
 import type { ImageMimeType } from './attachment-limits.ts';
 export type { ImageMimeType } from './attachment-limits.ts';
 
@@ -1399,6 +1595,12 @@ export type MessagePart =
       status: ToolStatus;
       /** A command's exit code when the provider reports it. Absent on older rows and other tools. */
       exitCode?: number | null;
+      /**
+       * The agent's own one-line account of the calls this one ran with ("Read
+       * rules.md and data.txt"), written after they finished. Claude's
+       * `tool_use_summary`; absent for other agents and on older rows.
+       */
+      summary?: string;
       /** Provider-reported child activity. These are not Boite thread IDs or team budget entries. */
       nativeAgents?: NativeAgentUpdate[];
       /** What the call produced or changed, under the input and the output. Absent on a journal row written before documents existed. */
@@ -1425,6 +1627,10 @@ export type MessagePart =
       answer?: QuestionAnswer | null;
       /** Asked without stopping: see `QuestionRequest.async`. */
       async?: boolean;
+      /** A settings card: see `QuestionRequest.setting`. */
+      setting?: SettingAsk;
+      /** An agent setting card: see `QuestionRequest.agentSetting`. */
+      agentSetting?: AgentSettingAsk;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is
@@ -1453,8 +1659,8 @@ export interface Message {
 export const MESSAGE_PAGE = 120;
 /** The first paint needs a small tail; older history uses the ordinary page size. */
 export const INITIAL_MESSAGE_PAGE = 40;
-export { previewToolOutputs, previewToolPart, inputPreview, longerThan, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS, TOOL_INPUT_INLINE_CHARS, TOOL_INPUT_PREVIEW_CHARS, TOOL_DOCUMENTS_INLINE_CHARS } from './message-preview';
-export { forTransport, projectMessage, MESSAGE_SENT_MAX_BYTES, type TransportOptions } from './transport.ts';
+export { previewToolOutputs, previewToolPart, inputPreview, longerThan, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS, TOOL_OUTPUT_FOLDED_CHARS, TOOL_INPUT_INLINE_CHARS, TOOL_INPUT_PREVIEW_CHARS, TOOL_DOCUMENTS_INLINE_CHARS } from './message-preview';
+export { forTransport, projectLiveMessage, projectLivePart, projectMessage, MESSAGE_SENT_MAX_BYTES, type TransportOptions } from './transport.ts';
 export { boundedMessageWindow } from './message-window.ts';
 export { lastAgentText, notificationExcerpt, requestExcerpt, NOTIFICATION_TEXT_CHARS } from './notification-text';
 /**
@@ -1473,8 +1679,10 @@ export interface PushPayload {
   /** The app icon's count after this notification. */
   badge?: number;
   /**
-   * Set when another member of the group sent it through the device's own
-   * machine: the id of the machine the thread is on.
+   * The id of the machine the thread is on. Every push to a device of the
+   * group carries it, direct or passed on by another member through the
+   * device's push home: the app's own page belongs to no machine and opens the
+   * thread there. A key of the older kind gets it only when passed on.
    */
   core?: string;
 }
@@ -1488,6 +1696,23 @@ export const MESSAGE_PAGE_MAX = 200;
  * tail must fit this budget in full; otherwise `threads.get` returns a page.
  */
 export const MESSAGE_PAGE_MAX_BYTES = 12 * 1024 * 1024;
+/**
+ * The `maxBytes` of a first visit: about what a desktop screen draws, once
+ * successful tool outputs stay on the core. Forty messages of one long thread
+ * weighed 9.5 MB on 2026-10-13, for one screen of answers and folded runs.
+ */
+export const INITIAL_PAGE_BYTES = 128 * 1024;
+/** The `maxBytes` of each page a reader scrolls into, above or below the window. */
+export const READING_PAGE_BYTES = 256 * 1024;
+/** Why a `maxBytes` is refused, or null: a positive whole count of bytes. */
+export function pageBytesProblem(maxBytes: unknown): { field: 'maxBytes'; expected: string } | null {
+  return maxBytes === undefined || (Number.isSafeInteger(maxBytes) && (maxBytes as number) > 0) ? null
+    : { field: 'maxBytes', expected: 'a positive integer count of serialized UTF-8 bytes' };
+}
+/** The byte budget a page read with `maxBytes` gets: never above `MESSAGE_PAGE_MAX_BYTES`. */
+export function pageBytes(maxBytes: number | undefined): number {
+  return maxBytes === undefined ? MESSAGE_PAGE_MAX_BYTES : Math.min(maxBytes, MESSAGE_PAGE_MAX_BYTES);
+}
 
 /**
  * A command the agent of a thread takes at the start of a prompt, sent as the
@@ -1612,6 +1837,13 @@ export interface Thread extends ThreadSummary {
    * which is the only page live messages are appended to.
    */
   messagesAfter?: MessageId | null;
+  /**
+   * How many messages of the thread come before `messages[0]`, or before
+   * `messagesFrom` on a resume tail: with it, a client sizes the history it
+   * does not hold and reads any stretch of it with `messages.list` `from`.
+   * Cores without `features.messagePositions` leave it out.
+   */
+  messageOffset?: number;
   /** The turns `messages` refers to, plus any still queued or running; never the whole history. */
   turns: Turn[];
 }
@@ -1680,6 +1912,8 @@ export interface QuestionAnswer {
    * not kept here: the core wrote them to its disk and told the agent the paths.
    */
   attachments?: AnswerAttachment[];
+  /** On a settings card the user changed: the value the setting holds now. */
+  value?: unknown;
 }
 
 /** A file given with an answer: what the card shows once it is answered. */
@@ -1709,6 +1943,17 @@ export interface QuestionRequest {
    * is running or as the next prompt when none is.
    */
   async?: boolean;
+  /**
+   * A settings card (`settings.request`): the agent asks for a change, or
+   * points at a page. `text` is its reason. Always asynchronous.
+   */
+  setting?: SettingAsk;
+  /**
+   * An agent setting card (`agents.settings.request`): a thread, or a
+   * persistent agent about itself, proposes a change to an agent's settings.
+   * `text` is its reason. Always asynchronous.
+   */
+  agentSetting?: AgentSettingAsk;
   createdAt: Timestamp;
 }
 
@@ -1738,6 +1983,71 @@ export interface BackgroundTaskObservation extends BackgroundTask {
   reason: 'provider-reported' | 'no-longer-reported' | 'session-ended' | 'core-restarted' | null;
 }
 
+/**
+ * How long a thread whose background work just ended still counts as waiting
+ * for it: the agent answers the task's notification by itself, usually within
+ * a second or two, and opens the turn that wakes it.
+ */
+export const BACKGROUND_WAKE_GRACE_MS = 30_000;
+
+/**
+ * Why background work a thread waited on ended without waking it. `error` and
+ * `cancelled` are what the agent reported for the task; `no-longer-reported`
+ * means the agent stopped listing it without a word (its process died);
+ * `session-ended` means the agent process was ended (a Stop, an archive, a
+ * switch); `core-restarted` means Boite or the PC restarted.
+ */
+export type BackgroundInterruption = 'error' | 'cancelled' | 'no-longer-reported' | 'session-ended' | 'core-restarted';
+
+/**
+ * A thread whose last turn ended while background work it started still ran.
+ * `waiting`: that work will wake it, so it is not finished; `for` names the
+ * tasks, `since` is when the oldest started, `until` is when a wake that has
+ * not come yet stops being expected (null while a task still runs).
+ * `interrupted`: the work ended without waking it; a new message resumes it.
+ */
+export type BackgroundWait =
+  | { state: 'waiting'; for: string; since: Timestamp; until: Timestamp | null }
+  | { state: 'interrupted'; for: string; reason: BackgroundInterruption; at: Timestamp };
+
+/**
+ * What a thread at rest still waits on, from its last turn, the background
+ * tasks its agent runs now and the observed history of those tasks. The core
+ * and the in-memory client derive it the same way. Null while a turn is
+ * under way, after a turn that did not finish (`done`), and once every task
+ * the turn left running completed: the thread is then simply done.
+ */
+export function backgroundWait(input: {
+  status: ThreadStatus;
+  lastTurn: Pick<Turn, 'status' | 'finishedAt'> | null;
+  live: readonly BackgroundTask[];
+  history: readonly BackgroundTaskObservation[];
+  now: Timestamp;
+}): BackgroundWait | null {
+  const { lastTurn } = input;
+  if (threadActive(input.status) || lastTurn?.status !== 'done' || lastTurn.finishedAt === null) return null;
+  const names = (tasks: readonly BackgroundTask[]) => [...new Set(tasks.map(task => task.description.trim() || task.kind))].join(', ');
+  if (input.live.length > 0) return { state: 'waiting', for: names(input.live), since: Math.min(...input.live.map(task => task.startedAt)), until: null };
+  // The tasks the turn left running: started before it ended, ended after.
+  const ended = input.history.filter(task => task.state !== 'running' && task.finishedAt !== null && task.finishedAt > lastTurn.finishedAt! && task.startedAt <= lastTurn.finishedAt!);
+  if (ended.length === 0) return null;
+  const failed = ended.filter(task => task.state !== 'completed');
+  const reasonOf = (task: BackgroundTaskObservation): BackgroundInterruption =>
+    task.reason === 'session-ended' || task.reason === 'core-restarted' || task.reason === 'no-longer-reported' ? task.reason : task.state === 'cancelled' ? 'cancelled' : 'error';
+  // Nothing is left to wake the thread once its agent process is gone.
+  const gone = failed.find(task => task.reason === 'session-ended' || task.reason === 'core-restarted');
+  const last = Math.max(...ended.map(task => task.finishedAt!));
+  if (gone) return { state: 'interrupted', for: names(failed), reason: reasonOf(gone), at: last };
+  if (input.now < last + BACKGROUND_WAKE_GRACE_MS) return { state: 'waiting', for: names(ended), since: Math.min(...ended.map(task => task.startedAt)), until: last + BACKGROUND_WAKE_GRACE_MS };
+  if (failed.length > 0) return { state: 'interrupted', for: names(failed), reason: reasonOf(failed[0]!), at: last };
+  return null;
+}
+
+/** A thread at work: a turn under way, or a turn ended on background work that will wake it. */
+export function threadBusy(thread: Pick<ThreadSummary, 'status' | 'backgroundWait'>): boolean {
+  return threadActive(thread.status) || thread.backgroundWait?.state === 'waiting';
+}
+
 // ---------------------------------------------------------------------------
 // Trace: every process a thread launched, with what it cost.
 // ---------------------------------------------------------------------------
@@ -1755,6 +2065,12 @@ export interface ProcessRecord {
   peakMemoryBytes: number | null;
   ioBytes: number | null;
 }
+
+/**
+ * The most recent processes `trace.get` returns when no limit is given, and
+ * all a client keeps of a thread's trace as `process.*` events arrive.
+ */
+export const TRACE_LIMIT = 200;
 
 /** A thread with at least one process running now; what exited stays in `trace.get`. */
 export interface ThreadResources {
@@ -1945,6 +2261,16 @@ export interface Settings {
    */
   asyncQuestions?: boolean;
   /**
+   * Every normal turn asks the agent for short answers: result first, no
+   * preamble, recap or commentary between tool calls. Missing reads as on.
+   */
+  shortAnswers?: boolean;
+  /**
+   * Agents may read this machine's anonymized diagnostics and draft an issue
+   * from them (`boite logs`, `boite issue`). Missing reads as on.
+   */
+  agentLogAccess?: boolean;
+  /**
    * The model that writes every thread's title after its first answer. Null
    * or missing: each thread's own provider on its small model
    * (`defaultTitleModel`), under the thread's account. A provider that can no
@@ -1956,6 +2282,34 @@ export interface Settings {
    * or missing: never, each agent keeps its own behaviour. Missing on older cores.
    */
   autoCompact?: AutoCompact | null;
+  /**
+   * The models the user starred, one list for all of the owner's machines:
+   * each client keeps the newest one it saw by `at` and writes it to every
+   * machine it controls. Missing on older cores and before the first star.
+   */
+  modelFavorites?: ModelFavorites;
+  /**
+   * A turn that failed on a subscription usage limit resumes by itself once
+   * that limit's window resets: one new turn per window and thread, with a
+   * short continue prompt (docs/usage.md). Missing reads as off.
+   */
+  autoResumeLimitedThreads?: boolean;
+}
+
+/** One starred model. Accounts are named by label: an id means nothing on another machine. */
+export interface ModelFavorite {
+  providerId: ProviderId;
+  model: { id: string; name: string };
+  /** The label of the account it was starred under. Missing: the account the picker uses for that provider. */
+  account?: string;
+}
+
+/** The starred models, with the time they last changed. */
+export interface ModelFavorites {
+  /** Milliseconds since the epoch of the last change: between two lists, the later one wins. */
+  at: number;
+  /** At most `MODEL_FAVORITES_MAX`, each provider, model and account once. */
+  items: ModelFavorite[];
 }
 
 export interface SubscriptionProxy {
@@ -1965,16 +2319,25 @@ export interface SubscriptionProxy {
   baseUrl: string;
   /** User-facing quotas page, opened inside Boite. Never contains a token. */
   dashboardUrl: string;
+  /**
+   * Where the gateway runs. Missing or `remote`: at the URLs above, which the
+   * user typed. `local`: the Douane plugin this core runs (`provides.gateway`,
+   * docs/plugins.md); the kind is `douane` and the core writes both URLs from
+   * the plugin's loopback port.
+   */
+  mode?: SubscriptionProxyMode;
 }
+
+export type SubscriptionProxyMode = 'remote' | 'local';
 
 /** The protocols whose every agent a subscription proxy serves. */
 export const SUBSCRIPTION_PROXY_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver'];
 /**
  * The providers a subscription proxy serves by id, where the protocol cannot
- * say: ACP is shared by OpenCode 2, which takes the gateway as one more model
- * provider, and by agents that keep their own configuration.
+ * say: both OpenCode versions take the gateway as one more model provider,
+ * while other ACP agents keep their own configuration.
  */
-export const SUBSCRIPTION_PROXY_PROVIDERS: readonly ProviderId[] = ['opencode-v2'];
+export const SUBSCRIPTION_PROXY_PROVIDERS: readonly ProviderId[] = ['opencode', 'opencode-v2'];
 /**
  * The providers only one kind of gateway serves. Grok's CLI takes its models
  * from the gateway's own list, and Douane writes that list the way the CLI
@@ -2014,6 +2377,80 @@ export function subscriptionProxyOrigin(proxy: SubscriptionProxy): string {
   // No `URL` here: contracts build without DOM or Node types. Credentials in the address never show.
   const match = /^([a-z][a-z0-9+.-]*:\/\/)(?:[^/?#@]*@)?([^/?#@]+)/i.exec(proxy.baseUrl);
   return match ? `${match[1]}${match[2]}`.toLowerCase() : proxy.baseUrl;
+}
+
+/**
+ * Whether a client can open the gateway's dashboard: a loopback address only
+ * answers on the core's own machine, so a phone or another computer gets no
+ * dead link. `sameMachine` says the client runs where the core does.
+ */
+export function gatewayDashboardReachable(dashboardUrl: string | null | undefined, sameMachine: boolean): boolean {
+  if (!dashboardUrl) return false;
+  const match = /^https?:\/\/(?:[^/?#@]*@)?(\[[^\]]+\]|[^/?#:]+)/i.exec(dashboardUrl);
+  if (!match) return false;
+  return sameMachine || !isLoopbackHost(match[1]!);
+}
+
+/** `localhost`, `127.x.y.z`, `::1` and the IPv4-mapped loopback. */
+export function isLoopbackHost(host: string): boolean {
+  const name = host.toLowerCase().replace(/^\[|\]$/g, '');
+  return name === 'localhost' || name.endsWith('.localhost') || /^127(?:\.\d{1,3}){3}$/.test(name)
+    || name === '::1' || /^(?:0:){5}ffff:127\./.test(name) || /^::ffff:127\./.test(name);
+}
+
+/**
+ * What a move to Douane takes from one Boite account. `login`: the agent's
+ * own sign-in file (Claude, Codex, Grok). `copilot`: OpenCode's GitHub Copilot
+ * sign-in. `endpoint`: an OpenCode API key, served by Douane as a custom
+ * endpoint under `route`. `opencodeGo`: OpenCode Go's key, Douane's own
+ * `opencode_go` subscription.
+ */
+export type GatewayMoveKind = 'login' | 'copilot' | 'endpoint' | 'opencodeGo';
+
+/**
+ * Why an item cannot move. `signedOut`: no login file. `unreadable`: the file
+ * is not JSON. `noAddress`: OpenCode's catalog gives the key no API address.
+ * `otherApi`: the provider does not speak the OpenAI API. `otherSignIn`: an
+ * OpenCode sign-in Douane cannot take (only GitHub Copilot's). `routeTaken`:
+ * the gateway already serves another address under that endpoint's route.
+ */
+export type GatewayMoveReason = 'signedOut' | 'unreadable' | 'noAddress' | 'otherApi' | 'otherSignIn' | 'routeTaken';
+
+export interface GatewayMoveItem {
+  /** Stable while the files do not change: `subscriptionProxy.move` names items by it. */
+  id: string;
+  accountId: AccountId;
+  providerId: ProviderId;
+  kind: GatewayMoveKind;
+  /** OpenCode's provider for a key or a sign-in: its id and its catalog name. */
+  source?: { id: string; name: string };
+  /** An endpoint's route at the gateway and its upstream address. */
+  route?: string;
+  baseUrl?: string;
+  movable: boolean;
+  reason: GatewayMoveReason | null;
+}
+
+/** `subscriptionProxy.movePlan`: what this machine could move, read from its files. No credential value. */
+export interface GatewayMovePlan {
+  /** The configured Douane's address as a person reads it, null when no Douane is configured. */
+  origin: string | null;
+  /** A management token for the gateway's `/admin/api` is saved on the core. */
+  managementToken: boolean;
+  items: GatewayMoveItem[];
+}
+
+/**
+ * One item's result. `moved`: the gateway took it. `present`: the gateway
+ * already had it; a sign-in it already had is updated with this copy.
+ * `refused`: the gateway said no (`message` is its reason) or the item cannot
+ * move (`reason`). `missing`: no such item any more.
+ */
+export interface GatewayMoveOutcome {
+  id: string;
+  outcome: 'moved' | 'present' | 'refused' | 'missing';
+  reason: GatewayMoveReason | null;
+  message: string | null;
 }
 
 export type WorktreeStorage =
@@ -2065,6 +2502,10 @@ export const KEYBINDING_COMMANDS = [
   'terminal-split',
   'terminal-split-vertical',
   'terminal-close',
+  'terminal-find',
+  'terminal-history',
+  'terminal-previous-command',
+  'terminal-next-command',
   'reopen-thread',
   'copy-answer',
   'find',
@@ -2102,6 +2543,63 @@ export interface ImportableSession {
   bytes: number;
   /** The thread that already carries this session, so it is not imported twice. */
   threadId: ThreadId | null;
+}
+
+/** The longest text of one system block `threads.agentShape` sends; the rest stays on disk. */
+export const AGENT_SHAPE_BLOCK_MAX = 32_000;
+/** The text of every system block together, after which blocks keep their size but lose their text. */
+export const AGENT_SHAPE_TEXT_BUDGET = 200_000;
+/** System blocks and tools listed by `threads.agentShape`; the rest are counted in the totals only. */
+export const AGENT_SHAPE_ITEMS_MAX = 256;
+
+/** One block of the system prompt the agent sent. */
+export interface AgentShapeBlock {
+  /** Its length in characters, whole. */
+  chars: number;
+  /** Its text, cut at `AGENT_SHAPE_BLOCK_MAX` or by `AGENT_SHAPE_TEXT_BUDGET`. */
+  text: string;
+  truncated: boolean;
+}
+
+/** One tool definition the agent sent. */
+export interface AgentShapeTool {
+  name: string;
+  descriptionChars: number;
+  /** The whole definition as JSON: name, description and input schema. */
+  chars: number;
+}
+
+/**
+ * What the agent's last API request started with: the system prompt and tool
+ * definitions Claude Code wrote into its session transcript (CLI 2.1.300 and
+ * later), and the request's parameters. `status` says why the rest is empty:
+ * `no-session` before the first turn, `no-transcript` when the file is gone,
+ * `unrecorded` when the CLI wrote no request shape (older than 2.1.300).
+ * Sizes are characters; `estimatedTokens` is characters divided by four, an
+ * estimate and not the provider's count.
+ */
+export interface AgentShape {
+  threadId: ThreadId;
+  status: 'ready' | 'no-session' | 'no-transcript' | 'unrecorded';
+  sessionId: string | null;
+  /** The Claude Code version that wrote the request. */
+  version: string | null;
+  /** When the request was sent. */
+  at: Timestamp | null;
+  model: string | null;
+  effort: string | null;
+  /** The `thinking` type, with its token budget when it has one. */
+  thinking: string | null;
+  betas: string[];
+  maxTokens: number | null;
+  /** In the order they were sent. */
+  system: AgentShapeBlock[];
+  /** Largest first. */
+  tools: AgentShapeTool[];
+  /** System blocks and tools past `AGENT_SHAPE_ITEMS_MAX`, counted in `chars` but not listed. */
+  omitted: { system: number; tools: number };
+  chars: { system: number; tools: number };
+  estimatedTokens: number;
 }
 
 /** What `<dataDir>/keybindings.json` says, as the core last read it. */
@@ -2237,9 +2735,27 @@ export interface CoreInfo {
     chunkedAnswers?: boolean;
     /** `threads.get` takes `around` and `compactImages`; `messages.list` takes `after`. */
     readingPages?: boolean;
+    /** Pages say where they sit (`messageOffset`, `offset`) and `messages.list` reads from a position (`from`). */
+    messagePositions?: boolean;
     /** `threads.get` and `messages.list` take `compactToolParts`; `messages.toolPart` exists. No message is refused for its size then. */
     deferredToolParts?: boolean;
+    /** A device of its group says hello with a signature of its own device key (`hello` `device`). */
+    deviceKeys?: boolean;
+    /** Prompt-free draft reservations and create-time subscription. */
+    draftPreparation?: boolean;
+    /** Connection-owned attachment uploads resolved by turns.start. */
+    attachmentUploads?: boolean;
+    /** `ui.reveal` takes `coreId` on a thread or an agent target and opens it on that machine. An older core drops the field and opens this core's. */
+    revealMachines?: boolean;
+    /** A load sample reaches a client whose hello `accepts` `thread.load` as that event alone, not as a whole `thread.updated` row. */
+    loadEvents?: boolean;
+    /** `core.desktopUpdateReport`, `core.desktopUpdateStatus` and `core.updateEverything` `app`: the desktop app of this machine updates on another machine's click. */
+    desktopUpdates?: boolean;
+    /** `subscriptionProxy.movePlan` and `subscriptionProxy.move`: this machine's logins move into Douane. */
+    gatewayMove?: boolean;
   };
+  /** The fingerprint of this core's identity key: the id its group knows it by, and the one a device signs its hello for. */
+  coreId?: string;
   os: Os;
   /** The install this core belongs to. `--channel` on its command line decides. */
   channel: Channel;
@@ -2518,13 +3034,6 @@ export interface PairingGrant {
   grant: string;
   role: PairingRole;
   expiresAt: Timestamp;
-  /**
-   * The same grant as a short code to type, `XXXX-XXXX`, for an installed
-   * iPhone app that cannot open the link (the camera hands it to Safari, which
-   * keeps its own storage). Valid until `codeExpiresAt`, once, like the grant.
-   */
-  code?: string;
-  codeExpiresAt?: Timestamp;
 }
 
 /**
@@ -2705,12 +3214,19 @@ export interface AgentTranscript {
 export interface AgentLetter {
   /**
    * Who the core says wrote it. Missing on older coordination mail: another
-   * agent. `user` and `result` are delegation mail. `steward` comes from the
-   * steward the owner assigned to the recipient's project, `notice` is the core
-   * telling a steward what happened in a thread it looks after. None of them is
-   * a message the user typed.
+   * agent. `user` and `result` are delegation mail. `resident` comes from the
+   * persistent agent the owner entrusted the recipient's project to. None of
+   * them is a message the user typed. `question` is written by the core when
+   * a delegated agent asks something (a question card or a permission request)
+   * and tells its parent; it is withdrawn when the card closes before delivery.
    */
-  origin?: 'user' | 'agent' | 'result' | 'steward' | 'notice';
+  origin?: 'user' | 'agent' | 'result' | 'resident' | 'question';
+  /**
+   * A `result` written when a delegated agent ended its turn to wait on its
+   * own background work: what it said so far, not its final result, which
+   * follows when that work wakes it. Missing otherwise and on older cores.
+   */
+  checkpoint?: boolean;
   id: string;
   from: AgentContact;
   to: AgentAddress;
@@ -2724,6 +3240,12 @@ export interface AgentLetter {
   status: 'queued' | 'received' | 'delivered' | 'uncertain' | 'expired' | 'rejected';
   error: string | null;
   /**
+   * The question of the recipient this message answered instead of being
+   * delivered as a message: a parent's `delegation.send` to a child waiting on
+   * a question card. Missing otherwise and on older cores.
+   */
+  answered?: RequestId;
+  /**
    * How the other end relates to the thread whose view lists this letter.
    * The core sets it when it reads the letter out, never stores it; missing on
    * older cores and on another machine's word.
@@ -2734,59 +3256,15 @@ export interface AgentLetter {
  * The other end of a letter, from one thread's side. `starter` started this
  * thread with `boite thread new` and `started` is a thread this one started;
  * `parent` delegated this thread and `child` is one of its subagents;
- * `steward` looks after this thread's project and `stewarded` is a thread this
- * steward looks after. The rest say only where it is.
+ * `resident` is the persistent agent the owner entrusted this thread's
+ * project to. The rest say only where it is.
  */
-export type AgentRelation = 'starter' | 'started' | 'parent' | 'child' | 'steward' | 'stewarded' | 'project' | 'other-project' | 'machine';
+export type AgentRelation = 'starter' | 'started' | 'parent' | 'child' | 'resident' | 'project' | 'other-project' | 'machine';
 /**
- * What a steward may do to the threads of the projects it looks after.
- * Reading them, their state and their requests comes with any grant.
+ * One thread of a project, as the persistent agent the owner entrusted that
+ * project to reads it, and as the owner's `boite threads` prints it.
  */
-export type StewardCapability =
-  /** Messages that reach the thread as the steward's, even when its coordination is off. */
-  | 'message'
-  /** Start threads in its projects, without the communication-settings gates. */
-  | 'spawn'
-  /** Archive and unarchive. */
-  | 'archive'
-  /** Move threads between its projects, and register a new project folder. */
-  | 'move'
-  /** Stop a running turn and rename a thread. */
-  | 'stop'
-  /** Answer and skip the questions agents ask the user. */
-  | 'answer'
-  /** Allow or deny tool permission requests. Never granted by default. */
-  | 'permissions'
-  /** Delete threads. Never granted by default; a deleted thread stays restorable for a while. */
-  | 'remove';
-export const STEWARD_CAPABILITIES: readonly StewardCapability[] = ['message', 'spawn', 'archive', 'move', 'stop', 'answer', 'permissions', 'remove'];
-/** What a new grant carries until the owner picks otherwise: everything but permissions and deletion. */
-export const STEWARD_DEFAULT_CAPABILITIES: readonly StewardCapability[] = ['message', 'spawn', 'archive', 'move', 'stop', 'answer'];
-/**
- * The owner assigns the agent of one thread to look after projects while they
- * are away: it reads every thread there, steers them, answers what they ask
- * and tidies them up, within `capabilities`. One grant per steward thread.
- */
-export interface StewardGrant {
-  /** The steward's own conversation. */
-  threadId: ThreadId;
-  /** The projects it looks after. Empty with `allProjects`. */
-  projectIds: ProjectId[];
-  /** Every project, those added later included. */
-  allProjects: boolean;
-  capabilities: StewardCapability[];
-  /**
-   * The core sends the steward a notice when a thread it looks after finishes
-   * a turn, fails, asks a question or waits on a permission; an idle steward
-   * wakes to read it.
-   */
-  notify: boolean;
-  grantedAt: Timestamp;
-  updatedAt: Timestamp;
-}
-export type StewardGrantInput = Pick<StewardGrant, 'threadId' | 'projectIds' | 'allProjects' | 'capabilities' | 'notify'>;
-/** One thread as a steward sees it in the projects it looks after. */
-export interface StewardThread {
+export interface ProjectThreadRow {
   id: ThreadId;
   title: string;
   projectId: ProjectId | null;
@@ -2794,8 +3272,6 @@ export interface StewardThread {
   status: ThreadStatus;
   archived: boolean;
   branch: string | null;
-  /** The steward's own conversation. */
-  self: boolean;
   /** Unanswered questions and permission requests. */
   questions: number;
   permissions: number;
@@ -2803,17 +3279,22 @@ export interface StewardThread {
   updatedAt: Timestamp;
   lastCompletedAt: Timestamp | null;
 }
-export interface StewardThreadDetail {
-  thread: StewardThread;
+export interface ProjectThreadDetail {
+  thread: ProjectThreadRow;
   questions: QuestionRequest[];
   permissions: PermissionRequest[];
   /** The last assistant text, cut at 4,000 characters. */
   lastAnswer: string | null;
 }
-export type StewardAction = 'archive' | 'unarchive' | 'remove' | 'stop' | 'rename' | 'move';
-/** What the steward reads about itself. Null grant: this thread is no steward. */
-export interface StewardView {
-  grant: StewardGrant | null;
+/**
+ * What a persistent agent does to a thread of a project entrusted to it.
+ * Deleting threads and deciding tool permissions stay the owner's.
+ */
+export type ResidentThreadAction = 'archive' | 'unarchive' | 'stop' | 'rename' | 'move';
+/** The calling agent and the projects the owner entrusted to it. Empty when this thread is not such an agent's. */
+export interface ResidentView {
+  agentId: string | null;
+  name: string | null;
   projects: { id: ProjectId; name: string; path: string }[];
 }
 /** Public contact card. No owner token or private signing key crosses a core. */
@@ -2853,12 +3334,23 @@ export interface GroupCore {
   epoch: number;
 }
 
-/** A phone or another computer paired with one member, which the group lets reach every member. */
+/**
+ * A phone or a browser of the group. It holds one Ed25519 key, `id` is the
+ * fingerprint of it, and every member lets it in on a signature of that key
+ * (`hello` `device`). A device paired before device keys still shows here
+ * under `<home core id>:<session id>`, with `legacy`, until it next connects
+ * and sends its key.
+ */
 export interface GroupDevice {
-  /** `<home core id>:<session id>`: the member it paired with and its session there. */
   id: string;
   name: string;
   role: PairingRole;
+  /** The member that admitted it. */
+  by?: string;
+  /** When it was admitted, as the admitting member's clock said. */
+  addedAt?: Timestamp;
+  /** A pairing of the older kind, one key per member: it moves to a device key the next time it connects. */
+  legacy?: true;
 }
 
 /**
@@ -2872,8 +3364,54 @@ export interface Group {
   /** The core that answered. */
   self: string;
   cores: GroupCore[];
-  /** Left empty for a paired device, which only needs the machines. */
+  /** The phones and browsers of the group. A device reads only its own entry. */
   devices: GroupDevice[];
+  /** The id of the device that asked, when a device asked. */
+  device?: string;
+}
+
+/**
+ * What "Add a device" shows: one link, drawn as a QR code. A phone scans it:
+ * it is admitted to the group with its device key and reaches every member. A
+ * computer pastes it: its core joins the group with the invitation the link
+ * carries after `#`. Both secrets are one-time and expire.
+ */
+export interface DeviceInvite {
+  url: string;
+  expiresAt: Timestamp;
+}
+
+/**
+ * Where the phone app is served from: a page that belongs to no core. Every
+ * core accepts its sockets, as it does the desktop shell's, and the app reaches
+ * the machines of the group it was added to from there. A core's
+ * `BOITE_APP_ORIGIN` and the UI's `VITE_BOITE_APP_ORIGIN` name another one, for
+ * tests and for a fork that serves its own.
+ */
+export const APP_ORIGIN = 'https://boite.mtsu.dev';
+
+/** The fragment key of a device link that carries a machine's group invitation. */
+export const DEVICE_LINK_JOIN = 'join';
+
+/**
+ * What a device signs to say hello to one core: the core it means, the time and
+ * a one-time nonce. Nothing in it can be used on another core or twice.
+ */
+export function deviceHelloInput(coreId: string, at: number, nonce: string): string {
+  return `boite-device-hello\n${coreId}\n${at}\n${nonce}`;
+}
+
+/** What a device signs when it is admitted: the grant it redeems, so its key is proven held by the one who scanned. */
+export function deviceAdmitInput(grant: string, publicKey: string): string {
+  return `boite-device-admit\n${grant}\n${publicKey}`;
+}
+
+/** A device's signed hello for one core. */
+export interface DeviceHello {
+  id: string;
+  at: number;
+  nonce: string;
+  sig: string;
 }
 
 /**
@@ -2918,6 +3456,25 @@ export const GROUP_MAX_CORES = 32;
  */
 export const GROUP_RELAY_ROUTE = '/group/relay';
 
+/** The vendor family of a proprietary model. */
+export type ModelFamily = 'anthropic' | 'openai' | 'google' | 'xai' | 'meta';
+
+/**
+ * Gateway route prefixes named after a vendor's own subscription. Behind one,
+ * `claude/claude-opus-5-5` is the agent's native `claude-opus-5-5`: the core
+ * lists it once, and a choice saved under the route still means that model.
+ */
+export const MODEL_ROUTE_FAMILIES: Readonly<Record<string, ModelFamily>> = {
+  claude: 'anthropic', anthropic: 'anthropic', codex: 'openai', openai: 'openai', chatgpt: 'openai',
+  gemini: 'google', google: 'google', xai: 'xai', grok: 'xai', muse: 'meta',
+};
+
+/** A model id without a vendor route prefix: `codex/gpt-6.1-sol` is `gpt-6.1-sol`, `antigravity/claude-sonnet-5` stays. */
+export function nativeModelId(id: string): string {
+  const slash = id.indexOf('/');
+  return slash > 0 && Object.hasOwn(MODEL_ROUTE_FAMILIES, id.slice(0, slash).toLowerCase()) ? id.slice(slash + 1) : id;
+}
+
 /** `url` without its trailing slashes; a loop, since `/\/+$/` backtracks quadratically on a long run of them. */
 export function withoutTrailingSlashes(url: string): string {
   let end = url.length;
@@ -2956,9 +3513,21 @@ export interface DelegationProfile {
   model: string;
   effort: string | null;
 }
+/**
+ * Who paused a team or a workflow run, which decides who may lift the pause.
+ * `owner`: Subagents > Settings, or a run paused from its panel or a phone.
+ * `stop`: the owner's Stop on the conversation. `agent`: the conversation's
+ * own agent. `restart`: the core restarted over the work. The agent lifts its
+ * own and a restart's at any time, a Stop or a paused run once the owner wrote
+ * to the conversation after it, and never the Settings switch.
+ */
+export type PauseOrigin = 'owner' | 'stop' | 'agent' | 'restart';
 export interface DelegationConfig {
   enabled: boolean;
   paused: boolean;
+  /** Set by the core while paused; a pause saved before it was recorded reads as the owner's. Ignored in `delegation.configure`. */
+  pausedBy?: PauseOrigin;
+  pausedAt?: Timestamp;
   profiles: DelegationProfile[];
   /**
    * The agent may start a child on any installed model it can run, with any
@@ -2966,6 +3535,12 @@ export interface DelegationConfig {
    * model and the profiles. Missing on older cores and saved configs: on.
    */
   anyModel?: boolean;
+}
+/** What `delegation.resume` did: whether the pause lifted, which children got a continuation, which runs resumed. */
+export interface DelegationResumed {
+  unpaused: boolean;
+  agents: ThreadId[];
+  runs: string[];
 }
 /**
  * On from the first turn: a conversation delegates to its own model, or to
@@ -3030,9 +3605,14 @@ export interface DelegationModels {
 /** The profile every conversation has without configuring one: its own harness, account, model and effort. */
 export const CONVERSATION_PROFILE_ID = 'conversation';
 export interface DelegationResultRef { agentId: ThreadId; turnId: TurnId }
-export type DelegationSettlement = 'result_available' | 'waiting_for_children' | 'settled';
+/** `needs_input`: a child waits on a question or a permission request; its `needsInput` says which. */
+export type DelegationSettlement = 'result_available' | 'waiting_for_children' | 'needs_input' | 'settled';
 export interface DelegationWaitResult {
-  /** Single-child completion exposes its result; a whole finished team is settled. */
+  /**
+   * Single-child completion exposes its result; a whole finished team is
+   * settled. A wait also ends, as `needs_input`, as soon as a child it covers
+   * asks something.
+   */
   state: DelegationSettlement;
   timedOut: boolean;
   agents: DelegatedAgent[];
@@ -3055,6 +3635,39 @@ export interface DelegatedAgent {
   resultRef?: DelegationResultRef;
   /** A child's terminal result availability, not ownership of nested children. */
   settlement?: 'result_available' | 'settled';
+  /** What the child waits on from someone, oldest first. Missing when nothing is open. */
+  needsInput?: DelegationInput[];
+  /** The child's own git worktree, for a child spawned with `worktree`. Missing for a child in the shared checkout. */
+  worktree?: DelegationWorktree;
+}
+/**
+ * A card a delegated child waits on. A question's free text or one of its
+ * option labels, sent by the parent with `delegation.send`, answers it; a
+ * permission request only the user can decide, in the child's conversation.
+ */
+export type DelegationInput =
+  | { kind: 'question'; id: RequestId; text: string; options: string[]; allowText: boolean; multiple: boolean; blocking: boolean }
+  | { kind: 'permission'; id: RequestId; toolName: string; description: string | null };
+/**
+ * A delegated child's worktree. `pending`: not made yet, it is made from the
+ * parent's HEAD before the child's next turn. `active`: the child works in it.
+ * `kept`: its last turn left commits beyond `base` or uncommitted changes, so
+ * the branch waits for the parent to merge it. `removed`: it ended with
+ * neither, so the worktree and its branch were deleted; a new turn makes them
+ * again from the parent's HEAD.
+ */
+export interface DelegationWorktree {
+  branch: string;
+  path: string;
+  /** The commit it branched from; null while pending. */
+  base: string | null;
+  state: 'pending' | 'active' | 'kept' | 'removed';
+  /** Commits on the branch beyond `base` when it was last settled. */
+  commits?: number;
+  /** Uncommitted changes when it was last settled. */
+  dirty?: boolean;
+  /** Why the core could not settle or make it, when it could not. */
+  error?: string;
 }
 export interface DelegationView {
   rootThreadId: ThreadId;
@@ -3237,6 +3850,20 @@ export interface TerminalState {
    * resize draws lines twice. Absent on Linux, macOS and older cores.
    */
   windowsPty?: { buildNumber: number };
+  /** The shell that runs, and whether it marks its prompts and commands (OSC 133). Absent on older cores. */
+  shell?: TerminalShell;
+}
+
+/**
+ * A terminal's shell. `integrated` is true when the core started it with its
+ * shell integration: each prompt and command is marked with OSC 133, and the
+ * working directory follows with OSC 633 P Cwd.
+ */
+export interface TerminalShell {
+  /** The executable's name without `.exe`: `pwsh`, `powershell`, `bash`, `cmd`, `zsh`. */
+  name: string;
+  kind: 'powershell' | 'cmd' | 'posix';
+  integrated: boolean;
 }
 
 /** The server on one machine, independently of the desktop application's updater. */
@@ -3253,79 +3880,42 @@ export interface ServerUpdateStatus {
   error: string | null;
 }
 
-export type CoreLogLevel = 'info' | 'warn' | 'error';
-
-/** Raw provider output reaches only owner live observers; diagnostic history retains a placeholder. */
-export interface CoreLogContext {
-  source?: string;
-  event?: string;
-  threadId?: ThreadId;
-  turnId?: TurnId;
-  requestId?: string;
-  kind?: 'provider-output';
+/**
+ * The desktop app's updater on the machine whose core this is, as that
+ * machine's own window reported it. Only the window drives the installer, so
+ * the core keeps the last report and nothing more.
+ */
+export interface DesktopUpdateStatus {
+  phase: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'waiting' | 'installing' | 'error';
+  currentVersion: string;
+  version: string | null;
+  channel: 'stable' | 'nightly';
+  received: number;
+  total: number | null;
+  error: string | null;
 }
 
-/** A bounded diagnostic, with no transcript, RPC payload or process arguments. */
-export interface CoreLogRecord {
-  id: string;
-  runId: string;
-  at: Timestamp;
-  level: CoreLogLevel;
-  source: string;
-  event: string;
-  message: string;
-  threadId?: ThreadId;
-  turnId?: TurnId;
-  requestId?: string;
+/** What `core.updateEverything` started on its machine. */
+export interface UpdateEverythingResult {
+  /** The agents whose update started, or was already under way. */
+  agents: ProviderId[];
+  /** Each agent named that did not start, with the core's reason. */
+  failed: { providerId: ProviderId; message: string }[];
+  /** Boite's own updater once the request is in: downloading, or as it was when `server` was null. */
+  server: ServerUpdateStatus;
+  /** Why Boite's own release did not start, null when it did or was not asked for. */
+  serverError: string | null;
+  /** The desktop app's updater as its window last reported it; absent from a core without `desktopUpdates`. */
+  app?: DesktopUpdateStatus | null;
+  /** Why the desktop app's release was not handed to its window, null when it was or was not asked for. */
+  appError?: string | null;
 }
 
-export interface CoreLogsQuery {
-  /** Defaults to 100; an integer from 1 to 200. Results are newest first. */
-  limit?: number;
-  threadId?: ThreadId;
-  level?: CoreLogLevel;
-}
-
-/** Real and in-memory cores share the same strict diagnostic query boundary. */
-export function validateCoreLogsQuery(raw: unknown): CoreLogsQuery & { limit: number } {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('core.logs params: expected an object');
-  const query = raw as Record<string, unknown>;
-  for (const key of Object.keys(query)) if (!['limit', 'threadId', 'level'].includes(key)) throw new Error(`core.logs ${key}: expected limit, threadId or level`);
-  const limit = query.limit === undefined ? 100 : query.limit;
-  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('core.logs limit: expected an integer from 1 to 200');
-  if (query.threadId !== undefined && (typeof query.threadId !== 'string' || query.threadId.length < 1 || query.threadId.length > 200 || /[\x00-\x1f\x7f]/.test(query.threadId))) throw new Error('core.logs threadId: expected 1 to 200 characters without control characters');
-  if (query.level !== undefined && !['info', 'warn', 'error'].includes(query.level as string)) throw new Error('core.logs level: expected info, warn or error');
-  return { limit, ...(query.threadId === undefined ? {} : { threadId: query.threadId as string }), ...(query.level === undefined ? {} : { level: query.level as CoreLogLevel }) };
-}
-
-/** Owner-only live provider output keeps sign-in URLs usable. Never persist this text. */
-export function normalizeCoreLogOutput(text: string, secrets: readonly string[] = []): string {
-  let value = text;
-  for (const secret of secrets) if (secret.length > 0) value = value.split(secret).join('[redacted]');
-  return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
-}
-
-/** Redact before bounding: cutting an Authorization value first could leave a secret prefix. */
-export function normalizeCoreLogText(text: string, secrets: readonly string[] = []): string {
-  const REDACTED = '[redacted]';
-  let value = text;
-  for (const secret of secrets) if (secret.length > 0) value = value.split(secret).join(REDACTED);
-  value = value
-    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompts?|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)[\[{](?!redacted\])[\s\S]*/gi, `$1${REDACTED}`)
-    .replace(/\b(?:Authorization\s*[:=]\s*)?(?:Bearer|Basic)\s+[^\s,;"'<>]+/gi, REDACTED)
-    .replace(/\bAuthorization\s*[:=]\s*[^\r\n]+/gi, `Authorization: ${REDACTED}`)
-    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompt|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}]+)/gi, `$1${REDACTED}`)
-    .replace(/\b(?:sk-[a-zA-Z0-9_-]{8,}|(?:ghp|github_pat)_[a-zA-Z0-9_]{8,})/g, REDACTED)
-    .replace(/(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/[^\s<>"']+)/gi, (_match, prefix: string, raw: string) => prefix + raw
-      .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#@]*@/i, `$1${REDACTED}@`)
-      // All query values and fragments are untrusted, including unfamiliar keys.
-      .replace(/[?#].*$/, `?${REDACTED}`));
-  return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
-}
-
-export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods {
+export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods, DiagnosticsRpcMethods {
   /** Owner-only merged-PR visibility policy; absent defaults to enabled. Disabling reveals automatically hidden roots, retaining manual archives. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
+  /** Owner-only automatic worktree removal policy; absent defaults to enabled. Turning it off stops future removals only. */
+  'projects.setAutoRemoveWorktrees': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /** Owner-only, private bounded diagnostic history, including earlier runs. */
   'journal.inspect': { params: { cursor?: JournalInspectionCursor | null; limit?: number }; result: JournalInspection };
   'core.logs': { params: CoreLogsQuery; result: CoreLogRecord[] };
@@ -3336,6 +3926,29 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** Confirm the version shown to the owner so a stale dialog cannot install another release. */
   'core.updateInstall': { params: { version: string }; result: ServerUpdateStatus };
   'core.updateCancel': { params: Record<string, never>; result: ServerUpdateStatus };
+  /**
+   * Owner only. One click's worth of updates on this machine: every agent in
+   * `agents` starts its update the way `providers.update` does, and Boite's
+   * own release, when `server` names the version the client showed, starts
+   * downloading at once. That release installs only once the agent updates
+   * are done and the core is idle, so no updater is cut off by the restart.
+   * Answers as soon as everything has started; progress arrives as
+   * `providers.updatesChanged` and `core.updateChanged`. One part failing
+   * leaves the others running. `app` names the desktop app's offered
+   * release: once the agents named here finished, the core hands it to this
+   * machine's own window, which installs it and restarts; `appError` says
+   * when no window is open to do it.
+   */
+  'core.updateEverything': { params: { agents: ProviderId[]; server: string | null; app?: string | null }; result: UpdateEverythingResult };
+  /**
+   * Owner only, and only from this machine's own desktop window (the core
+   * token on loopback): its updater's state, sent again on every change. A
+   * paired device or another member of the group has no installer here to
+   * speak for, so it is refused. Kept until that window's socket closes.
+   */
+  'core.desktopUpdateReport': { params: { status: DesktopUpdateStatus }; result: { ok: true } };
+  /** Owner only. The desktop app's updater on this machine, null when no window of it is connected. */
+  'core.desktopUpdateStatus': { params: Record<string, never>; result: DesktopUpdateStatus | null };
   'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
   'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
   /**
@@ -3343,12 +3956,33 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * wins over `profileId`. Neither: this conversation's own model. `speed` is
    * a tier of the model the child runs on, by id, by label or as listed
    * (`Fast (priority)`), case-insensitively, and is refused otherwise. Left
-   * out: no tier, never the parent's.
+   * out: no tier, never the parent's. `context` starts the child without
+   * part of the user's setup; left out, it gets all of it.
+   *
+   * `worktree: true` runs the child in a git worktree of its own on a new
+   * `boite/sub-<id>` branch from the parent's current HEAD instead of the
+   * shared checkout; refused when the parent's project is not a git
+   * repository. Uncommitted edits of the parent are not copied.
    */
-  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
+  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; worktree?: boolean; requestId: string }; result: DelegatedAgent };
   'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };
+  /**
+   * From a parent to a child blocked on a question card, the text answers
+   * that question (an option label, or free text where it takes some) and the
+   * letter carries `answered`; a text that fits neither is refused with the
+   * options. A question asked without stopping takes only its option labels.
+   * Otherwise a message delivered at the next tool boundary or turn
+   * (`delegationReply`).
+   */
   'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
   'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };
+  /**
+   * Lifts the team's pause when the caller may (`PauseOrigin`), hands over the
+   * mail it held and sends each stopped or failed child, or only `agentId`, a
+   * continuation. Without `agentId` it also resumes the root's paused runs the
+   * caller may resume. Refused with the reason when the pause stays.
+   */
+  'delegation.resume': { params: { threadId: ThreadId; agentId?: ThreadId }; result: DelegationResumed };
   'delegation.result': { params: { threadId: ThreadId; agentId: ThreadId; turnId: TurnId; offset?: number; limit?: number }; result: DelegationResultPage };
   'delegation.wait': { params: { threadId: ThreadId; agentId?: ThreadId; timeoutMs?: number }; result: DelegationWaitResult };
   'brain.status': { params: Record<string, never>; result: BrainStatus };
@@ -3370,34 +4004,24 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * and hands them over as delivered: they are not injected into the turn a second time.
    */
   'collaboration.wait': { params: { threadId: ThreadId; from?: AgentAddress; timeoutMs: number }; result: { letters: AgentLetter[] } };
-  /** Every steward grant on this core. */
-  'stewards.list': { params: Record<string, never>; result: StewardGrant[] };
   /**
-   * Make the agent of `threadId` the steward of projects, or replace its grant.
-   * Refused for a delegated child, a persistent agent session, an archived
-   * thread, an unknown project or capability, and an empty project list
-   * without `allProjects`.
+   * The calling persistent agent and the projects entrusted to it. The
+   * `resident.*` methods name the agent's own direct conversation as
+   * `threadId`; the core holds them to the projects of its profile.
    */
-  'stewards.set': { params: { grant: StewardGrantInput }; result: StewardGrant };
-  /** Remove a thread's steward grant. Its letters already delivered stay in the timelines. */
-  'stewards.revoke': { params: { threadId: ThreadId }; result: { ok: true } };
-  /** The calling thread's own grant and the projects it covers. */
-  'steward.get': { params: { threadId: ThreadId }; result: StewardView };
-  /** The threads of the projects it looks after, the most recently active first. `project` narrows to one (id, name or folder). */
-  'steward.threads': { params: { threadId: ThreadId; project?: string; archived?: boolean }; result: StewardThread[] };
-  /** One thread it looks after, with its pending questions, permissions and last answer. */
-  'steward.thread': { params: { threadId: ThreadId; target: ThreadId }; result: StewardThreadDetail };
+  'resident.view': { params: { threadId: ThreadId }; result: ResidentView };
+  /** The threads of its projects, the most recently active first. `project` narrows to one (id, name or folder). */
+  'resident.threads': { params: { threadId: ThreadId; project?: string; archived?: boolean }; result: ProjectThreadRow[] };
+  /** One thread of its projects, with its pending questions, permissions and last answer. */
+  'resident.thread': { params: { threadId: ThreadId; target: ThreadId }; result: ProjectThreadDetail };
   /**
-   * Act on a thread it looks after, within its capabilities: `rename` takes
-   * `title`, `move` takes `project` (a project it also looks after). Every
-   * action leaves a system line in the target's timeline naming the steward.
-   * The steward's own thread is refused.
+   * Act on a thread of its projects: `rename` takes `title`, `move` takes
+   * `project` (another project entrusted to it). Every action leaves a system
+   * line in the target's timeline naming the agent.
    */
-  'steward.act': { params: { threadId: ThreadId; target: ThreadId; action: StewardAction; title?: string; project?: string }; result: { thread: StewardThread | null } };
-  /** Answer a pending question of a thread it looks after, as the owner would from the card. */
-  'steward.answer': { params: { threadId: ThreadId; target: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; skip?: boolean }; result: { ok: true } };
-  /** Allow or deny a pending permission request of a thread it looks after. Needs the `permissions` capability. */
-  'steward.permission': { params: { threadId: ThreadId; target: ThreadId; requestId: RequestId; decision: 'allow' | 'deny' }; result: { ok: true } };
+  'resident.act': { params: { threadId: ThreadId; target: ThreadId; action: ResidentThreadAction; title?: string; project?: string }; result: { thread: ProjectThreadRow } };
+  /** Answer or skip a pending question of a thread of its projects, marked as the agent's in that timeline. */
+  'resident.answer': { params: { threadId: ThreadId; target: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; skip?: boolean }; result: { ok: true } };
   'collaboration.identity': { params: Record<string, never>; result: CoordinationPeer };
   'collaboration.peers': { params: Record<string, never>; result: CoordinationPeer[] };
   'collaboration.check': { params: { coreId: string }; result: { ok: true } };
@@ -3409,7 +4033,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'collaboration.bridge.forward': { params: { coreId: string; body: string; signature: string }; result: CoordinationBridgeResponse };
   /** Only the owner connection that received this request can complete it. */
   'collaboration.bridge.reply': { params: { requestId: string; response: CoordinationBridgeResponse }; result: { ok: true } };
-  /** The group this core belongs to, or null. A paired device reads the machines, never the devices. */
+  /** The group this core belongs to, or null. A paired device reads the machines and its own device entry. */
   'group.get': { params: Record<string, never>; result: Group | null };
   /** Starts a group with this core as its only member. Refused while it belongs to one. Owner only. */
   'group.create': { params: { name: string }; result: Group };
@@ -3425,6 +4049,21 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'group.remove': { params: { coreId: string }; result: Group };
   /** A ticket for the caller to connect to another member at its own role. */
   'group.ticket': { params: { coreId: string; url?: string }; result: GroupTicket };
+  /**
+   * "Add a device": one link and one code. A phone redeems it with its device
+   * key and joins the group; a computer pastes the link and its core joins.
+   * A core in no group starts one named after itself first. Owner only.
+   */
+  'group.addDevice': { params: Record<string, never>; result: DeviceInvite };
+  /** Takes a device out of the group: every member refuses it from then on. Owner only. */
+  'group.revokeDevice': { params: { id: string }; result: Group };
+  /**
+   * A client paired the older way, one key per member, hands over its device
+   * key: from then on it says hello with a signature on every member. The
+   * key it called with keeps working until it is revoked. A core in no group
+   * starts one named after itself first.
+   */
+  'group.enrollDevice': { params: { publicKey: string; name?: string; at: number; sig: string }; result: { id: string; group: Group } };
   'speech.status': { params: Record<string, never>; result: SpeechStatus };
   'speech.configure': { params: SpeechConfig & { groqKey?: string; openrouterKey?: string }; result: SpeechStatus };
   'speech.config': { params: Record<string, never>; result: SpeechConfig };
@@ -3486,6 +4125,21 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * disables and kills it, `restart` kills and launches it again.
    */
   'plugins.app': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
+  /** Owner-only. Start, stop or restart a gateway plugin. */
+  'plugins.gateway': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
+  /**
+   * Owner-only. Whether the plugin's desktop app and gateway start when the
+   * core starts. It changes nothing running now; a stop no longer keeps a
+   * plugin off across core starts once this is on. A client offers it only
+   * when the plugin's state carries `autostart`.
+   */
+  'plugins.autostart': { params: { id: string; autostart: boolean }; result: PluginState };
+  /**
+   * Reads the update source of one recommended plugin, or of every one that
+   * names a source, now. Answers once the reads finish; each changed state is
+   * also announced by `plugins.updated`. Installs nothing.
+   */
+  'plugins.checkUpdates': { params: { id?: string }; result: PluginState[] };
   /**
    * Asks the owner's desktop windows to show a thread or an agent's page.
    * Emits `ui.reveal` to owner connections only, desktop-app plugins left
@@ -3525,14 +4179,29 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
        * it, takes it out and passes the rest of the hello on: the core at the
        * end never sees it.
        */
-      relay?: string;
+      relay?: string | DeviceHello;
+      /**
+       * A device of the group: its signature for this core (`deviceHelloInput`).
+       * With `grant`, the device being admitted: its public key and a
+       * signature over the grant (`deviceAdmitInput`), and `name` for the list.
+       */
+      device?: DeviceHello | { publicKey: string; name?: string; sig: string };
       protocolVersion: number;
       client: { name: string; version: string; device?: string };
+      /**
+       * Events this client handles that an older client would not, so the
+       * core sends them in place of their older form. `thread.load`: a load
+       * sample arrives as that event instead of a whole `thread.updated` row.
+       * An older core ignores the field.
+       */
+      accepts?: HelloAccepted[];
     };
     result: {
       core: CoreInfo;
       principal: Principal;
       session?: { id: string; token: string };
+      /** The device id a grant just admitted. */
+      device?: string;
       /** The one thread an `agent` reaches. */
       threadId?: ThreadId;
     };
@@ -3562,6 +4231,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'agent.projects': { params: { threadId: ThreadId }; result: AgentProject[] };
   /**
+   * The settings an agent may ask about (`REQUESTABLE_SETTINGS`), each with
+   * its value and the page it sits on, so it reads before it proposes.
+   */
+  'agent.settings': { params: { threadId: ThreadId }; result: SettingReading[] };
+  /**
    * The agent registers an existing folder as a project, as the owner does
    * from the sidebar, so `agent.spawn` and `agent.move` can name it. `path` is
    * absolute; `name` defaults to the folder's name. A folder that is already a
@@ -3586,7 +4260,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * thread an agent started until the user has written in it. `requestId`
    * makes a retry return the same thread.
    */
-  'agent.spawn': { params: { threadId: ThreadId; project: string; prompt: string; title?: string; worktree?: boolean; requestId: string }; result: AgentSpawn };
+  'agent.spawn': { params: { threadId: ThreadId; project: string; prompt: string; title?: string; worktree?: boolean; context?: ContextRequest | ContextPreset; requestId: string }; result: AgentSpawn };
   /**
    * Show something in the thread's right panel. Every client subscribed to the
    * thread receives `panel.requested`; `shown` says whether one was. The core
@@ -3626,8 +4300,14 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
 
   /** `git status` of the thread's working directory. Refused by name outside a repository. */
   'git.status': { params: { threadId: ThreadId }; result: GitStatus };
-  /** One file's two sides. `ref` is what the working tree is compared to, HEAD by default. */
-  'git.diff': { params: { threadId: ThreadId; path: string; ref?: string }; result: GitDiff };
+  /**
+   * One file's two sides. `ref` is what the working tree is compared to, HEAD
+   * by default. `oldPath` is the origin `git.status` gave the path, null for
+   * none: given, the core reads that side without a status of its own, and
+   * the answer's `status` is `renamed` or what the two sides show (`added`,
+   * `deleted`, `modified`). Absent, the core asks git for the origin.
+   */
+  'git.diff': { params: { threadId: ThreadId; path: string; ref?: string; oldPath?: string | null }; result: GitDiff };
 
   /** One directory of the working directory, `path` relative to it or empty for the root. Directories first. */
   'files.list': { params: { threadId: ThreadId; path?: string }; result: FileEntry[] };
@@ -3636,7 +4316,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'files.write': { params: { threadId: ThreadId; path: string; text: string }; result: { bytes: number; modifiedAt: Timestamp } };
 
   /** A fresh one-time pairing link, `device` unless the role says otherwise. Owner only. */
-  'pairing.grant': { params: { role?: PairingRole; short?: boolean }; result: PairingGrant };
+  'pairing.grant': { params: { role?: PairingRole }; result: PairingGrant };
   /** Tailscale CLI and `tailscale serve` state for this core. Owner only. */
   'tailscale.status': { params: Record<string, never>; result: TailscaleStatus };
   /** Serve this core on https://<MagicDNS name> and make it the public URL. `replace` takes 443 from another target. Owner only. */
@@ -3859,6 +4539,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'terminals.resize': { params: { id: string; cols: number; rows: number }; result: { ok: true } };
   /** Kill the shell and its tree. `terminal.exited` follows. */
   'terminals.close': { params: { id: string }; result: { ok: true } };
+  /**
+   * The shell's recent commands from its own history file, newest first and
+   * each once: what the up arrow walks through, across past sessions too.
+   * Empty for a shell that keeps none (cmd, sh).
+   */
+  'terminals.history': { params: { id: string }; result: { commands: string[] } };
 
   'threads.list': { params: { projectId?: ProjectId; includeArchived?: boolean }; result: ThreadSummary[] };
   /** Read the thread's own branch PR using the execution machine's GitHub CLI. Null when the thread has no branch. */
@@ -3892,9 +4578,27 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
        * core makes its folder.
        */
       incognito?: boolean;
+      /** Start without part of the user's setup, fixed for the thread's life ([context modes](../../docs/context-modes.md)). */
+      context?: ContextRequest | ContextPreset;
+      /** Adopt this connection's compatible, prompt-free draft reservation. */
+      preparationId?: string;
+      /** Subscribe this connection before returning the newly created conversation. */
+      subscribe?: boolean;
     };
     result: ThreadSummary;
   };
+  /** Reserve the final workspace and initialize a native session without publishing a conversation or sending text. */
+  'drafts.prepare': {
+    params: Omit<RpcMethods['threads.create']['params'], 'title' | 'preparationId' | 'subscribe'> & { preparationId: string };
+    result: { preparationId: string; threadId: ThreadId };
+  };
+  /** Release only the named reservation owned by this connection, including preparation still in flight. */
+  'drafts.release': { params: { preparationId: string }; result: { ok: true } };
+  /** Transfer one validated attachment before Send. The lease belongs to this connection. */
+  'attachments.upload': { params: { attachment: Attachment }; result: { id: string } };
+  'attachments.release': { params: { ids: string[] }; result: { ok: true } };
+  /** The system prompt, tools and parameters of a Claude thread's last request, read from its transcript. Refused on other providers. */
+  'threads.agentShape': { params: { threadId: ThreadId }; result: AgentShape };
   /** Supported operations and their current availability for this thread. */
   'threads.capabilities': { params: { threadId: ThreadId }; result: ThreadCapabilities };
   /**
@@ -3919,10 +4623,16 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * tool inputs and heavy documents on the core as well, and caps each message
    * at `MESSAGE_SENT_MAX_BYTES`; it needs `features.deferredToolParts`. A
    * subscription opened with it receives live tool parts the same way.
+   *
+   * `maxBytes` lowers the page's byte budget below `MESSAGE_PAGE_MAX_BYTES`,
+   * counted as the client receives the messages: a first visit asks for what
+   * fills a screen (`INITIAL_PAGE_BYTES`). It bounds a page, around a saved
+   * position too, never a resume tail, which comes whole or not at all. Older
+   * cores ignore it and send their page.
    */
   'threads.get': {
     params: {
-      threadId: ThreadId; after?: MessageId; around?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean;
+      threadId: ThreadId; after?: MessageId; around?: MessageId; limit?: number; maxBytes?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean;
       /** Request a resume proof, or reuse a proof previously supplied by this core. */
       sync?: true | MessageSync;
       /** Subscribe after a successful snapshot, optionally replacing the previous subscription and acknowledging unread content. */
@@ -3944,11 +4654,17 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * `after` instead of `before` asks for the messages written after it, the
    * page a reader scrolls down into from a page cut by `around`. The result's
    * `after` is then the next cursor, null once the page reaches the last
-   * message, and its `before` is null. Exactly one of the two is given.
+   * message, and its `before` is null. `from` instead asks for the messages
+   * from that position on, 0 being the thread's first, with `before` and
+   * `after` the cursors around the page (`features.messagePositions`). Exactly
+   * one of the three is given; a `from` that is not a whole number from 0 up is
+   * refused by name. `offset` is the position of the page's first message,
+   * left out by cores without that feature.
+   * `maxBytes` lowers the byte budget as it does for `threads.get`.
    */
   'messages.list': {
-    params: { threadId: ThreadId; before?: MessageId; after?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean };
-    result: { messages: Message[]; before: MessageId | null; after?: MessageId | null; turns?: Turn[] };
+    params: { threadId: ThreadId; before?: MessageId; after?: MessageId; from?: number; limit?: number; maxBytes?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean };
+    result: { messages: Message[]; before: MessageId | null; after?: MessageId | null; turns?: Turn[]; offset?: number };
   };
   /** The full output of a tool already visible in this conversation. No filesystem path is accepted. */
   'messages.toolOutput': {
@@ -4092,12 +4808,18 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'threads.focus': { params: { threadId: ThreadId | null; protectedThreadIds?: ThreadId[]; protectAllThreads?: boolean; attentive?: boolean; idleMs?: number }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
-  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
+  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; attachmentIds?: (string | null)[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
   /** Sends user input into the active turn; false leaves it queued for a later boundary or turn. */
   'turns.steer': { params: { threadId: ThreadId; turnId: TurnId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId: string }; result: { accepted: boolean } };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
   /** Resume or discard exactly one unsent prompt held after restart, retaining its execution selection. */
   'turns.recover': { params: { threadId: ThreadId; turnId: TurnId; action: 'resume' | 'discard' }; result: Turn };
+  /**
+   * Cancels the retry the core planned for the thread (`ThreadSummary.retry`).
+   * A capacity retry's turn then fails with the provider's refusal; a usage
+   * limit resume is dropped. False when nothing was planned.
+   */
+  'turns.cancelRetry': { params: { threadId: ThreadId }; result: { cancelled: boolean } };
 
   /**
    * The requests still unanswered, in the order they were created; every thread
@@ -4143,6 +4865,20 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
     params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean };
     result: { questionId: RequestId };
   };
+  /**
+   * A settings card on the agent's thread (`boite settings request|open`),
+   * asked without stopping like `questions.ask`, with `reason` as its text.
+   * With `key` and `value` it proposes a change: refused for a key outside
+   * `REQUESTABLE_SETTINGS` (naming them), a value `settings.set` would refuse,
+   * the value already set, or a card already open on that key in the thread.
+   * The card settles when the setting changes, through Apply or the page; the
+   * agent reads `applied`, `changed` or `refuse`. With `page` it points at a
+   * page and the agent reads `open` or `refuse`.
+   */
+  'settings.request': {
+    params: SettingRequestParams;
+    result: { questionId: RequestId; setting: SettingAsk };
+  };
 
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
@@ -4175,6 +4911,14 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'subscriptionProxy.configure': { params: { subscriptionProxy: SubscriptionProxy; key?: string | null }; result: Settings };
   /** Owner-only. The core reads the gateway's quotas route itself; `quotas.list` carries the same entries. */
   'subscriptionProxy.quotas': { params: { refresh?: boolean }; result: SubscriptionProxyQuotas };
+  /** Owner-only. The logins and OpenCode keys of this machine's accounts Douane could take, without their values. */
+  'subscriptionProxy.movePlan': { params: { target?: GatewayMoveTarget }; result: GatewayMovePlan };
+  /**
+   * Owner-only. The core reads each named item's file and posts it to the
+   * configured Douane's `/admin/api/accounts/import`. `managementToken` saves
+   * (or with null removes) the token sent to that API; omitted keeps it.
+   */
+  'subscriptionProxy.move': { params: { ids: string[]; managementToken?: string | null; target?: GatewayMoveTarget }; result: { outcomes: GatewayMoveOutcome[] } };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };
@@ -4214,8 +4958,6 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
-  /** A steward grant was set or revoked; `stewards.list` reads the rest. */
-  'stewards.changed': { threadId: ThreadId };
   /** Sent directly to the owner connection registered for the target core. */
   'collaboration.bridge.request': { requestId: string; fromCoreId: string; toCoreId: string; body: string; signature: string };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
@@ -4241,6 +4983,13 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
 
   'thread.created': ThreadSummary;
   'thread.updated': ThreadSummary;
+  /**
+   * A thread's load sample alone, at most once a second while it moves: the
+   * client patches `load` on the row it holds and nothing else. Sent only to
+   * a connection whose hello `accepts` it; any other receives the whole row
+   * as `thread.updated`.
+   */
+  'thread.load': { threadId: ThreadId; load: ThreadLoad };
   'thread.removed': { threadId: ThreadId; undoable?: boolean };
   /** The owner-only deletion list changed, including purge and removal with a project. */
   'thread.deletionsUpdated': Record<string, never>;
@@ -4343,6 +5092,14 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   };
   'core.log': { level: CoreLogLevel; message: string; at: Timestamp } & CoreLogContext;
   'core.updateChanged': ServerUpdateStatus;
+  /** Owner connections only: this machine's desktop updater as its window reported it, null once that window left. */
+  'core.desktopUpdateChanged': { status: DesktopUpdateStatus | null };
+  /**
+   * This machine's own desktop window only: install this release now, the
+   * owner asked from another machine (`core.updateEverything` `app`). The
+   * window checks it against its own offer before anything installs.
+   */
+  'ui.appUpdate': { version: string };
   /** What a shell printed, as it printed it. */
   'terminal.output': { id: string; data: string; sequence?: number };
   /** Portable brain switches changed. The folder stays on its host. */
@@ -4451,22 +5208,6 @@ export const GRANT_QUERY_PARAM = 'grant';
 export const GRANT_TTL_MS = 10 * 60 * 1000;
 /** Every role `pairing.grant` takes; anything else is refused by name. */
 export const PAIRING_ROLES: readonly PairingRole[] = ['device', 'owner'];
-/** How long a typed pairing code and a short owner grant stay valid. */
-export const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
-/** Letters of a pairing code: Crockford base32, no I, L, O or U to misread. */
-export const PAIRING_CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-
-/**
- * A typed or pasted pairing code in its canonical 8-letter form, or null when
- * it cannot be one. Case, spaces and dashes are ignored; O reads as 0, I and L as 1.
- */
-export function normalizePairingCode(text: string): string | null {
-  const code = text.toUpperCase().replace(/[\s-]+/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
-  if (code.length !== 8) return null;
-  for (const letter of code) if (!PAIRING_CODE_ALPHABET.includes(letter)) return null;
-  return code;
-}
-
 /**
  * What a client says it is in its `hello`. `plugin` is a desktop-app plugin
  * (`provides.desktopApp`) talking to the core that started it: it signs in
@@ -4476,11 +5217,29 @@ export function normalizePairingCode(text: string): string | null {
 export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'plugin', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
+/** What a hello's `accepts` may name. Anything else is ignored. */
+export const HELLO_ACCEPTED = ['thread.load'] as const;
+export type HelloAccepted = (typeof HELLO_ACCEPTED)[number];
+
 export { attachmentError, answerAttachmentError } from './attachment-validation.ts';
-export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, checkSettingsPatch, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
+export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, MODEL_FAVORITES_MAX, checkSettingsPatch, compareModelFavorites, keepLaterFavorites, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
 import type { AutoCompact } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
+export {
+  REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
+  checkSettingRequest, effectiveSetting, isRequestableSetting, isSettingsPage, readSettings, sameSetting, settingAnswerText, settledSetting,
+  type RequestableSetting, type SettingAsk, type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck,
+  type SettingRequestParams, type SettingsPage,
+} from './setting-requests.ts';
+import type { SettingAsk, SettingReading, SettingRequestParams } from './setting-requests.ts';
+export {
+  AGENT_PROJECTS_MAX, AGENT_RUN_MINUTES, AGENT_SETTING_KEYS, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,
+  normalizeAgentSetting, settledAgentSetting,
+  type AgentSettingApplyParams, type AgentSettingAsk, type AgentSettingChoice, type AgentSettingContext, type AgentSettingKey, type AgentSettingReading,
+  type AgentSettingRequestCheck, type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams,
+} from './agent-setting-requests.ts';
+import type { AgentSettingAsk } from './agent-setting-requests.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier, type SpeechBackend } from './speech-models.ts';
 import type { SpeechModelTier, SpeechBackend } from './speech-models.ts';
 
@@ -4497,7 +5256,7 @@ export { IMAGE_INLINE_CHARS, previewFileData, previewImageData, type ImagePrevie
 export const DISPLAY_IMAGE_MAX = 1280;
 export { imageSize } from './image-size.ts';
 export {
-  VIEW_ROUTE, VIEW_MAX_BYTES, VIEW_WIDTH, VIEW_NARROW_WIDTH, VIEW_NARROW_BELOW, VIEW_MIN_HEIGHT, VIEW_MAX_HEIGHT, VIEW_DEFAULT_HEIGHT, VIEW_TITLE_MAX,
+  VIEW_ROUTE, VIEW_MAX_BYTES, VIEW_WIDTH, VIEW_NARROW_WIDTH, VIEW_BLEED, VIEW_NARROW_BELOW, VIEW_MIN_HEIGHT, VIEW_MAX_HEIGHT, VIEW_DEFAULT_HEIGHT, VIEW_TITLE_MAX,
   VIEW_CONTENT_POLICY, VIEW_SANDBOX, VIEW_TOKENS, VIEW_HEIGHT_EXPRESSION, VIEW_GUIDE_LINE, VIEW_HELP,
   clampViewHeight, viewFrameHeight, viewThemeFragment, readViewMessage, viewDocument, viewTitleOf,
   type InlineView, type ViewTheme, type ViewHostMessage, type ViewPageMessage,

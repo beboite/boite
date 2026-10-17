@@ -71,6 +71,20 @@ export function removeImageReferences(store: Store, key: string, at: number) {
   }
 }
 
+/** True when `edit` (a range of `text`) reaches into an image reference: removing it is a step of its own. */
+export function touchesImageReference(text: string, attachments: Attachment[], edit: { start: number; end: number } | undefined): boolean {
+  if (!edit) return false;
+  let at = 0;
+  for (const part of imageTextParts(text, attachments)) {
+    const from = at;
+    at += part.text.length;
+    if (!part.attachment) continue;
+    // A range overlaps it; a caret only counts strictly inside it, not at its edge.
+    if (edit.end > edit.start ? from < edit.end && at > edit.start : from < edit.start && edit.start < at) return true;
+  }
+  return false;
+}
+
 /**
  * A reference is one object in the box: an edit that cuts into it takes it
  * whole, and its image with it once no other reference names that image.

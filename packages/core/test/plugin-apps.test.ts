@@ -51,21 +51,23 @@ function installBots(dataDir: string): string {
 /**
  * The app the core spawns: it records the variables it was given, then does
  * what `mode.txt` beside it says. Returns the fixture's directory, where its
- * mode and its record live, and the pids the core started.
+ * mode and its record live, and the pids the core started. In `exit0` it is
+ * the user who quits: the app exits 0 once `quit()` says so, never before.
  */
-function fakeApp(h: TestCore): { home: string; pids: number[]; mode(value: 'exit0' | 'crash' | 'stay'): void } {
+function fakeApp(h: TestCore): { home: string; pids: number[]; mode(value: 'exit0' | 'crash' | 'stay'): void; quit(): void } {
   const home = join(h.dataDir, 'app-fixture');
   mkdirSync(home, { recursive: true });
   const fixture = join(home, 'app.ts');
   writeFileSync(fixture, `
-    import { readFileSync, writeFileSync } from 'node:fs';
+    import { existsSync, readFileSync, writeFileSync } from 'node:fs';
     import { join } from 'node:path';
     const names = ['BOITE_CORE_URL', 'BOITE_TOKEN', 'BOITE_PLUGIN_ID', 'BOITE_THREAD_ID', 'BOITE_AGENT_TOKEN'];
     writeFileSync(join(import.meta.dir, 'seen.json'), JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), env: Object.fromEntries(names.map((name) => [name, process.env[name] ?? null])) }));
     const mode = readFileSync(join(import.meta.dir, 'mode.txt'), 'utf8');
-    if (mode === 'exit0') process.exit(0);
     if (mode === 'crash') process.exit(3);
-    setInterval(() => undefined, 1000);
+    // 'exit0' quits once the test says so; 'stay' runs until it is killed.
+    const quit = join(import.meta.dir, 'quit');
+    setInterval(() => { if (mode === 'exit0' && existsSync(quit)) process.exit(0); }, mode === 'exit0' ? 10 : 1000);
   `);
   const pids: number[] = [];
   const spawn = h.core.procs.spawn.bind(h.core.procs);
@@ -78,7 +80,7 @@ function fakeApp(h: TestCore): { home: string; pids: number[]; mode(value: 'exit
   });
   restores.push(() => spy.mockRestore());
   h.core.plugins.apps.desktop = () => null;
-  return { home, pids, mode: (value) => writeFileSync(join(home, 'mode.txt'), value) };
+  return { home, pids, mode: (value) => writeFileSync(join(home, 'mode.txt'), value), quit: () => writeFileSync(join(home, 'quit'), '') };
 }
 
 /** Timers that fire when the test says so. */
@@ -126,8 +128,12 @@ describe('a desktop app', () => {
     expect(harness.core.plugins.state('bots').app).toMatchObject({ enabled: true, status: 'stopped', pid: null });
     expect(harness.core.plugins.state('bots').commands[0]).toBe('bots');
 
+    // An app that quits by itself can be gone before `start` answers, and the
+    // answer then rightly says stopped: a macOS runner saw its exit settled
+    // before the reply. The user quits only once the app is seen running.
     const started = await client.call('plugins.app', { id: 'bots', action: 'start' });
     expect(started.app?.status).toBe('running');
+    fake.quit();
     await waitFor(() => app().status === 'stopped');
     expect(app()).toMatchObject({ enabled: true, status: 'stopped', exitCode: 0, error: null, startedAt: null });
     const seen = JSON.parse(readFileSync(join(fake.home, 'seen.json'), 'utf8')) as { args: string[]; cwd: string; env: Record<string, string | null> };
@@ -191,35 +197,63 @@ describe('a desktop app', () => {
     expect(app()).toMatchObject({ enabled: false, status: 'stopped', pid: null, startedAt: null });
     expect(fake.pids).toHaveLength(3);
     expect(fake.pids.filter(alive)).toEqual([]);
-    expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false });
+    expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false, autostart: true });
   });
 
-  test('stop disables it for good, start and restart bring it back, and the choice survives a new store', async () => {
+  test('stop keeps it off until a start, and the core start brings it back only while it starts with Boite', async () => {
     harness = await startQuietCore(); const client = await harness.connect();
     const dir = installBots(harness.dataDir);
     const fake = fakeApp(harness); fake.mode('stay');
     await client.call('plugins.app', { id: 'bots', action: 'start' });
     const first = fake.pids[0]!;
     const stopped = await client.call('plugins.app', { id: 'bots', action: 'stop' });
-    expect(stopped.app).toMatchObject({ enabled: false, status: 'stopped', pid: null, startedAt: null });
+    expect(stopped.app).toMatchObject({ enabled: false, autostart: true, status: 'stopped', pid: null, startedAt: null });
     expect(alive(first)).toBe(false);
-    expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false });
+    expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false, autostart: true });
 
-    // What the next core start reads: nothing launches.
-    const fresh = new PluginStore(harness.core);
-    expect(fresh.state('bots').app?.enabled).toBe(false);
+    // Started with Boite: the next core start launches it, a stop or not.
+    expect(new PluginStore(harness.core).state('bots').app).toMatchObject({ enabled: false, autostart: true });
     harness.core.plugins.startApps();
-    expect(fake.pids).toHaveLength(1);
+    await waitFor(() => fake.pids.length === 2 && app().status === 'running');
 
+    // Turned off, nothing running changes, and the next core start leaves it alone.
+    const off = await client.call('plugins.autostart', { id: 'bots', autostart: false });
+    expect(off.app).toMatchObject({ autostart: false, status: 'running' });
+    expect(JSON.parse(readFileSync(join(dir, 'app.json'), 'utf8'))).toEqual({ enabled: false, autostart: false });
+    await client.call('plugins.app', { id: 'bots', action: 'stop' });
+    harness.core.plugins.startApps();
+    expect(fake.pids).toHaveLength(2);
+
+    // A start makes it run without turning autostart back on.
     await client.call('plugins.app', { id: 'bots', action: 'restart' });
-    expect(app()).toMatchObject({ enabled: true, status: 'running' });
+    expect(app()).toMatchObject({ enabled: true, autostart: false, status: 'running' });
     const second = app().pid!;
     await client.call('plugins.app', { id: 'bots', action: 'restart' });
     expect(alive(second)).toBe(false);
     expect(app().pid).not.toBe(second);
-    expect(new PluginStore(harness.core).state('bots').app?.enabled).toBe(true);
+    expect(new PluginStore(harness.core).state('bots').app).toMatchObject({ enabled: true, autostart: false });
     await expect(client.call('plugins.app', { id: 'bots', action: 'pause' as 'stop' })).rejects.toThrow('start, stop or restart');
-    await expect(client.call('plugins.app', { id: 'kebacc-switcher', action: 'start' })).rejects.toThrow('Install kebacc-switcher first');
+    await expect(client.call('plugins.autostart', { id: 'bots', autostart: 'yes' as unknown as boolean })).rejects.toThrow('autostart must be true or false');
+    // A recommended plugin that is not installed has no app to start.
+    const pools = parseManifest({ ...manifest(), id: 'pool-switcher', name: 'Pool switcher', executable: 'pool', provides: { accountPools: { providers: ['claude'] } } }, 'recommended.json[1]');
+    harness.core.plugins.recommended = [...harness.core.plugins.recommended, pools];
+    await expect(client.call('plugins.app', { id: 'pool-switcher', action: 'start' })).rejects.toThrow('Install pool-switcher first');
+    await expect(client.call('plugins.autostart', { id: 'pool-switcher', autostart: true })).rejects.toThrow('Install pool-switcher first');
+
+    const { grant } = await client.call('pairing.grant', {});
+    const device = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
+    try {
+      await expect(device.call('plugins.autostart', { id: 'bots', autostart: true })).rejects.toThrow('plugins.autostart is for the owner only');
+    } finally { device.close(); }
+  });
+
+  test('an app.json from before autostart starts with the core only if it was left enabled', async () => {
+    harness = await startQuietCore();
+    const dir = installBots(harness.dataDir);
+    writeFileSync(join(dir, 'app.json'), JSON.stringify({ enabled: false }));
+    expect(app()).toMatchObject({ enabled: false, autostart: false });
+    writeFileSync(join(dir, 'app.json'), JSON.stringify({ enabled: true }));
+    expect(app()).toMatchObject({ enabled: true, autostart: true });
   });
 
   test('the core start launches an enabled app, and close() kills it', async () => {

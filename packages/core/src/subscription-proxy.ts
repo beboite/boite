@@ -1,12 +1,12 @@
 import { join } from 'node:path';
-import { subscriptionProxyName, subscriptionProxyOf, type ModelInfo, type ProviderDescriptor, type ProviderId, type SubscriptionProxy } from '@boite/contracts';
+import { MODEL_ROUTE_FAMILIES, nativeModelId, subscriptionProxyName, subscriptionProxyOf, type ModelFamily, type ModelInfo, type ProviderDescriptor, type ProviderId, type SubscriptionProxy } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, unavailable, RpcFailure } from './errors.ts';
-import { OPENCODE_V2 } from './providers/opencode.ts';
+import { isOpenCode, OPENCODE_V2 } from './providers/opencode.ts';
 import { profileFor } from './providers/resolve.ts';
 
 const KEY_SETTING = 'subscription-proxy-key';
-/** The gateway models OpenCode 2 was last offered, `{ id, name }` rows, kept so a restart can start a turn on one. */
+/** The gateway models both OpenCode versions were last offered, kept so a restart can start a turn on one. */
 const OPENCODE_MODELS_SETTING = 'subscription-proxy-opencode-models';
 export const PROXY_URL_ENV = 'BOITE_SUBSCRIPTION_PROXY_URL';
 export const PROXY_KEY_ENV = 'BOITE_SUBSCRIPTION_PROXY_KEY';
@@ -16,26 +16,43 @@ export const PROXY_KEY_ENV = 'BOITE_SUBSCRIPTION_PROXY_KEY';
  * its own, which is what the ACP driver reads this for.
  */
 export const PROXY_PREFIX_ENV = 'BOITE_SUBSCRIPTION_PROXY_PREFIX';
-/** OpenCode 2's runtime for a gateway that speaks Chat Completions, which both gateways do for every model. */
-const OPENCODE_GATEWAY_PACKAGE = '@opencode/ai/providers/openai-compatible';
 const GROK: ProviderId = 'grok';
 
 export function activeSubscriptionProxy(core: Core, provider: ProviderDescriptor): SubscriptionProxy | null {
   return subscriptionProxyOf(core.settings.get(), provider);
 }
 
-interface GatewayModel { id: string; name: string }
+interface GatewayModel {
+  id: string;
+  name: string;
+  reasoning?: true;
+  limit?: { context?: number; output?: number };
+}
 
-/** The gateway models last offered to OpenCode 2, read back from the journal: a bad row is dropped, not trusted. */
+function positiveTokenLimit(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function gatewayModelLimits(context: unknown, output: unknown): GatewayModel['limit'] {
+  const contextLimit = positiveTokenLimit(context), outputLimit = positiveTokenLimit(output);
+  if (contextLimit === undefined && outputLimit === undefined) return undefined;
+  return { ...(contextLimit === undefined ? {} : { context: contextLimit }), ...(outputLimit === undefined ? {} : { output: outputLimit }) };
+}
+
+/** The gateway models last offered to OpenCode, read back from the journal: a bad row is dropped, not trusted. */
 function openCodeGatewayModels(core: Core): GatewayModel[] {
   const stored = core.journal.getSetting(OPENCODE_MODELS_SETTING);
   if (!Array.isArray(stored)) return [];
   return stored.filter((row): row is GatewayModel =>
-    row !== null && typeof row === 'object' && typeof (row as GatewayModel).id === 'string' && typeof (row as GatewayModel).name === 'string');
+    row !== null && typeof row === 'object' && typeof (row as GatewayModel).id === 'string' && typeof (row as GatewayModel).name === 'string')
+    .map(row => {
+      const limit = gatewayModelLimits(row.limit?.context, row.limit?.output);
+      return { id: row.id, name: row.name, ...(row.reasoning === true ? { reasoning: true as const } : {}), ...(limit ? { limit } : {}) };
+    });
 }
 
 /**
- * OpenCode 2 takes the gateway as one more model provider, named after the
+ * Both OpenCode versions take the gateway as one more model provider, named after the
  * gateway's kind, beside the ones it already has. The provider is written into
  * the inline configuration the descriptor already sends, so what that carries
  * (the denial of OpenCode's own subagents) is kept. A custom provider lists
@@ -50,13 +67,29 @@ function openCodeGatewayEnv(core: Core, provider: ProviderDescriptor, proxy: Sub
   } catch {
     // A descriptor whose inline configuration is not JSON keeps the gateway and loses nothing it could have applied.
   }
-  const others = base['providers'] !== null && typeof base['providers'] === 'object' && !Array.isArray(base['providers']) ? base['providers'] as Record<string, unknown> : {};
-  const models = Object.fromEntries(openCodeGatewayModels(core).map((model) => [model.id, { name: model.name }]));
+  const collection = provider.id === OPENCODE_V2 ? 'providers' : 'provider';
+  const declaredProviders = base[collection];
+  const others = declaredProviders !== null && typeof declaredProviders === 'object' && !Array.isArray(declaredProviders) ? declaredProviders as Record<string, unknown> : {};
+  const models = Object.fromEntries(openCodeGatewayModels(core).map((model) => [model.id, {
+    name: model.name,
+    ...(model.limit && (provider.id === OPENCODE_V2 || (model.limit.context !== undefined && model.limit.output !== undefined))
+      ? { limit: model.limit } : {}),
+    ...(model.reasoning ? provider.id === OPENCODE_V2
+      ? { compatibility: { reasoningField: 'reasoning_content' } }
+      : { reasoning: true, interleaved: { field: 'reasoning_content' } } : {}),
+  }]));
+  const integration = provider.id === OPENCODE_V2 ? {
+    package: '@opencode/ai/providers/openai-compatible', name: subscriptionProxyName(proxy.kind),
+    settings: { baseURL: proxyApiUrl(proxy) }, env: [PROXY_KEY_ENV], models,
+  } : {
+    npm: '@ai-sdk/openai-compatible', name: subscriptionProxyName(proxy.kind),
+    options: { baseURL: proxyApiUrl(proxy), apiKey: `{env:${PROXY_KEY_ENV}}` }, models,
+  };
   const content = {
     ...base,
-    providers: {
+    [collection]: {
       ...others,
-      [proxy.kind]: { package: OPENCODE_GATEWAY_PACKAGE, name: subscriptionProxyName(proxy.kind), settings: { baseURL: proxyApiUrl(proxy) }, env: [PROXY_KEY_ENV], models },
+      [proxy.kind]: integration,
     },
   };
   return { OPENCODE_CONFIG_CONTENT: JSON.stringify(content), [PROXY_KEY_ENV]: key, [PROXY_PREFIX_ENV]: `${proxy.kind}/` };
@@ -104,7 +137,7 @@ export function subscriptionProxyEnv(core: Core, provider: ProviderDescriptor): 
   const proxy = activeSubscriptionProxy(core, provider);
   if (!proxy) return {};
   const key = proxyKey(core);
-  if (provider.id === OPENCODE_V2) return openCodeGatewayEnv(core, provider, proxy, key);
+  if (isOpenCode(provider.id)) return openCodeGatewayEnv(core, provider, proxy, key);
   if (provider.id === GROK) return grokGatewayEnv(core, proxy, key);
   if (provider.protocol === 'claude-sdk') return {
     ANTHROPIC_BASE_URL: proxyApiUrl(proxy).replace(/\/v1$/, ''),
@@ -141,11 +174,17 @@ export function subscriptionProxyCodexArgs(args: string[], env: Record<string, s
 /**
  * The agent's native list first, as a subscription shows it, then the models
  * only the gateway routes. Without a native list the gateway's stands alone.
+ * A gateway can name a model after the subscription that serves it
+ * (`codex/gpt-5.4`): behind a vendor's route that is the agent's own model
+ * again, already listed with its speeds, so it is not offered twice. Another
+ * route to the same name (`antigravity/claude-sonnet-5`) is another pool and
+ * stays.
  */
 export function mergeProxyModels(native: ModelInfo[], proxy: ModelInfo[]): ModelInfo[] {
   if (!native.length) return proxy;
   const ids = new Set(native.map(model => model.id));
-  return [...native, ...proxy.filter(model => !ids.has(model.id)).map(model => ({ ...model, default: false }))];
+  const listed = (id: string): boolean => ids.has(id) || ids.has(nativeModelId(id));
+  return [...native, ...proxy.filter(model => !listed(model.id)).map(model => ({ ...model, default: false }))];
 }
 
 /** Effort controls come from explicit gateway capabilities, including Codex's native metadata. */
@@ -166,12 +205,6 @@ function proxyEffort(row: Record<string, unknown>): ModelInfo['effort'] | undefi
   return { levels, default: typeof wanted === 'string' && levels.some(level => level.id === wanted) ? wanted : levels[0]!.id };
 }
 
-type ModelFamily = 'anthropic' | 'openai' | 'google' | 'xai' | 'meta';
-
-const ROUTE_FAMILIES: Record<string, ModelFamily> = {
-  claude: 'anthropic', anthropic: 'anthropic', codex: 'openai', openai: 'openai', chatgpt: 'openai',
-  gemini: 'google', google: 'google', xai: 'xai', grok: 'xai', muse: 'meta',
-};
 
 /** Open-weight families: offered to every harness, whatever routing prefix the gateway gives them. */
 const OPEN_MODEL = /gpt-oss|kimi|qwen|llama|deepseek|mistral|mixtral|glm/i;
@@ -191,7 +224,8 @@ export function proprietaryFamily(id: string): ModelFamily | null {
   if (/gemini/i.test(name)) return 'google';
   if (/grok/i.test(name)) return 'xai';
   if (/muse/i.test(name)) return 'meta';
-  return slash > 0 ? ROUTE_FAMILIES[id.slice(0, slash).split('/').pop()!.toLowerCase()] ?? null : null;
+  const route = slash > 0 ? id.slice(0, slash).split('/').pop()!.toLowerCase() : '';
+  return Object.hasOwn(MODEL_ROUTE_FAMILIES, route) ? MODEL_ROUTE_FAMILIES[route]! : null;
 }
 
 /** Discovery is a bounded HTTP read on the core, so a phone uses its host's gateway. */
@@ -215,7 +249,7 @@ export async function readSubscriptionProxyModels(core: Core, provider: Provider
   if (!body || typeof body !== 'object' || !Array.isArray(body.data) || body.data.length > 10_000) throw unavailable('Subscription proxy model discovery expected a bounded data array');
   const seen = new Set<string>();
   const models: ModelInfo[] = [];
-  if (provider.id === OPENCODE_V2) return openCodeModels(core, proxy, body.data as Record<string, unknown>[]);
+  if (isOpenCode(provider.id)) return openCodeModels(core, proxy, body.data as Record<string, unknown>[]);
   for (const row of body.data as Record<string, unknown>[]) {
     if (!row || typeof row !== 'object' || typeof row.id !== 'string' || !row.id || row.id.length > 200 || seen.has(row.id)) continue;
     const endpoints = row.supported_endpoint_types;
@@ -243,8 +277,8 @@ const OWN_HARNESS: ReadonlySet<ModelFamily> = new Set(['anthropic', 'openai', 'x
 const OPENCODE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}$/;
 
 /**
- * What OpenCode 2 is offered from the gateway: every model but the ones with a
- * harness of their own, so Gemini, Muse and the open-weight families. Each is
+ * What OpenCode is offered from the gateway: Gemini, Muse and open-weight
+ * families, plus Antigravity Claude routes with explicit Chat Completions support. Each is
  * named `<kind>/<gateway id>`, the way OpenCode names a model of a provider.
  * The catalog is stored for the next spawn, and an empty one is an answer: the
  * agent's own models stand, where the other harnesses would have nothing left.
@@ -255,13 +289,21 @@ function openCodeModels(core: Core, proxy: SubscriptionProxy, rows: Record<strin
   for (const row of rows) {
     if (!row || typeof row !== 'object' || typeof row.id !== 'string' || !OPENCODE_MODEL_ID.test(row.id) || seen.has(row.id)) continue;
     const family = proprietaryFamily(row.id);
-    if (family !== null && OWN_HARNESS.has(family)) continue;
     const endpoints = row.supported_endpoint_types;
+    const antigravityClaude = family === 'anthropic' && /^antigravity\//i.test(row.id)
+      && Array.isArray(endpoints) && endpoints.includes('openai');
+    if (family !== null && OWN_HARNESS.has(family) && !antigravityClaude) continue;
     // A gateway that says which APIs a model answers must name Chat Completions; one that says nothing is taken at its word.
     if (Array.isArray(endpoints) && !endpoints.includes('openai')) continue;
     seen.add(row.id);
     const name = row.name ?? row.display_name;
-    catalog.push({ id: row.id, name: typeof name === 'string' && name ? name.slice(0, 200) : row.id });
+    const thinking = row.thinking !== null && typeof row.thinking === 'object' && !Array.isArray(row.thinking)
+      ? row.thinking as Record<string, unknown> : null;
+    const reasoning = proxyEffort(row) !== undefined || (thinking !== null && (positiveTokenLimit(thinking.min) !== undefined
+      || positiveTokenLimit(thinking.max) !== undefined || thinking.dynamic_allowed === true));
+    const limit = gatewayModelLimits(positiveTokenLimit(row.context_length) ?? row.context_window, row.max_output_tokens);
+    catalog.push({ id: row.id, name: typeof name === 'string' && name ? name.slice(0, 200) : row.id,
+      ...(reasoning ? { reasoning: true } : {}), ...(limit ? { limit } : {}) });
   }
   if (JSON.stringify(catalog) !== JSON.stringify(openCodeGatewayModels(core))) core.journal.setSetting(OPENCODE_MODELS_SETTING, catalog);
   return catalog.map((model) => ({ id: `${proxy.kind}/${model.id}`, name: model.name }));

@@ -199,6 +199,8 @@ interface ThreadJob {
   pids: Set<number>;
   lastCpu100ns: bigint;
   lastSampleAt: number;
+  /** The registry forgot the thread while the job still held a pid: release it when that pid leaves. */
+  forgotten: boolean;
 }
 
 const LOGICAL_CPUS = Math.max(1, cpus().length);
@@ -398,13 +400,16 @@ export function terminateJobProcess(threadId: string, pid: number): boolean {
 
 /**
  * Close the job of a thread the registry forgot. A job that still holds a pid
- * is kept: closing it would kill that process through KILL_ON_JOB_CLOSE. Once
- * the key is gone a late packet for it is dropped, and the same thread id
+ * stays until that pid leaves: closing it would kill the process through
+ * KILL_ON_JOB_CLOSE. The registry never traces a console host, which exits after
+ * its `cmd`; refusing outright left such a job open for the life of the core.
+ * Once the key is gone a late packet for it is dropped, and the thread id
  * spawning again gets a new job and a new key.
  */
 export function releaseThreadJob(threadId: string): void {
   const job = threadJobs.get(threadId);
-  if (job === undefined || job.pids.size > 0) return;
+  if (job === undefined) return;
+  if (job.pids.size > 0) { job.forgotten = true; return; }
   threadJobs.delete(threadId);
   threadsByKey.delete(job.key);
   job.startup.close();
@@ -518,7 +523,8 @@ function ensureGlobalJob(api: Native): void {
 
 function ensureThreadJob(api: Native, threadId: string): ThreadJob | null {
   const existing = threadJobs.get(threadId);
-  if (existing !== undefined) return existing;
+  // A thread back before its forgotten job emptied keeps that job.
+  if (existing !== undefined) { existing.forgotten = false; return existing; }
 
   ensureGlobalJob(api);
   const handle = api.createJob();
@@ -528,7 +534,7 @@ function ensureThreadJob(api: Native, threadId: string): ThreadJob | null {
   associatePort(api, handle, key);
 
   const startup = new StartupPriority((active) => applyMemoryLimit(api, handle, limits.threadMemoryCapMb * 1.1, active ? NORMAL_PRIORITY_CLASS : BELOW_NORMAL_PRIORITY_CLASS));
-  const job: ThreadJob = { handle, startup, key, pids: new Set(), lastCpu100ns: 0n, lastSampleAt: 0 };
+  const job: ThreadJob = { handle, startup, key, pids: new Set(), lastCpu100ns: 0n, lastSampleAt: 0, forgotten: false };
   startup.apply();
   threadJobs.set(threadId, job);
   threadsByKey.set(key, threadId);
@@ -553,7 +559,7 @@ function ensureWorker(port: number): void {
     };
     // No timeout: the Worker sleeps in the kernel until a packet comes, and
     // teardown posts one of its own to wake it.
-    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE, inspectAccess: INSPECT_ACCESS };
+    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE, inspectAccess: INSPECT_ACCESS, globalKey: GLOBAL_JOB_KEY };
     created.postMessage(start);
     // Typed structurally: the bench type-checks this file under the DOM lib, whose Worker has no unref.
     (created as { unref?: () => void }).unref?.();
@@ -654,7 +660,7 @@ function onWorkerMessage(message: JobsWorkerMessage): void {
 
 function onJobPacket(message: number, key: number, pid: number, handle = 0): void {
   if (key === GLOBAL_JOB_KEY) {
-    // Starts and exits also reach the global job. Only the thread owns their trace.
+    // The Worker posts only the global budget alert; this stays for any other.
     if (handle !== 0) native?.close(handle);
     if (message === MSG_JOB_MEMORY_LIMIT) sink?.memoryLimit(tracked.get(pid)?.threadId ?? null, 'budget');
     return;
@@ -773,6 +779,8 @@ function baseName(path: string): string {
 
 function onProcessExited(threadId: string, pid: number): void {
   reportExit(threadId, pid);
+  const job = threadJobs.get(threadId);
+  if (job?.forgotten === true && job.pids.size === 0) releaseThreadJob(threadId);
   if (worker !== null && jobsEmpty()) armIdle();
 }
 

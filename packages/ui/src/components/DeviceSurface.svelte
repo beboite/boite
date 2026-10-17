@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { onMount, untrack } from 'svelte';
   import { Camera, Circle, CornerDownLeft, Delete, EyeOff, Pause, Play, Plus, Power, RefreshCw, RotateCw, Send, Smartphone, Square, Triangle, X } from '@lucide/svelte';
   import { MOBILE_TEXT_MAX, type MobileDevice, type MobileDeviceFrame, type MobileDeviceInput, type MobileDeviceList, type MobileDeviceSession } from '@boite/contracts';
@@ -20,7 +21,9 @@
   let frame = $state.raw<MobileDeviceFrame | null>(null), picture = $state<HTMLImageElement>();
   let paused = $state(false), busy = $state(false), error = $state(''), text = $state(''), areaWidth = $state(0);
   let alive = true, generation = 0, timer: ReturnType<typeof setTimeout> | undefined, pending = false, requestedAt = 0;
-  let roundTrip = 0, unchanged = 0, failures = 0;
+  // `pictureTrip` sets the JPEG quality and counts only answers that carried one: a quick `unchanged`
+  // must not change the quality, which would change the frame the core makes and its id.
+  let roundTrip = 0, pictureTrip = 0, unchanged = 0, failures = 0;
   let pointer: { x: number; y: number; at: number; frame: MobileDeviceFrame } | undefined;
   // A computer types, pastes and scrolls on the screen itself; the text field below is the phone's.
   const desk = hasKeyboard();
@@ -34,7 +37,6 @@
   const machine = $derived(machineName(store));
   const showing = $derived(session?.state === 'ready' && revealed ? session : null);
   const usable = $derived(!!showing && !!frame && frame.deviceId === showing.deviceId && !paused && !busy && store.connection === 'ready');
-  const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 
   function stop() { generation++; clearTimeout(timer); }
   async function decoded(base64: string): Promise<void> {
@@ -50,15 +52,20 @@
     const client = store.client, started = performance.now();
     try {
       if (!client || client.state !== 'ready') throw new Error(strings.remoteBrowser.reconnecting);
-      const maxWidth = frameMaxWidth(areaWidth, window.devicePixelRatio), quality = frameQuality(roundTrip);
-      const next = await client.call('devices.frame', { threadId, deviceId: target.deviceId, ...(maxWidth ? { maxWidth } : {}), quality });
-      if (next.base64 !== frame?.base64) await decoded(next.base64);
+      const maxWidth = frameMaxWidth(areaWidth, window.devicePixelRatio), quality = frameQuality(pictureTrip);
+      // The core answers `unchanged`, with no picture, while the screen still shows the frame named here.
+      const previous = frame?.deviceId === target.deviceId ? frame.id : undefined;
+      const next = await client.call('devices.frame', { threadId, deviceId: target.deviceId, ...(maxWidth ? { maxWidth } : {}), quality, ...(previous ? { previous } : {}) });
+      const same = next.unchanged ? !!frame && next.id === frame.id : next.base64 === frame?.base64;
+      if (!same && !next.unchanged) await decoded(next.base64);
       if (!alive || run !== generation) return;
       roundTrip = performance.now() - started; failures = 0;
-      unchanged = frame && next.base64 === frame.base64 ? unchanged + 1 : 0;
-      frame = next; error = '';
+      if (!next.unchanged) pictureTrip = roundTrip;
+      unchanged = same ? unchanged + 1 : 0;
+      if (!next.unchanged) frame = next;
+      error = '';
     } catch (cause) {
-      if (alive && run === generation) { failures++; error = message(cause); }
+      if (alive && run === generation) { failures++; error = errorText(cause); }
     } finally { pending = false; }
     if (alive && run === generation) timer = setTimeout(() => void poll(run), nextPollDelay({ roundTrip, unchanged, failures }));
   }
@@ -83,13 +90,13 @@
     if (!client) return;
     loading = true;
     try { list = await client.call('devices.list', { threadId }); sessions = list.sessions; error = ''; }
-    catch (cause) { error = message(cause); }
+    catch (cause) { error = errorText(cause); }
     finally { loading = false; }
   }
   async function act<T>(run: () => Promise<T>): Promise<T | undefined> {
     busy = true;
     try { const value = await run(); error = ''; return value; }
-    catch (cause) { error = message(cause); return undefined; }
+    catch (cause) { error = errorText(cause); return undefined; }
     finally { busy = false; kick(); }
   }
   async function open(deviceId: string): Promise<void> {
@@ -120,7 +127,7 @@
       const value = typed.shift()!, client = store.client, target = showing;
       if (!alive || !client || !target?.input || paused || store.connection !== 'ready') { typed = []; return; }
       try { await client.call('devices.input', { threadId, deviceId: target.deviceId, input: value }); error = ''; }
-      catch (cause) { typed = []; if (alive) error = message(cause); return; }
+      catch (cause) { typed = []; if (alive) error = errorText(cause); return; }
       finally { if (alive) kick(); }
     }
   }
@@ -177,7 +184,7 @@
     void client?.call('devices.sessions', { threadId }).then(result => {
       sessions = result.sessions;
       if (result.sessions.length === 0) void refresh();
-    }, cause => { error = message(cause); });
+    }, cause => { error = errorText(cause); });
     const live = liveInput(() => viewer, {
       key(event) {
         if (!showing?.input || !frame || paused) return false;
@@ -272,7 +279,7 @@
     <div class="picker" data-testid="device-picker">
       {#if sessions.length === 0}<p class="muted">{strings.devicePanel.empty}</p>{/if}
       <div class="heading"><span class="section-label">{strings.devicePanel.onMachine}</span>
-        <button type="button" class="chip" disabled={loading} onclick={() => void refresh()}><RefreshCw size={14} /><span class="ui-label">{strings.devicePanel.refresh}</span></button></div>
+        <button type="button" class="chip" disabled={loading} onclick={() => void refresh()}><RefreshCw size={14} /><span class="ui-label">{strings.common.refresh}</span></button></div>
       {#if list}
         {#each list.hosts as host (host.id)}
           {#each host.platforms.filter(one => one.reason) as platform (platform.platform)}
@@ -285,7 +292,7 @@
             {@const shown = sessions.some(one => one.deviceId === device.id)}
             <li>
               <span class="name">{device.name}<small>{device.platform === 'ios' ? 'iOS' : 'Android'}{device.runtime ? ` · ${device.runtime}` : ''} · {stateLabel(device.state)}</small></span>
-              <button type="button" class="chip" disabled={busy || shown} data-testid="device-open" onclick={() => void open(device.id)}><span class="ui-label">{strings.devicePanel.open}</span></button>
+              <button type="button" class="chip" disabled={busy || shown} data-testid="device-open" onclick={() => void open(device.id)}><span class="ui-label">{strings.common.open}</span></button>
             </li>
           {/each}
         </ul>

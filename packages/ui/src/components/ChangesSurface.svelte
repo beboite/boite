@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, GitBranch, RefreshCw } from '@lucide/svelte';
-  import type { GitChange, GitDiff, GitStatus } from '@boite/contracts';
+  import type { GitChange, GitDiff, GitStatus, ThreadId } from '@boite/contracts';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -38,17 +38,25 @@
     return cut < 0 ? path : path.slice(cut + 1);
   }
 
-  async function refresh(): Promise<void> {
-    const id = threadId;
-    if (id === null) return;
+  /** Bumped by the refresh button, so the status and the diff are both read again. */
+  let asked = $state(0);
+  /** The last status request; an older answer that lands after it is dropped. */
+  let latest = 0;
+  /** The thread the list on screen belongs to. */
+  let listed: ThreadId | null = null;
+  /** The thread and path the diff on screen belongs to. */
+  let shown: string | null = null;
+
+  async function refresh(id: ThreadId): Promise<void> {
+    const mine = ++latest;
     loading = true;
     try {
       const answer = await store.gitStatus(id);
-      // The thread may have changed while the call was out: an answer about
-      // another working tree must not land in this list.
-      if (threadId === id) status = answer;
+      // The thread may have changed, or a newer read gone out, while the call
+      // was out: an answer about another working tree must not land in this list.
+      if (mine === latest && threadId === id) status = answer;
     } finally {
-      loading = false;
+      if (mine === latest) loading = false;
     }
   }
 
@@ -77,26 +85,54 @@
   // On mount, and again on every turn that ends: the working tree is what the
   // agent is changing, so the list is stale the moment a turn finishes.
   $effect(() => {
-    void threadId;
+    const id = threadId;
     void finished;
-    void refresh();
+    void asked;
+    // Another thread's files never stay on screen while this one's are read.
+    if (id !== listed) {
+      listed = id;
+      status = null;
+    }
+    if (id !== null) void refresh(id);
   });
 
-  // The diff of the selected row, read again when the status did.
+  /** The rename origin the list gives the selected row: null for none, undefined while the row is not in it. */
+  let origin = $derived(at < 0 ? undefined : (changes[at]?.oldPath ?? null));
+  /** The last diff request: which row, which round of triggers, with which origin. */
+  let reading: { key: string; round: string; from: string | null | undefined } | null = null;
+  /** Bumped by every diff request; an older answer that lands after a newer one is dropped. */
+  let diffSeq = 0;
+
+  // The diff of the selected row, read on the same triggers as the status and
+  // at the same time, not after it: the two reads do not depend on each other.
+  // The row's origin from the list goes with it, so the core skips a second
+  // status of its own. A refresh of the same row keeps the old diff on screen
+  // until the new one replaces it; only another thread or another row starts
+  // from blank.
   $effect(() => {
     const id = threadId;
     const path = selected;
-    void status;
-    diff = null;
-    if (id === null || path === null) {
+    const from = origin;
+    const round = `${finished}:${asked}`;
+    const key = id === null || path === null ? null : `${id}\n${path}`;
+    if (key !== shown) {
+      shown = key;
       diff = null;
+    }
+    if (id === null || path === null || key === null) {
+      reading = null;
+      diffSeq += 1;
       return;
     }
-    let cancelled = false;
-    void store.gitDiff(id, path).then((answer) => {
-      if (!cancelled) diff = answer;
+    // A status that lands re-runs this. The read of this round still holds when
+    // it went out with the same origin, or with none (the core then asked git
+    // itself): only an origin that moved, a rename staged meanwhile, is read again.
+    if (reading !== null && reading.key === key && reading.round === round && (reading.from === from || reading.from === undefined || from === undefined)) return;
+    const mine = ++diffSeq;
+    reading = { key, round, from };
+    void store.gitDiff(id, path, undefined, from).then((answer) => {
+      if (mine === diffSeq) diff = answer;
     });
-    return () => { cancelled = true; };
   });
 </script>
 
@@ -131,7 +167,7 @@
       aria-label={strings.common.refresh}
       data-testid="changes-refresh"
       disabled={loading}
-      onclick={() => void refresh()}
+      onclick={() => asked++}
     >
       <RefreshCw size={13} strokeWidth={1.75} />
     </button>

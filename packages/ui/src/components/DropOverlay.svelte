@@ -1,13 +1,22 @@
 <script lang="ts">
-  import { FolderPlus } from '@lucide/svelte';
+  import { FolderPlus, Paperclip } from '@lucide/svelte';
+  import type { DropKind } from '../lib/native-drop';
   import { strings } from '../lib/strings';
+
+  let { kind }: { kind: DropKind } = $props();
 </script>
 
-<div class="drop" data-testid="drop-overlay">
+<div class="drop" data-testid="drop-overlay" data-kind={kind}>
   <div class="target">
-    <FolderPlus size={28} strokeWidth={1.5} />
-    <h2>{strings.drop.title}</h2>
-    <p class="muted">{strings.drop.body}</p>
+    {#if kind === 'attach'}
+      <Paperclip size={28} strokeWidth={1.5} />
+      <h2>{strings.drop.attachTitle}</h2>
+      <p class="muted">{strings.drop.attachBody}</p>
+    {:else}
+      <FolderPlus size={28} strokeWidth={1.5} />
+      <h2>{strings.drop.title}</h2>
+      <p class="muted">{strings.drop.body}</p>
+    {/if}
   </div>
 </div>
 

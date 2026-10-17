@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { onDestroy } from 'svelte';
   import type { AccountQuota, QuotaResetOutcome } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
@@ -35,7 +36,7 @@
     if (busy || disabled || !available || !client || !store.owner || store.connection !== 'ready') return;
     const accountId = row.accountId;
     const identity = store.accounts?.find(account => account.id === accountId)?.identity;
-    const reader = quotaReader(store.endpointUrl ?? 'here');
+    const reader = quotaReader(store.endpointUrl ?? 'here', store.core);
     busy = true;
     try {
       const accepted = confirm.ask({
@@ -60,7 +61,7 @@
     } catch (error) {
       if (disposed || store.client !== client) return;
       failed = true;
-      status = fill(strings.quotas.resetFailed, { error: error instanceof Error ? error.message : String(error) });
+      status = fill(strings.quotas.resetFailed, { error: errorText(error) });
     } finally { busy = false; sending = false; }
   }
 </script>

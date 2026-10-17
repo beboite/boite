@@ -1,4 +1,5 @@
-import type { ProjectId, ProviderId, ThreadId, Timestamp, Usage } from './index';
+import type { DelegationWorktree, PauseOrigin, ProjectId, ProviderId, ThreadId, Timestamp, Usage } from './index';
+import type { ContextPreset, ContextRequest } from './context-mode';
 
 /**
  * The shape a step promises for its structured output: a type name, a list of
@@ -25,6 +26,8 @@ export interface WorkflowStepPlan {
   model?: string;
   /** A reasoning level the step's model offers. */
   effort?: string;
+  /** Start the step without part of the user's setup: a preset name or a `ContextRequest`. */
+  context?: ContextRequest | ContextPreset;
   /** The brief. `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts. */
   task: string;
   /** Steps that must end first. Steps named in `forEach`, `when` or the task are added automatically. */
@@ -35,6 +38,12 @@ export interface WorkflowStepPlan {
   when?: WorkflowCondition;
   /** Structured output the step must return, validated by the core. */
   output?: WorkflowShape;
+  /**
+   * Run the step in a git worktree of its own, on a new branch from the
+   * conversation's current HEAD, instead of the shared checkout. Uncommitted
+   * edits are not copied. The run's summary names the branch to merge.
+   */
+  worktree?: boolean;
 }
 
 export interface WorkflowLimits {
@@ -92,6 +101,8 @@ export interface WorkflowInstance {
   error: string | null;
   startedAt: Timestamp | null;
   finishedAt: Timestamp | null;
+  /** The step's own worktree, for a step that set `worktree`. Missing otherwise and on older runs. */
+  worktree?: DelegationWorktree;
 }
 
 export interface WorkflowNode {
@@ -119,6 +130,9 @@ export interface WorkflowRun {
   limits: WorkflowLimits;
   /** Why the run stopped, failed or paused by itself. */
   error: string | null;
+  /** Who paused it, while paused: a step held by a paused team takes the team's. Absent on older runs, read as the owner's. */
+  pausedBy?: PauseOrigin;
+  pausedAt?: Timestamp;
   launchedBy: 'agent' | 'user';
   templateId: string | null;
   /** Whether the final summary reached the root thread as a turn. */
@@ -154,7 +168,11 @@ export interface WorkflowsRpcMethods {
   'workflows.start': { params: { threadId: ThreadId; plan: WorkflowPlan; requestId: string; templateId?: string }; result: WorkflowRun };
   /** Adds steps to a running or paused run. */
   'workflows.extend': { params: { threadId: ThreadId; runId: string; steps: WorkflowStepPlan[]; requestId: string }; result: WorkflowRun };
-  /** `retry` needs `stepId` and restarts its failed or stopped executions. */
+  /**
+   * `retry` restarts the failed or stopped executions, of `stepId` only when
+   * named. An agent resumes, or retries on a paused run, only a pause it may
+   * lift (`PauseOrigin`).
+   */
   'workflows.control': { params: { threadId: ThreadId; runId: string; action: 'pause' | 'resume' | 'stop' | 'retry'; stepId?: string }; result: WorkflowRun };
   /** Called from a step's own thread: records its structured output, refused with the mismatch. */
   'workflows.output': { params: { threadId: ThreadId; value: unknown }; result: { runId: string; step: string } };

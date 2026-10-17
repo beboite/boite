@@ -278,6 +278,30 @@ describe('server', () => {
     healthy.close(1000);
   });
 
+  test('a large frame that keeps leaving a slow socket is not cut off by the congestion deadline', async () => {
+    // One unchunked page of about 12 MB leaves a slow link a slice per drain; the
+    // deadline is for a reader that takes nothing, not for one still taking bytes.
+    const closed: number[] = [];
+    let buffered = 0;
+    const slow = new ServerConnection(harness.core, false, 300);
+    slow.attach({ getBufferedAmount: () => buffered, send: (frame: string) => { buffered += Buffer.byteLength(frame); return -1; },
+      close: (code: number) => closed.push(code) } as unknown as Parameters<ServerConnection['attach']>[0]);
+    slow.sendResponse({ jsonrpc: '2.0', id: 1, result: 'x'.repeat(1024 * 1024) });
+    const slice = Math.ceil(buffered / 8);
+    for (let step = 0; step < 8; step++) {
+      await Bun.sleep(60);
+      buffered = Math.max(0, buffered - slice);
+      slow.drain();
+    }
+    expect(buffered).toBe(0);
+    expect(closed).toEqual([]);
+    // A reader that then stops taking bytes is still cut off.
+    slow.sendResponse({ jsonrpc: '2.0', id: 2, result: 'held' });
+    slow.drain();
+    await Bun.sleep(400);
+    expect(closed).toEqual([1013]);
+  });
+
   test('catch-up parts are bounded and a fresh connection reads the authoritative journal', async () => {
     const owner = await harness.connect();
     const { threadId } = await echoThread(harness, owner);
@@ -444,6 +468,9 @@ describe('server', () => {
       expect(body.bundleHash).toBe('loaded-bundle');
       const client = await bundled.connect();
       expect(client.core.bundleHash).toBe('loaded-bundle');
+      // The UI's liveness probe: a hello with no credential on an authenticated socket.
+      const probe = await client.call('hello', { protocolVersion: PROTOCOL_VERSION, client: { name: 'shell', version: '0' } });
+      expect(probe.core.bundleHash).toBe('loaded-bundle');
     } finally { await bundled.stop(); }
   });
 
@@ -644,6 +671,10 @@ describe('server', () => {
       expect(index.status).toBe(200);
       expect(index.headers.get('cache-control')).toBe('no-cache');
       const html = await index.text();
+      // Revalidating the shell with the tag it came with costs no body.
+      const again = await fetch(`${harness.url}/`, { headers: { 'if-none-match': index.headers.get('etag')! } });
+      expect(again.status).toBe(304);
+      expect(again.headers.get('cache-control')).toBe('no-cache');
 
       const worker = await fetch(`${harness.url}/sw.js`);
       expect(worker.status).toBe(200);
@@ -946,7 +977,7 @@ describe('server', () => {
       token: harness.token, grant: 'x', protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '0' },
     } }));
     const frame = (await firstFrame(socket)) as { error?: { code: number; message: string } };
-    expect(frame.error?.message).toBe('hello takes a token, a grant or a group ticket, one of the three');
+    expect(frame.error?.message).toBe('hello takes a token, a grant, a group ticket or a device signature');
     expect(await closeCode(socket)).toBe(RpcCloseCode.Unauthorized);
   });
 

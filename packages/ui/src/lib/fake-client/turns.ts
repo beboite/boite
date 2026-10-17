@@ -1,12 +1,13 @@
 /** The turn engine: start, stream and stop a turn, the way the echo driver answers. */
-import { previewPrompt, RpcErrorCode, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type TurnInFlightData, type Usage } from '@boite/contracts';
+import { previewPrompt, RpcErrorCode, threadActive, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type TurnInFlightData, type Usage } from '@boite/contracts';
 import { decodedBytes } from '../attachments';
 import { RpcFailure } from '../client';
-import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SPAWN_MARKER } from './conversation';
+import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SETTING_MARKERS, SPAWN_MARKER, AGENT_SETTING_MARKER, AGENT_SETTING_REASON } from './conversation';
+import { requestAgentSetting } from './agent-settings';
 import { FAKE_CONTEXT_FLOOR, FAKE_CONTEXT_PER_TURN, FAKE_CONTEXT_WINDOW } from './providers';
 import { addUsage, chunkText, ECHO_COMMANDS, emptyUsage, SHOUT, toSummary } from './shared';
 import { pauseActivity } from './activity';
-import { askPermission, askQuestion, askAsync } from './requests';
+import { askPermission, askQuestion, askAsync, requestSetting } from './requests';
 import { backgroundShell, streamToolInput, runTool, documentTool, spawnProcess, toolBurst } from './turn-tools';
 import { delegationConfig, pumpDelegation } from './delegation';
 import { applyWaitingMove } from './thread-move';
@@ -49,16 +50,8 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
   // The real transport serializes Svelte proxies before they reach the core.
   previewReferences = JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[];
   const thread = ctx.thread(threadId);
-  if (thread.archived) {
-    throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
-  }
-  if (thread.parentThreadId && ctx.thread(thread.parentThreadId).archived) {
-    throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn while its parent is archived; restore the parent first', data: { threadId } });
-  }
-  if ((!queuedTurn && ['queued', 'running', 'waiting'].includes(thread.status)) || (queuedTurn && (thread.status !== 'queued' || queuedTurn.status !== 'queued')) || ctx.inFlight.has(threadId)) {
-    const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: structuredClone(toSummary(thread)) };
-    throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn', data });
-  }
+  const refusal = refuseTurn(ctx, thread, queuedTurn);
+  if (refusal) throw refusal;
   // The agent names what it takes on its first turn, the way the echo driver
   // does: the list is the agent's, so it only exists once one has run.
   if (thread.commands.length === 0) {
@@ -73,13 +66,7 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
   // As the core: the first message after a move carries the note, unless it is a compact or a slash command.
   const moved = operation === 'compact' || prompt.trimStart().startsWith('/') ? undefined : thread.moveNote ?? undefined;
   if (moved) thread.moveNote = null;
-  const execution: NonNullable<Turn['execution']> = {
-      providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
-      effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
-      sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
-      ...(operation ? { operation } : {}),
-      ...(automatic ? { automatic: true as const } : {}),
-  };
+  const execution = turnExecution(thread, operation, automatic);
   const turn: Turn = queuedTurn ?? {
     id: `turn-${++ctx.seq}`, threadId, status: 'running', queuedAt: at,
     startedAt: at, finishedAt: null, usage: null, error: null, execution
@@ -95,25 +82,13 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
     role: automatic ? 'system' : 'user',
     // The images ride after the text, the order the core journals them in.
     parts: [
-      { type: 'text', text: activityKind ? `/${activityKind === 'goal' && thread.activity?.goal?.review ? 'goal2' : activityKind} ${prompt}` : previewPrompt(prompt, previewReferences), ...(automatic ? { displayText: 'Automatic compaction' } : {}), ...(previewReferences.length ? { displayText: prompt, previewReferences: structuredClone(previewReferences) } : {}), ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}), ...(moved ? { moved: structuredClone(moved) } : {}) },
-      ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
-        type: 'image',
-        mimeType: attachment.mimeType,
-        data: attachment.data,
-        alt: attachment.name
-      }))
+      userPart(thread, prompt, previewReferences, automatic, activityKind, moved),
+      ...attachments.map(attachmentPart)
     ],
     state: 'complete',
     createdAt: at
   };
-  if (!activityKind && !operation && thread.activity) {
-    if (thread.activity.tasks.length && thread.activity.tasks.every(task => task.status === 'completed')) thread.activity.tasksDismissed = true;
-    if (thread.activity.goal?.status === 'complete') thread.activity.goal.dismissed = true;
-    // The user's answer resumes a blocked goal once this turn ends; a native command is no answer.
-    const goal = thread.activity.goal;
-    if (goal?.status === 'paused' && goal.blocked && !/^\s*\/[\w:-]+(?:\s|$)/.test(prompt)) { goal.status = 'active'; goal.error = null; delete goal.blocked; }
-    ctx.publishActivity(thread);
-  }
+  if (!activityKind && !operation && thread.activity) resumeFromUserPrompt(ctx, thread, prompt);
   if (!queuedTurn || !thread.messages.some(message => message.turnId === turn.id && message.role === 'user')) {
     thread.messages.push(user);
     ctx.emitToThread(threadId, 'message.started', structuredClone(user));
@@ -135,12 +110,73 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
   return structuredClone(turn);
 }
 
+function refuseTurn(ctx: FakeContext, thread: Thread, queuedTurn?: Turn): RpcFailure | null {
+  const threadId = thread.id;
+  if (thread.archived) {
+    return new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
+  }
+  if (thread.parentThreadId && ctx.thread(thread.parentThreadId).archived) {
+    return new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn while its parent is archived; restore the parent first', data: { threadId } });
+  }
+  if ((!queuedTurn && threadActive(thread.status)) || (queuedTurn && (thread.status !== 'queued' || queuedTurn.status !== 'queued')) || ctx.inFlight.has(threadId)) {
+    const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: structuredClone(toSummary(thread)) };
+    return new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn', data });
+  }
+  return null;
+}
+
+function turnExecution(thread: Thread, operation: 'compact' | 'delegation' | undefined, automatic: boolean): NonNullable<Turn['execution']> {
+  return {
+    providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
+    effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
+    sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
+    ...(operation ? { operation } : {}),
+    ...(automatic ? { automatic: true as const } : {}),
+  };
+}
+
+function userPart(thread: Thread, prompt: string, previewReferences: PreviewReference[], automatic: boolean, activityKind: 'goal' | 'loop' | undefined, moved: Thread['moveNote'] | undefined): MessagePart {
+  const part: Extract<MessagePart, { type: 'text' }> = {
+    type: 'text',
+    text: activityKind ? activityPrompt(thread, activityKind, prompt) : previewPrompt(prompt, previewReferences),
+  };
+  if (automatic) part.displayText = 'Automatic compaction';
+  if (previewReferences.length) {
+    part.displayText = prompt;
+    part.previewReferences = structuredClone(previewReferences);
+  }
+  if (activityKind) part.activity = { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 };
+  if (moved) part.moved = structuredClone(moved);
+  return part;
+}
+
+function activityPrompt(thread: Thread, kind: 'goal' | 'loop', prompt: string): string {
+  const command = kind === 'goal' && thread.activity?.goal?.review ? 'goal2' : kind;
+  return `/${command} ${prompt}`;
+}
+
+function attachmentPart(attachment: Attachment): MessagePart {
+  return attachment.kind === 'file'
+    ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name }
+    : { type: 'image', mimeType: attachment.mimeType, data: attachment.data, alt: attachment.name };
+}
+
+function resumeFromUserPrompt(ctx: FakeContext, thread: Thread, prompt: string): void {
+  const activity = thread.activity!;
+  if (activity.tasks.length && activity.tasks.every(task => task.status === 'completed')) activity.tasksDismissed = true;
+  if (activity.goal?.status === 'complete') activity.goal.dismissed = true;
+  // The user's answer resumes a blocked goal once this turn ends; a native command is no answer.
+  const goal = activity.goal;
+  if (goal?.status === 'paused' && goal.blocked && !/^\s*\/[\w:-]+(?:\s|$)/.test(prompt)) { goal.status = 'active'; goal.error = null; delete goal.blocked; }
+  ctx.publishActivity(thread);
+}
+
 async function stream(
   ctx: FakeContext,
   thread: Thread,
   turn: Turn,
   prompt: string,
-  record: { cancelled: boolean; steered?: { prompt: string; attachments: Attachment[] }[] },
+  record: StreamRecord,
   attachments: Attachment[] = [],
   modelPrompt: string = prompt
 ): Promise<void> {
@@ -172,11 +208,7 @@ async function stream(
     });
   }
 
-  const thought = message.parts[0];
-  if (thought?.type === 'thinking') {
-    thought.finishedAt = ctx.now();
-    ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex: 0, part: structuredClone(thought) });
-  }
+  finishThinking(ctx, thread, message);
   const textIndex = message.parts.length;
   message.parts.push({ type: 'text', text: '' });
   ctx.emitToThread(thread.id, 'message.part', {
@@ -186,20 +218,7 @@ async function stream(
     part: { type: 'text', text: '' }
   });
 
-  // `/shout <text>` comes back in capitals, the one command the fake acts on.
-  const shouted = prompt.startsWith(`/${SHOUT} `) ? prompt.slice(SHOUT.length + 2) : null;
-  const echoed = shouted === null ? modelPrompt : modelPrompt.slice(SHOUT.length + 2).toUpperCase();
-
-  // An image is named back the way the echo driver names it, format and
-  // weight first, then the prompt itself is echoed.
-  const reply =
-    attachments
-      .map(
-        (attachment) =>
-          `[${attachment.kind} ${attachment.mimeType}, ${decodedBytes(attachment.data)} bytes${attachment.name === null ? '' : `, ${attachment.name}`
-          }] `
-      )
-      .join('') + echoed;
+  const reply = echoReply(prompt, modelPrompt, attachments);
 
   for (const piece of chunkText(reply, 5, ctx.chunkSize)) {
     if (record.cancelled) break;
@@ -214,54 +233,95 @@ async function stream(
     });
   }
 
-  if (!record.cancelled && prompt.includes('[permission]')) {
-    await askPermission(ctx, thread, turn, message);
-  }
-  // The bare word, like the echo driver: the fake agent asks one question.
-  if (!record.cancelled && /\bquestion\b/.test(prompt)) {
-    await askQuestion(ctx, thread, turn, message);
-  }
-  // `boite ask`: a card the agent does not wait on, answered into the next prompt.
-  if (!record.cancelled && prompt.includes('[ask]')) {
-    askAsync(ctx, thread, turn, message, ASYNC_QUESTION_TEXT, ASYNC_QUESTION_OPTIONS, false);
-  }
-  if (!record.cancelled && prompt.includes('[background]')) {
-    await backgroundShell(ctx, thread, message);
-  }
-  if (!record.cancelled && prompt.includes('[monitor]')) {
-    await backgroundShell(ctx, thread, message, 'monitor');
-  }
-  if (!record.cancelled && prompt.includes('[tool-stream]')) {
-    await streamToolInput(ctx, thread, message);
-  }
-  if (!record.cancelled && prompt.includes('[tool]')) {
-    await runTool(ctx, thread, message);
-  }
-  if (!record.cancelled && prompt.includes('[tools]')) {
-    await toolBurst(ctx, thread, message, record);
-  }
-  if (!record.cancelled && prompt.includes('[diff]')) {
-    // The edit lands in the working tree, so the file it names opens.
-    ctx.files.set(DIFF_PATH, DIFF_NEW);
-    await documentTool(ctx, thread, message, 'Edit', { file_path: DIFF_PATH }, 'edited 1 file', [
-      { kind: 'diff', path: DIFF_PATH, oldText: DIFF_OLD, newText: DIFF_NEW }
-    ]);
-  }
-  if (!record.cancelled && prompt.includes('[doc]')) {
-    await documentTool(ctx, thread, message, 'Read', { file_path: DOC_TITLE }, `read ${DOC_TITLE}`, [
-      { kind: 'markdown', title: DOC_TITLE, text: DOC_TEXT }
-    ]);
-  }
-  if (!record.cancelled && prompt.includes('[image]')) {
-    await documentTool(ctx, thread, message, 'Screenshot', { region: 'window' }, 'captured the window', [
-      { kind: 'image', mimeType: 'image/png', data: IMAGE_BASE64, alt: 'one pixel' }
-    ]);
+  for (const marker of TURN_MARKERS) {
+    if (record.cancelled || !marker.matches(prompt)) continue;
+    const pending = marker.run(ctx, thread, turn, message, record);
+    // Cards are synchronous; only tools and blocking requests yield between markers.
+    if (pending) await pending;
   }
   const spawn = SPAWN_MARKER.exec(prompt);
   if (!record.cancelled && spawn && spawn[1]) {
     await spawnProcess(ctx, thread, spawn[1]);
   }
 
+  appendSteering(ctx, thread, message, record);
+
+  finishTurn(ctx, thread, turn, message, prompt, modelPrompt, compactAfter, record);
+}
+
+type StreamRecord = { cancelled: boolean; steered?: { prompt: string; attachments: Attachment[] }[] };
+type TurnMarker = {
+  matches: (prompt: string) => boolean;
+  run: (ctx: FakeContext, thread: Thread, turn: Turn, message: Message, record: StreamRecord) => Promise<void> | void;
+};
+
+// Marker order matches the echo driver, including settings before tools.
+const TURN_MARKERS: TurnMarker[] = [
+  { matches: prompt => prompt.includes('[permission]'), run: (ctx, thread, turn, message) => askPermission(ctx, thread, turn, message) },
+  { matches: prompt => /\bquestion\b/.test(prompt), run: (ctx, thread, turn, message) => askQuestion(ctx, thread, turn, message) },
+  { matches: prompt => prompt.includes('[ask]'), run: (ctx, thread, turn, message) => { askAsync(ctx, thread, turn, message, ASYNC_QUESTION_TEXT, ASYNC_QUESTION_OPTIONS, false); } },
+  ...SETTING_MARKERS.map(([marker, params]): TurnMarker => ({
+    matches: prompt => prompt.includes(marker),
+    run: (ctx, thread, turn) => {
+      try { requestSetting(ctx, thread, turn, { threadId: thread.id, ...params }); } catch { /* already set, or already asked */ }
+    },
+  })),
+  { matches: prompt => prompt.includes(AGENT_SETTING_MARKER), run: (ctx, thread, turn) => {
+    const agent = ctx.agents.liveProfiles()[0];
+    const held = agent?.projectIds ?? [];
+    const project = ctx.projects.find(p => p.id === thread.projectId && p.kind !== 'drafts' && !held.includes(p.id))
+      ?? ctx.projects.find(p => p.kind !== 'drafts' && !held.includes(p.id));
+    if (agent && project) {
+      try {
+        requestAgentSetting(ctx, thread, turn, { threadId: thread.id, agent: agent.id, key: 'projects', value: { add: [project.id] }, reason: AGENT_SETTING_REASON.replace('{name}', agent.name) });
+      } catch { /* already entrusted, or already asked */ }
+    }
+  } },
+  { matches: prompt => prompt.includes('[background]'), run: (ctx, thread, _turn, message) => backgroundShell(ctx, thread, message) },
+  { matches: prompt => prompt.includes('[monitor]'), run: (ctx, thread, _turn, message) => backgroundShell(ctx, thread, message, 'monitor') },
+  { matches: prompt => prompt.includes('[tool-stream]'), run: (ctx, thread, _turn, message) => streamToolInput(ctx, thread, message) },
+  { matches: prompt => prompt.includes('[tool]'), run: (ctx, thread, _turn, message) => runTool(ctx, thread, message) },
+  { matches: prompt => prompt.includes('[tools]'), run: (ctx, thread, _turn, message, record) => toolBurst(ctx, thread, message, record) },
+  { matches: prompt => prompt.includes('[diff]'), run: (ctx, thread, _turn, message) => {
+    // The edit lands in the working tree, so the file it names opens.
+    ctx.files.set(DIFF_PATH, DIFF_NEW);
+    return documentTool(ctx, thread, message, 'Edit', { file_path: DIFF_PATH }, 'edited 1 file', [
+      { kind: 'diff', path: DIFF_PATH, oldText: DIFF_OLD, newText: DIFF_NEW }
+    ]);
+  } },
+  { matches: prompt => prompt.includes('[doc]'), run: (ctx, thread, _turn, message) => documentTool(ctx, thread, message, 'Read', { file_path: DOC_TITLE }, `read ${DOC_TITLE}`, [
+    { kind: 'markdown', title: DOC_TITLE, text: DOC_TEXT }
+  ]) },
+  { matches: prompt => prompt.includes('[image]'), run: (ctx, thread, _turn, message) => documentTool(ctx, thread, message, 'Screenshot', { region: 'window' }, 'captured the window', [
+    { kind: 'image', mimeType: 'image/png', data: IMAGE_BASE64, alt: 'one pixel' }
+  ]) },
+];
+
+function finishThinking(ctx: FakeContext, thread: Thread, message: Message): void {
+  const thought = message.parts[0];
+  if (thought?.type === 'thinking') {
+    thought.finishedAt = ctx.now();
+    ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex: 0, part: structuredClone(thought) });
+  }
+}
+
+function echoReply(prompt: string, modelPrompt: string, attachments: Attachment[]): string {
+  // `/shout <text>` comes back in capitals, the one command the fake acts on.
+  const shouted = prompt.startsWith(`/${SHOUT} `) ? prompt.slice(SHOUT.length + 2) : null;
+  const echoed = shouted === null ? modelPrompt : modelPrompt.slice(SHOUT.length + 2).toUpperCase();
+
+  // An image is named back the way the echo driver names it, format and
+  // weight first, then the prompt itself is echoed.
+  return attachments
+      .map(
+        (attachment) =>
+          `[${attachment.kind} ${attachment.mimeType}, ${decodedBytes(attachment.data)} bytes${attachment.name === null ? '' : `, ${attachment.name}`
+          }] `
+      )
+      .join('') + echoed;
+}
+
+function appendSteering(ctx: FakeContext, thread: Thread, message: Message, record: StreamRecord): void {
   for (const input of record.steered ?? []) {
     if (record.cancelled) break;
     const partIndex = message.parts.length;
@@ -270,7 +330,9 @@ async function stream(
     message.parts.push(part);
     ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part });
   }
+}
 
+function finishTurn(ctx: FakeContext, thread: Thread, turn: Turn, message: Message, prompt: string, modelPrompt: string, compactAfter: number, record: StreamRecord): void {
   if (!record.cancelled && prompt === '[compact]') {
     const part: MessagePart = { type: 'compaction', trigger: turn.execution?.automatic ? 'auto' : 'manual', preTokens: thread.context?.tokens ?? null, postTokens: compactAfter };
     const partIndex = message.parts.length;
@@ -313,14 +375,21 @@ async function stream(
   // A move the agent asked for during the turn happens now, as the core's turn runner does.
   applyWaitingMove(ctx, thread.id);
   autoCompact(ctx, thread, turn);
+  finishDelegation(ctx, thread, turn, message, record);
+}
+
+function finishDelegation(ctx: FakeContext, thread: Thread, turn: Turn, message: Message, record: StreamRecord): void {
   if (turn.execution?.operation === 'delegation' && thread.parentThreadId) {
     const root = thread.parentThreadId;
     const text = message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n').trim().slice(0, 4000);
     const config = delegationConfig(ctx, root);
+    // As the core: a turn ended on its own background work leaves a checkpoint, its final result follows.
+    const live = turn.status === 'done' ? thread.background ?? [] : [];
     if (!record.cancelled && config.enabled && !config.paused) {
       const letter: AgentLetter = {
         id: `letter-${++ctx.seq}`,
         origin: 'result',
+        ...(live.length > 0 ? { checkpoint: true } : {}),
         from: { coreId: 'local', threadId: thread.id, title: thread.title, machine: 'Boite', resources: '', status: thread.status, mode: 'team' },
         to: { coreId: 'local', threadId: root },
         toTitle: ctx.thread(root).title,

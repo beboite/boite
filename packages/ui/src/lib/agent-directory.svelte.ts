@@ -1,9 +1,12 @@
-import type { AgentEntrustment, AgentProfile, AgentsSnapshot, ThreadSummary } from '@boite/contracts';
+import { threadActive, type AgentEntrustment, type AgentProfile, type AgentsSnapshot, type ThreadSummary } from '@boite/contracts';
 import { experimentOn } from './experiments.svelte';
 import type { Store } from './store.svelte';
 
-/** Threads an agent is busy in: a turn running, queued, or waiting on the user. */
-const LIVE: ReadonlySet<ThreadSummary['status']> = new Set(['running', 'queued', 'waiting']);
+/** A thread an agent is busy in right now: a turn running, queued, or waiting on the user. */
+export function agentThreadLive(thread: ThreadSummary): boolean {
+  return !!thread.agentSessionId && !thread.archived && threadActive(thread.status);
+}
+
 /** The least time between two snapshots the thread list asks for: agents change many records per turn. */
 const SETTLE_MS = 1500;
 
@@ -18,7 +21,8 @@ export interface AgentAtWork {
  * Which persistent agent owns or carries a thread, for the views outside the
  * Agents page: the thread list draws that agent's picture on its rows and lists
  * the agents in charge, the chat says whose thread it is, and the thread menu
- * lists the agents a thread can be entrusted to. A thread names its agent
+ * lists the agents a thread can be entrusted to, a project header and a
+ * thread header show the agents that look after the project. A thread names its agent
  * session (`agentSessionId`), a delegated child its parent; the session names
  * the agent. An entrusted thread is named in the snapshot's `entrusted`. Only
  * with the Agents experiment on, the agents snapshot loads, at most once per
@@ -122,6 +126,22 @@ export class AgentDirectory {
     });
   }
 
+  /**
+   * The active agents the owner entrusted a project to: they look after every
+   * thread there. Paused and archived agents look after nothing.
+   */
+  residentsOf(projectId: string | null): AgentProfile[] {
+    if (projectId === null) return [];
+    return this.agents.filter(agent => agent.projectIds?.includes(projectId));
+  }
+
+  /** The persistent agent whose own session runs in a thread: what a letter's `from.threadId` names. */
+  agentOfThread(threadId: string): AgentProfile | null {
+    const snapshot = this.snapshot;
+    const agentId = snapshot?.sessions.find(session => session.threadId === threadId)?.agentId;
+    return agentId ? snapshot?.profiles.find(agent => agent.id === agentId) ?? null : null;
+  }
+
   /** The agent a thread belongs to, through its session or its parent's. */
   ownerOf(thread: Pick<ThreadSummary, 'agentSessionId' | 'parentThreadId'>): AgentProfile | null {
     const snapshot = this.snapshot;
@@ -143,7 +163,7 @@ export class AgentDirectory {
     if (!snapshot) return [];
     const byThread = new Map<string, AgentAtWork>();
     for (const thread of this.store.threads) {
-      if (!thread.agentSessionId || !LIVE.has(thread.status) || thread.archived) continue;
+      if (!agentThreadLive(thread)) continue;
       const agent = this.ownerOf(thread);
       if (agent) byThread.set(thread.id, { agent, thread, waiting: thread.status === 'waiting' });
     }

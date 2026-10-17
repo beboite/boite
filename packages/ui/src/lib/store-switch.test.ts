@@ -151,7 +151,8 @@ test('a tool disclosure shares its fetch and an obsolete result cannot fill anot
     await store.open('t-scheduler');
     release({ output: 'full output from the previous visit' }); await one;
     const returning = store.open('t-bench');
-    expect(store.openThread!.messages.at(-1)!.parts.at(-1)).toMatchObject({ output: 'preview', outputDeferred: true });
+    // The cached visit kept it folded: a successful call's preview is not kept either.
+    expect(store.openThread!.messages.at(-1)!.parts.at(-1)).toMatchObject({ output: '', outputDeferred: true });
     await returning;
   } finally { release({ output: '' }); spy.mockRestore(); }
 });
@@ -318,4 +319,50 @@ test('a compact refresh cannot certify a hydrated output from its matching prefi
     expect(fresh).toMatchObject({ output: prefix + 'after!' });
     expect(fresh).not.toHaveProperty('outputDeferred');
   } finally { spy.mockRestore(); }
+});
+
+test('a return to a visit kept as plain data repaints the tail that came while away, over the copy it painted', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0, long: true });
+  await store.open('t-long');
+  await store.open('t-bench');
+  // The idle pass after the leave keeps the visit as plain data, not as the proxy it was drawn from.
+  await new Promise(resolve => setTimeout(resolve, 400));
+  await client.call('turns.start', { threadId: 't-long', prompt: 'while you were away' });
+  await vi.waitFor(async () => {
+    const tail = await client.call('threads.get', { threadId: 't-long', limit: 2 });
+    expect(tail.messages.at(-1)?.role).toBe('assistant');
+    expect(tail.messages.at(-1)?.state).toBe('complete');
+  });
+  const opening = store.open('t-long');
+  const painted = store.openThread!;
+  const first = painted.messages[0];
+  expect(painted.messages.some(message => message.parts.some(part => part.type === 'text' && part.text === 'while you were away'))).toBe(false);
+  await opening;
+  // The resume tail lands in the copy on screen: the timeline keeps its rows and draws the new ones.
+  expect(store.openThread).toBe(painted);
+  expect(store.openThread!.messages[0]).toBe(first);
+  expect(store.openThread!.messages.some(message => message.parts.some(part => part.type === 'text' && part.text === 'while you were away'))).toBe(true);
+});
+
+test('a live end past its bound lets its oldest messages go and reads them again from the cursor', async ({ ready }) => {
+  const { store } = await ready({ delayMs: 0, long: true });
+  await store.open('t-long');
+  await store.loadOlder();
+  const thread = store.openThread!;
+  expect(thread.messages).toHaveLength(160);
+  // A day of output: every held message weighs 256 KiB, 40 MiB in all.
+  const text = 'x'.repeat(128 * 1024);
+  for (const message of thread.messages) message.parts = [{ type: 'text', text }];
+  const newest = thread.messages.at(-1)!.id;
+  expect(store.releaseOlder('t-long')).toBe(144);
+  expect(store.openThread!.messages).toHaveLength(16);
+  expect(store.openThread!.messages.at(-1)!.id).toBe(newest);
+  expect(store.messagesBefore).toBe(store.openThread!.messages[0]!.id);
+  // Weighed once per message count: a delta weighs nothing.
+  expect(store.releaseOlder('t-long')).toBe(0);
+  const first = store.openThread!.messages[0]!.id;
+  expect(await store.loadOlder()).toBeGreaterThan(0);
+  const messages = store.openThread!.messages;
+  expect(messages.findIndex(message => message.id === first)).toBeGreaterThan(0);
+  expect(new Set(messages.map(message => message.id)).size).toBe(messages.length);
 });

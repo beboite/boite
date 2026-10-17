@@ -2,10 +2,12 @@
   import { untrack } from 'svelte';
   import { ChevronDown, FolderOpen, VenetianMask } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
-  import { levelName, projectName } from '../lib/format';
+  import { modePhrase } from '../lib/permission-modes';
+  import { effortName, projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import { DRAFT_STASH_KEY } from '../lib/prefs';
   import { lastIndexById } from '../lib/thread-rows';
+  import { slideFrom } from '../lib/motion';
   import Composer from './Composer.svelte';
   import FolderGoneNotice from './FolderGoneNotice.svelte';
   import AgentDock from './AgentDock.svelte';
@@ -14,9 +16,11 @@
   import MessageList from './MessageList.svelte';
   import ThreadLoading from './ThreadLoading.svelte';
   import ThreadRecovery from './ThreadRecovery.svelte';
+  import ThreadRetry from './ThreadRetry.svelte';
   import ForkReturn from './ForkReturn.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import DoneThreadNotice from './DoneThreadNotice.svelte';
+  import WorktreeGoneNotice from './WorktreeGoneNotice.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -54,8 +58,25 @@
   let draftModel = $derived(store.modelOf(draftChoice));
   let draftProvider = $derived(draftChoice ? store.providerOf(draftChoice.providerId) : null);
   let draftEffort = $derived(draftChoice?.effort ?? draftModel?.effort?.default ?? null);
-  let effortLabel = $derived.by(() => { const level = draftModel?.effort?.levels.find((level) => level.id === draftEffort); return level ? levelName(level) : draftEffort; });
+  let effortLabel = $derived(draftEffort ? effortName(draftModel, draftEffort) : null);
   let modelLabel = $derived(draftModel?.name ?? draftChoice?.model ?? draftProvider?.name ?? '');
+
+  /**
+   * A draft's first prompt takes the composer from the middle of the column to
+   * the bottom. Its place is read before the layout changes, then it slides
+   * from there instead of jumping.
+   */
+  let chat = $state<HTMLElement>();
+  let leftFrom: number | null = null;
+  let leaving = $derived(!thread && !!sending);
+  $effect.pre(() => {
+    if (leaving) leftFrom = untrack(() => chat?.querySelector('[data-testid=composer]')?.getBoundingClientRect().top ?? null);
+  });
+  $effect(() => {
+    const composer = leaving ? chat?.querySelector<HTMLElement>('[data-testid=composer]') : null;
+    if (composer && leftFrom !== null) slideFrom(composer, leftFrom);
+    leftFrom = null;
+  });
 </script>
 
 {#if !thread && !store.draft}
@@ -64,7 +85,10 @@
     <p class="muted">{strings.thread.noneBody}</p>
   </div>
 {:else}
-  <section class="chat" class:drafting={!thread} data-testid="chat">
+  <!-- The draft's roomier composer belongs to the middle of the column: once
+     the prompt is on its way the composer is at the bottom, at its thread size,
+     or it shrinks a second time when the thread opens. -->
+  <section class="chat" class:drafting={!thread && !sending} bind:this={chat} data-testid="chat">
     {#if thread?.forkOrigin}{#key thread.id}<ForkReturn {store} {thread} />{/key}{/if}
     {#if thread}
       <!-- One timeline per thread: the heights it measured and the ids that
@@ -86,7 +110,7 @@
           <h1>{strings.mobile.draftTitle}</h1>
           <p>{strings.mobile.draftHint}</p>
           <span class="project-choice"><ProjectChoice {store} testid="mobile-draft-project">{#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}<span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span><ChevronDown size={14} /></ProjectChoice></span>
-          {#if draftChoice}<small>{strings.thread.draftMode[draftChoice.permissionMode]}</small>{/if}
+          {#if draftChoice}<small>{modePhrase(draftChoice.permissionMode, draftProvider)}</small>{/if}
           {#if store.draft?.worktree}<small>{strings.thread.inWorktree}</small>{/if}
         </div>
         <div class="draft-heading" data-testid="draft-sentence">
@@ -105,7 +129,7 @@
             <p class="draft-details">
               {#if store.draft?.worktree}<span>{strings.thread.inWorktree}</span>{/if}
               {#if draftChoice}
-                <span>{strings.thread.draftMode[draftChoice.permissionMode]}</span>
+                <span>{modePhrase(draftChoice.permissionMode, draftProvider)}</span>
                 <span>{strings.thread.using} {modelLabel}</span>
                 {#if effortLabel}<span>{fill(strings.thread.onEffort, { effort: effortLabel })}</span>{/if}
               {/if}
@@ -116,11 +140,12 @@
     {/if}
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
-    {#if thread}<ThreadRecovery {store} />{/if}
+    {#if thread}<ThreadRecovery {store} /><ThreadRetry {store} />{/if}
     {#if thread?.agentSessionId}
       <AgentOwnerBar {store} {thread} />
     {:else}
       {#if store.openProject?.missing === true}<FolderGoneNotice {store} project={store.openProject} />{/if}
+      {#if thread?.worktreeRemoved}<WorktreeGoneNotice removal={thread.worktreeRemoved} archived={thread.archived} />{/if}
       {#if thread?.archived}<DoneThreadNotice {store} threadId={thread.id} />{:else}<Composer {store} centered={!thread && !sending} />{/if}
     {/if}
 

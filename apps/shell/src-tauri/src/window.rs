@@ -191,8 +191,15 @@ pub(crate) fn build_main_window<R: Runtime>(
             // reload of the UI takes every child webview with it.
             .on_page_load(|window, payload| {
                 if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                    crate::watchdog::saw(crate::watchdog::Seen::PageLoadStarted);
+                    crate::shell_log::info("webview", "shell.webview.page-load", "the main page started loading; browser surfaces close with it",
+                        serde_json::json!({ "phase": "started" }));
                     crate::tray::reset_quit_guard(window.app_handle());
                     browser::close_all(window.app_handle());
+                } else {
+                    crate::watchdog::saw(crate::watchdog::Seen::PageLoadFinished);
+                    crate::shell_log::info("webview", "shell.webview.page-load", "the main page finished loading",
+                        serde_json::json!({ "phase": "finished" }));
                 }
             });
     // A window that can wear a material is built transparent, the one thing
@@ -257,11 +264,31 @@ pub(crate) fn build_main_window<R: Runtime>(
     #[cfg(windows)]
     if supported_materials(build).contains(&"acrylic") {
         let applied = window.hwnd().map_err(|error| error.to_string()).and_then(|hwnd| apply_material(hwnd.0, "acrylic", build));
-        if let Err(error) = applied {
-            eprintln!("[shell] the main window opens without its material: {error}");
+        match applied {
+            Ok(()) => crate::shell_log::info("window", "shell.window.material", format!("the main window opens with acrylic on Windows build {build}"),
+                serde_json::json!({ "material": "acrylic", "build": build })),
+            Err(error) => {
+                eprintln!("[shell] the main window opens without its material: {error}");
+                crate::shell_log::warn("window", "shell.window.material", format!("the main window opens without its material: {error}"),
+                    serde_json::json!({ "material": "none", "build": build }));
+            }
         }
+    } else {
+        let transparent = supported_materials(build).contains(&"mica");
+        crate::shell_log::info("window", "shell.window.material",
+            format!("the main window opens {} on Windows build {build}", if transparent { "transparent, without a material until the UI applies the chosen one" } else { "solid" }),
+            serde_json::json!({ "material": if transparent { "none" } else { "solid" }, "transparent": transparent, "shadow": undecorated_shadow(build), "build": build }));
     }
     Ok(window)
+}
+
+/// The main native window, whatever webviews it holds. Tauri's
+/// `get_webview_window` answers `None` for a window with more than one
+/// webview, and every browser surface is a child webview of this window: an
+/// agent's tab opened while the window waited in the tray left the tray, a
+/// second launch and the taskbar unable to show it (2026-10-12).
+pub(crate) fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Window<R>> {
+    app.get_window(MAIN_LABEL)
 }
 
 /// The window is created hidden and only reaches the screen here: at start
@@ -274,9 +301,13 @@ pub(crate) fn show_main<R: Runtime>(app: &AppHandle<R>) {
     if hidden() {
         return;
     }
-    if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+    if let Some(window) = main_window(app) {
+        crate::watchdog::saw(crate::watchdog::Seen::Shown);
+        crate::shell_log::info("window", "shell.window.show", "showing the main window",
+            serde_json::json!({ "wasVisible": window.is_visible().unwrap_or(false), "wasMinimized": window.is_minimized().unwrap_or(false) }));
         let _ = window.unminimize();
         let _ = window.set_skip_taskbar(false);
+        main_memory(app, false);
         let _ = window.show();
         browser::unpark_all(app);
         let _ = window.set_focus();
@@ -284,10 +315,23 @@ pub(crate) fn show_main<R: Runtime>(app: &AppHandle<R>) {
 }
 
 pub(crate) fn hide_main<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+    if let Some(window) = main_window(app) {
+        crate::watchdog::saw(crate::watchdog::Seen::Hidden);
+        crate::shell_log::info("window", "shell.window.hide", "hiding the main window to the tray", serde_json::json!({}));
         browser::park_all(app);
         let _ = window.hide();
         let _ = window.set_skip_taskbar(true);
+        main_memory(app, true);
+    }
+}
+
+/// The main page's memory level: low while the window waits in the tray,
+/// normal before it shows. Browser surfaces keep theirs, since a hidden one
+/// may still be recording. A minimized window keeps the normal level: it comes
+/// back from the taskbar often, and nothing should have to page back in.
+pub(crate) fn main_memory<R: Runtime>(app: &AppHandle<R>, low: bool) {
+    if let Some(page) = app.get_webview(MAIN_LABEL) {
+        crate::platform::memory_level(&page, low);
     }
 }
 
@@ -347,6 +391,20 @@ mod tests {
         let reveal = Reveal::default();
         reveal.stay_hidden();
         assert!(!reveal.painted() && !reveal.due() && !reveal.anyway(), "a start into the tray revealed the window");
+    }
+
+    #[test]
+    fn the_main_window_is_found_once_a_browser_surface_lives_in_it() {
+        use tauri::{LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl, WebviewWindowBuilder};
+        let app = tauri::test::mock_app();
+        let main = WebviewWindowBuilder::new(&app, super::MAIN_LABEL, WebviewUrl::default()).visible(false).build().unwrap();
+        assert!(super::main_window(app.handle()).is_some());
+        main.as_ref().window().add_child(WebviewBuilder::new("browser-agent-1", WebviewUrl::default()),
+            LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0)).unwrap();
+        // Tauri's own lookup loses the window here, which is what kept it
+        // hidden in the tray on 2026-10-12.
+        assert!(app.get_webview_window(super::MAIN_LABEL).is_none());
+        assert_eq!(super::main_window(app.handle()).map(|window| window.label().to_owned()).as_deref(), Some(super::MAIN_LABEL));
     }
 }
 

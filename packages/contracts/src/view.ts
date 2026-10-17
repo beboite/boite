@@ -12,11 +12,19 @@ export const VIEW_ROUTE = '/view';
 /** The page with its local files embedded. Above it the publish is refused. */
 export const VIEW_MAX_BYTES = 4 * 1024 * 1024;
 /**
- * The widths a page is measured at when it is published: the answer column on
- * a desktop (`--content` less its 4 px rest), then on a 390 px phone.
+ * The widths a page's content is measured at when it is published: the answer
+ * column on a desktop (`--content` less its 4 px rest), then on a 390 px phone.
  */
 export const VIEW_WIDTH = 816;
 export const VIEW_NARROW_WIDTH = 330;
+/**
+ * The room the frame keeps around the page on each side, taken from the
+ * conversation's own margin, with the page padded by as much: what it draws on
+ * its edge (a border, a card's shadow, a focus ring) is never cut by the frame,
+ * whatever a fractional display scale rounds the frame to. The content keeps
+ * the column's width; the frame is `2 * VIEW_BLEED` wider and taller.
+ */
+export const VIEW_BLEED = 4;
 /** A frame narrower than this takes the phone measurement. */
 export const VIEW_NARROW_BELOW = 520;
 export const VIEW_MIN_HEIGHT = 24;
@@ -28,7 +36,7 @@ export const VIEW_TITLE_MAX = 120;
 /** What an artifact part carries when it is a view: enough to keep its room before the page loads. */
 export interface InlineView {
   title: string;
-  /** The page's height in CSS pixels at `VIEW_WIDTH`. */
+  /** The frame's height in CSS pixels when the content is `VIEW_WIDTH` wide, the bleed included. */
   height: number;
   /** The same at `VIEW_NARROW_WIDTH`, when the page was measured. */
   narrowHeight?: number;
@@ -123,7 +131,7 @@ export function readViewMessage(data: unknown): ViewPageMessage | null {
  */
 const baseCss = (): string => [
   // The page: the answer's own text, on the conversation's own background.
-  'html{background:transparent;color:var(--color-foreground);font-family:var(--font-sans);font-size:var(--text-reading);line-height:var(--leading-reading);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}',
+  `html{padding:${VIEW_BLEED}px;background:transparent;color:var(--color-foreground);font-family:var(--font-sans);font-size:var(--text-reading);line-height:var(--leading-reading);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}`,
   'html::-webkit-scrollbar{display:none}',
   ':where(*,*::before,*::after){box-sizing:border-box}',
   ':where(body){margin:0}',
@@ -269,22 +277,31 @@ export function viewTitleOf(html: string): string | null {
 }
 
 /** One line in the guide every agent reads when its session starts. */
-export const VIEW_GUIDE_LINE = '`boite view <file.html>` draws an HTML page under your answer: diagram, chart, animated SVG, simulator. Use it when asked for a visual or a schema, or when a picture explains better than text. Read `boite view help` first.';
+export const VIEW_GUIDE_LINE = '`boite view <file.html>` draws an HTML page beside the text it explains: diagram, chart, animated SVG, simulator. Use it when asked for a visual or a schema, or when a picture explains better than text. Read `boite view help` first.';
 
 /** `boite view help`: everything an agent needs to write a page that looks like part of the app. */
-export const VIEW_HELP = `boite view <file.html> [--title <text>]   draw the page at the end of your answer
+export const VIEW_HELP = `boite view <file.html> [--title <text>]   publish a page to draw in your answer
 boite view example                        a complete page in the app's look, to start from
 
-Write one HTML file per visual, for instance .boite/views/orbit.html, then run
-\`boite view\` on it. The user sees it under your final text once your turn ends,
-so write the answer as if the visual were already under it: do not announce it,
-say where it is, or repeat what it shows.
+Write one HTML file per visual, for instance .boite/views/orbit.html, run
+\`boite view\` on it, then place it in your answer with a line of its own that
+names the file as an image:
 
-Several visuals: one file each and one command each. They stack in the order
-you published them. Running the command again on the same file in the same
-turn replaces that visual, so fix a page in place instead of making a copy.
-Split what is read separately; keep in one page what is compared side by side
-or driven by the same controls.
+  ![Orbit](.boite/views/orbit.html)
+
+The answer is cut there: the text above, the page, the text under. Put each
+visual right after the paragraph it explains, so the reader meets it with that
+paragraph instead of after the whole answer. A page no line places is drawn
+under your final text once your turn ends. Either way, write the answer as if
+the visual were already in it: do not announce it, say where it is, or repeat
+what it shows.
+
+Several visuals: one file each, one command each and one line each. An answer
+that walks through several points reads best with a small visual beside each
+point rather than one big page at the end. Running the command again on the
+same file in the same turn replaces that visual, so fix a page in place
+instead of making a copy. Split what is read separately; keep in one page what
+is compared side by side or driven by the same controls.
 
 The page
 - Self-contained: inline <style> and <script>. A local file named by a
@@ -370,9 +387,10 @@ Motion
 
 The check at publish
 The page is loaded once in a headless browser before anything is shown. A
-script error, a console.error, a remote resource or an unreadable local file
-refuses the publish and prints the reason with its line: fix the file and run
-the command again. The user never sees a page that failed.
+script error, a console.error, a remote resource, an unreadable local file or
+a page wider than the answer at either width (the user cannot scroll sideways)
+refuses the publish and prints the reason: fix the file and run the command
+again. The user never sees a page that failed.
 It also prints advice that does not stop the publish, such as a fixed color
 that will not follow the user's theme. Fix what it names, then publish again.
 `;

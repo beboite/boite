@@ -142,6 +142,10 @@ list. Cards show the installed and offered versions together. The card's own
 Details expands the idle wait, backup and recovery behavior without adding it
 to the confirmation.
 
+The sidebar's update card lists that release too, and its Update all
+installs it after the machine's agents
+([update everything](updates.md#update-everything)).
+
 Server updates require an owner connection, including on a phone. Ordinary
 paired devices cannot stop or update the server. The action always goes to the
 machine on the card, even after switching to another machine.
@@ -159,19 +163,49 @@ link to this guide. A core predating this feature needs one manual update first.
 The server checks eight seconds after startup, then every six hours. It follows
 its installed stable or nightly channel, downloads an immutable release's
 signed server archive, and verifies the publisher signature and embedded
-version before staging the complete core, CLI and UI. No update stops a running
-turn. The download and idle wait can be cancelled. Running and queued turns,
-terminals, warm sessions, background tasks and authenticated requests must
-finish before the existing idle-shutdown gate admits installation.
+version before staging the complete core, CLI and UI. The archive is hashed as
+it arrives and checked over every byte before anything unpacks; it is then
+inflated a chunk at a time, so neither it nor its files sit in memory and other
+requests keep being served. The download and idle
+wait can be cancelled. An idle server installs through the idle gate. A busy
+one hands its turns to the next core at once, as a desktop update does
+([restart handoff](restart-handoff.md)): each running turn ends its tool call,
+30 seconds at most, queued turns stay queued, and all resume after the
+restart. Only an agent install under way holds it, since the restart would
+replace the core under a half-written agent. Waiting for idle instead held a
+machine with an agent working for hours on "Waiting for work to finish" for
+good.
 
 An independent systemd user job survives the core's shutdown. After the core
-stops, it backs up the complete data directory and installation, switches the
-staged installation into place, and restarts the same service. Health must
+stops, it backs up the installation and the data directory, switches the
+staged installation into place, and restarts the same service. The data
+snapshot holds the journal and the state files beside it; checkpoints,
+browser profiles, attachments, artifacts, logs and dictation models stay out,
+since a release does not rewrite them. Copying them kept a server with 1,300
+threads down 2 min 25 s for 8.9 GB, and filled its disk once mid-copy; a
+rollback keeps the live ones. Before stopping the service, the job checks that
+the disk holds the snapshot plus 1 GB; otherwise it starts the untouched
+server again, since the core stops itself once it admits the update, with the
+reason in its status. A copy cut short is deleted. Health must
 report the target version and that service's new PID within 30 seconds.
 Failure restores both the previous installation and its data snapshot before
 restarting. Pairings and conversations survive; clients reconnect normally.
-Backups remain private beside the installation as `.boite-backup-<id>`.
+Backups remain private beside the installation as `.boite-backup-<id>`; a
+successful update keeps the two newest and deletes the older ones.
 Failure artifacts also remain for diagnosis; inspect them before removing them.
+
+The job runs under `MemoryHigh=1G`, which throttles it, rather than a hard
+memory limit: copying a 19 GB data directory once filled a 512 MB limit with
+page cache under writeback, and the kernel killed the job 30 seconds into the
+copy, leaving the service stopped. Its unit now has an `ExecStopPost` that
+runs `boite-core update-recover` however the job ends, a kill included. It
+reads where the update stood from the disk: a job that never stopped the
+service only closes the admission, a new version that answers health is kept,
+and anything else is rolled back as above before the service starts again.
+The recovery runs from a hard link of the job's executable,
+`.boite-recover-<id>`, which it deletes when done. If the recovery itself
+never ran, as after a power cut, the next update deletes the unfinished
+operation directory and the incomplete snapshot it left.
 
 From a terminal on the server, the same owner actions need no thread:
 
@@ -191,10 +225,12 @@ bun run build:ui
 bun run build:core:linux
 ```
 
-That is `build:core` followed by `bun build --compile --target=bun-linux-x64-baseline`,
+That is `build:core` followed by `bun build --compile --target=bun-linux-x64-baseline --bytecode --format=esm`,
 which writes `packages/core/dist/boite-core-linux-x64`: one executable for x64
 glibc Linux that carries its own Bun, in the baseline build that also runs on
-CPUs without AVX2. The image's Bun comes from `oven/bun`, whose x64 build is the
+CPUs without AVX2. The precompiled bytecode cuts its start to ready by about
+a third (bench/results/2026-10-15-perf-media.md) and ties the binary to the Bun
+that built it, which the build pins. The image's Bun comes from `oven/bun`, whose x64 build is the
 baseline one too. Cross-compiling works from Windows. Copy it
 to the server with `packages/ui/dist` beside it, renamed `ui`, since a compiled
 core looks for the UI next to its own executable. The build also writes
@@ -295,8 +331,6 @@ core for a one-time link over its own socket, and prints it on stdout; stderr
 says which role it carries and until when it works. Without `--owner` the link
 is a phone's. `--data-dir` and `--channel` name another core, as they do at
 start.
-
-stderr also gives the link's typing code, for an installed phone app.
 
 A server that belongs with your other machines joins their [group](groups.md)
 instead, with `boite-core group join`, which reads the invitation on its

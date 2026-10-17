@@ -166,6 +166,7 @@ describe('the Device panel over RPC', () => {
     expect(sdk.calls()).toContain('emulator -avd Pixel_8 -no-boot-anim');
 
     const frame = await owner.call('devices.frame', { threadId, deviceId: 'Pixel_8', maxWidth: 160, quality: 50 });
+    if (frame.unchanged) throw new Error('a frame asked without previous carries a picture');
     expect([frame.width, frame.height]).toEqual([SCREEN.width, SCREEN.height]);
     expect(Buffer.from(frame.base64, 'base64').subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
     await owner.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'tap', x: 10, y: 20 } });
@@ -196,6 +197,31 @@ describe('the Device panel over RPC', () => {
     expect(sdk.calls()).toContain('adb -s emulator-5554 emu kill');
     expect(sdk.state().running).toEqual({});
     expect((await agent.call('devices.list', { threadId })).devices.find((d) => d.id === 'Pixel_8')?.state).toBe('stopped');
+  });
+
+  test('a still screen is answered unchanged with no picture, and a changed one sends a new frame', async () => {
+    const sdk = fakeSdk({ avds: ['Pixel_8'] });
+    sdkEnv = linux({ ANDROID_HOME: sdk.root });
+    await agent.call('devices.open', { threadId, deviceId: 'Pixel_8' });
+    await ready('Pixel_8');
+    const ask = (previous?: string, maxWidth = 160) => owner.call('devices.frame', { threadId, deviceId: 'Pixel_8', maxWidth, quality: 50, ...(previous ? { previous } : {}) });
+    const first = await ask();
+    if (first.unchanged) throw new Error('the first frame must carry a picture');
+    await Bun.sleep(250);
+    // Same screen, caller still shows it: no picture. Without `previous` the frame comes in full, under the same id.
+    expect(await ask(first.id)).toEqual({ id: first.id, deviceId: 'Pixel_8', width: SCREEN.width, height: SCREEN.height, unchanged: true, at: expect.any(Number) });
+    const again = await ask();
+    expect(again).toMatchObject({ id: first.id, base64: first.base64 });
+    // Another size is another frame, and an unknown `previous` gets the picture.
+    expect((await ask(first.id, 200)).unchanged).toBeUndefined();
+    expect((await ask('not-a-frame')).unchanged).toBeUndefined();
+    await expect(ask('x'.repeat(101))).rejects.toThrow('previous must be the id of a frame');
+    sdk.paint([200, 40, 40]);
+    await owner.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'tap', x: 1, y: 1 } });
+    const moved = await ask(first.id);
+    if (moved.unchanged) throw new Error('a changed screen must send its picture');
+    expect(moved.id).not.toBe(first.id);
+    expect(moved.base64).not.toBe(first.base64);
   });
 
   test('powering off a device still booting stops it, and its old boot readies nothing', async () => {

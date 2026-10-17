@@ -52,6 +52,11 @@ test("a real shell draws ANSI colours and a full-screen program edge to edge, an
     await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
     await page.click(`[data-thread-id="${thread.id}"]`);
     await page.waitFor('document.querySelector("[data-testid=thread-header][data-status]")');
+    // The drawer is measured at the chat's full width: the panel an untouched
+    // conversation opens on a wide window is shut first, and stays shut across the reload.
+    await page.waitFor('document.querySelector("[data-testid=panel-launcher]")');
+    await page.click("[data-testid=panel-close]");
+    await page.waitFor('!document.querySelector("[data-testid=right-panel]")');
     await chord(page, "j", "KeyJ", 74);
     await page.waitFor('document.activeElement?.classList.contains("xterm-helper-textarea")');
     await page.waitFor(`(${screenText}).includes(">") || (${screenText}).includes("$ ")`);
@@ -67,7 +72,8 @@ test("a real shell draws ANSI colours and a full-screen program edge to edge, an
     await page.evaluate("delete document.documentElement.dataset.theme");
 
     await run(page, `${bun} ${quote(fixture)} fullscreen`);
-    await page.waitFor(`(${screenText}).includes("ansi-screen")`, 30_000);
+    // The typed command already names the fixture: wait for the program's own title row.
+    await page.waitFor(`(${screenText}).split('\\n')[0].trim().startsWith("ansi-screen")`, 30_000);
     await settled(page);
     // The program draws at the size the pty reports: the same as the screen xterm shows.
     const size = await page.evaluate<{ title: string; cols: number; rows: number; overflow: boolean }>(`(() => {

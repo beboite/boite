@@ -134,7 +134,7 @@ export class ThreadBranching {
       // The process that holds the whole session goes first, whatever it still runs.
       this.threads.releaseAgent(threadId);
       this.threads.agentState.noteBackground(threadId, []);
-      this.threads.cards.clearQuestionsOf(threadId, true);
+      this.threads.cards.clearQuestionsOf(threadId, true, 'rewind');
       this.threads.deferred.deferredAnswers.delete(threadId);
       this.threads.deferred.consumed.delete(threadId);
       this.threads.deferred.pendingWakes.delete(threadId);
@@ -447,7 +447,7 @@ export class ThreadBranching {
     // Native checkpoints cover the provider's entire turn, including later input and output.
     // Message order cannot identify a precise native cut once user input joins mid-turn.
     let users = 0;
-    for (const message of this.core.journal.walkTurnMessages(thread.id, turnId)) {
+    for (const message of this.core.journal.walkTurnMessages(thread.id, turnId, { blobs: false })) {
       if (message.role === 'user' && ++users > 1) return null;
     }
     return { sessionId: checkpoint.sessionId, sessionResumeAt: checkpoint.entry, session: 'native' };

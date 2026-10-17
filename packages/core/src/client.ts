@@ -1,6 +1,7 @@
 import { PROTOCOL_VERSION, RPC_PATH } from '@boite/contracts';
 import type {
   CoreInfo,
+  HelloAccepted,
   Principal,
   RpcError,
   RpcEventName,
@@ -21,10 +22,14 @@ export interface ConnectOptions {
   nonce?: string;
   /** Say hello with a group ticket instead of the token; `session` then carries what came back. */
   ticket?: string;
-  /** Through another member's relay route: this client's key for that member. */
-  relay?: string;
+  /** Through another member's relay route: this client's key for that member, or its device signature for it. */
+  relay?: string | object;
+  /** A device of the group: its signature for this core, or with `grant` its key being admitted (`hello` `device`). */
+  device?: object;
   /** Extra upgrade headers. The bench names a `Host` here to be served as a remote client. */
   headers?: Record<string, string>;
+  /** The newer events this client takes in place of their older form (`hello` `accepts`). */
+  accepts?: HelloAccepted[];
 }
 
 export interface CoreClient {
@@ -34,6 +39,8 @@ export interface CoreClient {
   readonly session: { id: string; token: string } | null;
   /** The one thread an agent token opens, null for the owner and a paired device. */
   readonly threadId: ThreadId | null;
+  /** The device id a grant just admitted. */
+  readonly device: string | null;
   call<M extends RpcMethodName>(method: M, params: RpcMethods[M]['params']): Promise<RpcMethods[M]['result']>;
   on<E extends RpcEventName>(event: E, handler: (payload: RpcEvents[E]) => void): () => void;
   onAny(handler: (event: RpcEventName, payload: unknown) => void): () => void;
@@ -162,11 +169,13 @@ export async function connect(url: string, token: string, options: ConnectOption
 
   const hello = (await send('hello', {
     ...(options.ticket !== undefined ? { ticket: options.ticket }
-      : options.grant === undefined ? { token } : { grant: options.grant, ...(options.nonce === undefined ? {} : { nonce: options.nonce }) }),
+      : options.grant === undefined ? (options.device === undefined ? { token } : {}) : { grant: options.grant, ...(options.nonce === undefined ? {} : { nonce: options.nonce }) }),
+    ...(options.device === undefined ? {} : { device: options.device }),
     ...(options.relay === undefined ? {} : { relay: options.relay }),
     protocolVersion: PROTOCOL_VERSION,
     client: options.client ?? { name: 'test', version: '2.0.0-beta.1' },
-  }, Math.max(1, deadline - Date.now())).catch(error => { socket.close(); throw error; })) as { core: CoreInfo; principal: Principal; session?: { id: string; token: string }; threadId?: ThreadId };
+    ...(options.accepts === undefined ? {} : { accepts: options.accepts }),
+  }, Math.max(1, deadline - Date.now())).catch(error => { socket.close(); throw error; })) as { core: CoreInfo; principal: Principal; session?: { id: string; token: string }; threadId?: ThreadId; device?: string };
   if (hello.core.protocolVersion !== PROTOCOL_VERSION) {
     socket.close();
     throw new Error(`core protocol version must be ${PROTOCOL_VERSION}`);
@@ -189,6 +198,7 @@ export async function connect(url: string, token: string, options: ConnectOption
     principal: hello.principal,
     session: hello.session ?? null,
     threadId: hello.threadId ?? null,
+    device: hello.device ?? null,
     async call<M extends RpcMethodName>(method: M, params: RpcMethods[M]['params']): Promise<RpcMethods[M]['result']> {
       if (closed) throw new Error('the client is closed');
       const wait = method === 'delegation.wait' && options.requestTimeoutMs === undefined

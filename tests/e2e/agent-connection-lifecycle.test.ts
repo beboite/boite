@@ -13,7 +13,7 @@ beforeAll(async () => {
   server = await startUi(port);
   url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
 }, 60_000);
-afterAll(async () => { await server?.close(); });
+afterAll(async () => { await server?.close(); }, 30_000);
 
 for (const [name, width, height, mobile] of [['desktop', 1280, 900, false], ['phone', 390, 844, true]] as const) {
   test(`agent connection cards can close on ${name}`, async () => {
@@ -72,18 +72,18 @@ for (const [name, width, height, mobile] of [['desktop', 1280, 900, false], ['ph
         expect(await page.evaluate(`${store}.accounts.filter(account => account.providerId === 'pi').length`)).toBe(1);
 
         await page.evaluate(`${store}.showSettings('machines')`);
-        await page.waitFor(`document.querySelector('${id('pairing-mint')}')`);
-        await page.click(id('pairing-mint'));
-        await page.waitFor(`document.querySelector('${id('pairing-link')}')`);
-        const first = await page.evaluate(`${store}.pairing.grant`);
-        await page.evaluate(`document.querySelector('${id('pairing-card')}').scrollIntoView()`);
-        await capture('pairing');
-        await page.click(id('pairing-close'));
-        await page.waitFor(`!document.querySelector('${id('pairing-link')}') && !document.querySelector('${id('pairing-qr')}')`);
-        await page.click(id('pairing-mint'));
-        await page.waitFor(`document.querySelector('${id('pairing-link')}')`);
-        expect(await page.evaluate(`${store}.pairing.grant`)).not.toBe(first);
-        await page.click(id('pairing-close'));
+        await page.waitFor(`document.querySelector('${id('group-add-device')}')`);
+        await page.click(id('group-add-device'));
+        await page.waitFor(`document.querySelector('${id('add-device-qr')} svg')`);
+        const first = await page.evaluate(`${store}.deviceInvite.url`);
+        await page.evaluate(`document.querySelector('${id('add-device')}').scrollIntoView()`);
+        await capture('add-device');
+        await page.click(id('add-device-close'));
+        await page.waitFor(`!document.querySelector('${id('add-device')}') && !document.querySelector('${id('add-device-qr')}')`);
+        await page.click(id('group-add-device'));
+        await page.waitFor(`document.querySelector('${id('add-device-qr')} svg')`);
+        expect(await page.evaluate(`${store}.deviceInvite.url`)).not.toBe(first);
+        await page.click(id('add-device-close'));
 
         await page.evaluate(`${store}.showSettings('accounts'); ${store}.logins['a-claude-side'] = { state: 'failed', output: 'Sign-in failed', url: null, exitCode: 1 };`);
         await page.waitFor(`document.querySelector('${id('account-login-dismiss')}')`);

@@ -1,8 +1,8 @@
 import type { ServerWebSocket } from 'bun';
 import type { Channel, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
-import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_CONTENT_POLICY, VIEW_ROUTE, VIEW_SANDBOX } from '@boite/contracts';
+import { APP_ORIGIN, FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_ROUTE } from '@boite/contracts';
 import { timingSafeEqual } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { dirname, join, normalize, resolve, sep } from 'node:path';
 import { eventThreadId, type EventPayload } from './bus.ts';
@@ -10,15 +10,18 @@ import { mayReceiveEvent } from './access.ts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
 import { JOIN_ROUTE } from './group.ts';
+import { LAZY_MCP_ROUTE } from './mcp/lazy.ts';
 import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts';
 import type { Connection } from './router.ts';
-import type { SocketData } from './server/connection.ts';
-import { ServerConnection } from './server/connection.ts';
+import type { EventFrames, SocketData } from './server/connection.ts';
+import { OUTBOUND_MAX_BUFFERED_BYTES, ServerConnection } from './server/connection.ts';
+import { loadRowSender } from './server/load-rows.ts';
+import { clientField, logConnectionClosed } from './server/connection-log.ts';
 import { handleFrame } from './server/frame.ts';
 import { authenticateToken } from './server/hello.ts';
 import { FrameQueue } from './server/frame-queue.ts';
 import { Refusals } from './server/refusals.ts';
-import { fdResponse } from './server/file-response.ts';
+import { ticketedFile, viewPage } from './server/tickets.ts';
 export { ServerConnection } from './server/connection.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
@@ -66,6 +69,18 @@ export const PLACEHOLDER_HTML =
 
 const SHELL_ORIGINS = ['tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost'];
 
+/** The phone app's origin (`APP_ORIGIN`), or the one `BOITE_APP_ORIGIN` names: a page no core serves, accepted by all. */
+export function appOrigin(env: Record<string, string | undefined> = process.env): string {
+  const named = env['BOITE_APP_ORIGIN']?.trim();
+  if (!named) return APP_ORIGIN;
+  try {
+    // Written in any case, with or without `:443` or a trailing slash, it is the same origin.
+    const url = new URL(named);
+    if (url.protocol === 'https:' && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash) return url.origin;
+  } catch { /* falls through */ }
+  throw new Error(`BOITE_APP_ORIGIN: expected an https origin such as ${APP_ORIGIN}, got ${named}`);
+}
+
 export interface ServerOptions {
   core: Core;
   host?: string;
@@ -109,6 +124,19 @@ export function isAllowedOrigin(origin: string | null, port: number, host: strin
     return Object.values(networkInterfaces()).some((entries) => entries?.some((entry) => entry.address === name));
   } catch {
     return false;
+  }
+}
+
+/** The socket came from a page whose origin names the host it asked for, outside loopback: this machine is served there. */
+function servedOrigin(core: Core, origin: string | null, host: string | null): void {
+  if (origin === null || host === null || SHELL_ORIGINS.includes(origin)) return;
+  try {
+    const url = new URL(origin);
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.origin !== origin || url.host !== host.trim().toLowerCase()) return;
+    if (isLoopbackHost(url.host)) return;
+    core.group.servedFrom(origin);
+  } catch {
+    // Not an origin: nothing learned.
   }
 }
 
@@ -162,6 +190,13 @@ export function preauthRefusal(waiting: Iterable<string>, peer: string): string 
 }
 
 const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
+/**
+ * Fonts and icons keep their names from one build to the next, so they cannot
+ * be immutable. A day fresh, then a week served stale while the browser
+ * revalidates: a font swapped in a release shows at most a day late, and the
+ * revalidation is a 304.
+ */
+const FRESH_FOR_A_DAY = 'public, max-age=86400, stale-while-revalidate=604800';
 
 /**
  * What the PWA's service worker needs from the host that serves it. Vite's
@@ -169,14 +204,17 @@ const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
  * is the version and a phone never fetches one twice. The shell, the worker
  * and the manifest decide what the next load caches, so all three are
  * revalidated every time; `Service-Worker-Allowed` is what lets `/sw.js` claim
- * the whole origin rather than its own directory. Everything else keeps the
- * headers `Bun.file` gives it.
+ * the whole origin rather than its own directory. Fonts and icons are fresh
+ * for a day: a phone on the LAN has no service worker, since plain http is not
+ * a secure context, and would otherwise fetch the default faces on every load.
+ * Everything else keeps the headers `Bun.file` gives it.
  */
 function cacheHeaders(pathname: string): Record<string, string> {
   if (pathname.startsWith('/assets/')) return { 'cache-control': IMMUTABLE_FOR_A_YEAR };
   if (pathname === '/sw.js') return { 'cache-control': 'no-cache', 'service-worker-allowed': '/' };
   if (pathname === '/' || pathname === '/index.html') return { 'cache-control': 'no-cache', ...NO_FOREIGN_FRAMES };
   if (pathname === '/manifest.webmanifest') return { 'cache-control': 'no-cache' };
+  if (pathname.startsWith('/fonts/') || pathname.startsWith('/icons/')) return { 'cache-control': FRESH_FOR_A_DAY };
   return {};
 }
 
@@ -204,29 +242,79 @@ const ENCODINGS: readonly { token: string; suffix: string }[] = [
   { token: 'gzip', suffix: '.gz' },
 ];
 
-/**
- * The UI build compresses its own text files (`packages/ui/vite.config.ts`),
- * so the core never deflates anything: it hands out the file the browser says
- * it can read. A browser only offers `br` on https, so a phone on the LAN gets
- * the `.gz`. `Vary` keeps a cache between the two from mixing them up.
- */
-export function staticResponse(file: string, pathname: string, acceptEncoding: string | null): Response {
-  const headers = cacheHeaders(pathname);
-  // `br;q=0` names a coding to refuse it, so an entry at zero is not accepted.
-  const accepted = (acceptEncoding ?? '').toLowerCase().split(',').flatMap((entry) => {
+/** The codings an `Accept-Encoding` value accepts. `br;q=0` names a coding to refuse it, so an entry at zero is not accepted. */
+export function acceptedEncodings(acceptEncoding: string | null): string[] {
+  return (acceptEncoding ?? '').toLowerCase().split(',').flatMap((entry) => {
     const [token = '', ...params] = entry.split(';').map((piece) => piece.trim());
     const quality = params.find((param) => param.startsWith('q='));
     return quality !== undefined && Number(quality.slice(2)) === 0 ? [] : [token];
   });
+}
+
+/**
+ * The validators of the exact file sent, read at each request: the size and
+ * the modification time, with the coding in the tag so the `.br` and the `.gz`
+ * of one file never answer for each other. Stating the file every time costs
+ * one system call and means a build replaced under a running core is never
+ * answered with a 304 for the old one.
+ */
+function validators(path: string, coding: string | null): { etag: string; lastModified: string; modifiedSeconds: number } {
+  const stats = statSync(path);
+  const modifiedSeconds = Math.floor(stats.mtimeMs / 1000);
+  return {
+    etag: `"${stats.size.toString(36)}-${Math.floor(stats.mtimeMs).toString(36)}${coding === null ? '' : `-${coding}`}"`,
+    lastModified: new Date(modifiedSeconds * 1000).toUTCString(),
+    modifiedSeconds,
+  };
+}
+
+/** RFC 9110: `If-None-Match` decides when present (weak comparison), `If-Modified-Since` only without it. */
+function notModified(conditions: Pick<Headers, 'get'> | undefined, etag: string, modifiedSeconds: number): boolean {
+  if (conditions === undefined) return false;
+  const match = conditions.get('if-none-match');
+  if (match !== null) {
+    return match.split(',').some((tag) => {
+      const trimmed = tag.trim();
+      return trimmed === '*' || trimmed.replace(/^W\//, '') === etag;
+    });
+  }
+  const since = conditions.get('if-modified-since');
+  if (since === null) return false;
+  const time = Date.parse(since);
+  return Number.isFinite(time) && modifiedSeconds <= Math.floor(time / 1000);
+}
+
+/**
+ * The UI build compresses its own text files (`packages/ui/vite.config.ts`),
+ * so the core never deflates anything: it hands out the file the browser says
+ * it can read. A browser only offers `br` on https, so a phone on the LAN gets
+ * the `.gz`. `Vary` keeps a cache between the two from mixing them up. Every
+ * answer outside `/assets/` carries an `ETag` and a `Last-Modified` of the
+ * variant sent, so a revalidation of the shell, the worker or a font is a
+ * bodiless 304.
+ */
+export function staticResponse(file: string, pathname: string, acceptEncoding: string | null, conditions?: Pick<Headers, 'get'>): Response {
+  const accepted = acceptedEncodings(acceptEncoding);
+  let sent = file;
+  let coding: string | null = null;
   for (const { token, suffix } of ENCODINGS) {
     if (!accepted.includes(token)) continue;
     const candidate = file + suffix;
     if (!existsSync(candidate)) continue;
-    return new Response(Bun.file(candidate), {
-      headers: { ...headers, 'content-type': Bun.file(file).type, 'content-encoding': token, vary: 'accept-encoding' },
-    });
+    sent = candidate;
+    coding = token;
+    break;
   }
-  return new Response(Bun.file(file), { headers: { ...headers, vary: 'accept-encoding' } });
+  const headers: Record<string, string> = { ...cacheHeaders(pathname), vary: 'accept-encoding' };
+  // A hashed asset is immutable, its name is its version: a validator would be about 70 bytes on every one, never used.
+  if (!pathname.startsWith('/assets/')) {
+    const { etag, lastModified, modifiedSeconds } = validators(sent, coding);
+    headers.etag = etag;
+    headers['last-modified'] = lastModified;
+    if (notModified(conditions, etag, modifiedSeconds)) return new Response(null, { status: 304, headers });
+  }
+  if (coding === null) return new Response(Bun.file(file), { headers });
+  return new Response(Bun.file(sent), { headers: { ...headers, 'content-type': Bun.file(file).type, 'content-encoding': coding } });
 }
 
 /**
@@ -244,53 +332,6 @@ function mayReadTodos(core: Core, connection: Connection, projectId: string): bo
     // The thread went away while its agent was still connected.
     return false;
   }
-}
-
-/**
- * The file a ticket opens: what `files.read` could not put in a JSON frame.
- * The ticket is the whole address, so no request here names a path and no
- * answer says what an unknown one missed. A `Range` is honoured because that
- * is how a video seeks, and nothing is cached because the ticket outlives
- * neither the ten minutes nor the next write to the file.
- */
-async function ticketedFile(core: Core, ticket: string, range: string | null): Promise<Response> {
-  const opened = await core.fileTickets.open(ticket);
-  if (opened === null) return new Response('unknown or expired ticket', { status: 404 });
-  const headers: Record<string, string> = {
-    'content-type': opened.mime,
-    'cache-control': 'no-store',
-    // The type is the one the extension named and nothing the bytes suggest,
-    // and a ticket opened as a page downloads instead of rendering: an agent
-    // picks what the panel opens, so no file of its may run in a window.
-    // Neither header touches an <img> or a <video> loading the same address.
-    'x-content-type-options': 'nosniff',
-    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(opened.name ?? 'download')}`,
-  };
-  return fdResponse(opened.handle, opened.size, range, headers);
-}
-
-/**
- * A published view, opened as a page: the one address of the core where an
- * agent's HTML runs. Only a ticket minted for a view opens here, so a file
- * ticket still only downloads. The sandbox puts the page on an opaque origin,
- * whether a client frames it or someone opens the address: it has no storage,
- * no cookie and no way to the core's socket, and the policy lets it load and
- * call nothing. The snapshot never changes, but its ticket does not outlive
- * ten minutes, so nothing is cached.
- */
-async function viewPage(core: Core, ticket: string): Promise<Response> {
-  const opened = await core.fileTickets.open(ticket);
-  if (opened === null || !opened.view) {
-    void opened?.handle.close();
-    return new Response('unknown or expired ticket', { status: 404 });
-  }
-  return fdResponse(opened.handle, opened.size, null, {
-    'content-type': 'text/html; charset=utf-8',
-    'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff',
-    'referrer-policy': 'no-referrer',
-    'content-security-policy': `sandbox ${VIEW_SANDBOX}; ${VIEW_CONTENT_POLICY}`,
-  });
 }
 
 /**
@@ -357,28 +398,39 @@ export function startServerOnStickyPort(
   options: ServerOptions & { explicitPort: boolean; previousPort: number | null; preferredPorts?: readonly number[] },
 ): RunningServer {
   const { explicitPort, previousPort, preferredPorts = PREFERRED_PORTS[options.core.channel], ...server } = options;
+  // Before any port is tried: a misspelt app address is no port taken.
+  appOrigin();
   if (explicitPort) return startServer(server);
   const candidates = [...new Set([...(previousPort === null ? [] : [previousPort]), ...preferredPorts])];
   let last: unknown = null;
   for (const port of candidates) {
     try {
       const started = startServer({ ...server, port });
-      if (previousPort !== null && port !== previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken, listening on ${port}`);
+      if (previousPort !== null && port !== previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken, listening on ${port}`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port } });
       return started;
     } catch (error) {
       last = error;
-      if (port === previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)})`);
+      if (port === previousPort) server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)})`, { source: 'startup', event: 'startup.port-taken', data: { previousPort } });
     }
   }
   // The last refusal is named: a host that cannot be bound fails every port the same way, which "taken" would hide.
-  server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), listening on another`);
-  return startServer({ ...server, port: 0 });
+  // The bound port is logged, not the 0 asked for; a host no port accepts is logged before it throws.
+  let started: RunningServer;
+  try { started = startServer({ ...server, port: 0 }); }
+  catch (error) {
+    server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), and so did any other port`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port: null } });
+    throw error;
+  }
+  server.core.log('warn', `ports ${candidates.join(', ')} refused the server (${messageOf(last)}), listening on ${started.port}`, { source: 'startup', event: 'startup.port-fallback', data: { previousPort, port: started.port } });
+  return started;
 }
 
 export function startServer(options: ServerOptions): RunningServer {
   const core = options.core;
   const host = options.host ?? '127.0.0.1';
   const helloTimeoutMs = options.helloTimeoutMs ?? envTimeout() ?? DEFAULT_HELLO_TIMEOUT_MS;
+  // Read once, before anything is set up: a misspelt override stops the start rather than letting a page nobody meant in.
+  const app = appOrigin();
   const connections = new Set<ServerConnection>();
   const helloTimers = new Map<ServerConnection, ReturnType<typeof setTimeout>>();
   /** The counted peer of each open socket from another machine, until it closes. */
@@ -393,8 +445,12 @@ export function startServer(options: ServerOptions): RunningServer {
   const peerRequests = new Set<Promise<Response>>();
   const refusals = new Refusals();
   // A client of this machine carried to another member of its group: its key here, never an agent's, opens the way.
-  const relays = new RelayHub(core, (token) => {
-    const identity = authenticateToken(core, token);
+  const relays = new RelayHub(core, (credential) => {
+    if (typeof credential !== 'string') {
+      // A device of the group carried to another member: its signature for this machine, never one made for another.
+      try { return { sessionId: core.group.clients.authenticateDevice(credential, { name: 'pwa', version: '' }).sessionId }; } catch { return null; }
+    }
+    const identity = authenticateToken(core, credential);
     return identity === null || identity.principal === 'agent' ? null : { sessionId: identity.sessionId };
   }, { helloTimeoutMs, helloMaxBytes: PREAUTH_FRAME_MAX_BYTES });
   core.relays = relays;
@@ -440,6 +496,12 @@ export function startServer(options: ServerOptions): RunningServer {
       if (url.pathname === IDLE_SHUTDOWN_PATH) return shutdownResponse(core, request, 'idle');
       if (url.pathname === HANDOFF_SHUTDOWN_PATH) return shutdownResponse(core, request, 'handoff');
 
+      // An agent session's MCP servers, behind its thread's token (mcp/lazy.ts).
+      if (url.pathname.startsWith(LAZY_MCP_ROUTE)) {
+        if (core.stopping) return new Response('core stopping', { status: 503 });
+        return core.lazyMcp.http(request, url.pathname.slice(LAZY_MCP_ROUTE.length));
+      }
+
       if (url.pathname.startsWith(`${FILE_ROUTE}/`)) {
         if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
         return ticketedFile(core, url.pathname.slice(FILE_ROUTE.length + 1), request.headers.get('range'));
@@ -447,12 +509,14 @@ export function startServer(options: ServerOptions): RunningServer {
 
       if (url.pathname.startsWith(`${VIEW_ROUTE}/`)) {
         if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
-        return viewPage(core, url.pathname.slice(VIEW_ROUTE.length + 1));
+        return viewPage(core, url.pathname.slice(VIEW_ROUTE.length + 1), acceptedEncodings(request.headers.get('accept-encoding')).includes('gzip'));
       }
 
+      // What this machine trusts of its own accord: itself, the shell, and the addresses its owner gave it.
+      const ownOrigin = (origin: string | null): boolean => isAllowedOrigin(origin, self.port ?? 0, hostname)
+        || (origin !== null && (core.settings.get().browserOrigins?.includes(origin) === true || origin === core.settings.get().publicUrl));
       // A page served by one machine of the group opens its socket on the others.
-      const allowedOrigin = (origin: string | null): boolean => isAllowedOrigin(origin, self.port ?? 0, hostname)
-        || (origin !== null && (core.settings.get().browserOrigins?.includes(origin) === true || origin === core.settings.get().publicUrl || core.group.allowsOrigin(origin)));
+      const allowedOrigin = (origin: string | null): boolean => ownOrigin(origin) || (origin !== null && (origin === app || core.group.allowsOrigin(origin)));
 
       const relayed = parseRelayPath(url.pathname);
       if (relayed !== null) {
@@ -461,16 +525,16 @@ export function startServer(options: ServerOptions): RunningServer {
           if (answer !== null) return answer;
           const origin = request.headers.get('origin');
           if (!allowedOrigin(origin)) {
-            core.log('warn', `refused a relayed websocket from origin ${origin ?? '(none)'}`);
+            core.log('warn', `refused a relayed websocket from origin ${origin === null ? '(none)' : clientField(origin, 100)}`, { source: 'connections', event: 'connection.origin-refused' });
             return new Response('forbidden origin', { status: 403 });
           }
           const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
           const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
           if (refusal !== null) {
-            core.log('warn', `refused a relayed websocket: ${refusal}`);
+            core.log('warn', `refused a relayed websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
             return new Response('too many connections waiting for hello', { status: 503 });
           }
-          const pipe = relays.pipe(relayed.coreId, peer);
+          const pipe = relays.pipe(relayed.coreId, peer, !isLoopbackHost(request.headers.get('host')));
           if (self.upgrade(request, { data: { relay: pipe } })) return undefined;
           pipe.close(1000);
           return new Response('expected a websocket upgrade', { status: 400 });
@@ -480,22 +544,31 @@ export function startServer(options: ServerOptions): RunningServer {
       if (url.pathname === RPC_PATH) {
         const origin = request.headers.get('origin');
         if (!allowedOrigin(origin)) {
-          core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
+          core.log('warn', `refused a websocket from origin ${origin === null ? '(none)' : clientField(origin, 100)}`, { source: 'connections', event: 'connection.origin-refused' });
           return new Response('forbidden origin', { status: 403 });
         }
         const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
         const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
         if (refusal !== null) {
-          core.log('warn', `refused a websocket: ${refusal}`);
+          core.log('warn', `refused a websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
           return new Response('too many connections waiting for hello', { status: 503 });
         }
+        // A page of this machine, at an origin it trusts itself and that names the host the socket asked for:
+        // this machine is served there, and the others of its group accept that origin from now on. Learned
+        // before any hello, so a phone's first page, which holds no key yet, already opens the way to the others.
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
-        if (self.upgrade(request, { data: { connection, peer } })) return undefined;
+        if (self.upgrade(request, { data: { connection, peer } })) {
+          // A page of this machine, at an origin it trusts itself and that names the host the socket asked for:
+          // this machine is served there, and the others of its group accept that origin from now on. Learned at
+          // the upgrade, before any hello, so a phone's first page, which holds no key yet, already opens the way.
+          if (ownOrigin(origin)) servedOrigin(core, origin, request.headers.get('host'));
+          return undefined;
+        }
         return new Response('expected a websocket upgrade', { status: 400 });
       }
 
       const file = staticFile(url.pathname);
-      if (file !== null) return staticResponse(file, url.pathname, request.headers.get('accept-encoding'));
+      if (file !== null) return staticResponse(file, url.pathname, request.headers.get('accept-encoding'), request.headers);
       if (url.pathname === '/') {
         return new Response(PLACEHOLDER_HTML, { headers: { 'content-type': 'text/html; charset=utf-8', ...NO_FOREIGN_FRAMES } });
       }
@@ -515,6 +588,11 @@ export function startServer(options: ServerOptions): RunningServer {
       // The contract derives the attachment total of a turn from this number,
       // and the UI refuses a larger frame before sending it.
       maxPayloadLength: RPC_MAX_FRAME_BYTES,
+      // Bun drops a frame, and keeps the socket open, once this much waits
+      // (16 MiB by default). The connections and relays close at their own
+      // 32 MiB budget first, checked before each send, so nothing is dropped
+      // below the limit the code enforces.
+      backpressureLimit: OUTBOUND_MAX_BUFFERED_BYTES,
 
       open(socket) {
         if ('relay' in socket.data) {
@@ -550,17 +628,24 @@ export function startServer(options: ServerOptions): RunningServer {
         void frame.catch((error: unknown) => core.log('error', messageOf(error))).finally(() => frames.delete(frame));
       },
 
-      drain(socket) { if (!('relay' in socket.data)) socket.data.connection.drain(); },
+      drain(socket) {
+        if ('relay' in socket.data) socket.data.relay.drained();
+        else socket.data.connection.drain();
+      },
 
-      close(socket) {
+      close(socket, code, reason) {
         if ('relay' in socket.data) {
           socket.data.relay.close(1000, 'client closed');
           return;
         }
+        logConnectionClosed(core, socket.data.connection, code, reason);
         core.procs.unwatchResources(socket.data.connection.id);
         core.coordination.bridge.disconnect(socket.data.connection.id);
         core.browser.disconnect(socket.data.connection.id);
+        core.terminals.disconnect(socket.data.connection.id);
         core.threads.focus.disconnect(socket.data.connection.id);
+        void core.drafts.disconnect(socket.data.connection.id).catch(error => core.log('warn', `draft cleanup failed: ${String(error)}`));
+        void core.attachmentUploads.disconnect(socket.data.connection.id).catch(error => core.log('warn', `attachment cleanup failed: ${String(error)}`));
         incoming.drop(socket.data.connection);
         socket.data.connection.close(1000);
         clearTimeout(helloTimers.get(socket.data.connection));
@@ -613,10 +698,16 @@ export function startServer(options: ServerOptions): RunningServer {
     // first start after an update there is no kept reading, and a turn resumed
     // before it would be refused for good.
     void core.providers.settle().finally(() => {
-      if (!stopping) core.threads.handoff.resume();
+      if (stopping) return;
+      core.threads.handoff.resume();
+      // The children and steps the handoff cut go on with their conversations.
+      core.delegation.resumeAfterRestart();
+      core.workflows.resumeAfterRestart();
     });
     // Desktop-app plugins the owner left enabled, now that they have an address to reach.
     core.plugins.startApps();
+    // Newer releases of installed recommended plugins, read a minute from now and every six hours.
+    core.plugins.startUpdateChecks();
   }, 0);
   core.subscribers = {
     hasSubscribers(threadId: ThreadId): boolean {
@@ -668,18 +759,31 @@ export function startServer(options: ServerOptions): RunningServer {
       // trace panel reads it.
       name.startsWith('process.');
     const threadId = eventThreadId(payload);
+    // A child's question or permission is also for the windows that have its parent open:
+    // children are no sidebar rows, so the parent is where the user meets them.
+    const parentId = threadId !== null && (name.startsWith('question.') || name.startsWith('permission.'))
+      ? core.journal.getThread(threadId)?.parentThreadId ?? null
+      : null;
+    const loadRow = name === 'thread.load' ? loadRowSender(core, payload as RpcEvents['thread.load']) : null;
+    // Serialized once per projection, not once per socket.
+    const frames: EventFrames = new Map();
     for (const connection of connections) {
       if (!connection.authenticated) continue;
       if (!mayReceiveEvent(name, connection)) continue;
       if (connection.identity.principal === 'agent' && name !== 'todos.updated' && name !== 'agents.changed' && connection.identity.threadId !== threadId) continue;
       if ((name === 'collaboration.changed' || name === 'delegation.changed' || name === 'workflows.changed') && !connection.subscriptions.has(threadId ?? '')) continue;
-      if (scoped && (threadId === null || !connection.subscriptions.has(threadId))) continue;
+      if (scoped && (threadId === null || !(connection.subscriptions.has(threadId) || (parentId !== null && connection.subscriptions.has(parentId))))) continue;
       // The whole activity, loop history included, is for the clients that have
       // that thread open; an agent socket still gets its own thread's.
       if (name === 'thread.activity' && connection.identity.principal !== 'agent' && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
-      connection.sendEvent(name, payload);
+      // A shell's bytes go to the windows that attached it. Its exit still goes to every owner window: one
+      // that lays the pane out without having attached it, a background tab say, drops the pane then.
+      if (name === 'terminal.output' && !core.terminals.watches((payload as RpcEvents['terminal.output']).id, connection.id)) continue;
+      if (loadRow && !connection.accepts.has('thread.load')) { loadRow(connection); continue; }
+      connection.sendEvent(name, payload, frames);
     }
+    if (name === 'terminal.exited') core.terminals.exitSent((payload as RpcEvents['terminal.exited']).id);
   };
   let pendingScheduler: RpcEvents['scheduler.updated'] | null = null;
   let schedulerTimer: ReturnType<typeof setTimeout> | null = null;

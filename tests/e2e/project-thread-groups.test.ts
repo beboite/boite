@@ -9,7 +9,7 @@ let server: { close(): Promise<void> };
 let port: number;
 const id = (value: string) => `[data-testid="${value}"]`;
 beforeAll(async () => { port = await freePort(); server = await startUi(port); }, 60_000);
-afterAll(async () => { await server?.close(); });
+afterAll(async () => { await server?.close(); }, 30_000);
 
 for (const width of [1280, 390]) {
   test(`visibility options work in both views and preserve manual archives at ${width}px`, async () => {
@@ -36,14 +36,15 @@ for (const width of [1280, 390]) {
       })()`);
       const option = async (key: string) => {
         if (await page.evaluate(`document.querySelector('${id(`${prefix}grouping-options`)}').getAttribute('aria-expanded') !== 'true'`)) await page.click(id(`${prefix}grouping-options`));
-        const selector = `${menu} ${key === 'merged' ? '[data-value]:last-child' : `[data-value=${key}]`}`;
+        const selector = `${menu} [data-value=${key}]`;
+        await page.waitFor(`document.querySelector('${selector}')`);
         const checked = await page.evaluate(`document.querySelector('${selector}').getAttribute('aria-checked')`);
         await page.click(selector);
         await page.waitFor(`document.querySelector('${selector}')?.getAttribute('aria-checked') === '${checked === 'true' ? 'false' : 'true'}'`);
         expect(await page.evaluate(`document.querySelector('${id(`${prefix}grouping-options`)}').getAttribute('aria-expanded')`)).toBe('true');
       };
       const shot = async (state: string) => {
-        await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+        await page.settleAnimations();
         await page.screenshot(join(import.meta.dir, '.artifacts', `visibility-${state}-${width}.png`));
       };
       await showThreadView(page, 'projects', prefix);
@@ -58,7 +59,7 @@ for (const width of [1280, 390]) {
       await showThreadView(page, 'projects', prefix);
       await revealProject('t-scheduler');
       await option('other');
-      await page.waitFor(`!document.querySelector('${root} ${id('idle-projects-toggle')}') && document.querySelector('${root} [data-project-id="${empty}"]')`);
+      await page.waitFor(`!document.querySelector('${root} ${id('project-shelf-toggle')}') && document.querySelector('${root} [data-project-id="${empty}"]')`);
       await option('merged');
       await revealProject(merged);
       expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.client.call('threads.get', {threadId:'t-parser'}).then(t=>t.archived)`)).toBe(true);
@@ -72,8 +73,10 @@ for (const width of [1280, 390]) {
       await page.evaluate(`Array.from(document.querySelectorAll('${id(`${prefix}project-filter-menu`)} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-boite'])).click()`);
       await option('merged');
       expect(await page.evaluate('globalThis.__boiteTest.workspace.machines.map(m => m.store.projects.find(p => p.id === "p-boite").autoArchiveMergedPr)')).toEqual([true, false]);
-      await page.waitFor(`document.querySelector('${menu} [role=menuitemcheckbox]')`);
+      await page.waitFor(`document.querySelector('${menu} [role=switch]')`);
       await shot('recent-options');
+      // Each switch draws one knob, the shared one from app.css, not a second of its own.
+      expect(await page.evaluate(`[...document.querySelectorAll('${menu} [role=switch]')].every(sw => sw.childElementCount === 0 && getComputedStyle(sw, '::after').content !== 'none')`)).toBe(true);
       expect(await page.evaluate(`(() => { const r=document.querySelector('${menu}').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })()`)).toBe(true);
       await page.reload();
       await page.waitFor('globalThis.__boiteTest?.workspace.machines.length === 2');
@@ -113,14 +116,14 @@ for (const width of [1280, 390]) {
       const row = (project: string, thread: string) => `${project} ${width < 720 ? '.row' : id('thread-row')}[data-thread-id="${thread}"]`;
       const click = async (selector: string) => { await page.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'})`); await page.click(selector); };
       const shot = async (name: string) => {
-        await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+        await page.settleAnimations();
         await page.screenshot(join(import.meta.dir, '.artifacts', `project-groups-${name}-${width}.png`));
       };
       await page.waitFor(`document.querySelector('${first}')`);
       expect(await page.evaluate(`!!document.querySelector(${JSON.stringify(project(main, busy))})`)).toBe(true);
       await page.waitFor(`document.querySelectorAll('${root} ${id(width < 720 ? 'mobile-project-group' : 'project')}').length === 4`);
       expect(await page.evaluate(`document.querySelector(${JSON.stringify(project(main, 'p-notes'))}) === null && document.querySelector(${JSON.stringify(project(main, empty))}) === null`)).toBe(true);
-      expect(await page.evaluate(`document.querySelector('${root} ${id('idle-projects-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
+      expect(await page.evaluate(`document.querySelector('${root} ${id('project-shelf-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
       expect(await page.evaluate(`document.querySelector('${first} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
       // t-parser was archived by hand: it waits under Archived, not Done.
       expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').dataset.count`)).toBe('0');
@@ -186,7 +189,7 @@ for (const width of [1280, 390]) {
         await page.waitFor(`document.querySelector('${row(first, 't-scheduler')}')`);
         expect(await page.evaluate(`document.querySelector('${row(first, 't-bench')}') === null`)).toBe(true);
         await page.type(id('mobile-search'), '');
-        await page.waitFor(`document.querySelector('${root} ${id('idle-projects-toggle')}')`);
+        await page.waitFor(`document.querySelector('${root} ${id('project-shelf-toggle')}')`);
       } else {
         // Opening a previously expanded counter also unfolds its collapsed project.
         await click(`${first} ${id('project-row')}`);
@@ -196,16 +199,18 @@ for (const width of [1280, 390]) {
         expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').getAttribute('aria-expanded')`)).toBe('true');
       }
 
-      await click(`${root} ${id('idle-projects-toggle')}`);
+      await click(`${root} ${id('project-shelf-toggle')}`);
       // The fold lists idle projects as compact rows, never as project sections.
-      const idleRow = (projectId: string) => `${root} ${id('idle-projects')} ${id('idle-project')}[data-machine-id="${main}"][data-project-id="${projectId}"]`;
+      const idleRow = (projectId: string) => `${root} ${id('project-shelf')} ${id('idle-project')}[data-machine-id="${main}"][data-project-id="${projectId}"]`;
+      // Its rows load on their own, at the latest when it opens.
+      await page.waitFor(`document.querySelector('${idleRow(empty)}')`);
       expect(await page.evaluate(`!!document.querySelector('${building}:not(.inactive)') && !document.querySelector('${idleRow(busy)}') && !!document.querySelector('${idleRow(empty)}')`)).toBe(true);
-      expect(await page.evaluate(`!document.querySelector('${root} ${id('idle-projects')} ${id(width < 720 ? 'mobile-project-group' : 'project')}')`)).toBe(true);
+      expect(await page.evaluate(`!document.querySelector('${root} ${id('project-shelf')} ${id(width < 720 ? 'mobile-project-group' : 'project')}')`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
       await click(`${building} ${id('project-working-toggle')}`);
       await page.waitFor(`document.querySelector('${row(building, 't-building')}')`);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-done-toggle')}').disabled`)).toBe(true);
-      // Queued and background work also keep the project outside Idle projects.
+      // Queued and background work also keep the project out of the fold of idle projects.
       for (const [index, renderedState] of ['queued', 'monitoring', 'background', 'working'].entries()) {
         await page.evaluate(`(() => {
           const states = [

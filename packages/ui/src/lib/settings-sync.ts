@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import {
   KEYBINDING_COMMANDS,
   RpcErrorCode,
@@ -33,6 +34,7 @@ export const PORTABLE_SETTINGS = [
   'muteAgents',
   'reapOrphans',
   'asyncQuestions',
+  'shortAnswers',
   'autoCompact'
 ] as const satisfies readonly (keyof Settings)[];
 
@@ -78,7 +80,7 @@ export type SyncStage = 'settings' | 'keybindings' | 'brain';
 /** A copy that stopped partway: the stages before `stage` are on the target and stay there. */
 export class SyncFailure extends Error {
   constructor(readonly stage: SyncStage, error: unknown) {
-    super(error instanceof Error ? error.message : String(error), { cause: error });
+    super(errorText(error), { cause: error });
   }
 }
 

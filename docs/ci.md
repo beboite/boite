@@ -50,8 +50,8 @@ when the full core suite is absent. The focused E2E type job runs
 
 The required Windows stress job runs all three existing offline scenarios with
 `bun run test:stress`: protocol isolation/cancellation/recovery, failed health
-reporting, and loaded desktop/phone-width UI. It builds the UI first and retains
-fixture evidence under `tests/e2e/.artifacts/stress/`. Live-provider tests stay
+reporting, and loaded desktop/phone-width UI. It tests the UI the `Build UI`
+job built (below) and retains fixture evidence under `tests/e2e/.artifacts/stress/`. Live-provider tests stay
 disabled. See [performance](performance.md#concurrent-agent-stress) for workloads
 and [portability](portability.md) for what these fixtures cannot prove.
 
@@ -67,11 +67,17 @@ a tree no later change affected, as far as the path rules above hold; the
 nightly publishes on that. Without an answer from the API, the run selects every
 check. Tags, reusable full calls and manual runs use `full`. PR portable
 desktop legs are Linux x64 and macOS ARM64; warm/full runs use both
-architectures of each OS.
+architectures of each OS. The core suite follows the same rule for its Intel
+Mac: a PR runs it on Linux x64/ARM64, Windows and macOS ARM64, and warm/full
+runs add `Core tests (macOS x64)` on `macos-15-intel` (`coreRunners` in
+`changes.ts`). That job took 322 to 409 s a PR on a scarce runner (2026-10-17);
+an Intel-only core failure now shows on the main push.
 
 `desktop.yml` holds the desktop builds: the Windows installer job and one job
 per portable platform, named after it (`Desktop / macOS x64`). `ci.yml` calls
-it with the Rust tests; the nightly calls it without them. Only `CI required`
+it with the Rust tests; the nightly calls it without them. On Windows they run
+in `Desktop / Windows x64 Rust tests`, a job of their own beside the installer
+build; portable jobs keep them in line. Only `CI required`
 and `PR title` are required checks, so a display name can change freely, except
 the `release.yml` job names that `server-provenance.ts` checks.
 
@@ -83,7 +89,7 @@ desktop leg took 14.0 minutes and the Apple Silicon one 8.1 (nightly run
 37234148865, the longest job of that run).
 
 Core changes run the full core suite on Windows, Linux x64/ARM64 and macOS
-ARM64/Intel in every mode. Linux desktop packages build on Ubuntu 22.04,
+ARM64 in every mode, and on Intel macOS outside PRs. Linux desktop packages build on Ubuntu 22.04,
 setting a glibc 2.35 floor. Portable jobs run Rust tests and installed smoke
 checks against Debian, extracted AppImage and macOS application bundles.
 These verify startup, UI serving, authenticated RPC and a fixture echo turn
@@ -106,15 +112,19 @@ the step.
 
 ## Build cost
 
-Cargo, Vitest and BuildKit save caches only from `main`. Cargo namespaces
+Cargo, Vitest, the Bun store and BuildKit save caches only from `main`. Cargo namespaces
 separate Windows release builds and each portable runner. Vitest stores
 transforms under `node_modules/.vitest-cache`; its namespace includes
 `bun.lock`, Svelte/Vitest configuration and `packages/ui/icon-plugin.ts`.
 Each Docker architecture has its own BuildKit scope. Agent dependency manifests
 are copied before source files, so a core edit does not reinstall CLIs.
 
-Bun follows `packageManager` and installs with `--frozen-lockfile`, without a
-cached download store. UI tests use at most eight workers. Core files run in
+Bun follows `packageManager` and installs with `--frozen-lockfile`. The setup
+action restores Bun's download store (`bun pm cache`) keyed on OS,
+architecture, Bun version and `bun.lock`, falling back to the newest store of
+the same Bun; only `main` saves it. Install still links every package and runs
+lifecycle scripts, so a stale store costs downloads only. Uncached, install took
+20 to 33 s on the Windows and macOS runners (2026-10-17). UI tests use at most eight workers. Core files run in
 fresh Bun processes, four at once by default; `BOITE_TEST_WORKERS` accepts 1 to
 8 and `bun run --cwd packages/core test:serial` runs one file at a time. Each
 core has a fresh data directory and port. Full per-file output and nonzero
@@ -122,8 +132,30 @@ exit failures are retained. A file still running after five minutes, its event
 loop blocked where no test timeout can fire, is ended and reported with what it
 printed (`BOITE_TEST_FILE_DEADLINE_MS`).
 
+Browser command, sharing and profile scenarios run in separate files so their
+combined Chromium startup time does not consume one five-minute file budget.
+Each file registers its own loopback site and fresh-core hooks through a fixture
+factory; individual scenario deadlines and assertions remain unchanged.
+Crash-recovery fixtures disarm resident delegation, coordination, workflow and
+group readers before closing the journal, without draining interrupted work.
+Real-core browser gestures wait for a decoded, enabled frame fitted to the view;
+an image can load before the automatic viewport resize has finished.
+Deferred-dialog fixtures release a loopback response after the agent's commands
+finish and observe the page's completion request before reading its title.
+Network-diagnostic assertions wait for the asynchronous response event, which
+DOM readiness does not include. Desktop-host fixtures close Chromium and remove
+their profiles when setup fails, and register cleanup before returning a host.
+The command/dialog scenario prints a bounded, content-free CDP timing trace only
+on failure, retaining the original error and restoring its observers afterward.
+Fold-reveal coverage includes lazy rows arriving after the opening animation;
+the follow period starts when content is ready, and user input still cancels it.
+
 The Windows job shares release-profile Rust dependencies, builds the installer
-once, and stages its existing core beside the shell for native E2E. Installer
+once, and stages its existing core beside the shell for native E2E. The shell's
+Rust tests run beside it in their own job, which restores the same
+`desktop-release-v1` cache and never saves it: the test build turns on
+`tauri/test` and drops `custom-protocol`, so it needs neither the UI nor the
+staged core, and in line it added 97 to 102 s after the 221 s build. Installer
 regressions set `BOITE_CI_INSTALLER_REQUIRED=1`, so missing NSIS or generated
 fixtures fail rather than skip. Unsupported local runs keep intentional skips.
 The tested installer becomes the release artifact.
@@ -132,12 +164,246 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 591,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,475,000 |
+| UI entry chunk | 596,500 |
+| UI files, excluding `.br` and `.gz` copies | 5,037,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,760,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,401,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, removing a purged or erased thread's Claude transcripts and
+muting new audio sessions on Core Audio's notice, rebased on `b611c01f`,
+measure 4,400,530 core JavaScript bytes after a fresh `bun run build:core` on
+Windows, against 4,390,768 for that main: `threads/transcript-purge.ts`,
+`threads/native-sessions.ts` and the notification vtables of
+`audio-sessions.ts` add 9,762 bytes. The core JavaScript limit rises to
+4,401,000; the other limits stay.
+
+On 2026-10-17, PR #566 merged with `origin/main` at `b6ae659a`, which brings
+the thread links and agent mail direction (PR #562), measures 595,205 entry
+bytes, 5,036,527 UI bytes and 4,390,768 core JavaScript bytes after fresh
+`bun run build:ui` and `bun run build:core` on Windows; a context menu that
+only a scroll holding its row closes brings the UI to 595,295 and 5,036,764.
+The entry is back under main's 596,500, which stays; the UI limit rises to
+5,037,000 and the core limit stays at 4,391,000.
+
+On 2026-10-17, PR #562 adds thread links in answers, reasoning and mission
+results (`chat-links.ts`, `workspace.openThreadLink` and `followThreadLink`)
+and the direction line on agent mail rows. Merged with `origin/main` at
+`ec52ba98`, a fresh Windows `vite build` measures 5,026,308 UI bytes, 4,597
+over the 5,021,711 PR #567 measured for its main, and a 593,355-byte entry
+chunk against 596,347: since `workspace.svelte.ts` imports `chat-links.ts`,
+Rollup moves that module out of the entry into the workspace chunk. Windows
+CI agreed at `634840c3` (5,020,641 against 5,016,064 for `b8967956`). The UI
+limit becomes 5,029,000; the entry limit stays at 596,500.
+
+On 2026-10-17, PR #566 merged with `origin/main` at `ec52ba98`, which brings
+subagent counts, their questions in the parent and agent-side resume (PR #567),
+measures 597,841 entry bytes, 5,031,574 UI bytes and 4,390,771 core JavaScript
+bytes after fresh `bun run build:ui` and `bun run build:core` on Windows. Each
+PR's growth over `6004522f` is kept; the entry, UI and core limits rise to
+598,000, 5,032,000 and 4,391,000.
+
+On 2026-10-17, subagent counts, their questions in the parent and agent-side
+resume (PR #567) merged with `origin/main` at `6004522f` measure a 596,347-byte
+UI entry chunk, 5,021,711 UI bytes and 4,366,674 core JavaScript bytes with
+`measure()` from `scripts/ci/budgets.ts` after fresh builds on Windows, against
+593,513, 5,016,415 and 4,355,255 for that main on the same machine. The parent
+row's subagent chip, the children's questions and permissions in the parent's
+dock and the reads that keep them add 2,834 entry bytes and 5,296 UI bytes;
+pause provenance, `delegation.resume`, the restart cut that continues children
+and steps, the workflow adoption of a resumed step and one continuation per
+stopped turn add 11,419 core bytes, none of them in `main.js`. The entry, UI
+and core limits rise to 596,500, 5,022,000 and 4,367,000.
+
+On 2026-10-17, opening an untouched conversation's panel on its launcher
+(PR #563) merged with `origin/main` at `acb17c0a` measures 593,610 UI entry
+bytes on Windows CI, 197 over that main's 593,413: the store's wide-window
+`MediaQuery` and the untouched layout live in `right-panel.svelte.ts`, which
+the entry loads. The entry limit is 594,000, which the Agents tab's list of
+every machine's agents (PR #568) set without a note; the other limits stay
+unchanged.
+
+On 2026-10-17, Windows CI measured a 593,177-byte UI entry chunk for
+`origin/main` at `7c7327ab`, already over its 593,000 limit after PRs #558 to
+#560. The PR watch state (PR #564) adds 236 bytes there, 593,413 in total, and
+201 bytes in a fresh Linux `bun run build:ui` (538,541 to 538,742). The entry
+limit becomes 593,500; the other limits stay unchanged.
+
+On 2026-10-17, pausing the UI's loops at rest and stepping them on a 60 Hz
+grid measures 594,479 entry bytes and 5,020,875 UI bytes after a fresh `bun run
+build:ui` on Windows, against 593,177 and 5,012,389 for `7c7327ab` built the
+same way: the rest watcher, the loop phase and the shell's focus cue add 1,302
+entry bytes, and the six easing staircases of `app.css` most of the 8,486. The
+limits rise by that growth to 594,500 and 5,028,000.
+
+On 2026-10-17, letting the followed live end of the open thread go past the
+reading cache's bound measures 594,696 entry bytes and 5,022,260 UI bytes after
+a fresh `bun run build:ui` on Windows, against 594,479 and 5,020,875 before it.
+`store/live-end.ts` and the list's pruning of the heights it measured add 217
+entry bytes; the entry limit rises to 594,800 and the UI limit stays.
+
+On 2026-10-17, PR #566 merged with `origin/main` at `acb17c0a`, which brings
+the PR watch state (PR #564) and the unread history reading (PR #565),
+measures 595,104 entry bytes, 5,023,979 UI bytes and 4,378,787 core JavaScript
+bytes after fresh `bun run build:ui` and `bun run build:core` on Windows. The
+entry limit rises to 595,200; the other limits stay.
+
+On 2026-10-17, the MCP servers started on demand, the frozen idle browser tabs
+and the batched process records of PR #566 measure 4,378,383 core JavaScript
+bytes after a fresh `bun run build:core` on Windows, against 4,355,066 for
+`7c7327ab` built the same way; Windows CI measured 4,378,339. They add 23,317
+bytes, none of them in `main.js`. The core limit becomes 4,379,000.
+
+On 2026-10-17, the lazy MCP proxy dropping a call cancelled during its
+server's start, and refusing a request whose session ended while its body
+came, measure 4,379,352 core JavaScript bytes after a fresh `bun run
+build:core` on Windows, against 4,378,787 before them. They add 565 bytes; the
+core limit becomes 4,380,000.
+
+On 2026-10-16, the server update recovery (PR #552) on `origin/main` at
+`08c11d82` measures 4,353,036 core JavaScript bytes after a fresh `bun run
+build:core` on Windows, against 4,348,624 for that main; Windows CI measured
+4,352,918 for the first push. The update worker's recovery, its idempotent
+rollback and the stale update cleanup add 4,412 bytes, 112 of them in
+`main.js`, which stays under its limit. The core limit becomes 4,356,000; the other limits stay
+unchanged. The table before this still showed 4,994,000 and 4,314,000 while
+`budgets.json` held the 5,019,500 and 4,350,000 that PRs #545 to #550 set.
+
+On 2026-10-16, shared git reads, checkpoint blobs and merged-PR backoff
+(PR #526) merged with `origin/main` at `83f1720a` measure 4,988,020 UI bytes and
+4,310,297 core JavaScript bytes after fresh `bun run build:ui` and `bun run
+build:core` on Linux, against 4,987,764 and 4,299,107 for that main: the shared
+checkpoint store, the batch diff read, the eight read slots, the worktree pool
+and the merged-PR proof backoff add 11,190 core bytes and 256 UI bytes. The
+limits rise by that growth to 4,994,000 and 4,314,000; the entry and `main.js`
+limits stay unchanged.
+
+On 2026-10-16, the network pass (PR #518: group sync backoff, streamed server
+update unpacking, device frame reuse, per-account quota reads and the merge of a
+live Codex reading into the account's last read) merged with `origin/main` at
+`060cb452` measures 4,984,789 UI bytes and 4,299,107 core JavaScript bytes after
+fresh `bun run build:ui` and `bun run build:core` on Linux, against 4,983,859
+and 4,294,823 for that main: 930 UI and 4,284 core bytes. The core limit
+becomes 4,302,000; the UI limit keeps room for that growth and stays
+unchanged, as do the entry and `main.js` limits.
+
+On 2026-10-16, faster provider detection and the native Codex binary (PR #524)
+merged with `origin/main` at `0a63d907` measure 4,983,859 UI bytes and 4,292,757
+core JavaScript bytes after fresh `bun run build:ui` and `bun run build:core`
+on Linux, against 4,983,859 and 4,281,763 for that main: the hand-written ACP
+update parser, the Codex launcher lookup, the live Codex limits and the provider
+lookup memo add 10,994 core bytes. The core limit becomes 4,297,000; the other
+limits stay unchanged.
+
+On 2026-10-16, the process sampling changes (PR #522) merged with `origin/main`
+at `2f979036` measure 4,983,647 UI bytes and 4,281,183 core JavaScript bytes
+after fresh `bun run build:ui` and `bun run build:core` on Linux, against
+4,982,829 and 4,272,145 for that main: the load pace, the bounded trace rows,
+the `thread.load` event and the command lookup cache add 9,038 core bytes, the
+client side of `thread.load` 818 UI bytes. The limits rise by that growth to
+4,990,000 and 4,286,000; the entry and `main.js` limits stay unchanged.
+
+On 2026-10-16, the reading cache, display image and pull request polling
+changes (PR #525) merged with `origin/main` at `0a63d907` measure 4,986,586 UI
+bytes after fresh `bun run build:ui` on Linux, against 4,983,859 for that main;
+core JavaScript is unchanged at 4,281,763. The shared pull request timer, the
+reading cache's size accounting, the bounded display image cache and the
+per-project sidebar lists add 2,727 bytes. The UI limit becomes 4,993,000; the
+other limits stay unchanged.
+
+On 2026-10-16, the browser recording and viewer changes (PR #529) merged with
+`origin/main` at `c561ea2c` measure 4,982,829 UI bytes and 4,272,145 core
+JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
+Linux, against 4,982,096 and 4,263,703 for that main: the recorder's frame
+pacing and the per-width viewer screencasts add 8,442 core bytes. The core
+limit becomes 4,276,000; the other limits stay unchanged.
+
+On 2026-10-16, `main` at `7ccb238d` measures 4,982,096 UI bytes and 4,263,703
+core JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
+Linux, above its 4,982,000 and 4,244,000 limits. Nine pull requests merged that
+day each fit the limits alone; together they add 6,681 UI bytes and 25,836 core
+bytes over `9c5c1849`. Measured after each merge: #521 10,828 core bytes, #520
+6,273 UI bytes, #519 5,070 core and 125 UI, #528 4,287 core and 283 UI, #516
+3,693 core, #523 814, #531 518, #514 318 and #530 308 core bytes. The limits
+rise by the growth they did not yet count, every byte but #516's 3,693 core
+bytes, to 4,989,000 and 4,267,000; the entry and `main.js` limits stay
+unchanged.
+
+On 2026-10-16, the runtime optimization pass (PR #516) merged with `origin/main`
+at `0f480824` measures 4,241,560 core JavaScript bytes after fresh `bun run build:core`
+on Linux, against 4,237,867 for that main: the bounded journal walks, the copy
+memo, the per-pump delegation config map and the undelivered-run set add 3,693
+bytes. The core limit becomes 4,244,000; the UI measures 4,975,415 bytes on both
+and its limits stay unchanged.
+
+On 2026-10-16, the dialog showing what a Claude thread sends (PR #501) merged
+with `origin/main` at `4eec5562` measures 4,975,415 UI bytes and 4,237,867 core
+JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
+Linux, against 4,958,781 and 4,231,749 for that main: the dialog, its strings in
+both languages and the store add 16,634 UI bytes, the reader of the recorded
+request 6,118 core bytes. On `d11f6d16` Windows CI measured the UI about 5,000
+bytes above Linux. The limits become 4,982,000 and 4,240,000; the entry and
+`main.js` limits stay unchanged. The core row before this showed 4,161,000
+while `budgets.json` held the 4,233,000 PR #505 set.
+
+On 2026-10-15, views placed inside an answer (PR #502), merged with PR #503,
+measure 4,938,784 UI bytes and 4,151,081 core JavaScript bytes after fresh
+`bun run build:ui` and `bun run build:core` on Linux. The UI adds the answer
+split around views. The UI limit becomes 4,941,000; the core limit stays at
+the 4,161,000 PR #503 set, and the entry limits stay unchanged.
+
+On 2026-10-15, Claude's preset system prompt (PR #500) merged with `origin/main`
+at `2adac07b` measures 4,150,454 core JavaScript bytes after a clean
+`bun run build:core` on Linux with Bun 1.4.2, against 4,127,241 for that main.
+The Claude Agent SDK's update from 0.3.296 to 0.3.300 adds 21,565 bytes to its
+lazy chunk, which never loads at startup. The core total limit becomes
+4,152,000; the UI, entry and `main.js` limits stay unchanged.
+
+On 2026-10-15, updating another Windows PC's desktop app (PR #498) merged
+with PR #494 measures 4,926,156 UI bytes and 4,125,352 core JavaScript bytes
+after fresh `bun run build:ui` and `bun run build:core` on Linux. The limits
+become 4,928,000 and 4,127,000; the entry limits stay unchanged.
+
+On 2026-10-15, the server update's handoff and the slimmer backup (PR #494),
+with a handoff time in the update cards since removed, measured 4,917,711 UI bytes
+and 4,119,340 core JavaScript bytes after fresh `bun run build:ui` and
+`bun run build:core` on Linux, 711 and 340 bytes over the limits of that day;
+Windows CI measured 4,119,299 core bytes. The limits become 4,919,000 and
+4,121,000; the entry limits stay unchanged.
+
+On 2026-10-14, files dropped on the desktop window going to the composer
+(`lib/native-drop.ts`, the attach overlay and its English and French strings)
+measured 4,900,488 UI bytes on Linux, 2,488 bytes over the 4,898,000 limit of
+that day. Merged with `862a9aa6`, fresh `bun run build:ui` and
+`bun run build:core` on Linux measure 4,902,582 UI bytes; the entry chunk is
+525,965 bytes, under its unchanged limit. The UI total limit becomes 4,906,000.
+
+On 2026-10-13, the audit refactors and fixes measure 4,899,213 UI bytes,
+compared with 4,897,240 at `bc3244ef`: an increase of 1,973 bytes (0.04%).
+Fresh Linux builds match the Windows CI total. The existing workspace chunk
+adds 1,585 bytes from composer helpers and boot lifecycle arguments; the
+remaining changes include quota fixes and diagnostic labels. Both builds
+contain 135 JavaScript chunks, with unchanged public-asset sizes and no
+duplicate rendered module IDs. The UI total limit becomes 4,902,000, leaving
+2,787 bytes; the entry and core limits stay unchanged. Reproduce with
+`bun run build:ui` and compare files excluding compression sidecars, or run
+`bun scripts/ci/budgets.ts` after building both UI and core.
+
+On 2026-10-13, prompt-free draft preparation, attachment uploads and crash
+recovery measured 4,853,814 UI bytes and 4,092,165 core JavaScript bytes after
+`bun run build:ui`, `bun run build:core` and `bun scripts/ci/budgets.ts` on Linux.
+Compared with `2893abd8`, the workspace chunk adds 6,904 bytes (0.14% of the UI)
+and the core adds 35,861 bytes (0.88%). The UI entry remains 518,508 bytes and
+the core entry 15,114 bytes. The total budgets rise to 4,870,000 and 4,110,000;
+entry budgets stay unchanged. These are bundle sizes, not runtime memory or
+startup measurements.
+
+After integrating `af3acd8e` and the reservation ownership audit fixes, fresh
+Linux builds on 2026-10-13 measure 4,870,320 UI bytes and 4,096,583 core
+JavaScript bytes. The entries are 523,170 and 15,114 bytes. The merged UI
+limit remains main's 4,872,000; the core total limit remains 4,110,000.
+`bun scripts/ci/budgets.ts` passes all four measures.
 
 On 2026-10-10 on Linux with Bun 1.4.2, `main` at `27aa04a8` measured about
 4,438,500 UI bytes and 3,719,300 emitted core JavaScript bytes. The group relay
@@ -163,11 +429,170 @@ limits were 4,466,000 and 3,744,000, the branch measured 4,469,022 and
 3,749,375 on Linux, about 3,755,400 core bytes on Windows. The limits rise to
 4,475,000 and 3,760,000.
 
+On 2026-10-11 on Linux with Bun 1.4.2, `main` at `4762402b` measured 4,471,508
+UI bytes with a 581,473-byte entry chunk. Several drafts per project, the
+composer's own undo history and image-carrying copy, the work counts on the
+Threads/Agents switch, the merged project fold, thread-like done rows with long
+press and their English/French sentences measured 4,493,255 and 590,779: 21,747
+bytes in all, 9,306 of them in the entry chunk. The display options panel loads
+on its own (6,646 bytes of JavaScript, 3,613 of CSS) to keep the entry chunk
+under its unchanged 591,000. The Windows job measured the same UI total. The UI
+limit rises to 4,500,000. Merged with `5dd77e39` and its review fixes, the
+Windows job measured a 591,007-byte entry chunk at `b294a3da`, and the next
+fixes 591,270 on Linux. A done row now loads with the first done rows (5,167
+bytes of JavaScript, 3,113 of CSS): the entry chunk measured 587,071 and the UI
+4,496,036. Merged with `daff9a53`, whose agent discussions had raised the UI
+limit to 4,500,000 on their own, the Windows job measured 591,322 and
+4,508,531 at `a1bd2cc4`. The project fold's rows now load at its first opening
+or after the list has drawn (7,250 bytes of JavaScript, 3,406 of CSS): on Linux
+the entry chunk measured 585,204, under its unchanged 591,000, and the UI
+4,511,041. The UI limit rises to 4,525,000.
+
+Later on 2026-10-11 on Linux with Bun 1.4.2, `main` at `5dd77e39` measured
+4,472,003 UI bytes and 3,749,519 core bytes, and settings cards (`boite
+settings`) on top of it 4,495,656 and 3,760,802; the Windows job measured
+3,760,540 core bytes for an earlier head of that branch. The core gains 11,283
+bytes for the card checks, the CLI and MCP commands; the UI 23,653 for the
+card, which loads outside the entry chunk, its English and French sentences
+and the shared checks in contracts. The entry chunk grows 5,016 bytes, to
+586,462. The limits rise to 4,499,000 and 3,767,000. `main` at `da347f40`,
+whose agent mail had raised the UI limit to 4,500,000 without this table,
+measured 4,485,829 UI bytes, a 585,698-byte entry chunk and 3,754,727 core
+bytes; merged with settings cards, 4,509,505, 590,714 and 3,766,024. The
+limits rise to 4,515,000, 593,000 and 3,772,000, the core keeping room for the
+Windows job's larger build.
+
+On 2026-10-12 on Linux with Bun 1.4.2, the latency pass (idle warm-up of the
+pages, kept Agents view, optimistic pin and archive, single permission answer)
+merged with `main` measured 4,513,690 UI bytes and a 591,872-byte entry chunk,
+within the limits above.
+
+On 2026-10-12 the Windows job measured 4,623,852 UI bytes for device keys in
+the group merged with `main` at `5ee76431`: the signing chunk
+(`@noble/ed25519`, loaded at the first signature), Add a device and the group's
+device rows. The UI limit rises to 4,640,000. The same job then measured
+3,927,501 core bytes: signed hellos, device admission and served origins
+(`group/clients.ts`, `group/device-keys.ts`). The core limit rises to 3,935,000.
+
+On 2026-10-12 on Linux with Bun 1.4.2, the terminal rewrite (#453) measured
+4,802,359 UI bytes, 593,425 for the entry chunk and 3,915,408 core bytes; the
+Windows job measured 3,915,831 core bytes. The xterm WebGL, search and Unicode
+11 addons are lazy chunks of 113,385, 31,879 and 24,853 bytes, loaded with the
+first terminal, never at startup. The find bar, the recent commands list and
+their English/French sentences make up the rest of the UI growth, and the bash
+and PowerShell integration scripts the core's. The limits rise to 594,000,
+4,810,000 and 3,925,000.
+
+Merged with `main` at `5feb7d82` on Linux it measured 4,814,973 UI bytes,
+556,942 for the entry chunk and 3,942,646 core bytes, after the device keys
+above. The UI limit rises to 4,823,000 and the core limit to 3,951,000.
+
+On 2026-10-13 on Linux with Bun 1.4.2, `main` at `b5d73b56` measured 3,943,237
+core bytes and the dependency update on top of it 4,022,479. The Claude Agent
+SDK (0.3.283 to 0.3.296) grows its lazy chunk by 70,752 bytes and the ACP SDK
+(1.5.0 to 1.8.0) its own by 7,662; neither loads at startup. The core limit
+rises to 4,030,000.
+
+Context modes, the same day on Linux, measured 4,829,171 UI bytes and 4,031,205
+core bytes against 4,822,797 and 4,023,886 for `main` at `aa0ced74`: 6,374 UI
+bytes for the badge, the fake client's checks and the English/French sentences,
+and 7,319 core bytes for the resolution, the journal column, the CLI flags and
+the driver options. The UI limit rises to 4,836,000 and the core limit to
+4,040,000.
+
+On 2026-10-13 on Linux with Bun 1.4.2, `main` at `aa0ced74` measured 4,822,797
+UI bytes and a 557,709-byte entry chunk. The dictation spectrum, the reasoning
+ramp, favorites shared through each core's settings with their check, folds
+that follow the list and their English/French sentences measured 4,836,660 and
+562,724 on top of it, as the Windows job did: 13,863 bytes. Merged with context
+modes at `c8e9d2ac`, whose limit was 4,836,000, the branch measured 4,843,049 UI
+bytes. The UI limit rises to 4,850,000. With the earlier reasoning slider back,
+lit by level and crossed by speed streaks, and the dictation in a floating
+menu, it measured 4,845,313 bytes and a 557,726-byte entry chunk. Merged with
+persistent agents and their setting cards at `2893abd8`, whose limit was
+4,860,000 and which measured 4,846,910, the branch measured 4,863,429 UI bytes,
+the same 16,519 bytes on top. The UI limit becomes 4,872,000.
+
+Opening a thread on one screen of history (#472) measured 4,823,117 UI bytes
+merged with `main` at `224597ed` (4,822,128), as the Windows job did: 989 bytes
+for the page byte budgets the store sends, the list that pages itself when it
+cannot scroll, the old first row put back after a page lands, and the fake
+core's budgets. Merged with context modes at `c8e9d2ac` it measured 4,830,160,
+within the 4,836,000 above; merged with the dictation menu at `af3acd8e`,
+4,864,454, within 4,872,000.
+
+The update card, merged with `main` at `8ac1d98f`, measured 4,888,826 UI bytes
+and a 522,879-byte entry chunk on Linux, against 4,864,454 for `main`: 24,372
+bytes for the card, its rows and buttons, the Update all button in Machines and
+their sentences ([performance](performance.md#update-everything)). The UI limit
+rises to 4,898,000.
+
+Several drafts per project, merged with settings cards at `87fca361`, measured
+4,536,091 UI bytes and a 590,215-byte entry chunk on Linux: the done rows and
+the project fold's rows load outside the entry chunk, which stays under 593,000.
+Merged with `bafe8898`, whose diagnostic logs had raised the UI limit to
+4,581,000, the branch measured 4,606,394 UI bytes, a 591,099-byte entry chunk
+and 3,901,792 core bytes on Linux the same day. The UI limit rises to
+4,620,000.
+
+On 2026-10-12 on Linux with Bun 1.4.2, `main` at `8035c2f7` measured 4,608,637
+UI bytes and a 591,096-byte entry chunk. Edge scrollbars and load on press on
+top of it measured 4,625,475 and 591,725, as the Windows job did: 16,838 bytes
+in all. The scrollbar overlay (6,168) and the press listener (3,575) load only
+while their switch is on; their starter (2,397) loads after mount, and the
+entry chunk gains 629. Merged with `a0c02d16`, whose shared thread and agent
+code shrank the UI, the branch measured 4,602,452 and 554,651, within the
+unchanged 4,620,000 and 593,000.
+
 On 2026-10-10, `bun run build:ui` with Bun 1.4.2 measured 4,420,649 UI bytes at
 `feeb393b` and 4,425,557 with close confirmation and typed agent archival.
 The dialogs, input binding and English/French sentences add 4,908 bytes. The UI
 total limit increases by 5,000 bytes to 4,429,000, leaving 3,443 bytes; entry
 and core limits stay unchanged.
+
+On 2026-10-10 the Windows CI job printed 4,321.8 KB of UI and 3,623.0 KB of
+core JavaScript for `main`, and 4,481,389 and 3,815,569 bytes for the
+diagnostic logs branch. The UI gains about 56 KB for the Diagnostics page, the
+report dialog, the client error reporter and their English/French sentences;
+the core about 106 KB for the instrumentation of every subsystem, the
+anonymizer, the export and the `boite logs` and `boite issue` commands. A local
+Linux build of the same head measured 3,823,800 core bytes. The UI total limit
+becomes 4,493,000 (this increase on top of `main`'s own) and the core JavaScript
+limit 3,826,000; entry and core
+bundle limits stay unchanged.
+Merged with `ed68bd94` (group relay, project search, plugin updates), a local
+Linux build of the branch measured 4,511,575 UI bytes and 3,843,682 core
+bytes, and the limits become 4,520,000 and 3,852,000. Merged with `ffd433a4`,
+whose firewall check had raised `main`'s limits by 6,000 and 4,000 bytes, the
+branch measured 4,516,117 and 3,851,614 on Linux on 2026-10-11, and its limits
+take the same increase: 4,526,000 and 3,856,000. Merged with `b8dc6c21`, whose pairing
+card raised `main`'s limits by the same 6,000 and 4,000 bytes again, the
+branch measured about 4,519,200 and 3,851,600 the same day, and its limits
+become 4,532,000 and 3,860,000. The review fixes that followed (redaction
+before bounding, strict diagnostics parameters, safer file writes) brought the
+core to about 3,859,000 bytes on Linux on 2026-10-11, under 1 KB from its
+limit, so the core JavaScript limit rises by 4,000 to 3,864,000.
+Merged with `0b13bd40` and `957768a8`, whose reviewed goals raised `main`'s
+limits by 9,000 and 16,000 bytes, the branch measured about 4,524,600 and
+3,868,100 on Linux on 2026-10-11, and its limits take the same increase:
+4,541,000 and 3,880,000.
+Merged with `e7b2b8c8`, whose agent mail raised `main`'s UI limit by 25,000
+bytes to 4,500,000, the branch's UI limit takes the same increase: 4,566,000.
+`main` kept its core limit while its own changes grew the merged core by about
+10,400 bytes: the branch measured about 4,542,500 UI bytes and 3,879,700 core
+bytes on Linux on 2026-10-12, 300 bytes under its core limit, which rises to
+3,900,000.
+Merged with `87fca361`, whose settings cards raised `main`'s limits by 15,000
+UI bytes, 2,000 entry bytes and 12,000 core bytes, the branch measured
+4,567,439 UI bytes and 3,891,447 core bytes on Linux on 2026-10-12, and its
+limits take the same increases: 4,581,000, 593,000 and 3,912,000.
+
+On 2026-10-12 on Linux, `main` at `bafe8898` measured 4,579,818 UI bytes. Priced
+usage rows measured 4,581,495: the UI gains 1,677 bytes for the rate notes and
+their English and French sentences. Merged with `5ee76431`, the branch measured
+4,608,071 UI bytes, under the 4,620,000 that `main` had set by then, and
+3,908,480 core bytes with its table of public API rates, under the unchanged
+3,912,000. No limit changes.
 
 On 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
 UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:
@@ -323,6 +748,23 @@ measured 4,450,765 bytes, and Windows desktop CI 4,450,386 on its first head:
 about 9,400 bytes for the search, the keyboard walk, the machine groups and two
 sentences in each language. The UI limit rises to 4,460,000, 9,235 bytes above
 the Linux build; the entry and core limits are unchanged.
+
+On 2026-10-13 on Linux, `origin/main` at `c8e9d2ac` measured 4,829,171 UI
+bytes and 4,031,205 emitted core JavaScript bytes. Persistent agents taking
+over from stewards measured 4,825,176 and 4,039,499: removing the steward
+settings saves the UI 3,995 bytes net of the projects field, files, memory chip
+and brain folder, and the core gains 8,294 bytes for the projects entrusted to
+an agent, its notices, the memory pass and the brain folder move. The core
+total limit becomes 4,050,000 bytes, 10,501 above this measurement; the UI,
+entry and `main.js` limits are unchanged.
+Cards asking the user to change an agent's settings, merged with `68898598`
+the same day, measured 4,846,910 UI bytes and 4,056,373 core bytes: about
+21,700 UI bytes for the lazy card, the conversation's card for an agent's
+pending questions, the in-memory client's three methods and the sentences in
+both languages, and about 16,900 core bytes for the cards, their shared checks,
+the CLI command and two MCP tools. The UI limit becomes 4,860,000 and the core
+total limit 4,070,000; the entry chunk (518,508 bytes) and `main.js` limits are
+unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 
@@ -330,15 +772,44 @@ runner observations remain in the [dated report](../bench/results/2026-09-29-res
 
 `BOITE_E2E_PREBUILT_UI=1` tests the built production UI and refuses missing
 artifacts; local E2E rebuilds by default. `shell.test.ts` runs against the
-installer in the desktop job. Every other E2E file enters three independent
-Windows shards through `bun test --shard=N/3`. Each shard builds from the same
-checkout and owns its Vite cache and fake-client bundle. Files run sequentially
-within a shard with separate ports, data and browser profiles. Matrix
-`fail-fast: false` preserves other shards' results after a failure.
+installer in the desktop job. Every other E2E file enters one of three Windows
+shards. Files run sequentially within a shard with separate ports, data and
+browser profiles. Matrix `fail-fast: false` preserves other shards' results
+after a failure.
+
+The `Build UI` job builds both UIs once on Linux: `bun run build:ui` (artifact
+`ui-dist`, `.well-known` included) and the fake-client bundle
+(`bun tests/e2e/lib/warm.ts --build-only`, artifact `ui-e2e-fake`). The shards
+and stress download them instead of building about 31 s each on Windows.
+On `6004522f` (2026-10-17), the Linux UI of `app.yml` run 39065496375 and a
+Windows build of the same commit had the same 459 files and, chunk hashes aside,
+the same JavaScript, HTML and manifest. The only differences: lightningcss
+rounds one `lab()` value in the CSS at its sixth decimal (`.857866` against
+`.857878`), which renames every chunk importing that stylesheet and the service
+worker's build id, and each `.gz` carries its OS byte (3 or 10). The installer
+still builds its own UI on Windows.
+
+Shards are cut by `scripts/ci/e2e-shards.ts` from
+[e2e-durations.json](../scripts/ci/e2e-durations.json), the seconds each file
+took on recorded green runs: files go longest first to the lightest shard, and
+a file with no record counts as the median. `bun test --shard` cut by file
+count and ran 285 to 317, 410 to 417 and 501 to 519 s of tests; the recorded
+seconds of 2026-10-17 split into 376, 376 and 376 s. Refresh the record after
+adding or reshaping heavy files, from one or more green `ci.yml` runs:
+
+```sh
+bun scripts/ci/e2e-shards.ts refresh <run id> [<run id> ...]
+```
+
+It reads each run's `E2E n/3` logs with `gh`, where `bun test` opens a group
+per file, averages the runs and prints the new split. `bun scripts/ci/e2e-shards.ts
+<shard> 3` prints a shard's files. `e2e-shards.test.ts` fails when the record
+splits the current files more than 15 % apart.
 
 `tests/e2e/lib/warm.ts` logs phase starts, elapsed times and errors, optimizes
 Vite once with `NODE_ENV=test`, and builds `BOITE_E2E_FAKE_UI` with the same
-fixture plugin used by `startDevUi`. It consumes the optimized dependency body
+fixture plugin used by `startDevUi`; in CI it runs `--prebuilt` on the
+downloaded bundle and refuses a directory without `index.html`. It consumes the optimized dependency body
 before closing Vite. Tests importing or blocking `/src/` URLs still use a dev
 server, warming reachable modules within its 60-second hook. Job deadlines stay
 35 minutes. Failure captures are attempted on cancellation too.
@@ -352,6 +823,15 @@ browser once more when the first never reached its page: no debugging port,
 no devtools socket, or a first navigation that did not commit in 20 seconds.
 It logs `[e2e] the browser did not start` when it does. Nothing the page does
 after it has loaded is retried.
+
+Both E2E steps point `TEMP` and `TMP` at `runner.temp`, on the runner's D:
+drive, so browser profiles and core data directories leave C:. With them on
+C:, Chrome held page loads for 15 to 60 s after the UI server had answered every
+request, while a fresh connection to the same server got the file in
+milliseconds: 8 such stalls in 5 of 9 shard runs, against none in 9 on D:, and
+706 s of tests against 420 s (PR #513, 2026-10-15). They had failed about one
+shard in five since 2026-10-10, on `main` as on branches, a different test each
+time. `scripts/ci/e2e-harness.test.ts` keeps both variables on both steps.
 
 CI Chromium uses CPU compositing with software GL disabled. Browser launch
 failures retain bounded stderr; exited browsers fail promptly. Navigation waits
@@ -369,7 +849,8 @@ RPC errors through `catch` and `toMatchObject` to avoid Bun 1.4.2 Windows
 
 ### Measuring the E2E partition
 
-`bench/e2e.ts` compares serial and sharded runs using JUnit case identities.
+`bench/e2e.ts` compares serial and sharded runs using JUnit case identities;
+its shards are the CI ones.
 It refuses failures, skips or a changed case list. Build/staging commands,
 the 2026-09-28 local comparison and the first hosted PR #108 run are preserved
 in the [dated report](../bench/results/2026-09-29-resources.md#e2e-partition-measurements-2026-09-28).
@@ -392,8 +873,8 @@ native shell E2E on Windows, the installed Debian package, the extracted
 AppImage and the macOS bundle. The Rust tests are skipped because the commit's
 CI already ran them.
 
-A dispatch with `dry-run` builds any branch with throwaway signing keys and an
-unsigned APK, even a commit that already has a nightly. It accepts that
+A dispatch with `dry-run` builds any branch with throwaway signing keys, even a
+commit that already has a nightly. It accepts that
 branch's pull request CI run without rerunning it, skips reservation and every
 publication, and has its own concurrency group.
 
@@ -402,7 +883,7 @@ resetting the counter each UTC day. For example, September 15's first build is
 `2.0.0-nightly.20260915.1`, then `.2` for a new commit. Build inputs stamp the
 version; source manifests retain theirs.
 
-The CI check, desktop builds, native image builds and Android run alongside one
+The CI check, desktop builds and native image builds run alongside one
 another. Only after all pass does reservation bind the tag to the exact commit. A publishing
 failure keeps that tag for retry, including on a later day. A reserved tag alone
 is not a successful release. `server-manifest.yml` promotes the tested digests
@@ -411,8 +892,21 @@ stable Docker `latest` or GitHub's latest stable release.
 
 Stable and nightly desktop tracks share the regular install and data; Boite Dev
 is separate ([updates](updates.md)). The server uses `dev`; use separate Compose
-volumes ([server](server.md)). The signed or reused APK is required too;
-[Android](android.md) owns the host, signing and reuse rules.
+volumes ([server](server.md)). The signed or reused APK, which opens the phone
+app's address, is required too; [Android](android.md) owns the host, signing
+and reuse rules.
+
+## The phone app's address
+
+`app.yml` builds the UI on `main` when `packages/ui/`, `packages/contracts/` or
+the workflow change, or by hand; from `main` it waits for that commit's CI to
+pass (`scripts/ci/commit-ci.ts`, as the nightly does) and deploys it with
+GitHub Pages to the
+repository's custom domain, `APP_ORIGIN` in the contracts
+([phone](phone.md#the-app-on-its-own-address)). It packs the site itself so
+`/.well-known/assetlinks.json` ships, which `upload-pages-artifact` would leave
+out as a hidden folder. Pages must use GitHub Actions as its source, and the
+domain's DNS names `beboite.github.io`.
 
 ## Pull request reviews
 

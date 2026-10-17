@@ -92,11 +92,11 @@
   <dialog bind:this={dialog} data-testid="browser-tools-dialog" aria-label={view === 'diagnostics' ? strings.browserTools.diagnostics : strings.browserTools.reviewRecording}
     onkeydown={event => event.stopPropagation()} oncancel={event => { event.preventDefault(); view = null; }}>
     <header><h2>{view === 'diagnostics' ? strings.browserTools.diagnostics : strings.browserTools.reviewRecording}</h2>
-      <button type="button" class="ghost small icon" aria-label={strings.imports.close} onclick={() => { view = null; }}><X size={16} /></button></header>
+      <button type="button" class="ghost small icon" aria-label={strings.common.close} onclick={() => { view = null; }}><X size={16} /></button></header>
     <div class="body">
       {#if view === 'diagnostics'}
         <div class="actions">
-          <button type="button" class="chip" disabled={busy} onclick={() => void diagnostics()}><RefreshCw size={14} /><span class="ui-label">{strings.browserTools.refresh}</span></button>
+          <button type="button" class="chip" disabled={busy} onclick={() => void diagnostics()}><RefreshCw size={14} /><span class="ui-label">{strings.common.refresh}</span></button>
           <button type="button" class="chip" disabled={busy} onclick={() => void diagnostics(true)}><Trash2 size={14} /><span class="ui-label">{strings.browserTools.clear}</span></button>
         </div>
         <h3>{strings.browserTools.pageEvents}</h3>

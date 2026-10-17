@@ -1,11 +1,8 @@
 import { Store, store } from './store.svelte';
-import { threadActive, type AgentAddress, type GroupCore } from '@boite/contracts';
+import { threadActive, withoutTrailingSlashes, type AgentAddress, type GroupCore } from '@boite/contracts';
 import {
-  clearStoredEndpoint,
   forgetGroupOf,
   removeBrought,
-  linkedCore,
-  openOnMainMachine,
   opensFromLink,
   parsePairingLink,
   readEnvironments,
@@ -16,15 +13,17 @@ import {
   readStoredEndpoint,
   readMainMachine,
   storeMainMachine,
-  fromTauri,
   type Endpoint,
   type MainMachine,
-  type StoredEnvironment
+  opens
 } from './endpoint';
 import { strings } from './strings';
+import { threadAddress } from './chat-links';
 import { onReveal, reveal } from './reveal';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
-import { GroupLinks, holdsBack } from './group-links.svelte';
+import { GroupLinks } from './group-links.svelte';
+import { appPage } from './app-origin';
+import { bootWorkspace, byHand, hostOf, primaryMachine } from './workspace-boot';
 
 export interface Machine {
   id: string;
@@ -83,17 +82,12 @@ function profiles(): Record<string, { label: string; icon?: MachineIconName }> {
   try { return JSON.parse(localStorage.getItem(PROFILE_KEY) ?? '{}') ?? {}; } catch { return {}; }
 }
 
-/** What a machine that has not answered yet is called: its address, never "This PC". */
-function hostOf(url: string | null): string | undefined {
-  try { return url === null ? undefined : new URL(url).host; } catch { return undefined; }
-}
-
 /** A connection's URL is also its identity in the workspace and saved list. */
 function endpointIdentity(endpoint: Endpoint): { id: string; host: string } | null {
   try {
     const url = new URL(endpoint.url);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
-    return { id: url.toString().replace(/\/+$/, ''), host: url.host };
+    return { id: withoutTrailingSlashes(url.toString()), host: url.host };
   } catch {
     return null;
   }
@@ -135,101 +129,16 @@ export class Workspace {
   #memberTap = 0;
   #lifecycle = 0;
 
+  /**
+   * The connected machines or, before the first connection, the one store the
+   * app runs on, under the id `local` that only the caller's own keys read.
+   */
+  machinesOr(store: Store): Machine[] {
+    return this.machines.length ? this.machines : [{ id: 'local', label: strings.machines.local, store }];
+  }
+
   #current(lifecycle: number): boolean {
     return lifecycle === this.#lifecycle;
-  }
-
-  #primaryMachine(selected: Endpoint | null, remembered: StoredEnvironment[], before: StoredEnvironment[] = []): Machine {
-    // A machine the group brought stays one when it is the machine this window opens on. When its saved entry
-    // went during the boot, its key refused, what the entry said before still holds: the group may drop it.
-    // With no entry at all, the core the window was stored on says it itself.
-    const brought = remembered.find(e => e.url === store.endpointUrl) ?? before.find(e => e.url === store.endpointUrl)
-      ?? (selected?.url === store.endpointUrl ? selected : undefined);
-    const machine: Machine = {
-      id: store.endpointUrl ?? 'local',
-      label: remembered.find(e => e.url === selected?.url)?.label ?? (store.localCore ? strings.machines.local : store.core?.hostname ?? hostOf(store.endpointUrl)) ?? strings.machines.local,
-      store,
-      ...(brought?.coreId === undefined ? {} : { coreId: brought.coreId }),
-      ...(brought?.groupId === undefined ? {} : { groupId: brought.groupId }),
-      ...(brought?.coreId === undefined || brought.epoch === undefined ? {} : { epoch: brought.epoch })
-    };
-    this.restoreProfile(machine);
-    return machine;
-  }
-
-  async #addFakeMachine(lifecycle: number): Promise<void> {
-    const { FakeClient } = await import('./fake-client');
-    if (!this.#current(lifecycle)) return;
-    const remote = new Store();
-    remote.machineId = 'http://builder.test';
-    remote.visible = false;
-    remote.attach(new FakeClient({ coreId: 'fake-builder', coreName: 'Builder', publicUrl: 'https://builder.test' }));
-    await remote.connect();
-    if (!this.#current(lifecycle)) {
-      remote.client?.close();
-      remote.detach();
-      return;
-    }
-    remote.booted = true;
-    if (remote.core) remote.core.os = 'linux';
-    const machine = { id: remote.machineId, label: 'Builder', store: remote };
-    this.restoreProfile(machine);
-    this.machines = [...this.machines, machine];
-    // The two fake machines are one group, so the group card has members to show.
-    if (store.client && remote.client && (await store.client.call('group.get', {})) === null) {
-      await store.client.call('group.create', { name: 'Home' });
-      const { invite } = await store.client.call('group.invite', {});
-      await remote.client.call('group.join', { invite });
-      await Promise.all([store.loadGroup(), remote.loadGroup()]);
-    }
-  }
-
-  async #connectShellLocal(lifecycle: number): Promise<void> {
-    if (!window.__TAURI_INTERNALS__ || store.localCore) return;
-    const local = await fromTauri();
-    if (!this.#current(lifecycle)) return;
-    if (local && local.url !== store.endpointUrl) await this.add(local, strings.machines.local);
-  }
-
-  async #adoptPopulatedJournal(lifecycle: number): Promise<void> {
-    // A fresh Dev core may have no threads while an older core on this PC has a journal.
-    // The name a core reports is its own word: a machine the group brought never becomes the page's own by claiming this PC's.
-    const populated = store.localCore && store.threads.length === 0 && store.core?.hostname
-      ? this.machines.find(m => m.store !== store && m.coreId === undefined && m.store.connection === 'ready' && m.store.threads.length > 0 && m.store.core?.hostname === store.core?.hostname)
-      : undefined;
-    if (!populated) return;
-    await store.switchEnvironment(populated.id);
-    if (!this.#current(lifecycle) || store.connection !== 'ready') return;
-    populated.store.client?.close();
-    populated.store.detach();
-    this.machines = [{ id: populated.id, label: populated.label, icon: populated.icon, store }, ...this.machines.filter(m => m.store !== store && m !== populated)];
-  }
-
-  /** Which keys the group brought over plain HTTP may be sent where they were saved: asked before any of them is. */
-  async #vet(saved: StoredEnvironment[]): Promise<StoredEnvironment[]> {
-    const held = saved.filter(holdsBack);
-    if (held.length === 0) return [];
-    const anchors: Endpoint[] = saved.filter((e) => e.coreId === undefined && e.token !== '').map((e) => ({ url: e.url, token: e.token, paired: e.paired }));
-    const local = window.__TAURI_INTERNALS__ ? await fromTauri().catch(() => null) : null;
-    if (local && !anchors.some((e) => e.url === local.url)) anchors.push(local);
-    return this.groups.vet(held, anchors);
-  }
-
-  /** The machine paired by hand a window falls back on: the one serving this page first. None in the shell, which has its own core. */
-  #byHand(): StoredEnvironment | undefined {
-    const byHand = readEnvironments().filter((e) => e.coreId === undefined && e.token !== '');
-    return window.__TAURI_INTERNALS__ ? undefined : byHand.find((e) => servesThisPage(e.url)) ?? byHand[0];
-  }
-
-  /**
-   * The stored core was refused its key: the key goes first, so nothing reads
-   * it back, and the window opens on a machine paired by hand or on the
-   * shell's own core.
-   */
-  #openElsewhere(): void {
-    clearStoredEndpoint();
-    const next = this.#byHand();
-    if (next) storeEndpoint({ url: next.url, token: next.token, ...(next.paired ? { paired: true } : {}) });
   }
 
   /**
@@ -260,7 +169,7 @@ export class Workspace {
    */
   #mayStandIn(): boolean {
     return store.endpointUrl !== null && !store.localCore && store.connection !== 'ready'
-      && (window.__TAURI_INTERNALS__ !== undefined || readEnvironments().some((e) => e.token !== '' && e.url !== store.endpointUrl));
+      && (window.__TAURI_INTERNALS__ !== undefined || readEnvironments().some((e) => opens(e) && e.url !== store.endpointUrl));
   }
 
   /** Whether the machine the window opens on has still not said hello after `PRIMARY_PATIENCE_MS`, with another machine to show instead. */
@@ -313,87 +222,51 @@ export class Workspace {
     this.#standIn(lifecycle, generation);
   }
 
+  async #addFakeMachine(lifecycle: number): Promise<void> {
+    const store = this.primary;
+    const { FakeClient } = await import('./fake-client');
+    if (!this.#current(lifecycle)) return;
+    const remote = new Store();
+    remote.machineId = 'http://builder.test';
+    remote.visible = false;
+    // `?desktopUpdate=<phase>` makes it a Windows PC whose desktop app reports an update.
+    const params = new URLSearchParams(window.location.search);
+    const desktopApp = params.get('desktopUpdate') !== null;
+    // `&load=<n>` streams on this machine too: a second machine at work feeds its own store.
+    const load = params.get('load') ? { load: Number(params.get('load')), ...(params.get('loadtick') ? { loadTickMs: Number(params.get('loadtick')) } : {}) } : {};
+    remote.attach(new FakeClient({ coreId: 'fake-builder', coreName: 'Builder', publicUrl: 'https://builder.test', desktopApp, ...load }));
+    await remote.connect();
+    if (!this.#current(lifecycle)) {
+      remote.client?.close();
+      remote.detach();
+      return;
+    }
+    remote.booted = true;
+    if (remote.core) remote.core.os = desktopApp ? 'windows' : 'linux';
+    const machine = { id: remote.machineId, label: 'Builder', store: remote };
+    this.restoreProfile(machine);
+    this.machines = [...this.machines, machine];
+    // The two fake machines are one group, so the group card has members to show.
+    if (store.client && remote.client && (await store.client.call('group.get', {})) === null) {
+      await store.client.call('group.create', { name: 'Home' });
+      const { invite } = await store.client.call('group.invite', {});
+      await remote.client.call('group.join', { invite });
+      await Promise.all([store.loadGroup(), remote.loadGroup()]);
+    }
+  }
+
   async #boot(thread: string | null): Promise<void> {
     const lifecycle = ++this.#lifecycle;
     const generation = this.#generation;
-    store.visible = true;
-    this.active = store;
-    // The machine the owner chose becomes the stored core before anything below reads it.
-    this.main = readMainMachine();
-    openOnMainMachine();
-    try {
-      this.view = localStorage.getItem('boite.thread-view') === 'recent' ? 'recent' : 'projects';
-    } catch {
-      /* session only */
-    }
-    // The window would open on a machine whose key is held back, the stored one or the one a `?core=`
-    // link names: it waits for the answer, and on a refusal that key is sent nowhere.
-    // Both count: a link the owner declines falls back on the stored core.
-    const kept = readStoredEndpoint();
-    // The stored core counts as an entry even when the list no longer has one for it: its marks travel with it.
-    const saved = kept?.coreId !== undefined && !readEnvironments().some((e) => e.url === kept.url)
-      ? [...readEnvironments(), { url: kept.url, label: '', token: kept.token, paired: true, coreId: kept.coreId, ...(kept.groupId === undefined ? {} : { groupId: kept.groupId }) }]
-      : readEnvironments();
-    const stored = kept?.url;
-    const gated = [linkedCore(), stored].filter((url): url is string => typeof url === 'string' && saved.some((e) => e.url === url && holdsBack(e)));
-    const vetting = this.#vet(saved).catch(() => [] as StoredEnvironment[]);
-    if (gated.length > 0) {
-      const cleared = await vetting;
-      if (!this.#current(lifecycle)) return;
-      if (stored !== undefined && gated.includes(stored) && !cleared.some((e) => e.url === stored)) this.#openElsewhere();
-    }
-    const selected = readStoredEndpoint();
-    const booting = thread === null ? store.boot() : store.boot(false, thread);
-    // Awaited below on every path: a failure in between is not left unhandled.
-    booting.catch(() => undefined);
-    // A machine that stays silent, a laptop switched off, does not keep the others waiting: they are
-    // connected without it, and the first that answers is shown in its place. A link is always waited on.
-    const ahead = this.waiting && await this.#silent(booting);
-    if (!ahead) await booting;
-    if (!this.#current(lifecycle)) return;
-    this.active = store;
-    // Read after the boot: a pairing link it opened on has just made this machine one paired by hand.
-    this.machines = [this.#primaryMachine(selected, readEnvironments(), saved)];
-    // Ends the wait at once when the machine answered, or when no other could be shown.
-    this.#standIn(lifecycle, generation);
-    if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('fake') === '1') {
-      if (new URLSearchParams(window.location.search).get('machines') === '1') {
-        await this.#addFakeMachine(lifecycle);
-      }
-      return;
-    }
-    const primaryEndpoint = readStoredEndpoint();
-    await this.#connectShellLocal(lifecycle);
-    if (!this.#current(lifecycle)) return;
-    this.#standIn(lifecycle, generation);
-    const shown = (connected: boolean): boolean => {
-      if (connected) this.#standIn(lifecycle, generation);
-      return connected;
-    };
-    if (!store.localCore && primaryEndpoint?.url === store.endpointUrl && primaryEndpoint.token) {
-      // An entry that went during the boot comes back as what it was: a machine the group brought is not made
-      // the owner's by being written again. One still there says what it is itself, a pairing by hand included.
-      const was = readEnvironments().some((e) => e.url === primaryEndpoint.url) ? undefined : saved.find((e) => e.url === primaryEndpoint.url);
-      upsertEnvironment({
-        ...primaryEndpoint, paired: primaryEndpoint.paired ?? false, label: this.machines[0]!.label,
-        ...(was?.coreId === undefined ? {} : { coreId: was.coreId }),
-        ...(was?.groupId === undefined ? {} : { groupId: was.groupId })
-      });
-    }
-    const others = readEnvironments().filter((e) => e.url !== store.endpointUrl);
-    await Promise.all([
-      ...others.filter((e) => !holdsBack(e)).map((e) => this.add(e, e.label).then(shown)),
-      // A key held back is sent once the machines paired by hand had their say, and only where it still stands.
-      vetting.then((cleared) => Promise.all(others
-        .filter((e) => holdsBack(e) && cleared.some((kept) => kept.url === e.url) && this.#current(lifecycle))
-        .map((e) => this.add(e, e.label).then(shown)))),
-      ...(ahead ? [booting.then(() => this.#primaryAnswered(lifecycle, generation))] : [])
-    ]);
-    if (!this.#current(lifecycle)) return;
-    await this.#adoptPopulatedJournal(lifecycle);
-    if (thread === null || generation !== this.#generation || !this.#current(lifecycle) || store.openThread?.id === thread) return;
-    const origin = this.machines.find((m) => m.store !== store && m.store.endpointUrl !== null && servesThisPage(m.store.endpointUrl));
-    if (origin) await this.select(origin.store, thread);
+    return bootWorkspace(this, thread, {
+      current: () => this.#current(lifecycle),
+      navigationCurrent: () => generation === this.#generation,
+      silent: (booting) => this.#silent(booting),
+      standIn: () => this.#standIn(lifecycle, generation),
+      primaryAnswered: () => this.#primaryAnswered(lifecycle, generation),
+      // Behind DEV here too, so a release build drops the method and its fake client.
+      addFakeMachine: () => (import.meta.env.DEV ? this.#addFakeMachine(lifecycle) : Promise.resolve())
+    });
   }
 
   restoreProfile(machine: Machine): void {
@@ -512,7 +385,8 @@ export class Workspace {
     // A machine the group brought is written back as one: another window may have dropped its entry meanwhile.
     if (!endpoint.grant && !endpoint.ticket && !endpoint.local)
       upsertEnvironment({
-        url: machine.id, token: endpoint.token, paired: endpoint.paired ?? false, label: machine.label,
+        url: machine.id, token: endpoint.token, paired: endpoint.paired ?? endpoint.signs !== undefined, label: machine.label,
+        ...(endpoint.signs === undefined ? {} : { signs: endpoint.signs }),
         ...(machine.coreId === undefined ? {} : { coreId: machine.coreId }),
         ...(machine.groupId === undefined ? {} : { groupId: machine.groupId }),
         ...(machine.epoch === undefined ? {} : { epoch: machine.epoch })
@@ -549,7 +423,10 @@ export class Workspace {
     if (existing && existing.store.connection === 'ready') return fail(strings.machines.duplicate);
     // A machine paired by hand at this address stays what it is: the group neither replaces its key nor claims it.
     if (existing && endpoint.ticket !== undefined && existing.coreId !== endpoint.coreId) return false;
-    const target = existing?.store ?? new Store();
+    // The phone app's window opened on no machine: the first one added becomes the one it shows.
+    // A first add that failed left it detached and out of the list: the next one takes it again.
+    const adopt = !existing && appPage() && !store.localCore && (store.endpointUrl === null || !this.machines.some((m) => m.store === store));
+    const target = existing?.store ?? (adopt ? store : new Store());
     target.client?.close();
     target.detach();
     target.machineId = id;
@@ -562,12 +439,13 @@ export class Workspace {
         ...(endpoint.coreId === undefined || endpoint.epoch === undefined ? {} : { epoch: endpoint.epoch })
       };
       this.#distinct(fresh);
-      this.machines = [...this.machines, fresh];
+      this.machines = adopt ? [fresh, ...this.machines.filter((m) => m.store !== store)] : [...this.machines, fresh];
     }
     // Read back from the list: the name the core reports is written through the
     // reactive entry, or a card already drawn under the address keeps showing it.
     const machine = existing ?? this.machines.find((m) => m.store === target)!;
-    const connecting = target.connectEndpoint({ ...endpoint, url: id });
+    // The primary pairing must survive reload before draft hydration finishes.
+    const connecting = target.connectEndpoint({ ...endpoint, url: id }, target === store);
     const client = target.client;
     await connecting;
     // A later add replaced this attempt's client: the outcome is that one's to report.
@@ -629,22 +507,23 @@ export class Workspace {
     if (saved) storeEndpoint(saved);
   }
 
-  async select(target: Store, threadId?: string, projectId?: string): Promise<void> {
+  /** `fresh`: a project's new draft rather than the last one written there. */
+  async select(target: Store, threadId?: string, projectId?: string, options: { fresh?: boolean } = {}): Promise<void> {
     this.selecting += 1;
     try {
-      await this.#select(target, threadId, projectId);
+      await this.#select(target, threadId, projectId, options);
     } finally {
       this.selecting -= 1;
     }
   }
 
-  async #select(target: Store, threadId?: string, projectId?: string): Promise<void> {
+  async #select(target: Store, threadId: string | undefined, projectId: string | undefined, options: { fresh?: boolean }): Promise<void> {
     ++this.#generation;
     this.#moveTo(target);
     target.showChat();
     target.visible = true;
     if (threadId) await target.open(threadId);
-    else if (projectId) target.startDraft(projectId);
+    else if (projectId) target.startDraft(projectId, options.fresh ? { fresh: true } : {});
     else if (target.openThread) await target.open(target.openThread.id);
     else await target.openWhereLeft();
   }
@@ -679,7 +558,7 @@ export class Workspace {
     ++this.#generation;
     // A machine paired by hand first, never the address being dropped: a page that address
     // served would otherwise reach it again, with no key, and take it for the window's own.
-    const next = this.#byHand();
+    const next = byHand();
     if (next && next.url !== id) await store.switchEnvironment(next.url);
     const was = this.machines.find((m) => m.store === store);
     const brought = was?.coreId === undefined ? undefined : { coreId: was.coreId, ...(was.groupId === undefined ? {} : { groupId: was.groupId }) };
@@ -687,7 +566,7 @@ export class Workspace {
     // Nothing to fall back on: the window shows a machine paired by hand that is still connected, if there is one.
     const other = store.connection === 'ready' ? undefined : this.machines.find((m) => m.store !== store && m.coreId === undefined && m.store.connection === 'ready');
     if (other && this.active === store) await this.select(other.store);
-    const entry = this.#primaryMachine(readStoredEndpoint(), readEnvironments());
+    const entry = primaryMachine(this, readStoredEndpoint(), readEnvironments());
     const twin = this.machines.find((m) => m.store !== store && m.id === entry.id);
     if (twin) {
       this.settingsSync.forget(twin);
@@ -750,6 +629,59 @@ export class Workspace {
     }
     const target = machineId ? this.machines.find((m) => m.store.machineId === machineId || m.id === machineId)?.store : store;
     if (target) await this.select(target, threadId);
+  }
+
+  /**
+   * The machine whose core has this id: by the id its hello gave, else by the
+   * one the group knows it by before it answered. A connected one wins over a
+   * twin still connecting under another address.
+   */
+  machineOf(coreId: string): Machine | null {
+    const matches = this.machines.filter((machine) => machine.store.core?.coreId === coreId || GroupLinks.coreOf(machine) === coreId);
+    return matches.find((machine) => machine.store.connection === 'ready') ?? matches[0] ?? null;
+  }
+
+  /**
+   * A thread an answer names the way `boite agents` prints it: `thr_x`,
+   * `<machine>/thr_x` or `<core-id>/thr_x`, read in `from` on `owner`.
+   * A connected machine that lists the thread opens it: the owner's when no
+   * machine is named, the one named, only the owner for `here`. Otherwise the
+   * owner's contacts say which core holds it, and last the one machine listing
+   * the id, which the agent may know by another name.
+   */
+  async openThreadLink(owner: Store, from: string | undefined, where: string | null, threadId: string): Promise<void> {
+    const core = where !== null && /^[0-9a-f]{64}$/.test(where) ? where : null;
+    const slug = (name: string) => name.trim().replace(/\s+/g, '-').toLowerCase();
+    const names = (name: string) => where === null || where === 'here' || slug(name) === where.toLowerCase() || (/^[0-9a-f]{6,}$/.test(where) && name.startsWith(where));
+    const holders = this.machines.filter(machine => machine.store.connection === 'ready' && machine.store.threads.some(thread => thread.id === threadId)
+      && (core === null || machine.store.core?.coreId === core));
+    const named = where === 'here' ? holders.filter(machine => machine.store === owner)
+      : holders.filter(machine => names(machine.label) || names(machine.store.core?.coreId ?? ''));
+    const pick = where === null ? holders.find(machine => machine.store === owner) ?? (holders.length === 1 ? holders[0] : undefined)
+      : named.length === 1 ? named[0] : undefined;
+    if (pick) { await this.select(pick.store, threadId); return; }
+    const client = owner.client;
+    if (client && from && owner.connection === 'ready') {
+      try {
+        const [{ self }, { agents }] = await Promise.all([client.call('collaboration.get', { threadId: from }), client.call('collaboration.directory', { threadId: from })]);
+        const found = agents.filter(agent => agent.threadId === threadId && (core !== null ? agent.coreId === core
+          : where === 'here' ? agent.coreId === self.coreId : names(agent.machine) || names(agent.coreId)));
+        if (found.length === 1) { await this.openAgentThread(owner, self, found[0]!); return; }
+      } catch { /* Coordination off on this thread: no contact names the core. */ }
+    }
+    const only = where !== null && where !== 'here' && holders.length === 1 ? holders[0]! : null;
+    if (only) { await this.select(only.store, threadId); return; }
+    owner.error = strings.agentMessages.threadMissing;
+  }
+
+  /** A click on a thread link `renderMarkdown` drew opens that thread; true when it was one. */
+  followThreadLink(event: MouseEvent, owner: Store | undefined, from: string | undefined): boolean {
+    const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[data-thread-address]') : null;
+    if (!anchor) return false;
+    event.preventDefault();
+    const address = threadAddress(anchor.dataset.threadAddress!);
+    if (address && owner) void this.openThreadLink(owner, from, address.where, address.threadId);
+    return true;
   }
 
   /** Resolve the authenticated core identity before using a machine-scoped thread id. */

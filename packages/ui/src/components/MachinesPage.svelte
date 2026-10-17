@@ -3,14 +3,13 @@
   import { ConnectionGroup } from '../lib/connection-group.svelte';
   import { GroupLinks } from '../lib/group-links.svelte';
   import InfoTip from './InfoTip.svelte';
-  import { ArrowUpRight, ChevronDown, RefreshCw, Settings2, Trash2, ScanLine } from '@lucide/svelte';
-  import { workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
+  import { ArrowUpRight, ChevronDown, CircleArrowDown, RefreshCw, Settings2, Trash2, ScanLine } from '@lucide/svelte';
+  import { machineHealth, workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { fill, strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
   import GroupCard from './GroupCard.svelte';
-  import PairingCard from './PairingCard.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
   import MachineSettings from './MachineSettings.svelte';
   import MainMachine from './MainMachine.svelte';
@@ -18,10 +17,20 @@
   import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
   import AppUpdateContent from './AppUpdateContent.svelte';
   import { appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
+  import { updateEverything } from '../lib/update-everything.svelte';
   import { machineUpdateState, type MachineUpdateState } from '../lib/machine-updates';
   import PairMachine from './PairMachine.svelte';
   import type { Store } from '../lib/store.svelte';
-  let { mobile = false }: { mobile?: boolean } = $props();
+  let { mobile = false, onopenthread }: { mobile?: boolean; onopenthread?: () => void } = $props();
+  /** The thread a failure on that machine was about: opening it shows the cause in its chat, and clears the line. */
+  function openFailedThread(machine: Machine) {
+    const owner = machine.store;
+    const threadId = owner.errorThreadId;
+    if (!threadId) return;
+    owner.error = null;
+    onopenthread?.();
+    void workspace.select(owner, threadId);
+  }
   const uid = $props.id();
   const migration = new ConnectionGroup(workspace);
   onDestroy(() => migration.stop());
@@ -58,6 +67,20 @@
   let unfolded = $state<Record<string, boolean>>({});
   const detailed = (machine: Machine): boolean => unfolded[machine.id] ?? workspace.machines.length === 1;
   let checking = $state(false);
+  /**
+   * A machine that tried and did not answer is out of reach, a laptop shut or
+   * a server switched off: its card goes grey and keeps only what works without
+   * it, its name, its icon and its removal. The client still retries behind it
+   * and the card comes back by itself. A machine that refused this device's key
+   * keeps its own repair flow instead. One the user depended on (`lost`: this
+   * PC, the window's own machine, a turn still running there) stays a warning,
+   * in red with its error, as the footer's machine menu shows it.
+   */
+  const away = (machine: Machine): 'offline' | 'lost' | null => {
+    if (machine.store.pairingRequired) return null;
+    const health = machineHealth(machine, workspace.active);
+    return health === 'offline' || health === 'lost' ? health : null;
+  };
 
   /** Boite on that machine and its agents, as the one word its row shows. */
   function updates(machine: Machine): MachineUpdateState | null {
@@ -65,7 +88,8 @@
     if (store.connection !== 'ready') return null;
     return machineUpdateState({
       server: store.localCore ? null : store.serverUpdater.busy ? { phase: 'checking' } : store.serverUpdater.snapshot,
-      app: store.localCore && showAppUpdateUi() ? appUpdater.snapshot : null,
+      // Another machine's desktop app counts once its window reports it, where it can be updated from here.
+      app: store.localCore ? (showAppUpdateUi() ? appUpdater.snapshot : null) : store.core?.os === 'windows' ? (store.serverUpdater.desktopFailure ? { phase: 'error' } : store.serverUpdater.desktop) : null,
       agents: store.owner ? store.harnessUpdates : []
     });
   }
@@ -85,7 +109,7 @@
       if (showAppUpdateUi()) appUpdater.check();
       await Promise.all(workspace.machines.filter(machine => machine.store.connection === 'ready' && machine.store.owner).flatMap(machine => [
         machine.store.loadHarnessUpdates(true),
-        ...(machine.store.localCore ? [] : [machine.store.serverUpdater.load(true)])
+        ...(machine.store.localCore ? [] : [machine.store.serverUpdater.load(true), machine.store.serverUpdater.loadDesktop()])
       ]));
     } finally {
       checking = false;
@@ -101,9 +125,13 @@
   });
 
   /** Sign-ins happen on the machine that keeps them: its own Providers page. */
+  /** The form already on the page takes it; a second one is drawn only when none is. */
+  const topForm = $derived(window.__TAURI_INTERNALS__ === undefined && groupStore.principal !== 'owner' && !workspace.machines.some(machine => machine.store.connection === 'ready'));
   async function repair() {
-    memberRepair = true;
-    await tick();
+    if (!topForm) {
+      memberRepair = true;
+      await tick();
+    }
     pairingForm?.startAdding();
   }
 
@@ -144,9 +172,16 @@
   <section class="connections-section" id="settings-machines" aria-label={strings.machines.heading}>
   <header class="head">
     <h1 class="ui-label-box"><span class="ui-label">{strings.settings.tabs.machines}</span><InfoTip topic={strings.settings.tabs.machines} text={strings.machines.intro} /></h1>
+    <div class="head-actions">
     <button type="button" class="ghost small" data-testid="updates-check-all" disabled={checking || !workspace.machines.some(machine => machine.store.connection === 'ready')} aria-busy={checking} onclick={() => void checkAll()}>
       <RefreshCw size={13} class={checking ? 'spinning' : undefined} /><span class="ui-label">{checking ? strings.appUpdate.checkingAction : strings.appUpdate.check}</span>
     </button>
+    {#if updateEverything.offered}
+      <button type="button" class="primary small" data-testid="updates-run-all" disabled={updateEverything.running} aria-busy={updateEverything.running} onclick={() => void updateEverything.run()}>
+        <CircleArrowDown size={13} /><span class="ui-label">{strings.updateAll.run}</span>
+      </button>
+    {/if}
+    </div>
   </header>
 
   <!-- The desktop app updates the computer it runs on, whichever machine the window shows. -->
@@ -157,16 +192,18 @@
     </section>
   {/if}
 
-    {#if !groupStore.owner}<PairMachine {mobile} bind:this={pairingForm} />{/if}
+    <!-- A device of a group has nothing to add: its group brings every machine. One that reaches none adds itself here. -->
+    {#if topForm}<PairMachine {mobile} bind:this={pairingForm} />{/if}
     {#each groupStores as owner (owner.group?.id ?? 'ungrouped')}
     <GroupCard store={owner} {mobile} migration={owner === groupStores[0] ? migration : undefined}>
     <div class="machines">
       {#each machinesOf(owner) as machine (machine.id)}
         {@const coreId = GroupLinks.coreOf(machine)}
         {@const state = updates(machine)}
-        {@const open = detailed(machine)}
+        {@const gone = away(machine) !== null}
+        {@const open = !gone && detailed(machine)}
         {@const carrier = GroupLinks.carrier(machine, workspace.machines)}
-        <section data-core-id={coreId} class="machine-card" data-testid="machine-card" data-group-member={coreId && owner.group?.cores.some(core => core.coreId === coreId) ? "true" : undefined} data-machine-id={machine.id}>
+        <section data-core-id={coreId} class="machine-card" class:away={gone} class:lost={away(machine) === 'lost'} data-testid="machine-card" data-group-member={coreId && owner.group?.cores.some(core => core.coreId === coreId) ? "true" : undefined} data-machine-id={machine.id} data-away={away(machine) ?? undefined}>
           <div class="main">
             <button
               class="ghost logo"
@@ -180,27 +217,32 @@
               <input class="machine-name" data-testid="machine-rename" aria-label={strings.machines.label} value={machine.label} maxlength="80" onchange={(event) => { workspace.customize(machine.id, event.currentTarget.value, machine.icon); event.currentTarget.value = machine.label; }} />
               <span class="meta">
                 <span class="dot" class:ready={machine.store.connection === 'ready'} aria-hidden="true"></span>
-                <span class="status ui-label" class:ready={machine.store.connection === 'ready'} data-testid="machine-card-status">{machine.store.pairingRequired ? strings.mobile.pairingRequired : carrier !== undefined && machine.store.connection === 'ready' ? fill(strings.group.relayed, { machine: carrier.label }) : strings.connection[machine.store.connection]}</span>
+                <span class="status ui-label" class:ready={machine.store.connection === 'ready'} data-testid="machine-card-status">{machine.store.pairingRequired ? strings.mobile.pairingRequired : gone ? strings.connection.offline : carrier !== undefined && machine.store.connection === 'ready' ? fill(strings.group.relayed, { machine: carrier.label }) : strings.connection[machine.store.connection]}</span>
                 {#if state}<span class="updates ui-label" data-testid="machine-updates-state" data-state={state}>{updateLabels[state]}</span>{/if}
               </span>
             </div>
             <div class="actions">
               {#if machine.store.pairingRequired}
-                <button class="ghost small" data-testid="machine-repair" onclick={() => { if (groupStore.owner) void repair(); else pairingForm?.startAdding(); }}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
+                <button class="ghost small" data-testid="machine-repair" onclick={() => void repair()}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
               {:else if machine.store.connection === 'closed'}
                 <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
               {/if}
-              <!-- The machine already open has nowhere to go. -->
-              {#if machine.store !== workspace.active}
+              {#if gone && machine.store !== primary}
+                <button class="ghost icon-only remove" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void removeMachine(machine, owner)}><Trash2 size={15} /></button>
+              {/if}
+              <!-- The machine already open has nowhere to go, and one out of reach has nothing to open. -->
+              {#if machine.store !== workspace.active && !gone}
                 <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
                   ><span class="ui-label">{strings.machines.open}</span><ArrowUpRight size={13} /></button
                 >
               {/if}
             </div>
+            {#if !gone}
             <button class="ghost icon-only fold" class:open data-testid="machine-details-toggle" aria-label={strings.machines.details} title={strings.machines.details}
               aria-expanded={open} aria-controls="{uid}-details-{machine.id}" onclick={() => (unfolded[machine.id] = !open)}><ChevronDown size={16} /></button>
+            {/if}
           </div>
-          <div class="reveal" class:open={customizing === machine.id} inert={customizing !== machine.id}>
+          <div class="disclosure-fold" class:open={customizing === machine.id} inert={customizing !== machine.id}>
             <div>
               <div class="icon-choices" role="group" aria-label={strings.machines.icon}>
                 {#each machineIcons as icon (icon)}
@@ -210,7 +252,7 @@
             </div>
           </div>
           <!-- Versions, agents and the machine's own settings: one click away, and still in the page for whoever looks for them. -->
-          <div class="reveal" class:open inert={!open} id="{uid}-details-{machine.id}">
+          <div class="disclosure-fold" class:open inert={!open} id="{uid}-details-{machine.id}">
             <div>
               <div class="details" data-testid="machine-updates-card" data-machine-id={machine.id}>
                 <p class="address"><span class="ui-label">{strings.machines.address}</span><span class="value">{machine.store.localCore ? strings.machines.local : carrier !== undefined ? fill(strings.group.through, { machine: carrier.label }) : machine.id}</span></p>
@@ -222,7 +264,7 @@
                       <Settings2 size={14} /><span class="ui-label">{strings.machines.settings}</span>
                     </button>
                   {/if}
-                  {#if machine.store !== primary}
+                  {#if machine.store !== primary && !gone}
                     <button class="ghost small remove" data-testid="machine-remove" onclick={() => void removeMachine(machine, owner)}><Trash2 size={14} /><span class="ui-label">{strings.machines.remove}</span></button>
                   {/if}
                 </div>
@@ -244,7 +286,14 @@
           {/if}
           {#if mobile && machine.store.pairingRequired && (machine.store.error === strings.errors.unpaired || machine.store.error === strings.errors.revoked)}
             <p class="pair-hint">{strings.mobile.pairInstalled}</p>
-          {:else if machine.store.error}<p class="error">{machine.store.error}</p>{/if}
+          <!-- A thread's failure carries the thread's title, never its cause: say it is a thread, and open it. -->
+          {:else if machine.store.error && machine.store.errorThreadId}
+            <div class="error thread-failed" data-testid="machine-thread-failed">
+              <p>{fill(strings.machines.threadFailed, { thread: machine.store.error })}</p>
+              <button class="ghost small" data-testid="machine-thread-failed-open" onclick={() => openFailedThread(machine)}><span class="ui-label">{strings.notify.openThread}</span><ArrowUpRight size={13} /></button>
+            </div>
+          <!-- A remote machine switched off has nothing to explain; this PC's own core failing to start does. A call that found it away repeats its status. -->
+          {:else if machine.store.error && away(machine) !== 'offline' && !(away(machine) === 'lost' && machine.store.errorOffline)}<p class="error">{machine.store.error}</p>{/if}
         </section>
       {/each}
     </div>
@@ -257,8 +306,7 @@
   <MainMachine />
 
   {#if !mobile}
-    <!-- A phone pairs from the computer, never from itself: both cards are the desktop's. -->
-    <PairingCard store={workspace.active} />
+    <!-- How a phone reaches this machine, and its app: the desktop's to set up. -->
     <PhoneSettings store={workspace.active} />
   {/if}
 </div>
@@ -281,25 +329,10 @@
     gap: 16px;
     margin-bottom: 16px;
   }
+  .head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   h1 {
     font-size: var(--text-lg);
     margin: 0;
-  }
-
-  /* Folds on its row height, so a close animates as much as an open. */
-  .reveal {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-2);
-  }
-  .reveal.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-  .reveal > div {
-    overflow: hidden;
-    min-height: 0;
   }
 
   .machines {
@@ -382,18 +415,24 @@
   .status.ready {
     color: var(--color-success);
   }
+  /* Out of reach: grey, still named and still removable. */
+  .away .logo { opacity: 0.5; }
+  .away .machine-name { color: var(--color-muted-foreground); }
+  .away .dot { background: var(--color-subtle); }
+  .away .status { color: var(--color-subtle); }
+  .lost .dot { background: var(--color-danger); }
+  .lost .status { color: var(--color-danger); }
   /* What the machine has to say about its updates, after its connection. */
   .updates { color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .updates::before { content: '·'; margin-right: 6px; color: var(--color-subtle); }
   .updates[data-state='available'] { color: var(--color-accent); }
   .updates[data-state='failed'] { color: var(--color-danger); }
   .fold :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
-  .head :global(.spinning) { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .head :global(.spinning) { animation: spin 1s linear infinite var(--loops); }
   :global(html[data-motion='reduced']) .head :global(.spinning) { animation: none; }
   .fold.open :global(svg) { transform: rotate(180deg); }
   .details { padding: 12px 0 4px 52px; }
-  .address { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+  .address { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .address .value { color: var(--color-subtle); overflow-wrap: anywhere; }
   .detail-actions { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 12px 0 0 -8px; }
   .detail-actions:empty { display: none; }
@@ -441,9 +480,16 @@
     overflow-wrap: anywhere;
     margin-top: 8px;
   }
+  .thread-failed {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .thread-failed p { margin: 0; min-width: 0; }
+  .thread-failed button { flex: none; }
   .pair-hint { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.6; margin: 12px 0 0; }
   @media (prefers-reduced-motion: reduce) {
-    .reveal,
     .fold :global(svg) {
       transition: none;
     }
@@ -472,9 +518,15 @@
     .actions:empty {
       display: none;
     }
+    /* Out of reach, the row has no fold and one small button: it takes the fold's place. */
+    .away .actions {
+      order: 2;
+      width: auto;
+    }
     .actions button {
       min-height: var(--touch-target);
     }
+    .away .actions .icon-only { min-width: var(--touch-target); }
     .icon-choices,
     .details,
     .sync-report {

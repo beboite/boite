@@ -156,7 +156,7 @@ test('a gateway that translates every model keeps proprietary models in their ow
     'codex/qwen3-coder', 'meta/llama-4-maverick']);
 });
 
-test('OpenCode 2 takes the gateway as one more provider: every model but those with a harness of their own', async () => {
+for (const providerId of ['opencode', 'opencode-v2'] as const) test(`${providerId} takes the gateway with its own config schema and advertised Antigravity Claude routes`, async () => {
   const anyApi = ['anthropic', 'openai', 'openai-response'];
   const sent: { key: string | null } = { key: null };
   gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
@@ -167,6 +167,10 @@ test('OpenCode 2 takes the gateway as one more provider: every model but those w
         'codex/o5', 'claude/default', 'codex/qwen3-coder'].map(id => ({ id, name: `Name of ${id}`, supported_endpoint_types: anyApi })),
       // A model the gateway only answers over Messages has no Chat Completions route for OpenCode to call.
       { id: 'kimi/messages-only', supported_endpoint_types: ['anthropic'] },
+      { id: 'antigravity/claude-messages-only', supported_endpoint_types: ['anthropic'] },
+      // Legacy catalogs remain usable, but cannot establish a cross-harness Claude route.
+      { id: 'antigravity/claude-unadvertised' },
+      { id: 'antigravity/gemini-legacy' },
       // An id that could not be a key of OpenCode's configuration is left out rather than written into it.
       { id: 'bad id"}', supported_endpoint_types: anyApi },
     ] });
@@ -175,39 +179,51 @@ test('OpenCode 2 takes the gateway as one more provider: every model but those w
   harness = await startTestCore({ settings: { subscriptionProxy: config(url) } });
   const owner = await harness.connect();
   await owner.call('subscriptionProxy.key', { key: 'gateway-key' });
-  await owner.call('providers.setEnabled', { providerId: 'opencode-v2', enabled: true });
+  await owner.call('providers.setEnabled', { providerId, enabled: true });
   // The gateway is the login: no sign-in of OpenCode's own is asked for.
-  const account = await owner.call('accounts.add', { providerId: 'opencode-v2', label: 'Gateway OpenCode' });
+  const account = await owner.call('accounts.add', { providerId, label: 'Gateway OpenCode' });
   expect(account.status).toBe('ok');
 
   // No OpenCode on a test machine: its own list is missing, the gateway's stands alone.
-  const { models } = await owner.call('providers.probe', { providerId: 'opencode-v2', accountId: account.id });
+  const { models } = await owner.call('providers.probe', { providerId, accountId: account.id });
   expect(sent.key).toBe('Bearer gateway-key');
-  // Claude, GPT and Grok stay in Claude Code, Codex and Grok, whatever route the gateway gives them.
-  expect(models.map(model => model.id)).toEqual(['douane/antigravity/gemini-3-flash', 'douane/antigravity/gpt-oss-120b-medium',
-    'douane/muse/muse-code', 'douane/opencode_go/kimi-k3', 'douane/codex/qwen3-coder']);
-  expect(models[0]).toEqual({ id: 'douane/antigravity/gemini-3-flash', name: 'Name of antigravity/gemini-3-flash' });
+  // Only explicitly advertised Antigravity Claude routes cross the native-harness boundary.
+  expect(models.map(model => model.id)).toEqual(['douane/antigravity/claude-sonnet-5-5-high', 'douane/antigravity/gemini-3-flash', 'douane/antigravity/gpt-oss-120b-medium',
+    'douane/muse/muse-code', 'douane/opencode_go/kimi-k3', 'douane/codex/qwen3-coder', 'douane/antigravity/gemini-legacy']);
+  expect(models[0]).toEqual({ id: 'douane/antigravity/claude-sonnet-5-5-high', name: 'Name of antigravity/claude-sonnet-5-5-high' });
 
-  const provider = harness.core.providers.require('opencode-v2');
+  const provider = harness.core.providers.require(providerId);
+  const collection = providerId === 'opencode' ? 'provider' : 'providers';
+  const original = JSON.parse(Object.values(provider.profiles)[0]!.env!['OPENCODE_CONFIG_CONTENT']!);
+  expect(original).toEqual(providerId === 'opencode'
+    ? { permission: { task: 'deny' } }
+    : { permissions: [{ action: 'subagent', resource: '*', effect: 'deny' }] });
+  const base = { ...original, [collection]: { existing: { name: 'Existing provider' } } };
+  for (const profile of Object.values(provider.profiles)) profile.env = { ...profile.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(base) };
   const env = subscriptionProxyEnv(harness.core, provider);
   expect(Object.keys(env).sort()).toEqual(['BOITE_SUBSCRIPTION_PROXY_KEY', 'BOITE_SUBSCRIPTION_PROXY_PREFIX', 'OPENCODE_CONFIG_CONTENT']);
   expect(env['BOITE_SUBSCRIPTION_PROXY_KEY']).toBe('gateway-key');
   expect(env['BOITE_SUBSCRIPTION_PROXY_PREFIX']).toBe('douane/');
   // The key is named, never written: OpenCode reads it from its environment.
   expect(env['OPENCODE_CONFIG_CONTENT']).not.toContain('gateway-key');
+  const catalog = {
+    'antigravity/claude-sonnet-5-5-high': { name: 'Name of antigravity/claude-sonnet-5-5-high' },
+    'antigravity/gemini-3-flash': { name: 'Name of antigravity/gemini-3-flash' },
+    'antigravity/gpt-oss-120b-medium': { name: 'Name of antigravity/gpt-oss-120b-medium' },
+    'muse/muse-code': { name: 'Name of muse/muse-code' },
+    'opencode_go/kimi-k3': { name: 'Name of opencode_go/kimi-k3' },
+    'codex/qwen3-coder': { name: 'Name of codex/qwen3-coder' },
+    'antigravity/gemini-legacy': { name: 'antigravity/gemini-legacy' },
+  };
+  const integration = providerId === 'opencode' ? {
+    npm: '@ai-sdk/openai-compatible', name: 'Douane',
+    options: { baseURL: url, apiKey: '{env:BOITE_SUBSCRIPTION_PROXY_KEY}' }, models: catalog,
+  } : {
+    package: '@opencode/ai/providers/openai-compatible', name: 'Douane',
+    settings: { baseURL: url }, env: ['BOITE_SUBSCRIPTION_PROXY_KEY'], models: catalog,
+  };
   expect(JSON.parse(env['OPENCODE_CONFIG_CONTENT']!)).toEqual({
-    // What the descriptor already sends stays: OpenCode's own subagents are denied.
-    permissions: [{ action: 'subagent', resource: '*', effect: 'deny' }],
-    providers: { douane: {
-      package: '@opencode/ai/providers/openai-compatible', name: 'Douane', settings: { baseURL: url }, env: ['BOITE_SUBSCRIPTION_PROXY_KEY'],
-      models: {
-        'antigravity/gemini-3-flash': { name: 'Name of antigravity/gemini-3-flash' },
-        'antigravity/gpt-oss-120b-medium': { name: 'Name of antigravity/gpt-oss-120b-medium' },
-        'muse/muse-code': { name: 'Name of muse/muse-code' },
-        'opencode_go/kimi-k3': { name: 'Name of opencode_go/kimi-k3' },
-        'codex/qwen3-coder': { name: 'Name of codex/qwen3-coder' },
-      },
-    } },
+    ...base, [collection]: { existing: { name: 'Existing provider' }, douane: integration },
   });
   // The account's whole environment carries it, over the descriptor's own inline configuration.
   expect(harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider)['OPENCODE_CONFIG_CONTENT']).toBe(env['OPENCODE_CONFIG_CONTENT']);
@@ -216,11 +232,61 @@ test('OpenCode 2 takes the gateway as one more provider: every model but those w
   await owner.call('settings.set', { subscriptionProxy: { ...config(url), enabled: false } });
   expect(subscriptionProxyEnv(harness.core, provider)).toEqual({});
   expect(harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider)['OPENCODE_CONFIG_CONTENT'])
-    .toBe('{"permissions":[{"action":"subagent","resource":"*","effect":"deny"}]}');
+    .toBe(JSON.stringify(base));
   expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
-  // OpenCode 1 speaks ACP too and is not served: the proxy is decided per provider.
-  await owner.call('settings.set', { subscriptionProxy: config(url) });
-  expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('opencode'))).toEqual({});
+  // Sharing ACP does not opt other agents into OpenCode's gateway configuration.
+  await owner.call('settings.set', { subscriptionProxy: config(url, 'cliproxyapi') });
+  const switched = JSON.parse(subscriptionProxyEnv(harness.core, provider)['OPENCODE_CONFIG_CONTENT']!);
+  expect(switched[collection].cliproxyapi.models).toEqual(catalog);
+  expect(switched[collection].douane).toBeUndefined();
+  expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('antigravity'))).toEqual({});
+});
+
+for (const providerId of ['opencode', 'opencode-v2'] as const) test(`${providerId} preserves gateway thinking and token limits without inventing legacy capabilities`, async () => {
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    return Response.json({ data: [
+      { id: 'antigravity/claude-opus-4-6-thinking', name: 'Opus thinking', supported_endpoint_types: ['openai'],
+        context_length: 200_000, max_output_tokens: 64_000,
+        thinking: { min: 1024, max: 32_768, zero_allowed: false, dynamic_allowed: true, levels: [] } },
+      { id: 'antigravity/gemini-alias', supported_endpoint_types: ['openai'], context_window: 8192, max_output_tokens: 4096, thinking: null },
+      { id: 'antigravity/gemini-invalid', context_length: '200000', max_output_tokens: -1, thinking: { min: -1, max: '32000', levels: [] } },
+      { id: 'antigravity/gemini-effort-only', supported_endpoint_types: ['openai'],
+        supportedReasoningEfforts: [{ reasoningEffort: 'high' }] },
+      { id: 'antigravity/gemini-context-only', supported_endpoint_types: ['openai'], context_length: 8192 },
+      { id: 'antigravity/gemini-output-only', supported_endpoint_types: ['openai'], max_output_tokens: 4096 },
+      { id: 'antigravity/gemini-invalid-output', supported_endpoint_types: ['openai'], context_length: 8192, max_output_tokens: -1 },
+      { id: 'antigravity/gemini-invalid-context', supported_endpoint_types: ['openai'], context_length: '8192', max_output_tokens: 4096 },
+    ] });
+  } });
+  harness = await startTestCore({ settings: { subscriptionProxy: config(`http://127.0.0.1:${gateway.port}/v1`) } });
+  const provider = harness.core.providers.require(providerId);
+  const models = await readSubscriptionProxyModels(harness.core, provider);
+  expect(models?.[0]?.id).toBe('douane/antigravity/claude-opus-4-6-thinking');
+  // The inline config is rebuilt from the persisted catalog, including after later spawns.
+  const injected = JSON.parse(subscriptionProxyEnv(harness.core, provider)['OPENCODE_CONFIG_CONTENT']!);
+  const catalog = injected[providerId === 'opencode' ? 'provider' : 'providers'].douane.models;
+  expect(catalog['antigravity/claude-opus-4-6-thinking']).toEqual({
+    name: 'Opus thinking', limit: { context: 200_000, output: 64_000 },
+    ...(providerId === 'opencode'
+      ? { reasoning: true, interleaved: { field: 'reasoning_content' } }
+      : { compatibility: { reasoningField: 'reasoning_content' } }),
+  });
+  expect(catalog['antigravity/gemini-alias']).toEqual({ name: 'antigravity/gemini-alias', limit: { context: 8192, output: 4096 } });
+  expect(catalog['antigravity/gemini-invalid']).toEqual({ name: 'antigravity/gemini-invalid' });
+  expect(catalog['antigravity/gemini-effort-only']).toEqual({ name: 'antigravity/gemini-effort-only',
+    ...(providerId === 'opencode'
+      ? { reasoning: true, interleaved: { field: 'reasoning_content' } }
+      : { compatibility: { reasoningField: 'reasoning_content' } }),
+  });
+  // OpenCode 1 requires both limits when the block is present; OpenCode 2 accepts each independently.
+  for (const [id, limit] of [
+    ['antigravity/gemini-context-only', { context: 8192 }],
+    ['antigravity/gemini-output-only', { output: 4096 }],
+    ['antigravity/gemini-invalid-output', { context: 8192 }],
+    ['antigravity/gemini-invalid-context', { output: 4096 }],
+  ] as const) {
+    expect(catalog[id]).toEqual({ name: id, ...(providerId === 'opencode-v2' ? { limit } : {}) });
+  }
 });
 
 test('Grok runs through Douane by its environment alone, and keeps its own sign-in behind CLIProxyAPI', async () => {
@@ -308,6 +374,13 @@ test('native discovery describes the models and the gateway adds only what it ro
   const proxy = [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5', default: true }, { id: 'antigravity/claude-sonnet-5', name: 'Sonnet', default: false }];
   expect(mergeProxyModels(native, proxy)).toEqual([native[0]!, proxy[1]!]);
   expect(mergeProxyModels([], proxy)).toBe(proxy);
+});
+
+test('a model the gateway names after its subscription is the native one, not a second entry', () => {
+  const native = [{ id: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', default: true, speeds: [{ id: 'priority', label: 'Fast' }] }];
+  const proxy = [{ id: 'codex/gpt-6.1-sol', name: 'GPT 6.1 Sol', default: true }, { id: 'codex/codex-auto-review', name: 'Auto review', default: false },
+    { id: 'antigravity/gpt-6.1-sol', name: 'Other pool', default: false }];
+  expect(mergeProxyModels(native, proxy)).toEqual([native[0]!, proxy[1]!, proxy[2]!]);
 });
 
 test('a Claude child drops the parent session markers and keeps the account variables', () => {

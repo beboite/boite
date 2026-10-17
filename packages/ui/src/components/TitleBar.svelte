@@ -165,7 +165,7 @@
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" /></svg>
       {/if}
     </button>
-    <button type="button" class="ctl close" aria-label={strings.titlebar.close} title={strings.titlebar.close} data-testid="titlebar-close" onclick={() => void close()}>
+    <button type="button" class="ctl close" aria-label={strings.common.close} title={strings.common.close} data-testid="titlebar-close" onclick={() => void close()}>
       <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="m0.5 0.5 9 9m0-9-9 9" /></svg>
     </button>
   </div>

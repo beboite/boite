@@ -21,8 +21,10 @@ export interface ProjectIconRow {
 
 export interface ThreadRow {
   done_at?: number | null;
+  archived_at?: number | null;
   fork_origin?: string | null;
   parent_thread_id: string | null;
+  context_mode?: string | null;
   last_user_message_at?: number | null;
   id: string;
   project_id: string | null;
@@ -118,6 +120,7 @@ export function toThread(row: ThreadRow): ThreadSummary {
   return {
     ...(row.fork_origin ? { forkOrigin: parseJson<ThreadSummary['forkOrigin']>(row.fork_origin, `threads.fork_origin of ${row.id}`) } : {}),
     ...(row.parent_thread_id ? { parentThreadId: row.parent_thread_id } : {}),
+    ...(row.context_mode ? { contextMode: parseJson<ThreadSummary['contextMode']>(row.context_mode, `threads.context_mode of ${row.id}`) } : {}),
     lastUserMessageAt: row.last_user_message_at ?? null,
     id: row.id,
     projectId: row.project_id,
@@ -139,6 +142,7 @@ export function toThread(row: ThreadRow): ThreadSummary {
     unread: row.unread !== 0,
     archived: row.archived !== 0,
     ...(row.done_at != null ? { doneAt: row.done_at } : {}),
+    ...(row.archived !== 0 && row.archived_at != null ? { archivedAt: row.archived_at } : {}),
     pinned: row.pinned !== 0,
     sessionId: row.session_id,
     ...(row.session_resume_at ? { sessionResumeAt: row.session_resume_at } : {}),

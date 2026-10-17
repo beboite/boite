@@ -24,12 +24,22 @@ export function projectMethods(ctx: FakeContext) {
           if (thread.projectId !== project.id || !thread.archived || thread.parentThreadId || thread.archiveReason?.type !== 'pr-merged') continue;
           thread.archived = false;
           thread.doneAt = null;
+          thread.archivedAt = null;
           delete thread.archiveReason;
           const state = ctx.mergedPrArchive.get(thread.id);
           if (state) ctx.mergedPrArchive.set(thread.id, { ...state, generation: state.generation + 1 });
           ctx.touch(thread);
         }
       }
+      const summary = describedProject(ctx, project);
+      ctx.emit('project.updated', summary);
+      return summary;
+    },
+    'projects.setAutoRemoveWorktrees': async (params) => {
+      const project = ctx.projects.find(project => project.id === params.projectId);
+      if (!project) throw ctx.notFound('project', params.projectId);
+      if (typeof params.enabled !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'projects.setAutoRemoveWorktrees.enabled must be a boolean', data: { field: 'enabled', expected: 'true or false' } });
+      project.autoRemoveWorktrees = params.enabled;
       const summary = describedProject(ctx, project);
       ctx.emit('project.updated', summary);
       return summary;

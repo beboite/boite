@@ -53,11 +53,13 @@ models` lists the choices.
 | `model` | Optional. `provider/model`, a model id or a unique part of one, matched like `delegate spawn --model`. Refused when the owner turned off "Let the agent choose the model" and it is not a suggested one |
 | `effort` | Optional. One of the model's reasoning levels. Left out: the parent's level on the same model, else the model's default |
 | `profile` | Optional. A delegation profile id of this thread. Left out with no `model`, the step runs on the conversation's model |
+| `context` | Optional. A [context mode](context-modes.md): `"light"`, `"neutral"` or `{ "preset", "keep", "drop", "tools", "rules" }`. Checked against the step's provider before anything starts |
 | `task` | The brief. `{{step}}`, `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts |
 | `after` | Steps that must end first. A step named in `forEach`, `when` or the task is added automatically |
 | `forEach` | A path to a list. The step runs once per item |
 | `when` | `{ "path", "equals" }`, `{ "path", "notEmpty": true }` or `{ "path", "empty": true }`. A false condition skips the step |
 | `output` | The JSON shape the step must return: `"string"`, `"number"`, `"boolean"`, `"any"`, `[shape]` or `{ "key": shape }` |
+| `worktree` | Optional. `true` runs the step in a git worktree of its own on a new branch from the conversation's HEAD, as `delegate spawn --worktree` does ([delegation](delegation.md#children-in-their-own-worktree)). The step's `worktree` record, `boite workflow show` and the run's summary name the branch to merge, or say it was removed with nothing in it |
 
 A path reads a step's structured output, or its final answer when it has none.
 On a fanned-out step, `review.bugs` collects the bugs of every item into one
@@ -85,7 +87,9 @@ it does not bypass the scheduler with a detached callback.
 
 The step's brief tells it where it sits in the run, that other steps share the
 checkout, and that its answer is collected automatically. Steps share the
-parent's working directory: give parallel steps distinct files.
+parent's working directory: give parallel steps distinct files, or set
+`worktree` on a step so it works on a branch of its own and is told to commit
+there. A step's result is collected once its worktree is kept or removed.
 
 ## Limits
 
@@ -109,7 +113,9 @@ summary goes back to the conversation. `boite workflow retry <run-id> <step>`
 runs the failed executions again in their own conversations, with the previous
 error in the prompt; an execution whose conversation was archived since gets a
 new one. The executions held back as "Not started" wait again with it, in any
-step.
+step. Without a step, retry runs every failed step. While another step stays
+failed, retrying one named step is refused with the names of the steps that
+still hold the run, and nothing changes.
 
 Handing the summary back is a turn of the parent. If the team is paused before
 delivery, the run keeps the reason as `deliveryError` and the panel shows it.
@@ -118,19 +124,43 @@ the team.
 
 Stop cancels every running step and marks the steps that did not start as
 stopped; retry runs them again. Stopping or archiving the parent conversation
-stops its runs too. A parent turn that ends in an error pauses every running
-run, and the team when there is one, until the owner resumes it. A team that is
+stops its runs too. A parent turn that ends in an error or is cut by the system
+(a provider at capacity, an agent update) pauses nothing: its runs go on and
+their summary reaches it when they end. A team that is
 merely disabled holds nothing: only a paused one does. Pause launches nothing new, but
 the steps already running still finish, and a paused run whose every step ended
-is done. A core restart never resumes paid work by itself: running runs pause,
-and each interrupted execution waits on its own thread. Resume runs it again
-with "Interrupted by a core restart" in its prompt.
+is done.
 
-Resume is an owner action. An agent pauses, stops, retries and extends only the
-runs it started, and retries none while the run is paused. An agent saves new
-templates but never replaces one already saved under that name. A paired phone
-can follow a run and stop it; Pause is not offered there, since only the owner
-resumes.
+An update or a restart from the app hands the run over: each running step is
+cut at its next tool boundary and waits again with "Interrupted by a core
+restart", the run stays running, and the next core runs those steps again with
+that line in their prompt ([restart handoff](restart-handoff.md)). After a
+crash, or a handoff older than an hour, nothing resumes paid work by itself:
+running runs pause, marked as held by a restart, and each interrupted execution
+waits on its own thread. Resume runs it again with the same line in its prompt.
+
+A step sent back to work in its own conversation still counts for its run. When
+the owner stops a step, the run fails with it; a turn started later in that
+step's conversation, by the owner or a letter, takes the step back: the run
+runs again, the "Not started" executions wait again, and the step's answer
+feeds the steps after it as if it had never stopped. A paused run takes such a
+turn too, since the turn runs either way; the pause still holds the steps after
+it until the run resumes.
+
+A pause records who set it (`pausedBy`), and that decides who lifts it:
+
+| Paused by | The agent that started the run resumes or retries it |
+| --- | --- |
+| The agent itself | at any time |
+| A restart | at any time |
+| The owner's Pause | once the owner wrote to the conversation again |
+| The team's pause in Subagents > Settings | never; the run takes the team's origin |
+
+`boite delegate resume` resumes every run a pause held that the agent may lift,
+with the team. The owner resumes any of them. An agent pauses, stops, retries
+and extends only the runs it started. An agent saves new templates but never
+replaces one already saved under that name. A paired phone can follow a run and
+stop it; Pause is not offered there, since a phone resumes nothing.
 
 The summary reaches the conversation once it is idle. When the run ends during
 one of its turns, delivery waits for that turn to finish.
@@ -152,10 +182,11 @@ with more steps than fit turns the run into a plain list of phases. A card
 shows the step's status, its model, `done/total` and a segmented bar for a
 fan-out, and its elapsed time.
 
-Clicking a step opens its detail: dependencies, condition, each execution, its
-structured output and its conversation streaming live in the height left
-below. "Open conversation" jumps to the step's own thread. The arrow in the run's
-header goes back to the list. Templates are saved, listed and started from the
+Clicking a step run by one subagent opens that subagent's conversation in the
+chat, under a "parent / step" header. A step with several executions, or none
+started yet, opens its detail: dependencies, condition, each execution and its
+structured output, with "Open conversation" for the execution picked. The arrow
+in the run's header goes back to the list. Templates are saved, listed and started from the
 CLI only.
 
 Captures: [the graph on the desktop](images/workflow-desktop.png) · [a step's

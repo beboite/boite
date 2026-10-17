@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { ChevronRight, CircleAlert, RefreshCw } from '@lucide/svelte';
   import { RpcErrorCode, type HookRun, type HooksStatus, type ProviderHooks } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
-  import { clockTime, count as figure, exactTime } from '../lib/format';
+  import { clockTime, count as figure, exactTime, providerName } from '../lib/format';
   import { formatLocale } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
@@ -44,7 +45,7 @@
       if (current !== revision) return;
       // An older core has no `hooks.status`: that is a version to update, not a failure.
       if (cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound) missing = true;
-      else error = cause instanceof Error ? cause.message : String(cause);
+      else error = errorText(cause);
     } finally {
       if (current === revision) loading = false;
     }
@@ -113,7 +114,7 @@
 
   /** Agent, event, hook. `PreToolUse:Bash` already names its event; a file name does not. */
   function runParts(run: HookRun): string[] {
-    const agent = names.get(run.providerId) ?? store.providerOf(run.providerId)?.name ?? run.providerId;
+    const agent = names.get(run.providerId) ?? providerName(store, run.providerId);
     if (!run.name || run.name === run.event || run.name.startsWith(`${run.event}:`)) return [agent, run.name || run.event];
     return [agent, run.event, run.name];
   }
@@ -159,7 +160,7 @@
                   {#each counters(provider) as counter, index (counter.kind)}{#if index > 0}{' '}<span class="dot" aria-hidden="true">·</span>{' '}{/if}<span class={counter.kind}>{counter.text}</span>{/each}
                 </span>
               {/if}
-              <ChevronRight size={14} class="chevron" />
+              <ChevronRight size={14} class="fold-caret" />
             </summary>
             <div class="detail">
               {#each provider.sources as source (source.path)}
@@ -223,8 +224,7 @@
   .counters .blocked { color: var(--color-foreground); }
   .counters .failed { color: var(--color-danger); }
   .counters .skipped { color: var(--color-live); }
-  summary :global(.chevron) { color: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
-  details[open] > summary :global(.chevron) { transform: rotate(90deg); }
+  summary :global(.fold-caret) { color: var(--color-muted-foreground); }
   /* A phone gives the counters their own line under the name, the chevron staying on the first. */
   @container (max-width: 480px) {
     .counters { order: 1; flex-basis: 100%; padding-left: 26px; }

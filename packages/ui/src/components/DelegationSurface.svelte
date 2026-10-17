@@ -1,28 +1,29 @@
 <script lang="ts">
-  import { ArrowLeft, Pause, Play, Plus, Settings, Square, Trash2, UsersRound, Workflow } from '@lucide/svelte';
-  import { onDestroy } from 'svelte';
-  import { DEFAULT_DELEGATION_CONFIG, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
+  import ContextModeBadge from './ContextModeBadge.svelte';
+  import { Pause, Play, Plus, RotateCcw, Settings, Square, Trash2, UsersRound, Workflow } from '@lucide/svelte';
+  import { DEFAULT_DELEGATION_CONFIG, threadActive, threadBusy, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
-  import { formatTokens } from '../lib/tokens';
+  import { effortName, formatTokens, providerName } from '../lib/format';
+  import { totalTokens } from '../lib/usage';
   import { modelLogoId, modelMakerName } from '../lib/provider-logos';
   import { isLive, runProgress } from '../lib/workflow-view';
   import EffortSlider from './EffortSlider.svelte';
-  import DelegationTranscript from './DelegationTranscript.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
-  import AgentElapsed from './AgentElapsed.svelte';
+  import { threadTone, workflowTone } from '../lib/thread-state';
+  import Elapsed from './Elapsed.svelte';
   import NativeAgents from './NativeAgents.svelte';
-  import WorkflowMark from './WorkflowMark.svelte';
   import WorkflowRunPane from './WorkflowRunPane.svelte';
   import { agentProgress } from '../lib/delegation-progress';
 
   /**
    * What this conversation handed out: its workflow runs, its subagents and the
-   * provider's own. A run opens its graph, a subagent its conversation. Nothing
-   * is launched from here; the agent does that.
+   * provider's own. A run opens its graph here; a subagent opens in the chat,
+   * whose header names the parent above it. Nothing is launched from here; the
+   * agent does that.
    */
   let { store, surface, panel }: { store: Store; surface: Surface; panel: BoundPanel } = $props();
   let settings = $state(false);
@@ -35,13 +36,14 @@
   let agents = $derived(view?.agents ?? []);
   let native = $derived((view?.nativeAgents ?? []).filter(agent => agent.source !== 'process'));
   let processes = $derived((view?.nativeAgents ?? []).filter(agent => agent.source === 'process'));
-  let selected = $derived(agents.find(agent => agent.thread.id === store.delegationSelectedAgentId) ?? null);
   let liveAgents = $derived(agents.filter(agent => agentProgress(agent).active));
   /** Finished subagents, the most recent first: the one that just reported is the one to read. */
   let doneAgents = $derived(agents.filter(agent => !agentProgress(agent).active).sort((a, b) => endOf(b) - endOf(a)));
   let liveRuns = $derived(runs.filter(isLive));
   let doneRuns = $derived(runs.filter(entry => !isLive(entry)));
-  let busy = $derived(agents.some(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)) || runs.some(isLive));
+  let busy = $derived(agents.some(agent => threadBusy(agent.thread)) || runs.some(isLive));
+  /** The interrupted subagents a Resume was just sent to: the button stays off until the core answers. */
+  let resuming = $state(new Set<string>());
 
   $effect(() => {
     const threadId = openThreadId;
@@ -50,7 +52,6 @@
     void store.loadDelegation(threadId);
     void store.loadWorkflows(threadId);
   });
-  onDestroy(() => { void store.selectDelegatedAgent(null); });
 
   function showRun(runId: string | undefined): void {
     panel.update(surface.id, { runId });
@@ -107,43 +108,59 @@
   function routeOf(agent: Agent) {
     const thread = agent.thread;
     const model = store.modelOf({ providerId: thread.providerId, accountId: thread.accountId, model: thread.model, effort: thread.effort, permissionMode: 'default', speed: null });
-    const provider = store.providerOf(thread.providerId)?.name ?? thread.providerId;
+    const provider = providerName(store, thread.providerId);
     const name = model?.name ?? thread.model ?? strings.thread.defaultModel;
-    const effort = thread.effort ? model?.effort?.levels.find(level => level.id === thread.effort)?.label ?? thread.effort : null;
+    const effort = thread.effort ? effortName(model, thread.effort) : null;
     const logo = modelLogoId(thread.providerId, thread.model ?? model?.id);
     return { provider, maker: modelMakerName(logo, thread.providerId) ?? provider, name, effort, logo, label: [provider, name, effort].filter(Boolean).join(' · ') };
   }
 
   function tokensOf(agent: Agent): number | null {
     const usage = agent.lastTurn?.usage;
-    return usage ? usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens : null;
+    return usage ? totalTokens(usage) : null;
   }
 
-  /** Completed goes without saying under Finished; a stop or a failure does not. */
+  /** Completed goes without saying under Finished; a stop, a failure or an interruption does not. */
   function outcomeOf(agent: Agent): string | null {
     const status = agentProgress(agent).status;
-    return status === 'stopped' ? strings.delegation.stoppedStatus : status === 'error' ? strings.delegation.failedStatus : null;
+    return status === 'stopped' ? strings.delegation.stoppedStatus : status === 'error' ? strings.delegation.failedStatus
+      : status === 'interrupted' ? strings.delegation.interruptedStatus : status === 'background' ? strings.delegation.waitingStatus : null;
   }
 
-  async function openChild(): Promise<void> {
-    if (!selected) return;
-    const id = selected.thread.id;
-    await store.selectDelegatedAgent(null);
-    await store.open(id);
+  /** At work in its turn, or waiting on its own background work: the mark shows it running either way. */
+  function markOf(agent: Agent) {
+    return threadActive(agent.thread.status) ? threadTone(agent.thread.status) : { tone: 'running' as const, label: strings.delegation.waitingStatus };
+  }
+
+  /** Sends an interrupted subagent the note that wakes it, once: its next turn clears the interruption. */
+  async function resume(agent: Agent): Promise<void> {
+    const wait = agent.thread.backgroundWait;
+    if (wait?.state !== 'interrupted' || resuming.has(agent.thread.id)) return;
+    resuming = new Set([...resuming, agent.thread.id]);
+    try {
+      await store.messageDelegatedAgent(agent.thread.id, fill(strings.delegation.resumeAgentText, { what: wait.for, reason: strings.sidebar.state.interruption[wait.reason] }));
+    } finally {
+      resuming = new Set([...resuming].filter(id => id !== agent.thread.id));
+    }
+  }
+
+  /** A subagent reads like any conversation: it opens in the chat, not in this panel. */
+  function openChild(agent: Agent): void {
+    void store.open(agent.thread.id);
   }
 </script>
 
 {#snippet runRow(entry: (typeof runs)[number])}
   {@const progress = runProgress(entry)}
   <button type="button" class="member" data-testid="delegation-run" data-run-id={entry.id} onclick={() => showRun(entry.id)}>
-    <span class="avatar run"><Workflow size={16} strokeWidth={1.75} /><span class="dot"><WorkflowMark status={entry.status} run /></span></span>
+    <span class="avatar run"><Workflow size={16} strokeWidth={1.75} /><StatusMark {...workflowTone(entry.status, true)} corner /></span>
     <span class="member-main">
       <strong class="title"><span class="ui-label">{entry.name}</span></strong>
       <span class="route"><span class="ui-label">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span></span>
     </span>
     <span class="meta">
       {#if !isLive(entry)}<span class="outcome ui-label" data-status={entry.status}>{strings.workflow.status[entry.status]}</span>{/if}
-      <AgentElapsed startedAt={entry.createdAt} finishedAt={entry.finishedAt} active={entry.status === 'running'} />
+      <Elapsed startedAt={entry.createdAt} finishedAt={entry.finishedAt} active={entry.status === 'running'} />
     </span>
   </button>
 {/snippet}
@@ -153,24 +170,36 @@
   {@const route = routeOf(agent)}
   {@const tokens = tokensOf(agent)}
   {@const outcome = outcomeOf(agent)}
-  <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
+  {@const wait = agent.thread.backgroundWait ?? null}
+  <button type="button" class="member" data-testid="delegation-member" data-agent-id={agent.thread.id} data-status={progress.status} data-preload-thread={agent.thread.id} onclick={() => openChild(agent)}>
     <span class="avatar" role="img" aria-label={route.maker} title={route.maker}>
       <ProviderLogo providerId={route.logo} size={20} />
-      {#if progress.active}<span class="dot"><StatusMark status={agent.thread.status} /></span>{/if}
+      {#if progress.active}<StatusMark {...markOf(agent)} corner />{/if}
     </span>
     <span class="member-main">
       <strong class="title"><span class="ui-label">{agent.thread.title}</span></strong>
       <span class="route" data-testid="delegation-member-route" title={route.label}>
         <span class="model ui-label">{route.name}</span>{#if route.effort}<span class="effort ui-label">{route.effort}</span>{/if}
+        {#if agent.thread.contextMode}<ContextModeBadge mode={agent.thread.contextMode} compact testid="delegation-member-context" />{/if}
       </span>
     </span>
     <span class="meta">
       {#if outcome}<span class="outcome ui-label" data-status={progress.status}>{outcome}</span>{/if}
-      <AgentElapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />
+      <Elapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />
       {#if tokens !== null}<span class="tokens ui-label">{formatTokens(tokens)} {strings.units.tokens}</span>{/if}
     </span>
+    {#if wait?.state === 'waiting'}
+      <span class="note" data-testid="delegation-member-wait"><span class="ui-label">{fill(strings.sidebar.state.awaiting, { what: wait.for })}</span><Elapsed startedAt={wait.since} finishedAt={null} active /></span>
+    {:else if wait?.state === 'interrupted'}
+      <span class="note interrupted" data-testid="delegation-member-wait"><span class="ui-label">{fill(strings.sidebar.state.interruptedBy, { what: wait.for, reason: strings.sidebar.state.interruption[wait.reason] })}</span></span>
+    {/if}
     {#if agent.result}<span class="result"><span>{agent.result}</span></span>{/if}
   </button>
+  {#if wait?.state === 'interrupted'}
+    <div class="resume-row">
+      <button type="button" class="quiet small" data-testid="delegation-resume" title={strings.delegation.resumeAgentHint} disabled={resuming.has(agent.thread.id)} onclick={() => void resume(agent)}><RotateCcw size={12} /><span class="ui-label">{strings.delegation.resumeAgent}</span></button>
+    </div>
+  {/if}
 {/snippet}
 
 <section class="delegation" data-testid="delegation-surface">
@@ -214,7 +243,7 @@
               <input aria-label={strings.delegation.profileLabel} value={profile.name} maxlength="80" onchange={(event) => patchProfile(profile, { name: event.currentTarget.value })} />
               <ModelPicker {store} {choice} onpick={(patch) => pickProfile(profile, patch)} disabled={store.delegationSaving} />
               {#if model?.effort?.levels.length}
-                <EffortSlider levels={model.effort.levels} active={profile.effort ?? model.effort.default} onpick={(effort) => patchProfile(profile, { effort })} />
+                <EffortSlider levels={model.effort.levels} active={profile.effort ?? model.effort.default ?? null} onpick={(effort) => patchProfile(profile, { effort })} />
               {/if}
               <button type="button" class="ghost small icon" aria-label={strings.delegation.removeProfile} onclick={() => save({ profiles: config.profiles.filter(entry => entry.id !== profile.id)})}><Trash2 size={14} /></button>
             </div>
@@ -228,7 +257,7 @@
         {/if}
       </div>
     {:else if view}
-      <div class="team" class:detail={selected !== null}>
+      <div class="team">
         <div class="members" aria-label={strings.delegation.heading}>
           {#if liveRuns.length || liveAgents.length}
             <section class="group" data-testid="delegation-active">
@@ -246,23 +275,10 @@
           {/if}
         </div>
 
-        {#if selected}
-          <article class="detail-pane" data-testid="delegation-detail">
-            <header>
-              <button type="button" class="ghost small icon back" aria-label={strings.delegation.backToTeam} onclick={() => void store.selectDelegatedAgent(null)}><ArrowLeft size={15} /></button>
-              <div><strong>{selected.thread.title}</strong><small>{routeOf(selected).label}</small></div>
-              <button type="button" class="quiet small" data-testid="delegation-open-thread" onclick={() => void openChild()}><span class="ui-label">{strings.delegation.openThread}</span></button>
-              {#if ['queued', 'running', 'waiting'].includes(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stop}</span></button>{/if}
-            </header>
-            {#if store.delegationThread}
-              <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>
-            {/if}
-          </article>
-        {/if}
       </div>
       {#if !agents.length && !runs.length && !native.length && !processes.length}<p class="empty" data-testid="delegation-empty">{config.enabled ? strings.delegation.empty : strings.delegation.enabledHint}</p>{/if}
-      {#if !selected && native.length}<NativeAgents agents={native} />{/if}
-      {#if !selected && processes.length}<NativeAgents agents={processes} source="process" />{/if}
+      {#if native.length}<NativeAgents agents={native} />{/if}
+      {#if processes.length}<NativeAgents agents={processes} source="process" />{/if}
     {/if}
 
     {#if store.delegationError}<p class="error" role="alert">{store.delegationError}</p>{/if}
@@ -280,32 +296,24 @@
   .settings { flex: none; padding: 4px 16px 14px; }
   .profiles-head { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .error { margin: 12px 16px; color: var(--color-danger); font-size: var(--text-sm); }
-  .team:not(.detail) { flex: none; }
   .switch-row { min-height: var(--control-lg); padding: 6px 0; display: flex; align-items: center; gap: 14px; }
   .switch-row > span, .profiles-head > span { flex: 1; min-width: 0; }
   .switch-row small, .profiles-head small { display: block; margin-top: 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.4; font-weight: normal; }
   .empty { margin: 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
-  input[role='switch'] { appearance: none; position: relative; width: 40px; height: 24px; min-height: 24px; padding: 0; border-radius: 999px; background: var(--color-surface-3); }
-  input[role='switch']::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
-  input[role='switch']:checked { background: var(--color-foreground); }
-  input[role='switch']:checked::after { transform: translateX(16px); background: var(--color-background); }
   .profiles { margin-top: 7px; display: grid; gap: 5px; }
   .profile { display: grid; grid-template-columns: minmax(90px, .8fr) minmax(140px, 1fr) auto var(--control-sm); gap: 6px; align-items: center; }
   .profile > input { min-width: 0; }
   .pause { margin-top: 10px; }
-  .team { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }
-  .team.detail { grid-template-columns: minmax(160px, .42fr) minmax(0, 1fr); }
-  .team.detail .members { border-right: 1px solid var(--color-border); }
+  .team { flex: none; display: grid; grid-template-columns: 1fr; }
   .members { min-height: 0; padding: 4px 8px 10px; overflow-y: auto; }
   .group + .group { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--color-border); }
   .group-head { padding: 10px 9px 6px; display: flex; align-items: center; gap: 6px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 600; }
   .group-head .count { padding: 1px 6px; border-radius: 999px; background: var(--color-surface-3); font-variant-numeric: tabular-nums; font-weight: 500; }
   .member { width: 100%; height: auto; padding: 10px 9px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0 10px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; text-align: left; }
   .member + .member { margin-top: 2px; }
-  .member:hover, .member.selected { background: var(--color-hover); border-color: var(--color-border); }
-  .avatar { position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface-2); border: 1px solid var(--color-border); }
+  .member:hover { background: var(--color-hover); border-color: var(--color-border); }
+  .avatar { --ring: var(--color-background); position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface-2); border: 1px solid var(--color-border); }
   .avatar.run { color: var(--color-muted-foreground); }
-  .avatar .dot { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; padding: 2px; border-radius: 50%; background: var(--color-background); }
   .member-main { min-width: 0; display: grid; gap: 6px; padding-top: 1px; }
   .title { min-width: 0; font-size: var(--text-sm); font-weight: 600; }
   .title .ui-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -314,28 +322,18 @@
   .effort { flex: none; padding: 3px 6px; border-radius: var(--radius-sm); background: var(--color-surface-3); color: var(--color-muted-foreground); }
   .meta { display: grid; justify-items: end; gap: 6px; padding-top: 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .outcome { font-weight: 500; }
-  .outcome[data-status='error'], .outcome[data-status='failed'] { color: var(--color-danger); }
+  .outcome[data-status='error'], .outcome[data-status='failed'], .outcome[data-status='interrupted'] { color: var(--color-danger); }
+  .outcome[data-status='background'] { color: var(--color-accent); }
+  /* What a subagent at rest waits on, or what ended without waking it. */
+  .note { grid-column: 2 / -1; margin-top: 8px; display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--color-accent); font-size: var(--text-xs); }
+  .note > .ui-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .note.interrupted { color: var(--color-danger); }
+  .note.interrupted > .ui-label { white-space: normal; }
+  .resume-row { padding: 0 9px 6px 49px; }
   .result { grid-column: 2 / -1; margin-top: 8px; padding: 6px 9px; border-radius: var(--radius-sm); background: var(--color-surface-2); color: color-mix(in srgb, var(--color-foreground) 82%, transparent); font-size: var(--text-xs); line-height: 1.45; }
   .result > span { display: -webkit-box; -webkit-box-orient: vertical; line-clamp: 3; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .team.detail .result, .team.detail .meta { display: none; }
-  .team.detail .member { grid-template-columns: auto minmax(0, 1fr); }
-  .detail-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-  .detail-pane > header { flex: none; min-height: 48px; padding: 7px 9px; display: flex; align-items: center; gap: 7px; border-bottom: 1px solid var(--color-border); }
-  .detail-pane > header > div { flex: 1; min-width: 0; }
-  .detail-pane > header strong, .detail-pane > header small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .detail-pane > header small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
-  .back { display: none; }
-  .transcript { flex: 1; min-height: 0; display: flex; overflow: hidden; }
   @container (max-width: 520px) {
     .profile { grid-template-columns: minmax(0, 1fr) auto; }
     .profile > :global(.picker) { grid-column: 1 / -1; }
-    .team.detail { grid-template-columns: 1fr; }
-    .team.detail .members { display: none; }
-    .back { display: inline-flex; }
-    .detail-pane > header { display: grid; grid-template-columns: var(--control-sm) minmax(0, 1fr) auto; }
-    .detail-pane > header > div { grid-column: 2 / -1; }
-    .detail-pane > header > .quiet:not(.back) { grid-column: 2; justify-self: start; }
-    .detail-pane > header > .danger { grid-column: 3; }
   }
-  @media (prefers-reduced-motion: reduce) { input[role='switch']::after { transition: none; } }
 </style>

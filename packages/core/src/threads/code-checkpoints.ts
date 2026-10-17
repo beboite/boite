@@ -3,33 +3,63 @@ import { join } from 'node:path';
 import type { ThreadRewind, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, refused } from '../errors.ts';
-import { contains, restoreFiles, same, snapshot, workspaceRoot, type FileChange, type FileSnapshot, type SnapshotCache } from './checkpoint-files.ts';
+import { collectSharedBlobs, contains, restoreFiles, same, snapshot, workspaceRoot, type FileChange, type FileSnapshot, type SnapshotCache } from './checkpoint-files.ts';
 
 type FileResult = NonNullable<ThreadRewind['files']>;
 interface Checkpoint { root: string; messages?: string[]; before?: FileSnapshot; after?: FileSnapshot; reason?: string }
 interface Active { threadId: string; turnId: string; checkpoint: Checkpoint }
 
+/** About 300 bytes each: the metadata cache stays near 30 MB at worst. */
+const CACHED_FILES = 100_000;
+/** Blobs written this recently stay through a collection: a snapshot may be linking them. */
+const COLLECT_GRACE_MS = 10 * 60_000;
+/** The shared blob store, beside the thread folders; never a thread id. */
+const SHARED = 'objects';
+
 /** Private file snapshots, independent of the driver's native conversation checkpoints. */
 export class CodeCheckpoints {
   private readonly active = new Map<string, Active>();
   private readonly restoring = new Set<string>();
-  private readonly previous = new Map<string, { root: string; files: SnapshotCache }>();
+  /** File metadata per real workspace root, least recently used first. */
+  private readonly previous = new Map<string, SnapshotCache>();
   private pruned: Promise<void> | undefined;
+  private collecting: Promise<number> | undefined;
 
   constructor(private readonly core: Core) {
     this.pruned = this.prune().catch(error => this.core.log('warn', `file checkpoint cleanup failed: ${messageOf(error)}`));
+    void this.pruned.then(() => this.collect());
   }
   private folder(threadId: string): string { return join(this.core.dataDir, 'checkpoints', threadId); }
   private objects(threadId: string): string { return join(this.folder(threadId), 'objects'); }
+  private shared(): string { return join(this.core.dataDir, 'checkpoints', SHARED); }
 
-  /** Reuse hashes only within the same object folder, with four bounded metadata maps. */
+  /**
+   * Blobs live once in the shared store, so threads on the same root reuse
+   * one metadata map; a hit only links the blob into the thread's folder.
+   */
   private cachedSnapshot(threadId: string, root: string): Promise<FileSnapshot> {
-    let cached = this.previous.get(threadId);
-    if (!cached || cached.root !== root) cached = { root, files: new Map() };
-    this.previous.delete(threadId);
-    this.previous.set(threadId, cached);
-    while (this.previous.size > 4) this.previous.delete(this.previous.keys().next().value!);
-    return snapshot(this.core, threadId, root, this.objects(threadId), cached.files);
+    const files = this.previous.get(root) ?? new Map();
+    this.previous.delete(root);
+    this.previous.set(root, files);
+    let total = 0;
+    for (const cached of this.previous.values()) total += cached.size;
+    for (const [key, cached] of this.previous) {
+      if (total <= CACHED_FILES || key === root) break;
+      total -= cached.size;
+      this.previous.delete(key);
+    }
+    return snapshot(this.core, threadId, root, this.objects(threadId), files, this.shared());
+  }
+
+  /**
+   * Remove shared blobs that no thread folder links to, in the background.
+   * Runs after startup cleanup and after a discard, one pass after another.
+   */
+  collect(graceMs = COLLECT_GRACE_MS): Promise<number> {
+    const pass = (this.collecting ?? Promise.resolve(0)).then(() => collectSharedBlobs(this.shared(), graceMs))
+      .catch(error => { this.core.log('warn', `file checkpoint blob cleanup failed: ${messageOf(error)}`); return 0; });
+    this.collecting = pass;
+    return pass;
   }
 
   assertAvailable(cwd: string): void {
@@ -48,7 +78,7 @@ export class CodeCheckpoints {
   private async capture(thread: ThreadSummary, turnId: string): Promise<void> {
     let root: string;
     try { root = await workspaceRoot(thread.cwd); } catch { return; }
-    const checkpoint: Checkpoint = { root, messages: [...this.core.journal.walkTurnMessages(thread.id, turnId)].filter(message => message.role === 'user').map(message => message.id) };
+    const checkpoint: Checkpoint = { root, messages: [...this.core.journal.walkTurnMessages(thread.id, turnId, { blobs: false })].filter(message => message.role === 'user').map(message => message.id) };
     this.assertAvailable(root);
     for (const other of this.active.values()) {
       if (contains(root, other.checkpoint.root) || contains(other.checkpoint.root, root)) {
@@ -144,10 +174,9 @@ export class CodeCheckpoints {
   }
 
   async discard(threadIds: string[]): Promise<void> {
-    for (const threadId of threadIds) {
-      this.previous.delete(threadId);
-      await rm(this.folder(threadId), { recursive: true, force: true });
-    }
+    const folders = threadIds.filter(threadId => threadId !== SHARED);
+    for (const threadId of folders) await rm(this.folder(threadId), { recursive: true, force: true });
+    if (folders.length) void this.collect();
   }
 
   /** Deletions kept undoable in a session are purged by the journal on restart. */

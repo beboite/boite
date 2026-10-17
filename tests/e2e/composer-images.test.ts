@@ -90,6 +90,12 @@ test('pasted images have linked references and a preview that leaves the compose
     await page.waitFor('document.querySelector("[data-testid=composer-image-preview]").textContent.includes("[Image 2]")');
     expect(await page.evaluate('document.querySelector("[data-testid=composer-image-preview] img").src')).not.toBe(firstImage);
     await page.click('[data-testid=composer-image-open]');
+    const tab = page;
+    const pointIn = (selector: string) => tab.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${selector}').getBoundingClientRect(); return { x: r.x + 10, y: r.y + 10 }; })()`);
+    const press = async (point: { x: number; y: number }) => {
+      await tab.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
+      await tab.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+    };
     for (const mobile of [false, true]) {
       if (mobile) await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await page.waitFor('document.querySelector("[data-testid=composer-input]").scrollHeight <= document.querySelector("[data-testid=composer-input]").clientHeight');
@@ -100,13 +106,9 @@ test('pasted images have linked references and a preview that leaves the compose
       expect(await page.evaluate('document.querySelectorAll("[data-testid=composer-attachment].highlighted").length')).toBe(1);
       expect(await page.evaluate('(() => { const preview = document.querySelector("[data-testid=composer-image-preview]").getBoundingClientRect(); const input = document.querySelector("[data-testid=composer-input]").getBoundingClientRect(); return preview.bottom <= input.top && input.bottom < innerHeight && preview.width <= innerWidth; })()')).toBe(true);
       await capture(`composer-images-${mobile ? 'phone' : 'desktop'}.png`);
-      const insidePoints = await page.evaluate<Array<{ x: number; y: number }>>(`Array.from(document.querySelectorAll('[data-testid=composer-input], [data-testid=composer-image-preview] img'), el => { const r = el.getBoundingClientRect(); return { x: r.x + 10, y: r.y + 10 }; })`);
-      expect(insidePoints).toHaveLength(2);
-      for (const inside of insidePoints) {
-        await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...inside });
-        await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...inside });
-        expect(await page.evaluate('document.querySelector("[data-testid=composer-image-preview]") !== null')).toBe(true);
-      }
+      // Typing room keeps the preview open.
+      await press(await pointIn('[data-testid=composer-input]'));
+      expect(await page.evaluate('document.querySelector("[data-testid=composer-image-preview]") !== null')).toBe(true);
       await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, x: mobile ? 190 : 800, y: 160 });
       await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, x: mobile ? 190 : 800, y: 160 });
       await page.waitFor('!document.querySelector("[data-testid=composer-image-preview]")');
@@ -114,6 +116,11 @@ test('pasted images have linked references and a preview that leaves the compose
       await page.click('[data-testid=composer-image-open]');
       await page.waitFor('document.querySelector("[data-testid=composer-image-preview]")');
     }
+    // The enlarged picture puts itself away on a click, the way its tile opened it.
+    await press(await pointIn('[data-testid=composer-image-preview] img'));
+    await page.waitFor('!document.querySelector("[data-testid=composer-image-preview]")');
+    await page.click('[data-testid=composer-image-open]');
+    await page.waitFor('document.querySelector("[data-testid=composer-image-preview]")');
     await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
     await page.waitFor('!document.querySelector("[data-testid=composer-image-preview]")');
     const point = await page.evaluate<{ x: number; y: number }>('(() => { const r = document.querySelector("[data-testid=composer-image-reference]").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
@@ -167,3 +174,91 @@ test('the paint layer breaks lines where the box does at a fractional width', as
     expect(lines.paintWidth).toBe(lines.boxWidth);
   } finally { await page?.close(); await server.close(); }
 }, 60_000);
+
+test('a full attachment strip stays one row and folds the rest behind a +N tile', async () => {
+  const port = await freePort();
+  const server = await startDevUi(port);
+  let page: BrowserPage | undefined;
+  try {
+    page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
+    await page.waitFor('document.querySelector("[data-testid=composer-input]")');
+    await page.evaluate(`(async () => {
+      const transfer = new DataTransfer();
+      for (let at = 0; at < 8; at++) {
+        const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 200;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'hsl(' + at * 40 + ' 55% 45%)'; ctx.fillRect(0, 0, 320, 200);
+        ctx.fillStyle = '#ffffff'; ctx.font = '96px sans-serif'; ctx.fillText(String(at + 1), 130, 135);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve));
+        transfer.items.add(new File([blob], 'shot-' + (at + 1) + '.png', { type: 'image/png' }));
+      }
+      document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
+    })()`);
+    const tiles = '[data-testid=composer-attachment], [data-testid=composer-attachments-more], [data-testid=composer-attachments-less]';
+    const rows = `new Set(Array.from(document.querySelectorAll('${tiles}'), el => el.offsetTop)).size`;
+    const capture = async (name: string) => {
+      await page!.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+      await page!.screenshot(join(import.meta.dir, '.artifacts', name));
+    };
+    await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]").length === 8');
+    expect(await page.evaluate(rows)).toBe(1);
+    expect(await page.evaluate('document.querySelector("[data-testid=composer-attachments-more]")')).toBeNull();
+    await capture('composer-strip-desktop.png');
+
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await page.waitFor('document.querySelector("[data-testid=composer-attachments-more]")');
+    const shown = await page.evaluate<number>('document.querySelectorAll("[data-testid=composer-attachment]").length');
+    expect(shown).toBeLessThan(8);
+    expect(await page.evaluate('document.querySelector("[data-testid=composer-attachments-more]").textContent.trim()')).toBe(`+${8 - shown}`);
+    expect(await page.evaluate(rows)).toBe(1);
+    await capture('composer-strip-phone.png');
+    expect(await page.evaluate('(() => { const strip = document.querySelector("[data-testid=composer-attachments]").getBoundingClientRect(); const more = document.querySelector("[data-testid=composer-attachments-more]").getBoundingClientRect(); return more.right <= strip.right; })()')).toBe(true);
+
+    await page.click('[data-testid=composer-attachments-more]');
+    await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]").length === 8');
+    expect(await page.evaluate(rows)).toBeGreaterThan(1);
+    await capture('composer-strip-phone-open.png');
+    await page.click('[data-testid=composer-attachments-less]');
+    await page.waitFor(`document.querySelectorAll("[data-testid=composer-attachment]").length === ${shown}`);
+
+    // Sent, the eight keep to one row of thumbnails in the bubble, the rest behind a +N over the last one.
+    await page.type('[data-testid=composer-input]', 'Eight screens');
+    await page.click('[data-testid=composer-send]');
+    const bubble = 'Array.from(document.querySelectorAll("[data-testid=message-images]")).at(-1)';
+    // The rows a reader sees: the live thumbnails and the one dimmed under the +N.
+    const sentRows = `(() => {
+      const row = ${bubble};
+      const more = row.querySelector('[data-testid=message-images-more]');
+      const shots = [...row.querySelectorAll('.shot')];
+      const covered = (shot) => more && shot.offsetTop === shots[0].offsetTop && shot.offsetLeft === more.offsetLeft;
+      return new Set(shots.filter(shot => !shot.inert || covered(shot)).map(shot => shot.offsetTop)).size;
+    })()`;
+    await page.waitFor(`${bubble}?.querySelectorAll('[data-testid=image-open]').length === 8 && ${bubble}.querySelector('[data-testid=message-images-more]')`);
+    await page.evaluate(`${bubble}.scrollIntoView({ block: 'center' })`);
+    const sent = await page.evaluate<{ fits: number; more: string; height: number }>(`(() => {
+      const row = ${bubble};
+      return { fits: row.querySelectorAll('.shot:not([inert])').length, more: row.querySelector('[data-testid=message-images-more]').textContent.trim(), height: row.getBoundingClientRect().height };
+    })()`);
+    expect(sent.fits).toBeLessThan(8);
+    expect(sent.more).toBe(`+${8 - sent.fits}`);
+    // The tile under the +N is inert like the wrapped ones, so the keyboard never lands behind the cover.
+    expect(await page.evaluate<boolean>(`(() => {
+      const row = ${bubble};
+      const more = row.querySelector('[data-testid=message-images-more]');
+      const shots = [...row.querySelectorAll('.shot')];
+      const under = shots.find(shot => shot.offsetTop === shots[0].offsetTop && shot.offsetLeft === more.offsetLeft);
+      return !!under && under.inert;
+    })()`)).toBe(true);
+    expect(sent.height).toBeLessThan(100);
+    expect(await page.evaluate(sentRows)).toBe(1);
+    await capture('message-images-phone.png');
+    await page.click('[data-testid=message-images-more]');
+    await page.waitFor(`${bubble}.querySelectorAll('.shot:not([inert])').length === 8 && !${bubble}.querySelector('[data-testid=message-images-more]')`);
+    expect(await page.evaluate(sentRows)).toBeGreaterThan(1);
+    await capture('message-images-phone-open.png');
+    expect(page.errors()).toEqual([]);
+  } finally {
+    await page?.close();
+    await server.close();
+  }
+}, 90_000);

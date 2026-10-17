@@ -116,12 +116,52 @@ too: show the agent's browser and sign in there.
 
 A conversation has at most 8 tabs and a machine 24. A page that opens a
 window, a sign-in popup for instance, adds a tab to the same conversation; past
-the limit the window is closed. Nobody can answer a dialog in a headless page.
+the limit the window is closed. A tab still attaching counts toward both
+limits, so a burst of windows opened at once stops at the limit too. Nobody can answer a dialog in a headless page.
 One raised while an agent command runs follows `dialog accept|dismiss`
 (accept until told otherwise) and is listed in that command's output; any
 other alert is accepted and a confirm or prompt declined, so a person acting in
 the panel never confirms by accident. All are noted in the diagnostics. Downloads are refused. Archiving or removing the
 conversation closes its tabs.
+
+### A tab nobody uses sleeps
+
+The browser runs every tab as shown (`--disable-renderer-backgrounding` and
+the timer and occlusion flags beside it) and each tab emulates focus, so a
+page left open runs at full speed. On 2026-10-17 one renderer of M2's agent
+browser had run 16 hours at 38 % of a core with no agent on it. A tab
+therefore sleeps (`browser/sleep.ts`): its page is frozen with
+`Page.setWebLifecycleState`, which stops its timers, its animation frames and
+its tasks. It sleeps once all of these hold for 30 seconds
+(`SLEEP_AFTER_MS`): no agent command or viewer request runs on it, no viewer
+is shown it, no recording runs in it, and its conversation has no running
+turn that used it in the last 5 minutes (`TURN_HOLD_MS`). A viewer is shown it
+while a screencast of it runs, a viewer asked for a frame within 3 seconds, or
+a client said within 15 seconds that it shows the tab's own page
+(`browser.remoteWatch`, `REMOTE_WATCH_MS`). The desktop app says so every 5
+seconds while its panel shows a tab it hosts and its window is visible: that
+page is the agent's own webview, which asks for no frames. The check runs
+again every 30 seconds while something holds the tab. The wait covers the gap
+after a turn ends or the last viewer leaves: a follow-up turn or a viewer
+coming back within it finds the page as it left it, and an abandoned page runs
+at most a minute. A turn that works elsewhere for half an hour lets its tab
+sleep about 5 minutes after it last used it, and its next command wakes it.
+
+Focus emulation keeps a page shown, and Chromium does not freeze a shown page:
+the call answers but the page keeps running. Focus emulation goes off before
+the freeze and back on after the wake. The tab wakes before every agent
+command, every frame, input or copy of a viewer, and when its conversation
+starts a turn, so the agent's pages run while it works, as they did when it
+last looked. Freezing and waking take turns per tab: a command that arrives
+while the page is being frozen waits for the freeze, wakes the page and only
+then runs, and the page is visible and focused again when it does. A tab
+closed while asleep is woken first, and a freeze that fails is tried again after the wait. A page asleep keeps its state; its timers
+resume where they stopped, and a page that reads the clock sees the time pass.
+
+A tab the desktop app hosts gets the same calls through the relay: `Page` and
+`Emulation` are among the domains an agent webview takes. The desktop's own
+pages, the ones the user browses, are suspended once hidden
+([panel](panel.md#surfaces)).
 
 An open tab does not hold back an update of the core: the browser's processes
 are not counted as work under way. The update closes them, the cookies are
@@ -153,7 +193,9 @@ browser would (`packages/ui/src/lib/browser-host.ts`): a page command goes to
 that webview's own DevTools channel, which WebView2 hands to the app without
 any port; `Target.createTarget`, `attachToTarget` and `closeTarget` create,
 name and close webviews; a page's events, its address and title, and the
-windows it opens come back with `browser.hostReply`. The shell lets an agent
+windows it opens come back with `browser.hostReply`. Network events are cut
+to what the core reads: a request's address, and a response only when it
+failed, with its status and address (`compactPageEvent`). The shell lets an agent
 webview (an id starting with `agent-`) take the Page, Runtime, Input,
 Emulation, Network, Log and DOM domains, never the profile's cookies
 (`apps/shell/src-tauri/src/browser_control.rs`). An agent webview out of sight
@@ -188,8 +230,16 @@ macOS apps do not host; their webviews have no DevTools channel to relay.
 `recording-start` records the tab as a silent MP4 without any encoder on the
 machine. The tab streams its frames (`Page.startScreencast`, at most
 1920 × 1080), and a blank page of the same browser, in a throwaway context of
-its own, draws them on a canvas that a `MediaRecorder` encodes. A still page
-sends no frame, so the last one is drawn again each second and the video keeps
+its own, draws them on a canvas that a `MediaRecorder` encodes. The take gets
+every picture the page draws, and frames reach the canvas at most at the
+take's rate; a frame that comes early waits its turn and the newest replaces
+it. A frame is acknowledged when it leaves, not when it arrives, and one stays
+unacknowledged while a frame waits, so Chrome encodes about one picture per
+slot of the take: a 30 Hz animation keeps all its pictures, a 60 Hz one costs
+about 30 encodes a second. Chrome skips the paints it makes while held back,
+so when no picture follows within 150 ms the screencast restarts, which sends
+the page as it is. The helper decodes each frame with
+`Uint8Array.fromBase64`. A still page sends no frame, so the last one is drawn again each second and the video keeps
 its length. H.264 is the default. Chrome 153 on Linux encodes H.264 and AV1 into MP4, not
 HEVC; a codec the browser cannot encode is refused with the ones it can. The same 100 MB limit and turn rule
 as before apply: a recording still running when the agent's turn ends is
@@ -228,8 +278,22 @@ another by hand, which holds until **Fit this screen**.
 The live view asks for one JPEG at a time (`browser.remoteFrame`), the next as
 soon as the last has arrived, sized to what the view shows and lighter on a
 slow link; [phone](phone.md#the-agents-browser-on-a-phone) has the schedule.
-Every viewer that asks within 150 ms gets the same capture, so a desktop and a
-phone watching one tab cost one. Input names the frame it was aimed at; a tap
+The frames come from a screencast of the tab on a DevTools session of its own,
+started by the first viewer and stopped 3 s after the last one asked, when the
+tab closes or its viewers disconnect (`browser/frames.ts`). Chrome sends a
+picture only when the page draws, so a still page sends nothing. The core keeps
+the newest picture and acknowledges it when a viewer takes it, so Chrome draws
+no faster than the fastest viewer. Viewers of a tab that ask the same width and
+quality share one screencast; each other width or quality gets its own, so a
+phone on a slow link never downloads the desktop's wider, heavier frames. A
+viewer names the frame it shows (`after`): the core answers with a newer one,
+or with `unchanged` once a second passes without one, and the frame it shows
+stays valid for input. Chrome sends nothing for the last size of a quick run
+of resizes, and skips paints while two pictures wait for an acknowledgement:
+when no picture follows within 300 ms, the screencast restarts, which always
+sends the page as it is. A tab the desktop app hosts has one DevTools session,
+the agent's, so its viewers still get one capture per request, shared within
+150 ms. Input names the frame it was aimed at; a tap
 on a frame of another page or another viewport size is refused, and the
 address bar accepts only http and https.
 
@@ -296,8 +360,13 @@ a paired viewer's frames and taps, a popup becoming a tab, the user agent a
 page, a worker, a request and a popup send without `Headless`, with
 `navigator.webdriver` false and full client hints, cookies kept per
 profile across a restart, a profile copied in by the owner, an MP4 recording
-read back, a recording discarded at the end of a turn, and a machine without a
-browser. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
+read back, a recording discarded at the end of a turn, a page that sleeps
+once nobody uses it and meets the next command and viewer awake and focused,
+one kept awake by `browser.remoteWatch`, and a machine without a browser. `browser-sleep.test.ts` checks, with the page
+stubbed, that a command arriving during a freeze runs after the wake, and that
+a held or closed tab never sleeps, and that a running turn holds an unused
+tab only 5 minutes. `AgentBrowserSurface.test.ts` checks that the desktop app
+reports a hosted tab it shows, only while its window is visible. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
 `tests/e2e/agent-browser-core.test.ts` runs the whole path on a real core: the
 owner's desktop at 1280 × 900 and a paired phone at 390 × 844 see the cover,
 show the page and tap it, and the tap reaches the page. `browser-remote.test.ts`

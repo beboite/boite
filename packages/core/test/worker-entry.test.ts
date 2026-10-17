@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { removeDir } from '../src/fs-retry.ts';
 import { workerEntry } from '../src/worker-entry.ts';
 
-test('worker lookup preserves sibling sources and bundled files before an explicit embedded relative entry', () => {
+// Allow the same compilation budget as main-entry's real executable tests.
+test('worker lookup preserves sibling sources and bundled files before an explicit embedded relative entry', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'boite-worker-entry-'));
   const base = pathToFileURL(join(dir, 'main.ts')).href;
   const name = 'isolated-worker-lookup';
@@ -65,5 +67,8 @@ test('worker lookup preserves sibling sources and bundled files before an explic
     expect(staged.stderr.toString()).toBe('');
     expect(staged.exitCode).toBe(0);
     expect(staged.stdout.toString()).toBe('staged worker ready\n');
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-}, 15_000);
+  } finally {
+    // Windows keeps the folder of an executable that just exited locked for a moment.
+    await removeDir(dir);
+  }
+}, 60_000);

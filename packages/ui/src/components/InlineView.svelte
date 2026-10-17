@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { Download, Maximize2, RotateCcw, X } from '@lucide/svelte';
-  import { VIEW_DEFAULT_HEIGHT, VIEW_SANDBOX, readViewMessage, viewFrameHeight, viewThemeFragment, type InlineView as ViewInfo, type MessagePart, type ViewHostMessage } from '@boite/contracts';
+  import { VIEW_BLEED, VIEW_DEFAULT_HEIGHT, VIEW_SANDBOX, readViewMessage, viewFrameHeight, viewThemeFragment, type InlineView as ViewInfo, type MessagePart, type ViewHostMessage } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { onView } from '../lib/on-view';
@@ -126,7 +126,7 @@
 {#if failed}
   <ChatFile file={part} {store} {threadId} {messageId} {partIndex} />
 {:else}
-  <div class="inline-view" role="group" aria-label={view.title} bind:this={box} style:min-height={expanded ? `${height}px` : undefined} use:onView={() => { near = true; }} data-testid="inline-view" data-ready={ready}>
+  <div class="inline-view" role="group" aria-label={view.title} bind:this={box} style:--bleed="{VIEW_BLEED}px" style:min-height={expanded ? `${height}px` : undefined} use:onView={() => { near = true; }} data-testid="inline-view" data-ready={ready}>
     <div class="stage" bind:this={stage} style:height={expanded ? undefined : `${height}px`} ontoggle={toggled} data-testid="inline-view-stage">
       {#if expanded}
         <header>
@@ -153,7 +153,8 @@
 <style>
   /* Part of the answer: the whole column, no surface and no edge of its own. */
   .inline-view { position: relative; width: 100%; min-width: 0; }
-  .stage { position: relative; width: 100%; }
+  /* The frame reaches past the column by the bleed the page is padded with, so what it draws on its edge is not cut. */
+  .stage { position: relative; width: calc(100% + 2 * var(--bleed)); margin: calc(-1 * var(--bleed)); }
   /* Hidden until the page says it is up, so a frame never shows anything but the page. */
   iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; visibility: hidden; opacity: 0; transition: opacity var(--dur-2); }
   iframe.ready { visibility: visible; opacity: 1; }
@@ -161,9 +162,9 @@
   /* Over the page's corner, and only while the pointer is on the view. */
   .tools { position: absolute; top: 0; right: 0; display: flex; gap: 2px; padding: 2px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); opacity: 0; transition: opacity var(--dur-1); }
   .inline-view:hover .tools, .tools:focus-within { opacity: 1; }
-  /* Nothing hovers on a phone, and the page is narrow: the actions take a row of their own under it. */
+  /* Nothing hovers on a phone, and the page is narrow: the actions take a row of their own under it, drawn over the frame's bleed. */
   @media (hover: none) {
-    .tools { position: static; justify-content: flex-end; padding: 0; border: 0; background: none; opacity: 1; color: var(--color-muted-foreground); }
+    .tools { position: relative; justify-content: flex-end; padding: 0; border: 0; background: none; opacity: 1; color: var(--color-muted-foreground); }
   }
 
   .stage:popover-open { position: fixed; inset: 0; display: flex; flex-direction: column; gap: 12px; width: auto; height: auto; max-width: none; max-height: none; margin: 0; padding: 12px clamp(12px, 4vw, 48px) clamp(12px, 4vw, 48px); border: 0; background: var(--color-background); color: var(--color-foreground); }

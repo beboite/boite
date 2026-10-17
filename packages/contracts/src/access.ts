@@ -21,13 +21,13 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // Follow and steer an owner-enabled team from the phone, without changing routes or limits.
   // Bounded child results and event-driven waits expose the same family read scope as delegation.get.
   'delegation.get', 'delegation.result', 'delegation.wait', 'delegation.send', 'delegation.stop',
-  // Follow a workflow, pause or stop it; resume and retry spend budget and stay the owner's (checked in workflows.control).
+  // Follow a workflow, pause or stop it; resume and retry spend budget and are refused to a phone (checked in workflows.control).
   'workflows.list', 'workflows.get', 'workflows.control', 'workflows.templates.list',
   // Coordination is visible with the conversation; only the owner enables it.
   'collaboration.get',
+  // A phone's own rendering errors and failed calls land in the owner's diagnostics, bounded per connection.
+  'diagnostics.report',
   'collaboration.directory',
-  // Which conversations act as stewards and over what: shown beside Communication settings. Only the owner grants or revokes.
-  'stewards.list',
   // Dictation uses the owner's configured engine. Devices cannot change paths or credentials.
   'speech.status',
   'speech.transcribe',
@@ -43,6 +43,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // The machines of the group and a ticket to each: a phone paired with one member reaches the others at its own role, never more.
   'group.get',
   'group.ticket',
+  // A device paired the older way hands over its own device key: it gains no role, only one key for every member.
+  'group.enrollDevice',
   // Each authenticated pairing manages only its own push destination.
   'push.status',
   'push.subscribe',
@@ -68,6 +70,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.pullRequest', // Read-only branch metadata shown on the same phone thread cards.
   'threads.pullRequests', // Read-only conversation links, including dependency order, on phones.
   'threads.pullRequestReview', 'threads.pullRequestFiles', // Bounded read-only data for PRs the owner already linked.
+  // Stopping a pull request watch only ends Boite's own polling: the phone's button beside the watch, never a GitHub write.
+  'threads.unwatchPullRequest',
   'browser.remoteFrame', 'browser.remoteInput', // Only the subscribed conversation's agent browser; taps, keys and http(s) addresses, no scripts or host paths.
   'browser.remoteSelection', // The text selected in that same page, password fields excluded: what the frames already show, as text.
   'browser.remoteStatus', // The subscribed conversation's agent tabs (address and title) and whether this machine has a browser.
@@ -75,6 +79,10 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // conversation, runs no command a device names and returns no host path: what the phone could ask of the agent.
   'devices.list', 'devices.sessions', 'devices.frame', 'devices.input', 'devices.open', 'devices.close', 'devices.screenshot',
   'threads.create',
+  // Composing a phone draft uses the same creation authority, with no prompt or arbitrary executable.
+  'drafts.prepare', 'drafts.release',
+  // Only this phone connection's bounded attachment bytes, with the same validation as Send.
+  'attachments.upload', 'attachments.release',
   'threads.get',
   'threads.capabilities', // Read-only controls for the conversation already visible; never prepares or probes a runtime.
   // A phone can manage continued prompts in the same thread it can already send to.
@@ -122,6 +130,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'turns.stop',
   // A paired phone can resume or discard the same retained prompt as the owner.
   'turns.recover',
+  // Cancelling a planned retry spends nothing and does less than turns.stop, which a phone already has.
+  'turns.cancelRetry',
   // The point of carrying the phone: answering the agent from anywhere.
   'permissions.list',
   'permissions.answer',
@@ -145,6 +155,11 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // Sums of the same finished turns per day, provider and model. The thread
   // titles it names are the ones `threads.list` already shows the device.
   'usage.history',
+  // The limit bars of the accounts `accounts.list` already names, and the gateway's.
+  // A device reads what the core holds: forcing a refresh, switching monitoring and
+  // spending a reset stay the owner's (core access.ts).
+  'quotas.list',
+  'subscriptionProxy.quotas',
   'settings.get',
   'keybindings.get',
 ]);
@@ -160,14 +175,16 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   // Invalidation naming the subscribed root; workflows.list applies the read scope.
   'workflows.changed',
   'collaboration.changed', 'thread.activity',
-  'stewards.changed', // Invalidation only, naming the steward thread; stewards.list is device-readable.
   'project.added', 'project.removed', 'project.updated',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background', 'thread.btw',
+  // The load `thread.updated` already carries to the same sockets, without the rest of the row.
+  'thread.load',
   'turn.started', 'turn.finished',
   'turn.toolCompleted',
   'message.started', 'message.delta', 'message.part', 'message.completed', 'message.truncated',
   'permission.requested', 'permission.resolved', 'question.asked', 'question.answered',
   'scheduler.updated', 'accounts.updated', 'accounts.removed',
+  'quotas.updated', 'quotas.progress', 'subscriptionProxy.quotasUpdated', // What quotas.list and subscriptionProxy.quotas answer.
   'settings.updated', 'keybindings.updated', 'sessions.updated',
   'group.updated', // Invalidation only; group.get applies the device read policy.
   'providers.updated', 'providers.installProgress', 'providers.probed',

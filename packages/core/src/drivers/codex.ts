@@ -7,6 +7,7 @@ import { titleTurn } from './codex/title.ts';
 import { CodexTurn } from './codex/turn.ts';
 import { ModelProbes } from './model-probes.ts';
 import type { Driver, SessionContext, TurnContext, TurnHandle } from './types.ts';
+import { noteWarmSession } from './driver-log.ts';
 export { readCodexQuota } from './codex/models.ts';
 
 const MINUTE_MS = 60_000;
@@ -14,7 +15,16 @@ const MINUTE_MS = 60_000;
 /** One `codex app-server` process per thread, kept between turns like the ACP one. */
 export function createCodexDriver(): Driver {
   const sessions = new Map<ThreadId, CodexSession>();
-  const probes = new ModelProbes(readModels);
+  const probes = new ModelProbes(async context => {
+    const session = context.catalogThread ? sessions.get(context.catalogThread.id) : undefined;
+    if (session) {
+      try {
+        const models = await session.catalog(context);
+        if (models) return models;
+      } catch { /* A host that exited or refused discovery leaves the ordinary probe available. */ }
+    }
+    return readModels(context);
+  });
   const viewed = new Set<ThreadId>();
 
   function acquire(ctx: SessionContext): CodexSession {
@@ -22,7 +32,9 @@ export function createCodexDriver(): Driver {
     const warmMs = Math.max(0, ctx.warmProcessMinutes) * MINUTE_MS;
     const key = sessionKey(ctx);
     let session = sessions.get(threadId) ?? null;
-    if (session !== null && !session.usable(key, warmMs)) {
+    const usable = session?.usable(key, warmMs) === true;
+    noteWarmSession(ctx, 'Codex app-server', { kept: session !== null, usable, sameSetup: session?.key === key, setupChange: 'the thread changed mode, account or folder' });
+    if (session !== null && !usable) {
       sessions.delete(threadId);
       session.close(session.key === key ? null : 'the thread changed mode, account or folder', ctx);
       session = null;
@@ -46,7 +58,7 @@ export function createCodexDriver(): Driver {
     forgetProbes: (filter) => probes.forget(filter),
     title: (context) => titleTurn(context),
 
-    prepare: ctx => acquire(ctx).prepare(ctx),
+    prepare: (ctx, options) => acquire(ctx).prepare(ctx, options?.forTurn),
     setViewed(threadId, active) {
       if (active) viewed.add(threadId);
       else viewed.delete(threadId);

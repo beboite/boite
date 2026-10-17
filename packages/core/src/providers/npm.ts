@@ -1,7 +1,7 @@
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { currentOs, homePath } from '../paths.ts';
-import { which } from './which.ts';
+import { Remembered, which } from './which.ts';
 
 /**
  * A CLI published on npm, found where a global install really put it. npm
@@ -122,8 +122,22 @@ export function scriptRuntime(root: string): string | null {
   return which('bun');
 }
 
-/** The command an `npm` candidate resolves to, or null when the package or a runtime for it is missing. */
+const resolved = new Remembered<NpmCommand | null>();
+
+/**
+ * The command an `npm` candidate resolves to, or null when the package or a
+ * runtime for it is missing. Every provider list resolves the same specs, and
+ * each walk stats about ten roots, so an answer is kept as long as a PATH
+ * lookup and dropped with them by `forgetWhich` (a reload, an install, an
+ * update). A kept answer whose script or runtime is gone is resolved again.
+ */
 export function resolveNpm(spec: string): NpmCommand | null {
+  const env = process.env;
+  const key = [spec, env['PATH'], env['npm_config_prefix'], env['NPM_CONFIG_PREFIX'], env['APPDATA'], env['LOCALAPPDATA'], env['PNPM_HOME'], env['BUN_INSTALL'], homePath()].join('\0');
+  return resolved.get(key, () => walkRoots(spec), (found) => found === null || (existsSync(found.script) && existsSync(found.executable)));
+}
+
+function walkRoots(spec: string): NpmCommand | null {
   const { name, bin } = splitSpec(spec);
   for (const root of globalRoots(bin)) {
     const script = scriptIn(root, name, bin);
@@ -137,10 +151,22 @@ export function resolveNpm(spec: string): NpmCommand | null {
 
 /** Where a global npm install put a program: the prefix its updater must install into, and what it replaces. */
 export interface NpmInstall {
-  /** The `--prefix` npm used, `/usr` for `/usr/lib/node_modules`. */
+  /** The `--prefix` npm used: `/usr` for `/usr/lib/node_modules`, `%APPDATA%\npm` on Windows. */
   prefix: string;
-  /** The package's own directory under `<prefix>/lib/node_modules`. */
+  /** The package's own directory under `<prefix>/lib/node_modules`, or `<prefix>\node_modules` on Windows. */
   packageDir: string;
+  /** The package as npm names it, `@anthropic-ai/claude-code`. */
+  name: string;
+}
+
+/** The command names a package's `bin` declares, read from its own `package.json`. */
+function binNames(packageDir: string): string[] {
+  try {
+    const parsed = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as { name?: unknown; bin?: unknown };
+    if (typeof parsed.bin === 'string' && typeof parsed.name === 'string') return [parsed.name.split('/').at(-1)!];
+    if (typeof parsed.bin === 'object' && parsed.bin !== null) return Object.keys(parsed.bin);
+  } catch { /* No readable manifest: not a package npm installed. */ }
+  return [];
 }
 
 /**
@@ -148,30 +174,44 @@ export interface NpmInstall {
  * An agent's updater runs `npm install -g`, which writes under npm's configured
  * prefix, not necessarily where the running copy lives: a copy under
  * `/opt/agents` updated with npm's `/usr` prefix lands beside it and PATH keeps
- * the old one. Only the Unix layout `<prefix>/lib/node_modules` is recognised;
- * pnpm, Bun and the Windows prefix put their packages elsewhere and are left to
- * their own configuration.
+ * the old one. Two layouts are recognised: `<prefix>/lib/node_modules` on Unix,
+ * and on Windows `<prefix>\node_modules` with npm's `.cmd` shim for one of the
+ * package's commands in the prefix itself. pnpm and Bun put their packages
+ * elsewhere, or their shims elsewhere, and are left to their own configuration.
  */
 export function npmInstallOf(program: string): NpmInstall | null {
-  if (currentOs() === 'windows') return null;
+  const windows = currentOs() === 'windows';
   const real = realpathOr(program);
-  const marker = `${sep}lib${sep}node_modules${sep}`;
-  const at = real.indexOf(marker);
+  const marker = windows ? `${sep}node_modules${sep}` : `${sep}lib${sep}node_modules${sep}`;
+  // Windows paths compare without case: `Node_Modules` is the same folder.
+  const at = (windows ? real.toLowerCase() : real).indexOf(marker);
   if (at < 0) return null;
   const prefix = at === 0 ? sep : real.slice(0, at);
   const [first = '', second = ''] = real.slice(at + marker.length).split(sep);
   if (first === '' || (first.startsWith('@') && second === '')) return null;
-  const root = join(prefix, 'lib', 'node_modules');
-  return { prefix, packageDir: first.startsWith('@') ? join(root, first, second) : join(root, first) };
+  const name = first.startsWith('@') ? `${first}/${second}` : first;
+  const packageDir = join(prefix, ...(windows ? ['node_modules'] : ['lib', 'node_modules']), first, ...(first.startsWith('@') ? [second] : []));
+  // A `node_modules` alone proves nothing on Windows: npm's own shim beside it does.
+  if (windows && !binNames(packageDir).some((bin) => existsSync(join(prefix, `${bin}.cmd`)))) return null;
+  return { prefix, packageDir, name };
+}
+
+/**
+ * npm's own CLI, run by Node: the `npm` on PATH is a `.cmd` shim on Windows,
+ * which Bun cannot spawn, and the script it starts is the same everywhere.
+ */
+export function npmCli(): NpmCommand | null {
+  return resolveNpm('npm');
 }
 
 /**
  * The first directory `npm install -g` must write to replace this install and
  * that this user cannot write, or null. npm swaps the package inside its parent
- * directory and relinks it under `<prefix>/bin`.
+ * directory and relinks it under `<prefix>/bin`, or the prefix on Windows.
  */
 export function unwritableDir(install: NpmInstall): string | null {
-  const bin = join(install.prefix, 'bin');
+  // npm's shims sit in the prefix itself on Windows.
+  const bin = currentOs() === 'windows' ? install.prefix : join(install.prefix, 'bin');
   for (const dir of [dirname(install.packageDir), ...(existsSync(bin) ? [bin] : [])]) {
     try {
       accessSync(dir, constants.W_OK);

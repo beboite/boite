@@ -42,6 +42,14 @@ with delegation off, and only a paused team holds them. Communication between
 conversations is a separate setting in the title's menu; its Off label does not
 disable provider-native subagents.
 
+## Context modes
+
+`--context light|neutral`, `--keep`, `--drop`, `--tools` and `--rules` or
+`--rules-file` start a child without part of the user's setup, with rules of
+its own; the child's row and header then carry a badge. A small Haiku chore
+fits `light`, a neutral review `neutral`. [Context modes](context-modes.md)
+lists the presets, the fields and what each provider honours.
+
 ## Native provider subagents
 
 Boite subagents replace the providers' own. Claude starts with its `Agent`,
@@ -105,14 +113,28 @@ One button above the composer shows the number of active subagents and running
 workflows, with elapsed time since the oldest active start. It appears for a
 running workflow even before a child starts. Click it to open the team overview,
 then select an agent or workflow to inspect its progress. The panel keeps
-completed results after the button disappears. Open a child's conversation to
-answer permission and question cards.
+completed results after the button disappears.
+
+A parent's row in the sidebar, the Recent list and the phone's list carries a
+chip with the number of its subagents at work, in every state of the parent.
+When a child asks the user something or waits on a permission, the chip takes
+the waiting colour and the parent reads Needs you, unless the parent itself
+failed. The parent's question dock shows each such child's question, "Asked by"
+its title, with its options and an Open button that goes to the child's
+conversation; a permission gets a row with the tool it asks for and Open, since
+it is approved in the child's conversation only. Text typed in the parent's
+composer never answers a child's question: it stays a message to the parent,
+and a written answer goes through Open. The core sends a child's `question.*`
+and `permission.*` events to the windows that have its parent open, and the
+dock reads the children's open cards when the parent opens.
 
 Messages carry the authenticated sender and appear as forwarded messages.
 Claude receives them at a tool boundary; Codex, Muse, pi and Grok can accept
 live steering. Drivers without steering receive a later turn.
 [Coordination](coordination.md#what-the-agent-receives) owns the protocol mapping. A waiting
-permission or question is never answered by a forwarded message. A delivery
+permission is never answered by a forwarded message; a parent's message to a
+child waiting on a question answers that question
+([questions from a child](#questions-from-a-child)). A delivery
 receipt means provider acceptance, not agreement or task completion. An
 uncertain submission is not retried automatically.
 
@@ -130,7 +152,9 @@ and the rule that results come back as messages. Later turns carry it again
 when the request is about handing work out (delegation, subagents, parallel
 work, a workflow) or the team is paused. A child receives one line naming its
 parent and how to report a blocker. Persistent agents keep their own setting, which starts off. Only the
-owner can configure profiles, turn delegation off or resume a paused team. A paired phone can inspect and stop an enabled team.
+owner can configure profiles or turn delegation off; the parent agent resumes
+the pauses listed under [Stop, pause and resume](#stop-pause-and-resume). A
+paired phone can inspect and stop an enabled team.
 
 Boite imposes no quota on the number of children, their concurrent turns, total
 turns or turn duration. Previously saved quotas are ignored. Each conversation
@@ -144,17 +168,47 @@ delivered in batches of up to four. Unread steering messages expire after 15 min
 Team messages are limited to 100 per hour; terminal results have a separate
 delivery path and stay available. They wake an idle parent or join its next
 prompt when live steering is unavailable.
-Only the selected child's transcript is subscribed to in the panel; inactive
-children contribute summaries instead of a stream per agent. After a
-reconnect, the panel asks for the selected child's messages from its oldest
-unfinished turn and reads the team and coordination views again, since events
+The panel lists children by their summaries and streams none of them. Clicking
+a child opens its conversation in the chat like any thread; its header reads
+"parent title / child title" and the parent's title goes back to it. After a
+reconnect, the panel reads the team and coordination views again, since events
 sent while the socket was down reach no client.
 
+### Stop, pause and resume
+
 Stop all pauses the team and cancels queued and running children. Stopping or
-archiving the parent does the same, and so does a parent failure. A team with
-no child is never paused that way: there is nothing to stop. A core restart
+archiving the parent does the same. A parent turn that fails or that the system
+cuts (a provider error, an agent update) pauses nothing: the children keep
+working, and their results reach the parent at its next prompt. A team with
+no child is never paused that way: there is nothing to stop. An unsuccessful
+child is not retried by Boite.
+
+An update or a restart from the app cuts each running child at its next tool
+boundary without a result: the parent hears nothing, the team stays as it was,
+and the next core starts the child again on the same task, told that Boite
+restarted ([restart handoff](restart-handoff.md)). After a crash, the core
 pauses only a team with a message still to deliver or a child turn it cut
-short. Resume is an owner action. An unsuccessful child is not retried by Boite.
+short; a handoff older than an hour pauses the teams of the children it cut.
+
+A pause records who set it (`pausedBy`, `pausedAt`), and that decides whether
+the parent agent may lift it with `boite delegate resume`:
+
+| Paused by | `pausedBy` | The parent agent resumes |
+| --- | --- | --- |
+| Its own `delegate stop` | `agent` | at any time |
+| A crash of the core, or a handoff past its hour | `restart` | at any time |
+| The owner's Stop, or archiving | `stop` | once the owner wrote to the conversation again |
+| The owner's Pause in Subagents > Settings | `owner` | never |
+
+A pause saved before origins existed reads as the owner's. A refused resume
+says which pause holds and who lifts it, and so do a refused spawn and the guide
+of a paused team. The owner resumes any of them. Resume hands over the mail the
+team held at once, sends each child whose last turn stopped, failed or was
+interrupted
+a message to continue from where it stopped, and resumes the team's
+[workflow](workflows.md) runs that a pause held, under the same rules. A child
+is continued once per stopped turn: a second resume sends nothing, whoever
+asks, unless a Stop rejected that continuation before it reached the child.
 
 ## Workflows
 
@@ -172,11 +226,14 @@ boite delegate spawn "List the parser's entry points. Do not edit files."
 boite delegate spawn "Review the parser changes. Do not edit files." --model codex/gpt-5.5 --effort high
 boite delegate spawn "Play the build and report what breaks." --model codex/gpt-6-luna --effort max --speed fast
 boite delegate spawn "Review the parser changes." --profile reviewer
+boite delegate spawn "Fix the parser bug and commit it." --worktree
 boite delegate list
 boite delegate send <child-thread-id> "Focus on malformed inputs."
 boite delegate result <child-thread-id> <turn-id>
 boite delegate stop <child-thread-id>
 boite delegate stop
+boite delegate resume <child-thread-id>
+boite delegate resume
 ```
 
 `--model` takes `provider/model`, a bare model id (the parent's provider wins a
@@ -202,12 +259,32 @@ else: `speed=fast` for Claude, `speed=Fast (priority)` for that Codex tier.
 works.
 
 Every answer is a few plain lines. `delegate list` starts with one summary
-line (`subagents: on; 1 running, 2 done, 0 failed, 0 stopped`), then one row per
+line (`subagents: on; 1 running, 1 waiting, 2 done, 0 failed, 0 stopped`, with
+`, N interrupted` when there are some), then one row per
 child with its id, state, elapsed time, `provider/model effort=`, `speed=` when
 it has one, and title, and
 the first 300 characters of a finished result. Workflow runs follow as
 `<run-id> workflow <status> <elapsed> steps=<done>/<total>`. A spawn prints the
 child id, its route and a reminder that the result arrives as a message.
+
+A child can end its turn while work it started in the background still runs
+(a long test, a build). It is not done: its state reads `waiting`, its row adds
+`waiting for: <task> (<elapsed>)`, and the summary counts it with the active
+ones. What it said at the end of that turn reaches the parent marked as a
+checkpoint, and the row labels it `checkpoint:` rather than `result:`;
+`delegate wait` keeps waiting. When the task ends, the agent wakes on it,
+runs again, and its next answer is the final result. A permission request a
+child waits on reads `approval`.
+
+When that background work ends without waking the agent (the task failed and
+nothing answered it, or the agent process, Boite or the PC stopped), the child
+is `interrupted`: its row says what ended and why, the parent gets one message
+saying so, and `boite delegate resume <thread-id>` (or Resume in the Subagents
+panel) continues it, while `boite delegate send <thread-id> "<instruction>"`
+steers it. A task that ends is given 30 seconds
+to wake the agent; after that a failed or vanished task counts as interrupted
+and a completed one as done. Work that ended with its agent process counts at
+once.
 
 A child can send a question or blocker to its parent with `delegate send`.
 Its final answer returns automatically, so it should not send a duplicate
@@ -215,8 +292,61 @@ completion message. Replies do not grant user permission or override the task.
 Only direct parent-child messages are allowed. Delegation has one level;
 children ask the parent when another worker is needed.
 
-Agents should name the files each child owns, because children share the
-checkout. Boite does not create a worktree per child or merge their edits.
+### Questions from a child
+
+A child can also ask through its own question tool (Claude's AskUserQuestion,
+Codex's requestUserInput, `boite ask`) or stop on a permission card. The
+parent learns of a question at once: a message with origin `question` names the
+child, its question, its options and whether it is blocked, and wakes an idle
+parent like a result does. A permission request reaches the parent only if it
+is still open after 30 seconds, since the user may be watching the child, and
+says that only the user can approve it, in the child's conversation. Settings
+cards are the owner's and never go to the parent.
+
+The parent's next `boite delegate send <child> "<answer>"` answers the child's
+blocking question instead of queuing a message. The text is an option label in
+any case, several labels separated by commas where the question takes several,
+or free text where it takes some; a text that fits none is refused with the
+options. A question asked without stopping takes the parent's text only when
+it names its options: the child is still working, so any other text stays an
+ordinary message. The answer is recorded as
+given by the parent agent, and the letter carries `answered` with the question
+id. A permission card is never answered this way: the message waits until the
+child runs again.
+
+A question message not yet delivered is withdrawn when the card closes first
+(the user answered it in the child, or its turn ended). A child that finishes
+its turn, unless it waits on its own background work, or that is stopped has
+its open asynchronous questions closed, so nothing is left asking on the
+parent's side. `delegate list` and `delegate wait` print each open card under
+the child (`asks (blocked): "..." options: ...` or `needs the user's
+approval: <tool>`), and the child's state reads `question` or `approval`.
+
+`delegate wait` returns as soon as a child it covers waits on a blocking
+question or a permission, with state `needs_input`, instead of holding until
+its timeout while the child's turn stays running. A question asked without
+stopping wakes the parent but does not end a wait.
+
+### Children in their own worktree
+
+Children share the parent's checkout by default, so agents should name the
+files each child owns. `boite delegate spawn --worktree` (and `"worktree":
+true` on a [workflow](workflows.md) step) gives the child a git worktree of its
+own on a new `boite/sub-<id>` branch, in the configured worktree folder. Its
+branch and folder are chosen at spawn and shown in the spawn output; the
+worktree itself is made from the parent's current HEAD just before the child's
+first turn. Uncommitted edits in the parent's checkout are not in it. A
+conversation outside a git repository is refused by name.
+
+The child is told to commit its work on that branch. When one of its turns ends
+(and it is not waiting on background work), Boite looks at the worktree: with
+no commit beyond its base and no uncommitted change, the worktree and its
+branch are removed and the result says so; otherwise both are kept and the
+result ends with `Worktree kept: <path> on branch <branch>, N commits beyond
+<base>`, uncommitted changes noted, and the `git merge <branch>` to run.
+Boite does not merge for the parent. A removed worktree is made again, from
+the parent's HEAD of that moment, if the child gets another turn.
+
 While a child works, the parent should do independent work or finish its turn.
 Waiting inside a tool keeps the parent busy and can delay delivery of results.
 

@@ -4,6 +4,7 @@ import type { AgentLetter } from '@boite/contracts';
 import AgentDiscussion from './AgentDiscussion.svelte';
 import { agentMailFor, discussionsOf } from '../lib/agent-mail';
 import type { Store } from '../lib/store.svelte';
+import { agentDirectory } from '../lib/agent-directory.svelte';
 
 let component: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (component) await unmount(component); component = undefined; document.body.innerHTML = ''; });
@@ -66,23 +67,33 @@ test('the back and forth groups each side, stamps long silences, quotes an earli
   expect(view.querySelector('.tally')?.textContent).toBe('2 sent, 3 received');
 });
 
-test('a steward letter reads as the steward\'s, never on the user\'s side, and a notice is a quiet line', async () => {
-  // Opened from the timeline's notice line: the notice is the letter it lands on.
-  const view = show([
-    letter('steer', 0, true, { origin: 'steward', text: 'Open the pull request.' }),
-    letter('notice', 1, true, { origin: 'notice', text: 'Turn done in "Deployment agent".' })
-  ], 'notice');
-  await tick();
+test('a resident letter carries its agent\'s name and robot, never on the user\'s side', () => {
+  const from = { coreId: 'core-local', threadId: 't-mira', title: 'Mira session', machine: 'This PC', resources: '', status: 'idle' as const, mode: 'brief' as const };
+  const steer = letter('steer', 0, true, { origin: 'resident', relation: 'resident', from, text: 'Open the pull request.' });
+  const store = { coordination: { self, config: { mode: 'brief', resources: '', remote: true, paused: false }, messages: [steer], sent: 0, sendLimit: null, wakes: 0, wakeLimit: null },
+    delegation: null, threads: [], projects: [] } as unknown as Store;
+  agentDirectory(store).snapshot = { profiles: [{ id: 'agent-mira', name: 'Mira', avatar: '', status: 'active', projectIds: ['p-1'] }],
+    sessions: [{ id: 'session-1', agentId: 'agent-mira', threadId: 't-mira' }], work: [], runs: [], entrusted: [] } as never;
+  const [discussion] = discussionsOf(agentMailFor(store, self.threadId), store, agentDirectory(store));
+  component = mount(AgentDiscussion, { target: document.body, props: { store, discussion: discussion!, onback: () => {} } });
   flushSync();
-  expect(message(view, 'notice').classList.contains('flash')).toBe(true);
-  const steer = message(view, 'steer');
-  expect(steer.classList.contains('steward')).toBe(true);
-  expect(steer.classList.contains('right')).toBe(false);
-  expect(steer.querySelector('.label')?.textContent).toBe('Steward');
-  expect(view.querySelector('header .tag')?.getAttribute('data-relation')).toBe('steward');
-  expect(view.querySelector('header svg.lucide-user-cog')).not.toBeNull();
-  const notice = message(view, 'notice');
-  expect(notice.getAttribute('data-testid')).toBe('agent-notice');
-  expect(notice.textContent).toBe('Turn done in "Deployment agent".');
-  expect(notice.querySelector('[data-testid=agent-letter-status]')).toBeNull();
+  const view = document.querySelector<HTMLElement>('[data-testid=agent-discussion-view]')!;
+  const sent = message(view, 'steer');
+  expect(sent.classList.contains('resident')).toBe(true);
+  expect(sent.classList.contains('right')).toBe(false);
+  expect(sent.querySelector('.label')?.textContent).toBe('Mira');
+  expect(view.querySelector('[data-testid=agent-discussion-heading]')?.textContent).toBe('Mira');
+  expect(view.querySelector('header .tag')?.getAttribute('data-relation')).toBe('resident');
+  expect(view.querySelector('header [data-testid=resident-avatar]')?.getAttribute('data-agent-id')).toBe('agent-mira');
+});
+
+test('a discussion opened on a letter that is gone lands on its end', async () => {
+  // A timeline row can name a letter the core has since pruned; the view must not stay at the top waiting for it.
+  const view = show([letter('kept', 0, true), letter('last', 1, false)], 'pruned');
+  const list = view.querySelector<HTMLElement>('[data-testid=agent-discussion-letters]')!;
+  let top = 0;
+  Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => 900 });
+  Object.defineProperty(list, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => { top = value; } });
+  await tick();
+  expect(top).toBe(900);
 });

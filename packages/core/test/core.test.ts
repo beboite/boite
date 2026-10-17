@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { echoThread, removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { newId } from '../src/ids.ts';
@@ -18,6 +18,32 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await harness.stop();
+});
+
+test('shutdown still stops owned children and closes the journal when both startup cleanups fail', async () => {
+  const core = harness.core;
+  const child = core.procs.spawn('shutdown-cleanup-fixture', process.execPath,
+    ['-e', 'setInterval(() => {}, 1000);'], { cwd: harness.dataDir });
+  const drafts = spyOn(core.drafts, 'close').mockRejectedValue(new Error('draft cleanup fixture'));
+  const uploads = spyOn(core.attachmentUploads, 'close').mockRejectedValue(new Error('upload cleanup fixture'));
+  const log = spyOn(core, 'log');
+  try {
+    await expect(harness.stop()).resolves.toBeUndefined();
+    expect(drafts).toHaveBeenCalledTimes(1);
+    expect(uploads).toHaveBeenCalledTimes(1);
+    expect(core.journal.isClosed()).toBe(true);
+    expect(await child.exited).not.toBe(0);
+    // Shutdown closes native exit tracing; inspect the captured child itself.
+    expect(processPlatform.runningSince(child.record.pid)).toBeNull();
+    const warnings = log.mock.calls.filter(([level]) => level === 'warn').map(([, message]) => message);
+    expect(warnings).toContain('draft shutdown cleanup failed: Error: draft cleanup fixture');
+    expect(warnings).toContain('attachment shutdown cleanup failed: Error: upload cleanup fixture');
+  } finally {
+    drafts.mockRestore(); uploads.mockRestore(); log.mockRestore();
+    if (!core.journal.isClosed()) await core.close();
+    await child.exited;
+    await removeDir(harness.dataDir);
+  }
 });
 
 describe('projects', () => {
@@ -85,6 +111,7 @@ describe('settings', () => {
       autoUpdateHarnesses: false,
       // Off only because the harness turns it off; a missing value reads as on.
       asyncQuestions: false,
+      shortAnswers: false,
     });
 
     const next = await client.call('settings.set', { warmProcessMinutes: 3 });
@@ -339,6 +366,24 @@ describe('the data directory lock', () => {
     release();
   });
 
+  test('a start key decides alone: a stepped wall clock leaves the holder its lock, another run loses it', () => {
+    // An NTP step after the core started: its Linux start and boot times read
+    // hours after the time it wrote, yet the boot and start ticks are the same.
+    const file = join(dir, 'core.lock');
+    const lockedAt = Date.parse('2026-09-27T03:29:39Z');
+    const drifted = () => lockedAt + 3_600_000;
+    const key = () => 'boot-a:4242';
+    writeFileSync(file, JSON.stringify({ pid: process.ppid, startedAt: lockedAt, startKey: 'boot-a:4242' }), 'utf8');
+    expect(() => lockDataDir(dir, drifted, drifted, key)).toThrow(`another core is already running on ${dir}`);
+    // A later boot, or a later process in the same boot, is another run.
+    for (const other of ['boot-b:4242', 'boot-a:9000']) {
+      writeFileSync(file, JSON.stringify({ pid: process.ppid, startedAt: lockedAt, startKey: other }), 'utf8');
+      const release = lockDataDir(dir, () => lockedAt, () => 0, key);
+      expect(JSON.parse(readFileSync(file, 'utf8')) as { pid: number }).toMatchObject({ pid: process.pid });
+      release();
+    }
+  });
+
   test.skipIf(process.platform === 'win32')('the data directory is private to its owner, an existing one included', () => {
     chmodSync(dir, 0o755);
     prepareDataDir(dir);
@@ -372,6 +417,11 @@ describe('the data directory lock', () => {
     expect(started!).toBeLessThanOrEqual(Date.now());
     expect(started!).toBeGreaterThanOrEqual(Date.now() - process.uptime() * 1000 - 2000);
     expect(processPlatform.startedAt(DEAD_PID)).toBeNull();
+    if (process.platform === 'linux') {
+      expect(processPlatform.startKey?.(process.pid)).toMatch(/^[0-9a-f-]{36}:\d+$/);
+      expect(processPlatform.startKey?.(process.pid)).toBe(processPlatform.startKey?.(process.pid) ?? '');
+      expect(processPlatform.startKey?.(DEAD_PID)).toBeNull();
+    }
     // A lock older than the parent process names it, and the real reading takes it over.
     writeFileSync(join(dir, 'core.lock'), JSON.stringify({ pid: process.ppid, startedAt: 0 }), 'utf8');
     const release = lockDataDir(dir);

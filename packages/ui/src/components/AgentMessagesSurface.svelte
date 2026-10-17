@@ -2,12 +2,13 @@
   import { tick, untrack } from 'svelte';
   import { ArrowUpRight, MessagesSquare } from '@lucide/svelte';
   import { agentMailFor, discussionsOf, hierarchyOf, whereOf } from '../lib/agent-mail';
+  import { agentDirectory } from '../lib/agent-directory.svelte';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import type { Store } from '../lib/store.svelte';
   import { count, relativeTime } from '../lib/format';
   import { page } from '../lib/page-hidden.svelte';
   import { fill, strings } from '../lib/strings';
-  import DiscussionAvatar from './DiscussionAvatar.svelte';
+  import AgentAvatar from './AgentAvatar.svelte';
   import AgentDiscussion from './AgentDiscussion.svelte';
 
   /**
@@ -18,7 +19,7 @@
   let { store, surface, panel }: { store: Store; surface: Surface; panel: BoundPanel } = $props();
   let threadId = $derived(store.openThread?.id);
   let mail = $derived(threadId ? agentMailFor(store, threadId) : []);
-  let discussions = $derived(discussionsOf(mail, store));
+  let discussions = $derived(discussionsOf(mail, store, agentDirectory(store)));
   let current = $derived(surface.peer ? discussions.find(discussion => discussion.key === surface.peer) : undefined);
   $effect(() => {
     const id = threadId;
@@ -61,10 +62,10 @@
         {@const tag = hierarchyOf(discussion)}
         {@const where = whereOf(discussion)}
         {@const last = discussion.last.letter}
-        <button type="button" class="row" class:selected={discussion === current} class:steward={discussion.steward}
+        <button type="button" class="row" class:selected={discussion === current} class:resident={discussion.resident}
           data-testid="agent-discussion" data-peer={discussion.key} aria-current={discussion === current ? 'true' : undefined}
           onclick={() => choose(discussion.key)}>
-          <DiscussionAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} steward={discussion.steward} size={34} />
+          <AgentAvatar title={discussion.title} providerId={discussion.providerId} status={discussion.status} resident={discussion.resident} agent={discussion.agent} size={34} />
           <span class="main">
             <span class="line">
               <strong>{discussion.title}</strong>
@@ -109,7 +110,7 @@
   .line strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 600; }
   time { flex: none; font-variant-numeric: tabular-nums; }
   .tag { flex: none; padding: 1px 6px; border-radius: var(--radius-full); background: var(--color-accent-soft); color: var(--color-accent); font-weight: 500; }
-  .steward .tag { background: var(--color-steward-soft); color: var(--color-steward); }
+  .resident .tag { background: var(--color-resident-soft); color: var(--color-resident); }
   .where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .preview .text { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; }
   .preview .text :global(svg) { flex: none; }

@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { RpcErrorCode } from '@boite/contracts';
 import { RpcFailure } from '../lib/client';
@@ -18,6 +18,8 @@ vi.mock('../lib/speech-recorder', () => ({
   audioBase64: () => 'AQ==', microphoneError: (error: Error) => error.message,
 }));
 let mounted: ReturnType<typeof mount> | undefined;
+// The recording's menu floats at the microphone, and jsdom has no ResizeObserver to follow it with.
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 test('a microphone ending before speech status resolves finishes instead of sticking in recording', async () => {

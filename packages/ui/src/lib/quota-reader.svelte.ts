@@ -1,4 +1,6 @@
-import { RpcErrorCode, providerEnabled, type Account, type AccountQuota, type ProviderSummary, type SubscriptionProxyQuotas } from '@boite/contracts';
+import { secureId } from './secure-id';
+import { errorText } from './errors';
+import { RpcErrorCode, providerEnabled, type Account, type AccountQuota, type CoreInfo, type ProviderSummary, type SubscriptionProxyQuotas } from '@boite/contracts';
 import { RpcFailure, type Client } from './client';
 import { fill, strings } from './strings';
 
@@ -67,20 +69,30 @@ export function quotaAccountName(row: AccountQuota): string {
   return row.label.trim() ? row.label : row.providerName;
 }
 
+/** What a window has left, clamped and to the tenth: the one rounding every quota view shows. */
+export function remainingPercent(used: number): number {
+  return Math.max(0, Math.min(100, Math.round((100 - used) * 10) / 10));
+}
+
+/** How a window reads from what it used: running low from 80 %, spent at 100 %. */
+export function quotaTone(used: number): 'ok' | 'low' | 'out' {
+  return used >= 100 ? 'out' : used >= 80 ? 'low' : 'ok';
+}
+
 /** A reported wallet, or an enabled budget after this subscription ran out. */
 export function quotaCredits(row: AccountQuota) {
   const credits = row.credits;
   if (!row.enabled || row.status !== 'ready' || !credits || credits.remaining === null ||
     !Number.isFinite(credits.remaining) || credits.remaining <= 0) return null;
   if (credits.kind === 'balance') return credits.enabled === false ? null : credits;
-  return row.windows.some((window) => window.usedPercent >= 100) && credits.enabled === true &&
+  return row.windows.some((window) => quotaTone(window.usedPercent) === 'out') && credits.enabled === true &&
     credits.limit !== null && Number.isFinite(credits.limit) && credits.limit > 0 ? credits : null;
 }
 
 /**
  * How long a refresh asked by hand looks busy at least: one turn of the
- * refresh icon. A gateway like Douane answers from its own cache in a few
- * milliseconds, which would otherwise show no sign that anything was read.
+ * refresh icon. A gateway can answer from its own cache in a few milliseconds
+ * (an older Douane does), which would otherwise show no sign of a read.
  */
 export const REFRESH_SHOWN_MS = 900;
 
@@ -91,6 +103,8 @@ export class QuotaReader {
   completed = $state.raw<string[]>([]);
   /** Why the newest read failed, null once one lands. */
   error = $state<string | null>(null);
+  /** The core refused a paired device the read: it predates devices reading limits. */
+  outdated = $state(false);
   /** A refresh asked by hand, still inside its shown minimum. */
   #held = $state(false);
   #hold: ReturnType<typeof setTimeout> | undefined;
@@ -130,8 +144,7 @@ export class QuotaReader {
   /** Only the newest read writes, so a slow first read never lands over a refresh asked meanwhile. */
   async read(client: Client, refresh = false): Promise<void> {
     const request = ++this.#latest;
-    // getRandomValues also works on a plain HTTP connection to a LAN core.
-    const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    const requestId = secureId();
     this.completed = [];
     this.loading = true;
     if (refresh) {
@@ -153,11 +166,13 @@ export class QuotaReader {
       if (request === this.#latest) {
         this.accept(rows);
         this.error = null;
+        this.outdated = false;
       }
     } catch (error) {
       if (request === this.#latest) {
         this.rows ??= [];
-        this.error = error instanceof Error ? error.message : String(error);
+        this.outdated = error instanceof RpcFailure && error.code === RpcErrorCode.Refused;
+        this.error = this.outdated ? null : errorText(error);
         throw error;
       }
     } finally {
@@ -191,7 +206,8 @@ export class GatewayReader {
   private pending: Promise<void> | null = null;
 
   /**
-   * An older core, which does not know the method, leaves the gateway its dashboard.
+   * An older core, which does not know the method or refuses it to a paired
+   * device, leaves the gateway its dashboard.
    * A transport failure says nothing about the gateway: the state stays as it was,
    * so the next `known()` asks again.
    */
@@ -200,7 +216,7 @@ export class GatewayReader {
     const running = (async () => {
       try { this.accept(await client.call('subscriptionProxy.quotas', { refresh })); }
       catch (error) {
-        if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound)
+        if (error instanceof RpcFailure && (error.code === RpcErrorCode.MethodNotFound || error.code === RpcErrorCode.Refused))
           this.accept({ status: 'unsupported', providers: [], updatedAt: null, checkedAt: null, error: null });
       }
     })();
@@ -229,7 +245,10 @@ export function gatewayReader(key: string): GatewayReader {
 const readers = new Map<string, QuotaReader>();
 
 /** One reader per core, so a page opened again starts from what the last one saw. */
-export function quotaReader(key: string): QuotaReader {
+export function quotaReader(endpointUrl: string, core?: Pick<CoreInfo, 'dataDir' | 'coreId'> | null): QuotaReader {
+  // An address can belong to a different installation after reconnecting.
+  // URL-only rows from older clients have no core identity, so leave them unread.
+  const key = JSON.stringify([endpointUrl, core?.dataDir, core?.coreId]);
   let reader = readers.get(key);
   if (!reader) {
     reader = new QuotaReader(key);

@@ -11,7 +11,7 @@ import {
   type RpcResult,
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
-import { appCommands, fakePluginPools, fakePlugins, PLUGIN_STEPS, poolCommands } from './plugins-seed';
+import { appCommands, FAKE_RELEASES, fakePluginPools, fakePlugins, PLUGIN_STEPS, poolCommands, runningGateway } from './plugins-seed';
 import { INSTALL_STEP_MS } from './providers';
 
 type PluginMethod = Extract<RpcMethodName, `plugins.${string}`>;
@@ -30,6 +30,10 @@ export class FakePlugins {
   close(): void { for (const [id, run] of this.#pluginRuns) this.#pluginRuns.set(id, run + 1); }
   handles(method: RpcMethodName): method is PluginMethod { return Object.hasOwn(this.handlers, method); }
   async call(method: PluginMethod, params: unknown): Promise<unknown> { return this.handlers[method](params as never); }
+  /** The loopback port a gateway plugin listens on, Douane's default when it is not listed. */
+  gatewayPort(id: string): number { return this.#plugins.find((entry) => entry.id === id)?.gateway?.port ?? 8787; }
+  /** Whether that gateway answers now. */
+  gatewayRunning(id: string): boolean { return this.#plugins.find((entry) => entry.id === id)?.gateway?.status === 'running'; }
   private readonly handlers: Handlers = {
     'plugins.list': (params) => { return structuredClone(this.#plugins).sort((a, b) => a.origin === b.origin ? (a.origin === 'url' ? a.id.localeCompare(b.id) : 0) : a.origin === 'recommended' ? -1 : 1); },
     'plugins.inspect': (params) => { return this.#inspectPlugin(params); },
@@ -60,8 +64,10 @@ export class FakePlugins {
       this.#pluginRuns.set(plugin.id, (this.#pluginRuns.get(plugin.id) ?? 0) + 1);
       if (plugin.origin === 'url') return this.#dropPlugin(plugin);
       // The core kills the app and deletes its directory, `app.json` with it: what is left is a fresh, enabled app.
-      const app: PluginAppState | null = plugin.app === null ? null : { enabled: true, status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null };
-      Object.assign(plugin, { status: 'not-installed', version: null, progress: 0, error: null, rejected: null, app });
+      const app: PluginAppState | null = plugin.app === null ? null : { enabled: true, autostart: true, status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null };
+      // A gateway's data directory stays; its program and `gateway.json` go.
+      const gateway = plugin.gateway == null ? null : { ...plugin.gateway, enabled: true, autostart: true, status: 'stopped' as const, pid: null, version: null, startedAt: null, error: null };
+      Object.assign(plugin, { status: 'not-installed', version: null, progress: 0, error: null, rejected: null, app, gateway });
       this.host.emit('plugins.updated', structuredClone(plugin));
       return structuredClone(plugin);
     },
@@ -90,11 +96,62 @@ export class FakePlugins {
       this.host.emit('plugins.updated', structuredClone(plugin));
       return structuredClone(plugin);
     },
+    'plugins.gateway': (params) => {
+      if (!['start', 'stop', 'restart'].includes(params.action)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'plugin gateway action must be start, stop or restart' });
+      }
+      const plugin = this.#requirePlugin(params.id);
+      if (plugin.status !== 'installed') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `Install ${plugin.id} first.` });
+      if (plugin.gateway == null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${plugin.id} provides no gateway.` });
+      plugin.gateway = params.action === 'stop'
+        ? { ...plugin.gateway, enabled: false, status: 'stopped', pid: null, version: null, startedAt: null, error: null }
+        : { ...runningGateway(plugin.version, 4000 + this.host.nextId(), this.host.now()), autostart: plugin.gateway.autostart };
+      this.host.emit('plugins.updated', structuredClone(plugin));
+      return structuredClone(plugin);
+    },
+    'plugins.autostart': (params) => {
+      const plugin = this.#requirePlugin(params.id);
+      if (plugin.status !== 'installed') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `Install ${plugin.id} first.` });
+      if (plugin.app === null && plugin.gateway == null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${plugin.id} provides no desktop app or gateway to start with Boite.` });
+      if (plugin.app !== null) plugin.app = { ...plugin.app, autostart: params.autostart };
+      if (plugin.gateway != null) plugin.gateway = { ...plugin.gateway, autostart: params.autostart };
+      this.host.emit('plugins.updated', structuredClone(plugin));
+      return structuredClone(plugin);
+    },
+    'plugins.checkUpdates': (params) => { return this.#checkUpdates(params?.id); },
   };
+
+  /**
+   * What the core's check answers, without git: each source "publishes" its
+   * FAKE_RELEASES entry, offered while it is not the version installed.
+   */
+  async #checkUpdates(id: string | undefined): Promise<PluginState[]> {
+    const sourced = this.#plugins.filter((plugin) => plugin.updates != null);
+    if (id !== undefined && !sourced.some((plugin) => plugin.id === id)) {
+      throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `plugin ${id} has no update source; expected a recommended plugin that names an update source: ${sourced.map((plugin) => plugin.id).join(', ')}` });
+    }
+    const checked = sourced.filter((plugin) => id === undefined || plugin.id === id);
+    for (const plugin of checked) {
+      plugin.updates = { ...plugin.updates!, checking: true };
+      this.host.emit('plugins.updated', structuredClone(plugin));
+    }
+    await new Promise((resolve) => setTimeout(resolve, this.host.delayMs() * 10));
+    // The page reads these against the wall clock, not the fake's.
+    const at = Date.now();
+    for (const plugin of checked) {
+      const release = FAKE_RELEASES[plugin.id];
+      const offered = release !== undefined && plugin.status !== 'installing' && release.version !== plugin.version;
+      plugin.updates = { ...plugin.updates!, checking: false, checkedAt: at, nextCheckAt: at + 6 * 3_600_000, error: null, ignored: null,
+        available: offered ? { version: release.version, commit: release.commit, checkedAt: at } : null };
+      if (offered) Object.assign(plugin, { availableVersion: release.version, artifact: release.artifact });
+      this.host.emit('plugins.updated', structuredClone(plugin));
+    }
+    return structuredClone(checked);
+  }
 
   /** A desktop app the fake has just started, as the core reports it. */
   #running(app: PluginAppState | null): PluginAppState {
-    return { enabled: true, status: 'running', pid: 4000 + this.host.nextId(), exitCode: app?.exitCode ?? null, error: null, startedAt: this.host.now() };
+    return { enabled: true, autostart: app?.autostart ?? true, status: 'running', pid: 4000 + this.host.nextId(), exitCode: app?.exitCode ?? null, error: null, startedAt: this.host.now() };
   }
 
   #plugins: PluginState[] = fakePlugins();
@@ -135,7 +192,10 @@ export class FakePlugins {
       else {
         // An enabled desktop app starts once its install or update is in place.
         Object.assign(plugin, { status: 'installed', version: plugin.availableVersion, progress: 0, error: null, rejected: null });
+        // Installed, the release found is no longer an update.
+        if (plugin.updates?.available != null) plugin.updates = { ...plugin.updates, available: null };
         if (plugin.app?.enabled) plugin.app = this.#running(plugin.app);
+        if (plugin.gateway?.enabled) plugin.gateway = runningGateway(plugin.version, 4000 + this.host.nextId(), this.host.now());
       }
       this.host.emit('plugins.updated', structuredClone(plugin));
     }
@@ -200,7 +260,7 @@ export class FakePlugins {
     const existing = this.#plugins.find((entry) => entry.id === manifest.id);
     const pools = manifest.provides.accountPools?.providers ?? [];
     const app: PluginAppState | null = manifest.provides.desktopApp === undefined ? null
-      : existing?.app ?? { enabled: true, status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null };
+      : existing?.app ?? { enabled: true, autostart: true, status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null };
     const plugin: PluginState = {
       id: manifest.id, name: manifest.name, origin: 'url', description: manifest.description, homepage: manifest.homepage,
       version: existing?.version ?? null, availableVersion: manifest.version, status: 'installing', progress: 0, error: null,

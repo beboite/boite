@@ -1,12 +1,14 @@
 <script lang="ts">
-  import { ChevronDown, Columns2, Plus, Rows2, X } from '@lucide/svelte';
+  import { ChevronDown, Columns2, History, Plus, Rows2, Search, X } from '@lucide/svelte';
   import { onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { MAX_THREAD_TERMINALS, type ThreadId } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { MAX_PANES, activeTab, paneNumber, panesOf, terminalIdOf, type TerminalTab } from '../lib/terminal-layout';
+  import { MAX_PANES, MIN_SHARE, activeTab, paneNumber, panesOf, terminalIdOf, type TerminalTab } from '../lib/terminal-layout';
+  import { baseName } from '../lib/terminal-marks';
   import type TerminalView from './TerminalView.svelte';
+  import ResizeHandle from './ResizeHandle.svelte';
 
   /**
    * The thread's shells in the frame under the chat, in tabs, each one shell
@@ -29,6 +31,7 @@
   let height = $state(readHeight());
   let room = $state(window.innerHeight);
   let visibleHeight = $derived(Math.min(height, Math.max(MIN_HEIGHT, Math.round(room * 0.7))));
+  /** Some handle of the drawer is being dragged. Each handle keeps its own state; this only stills the drawer's height transition. */
   let dragging = $state(false);
   let layout = $derived(store.terminalLayout(threadId));
   let tabs = $derived<TerminalTab[]>(layout === null ? [] : narrow.current
@@ -38,6 +41,9 @@
   let more = $derived(layout !== null && store.terminalsMultiple() && panesOf(layout).length < MAX_THREAD_TERMINALS);
   let splits = $derived(more && !narrow.current && layout !== null && activeTab(layout).panes.length < MAX_PANES);
   let hideLabel = $derived(store.keyLabel('terminal'));
+  /** The screen with the keyboard: its shell, its live directory and whether a command runs. */
+  let screen = $derived(layout === null ? null : store.terminalScreen(layout.active));
+  let liveCwd = $derived(screen?.cwd ?? cwd);
 
   function readHeight(): number {
     try {
@@ -57,8 +63,31 @@
     return key ? `${label} (${key})` : label;
   }
 
+  /** A tab is named after the directory its shells are in, as Windows Terminal titles it, else by number. */
   function tabLabel(tab: TerminalTab): string {
-    return fill(strings.terminal.tab, { n: tab.panes.map((pane) => paneNumber(threadId, pane)).join(' | ') });
+    return tab.panes.map((pane) => {
+      const where = store.terminalScreen(pane)?.cwd;
+      return where ? baseName(where) : fill(strings.terminal.tab, { n: String(paneNumber(threadId, pane)) });
+    }).join(' | ');
+  }
+
+  function tabTitle(tab: TerminalTab): string {
+    return tab.panes.map((pane) => store.terminalScreen(pane)?.cwd ?? cwd).join('\n');
+  }
+
+  /** `running`, `failed` or nothing: the dot after a tab's or the drawer's name. */
+  function statusOf(panes: string[]): 'running' | 'failed' | null {
+    const screens = panes.map((pane) => store.terminalScreen(pane));
+    if (screens.some((entry) => entry?.running)) return 'running';
+    if (screens.some((entry) => entry?.lastExit !== null && entry?.lastExit !== undefined && entry.lastExit !== 0 && !entry.running)) return 'failed';
+    return null;
+  }
+
+  function statusTitle(panes: string[]): string {
+    const status = statusOf(panes);
+    if (status === 'running') return strings.terminal.running;
+    const failed = panes.map((pane) => store.terminalScreen(pane)).find((entry) => entry?.lastExit);
+    return status === 'failed' ? fill(strings.terminal.failed, { code: String(failed?.lastExit ?? '') }) : '';
   }
 
   function showTab(tab: TerminalTab): void {
@@ -87,76 +116,73 @@
     return () => observer.disconnect();
   });
 
-  /** Follows the pointer from `handle` with `move` until it lets go, then runs `end`. */
-  function track(event: PointerEvent, move: (next: PointerEvent) => void, end: () => void) {
-    const handle = event.currentTarget as HTMLElement;
-    handle.setPointerCapture(event.pointerId);
-    const stop = () => {
-      handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', stop);
-      handle.removeEventListener('pointercancel', stop);
-      end();
-    };
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', stop);
-    handle.addEventListener('pointercancel', stop);
+  let dragFrom = 0;
+
+  function setHeight(next: number): void {
+    height = Math.min(maxHeight(), Math.max(MIN_HEIGHT, Math.round(next)));
   }
 
-  function startDrag(event: PointerEvent) {
-    if (event.button !== 0) return;
-    const startY = event.clientY;
-    const startHeight = visibleHeight;
-    dragging = true;
-    track(event, (next) => {
-      height = Math.min(maxHeight(), Math.max(MIN_HEIGHT, startHeight + startY - next.clientY));
-    }, () => {
-      dragging = false;
-      try { localStorage.setItem(HEIGHT_KEY, String(height)); } catch { /* private mode keeps the height for this session */ }
-    });
+  function saveHeight(): void {
+    try { localStorage.setItem(HEIGHT_KEY, String(height)); } catch { /* private mode keeps the height for this session */ }
   }
 
-  /** The line after pane `index`: the two panes around it share their room at the pointer. */
-  function startSplit(event: PointerEvent, tab: TerminalTab, index: number) {
-    if (event.button !== 0) return;
-    const line = event.currentTarget as HTMLElement;
-    const before = line.previousElementSibling?.getBoundingClientRect();
-    const after = line.nextElementSibling?.getBoundingClientRect();
-    if (!before || !after) return;
+  /** The two panes around the line `handle` sits on: where they start and how much room they share. */
+  function pair(handle: HTMLElement, tab: TerminalTab): { from: number; span: number } | null {
+    const line = handle.parentElement;
+    const before = line?.previousElementSibling?.getBoundingClientRect();
+    const after = line?.nextElementSibling?.getBoundingClientRect();
+    if (!before || !after) return null;
     const row = tab.direction === 'row';
     const from = row ? before.left : before.top;
     const span = (row ? after.right : after.bottom) - from;
-    if (span <= 0) return;
-    dragging = true;
-    track(event, (next) => {
-      store.resizeTerminalPanes(threadId, tab.id, index, ((row ? next.clientX : next.clientY) - from) / span);
-    }, () => { dragging = false; });
+    return span > 0 ? { from, span } : null;
+  }
+
+  let splitFrom = 0;
+  let splitSpan = 0;
+
+  /** The share of the two panes around line `index` that goes to the first, in percent. */
+  function sharePercent(tab: TerminalTab, index: number): number {
+    const first = tab.sizes[index] ?? 1;
+    const second = tab.sizes[index + 1] ?? 1;
+    return (first / (first + second)) * 100;
   }
 </script>
 
 <section class="drawer" class:closing class:dragging inert={closing} use:attach
   ontransitionend={(event) => { if (event.propertyName === 'height') onexit(event); }}
   style="--terminal-height: {visibleHeight}px" bind:this={drawer} data-testid="terminal-drawer">
+  <!-- Outside the frame, which clips: the handle lies in the gap above it. -->
+  <div class="edge">
+    <ResizeHandle
+      orientation="horizontal"
+      edge="top"
+      label={strings.terminal.resize}
+      testid="terminal-resize"
+      value={visibleHeight}
+      min={MIN_HEIGHT}
+      max={maxHeight()}
+      onstart={() => { dragFrom = visibleHeight; dragging = true; }}
+      onmove={(delta) => setHeight(dragFrom - delta)}
+      onend={() => { dragging = false; saveHeight(); }}
+      onstep={(delta) => { setHeight(visibleHeight - delta); saveHeight(); }}
+      onreset={() => { setHeight(DEFAULT_HEIGHT); saveHeight(); }}
+    />
+  </div>
   <div class="surface framed">
-    <div
-      class="handle"
-      class:dragging
-      role="separator"
-      aria-orientation="horizontal"
-      aria-label={strings.terminal.resize}
-      onpointerdown={startDrag}
-    ></div>
     <header>
       {#if tabs.length > 1}
         <div class="tabs" role="tablist" aria-label={strings.terminal.tabs}>
           {#each tabs as tab (tab.id)}
             {@const selected = tab === shown}
             <div class="tab" class:selected data-testid="terminal-tab">
-              <button type="button" class="ghost label ui-label" role="tab" aria-selected={selected} title={cwd}
+              <button type="button" class="ghost label ui-label" role="tab" aria-selected={selected} title={tabTitle(tab)}
                 onclick={() => showTab(tab)}>
                 {#if tab.panes.length > 1}
                   {#if tab.direction === 'row'}<Columns2 size={13} strokeWidth={1.75} />{:else}<Rows2 size={13} strokeWidth={1.75} />{/if}
                 {/if}
                 {tabLabel(tab)}
+                {#if statusOf(tab.panes)}<span class="status {statusOf(tab.panes)}" title={statusTitle(tab.panes)} data-testid="terminal-status"></span>{/if}
               </button>
               <button type="button" class="ghost close" title={strings.terminal.closeTab} aria-label={strings.terminal.closeTab}
                 data-testid="terminal-tab-close" onclick={() => closeTab(tab)}>
@@ -166,10 +192,23 @@
           {/each}
         </div>
       {:else}
-        <span class="title ui-label">{strings.terminal.title}</span>
-        <span class="cwd ui-label" title={cwd}>{cwd}</span>
+        {@const status = layout === null ? null : statusOf([layout.active])}
+        <span class="title ui-label">{screen?.shell?.name ?? strings.terminal.title}</span>
+        <span class="cwd ui-label" title={liveCwd} data-testid="terminal-cwd">{liveCwd}</span>
+        {#if status}<span class="status {status}" title={statusTitle([layout!.active])} data-testid="terminal-status"></span>{/if}
       {/if}
       <span class="spacer"></span>
+      <button type="button" class="ghost icon" title={titled(strings.terminal.find, 'terminal-find')}
+        aria-label={strings.terminal.find} data-testid="terminal-find-open" disabled={screen === null}
+        onclick={() => screen?.openSearch()}>
+        <Search size={14} strokeWidth={1.75} />
+      </button>
+      <button type="button" class="ghost icon" title={titled(strings.terminal.history, 'terminal-history')}
+        aria-label={strings.terminal.history} data-testid="terminal-history-open" disabled={screen === null}
+        onclick={() => screen?.openHistory()}>
+        <History size={15} strokeWidth={1.75} />
+      </button>
+      <span class="divider" aria-hidden="true"></span>
       {#if more}
         <button type="button" class="ghost icon" title={titled(strings.terminal.new, 'terminal-new')}
           aria-label={strings.terminal.new} data-testid="terminal-new" onclick={() => store.newTerminal(threadId)}>
@@ -213,13 +252,32 @@
         <div class="panes" class:column={shown.direction === 'column'}>
           {#each shown.panes as pane, index (pane)}
             {#if index > 0}
-              <div
-                class="split"
-                role="separator"
-                aria-orientation={shown.direction === 'row' ? 'vertical' : 'horizontal'}
-                aria-label={strings.terminal.resizePanes}
-                onpointerdown={(event) => startSplit(event, shown!, index - 1)}
-              ></div>
+              {@const tab = shown}
+              <div class="split">
+                <ResizeHandle
+                  orientation={tab.direction === 'row' ? 'vertical' : 'horizontal'}
+                  edge="center"
+                  label={strings.terminal.resizePanes}
+                  testid="terminal-split-resize"
+                  value={sharePercent(tab, index - 1)}
+                  min={MIN_SHARE * 100}
+                  max={(1 - MIN_SHARE) * 100}
+                  onstart={(handle) => {
+                    const room = pair(handle, tab);
+                    if (room === null) return false;
+                    splitFrom = room.from;
+                    splitSpan = room.span;
+                    dragging = true;
+                  }}
+                  onend={() => { dragging = false; }}
+                  onmove={(_, at) => store.resizeTerminalPanes(threadId, tab.id, index - 1, (at - splitFrom) / splitSpan)}
+                  onstep={(delta, handle) => {
+                    const room = pair(handle, tab);
+                    if (room !== null) store.resizeTerminalPanes(threadId, tab.id, index - 1, sharePercent(tab, index - 1) / 100 + delta / room.span);
+                  }}
+                  onreset={() => store.resizeTerminalPanes(threadId, tab.id, index - 1, 0.5)}
+                />
+              </div>
             {/if}
             <div
               class="pane"
@@ -247,6 +305,7 @@
 
 <style>
   .drawer {
+    position: relative;
     flex: none;
     min-height: 0;
     --terminal-gap: 0px;
@@ -280,31 +339,19 @@
 
   .loading { margin: 12px; font-size: var(--text-sm); }
 
-  /* The top edge, a hairline on hover and while dragged, like the panel's. */
-  .handle {
+  /* The frame's top edge, for the handle centred in the gap above it. On a
+     phone there is no gap: the handle stays under the edge, inside the
+     drawer's clip. */
+  .edge {
     position: absolute;
-    top: 0;
+    top: var(--terminal-gap);
     left: 0;
     right: 0;
-    height: 8px;
-    cursor: row-resize;
-    z-index: 1;
-    touch-action: none;
+    --resize-gap: var(--terminal-gap);
   }
-
-  .handle::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 3px;
-    height: 1px;
-    background: transparent;
-    transition: background var(--dur-2) var(--ease-out-quint);
+  @media (max-width: 720px) {
+    .edge { --resize-gap: -10px; }
   }
-
-  .handle:hover::after { background: var(--color-border); }
-  .handle.dragging::after { background: color-mix(in srgb, var(--color-foreground) 60%, transparent); }
 
   header {
     display: flex;
@@ -382,6 +429,37 @@
 
   .spacer { flex: 1; }
 
+  .divider {
+    flex: none;
+    width: 1px;
+    height: 14px;
+    margin: 0 2px;
+    background: var(--color-border);
+  }
+
+  /* After a name: the accent breathing while a command runs, red once one failed. */
+  .status {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  .status.running {
+    background: var(--color-accent);
+    animation: status-running 1.2s var(--loop-ease-out-quint-36) infinite var(--loops);
+  }
+
+  .status.failed { background: var(--ansi-red); }
+
+  @keyframes status-running {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  @media (prefers-reduced-motion: reduce) { .status.running { animation: none; } }
+  :global(html[data-motion='reduced']) .status.running { animation: none; }
+
   .icon {
     width: var(--control-sm);
     height: var(--control-sm);
@@ -419,25 +497,13 @@
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent);
   }
 
+  /* The line between two panes; its handle (ResizeHandle) lies over it. */
   .split {
     flex: none;
     width: 1px;
     position: relative;
     background: var(--color-border);
-    cursor: col-resize;
-    touch-action: none;
   }
 
-  .panes.column > .split { width: auto; height: 1px; cursor: row-resize; }
-
-  /* A wider grip than the hairline it draws. */
-  .split::before {
-    content: '';
-    position: absolute;
-    inset: 0 -4px;
-    z-index: 1;
-  }
-
-  .panes.column > .split::before { inset: -4px 0; }
-  .split:hover, .drawer.dragging .split { background: var(--color-edge); }
+  .panes.column > .split { width: auto; height: 1px; }
 </style>

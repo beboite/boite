@@ -13,9 +13,12 @@ directory and the message stores a reference. Downloads support HTTP ranges,
 so videos can seek without loading the entire file. The UI renews download
 tickets while the card is mounted. Unreferenced snapshots and interrupted
 copies older than a day are removed by daily maintenance; forks retain their
-referenced files. The reference scan runs in a worker so large journals do not
-block the core's event loop. A pass that overlaps journal writes skips deletion
-to avoid acting on stale references. User uploads still have their separate 5 MB limit.
+referenced files. A pass skips the reference scan when no file is a day old.
+The scan runs in a worker so large journals do not block the core's event loop.
+A file is never deleted on a scan older than the last journal write: when a
+write lands during the scan, the pass scans again once, and when that scan is
+overtaken too, it tries again in 15 minutes, up to 8 times before waiting a
+day. User uploads still have their separate 5 MB limit.
 Relative and absolute paths must
 stay inside that directory, including resolved symlinks. A missing file,
 directory, oversized file or archived thread is refused. The thread must have
@@ -25,6 +28,14 @@ Published files remain downloadable after the source is edited or deleted,
 after a core restart, and with the switch below turned off. Paired phones can
 download the published snapshot. They cannot publish or browse arbitrary host
 files through the file APIs.
+
+A published file shows where it was sent while its turn runs, so it can be
+seen at once. Once the turn ends, the turn's files move under the last thing
+the agent wrote, in the order they were published, and any inline views come
+after them (`filesLast` in `packages/ui/src/lib/message-order.ts`). The
+journal keeps the publish order; only the drawing changes, so older threads
+are shown the same way. A file whose turn has nothing else on the loaded page
+keeps its place.
 
 Published images, videos and audio appear directly in the conversation
 whatever the switch says. Media keeps its aspect ratio in a bounded card; videos have
@@ -54,12 +65,13 @@ text. A page runs only as an inline view, below.
 
 An agent that wants to show something writes one HTML file and runs
 `boite view .boite/views/orbit.html`: a diagram, a chart, an animated SVG, a
-simulator with its own sliders. The page is drawn in the conversation at the
-end of the agent's answer, with no card around it, on the conversation's own
-background, in the app's theme and faces. Every provider can use the command.
-No setting turns it on, and the switch above does not turn it off.
+simulator with its own sliders. The page is drawn in the conversation, inside
+the agent's answer where a line of it places the page, else at the end of the
+answer, with no card around it, on the conversation's own background, in the
+app's theme and faces. Every provider can use the command. No setting turns
+it on, and the switch above does not turn it off.
 
-Captures: [a view on desktop](images/inline-view-desktop.png) · [the same on a phone](images/inline-view-phone.png)
+Captures: [a view on desktop](images/inline-view-desktop.png) · [the same on a phone](images/inline-view-phone.png) · [a view placed between two paragraphs](images/inline-view-placed-desktop.png) · [the same on a phone](images/inline-view-placed-phone.png)
 
 ### The app's look
 
@@ -107,10 +119,19 @@ to animate and what the publish checks. Both texts are `VIEW_GUIDE_LINE` and `VI
 `packages/contracts/src/view.ts`, beside the code they describe.
 
 One file is one visual. Several visuals are several files, each published
-with its own command; they stack under the answer in the order they were
-published. Publishing the same file again in the same turn replaces that
-visual on screen, so an agent fixes a page in place. In a later turn the same
-file is a new view, and the earlier answer keeps the page it had.
+with its own command. The help and the command's output tell the agent to
+place each one right after the paragraph it explains, with a line of its own
+that names the file as a Markdown image; the output prints that line with the
+page's title and stored path:
+
+```text
+![Orbit](.boite/views/orbit.html)
+```
+
+Pages no line places stack under the answer in the order they were published.
+Publishing the same file again in the same turn replaces that visual on
+screen, so an agent fixes a page in place. In a later turn the same file is a
+new view, and the earlier answer keeps the page it had.
 
 ### What publishing does
 
@@ -134,8 +155,12 @@ an `.html` file inside the thread's working directory, and then:
    loads it once in a headless browser of this machine
    ([the agent's browser](browser.md), in a process of its own that no
    conversation lists). An uncaught error, a `console.error` or a request the
-   policy refused fails the publish. The page's height is measured at 816 px
-   and at 330 px, the answer column on a desktop and on a phone.
+   policy refused fails the publish. The page's height is measured with its
+   content 816 px and 330 px wide, the answer column on a desktop and on a
+   phone. A page wider than its frame at either width also fails, naming the
+   outermost element that sticks out and its container: the frame hides its
+   scrollbars, so the reader would see it cut with no way to scroll to the
+   rest. What a scrolling or clipping box of the page holds does not count.
 
 A refusal is the command's error, with each problem and its line, and nothing
 is stored or shown: the agent fixes the file and runs the command again. A
@@ -153,12 +178,38 @@ shows the file card and still downloads the page. Retention, forks and
 
 ### Where it is drawn
 
-The message is journalled when the command runs. The timeline draws a turn's
-views after everything else the turn wrote (`placeViews` in
-`packages/ui/src/lib/inline-view.ts`), and draws none while the turn is still
-running: the answer being written stays the last thing in the thread, and the
-page arrives with the finished answer. Publishing does not cut the running
-answer in two, as a published file does.
+The message is journalled when the command runs. Where it is drawn depends on
+the answer of the same turn (`packages/ui/src/lib/inline-view.ts`):
+
+- A line of the answer that holds only such an image, its path naming a
+  page the turn published, places that page (`answerPieces`, `viewAt`). The
+  path is the one the command printed, relative to the working directory; an
+  absolute path or a bare file name finds the same page, the exact path first.
+  A line in a fenced block places nothing, and a line naming no page of the
+  turn stays text. The answer's bubble is cut there: the text above in one
+  bubble, the page across the whole column, the text under it in another
+  bubble. A page is drawn as soon as its line is complete, while the turn still
+  runs, and the line is never shown as a link while it is being written. An
+  answer of a turn that published a page is drawn this way from its first
+  word, so the line, once written, adds the page and the bubble under it
+  without drawing again the paragraphs above. Each text part reads its lines
+  again only when its text changed (a streamed delta grows it in place).
+- Every other page goes after everything else the turn wrote (`placeViews`),
+  and none of them is drawn while the turn is still running: the answer being
+  written stays the last thing in the thread, and the page arrives with the
+  finished answer.
+
+Publishing does not cut the running answer in two where the command ran, as a
+published file does: only the answer's own line places a page. A client
+without this placement shows the line as a link to the file and the page at
+the end of the answer.
+
+The frame reaches 4 px (`VIEW_BLEED`) past the answer column on each side,
+into the conversation's margin, and the kit pads the page's root by as much,
+so the content keeps the column's width. A border, a card's shadow or a focus
+ring on the page's edge is drawn in that room instead of being cut by the
+frame, whatever a fractional display scale (125 % with the app zoomed, for
+instance) rounds the frame's edge to.
 
 `InlineView.svelte` frames the page at the measured height for its width, so
 nothing below it moves when it loads, then at the height the page reports.
@@ -177,7 +228,10 @@ which lifts the same running page over the app; and download.
 on the core's own port, so a phone and a proxied core need nothing more than
 they already reach. Only a ticket minted for a view opens there; a file
 ticket still only downloads, and a view's download address still does not
-render.
+render. Publication also writes the snapshot gzipped beside it
+(`<id>.gz`), and the route sends that copy with `content-encoding: gzip` to a
+client that reads gzip; a view published before that copy existed is sent as
+it is. Retention removes the copy with its snapshot.
 
 The route sends `content-security-policy: sandbox allow-scripts` and the
 frame carries the same sandbox. The page runs on an opaque origin: it has no
@@ -199,7 +253,7 @@ A page can still navigate its own frame. The client notices the second load
 and closes the frame.
 
 Tests: `packages/core/test/views.test.ts` (embedding, refusals, the route, the
-headless check), `packages/ui/src/lib/inline-view.test.ts` and
-`components/InlineView.test.ts` (order, frame, fallback),
+headless check), `packages/ui/src/lib/inline-view.test.ts`, `components/InlineView.test.ts`
+and `components/AssistantMessage.test.ts` (order, placement, frame, fallback),
 `tests/e2e/inline-views.test.ts` (a real core and browser on desktop and
 phone, and the shell's content policy).

@@ -1,12 +1,15 @@
 <script lang="ts">
   import { ChevronRight } from '@lucide/svelte';
+  import { threadBusy } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
-  import AgentElapsed from './AgentElapsed.svelte';
+  import { threadTone } from '../lib/thread-state';
+  import Elapsed from './Elapsed.svelte';
 
   let { store, threadId }: { store: Store; threadId: string } = $props();
-  let active = $derived((store.delegation?.agents ?? []).filter(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)));
+  /** At work in a turn, or waiting on its own background work: either way its result has not come back. */
+  let active = $derived((store.delegation?.agents ?? []).filter(agent => threadBusy(agent.thread)));
   let native = $derived((store.delegation?.nativeAgents ?? []).filter(agent => agent.status === 'running'));
   let runs = $derived(store.workflowsOf(threadId).filter(run => run.status === 'running'));
   let count = $derived(active.length + native.length);
@@ -19,24 +22,19 @@
   $effect(() => { void store.loadDelegation(threadId); });
   $effect(() => { void store.loadWorkflows(threadId); });
 
-  function open(): void {
-    const surface = store.panel.open('agents');
-    store.panel.update(surface.id, { runId: undefined });
-    void store.selectDelegatedAgent(null);
-  }
 </script>
 
 {#if count > 0 || runs.length > 0}
   <div class="dock" data-testid="agent-dock">
-    <button type="button" class="quiet activity" data-testid="active-subagents" onclick={open}>
-      <StatusMark status="running" />
+    <button type="button" class="quiet activity" data-testid="active-subagents" onclick={() => store.showTeam()}>
+      <StatusMark {...threadTone('running')} />
       <span class="counts">
         {#if count > 0}<span class="ui-label">{fill(count === 1 ? strings.delegation.activeOne : strings.delegation.activeMany, { count: String(count) })}</span>{/if}
         {#if count > 0 && runs.length > 0}<span class="ui-label" aria-hidden="true">·</span>{/if}
         {#if runs.length > 0}<span class="ui-label">{fill(runs.length === 1 ? strings.workflow.activeOne : strings.workflow.activeMany, { count: String(runs.length) })}</span>{/if}
       </span>
       <span class="ui-label" aria-hidden="true">·</span>
-      <AgentElapsed {startedAt} finishedAt={null} active />
+      <Elapsed {startedAt} finishedAt={null} active />
       <ChevronRight size={13} strokeWidth={1.75} />
     </button>
   </div>

@@ -3,7 +3,7 @@ name = "boite-shell"
 version = "2.0.0-beta.1"
 description = "Boite desktop shell: window, tray, and the local core"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.95"
 publish = false
 license = "MIT"
 
@@ -12,17 +12,17 @@ name = "boite_shell_lib"
 crate-type = ["lib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
 # `unstable` is what makes a child webview possible: `Window::add_child`,
 # `Manager::get_webview` and `WebviewBuilder` are all behind that flag, and the
 # browser surface is a child webview parked over the slot the UI measures.
-tauri = { version = "2", features = ["tray-icon", "unstable"] }
-tauri-plugin-dialog = "2"
-tauri-plugin-opener = "2"
+tauri = { version = "2.12", features = ["tray-icon", "unstable"] }
+tauri-plugin-dialog = "2.8"
+tauri-plugin-opener = "2.7"
 # Pinned to a minor: `configure_client` hands us its reqwest builder.
-tauri-plugin-updater = "~2.12"
+tauri-plugin-updater = "~2.13"
 reqwest = { version = "0.13", default-features = false, features = ["json", "gzip"] }
 # The crypto provider reqwest's rustls needs, the one the updater plugin uses.
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
@@ -35,14 +35,14 @@ serde_json = "1"
 fs2 = "0.4"
 
 [dev-dependencies]
-tauri = { version = "2", features = ["test"] }
+tauri = { version = "2.12", features = ["test"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-dirs = "6"
+dirs = "7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
+objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSButton", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
 
@@ -54,26 +54,32 @@ harness = false
 # The Job Object that ties the core's life to this process. Only the calls in
 # `src/platform/` are asked for.
 [target.'cfg(windows)'.dependencies]
-webview2-com = "0.38"
-windows = "0.61"
+webview2-com = "0.39"
+windows = "0.62"
 # `implement`, for the environment wrapper that opens a named browser profile.
-windows-core = "0.61"
+# Matches the windows-core that `windows` and webview2-com depend on, so the
+# interfaces it implements are theirs; a newer windows-core alone would not be.
+windows-core = "0.62"
 # Screencast frames arrive as base64 JPEG; the recorder receives raw bytes.
-base64 = "0.22"
+base64 = "0.23"
 # A toast when a thread finishes or asks something while the window is not the
 # one the user is looking at. The UI decides when; Rust carries the toast and
 # hands a click back as `notification://open`, which the notification plugin
 # cannot do on a desktop.
 tauri-winrt-notification = "0.8"
 # The Windows build, which decides the window materials the setting offers.
-windows-version = "0.1"
+windows-version = "0.100"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Globalization",
     "Win32_Graphics_Dwm",
     "Win32_Security",
     "Win32_Storage_FileSystem",
+    # MiniDumpWriteDump, for the watchdog's hang dump; it is also gated on Kernel and Memory.
+    "Win32_System_Diagnostics_Debug",
     "Win32_System_JobObjects",
+    "Win32_System_Kernel",
+    "Win32_System_Memory",
     "Win32_System_Registry",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",

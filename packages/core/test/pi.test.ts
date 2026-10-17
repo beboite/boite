@@ -145,6 +145,10 @@ function writeLateDialogAgent(dataDir: string): string {
       '    setTimeout(run, 0);',
       '    return;',
       '  }',
+      "  if (message.type === 'get_state') {",
+      "    send({ id: message.id, type: 'response', command: 'get_state', success: true, data: { isStreaming: false } });",
+      '    return;',
+      '  }',
       "  if (message.type === 'get_commands') {",
       "    send({ id: message.id, type: 'response', command: 'get_commands', success: true, data: { commands: [] } });",
       '    return;',
@@ -447,6 +451,7 @@ describe('pi driver', () => {
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: '[slow]' });
     await started;
+    await waitFor(() => fakeLog().includes('waiting for abort'));
 
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
     expect((await finished).status).toBe('stopped');
@@ -633,7 +638,7 @@ describe('pi driver', () => {
     expect(result.models.find((model) => model.default === true)?.id).toBe('fake-a/smart');
 
     // The two opt-in levels are there only for the model that maps them, and the
-    // session's own level is the default of every scale that carries it.
+    // session's own level is the default of the model it is on, and of no other.
     expect(result.models[1]?.effort).toEqual({
       levels: [
         { id: 'off', label: 'Off' },
@@ -653,6 +658,8 @@ describe('pi driver', () => {
       'medium',
       'high',
     ]);
+    // pi keeps its own level for another model, clamped to it: the core has no default to send.
+    expect(result.models[2]?.effort?.default).toBeUndefined();
     // A model without reasoning has `off` and nothing else, which is no choice.
     expect(result.models[3]?.effort).toBeUndefined();
     expect(result.probedAt).toBeGreaterThan(0);

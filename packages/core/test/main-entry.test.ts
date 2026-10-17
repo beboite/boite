@@ -16,7 +16,7 @@ beforeEach(() => {
 
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-test.each(['cli', 'pair', 'update-apply'])('%s reaches its command path without loading the server runtime', (command) => {
+test.each(['cli', 'pair', 'update-apply', 'update-recover'])('%s reaches its command path without loading the server runtime', (command) => {
   const guard = join(dir, 'runtime-guard.ts');
   writeFileSync(guard, String.raw`
     import { plugin } from 'bun';
@@ -40,7 +40,7 @@ test.each(['cli', 'pair', 'update-apply'])('%s reaches its command path without 
   } else if (command === 'pair') {
     expect(error).toBe(`boite-core pair: no core has run on ${dataDir}: ${join(dataDir, 'core.json')} does not exist. Start the core first.\n`);
   } else {
-    expect(error).toBe('boite-core update: update-apply expects a private server update plan on Linux\n');
+    expect(error).toBe(`boite-core update: ${command} expects a private server update plan on Linux\n`);
   }
   expect(readdirSync(dataDir)).toEqual([]);
 });

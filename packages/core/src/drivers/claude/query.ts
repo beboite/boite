@@ -1,6 +1,7 @@
-import type { EffortLevel, Options, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { EffortLevel, Options, PermissionMode as SdkPermissionMode, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ImageAttachment, PermissionMode } from '@boite/contracts';
 import type { SessionContext } from '../types.ts';
+import { fitImages } from './images.ts';
 
 export const STDERR_MAX = 400;
 
@@ -27,20 +28,40 @@ export interface LiveSetup {
    */
   effortLevel: EffortLevel | null;
   fastMode: boolean;
-  permissionMode: Exclude<PermissionMode, 'yolo'>;
+  /**
+   * What the CLI runs in: the mode Boite set, or one the CLI reported entering
+   * by itself (EnterPlanMode, or an ExitPlanMode it was refused), which can be
+   * one Boite has no name for.
+   */
+  permissionMode: Exclude<PermissionMode, 'yolo'> | SdkPermissionMode;
   disableHooks: boolean;
 }
 
 /** What this turn asks the running query to be, whatever the last one asked for. */
-export function liveSetup(thread: { model: string | null; effort: string | null; permissionMode: PermissionMode; speed?: string | null }): LiveSetup {
+export function liveSetup(thread: { model: string | null; effort: string | null; permissionMode: PermissionMode; speed?: string | null; contextMode?: { hooks: boolean } | null }): LiveSetup {
   const effort = thread.effort;
   return {
     model: thread.model,
     effortLevel: effort !== null && SDK_EFFORTS.includes(effort) ? (effort as EffortLevel) : null,
     fastMode: thread.speed === 'fast',
     permissionMode: thread.permissionMode === 'yolo' ? 'bypassPermissions' : thread.permissionMode,
-    disableHooks: thread.permissionMode === 'yolo',
+    // A context mode without hooks keeps them off whatever the permission mode.
+    disableHooks: thread.permissionMode === 'yolo' || thread.contextMode?.hooks === false,
   };
+}
+
+function userMessage(uuid: string, text: string, images: ImageAttachment[] = []): SDKUserMessage {
+  const content =
+    images.length === 0
+      ? text
+      : [
+          { type: 'text', text },
+          ...images.map((image) => ({
+            type: 'image',
+            source: { type: 'base64', media_type: image.mimeType, data: image.data },
+          })),
+        ];
+  return { type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null } as SDKUserMessage;
 }
 
 /**
@@ -49,27 +70,21 @@ export function liveSetup(thread: { model: string | null; effort: string | null;
  * turn of the thread until the session ends.
  */
 export class PromptQueue {
-  private readonly items: SDKUserMessage[] = [];
+  /** A message with images waits for them to be fitted; the order stays the push order. */
+  private readonly items: (SDKUserMessage | Promise<SDKUserMessage>)[] = [];
   private notify: (() => void) | null = null;
   private ended = false;
 
-  push(text: string, attachments: ImageAttachment[]): void {
-    const content =
-      attachments.length === 0
-        ? text
-        : [
-            { type: 'text', text },
-            ...attachments.map((attachment) => ({
-              type: 'image',
-              source: { type: 'base64', media_type: attachment.mimeType, data: attachment.data },
-            })),
-          ];
-    this.items.push({
-      type: 'user',
-      message: { role: 'user', content },
-      parent_tool_use_id: null,
-    } as SDKUserMessage);
+  /**
+   * Returns the message's uuid. The CLI lists it in `user_message_uuids` on
+   * the result that answers it, also when it folds the message into a run
+   * already going.
+   */
+  push(text: string, attachments: ImageAttachment[]): string {
+    const uuid = crypto.randomUUID();
+    this.items.push(attachments.length === 0 ? userMessage(uuid, text) : fitImages(attachments).then((images) => userMessage(uuid, text, images)));
     this.wake();
+    return uuid;
   }
 
   end(): void {
@@ -81,7 +96,12 @@ export class PromptQueue {
     for (;;) {
       const next = this.items.shift();
       if (next !== undefined) {
-        yield next;
+        const message = await next;
+        yield message;
+        // Asking for the next prompt means the SDK wrote this one. Its loop and
+        // this generator still hold the object until then: let the images go.
+        const content = message.message.content;
+        if (typeof content !== 'string') message.message.content = content.filter(block => block.type !== 'image');
         continue;
       }
       if (this.ended) return;
@@ -126,4 +146,20 @@ export function childEnv(accountEnv: Record<string, string>): Record<string, str
     if (key.startsWith('CLAUDE_CODE_')) delete env[key];
   }
   return { ...env, ...accountEnv };
+}
+
+/** The CLI flag that picks what the API returns of the model's reasoning: `summarized` or `omitted`. */
+export const THINKING_DISPLAY_FLAG = 'thinking-display';
+
+/**
+ * What makes the CLI write a `tool_use_summary` line after each batch of tool
+ * calls ("Read rules.md and data.txt"). Off by default in a CLI driven through
+ * the SDK. Each line is one small request to Haiku (`source=tool_use_summary_generation`
+ * in the CLI's debug log, 2.1.299), billed to the account the session runs on.
+ */
+export const TOOL_SUMMARIES_ENV = 'CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES';
+
+/** The environment of a conversation's CLI: `childEnv`, plus the tool summaries the timeline labels its calls with. */
+export function agentEnv(accountEnv: Record<string, string>): Record<string, string | undefined> {
+  return { ...childEnv(accountEnv), [TOOL_SUMMARIES_ENV]: '1' };
 }

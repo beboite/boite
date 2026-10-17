@@ -11,7 +11,8 @@ export const FAKE_BOOT_MS = 1500;
 
 /**
  * Mirrors packages/core/src/devices/control.ts on a machine with an Android SDK
- * and two emulators but no Xcode. Frames are one still home screen.
+ * and two emulators but no Xcode. Frames are one still home screen; an input
+ * counts as a change, so the next frame gets a new id instead of `unchanged`.
  */
 export function devicesMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
   const devices: MobileDevice[] = [
@@ -20,6 +21,7 @@ export function devicesMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
   ];
   const sessions = new Map<string, Map<string, MobileDeviceSession>>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
+  const screens = new Map<string, number>();
   const list = (threadId: string) => [...(sessions.get(threadId)?.values() ?? [])].map(session => ({ ...session }));
   const changed = (threadId: string) => ctx.emitToThread(threadId, 'devices.changed', { threadId, sessions: list(threadId) });
   const release = (threadId: string) => { if (sessions.delete(threadId)) changed(threadId); };
@@ -105,16 +107,20 @@ export function devicesMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       }
       return { session: { ...session } };
     },
-    'devices.frame': async ({ threadId, deviceId, maxWidth, quality }) => {
+    'devices.frame': async ({ threadId, deviceId, maxWidth, quality = 60, previous }) => {
       if (maxWidth !== undefined && !(Number.isInteger(maxWidth) && maxWidth >= 160 && maxWidth <= 3840)) throw refusal('device frame maxWidth must be an integer from 160 to 3840');
-      if (quality !== undefined && !(Number.isInteger(quality) && quality >= 20 && quality <= 90)) throw refusal('device frame quality must be an integer from 20 to 90');
+      if (!(Number.isInteger(quality) && quality >= 20 && quality <= 90)) throw refusal('device frame quality must be an integer from 20 to 90');
+      if (previous !== undefined && !(typeof previous === 'string' && previous.length <= 100)) throw refusal('device frame previous must be the id of a frame this device sent');
       ready(threadId, deviceId);
-      return { id: crypto.randomUUID(), deviceId, ...SCREEN, base64: fakeDeviceScreen(), at: Date.now() };
+      const id = `frame-${deviceId}-${screens.get(deviceId) ?? 0}-${maxWidth ?? 0}-${quality}`;
+      if (previous === id) return { id, deviceId, ...SCREEN, unchanged: true, at: Date.now() };
+      return { id, deviceId, ...SCREEN, base64: fakeDeviceScreen(), at: Date.now() };
     },
     'devices.input': async ({ threadId, deviceId, input }) => {
       const problem = mobileDeviceInputError(input);
       if (problem) throw refusal(problem);
       ready(threadId, deviceId);
+      screens.set(deviceId, (screens.get(deviceId) ?? 0) + 1);
       return { ok: true };
     },
     'devices.screenshot': async ({ threadId, deviceId, hostId }) => {

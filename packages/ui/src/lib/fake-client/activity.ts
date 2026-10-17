@@ -1,5 +1,6 @@
 /** A thread's goal, loop and task list, and the timer that runs them. */
-import { attachmentError, RpcErrorCode, type AgentTask, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
+import { errorText } from '../errors';
+import { attachmentError, RpcErrorCode, threadActive, type AgentTask, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { refusal } from './shared';
 import { workflowAnswer, workflowChild } from './delegation';
@@ -83,7 +84,7 @@ function scheduleActivity(ctx: FakeContext, threadId: string, delay = 0): void {
   if (!thread || thread.archived || !activity || (activity.goal?.status !== 'active' && activity.loop?.status !== 'active')) return;
   ctx.activityTimers.set(threadId, setTimeout(() => {
     ctx.activityTimers.delete(threadId);
-    if (ctx.inFlight.has(threadId) || ['running', 'queued', 'waiting'].includes(thread.status)) return;
+    if (ctx.inFlight.has(threadId) || threadActive(thread.status)) return;
     const kind = activity.loop?.status === 'active' && (activity.loop.nextRunAt ?? 0) <= Date.now() ? 'loop' : activity.goal?.status === 'active' ? 'goal' : null;
     if (!kind) {
       if (activity.loop?.status === 'active') scheduleActivity(ctx, threadId, Math.max(0, (activity.loop.nextRunAt ?? Date.now()) - Date.now()));
@@ -105,7 +106,7 @@ function scheduleActivity(ctx: FakeContext, threadId: string, delay = 0): void {
       ctx.publishActivity(thread);
     } catch (error) {
       pauseActivity(ctx, thread);
-      activity[kind]!.error = error instanceof Error ? error.message : String(error);
+      activity[kind]!.error = errorText(error);
       ctx.publishActivity(thread);
     }
   }, delay));
@@ -148,40 +149,116 @@ export function finishActivityTurn(ctx: FakeContext, turn: Turn): void {
   }
 }
 
+type ActivitySet = Parameters<FakeMethods['threads.activity.set']>[0];
+type ActivityControl = Parameters<FakeMethods['threads.activity.control']>[0];
+type GoalInput = Exclude<ActivitySet['goal'], undefined>;
+type LoopInput = Exclude<ActivitySet['loop'], undefined>;
+
+function activityAttachments(ctx: FakeContext, thread: Thread, params: ActivitySet) {
+  const attachments = params.attachments ?? [];
+  if (!Array.isArray(attachments)) throw refusal('attachments must be an array');
+  if (attachments.length) {
+    const provider = ctx.providers.find(provider => provider.id === thread.providerId);
+    if (!provider) throw ctx.notFound('provider', thread.providerId);
+    const error = attachmentError(attachments, provider);
+    if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
+  }
+  if (attachments.length && Number(!!params.goal) + Number(!!params.loop) !== 1) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'attachments require exactly one new goal or loop' });
+  return attachments;
+}
+
+function validateGoal(thread: Thread, goal: GoalInput): RpcFailure | null {
+  if (goal !== null && !goal.objective?.trim()) return new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'goal.objective must be non-empty text' });
+  if (goal && goal.review !== undefined && typeof goal.review !== 'boolean') return new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'goal.review must be a boolean' });
+  if (goal?.review && thread.parentThreadId) return refusal('a reviewed goal starts reviewer conversations; start it in a top-level thread');
+  return null;
+}
+
+function setGoal(ctx: FakeContext, thread: Thread, activity: ThreadActivity, goal: GoalInput): void {
+  const error = validateGoal(thread, goal);
+  if (error) throw error;
+  stopReview(ctx, thread);
+  activity.goal = goal === null ? null : {
+    objective: goal.objective.trim(), status: 'active', iterations: 0, error: null,
+    ...(goal.review ? { review: { phase: 'working' as const, maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] } } : {}),
+  };
+}
+
+function validateLoop(loop: LoopInput): RpcFailure | null {
+  if (loop !== null && (!loop.prompt?.trim() || !Number.isInteger(loop.intervalMs) || (loop.intervalMs < 1000 && !(loop.intervalMs === 0 && loop.maxIterations)) || loop.intervalMs > 86400000 || (loop.maxIterations != null && (!Number.isInteger(loop.maxIterations) || loop.maxIterations < 1 || loop.maxIterations > 1000)))) return new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'loop requires text and an interval from 1000 to 86400000 ms, or 0 with 1 to 1000 iterations' });
+  return null;
+}
+
+function setLoop(activity: ThreadActivity, loop: LoopInput): void {
+  const error = validateLoop(loop);
+  if (error) throw error;
+  activity.loop = loop === null ? null : { prompt: loop.prompt.trim(), intervalMs: loop.intervalMs, maxIterations: loop.maxIterations ?? null, status: 'active', iterations: 0, nextRunAt: Date.now(), error: null, history: [] };
+}
+
+function updateActivityAttachments(ctx: FakeContext, thread: Thread, params: ActivitySet, attachments: NonNullable<ActivitySet['attachments']>): void {
+  for (const kind of ['goal', 'loop'] as const) if (params[kind] !== undefined) {
+    const key = `${thread.id}:${kind}`;
+    ctx.activityGenerations.set(key, (ctx.activityGenerations.get(key) ?? 0) + 1);
+    if (params[kind] && attachments.length) ctx.activityAttachments.set(key, JSON.parse(JSON.stringify(attachments)));
+    else ctx.activityAttachments.delete(key);
+  }
+}
+
+function validateControl(thread: Thread, params: ActivityControl): ThreadActivity {
+  const activity = thread.activity;
+  if (params.action === 'resume' && thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot resume activity on an archived thread' });
+  const item = activity?.[params.kind];
+  if (!activity || !item) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `this thread has no ${params.kind}` });
+  if (params.action === 'complete' && params.kind !== 'goal') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'only a goal can be completed' });
+  if (params.action === 'resume' && params.kind === 'loop' && activity.loop?.maxIterations && activity.loop.iterations >= activity.loop.maxIterations) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this loop has finished all its iterations' });
+  return activity;
+}
+
+function setActivityStatus(activity: ThreadActivity, kind: ActivityControl['kind'], status: 'active' | 'paused'): void {
+  const item = activity[kind]!;
+  item.status = status;
+  item.error = null;
+  if (kind === 'goal' && activity.goal) {
+    activity.goal.dismissed = false;
+    delete activity.goal.blocked;
+  }
+}
+
+function completeGoal(activity: ThreadActivity, kind: ActivityControl['kind']): void {
+  if (!activity.goal) { setActivityStatus(activity, kind, 'paused'); return; }
+  activity.goal.status = 'complete';
+  delete activity.goal.blocked;
+  if (activity.goal.review) Object.assign(activity.goal.review, { phase: 'working', reviewerThreadId: null });
+}
+
+const CONTROL_ACTIONS = new Map<ActivityControl['action'], (activity: ThreadActivity, kind: ActivityControl['kind']) => void>([
+  ['remove', (activity, kind) => { activity[kind] = null; }],
+  ['complete', completeGoal],
+  ['resume', (activity, kind) => setActivityStatus(activity, kind, 'active')],
+  ['pause', (activity, kind) => setActivityStatus(activity, kind, 'paused')],
+]);
+
+function applyControl(activity: ThreadActivity, params: ActivityControl): void {
+  const apply = CONTROL_ACTIONS.get(params.action) ?? CONTROL_ACTIONS.get('pause')!;
+  apply(activity, params.kind);
+}
+
+function updateLoopClock(activity: ThreadActivity, params: ActivityControl): void {
+  if (activity.loop && activity.loop.status !== 'active') activity.loop.nextRunAt = null;
+  if (params.kind === 'loop' && params.action === 'resume' && activity.loop) activity.loop.nextRunAt = Date.now();
+}
+
 export function activityMethods(ctx: FakeContext) {
   return {
     'threads.activity.set': async (params) => {
       if (ctx.thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions use missions instead of conversation loops');
       const thread = ctx.thread(params.threadId);
       if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'activity requires an unarchived thread' });
-      const attachments = params.attachments ?? [];
-      if (!Array.isArray(attachments)) throw refusal('attachments must be an array');
-      if (attachments.length) {
-        const provider = ctx.providers.find(provider => provider.id === thread.providerId);
-        if (!provider) throw ctx.notFound('provider', thread.providerId);
-        const error = attachmentError(attachments, provider);
-        if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
-      }
-      if (attachments.length && Number(!!params.goal) + Number(!!params.loop) !== 1) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'attachments require exactly one new goal or loop' });
+      const attachments = activityAttachments(ctx, thread, params);
       const activity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
-      if (params.goal !== undefined) {
-        if (params.goal !== null && !params.goal.objective?.trim()) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'goal.objective must be non-empty text' });
-        if (params.goal && params.goal.review !== undefined && typeof params.goal.review !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'goal.review must be a boolean' });
-        if (params.goal?.review && thread.parentThreadId) throw refusal('a reviewed goal starts reviewer conversations; start it in a top-level thread');
-        stopReview(ctx, thread);
-        activity.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null,
-          ...(params.goal.review ? { review: { phase: 'working' as const, maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] } } : {}) };
-      }
-      if (params.loop !== undefined) {
-        if (params.loop !== null && (!params.loop.prompt?.trim() || !Number.isInteger(params.loop.intervalMs) || (params.loop.intervalMs < 1000 && !(params.loop.intervalMs === 0 && params.loop.maxIterations)) || params.loop.intervalMs > 86400000 || (params.loop.maxIterations != null && (!Number.isInteger(params.loop.maxIterations) || params.loop.maxIterations < 1 || params.loop.maxIterations > 1000)))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'loop requires text and an interval from 1000 to 86400000 ms, or 0 with 1 to 1000 iterations' });
-        activity.loop = params.loop === null ? null : { prompt: params.loop.prompt.trim(), intervalMs: params.loop.intervalMs, maxIterations: params.loop.maxIterations ?? null, status: 'active', iterations: 0, nextRunAt: Date.now(), error: null, history: [] };
-      }
-      for (const kind of ['goal', 'loop'] as const) if (params[kind] !== undefined) {
-        const key = `${thread.id}:${kind}`;
-        ctx.activityGenerations.set(key, (ctx.activityGenerations.get(key) ?? 0) + 1);
-        if (params[kind] && attachments.length) ctx.activityAttachments.set(key, JSON.parse(JSON.stringify(attachments)));
-        else ctx.activityAttachments.delete(key);
-      }
+      if (params.goal !== undefined) setGoal(ctx, thread, activity, params.goal);
+      if (params.loop !== undefined) setLoop(activity, params.loop);
+      updateActivityAttachments(ctx, thread, params, attachments);
       thread.activity = activity;
       ctx.publishActivity(thread);
       scheduleActivity(ctx, thread.id);
@@ -189,26 +266,15 @@ export function activityMethods(ctx: FakeContext) {
     },
     'threads.activity.control': async (params) => {
       const thread = ctx.thread(params.threadId);
-      const activity = thread.activity;
-      if (params.action === 'resume' && thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot resume activity on an archived thread' });
-      const item = activity?.[params.kind];
-      if (!activity || !item) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `this thread has no ${params.kind}` });
-      if (params.action === 'complete' && params.kind !== 'goal') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'only a goal can be completed' });
-      if (params.action === 'resume' && params.kind === 'loop' && activity.loop?.maxIterations && activity.loop.iterations >= activity.loop.maxIterations) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this loop has finished all its iterations' });
+      const activity = validateControl(thread, params);
       if (params.kind === 'goal' && params.action !== 'resume') stopReview(ctx, thread);
-      if (params.action === 'remove') activity[params.kind] = null;
-      else if (params.action === 'complete' && activity.goal) {
-        activity.goal.status = 'complete'; delete activity.goal.blocked;
-        if (activity.goal.review) Object.assign(activity.goal.review, { phase: 'working', reviewerThreadId: null });
-      }
-      else { item.status = params.action === 'resume' ? 'active' : 'paused'; item.error = null; if (params.kind === 'goal' && activity.goal) { activity.goal.dismissed = false; delete activity.goal.blocked; } }
+      applyControl(activity, params);
       if (params.action === 'remove' || params.action === 'complete') {
         const key = `${thread.id}:${params.kind}`;
         ctx.activityGenerations.set(key, (ctx.activityGenerations.get(key) ?? 0) + 1);
         ctx.activityAttachments.delete(key);
       }
-      if (activity.loop && activity.loop.status !== 'active') activity.loop.nextRunAt = null;
-      if (params.kind === 'loop' && params.action === 'resume' && activity.loop) activity.loop.nextRunAt = Date.now();
+      updateLoopClock(activity, params);
       ctx.publishActivity(thread);
       scheduleActivity(ctx, thread.id);
       return structuredClone(activity);

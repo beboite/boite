@@ -1,12 +1,14 @@
 import { untrack } from 'svelte';
-import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
+import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, withoutTrailingSlashes, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
-import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
+import { deviceKey } from './device-key';
+import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, rememberGroupAddresses, removeBrought, signsFor, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
-/** A machine that did not answer is asked again no sooner than this. */
+/** A machine that did not answer is asked again no sooner than this; each failure in a row doubles it, up to `RETRY_MAX_MS`. */
 const RETRY_MS = 60_000;
+const RETRY_MAX_MS = 15 * 60_000;
 const PROBE_MS = 4000;
 /** At start, how long the machines paired by hand are given to answer before a held key is used as it was left. */
 const VOUCH_WAIT_MS = 3000;
@@ -33,7 +35,11 @@ export interface GroupLinkOptions {
 
 /** One question to a machine paired by hand, on a socket made for it and closed with the answer. */
 function askGroup(endpoint: Endpoint, patience: number): Promise<Group | null | undefined> {
-  const client = new WsClient({ url: endpoint.url, token: endpoint.token, paired: endpoint.paired === true, reconnect: false });
+  const client = new WsClient({
+    url: endpoint.url, token: endpoint.token, paired: endpoint.paired === true || endpoint.signs !== undefined, reconnect: false,
+    // A machine this device's key opens answers a signed hello.
+    ...(endpoint.signs === undefined ? {} : { signer: { key: deviceKey, coreId: endpoint.signs } })
+  });
   return Promise.race([
     client.connect().then(() => client.call('group.get', {})).catch(() => undefined),
     new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), patience))
@@ -109,8 +115,14 @@ export class GroupLinks {
   /** Per core id, for the machines of the group this client is not connected to. */
   states = $state<Record<string, GroupLinkState>>({});
   #attempts = new Map<string, number>();
+  /** Per core id, attempts in a row that reached nothing: they space the next one out (`#due`). */
+  #failures = new Map<string, number>();
+  /** Per core id, the routes the last pass saw it at: a change brings the wait back to a minute. */
+  #routes = new Map<string, string>();
   #movedAt = new Map<string, number>();
   #running = new Set<string>();
+  /** Cores whose attempt was under way when the page came back or the network did: a failure tries again at once. */
+  #again = new Set<string>();
   #reach: (addresses: string[]) => Promise<string | null>;
   #secure: () => boolean;
   #now: () => number;
@@ -155,9 +167,26 @@ export class GroupLinks {
     });
   }
 
-  /** Runs for the whole window: every roster change and every reconnect is looked at again. */
+  /**
+   * Runs for the whole window: every roster change and every reconnect is looked at again. The minute's
+   * pass sleeps while the page is hidden; showing it again, or the network coming back, retries at once.
+   */
   start(): () => void {
-    const timer = setInterval(() => void this.reconcile(), RETRY_MS);
+    const timer = setInterval(() => { if (!document.hidden) void this.reconcile(); }, RETRY_MS);
+    const shown = (): void => {
+      if (document.hidden) return;
+      this.#failures.clear();
+      this.#attempts.clear();
+      for (const coreId of this.#running) this.#again.add(coreId);
+      void this.reconcile();
+    };
+    // Back on a network: whatever was out of reach is tried now, without the minute's wait.
+    const online = (): void => {
+      this.#failures.clear();
+      this.#attempts.clear();
+      for (const coreId of this.#running) this.#again.add(coreId);
+      void this.reconcile();
+    };
     const stop = $effect.root(() => {
       $effect(() => {
         // Read so the effect follows them: the list, each connection, each roster.
@@ -179,9 +208,13 @@ export class GroupLinks {
     };
     keepDropped();
     window.addEventListener('storage', heard);
+    window.addEventListener('online', online);
+    document.addEventListener('visibilitychange', shown);
     return () => {
       clearInterval(timer);
       window.removeEventListener('storage', heard);
+      window.removeEventListener('online', online);
+      document.removeEventListener('visibilitychange', shown);
       stop();
     };
   }
@@ -194,7 +227,8 @@ export class GroupLinks {
 
   /** The member of the group this machine is: what it says itself, or what the group said when it brought it. */
   static coreOf(machine: Machine): string | undefined {
-    return machine.store.group?.self ?? machine.coreId;
+    // A machine this device's key opens says which it is before it answered: the id its hellos are signed for.
+    return machine.store.group?.self ?? machine.coreId ?? signsFor(machine.id);
   }
 
   async reconcile(): Promise<void> {
@@ -211,8 +245,19 @@ export class GroupLinks {
     if (informed.length === 0) return;
 
     // What the group brought vouches for nothing: only what was paired by hand says who is in a group.
+    // A machine this device's key opens is one of those: every member of its group lets the same key in.
     const anchors = informed.filter((machine) => machine.coreId === undefined);
     await this.#prune(informed, anchors);
+    await this.#pruneSigned(anchors);
+    // A link to one of these later asks nothing: they are this device's own group.
+    // Only addresses a key could go to, and that every machine this device's key opens in that group lists:
+    // one of them holding an older or a forged roster vouches for nothing on its own.
+    const signedAnchors = anchors.filter((machine) => signsFor(machine.id) !== undefined && machine.store.group != null);
+    const listed = signedAnchors.flatMap((machine) => machine.store.group!.cores.flatMap((core) => usableAddresses(core.addresses, this.#secure())
+      .filter((address) => signedAnchors.every((other) => other.store.group!.id !== machine.store.group!.id
+        || other.store.group!.cores.some((listedCore) => listedCore.coreId === core.coreId && usableAddresses(listedCore.addresses, this.#secure()).includes(address))))));
+    // Written even empty: a device out of every group follows no link on the word of an old roster.
+    rememberGroupAddresses(listed);
 
     const wanted = new Map<string, Wanted>();
     for (const via of anchors) {
@@ -238,8 +283,13 @@ export class GroupLinks {
     const states: Record<string, GroupLinkState> = {};
     const starting: (Wanted & { upgrade?: Machine })[] = [];
     for (const [coreId, state] of Object.entries(this.states)) if (wanted.has(coreId)) states[coreId] = state;
+    for (const coreId of this.#routes.keys()) if (!wanted.has(coreId)) this.#routes.delete(coreId);
     for (const [coreId, want] of wanted) {
       const { addresses, relays } = want;
+      // A member back with other addresses, or another route to it, is tried within the minute again, not after the longer wait.
+      const routes = JSON.stringify([want.core.epoch, want.core.addresses, addresses, relays]);
+      if (this.#routes.has(coreId) && this.#routes.get(coreId) !== routes) this.#failures.delete(coreId);
+      this.#routes.set(coreId, routes);
       let existing = this.workspace.machines.find((machine) => GroupLinks.coreOf(machine) === coreId);
       // A key the group handed out for an address the machine no longer gives, or no longer
       // allows now that it has HTTPS, is not sent there again: the machine is reached anew.
@@ -250,21 +300,30 @@ export class GroupLinks {
       }
       if (existing !== undefined && (existing.store.connection !== 'closed' || this.#holdsKey(existing))) {
         delete states[coreId];
+        // Reached on its own, by a key it kept: should it need a ticket again, it starts from a minute's wait.
+        if (existing.store.connection === 'ready' && !relays.includes(existing.id)) this.#failures.delete(coreId);
         // Carried by a member while the machine gives an address this client may use: tried directly
-        // once a minute, and the member's route given up the moment one answers.
-        if (relays.includes(existing.id) && addresses.length > 0 && !this.#running.has(coreId)
-          && this.#now() - (this.#attempts.get(coreId) ?? -RETRY_MS) >= RETRY_MS) {
+        // a minute after the last try, longer after each that failed, and the member's route given up the moment one answers.
+        if (relays.includes(existing.id) && addresses.length > 0 && !this.#running.has(coreId) && this.#due(coreId)) {
           starting.push({ ...want, relays: [], upgrade: existing });
         }
         continue;
       }
-      if (this.#running.has(coreId) || this.#now() - (this.#attempts.get(coreId) ?? -RETRY_MS) < RETRY_MS) continue;
+      if (this.#running.has(coreId) || !this.#due(coreId)) continue;
       states[coreId] = 'connecting';
       starting.push(want);
     }
     // Written before any attempt starts: one that ends at once writes its own state after this.
     this.states = states;
     for (const want of starting) void this.#connect(want);
+  }
+
+  /** Whether a member may be tried now: a minute after its last attempt, doubled by each failure in a row, 15 minutes at most. */
+  #due(coreId: string): boolean {
+    const at = this.#attempts.get(coreId);
+    if (at === undefined) return true;
+    const failures = this.#failures.get(coreId) ?? 0;
+    return this.#now() - at >= Math.min(RETRY_MS * 2 ** Math.max(0, failures - 1), RETRY_MAX_MS);
   }
 
   /**
@@ -324,6 +383,28 @@ export class GroupLinks {
     }
   }
 
+  /**
+   * A machine this device's key opens that its group no longer lists: another
+   * machine the key opens, in that group, has the last word, as for a machine
+   * the group brought. Nothing is marked: the key itself opens nothing there
+   * once that machine heard of its own removal, and a machine let back in is
+   * listed again.
+   */
+  async #pruneSigned(anchors: readonly Machine[]): Promise<void> {
+    const signed = anchors.filter((other) => signsFor(other.id) !== undefined && other.store.group != null);
+    for (const machine of [...this.workspace.machines]) {
+      const signs = signsFor(machine.id);
+      if (signs === undefined) continue;
+      const groupId = machine.store.group?.id;
+      const listedBy = (other: Machine): boolean => other.store.group!.cores.some((core) => core.coreId === signs);
+      // Its own group, as another machine of it says; or, refused there with the group it was in unknown, none of the device's groups lists it.
+      const delisted = groupId !== undefined
+        ? signed.some((other) => other !== machine && other.store.group!.id === groupId && !listedBy(other))
+        : machine.store.pairingRequired && signed.length > 0 && !signed.some((other) => other !== machine && listedBy(other));
+      if (delisted) await this.#drop(machine, false);
+    }
+  }
+
   /** The machine this window opened on cannot leave the list: its key goes and the window falls back to its own core. */
   /** `gone`: the group dropped it, and its address is marked for every window. Otherwise it only moved, or its key died. */
   async #drop(machine: Machine, gone: boolean): Promise<void> {
@@ -333,7 +414,7 @@ export class GroupLinks {
 
   /** A remembered key reconnects by itself; a machine without one needs a ticket again. */
   #holdsKey(machine: Machine): boolean {
-    return readEnvironments().some((env) => env.url === machine.id && env.token !== '');
+    return readEnvironments().some((env) => env.url === machine.id && (env.token !== '' || env.signs !== undefined));
   }
 
   /** The hand-paired machines of a group that are connected and have said what their group lists. */
@@ -355,6 +436,8 @@ export class GroupLinks {
     this.#attempts.set(coreId, this.#now());
     let state: GroupLinkState | null = upgrade === undefined ? 'unreachable' : null;
     let moved = false;
+    // Whether the member is now reached, or is another machine's to reach: the next attempt then waits only the minute.
+    let settled = false;
     try {
       // Directly when an address answers, else through the first member that does.
       const direct = addresses.length === 0 ? null : await this.#reach(addresses);
@@ -374,9 +457,27 @@ export class GroupLinks {
         moved = true;
         return;
       }
+      const sitting = this.workspace.machines.find((machine) => machine.id === withoutTrailingSlashes(url));
+      // A device of the group signs its own way in: no ticket, nothing a member hands over. The machine
+      // already at that address is taken over when it holds no key of its own there, the page's own core
+      // waiting to be paired included; one this device holds a key for stays as it is.
+      if (signsFor(via.id) !== undefined) {
+        if (sitting !== undefined && sitting.coreId !== coreId && this.#holdsKey(sitting) && signsFor(sitting.id) !== coreId) {
+          state = null;
+          settled = true;
+          return;
+        }
+        if (await this.workspace.add({ url, token: '', signs: coreId }, core.name, true)) {
+          state = null;
+          settled = true;
+          if (upgrade !== undefined && this.workspace.machines.includes(upgrade)) await this.#drop(upgrade, false);
+        }
+        return;
+      }
       // A machine paired by hand already sits at that address: it is that machine's to reach, with the key it has.
-      if (this.workspace.machines.some((machine) => machine.id === url.replace(/\/+$/, '') && machine.coreId !== coreId)) {
+      if (sitting !== undefined && sitting.coreId !== coreId) {
         state = null;
+        settled = true;
         return;
       }
       // Asked for last: a ticket is good for a minute and for one socket.
@@ -390,6 +491,7 @@ export class GroupLinks {
       }
       if (await this.workspace.add({ url, token: '', ticket, coreId, groupId, epoch: core.epoch }, core.name, true)) {
         state = null;
+        settled = true;
         // A direct route found for a machine a member carried: the carried one goes once the direct one is in, never before.
         if (upgrade !== undefined && this.workspace.machines.includes(upgrade)) await this.#drop(upgrade, false);
       }
@@ -397,14 +499,22 @@ export class GroupLinks {
       // The machine that vouches went away, or the member refused: the next pass asks again.
     } finally {
       this.#running.delete(coreId);
+      if (settled) this.#failures.delete(coreId);
+      else if (!moved) this.#failures.set(coreId, Math.min((this.#failures.get(coreId) ?? 0) + 1, 16));
       const states = { ...this.states };
       if (state === null) delete states[coreId];
       else states[coreId] = state;
       this.states = states;
       // The addresses changed under the attempt: the member is reached where they stand now, without
       // the minute's wait. Once a minute at most, or rosters made to flip would have tickets asked for without end.
+      const again = this.#again.delete(coreId) && !settled;
       if (moved && this.#now() - (this.#movedAt.get(coreId) ?? -RETRY_MS) >= RETRY_MS) {
         this.#movedAt.set(coreId, this.#now());
+        this.#attempts.delete(coreId);
+        void this.reconcile();
+      } else if (again) {
+        // The page came back or the network did while this ran: the reconcile then passed this machine by.
+        this.#failures.delete(coreId);
         this.#attempts.delete(coreId);
         void this.reconcile();
       }

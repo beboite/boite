@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
+import type { Turn } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { waitFor } from './harness.ts';
 import {
@@ -179,7 +180,7 @@ describe('claude driver', () => {
     expect(queries).toHaveLength(1);
     expect(queries[0]!.setters).toContain('effortLevel high');
     expect(queries[0]!.setters).toContain('fastMode true');
-    expect(calls[0]!.options.settings).toEqual({ fastMode: false });
+    expect(calls[0]!.options.settings).toEqual({ fastMode: false, autoMemoryEnabled: false });
     expect(calls[0]!.prompts).toHaveLength(1);
   });
 
@@ -290,6 +291,34 @@ describe('claude driver', () => {
     expect(costs[2]).toBeCloseTo(0.07, 10);
   });
 
+  test('a resumed CLI that restored less than the journal holds leaves the turn unpriced instead of charging the session again', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    // The second process restored the session's tokens (52 held for a 26-token turn) but a total of 0.1, under the 0.25
+    // the journal already charged. Charging 0.1 would count the first turn twice, and every later resume more.
+    const held = (tokens: number) => ({ 'claude-test': { inputTokens: tokens, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0, contextWindow: 0, maxOutputTokens: 0 } });
+    const results = [{ total_cost_usd: 0.25, modelUsage: held(26) }, { total_cost_usd: 0.1, modelUsage: held(52) }];
+    let turn = 0;
+    scripted(() => undefined, (fake) => {
+      fake.emit(init('sess-short'));
+      fake.emit(sdk({ ...(success('sess-short') as object), ...results[turn++] }));
+    });
+
+    const finished: Turn[] = [];
+    for (const prompt of ['first', 'second']) {
+      const done = client.next('turn.finished', (finishedTurn) => finishedTurn.threadId === threadId, 10000);
+      await client.call('turns.start', { threadId, prompt });
+      finished.push(await done);
+    }
+
+    expect(queries).toHaveLength(2);
+    expect(finished[0]?.usage?.costUsdEquivalent).toBeCloseTo(0.25, 10);
+    // The tokens stay, so the usage page still prices the turn at the model's rates.
+    expect(finished[1]?.usage).toMatchObject({ costUsdEquivalent: null });
+    expect(finished[1]?.usage?.inputTokens).toBeGreaterThan(0);
+  });
+
   test('warmProcessMinutes at zero keeps one query per turn', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
@@ -337,6 +366,29 @@ describe('claude driver', () => {
     ]);
   });
 
+  test('a plan mode Claude entered by itself is put back to the thread mode before the next turn', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    const answer = answerEach('sess-drift');
+    scripted(() => undefined, (fake, prompt, index) => {
+      if (index === 0) {
+        // EnterPlanMode, then an ExitPlanMode the user refused: the CLI stays in plan.
+        fake.emit(sdk({ type: 'system', subtype: 'status', status: null, permissionMode: 'plan', session_id: 'sess-drift' }));
+      }
+      answer(fake, prompt, index);
+    });
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+    expect(await runTurn(client, threadId, 'third')).toBe('done');
+
+    expect(queries).toHaveLength(1);
+    expect(harness.core.threads.require(threadId).permissionMode).toBe('default');
+    // Once, before the second prompt; the third finds the CLI where the thread wants it.
+    expect(queries[0]?.setters).toEqual(['setPermissionMode default']);
+  });
+
   test('warm queries apply Auto and YOLO in place and restore configured hooks', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
@@ -349,7 +401,7 @@ describe('claude driver', () => {
     expect(queries).toHaveLength(1);
     expect(calls[0]!.options.allowDangerouslySkipPermissions).toBe(true);
     expect(calls[0]!.options.permissionMode).toBe('default');
-    expect(calls[0]!.options.settings).toEqual({ fastMode: false });
+    expect(calls[0]!.options.settings).toEqual({ fastMode: false, autoMemoryEnabled: false });
     expect(queries[0]!.setters).toEqual([
       'setPermissionMode bypassPermissions', 'disableAllHooks true',
       'disableAllHooks the default', 'setPermissionMode default',
@@ -413,7 +465,7 @@ describe('claude driver', () => {
     expect(queries).toHaveLength(2);
     expect(calls[0]?.options.model).toBe('claude-sonnet-5');
     expect(calls[1]?.options.model).toBe('claude-opus-5');
-    expect(calls[1]?.options.settings).toEqual({ fastMode: setter === 'fastMode' });
+    expect(calls[1]?.options.settings).toEqual({ fastMode: setter === 'fastMode', autoMemoryEnabled: false });
     expect(calls[1]?.options.resume).toBe('sess-refused');
     expect(calls[0]?.prompts).toEqual(['first']);
     expect(calls[1]?.prompts).toEqual(['second']);
@@ -516,7 +568,7 @@ test('Claude discovery reports only its model capabilities, caches and refreshes
   } finally { phone.close(); }
   await client.call('threads.update', { threadId: id, model: 'claude-opus-5', speed: 'fast' });
   expect(await runTurn(client, id, 'fast turn')).toBe('done');
-  expect(calls.at(-1)?.options.settings).toEqual({ fastMode: true });
+  expect(calls.at(-1)?.options.settings).toEqual({ fastMode: true, autoMemoryEnabled: false });
   const native = queries.at(-1)!;
   const queryCount = queries.length;
   await client.call('threads.update', { threadId: id, speed: null });
@@ -551,7 +603,7 @@ test('a new Claude session learns `boite ask` once, and the setting turns it off
   expect(calls.at(-1)!.prompts[0]).toBe('third');
 });
 
-test('with a brain, a new Claude session reads the Boite guide once and learns `boite ask` from it alone', async () => {
+test('with a brain, a new Claude session reads the Boite guide in its system prompt and learns `boite ask` from it alone', async () => {
   harness.core.settings.set({ asyncQuestions: true, warmProcessMinutes: 5 });
   const brain = join(harness.dataDir, 'brain');
   mkdirSync(brain);
@@ -563,16 +615,26 @@ test('with a brain, a new Claude session reads the Boite guide once and learns `
   expect(await runTurn(client, threadId, 'first')).toBe('done');
   expect(await runTurn(client, threadId, 'second')).toBe('done');
   const [first, second] = calls[0]!.prompts;
-  expect(first).toContain('boite where');
-  expect(first!.split('boite ask').length).toBe(2);
-  expect(second).toContain('Shared convention');
-  expect(second).not.toContain('boite where');
+  const guide = appendedPrompt(calls[0]!.options);
+  expect(guide).toContain('boite where');
+  expect(guide.split('boite ask').length).toBe(2);
+  // The messages carry the brain, and no second `boite ask` note.
+  for (const prompt of [first, second]) {
+    expect(prompt).toContain('Shared convention');
+    expect(prompt).not.toContain('boite where');
+    expect(prompt).not.toContain('boite ask');
+  }
   harness.core.settings.set({ asyncQuestions: false });
   const other = await claudeThread(client);
   expect(await runTurn(client, other, 'third')).toBe('done');
-  expect(calls.at(-1)!.prompts[0]).toContain('boite where');
-  expect(calls.at(-1)!.prompts[0]).not.toContain('boite ask');
+  expect(appendedPrompt(calls.at(-1)!.options)).toContain('boite where');
+  expect(appendedPrompt(calls.at(-1)!.options)).not.toContain('boite ask');
 });
+
+function appendedPrompt(options: Options): string {
+  const prompt = options.systemPrompt;
+  return typeof prompt === 'object' && prompt !== null && !Array.isArray(prompt) && 'append' in prompt ? prompt.append ?? '' : '';
+}
 
 
 test('user follow-ups enter the running Claude prompt stream without a second turn or interrupt', async () => {

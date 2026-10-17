@@ -21,6 +21,7 @@ import { createHash, createPublicKey, verify } from 'node:crypto';
 import { GROUP_MAX_CORES, PAIRING_ROLES, type Os, type PairingRole } from '@boite/contracts';
 import { invalidParams } from '../errors.ts';
 import { boxSigningInput, checkBox } from './seal.ts';
+import { checkDeviceKey, checkServedOrigins, deviceAdmitted, mergeDeviceKeys, mergeServedOrigins, type DeviceKeyEntry, type ServedOrigins } from './device-keys.ts';
 
 export interface CoreEntry {
   coreId: string;
@@ -61,7 +62,12 @@ export interface Roster {
   /** The machine that started the group: the one entry that admitted itself. */
   founder: string;
   cores: CoreEntry[];
+  /** Pairings of the older kind, one key per member. */
   devices: DeviceEntry[];
+  /** The devices of the group, one key each (`device-keys.ts`). Dropped by a core of an earlier version, which exchanges on without them. */
+  deviceKeys?: DeviceKeyEntry[];
+  /** Where each member says its page is served, besides its addresses: the origins its members let open a socket. */
+  origins?: Record<string, ServedOrigins>;
 }
 
 /** Machines a group lists over its life, removed ones included: past it, no new machine is admitted. */
@@ -188,6 +194,18 @@ export function checkRoster(value: unknown): Roster {
     cores: raw['cores'].map((core) => checkCore(core, 'roster.cores')),
     devices: raw['devices'].map((device) => checkDevice(device, 'roster.devices')),
   };
+  if (raw['deviceKeys'] !== undefined) {
+    if (!Array.isArray(raw['deviceKeys']) || raw['deviceKeys'].length > DEVICE_ENTRIES_MAX * OVERSHOOT) {
+      throw invalidParams(`roster.deviceKeys: expected at most ${DEVICE_ENTRIES_MAX * OVERSHOOT} devices`, { field: 'roster.deviceKeys' });
+    }
+    const keys = raw['deviceKeys'].map((entry) => checkDeviceKey(entry, 'roster.deviceKeys'));
+    if (keys.length > 0) roster.deviceKeys = keys;
+  }
+  const origins = checkServedOrigins(raw['origins'], checkAddress);
+  if (Object.keys(origins).length > 0) roster.origins = origins;
+  if (roster.deviceKeys !== undefined && new Set(roster.deviceKeys.map((entry) => entry.id)).size !== roster.deviceKeys.length) {
+    throw invalidParams('roster.deviceKeys: a device is listed twice', { field: 'roster.deviceKeys' });
+  }
   if (new Set(roster.cores.map((core) => core.coreId)).size !== roster.cores.length) throw invalidParams('roster.cores: a machine is listed twice', { field: 'roster.cores' });
   if (new Set(roster.devices.map((device) => device.id)).size !== roster.devices.length) throw invalidParams('roster.devices: a device is listed twice', { field: 'roster.devices' });
   if (liveCores(roster).length > GROUP_MAX_CORES * OVERSHOOT) throw invalidParams(`roster.cores: a group holds at most ${GROUP_MAX_CORES} machines`, { field: 'roster.cores' });
@@ -197,6 +215,11 @@ export function checkRoster(value: unknown): Roster {
     // admitted it may itself be one this core never accepted, and is then absent.
     if (!core.removed && !admitted(core, roster.id, roster.founder, keys)) {
       throw invalidParams(`roster.cores: ${core.coreId} carries no valid admission by a machine of this roster`, { field: 'roster.cores' });
+    }
+  }
+  for (const device of roster.deviceKeys ?? []) {
+    if (!device.removed && !deviceAdmitted(device, roster.id, keys)) {
+      throw invalidParams(`roster.deviceKeys: ${device.id} carries no valid admission by a machine of this roster`, { field: 'roster.deviceKeys' });
     }
   }
   return sorted(roster);
@@ -228,11 +251,35 @@ export function homeOf(deviceId: string): string {
   return deviceId.slice(0, deviceId.indexOf(':'));
 }
 
+/** A device key counts while it is not revoked and the member that admitted it is still one. */
+export function liveDeviceKeys(roster: Roster): DeviceKeyEntry[] {
+  const members = new Set(liveCores(roster).map((core) => core.coreId));
+  return (roster.deviceKeys ?? []).filter((device) => !device.removed && members.has(device.admit.by));
+}
+
+/** The origins a page of a live member is served from: its addresses and what it says of itself. */
+export function memberOrigins(roster: Roster): Set<string> {
+  const origins = new Set<string>();
+  for (const core of liveCores(roster)) {
+    for (const address of core.addresses) origins.add(address);
+    for (const origin of roster.origins?.[core.coreId]?.list ?? []) origins.add(origin);
+  }
+  return origins;
+}
+
+/** Where a member is reached: the addresses it gives, then the origins it said it is served at. */
+export function reachOf(roster: Roster, core: CoreEntry): string[] {
+  const served = roster.origins?.[core.coreId]?.list ?? [];
+  return [...core.addresses, ...served.filter((origin) => !core.addresses.includes(origin))];
+}
+
 /** The highest revision the roster holds: the next change is one above it. */
 export function clockOf(roster: Roster): number {
   let clock = 0;
   for (const entry of roster.cores) clock = Math.max(clock, entry.rev);
   for (const entry of roster.devices) clock = Math.max(clock, entry.rev);
+  for (const entry of roster.deviceKeys ?? []) clock = Math.max(clock, entry.rev);
+  for (const entry of Object.values(roster.origins ?? {})) clock = Math.max(clock, entry.rev);
   return clock;
 }
 
@@ -244,6 +291,8 @@ function sorted(roster: Roster): Roster {
     founder: roster.founder,
     cores: [...roster.cores].sort((a, b) => a.coreId.localeCompare(b.coreId)),
     devices: [...roster.devices].sort((a, b) => a.id.localeCompare(b.id)),
+    ...(roster.deviceKeys?.length ? { deviceKeys: [...roster.deviceKeys].sort((a, b) => a.id.localeCompare(b.id)) } : {}),
+    ...(roster.origins && Object.keys(roster.origins).length > 0 ? { origins: Object.fromEntries(Object.entries(roster.origins).sort(([a], [b]) => a.localeCompare(b))) } : {}),
   };
 }
 
@@ -323,6 +372,8 @@ export function mergeRosters(local: Roster, remote: Roster): Roster {
     founder: local.founder,
     cores: mergeCores(local.cores, remote.cores),
     devices: mergeDevices(local.devices, remote.devices),
+    deviceKeys: mergeDeviceKeys(local.deviceKeys ?? [], remote.deviceKeys ?? []),
+    origins: mergeServedOrigins(local.origins ?? {}, remote.origins ?? {}),
   });
 }
 

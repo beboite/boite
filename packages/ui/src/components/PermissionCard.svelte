@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronRight, ShieldCheck, ShieldQuestion, ShieldX } from '@lucide/svelte';
+  import { ShieldCheck, ShieldQuestion, ShieldX } from '@lucide/svelte';
   import type { PermissionRequest } from '@boite/contracts';
   import { json } from '../lib/format';
   import { strings } from '../lib/strings';
@@ -15,8 +15,21 @@
     toolName: string;
     decision: 'allow' | 'deny' | null;
     request: PermissionRequest | null;
-    answer: (decision: 'allow' | 'deny') => void;
+    /** False, or a promise of false, gives the buttons back: the answer did not reach the core. */
+    answer: (decision: 'allow' | 'deny') => unknown;
   } = $props();
+
+  /**
+   * The decision out to the core: both buttons stay down until it lands, so a
+   * second tap sends nothing and the card shows its answer was taken.
+   */
+  let sending = $state<'allow' | 'deny' | null>(null);
+
+  async function choose(choice: 'allow' | 'deny'): Promise<void> {
+    if (sending !== null || decision !== null) return;
+    sending = choice;
+    if ((await answer(choice)) === false) sending = null;
+  }
 
   /**
    * One sentence says what the agent wants to do; under it, the thing itself
@@ -57,26 +70,26 @@
       <pre class="mono subject" data-testid="permission-subject">{subjectBlock}</pre>
     {/if}
     {#if described.change}
-      <DiffView path={described.change.path} oldText={described.change.oldText} newText={described.change.newText} />
+      <DiffView path={described.change.path} oldText={described.change.oldText} newText={described.change.newText} doc={described.change} />
     {/if}
     {#if request?.description && request.description !== subjectBlock}
       <p class="muted description">{request.description}</p>
     {/if}
   {/if}
   {#if request}
-    <details class="technical">
-      <summary><ChevronRight size={12} strokeWidth={2} /><span class="ui-label">{strings.chat.permissionTechnical}</span></summary>
+    <details class="technical disclosure">
+      <summary><span class="ui-label">{strings.chat.permissionTechnical}</span></summary>
       <p class="tool mono">{toolName}</p>
       <pre class="mono" data-testid="permission-input">{json(request.input)}</pre>
     </details>
   {/if}
 
   {#if decision === null}
-    <div class="actions">
-      <button type="button" class="primary" data-testid="permission-allow" onclick={() => answer('allow')}>
+    <div class="actions" aria-busy={sending !== null}>
+      <button type="button" class="primary" data-testid="permission-allow" disabled={sending !== null} onclick={() => void choose('allow')}>
         <span class="ui-label">{strings.chat.allow}</span>
       </button>
-      <button type="button" class="danger" data-testid="permission-deny" onclick={() => answer('deny')}>
+      <button type="button" class="danger" data-testid="permission-deny" disabled={sending !== null} onclick={() => void choose('deny')}>
         <span class="ui-label">{strings.chat.deny}</span>
       </button>
     </div>
@@ -157,19 +170,9 @@
 
   .subject { color: var(--color-foreground); }
 
-  .technical summary {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: var(--text-xs);
-    color: var(--color-subtle);
-    cursor: pointer;
-    list-style: none;
-  }
-
-  .technical summary::-webkit-details-marker { display: none; }
-  .technical summary :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
-  .technical[open] summary :global(svg) { transform: rotate(90deg); }
+  /* The shared disclosure, at the size of the card's small print. */
+  .technical summary { gap: 4px; min-height: 0; font-size: var(--text-xs); font-weight: 400; color: var(--color-subtle); }
+  .technical summary::before { width: 12px; height: 12px; }
   .technical .tool { margin: 6px 0 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .resolved .technical { display: none; }
   @media (max-width: 720px) {

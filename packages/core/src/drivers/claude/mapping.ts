@@ -18,7 +18,7 @@ interface ContentBlock {
 export interface StreamEvent {
   type: string;
   index?: number;
-  message?: { id?: string };
+  message?: { id?: string; model?: string };
   content_block?: ContentBlock;
   delta?: { type?: string; text?: string; thinking?: string; partial_json?: string };
 }
@@ -137,8 +137,11 @@ export function mapUsage(result: SDKResultMessage, costBefore: number): Usage {
     outputTokens: usage?.output_tokens ?? 0,
     cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
     cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
-    // A total under what was already charged is a process that started over.
-    costUsdEquivalent: total === null ? null : total >= costBefore ? total - costBefore : total,
+    // A total under what was already charged leaves this turn's share unknown:
+    // the CLI restored less than the journal holds. Charging the whole total
+    // would count the restored turns again, and the journal's sum, read back
+    // as `costBefore` on the next resume, would grow with every cold start.
+    costUsdEquivalent: total === null || total < costBefore ? null : total - costBefore,
   };
 }
 
@@ -224,13 +227,71 @@ export function isAuthenticationFailure(reason: string): boolean {
   return /\b(?:OAuth (?:session|(?:access )?token) (?:has |is )?(?:expired|revoked)|Signed out of Claude|Invalid API key)\b/i.test(reason);
 }
 
-/** Account-level authentication refusal; delegated-agent failures cannot sign out its parent. */
-export function authenticationFailureOf(message: SDKMessage): string | null {
-  if (subagentOf(message) !== null) return null;
-  if (message.type === 'assistant' && message.error === 'authentication_failed') return errorSentence(message.error);
-  if (message.type !== 'result' || (message.subtype === 'success' && !message.is_error)) return null;
+/** The HTTP status of a refused request that a new login cannot cure: a permission, not a credential. */
+export const FORBIDDEN = 403;
+/** The HTTP status of a refused credential: an expired, revoked or invalid login. */
+const UNAUTHORIZED = 401;
+
+/**
+ * The HTTP status of the API failure a frame reports: the result's own
+ * `api_error_status`, else the status the CLI wrote in its text
+ * ("API Error: 403 ..."), which is all an assistant error frame carries.
+ */
+export function apiErrorStatusOf(message: SDKMessage): number | null {
+  if (message.type === 'result' && message.subtype === 'success' && typeof message.api_error_status === 'number') return message.api_error_status;
+  const text = message.type === 'assistant'
+    ? textOf((message.message as { content?: unknown } | undefined)?.content)
+    : message.type === 'result'
+      ? (message.subtype === 'success' ? message.result : message.errors.join('; '))
+      : '';
+  const said = /\bAPI Error: (\d{3})\b/.exec(text);
+  return said === null ? null : Number(said[1]);
+}
+
+/**
+ * The CLI labels an HTTP 403 `authentication_failed` as it does a 401, so the
+ * label alone cannot sign an account out: only the result that follows, or a
+ * status the frame's own text names, says which it was. True for a frame that
+ * may be a credential failure and waits for that result.
+ */
+export function authenticationSuspectOf(message: SDKMessage): boolean {
+  return subagentOf(message) === null && message.type === 'assistant' &&
+    message.error === 'authentication_failed' && apiErrorStatusOf(message) !== FORBIDDEN;
+}
+
+/**
+ * Account-level authentication refusal read from a result; delegated-agent
+ * failures cannot sign out their parent, and a 403 is a refused permission
+ * that leaves the login valid. `suspect` is an `authentication_failed` frame
+ * of the same request (`authenticationSuspectOf`): any other status confirms it.
+ */
+export function authenticationFailureOf(message: SDKMessage, suspect = false): string | null {
+  if (subagentOf(message) !== null || message.type !== 'result') return null;
+  const status = apiErrorStatusOf(message);
+  if (status === FORBIDDEN) return null;
+  // A result can carry the 401 with no labelled frame before it, in words the text matcher does not know.
+  if (suspect || status === UNAUTHORIZED) return errorSentence('authentication_failed');
+  if (message.subtype === 'success' && !message.is_error) return null;
   const reason = message.subtype === 'success' ? message.result : message.errors.join('; ');
   return isAuthenticationFailure(reason) ? reason : null;
+}
+
+/**
+ * What a turn refused with a 403 says: the API's own text, behind a sentence
+ * that keeps the user from signing in again for nothing. The CLI prefixes it
+ * "Failed to authenticate.", which a permission refusal is not.
+ */
+export function forbiddenReason(said: string): string {
+  const text = said.replace(/^Failed to authenticate\.?\s*/i, '').trim();
+  const sentence = 'Claude refused this request; the account is still signed in.';
+  return text.length === 0 ? sentence : `${sentence} ${text}`;
+}
+
+function textOf(content: unknown): string {
+  return contentBlocks(content)
+    .map((block) => (block.type === 'text' ? (block.text ?? '').trim() : ''))
+    .filter((text) => text.length > 0)
+    .join(' ');
 }
 
 /**
@@ -241,10 +302,7 @@ export function authenticationFailureOf(message: SDKMessage): string | null {
  * adds nothing, so the text alone is the reason.
  */
 export function apiErrorReason(error: SDKAssistantMessageError, content: unknown): string {
-  const said = contentBlocks(content)
-    .map((block) => (block.type === 'text' ? (block.text ?? '').trim() : ''))
-    .filter((text) => text.length > 0)
-    .join(' ');
+  const said = textOf(content);
   if (said.length === 0) return errorSentence(error);
   const sentence = namedErrorSentence(error);
   if (sentence === null) return said;

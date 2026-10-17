@@ -2,8 +2,8 @@ import { logMessageOf } from '../../log-errors.ts';
 import { mkdirSync } from 'node:fs';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
-import type { LiveTurnSettings, TurnContext } from '../types.ts';
+import { profileFor, resolveLaunch } from '../../providers/resolve.ts';
+import type { LiveTurnSettings, SessionContext, TurnContext } from '../types.ts';
 import { exitWithin } from '../exit.ts';
 import {
   agentEnv,
@@ -21,6 +21,8 @@ import type { PiAssistantMessage, PiCommand, PiUsage } from './protocol.ts';
 import { dataOf, PiPeer } from './rpc.ts';
 import type { PiTurn } from './turn.ts';
 import { answerText } from '../../attachments.ts';
+import { noteReady } from '../driver-log.ts';
+import { SessionRetention } from '../session-retention.ts';
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -48,9 +50,9 @@ export function setPiReadDeadlineForTests(ms: number | null): void {
 /**
  * One `pi --mode rpc` process for a thread: launched on the thread's own
  * `--session-id` and `--session-dir`, so a later process reopens the transcript
- * the first one wrote. With `warmProcessMinutes` at zero the process goes with
- * the turn; above zero it takes the next turns of the thread until the idle
- * window, a stop, an archive, core shutdown or a changed setup ends it.
+ * the first one wrote. Viewed and prepared sessions stay resident through
+ * navigation; other sessions follow the post-turn `warmProcessMinutes`
+ * policy. A stop, archive, shutdown or changed setup closes the process.
  */
 export class PiSession {
   private child: SpawnedChild | null = null;
@@ -64,8 +66,10 @@ export class PiSession {
   private exited: Promise<number | null> | null = null;
   private processClosed: Promise<void> = Promise.resolve();
   private idle: Timer | null = null;
+  private readonly retention = new SessionRetention();
   /** The turn whose `prompt` is in flight; events outside one are dropped. */
   private current: PiTurn | null = null;
+  private opening: PiTurn | null = null;
   private steered = false;
   private queue: Promise<void> = Promise.resolve();
   private running = 0;
@@ -85,7 +89,24 @@ export class PiSession {
 
   /** Reusable only while the process is up and the turn asks for the very same setup. */
   usable(key: string, warmMs: number): boolean {
-    return !this.ended && !this.closing && this.key === key && warmMs > 0 && this.warmMs > 0;
+    return !this.ended && !this.closing && this.key === key && this.retention.reusable(warmMs, this.warmMs);
+  }
+
+  setViewed(viewed: boolean): void {
+    this.retention.setViewed(viewed);
+    this.clearIdle();
+    if (!viewed && !this.busy() && !this.ended) this.armIdle();
+  }
+
+  async prepare(ctx: SessionContext, forTurn = false): Promise<void> {
+    this.retention.prepare(forTurn);
+    this.clearIdle();
+    try { await this.start(ctx); }
+    catch (error) { this.drop(); throw error; }
+    finally {
+      ctx.finishStartup?.();
+      if (!this.ended && !this.busy() && !this.retention.viewed) this.armIdle();
+    }
   }
 
   busy(): boolean {
@@ -94,6 +115,7 @@ export class PiSession {
 
   attach(turn: PiTurn, warmMs: number): void {
     this.warmMs = warmMs;
+    this.retention.beginTurn();
     this.running += 1;
     this.clearIdle();
     this.queue = this.queue.then(async () => {
@@ -113,6 +135,7 @@ export class PiSession {
   stopTurn(turn: PiTurn): void {
     if (turn.settled) return;
     turn.markStopped();
+    if (this.opening === turn) { this.drop(); return; }
     if (this.current !== turn) return;
     if (turn.ctx.turn.execution?.operation === 'compact') {
       turn.settleRun();
@@ -205,7 +228,7 @@ export class PiSession {
   }
 
   /** Archive, shutdown, an idle window, a changed setup: the process goes. */
-  close(reason: string | null, ctx?: TurnContext): void {
+  close(reason: string | null, ctx?: SessionContext): void {
     if (this.ended) return;
     this.closing = true;
     if (reason !== null && ctx !== undefined) ctx.log('warn', `pi session: ${reason}`);
@@ -221,12 +244,16 @@ export class PiSession {
       this.endTurn(turn, false);
       return;
     }
+    this.opening = turn;
     try {
       await this.start(turn.ctx);
     } catch (error) {
-      turn.fail(messageOf(error));
+      if (turn.isStopped) turn.settleRun();
+      else turn.fail(messageOf(error));
       this.endTurn(turn, true);
       return;
+    } finally {
+      this.opening = null;
     }
 
     const peer = this.peer;
@@ -294,7 +321,7 @@ export class PiSession {
    * again after it. A refusal fails the turn with pi's own sentence and drops
    * the process, and the next turn launches with `--model`.
    */
-  private async align(ctx: TurnContext, peer: PiPeer): Promise<void> {
+  private async align(ctx: SessionContext, peer: PiPeer): Promise<void> {
     const model = ctx.thread.model;
     if (model === null || model === AGENT_OWN_MODEL) return;
     let changed = false;
@@ -374,24 +401,25 @@ export class PiSession {
   private endTurn(turn: PiTurn, drop: boolean): void {
     turn.settle();
     this.running = Math.max(0, this.running - 1);
-    if (drop || this.closing || this.warmMs <= 0) {
+    if (drop || this.closing || this.retention.idleMs(this.warmMs) <= 0) {
       this.drop();
       return;
     }
-    if (this.running === 0) this.armIdle();
+    if (this.running === 0 && !this.retention.viewed) this.armIdle();
   }
 
   // -- the process ----------------------------------------------------------
 
-  private start(ctx: TurnContext): Promise<void> {
-    if (this.starting === null) this.starting = this.open(ctx);
+  private start(ctx: SessionContext): Promise<void> {
+    if (this.starting === null) this.starting = noteReady(ctx, 'pi', () => this.open(ctx), undefined, () => this.closing || this.ended);
     return this.starting;
   }
 
-  private open(ctx: TurnContext): Promise<void> {
+  private async open(ctx: SessionContext): Promise<void> {
+    if (this.ended) throw new Error('the pi session was closed before it started');
     const profile = profileFor(ctx.provider);
-    const executable = profile === undefined ? null : resolveExecutable(profile);
-    if (executable === null) {
+    const launch = resolveLaunch(profile);
+    if (launch === null) {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
 
@@ -408,7 +436,7 @@ export class PiSession {
     }
 
     const args = [
-      ...launchPrefix(profile),
+      ...launch.prefix,
       ...(profile?.launch?.args ?? []),
       '--session-id',
       sessionId,
@@ -416,7 +444,7 @@ export class PiSession {
       sessionDir,
       ...modelArgs(ctx),
     ];
-    const child = ctx.spawnChild(executable, args, {
+    const child = ctx.spawnChild(launch.executable, args, {
       cwd: ctx.thread.cwd,
       env: agentEnv(ctx.accountEnv),
     });
@@ -445,11 +473,11 @@ export class PiSession {
     // session, memoized behind `start`. Not awaited, so a slow or unknown
     // command never holds up the turn that started this process.
     void this.fetchCommands(ctx, peer);
-    return Promise.resolve();
+    await peer.command('get_state', {}, { timeoutMs: 20_000 });
   }
 
   /** `get_commands`: a refusal or a dead peer is one warning, never a failed turn. */
-  private async fetchCommands(ctx: TurnContext, peer: PiPeer): Promise<void> {
+  private async fetchCommands(ctx: SessionContext, peer: PiPeer): Promise<void> {
     try {
       const data = dataOf(await peer.command('get_commands'));
       const list = Array.isArray(data['commands']) ? (data['commands'] as PiCommand[]) : [];
@@ -459,7 +487,7 @@ export class PiSession {
     }
   }
 
-  private watch(child: SpawnedChild, ctx: TurnContext, peer: PiPeer): void {
+  private watch(child: SpawnedChild, ctx: SessionContext, peer: PiPeer): void {
     let closed = (): void => undefined;
     this.processClosed = new Promise<void>(resolve => { closed = resolve; });
     child.stderr.setEncoding('utf8');
@@ -559,10 +587,11 @@ export class PiSession {
   }
 
   private armIdle(): void {
+    this.clearIdle();
     this.idle = setTimeout(() => {
       this.idle = null;
       this.drop();
-    }, this.warmMs);
+    }, this.retention.idleMs(this.warmMs));
     this.idle?.unref?.();
   }
 
@@ -574,7 +603,7 @@ export class PiSession {
 
   // -- what the agent sends -------------------------------------------------
 
-  private onEvent(ctx: TurnContext, message: Record<string, unknown>): void {
+  private onEvent(ctx: SessionContext, message: Record<string, unknown>): void {
     const type = message['type'];
     if (type === 'extension_ui_request') {
       void this.answerDialog(ctx, message).catch((error) => ctx.log('warn', `pi question: ${messageOf(error)}`));
@@ -625,15 +654,21 @@ export class PiSession {
         turn.noteOutcome(assistant.stopReason === 'error' ? (assistant.errorMessage ?? 'the pi agent failed the turn') : null);
         break;
       }
-      case 'auto_retry_start':
-        turn.ctx.reportProgress?.('retrying', `${String(message['attempt'])}/${String(message['maxAttempts'])}`);
+      case 'auto_retry_start': {
+        const attempt = numberOf(message['attempt']), maxAttempts = numberOf(message['maxAttempts']), retryAfterMs = numberOf(message['delayMs']);
+        turn.ctx.reportProgress?.('retrying', `${attempt ?? '?'}/${maxAttempts ?? '?'}`);
+        turn.ctx.diagnostic?.('warn', `pi request failed, retry ${attempt ?? '?'} of ${maxAttempts ?? '?'} in ${retryAfterMs ?? '?'} ms: ${textOf(message['errorMessage'])}`, {
+          event: 'driver.api.retry', data: { attempt, maxAttempts, retryAfterMs },
+        });
         turn.ctx.log(
           'info',
-          `pi: retrying the request (attempt ${String(message['attempt'])} of ${String(message['maxAttempts'])}, in ${String(message['delayMs'])} ms): ${textOf(message['errorMessage'])}`,
+          `pi: retrying the request (attempt ${attempt ?? '?'} of ${maxAttempts ?? '?'}, in ${retryAfterMs ?? '?'} ms): ${textOf(message['errorMessage'])}`,
         );
         break;
+      }
       case 'auto_retry_end':
         turn.ctx.reportProgress?.('working');
+        turn.ctx.diagnostic?.(message['success'] === false ? 'warn' : 'info', message['success'] === false ? `pi gave up retrying: ${textOf(message['finalError']) || turn.pendingError || 'no reason given'}` : 'pi retry succeeded', { event: 'driver.api.retry-ended', data: { success: message['success'] !== false } });
         if (message['success'] === false) {
           turn.noteOutcome(textOf(message['finalError']) || turn.pendingError || 'pi gave up retrying the request');
         }
@@ -681,7 +716,7 @@ export class PiSession {
    * pi's only request back to the client. `select`, `confirm`, `input` and
    * `editor` block the agent until an answer with the same id arrives.
    */
-  private async answerDialog(ctx: TurnContext, message: Record<string, unknown>): Promise<void> {
+  private async answerDialog(ctx: SessionContext, message: Record<string, unknown>): Promise<void> {
     const method = textOf(message['method']);
     if (UI_NOTICES.has(method)) {
       this.onNotice(ctx, method, message);
@@ -754,7 +789,7 @@ export class PiSession {
    * Status lines, widgets, window titles and editor text have no place in a
    * chat and are dropped.
    */
-  private onNotice(ctx: TurnContext, method: string, message: Record<string, unknown>): void {
+  private onNotice(ctx: SessionContext, method: string, message: Record<string, unknown>): void {
     if (method !== 'notify') return;
     const text = textOf(message['message']);
     if (text.length === 0) return;

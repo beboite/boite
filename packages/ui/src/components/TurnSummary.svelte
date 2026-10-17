@@ -2,11 +2,11 @@
   import { page } from '../lib/page-hidden.svelte';
   import { Check, LoaderCircle, Square, CircleAlert } from '@lucide/svelte';
   import type { BackgroundTask, ThreadProgress, Turn } from '@boite/contracts';
-  import { clockTime, elapsed } from '../lib/format';
-  import { formatTokens } from '../lib/tokens';
+  import { clockTime, elapsed, exactTime, formatTokens } from '../lib/format';
+  import { totalTokens } from '../lib/usage';
   import { fill, strings } from '../lib/strings';
-  import { formatLocale } from '../lib/i18n.svelte';
   import { backgroundLabel } from '../lib/background';
+  import { secondClock } from '../lib/clock.svelte';
   import type { Snippet } from 'svelte';
   let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, pointed = false, actions }: {
     turn: Turn;
@@ -32,8 +32,9 @@
     actions?: Snippet;
   } = $props();
   const hidden = $derived(page.hidden);
-  let now = $state(Date.now());
   const running = $derived(turn.status === 'running');
+  /** The second clock ticks while the turn runs and the page is on screen; a settled turn keeps the time it stopped at. */
+  const now = $derived(running ? secondClock.now : Date.now());
   const compactOperation = $derived(turn.execution?.operation === 'compact');
   const observed = $derived(running && !waiting && progress?.turnId === turn.id ? progress : null);
   const compacting = $derived(running && !waiting && (compactOperation || observed?.phase === 'compacting'));
@@ -52,7 +53,7 @@
   const ownLabel = $derived(own !== null && spent !== null && spent - own >= 1000 ? fill(strings.chat.turnOwnTime, { time: elapsed(own) }) : undefined);
   const elapsedLabel = $derived(compactOperation ? turn.status === 'done' ? strings.chat.compactedFor : strings.chat.compactionElapsed : running ? strings.chat.workingFor : strings.chat.workedFor);
   const usage = $derived(turn.usage);
-  const total = $derived(usage === null ? 0 : usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens);
+  const total = $derived(usage === null ? 0 : totalTokens(usage));
   const breakdown = $derived(usage === null ? '' : [
     fill(strings.chat.inputTokens, { count: formatTokens(usage.inputTokens) }),
     fill(strings.chat.outputTokens, { count: formatTokens(usage.outputTokens) }),
@@ -64,14 +65,6 @@
   const quiet = $derived(observed ? Math.max(0, now - observed.at) : 0);
   const activityLabel = $derived(observed ? strings.chat.progress[observed.phase] : null);
   const providerAge = $derived(observed?.providerAt == null ? null : Math.max(0, now - observed.providerAt));
-
-  // The clock only ticks while the turn runs and the page is on screen.
-  $effect(() => {
-    if (!running || hidden) return;
-    now = Date.now();
-    const timer = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
 </script>
 
 {#snippet metric(id: string, text: string | null, title?: string, quiet = false)}
@@ -109,7 +102,7 @@
       {/if}
     {/if}
     {#if turn.finishedAt !== null}
-      {@render metric('turn-finished-at', fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) }), new Date(turn.finishedAt).toLocaleString(formatLocale()))}
+      {@render metric('turn-finished-at', fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) }), exactTime(turn.finishedAt))}
     {/if}
     {#if total > 0}
       {@render metric('turn-tokens', `${formatTokens(total)} ${strings.units.tokens}`, breakdown)}
@@ -149,14 +142,12 @@
   [data-testid='turn-progress'] { min-width: 0; overflow-wrap: anywhere; }
   .quiet { color: var(--color-muted-foreground); }
   .background { display: inline-flex; align-items: center; gap: 6px; color: var(--color-accent); }
-  .pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.6s var(--ease-out-quint) infinite; }
+  .pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops); }
   .paused .pulse { animation-play-state: paused; }
   .stop-background { display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: transparent; color: var(--color-muted-foreground); cursor: pointer; }
   .stop-background:hover { color: var(--color-danger); border-color: currentColor; }
-  .summary :global(.spinner) { animation: spin 1.5s linear infinite; }
+  .summary :global(.spinner) { animation: spin 1.5s steps(90) infinite var(--loops); }
   .paused :global(.spinner) { animation-play-state: paused; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
   @media (prefers-reduced-motion: reduce) { .summary :global(.spinner), .pulse { animation: none; } }
   :global(html[data-motion='reduced']) .summary :global(.spinner),
   :global(html[data-motion='reduced']) .summary .pulse { animation: none; }

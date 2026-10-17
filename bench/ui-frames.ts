@@ -306,6 +306,12 @@ async function main(): Promise<void> {
         await page.evaluate(`document.querySelector('[data-testid=onboarding-animation-replay]')?.click()`);
       },
       'phone streaming': async () => { await open('open=recent&stream=tokens', 390, 844, true); await stream(); },
+      // The thread list open over a chat that keeps streaming behind it: what the hidden chat still costs.
+      'phone streaming behind list': async () => {
+        await open('open=recent&stream=tokens', 390, 844, true); await stream();
+        await page.evaluate(`document.querySelector('[data-testid=mobile-back]')?.click()`);
+        await Bun.sleep(400);
+      },
       'phone long scroll': async () => { await open('open=recent&long=1', 390, 844, true); wheel(390, 844); },
       'phone heavy scroll': async () => { await openHeavy(390, 844, true); wheel(390, 844); },
       'typing': async () => { await open('open=recent'); await focusComposer(); type(); },

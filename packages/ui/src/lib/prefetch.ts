@@ -1,3 +1,5 @@
+import type { Store } from './store.svelte';
+
 /**
  * The idle prefetch of the chunks the first screen does not draw (App.svelte).
  * Each chunk still loads the moment it is asked for; this only decides what is
@@ -24,12 +26,34 @@ export function prefetchNames<Name extends string>(names: Name[], device: { tour
   return names.filter((name) => !(name === 'Onboarding' && device.tourSeen) && !(name === 'TerminalView' && !device.owner));
 }
 
-/** Runs `task` once the page is idle, after the first paint. Safari has no requestIdleCallback. Returns the cancel. */
-export function whenIdle(task: () => void): () => void {
+/**
+ * Runs `task` once the page is idle, after the first paint, or after `timeout`
+ * ms at the latest. Safari has no requestIdleCallback: it waits `fallback` ms
+ * instead. Returns the cancel.
+ */
+export function whenIdle(task: () => void, { timeout = 1500, fallback = 300 } = {}): () => void {
   if (typeof requestIdleCallback === 'function') {
-    const id = requestIdleCallback(task, { timeout: 1500 });
+    const id = requestIdleCallback(task, { timeout });
     return () => cancelIdleCallback(id);
   }
-  const id = setTimeout(task, 300);
+  const id = setTimeout(task, fallback);
   return () => clearTimeout(id);
+}
+
+/**
+ * The pages beside the chat and the terminal's code, fetched in the same idle
+ * pass: Settings, the Agents page with its first snapshot when its experiment
+ * is on, and xterm for the owner. A first visit then draws its content instead
+ * of "loading"; App's own `import()` of each finds the module already there.
+ */
+export function warmPages(store: Store, agents: boolean): void {
+  const quiet = () => undefined;
+  void import('../components/SettingsShell.svelte').catch(quiet);
+  if (agents) {
+    void Promise.all([import('../components/agents/AgentsPage.svelte'), import('./agents.svelte')]).then(async ([, { AgentsView }]) => {
+      const view = AgentsView.of(store);
+      if (!view.snapshot && store.connection === 'ready') await view.refresh();
+    }).catch(quiet);
+  }
+  if (store.owner) void Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit'), import('@xterm/addon-web-links')]).catch(quiet);
 }

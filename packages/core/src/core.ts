@@ -1,5 +1,6 @@
 import { MergedPrArchive } from './merged-pr-archive.ts';
 import { PullRequests } from './pull-requests.ts';
+import { PullRequestWatches, type WatchTiming } from './pull-request-watch.ts';
 import { existsSync, mkdirSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -18,12 +19,13 @@ import { ImportStore } from './imports.ts';
 import { Journal } from './journal.ts';
 import { scheduleEventRetention, scheduleInlineValueMoves } from './journal/retention.ts';
 import { KeybindingStore } from './keybindings.ts';
-import { DiagnosticLogs } from './logs.ts';
+import { DiagnosticLogs, type ThreadIdentity } from './logs.ts';
+import { Diagnostics } from './diagnostics.ts';
 import { registerModules } from './modules.ts';
 import { currentOs } from './paths.ts';
 import { lanAddress } from './server/lan.ts';
 import { ProcRegistry } from './procs.ts';
-import { withLoad } from './threads/records.ts';
+import { attachResourceLog } from './resource-log.ts';
 import { ProjectStore } from './projects.ts';
 import { PROVIDER_SWITCHES, ProviderRegistry } from './providers/loader.ts';
 import { Router } from './router.ts';
@@ -31,13 +33,18 @@ import { Scheduler } from './scheduler.ts';
 import { SessionStore } from './sessions.ts';
 import { SettingsStore } from './settings.ts';
 import { eraseIncognitoRoot } from './threads/incognito.ts';
+import { removeTranscripts } from './threads/transcript-purge.ts';
 import { ThreadStore } from './threads.ts';
+import { DraftPreparations } from './threads/draft-preparations.ts';
+import { AttachmentUploads } from './attachment-uploads.ts';
 import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts';
 import { scheduleDoneRetention } from './threads/done-retention.ts';
+import { WorktreeCleanup } from './worktree-cleanup.ts';
 import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
 import { AgentBrowser, BROWSER_SCOPE } from './browser.ts';
 import { MobileDevices } from './devices/control.ts';
+import { LazyMcp } from './mcp/lazy.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
@@ -47,7 +54,6 @@ import { SpeechStore } from './speech.ts';
 import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
-import { Stewards } from './stewards.ts';
 import { GroupStore, type NetworkSink } from './group.ts';
 import type { RelaySink } from './group/relay.ts';
 import { Delegation } from './delegation.ts';
@@ -56,6 +62,7 @@ import { BrainStore } from './brain.ts';
 import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
 import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
+import { DesktopUpdates } from './desktop-update.ts';
 
 export { CORE_VERSION } from './version.ts';
 
@@ -72,6 +79,8 @@ export interface SubscriptionSink {
 
 export interface CoreOptions {
   serverUpdates?: ServerUpdateOptions;
+  /** Tests shorten the pull request watch loop's waits. */
+  pullRequestWatches?: Partial<WatchTiming>;
   bundleHash?: string;
   dataDir: string;
   token: string;
@@ -79,6 +88,10 @@ export interface CoreOptions {
   channel?: Channel;
   /** The executable owns process exit; embedded cores may omit it. */
   onShutdown?: () => void;
+  /** Whether the data directory is the channel's default or one a flag or BOITE_DATA_DIR named; the log never holds the path. */
+  dataDirKind?: 'default' | 'custom';
+  /** How often a resident core runs its retention passes; a test shortens the minute. */
+  retentionPassMs?: number;
 }
 
 /**
@@ -123,8 +136,11 @@ export class Core {
 
   readonly bus: Bus;
   readonly logs: DiagnosticLogs;
+  readonly diagnostics: Diagnostics;
   readonly pullRequests: PullRequests;
   readonly mergedPrArchive: MergedPrArchive;
+  readonly worktreeCleanup: WorktreeCleanup;
+  readonly pullRequestWatches: PullRequestWatches;
   readonly journal: Journal;
   readonly router: Router;
   readonly settings: SettingsStore;
@@ -136,6 +152,8 @@ export class Core {
   readonly procs: ProcRegistry;
   readonly scheduler: Scheduler;
   readonly threads: ThreadStore;
+  readonly drafts: DraftPreparations;
+  readonly attachmentUploads: AttachmentUploads;
   readonly quotas: QuotaStore;
   readonly plugins: PluginStore;
   readonly sessions: SessionStore;
@@ -156,8 +174,9 @@ export class Core {
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
   readonly serverUpdates: ServerUpdates;
+  /** The desktop app's updater as this machine's own window reports it. */
+  readonly desktopUpdates: DesktopUpdates;
   readonly coordination: Coordination;
-  readonly stewards: Stewards;
   /** The machines this core trusts as one owner's, and what it hands their clients. */
   readonly group: GroupStore;
   readonly delegation: Delegation;
@@ -171,6 +190,8 @@ export class Core {
   readonly browser = new AgentBrowser(this);
   /** Simulators and emulators open in conversations' Device panels. */
   readonly devices = new MobileDevices(this);
+  /** The user's stdio MCP servers, started when a conversation first calls one (`mcp/lazy.ts`). */
+  readonly lazyMcp = new LazyMcp(this);
 
   /**
    * The server tells the core what it alone can know. The default answers no
@@ -200,18 +221,10 @@ export class Core {
     if (!this.#onShutdown) return 'unsupported';
     if (this.#idleShutdownAdmitted) return 'accepted';
     if (this.#shutdownRequested || this.#stopping) return 'busy';
-    const scheduler = this.scheduler.state();
-    const threads = this.threads;
-    if (this.router.activeRequests > 0 || scheduler.running.length > 0 || scheduler.queued.length > 0
-      // An agent's open tab is not work under way: its browser stays up after the turn and would hold an
-      // update back for good. Closing saves each profile's cookies; a browser command in flight is an active request.
-      || this.agentRuntime.busy || this.procs.liveThreads().some(scope => scope !== BROWSER_SCOPE)
-      || threads.sideQuestions.busy
-      || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
-      || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0 || threads.deferred.consumed.size > 0
-      || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
+    if (!this.idle()) return 'busy';
     // Persist an updater's acknowledgement before closing admission or scheduling exit.
     beforeShutdown?.();
+    this.logs.info('Idle shutdown accepted: no turn, request or agent process is running', { source: 'core', event: 'core.idle-shutdown.accepted' });
     this.#idleShutdownAdmitted = true;
     this.#stopping = true;
     this.threads.focus.close();
@@ -219,6 +232,39 @@ export class Core {
     this.procs.stopAccepting();
     this.requestShutdown();
     return 'accepted';
+  }
+
+  /**
+   * The server update's way out when the machine never goes idle: a busy
+   * server (an agent working for hours, a resident agent) held the idle gate
+   * shut for good. An agent install still half-written refuses, since the
+   * restart would replace the core under it; anything else is handed to the
+   * next core (`requestHandoffShutdown`), which resumes the running turns.
+   */
+  requestUpdateHandoff(beforeShutdown?: () => void): 'accepted' | 'busy' | 'unsupported' {
+    if (!this.#onShutdown) return 'unsupported';
+    if (this.#idleShutdownAdmitted) return 'accepted';
+    if (this.#shutdownRequested || this.#stopping || this.updates.busy) return 'busy';
+    beforeShutdown?.();
+    this.logs.info('Update handoff accepted: running turns end their tool call, then resume after the restart', { source: 'core', event: 'core.update-handoff.accepted' });
+    this.#idleShutdownAdmitted = true;
+    this.requestHandoffShutdown();
+    return 'accepted';
+  }
+
+  /** No turn, request, agent process, background task or agent install is under way. */
+  private idle(): boolean {
+    const scheduler = this.scheduler.state();
+    const threads = this.threads;
+    if (this.router.activeRequests > 0 || scheduler.running.length > 0 || scheduler.queued.length > 0
+      // An agent's open tab is not work under way: its browser stays up after the turn and would hold an
+      // update back for good. Closing saves each profile's cookies; a browser command in flight is an active request.
+      || this.agentRuntime.busy || this.procs.liveThreads().some(scope => scope !== BROWSER_SCOPE)
+      || threads.sideQuestions.busy || this.updates.busy
+      || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
+      || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0 || threads.deferred.consumed.size > 0
+      || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return false;
+    return true;
   }
 
   /**
@@ -230,6 +276,8 @@ export class Core {
   requestHandoffShutdown(graceMs?: number): 'accepted' | 'unsupported' {
     if (!this.#onShutdown) return 'unsupported';
     if (this.#shutdownRequested || this.threads.handoff.active) return 'accepted';
+    const running = this.scheduler.state().running.length;
+    this.logs.info(`Restart handoff started: ${running} running turns end their tool call, then stop`, { source: 'core', event: 'core.handoff.started', data: { running, graceMs: graceMs ?? null } });
     this.#stopping = true;
     void this.threads.handoff.begin(graceMs).then(() => this.requestShutdown());
     return 'accepted';
@@ -263,7 +311,18 @@ export class Core {
     this.logs = new DiagnosticLogs(this.dataDir, [this.token]);
     this.logs.attach(this.bus);
     this.bus.onError = (message) => this.log('error', message);
+    let phaseAt = performance.now();
+    const phase = (event: string, message: string, data?: Record<string, string | number | boolean | null>): void => {
+      const now = performance.now();
+      this.logs.info(`${message} in ${Math.round(now - phaseAt)} ms`, { source: 'startup', event, durationMs: now - phaseAt, ...(data ? { data } : {}) });
+      phaseAt = now;
+    };
     this.journal = new Journal(join(this.dataDir, 'journal.db'), { onError: (message) => this.log('error', message) });
+    const schema = this.journal.schema;
+    phase('startup.journal-opened', schema.from === schema.to ? `Journal opened at schema ${schema.to}` : `Journal opened and migrated from schema ${schema.from} to ${schema.to}`,
+      { schemaFrom: schema.from, schemaTo: schema.to, dataDir: options.dataDirKind ?? 'custom', channel: this.channel });
+    this.logs.describeThread = threadIdentities(this.journal);
+    this.diagnostics = new Diagnostics(this);
     this.stopArtifactRetention = scheduleArtifactRetention(this);
     // The journal just erased every incognito conversation; their folders follow.
     eraseIncognitoRoot(this.dataDir, (message) => console.error(message));
@@ -275,23 +334,33 @@ export class Core {
     this.providers.loadSwitches(this.journal.getSetting(PROVIDER_SWITCHES));
     this.accounts = new AccountStore(this);
     this.projects = new ProjectStore(this);
-    this.procs = new ProcRegistry(this.journal, this.bus, undefined, { summarize: (thread) => withLoad(this, thread) });
+    this.procs = new ProcRegistry(this.journal, this.bus, undefined, {
+      diagnostic: (message, context) => this.logs.warn(message, { source: 'guards', ...context }),
+    });
+    attachResourceLog(this);
     this.scheduler = new Scheduler(this);
     this.threads = new ThreadStore(this);
+    this.drafts = new DraftPreparations(this);
+    this.attachmentUploads = new AttachmentUploads(this.dataDir);
     this.quotas = new QuotaStore(this);
     this.plugins = new PluginStore(this);
     this.sessions = new SessionStore(this);
     this.worktrees = new Worktrees(this);
     this.keybindings = new KeybindingStore(this);
     this.imports = new ImportStore(this);
-    this.activity = new ActivityStore(this);
+    // The journal erased the incognito conversations the last core left behind; their transcripts follow.
+    this.threads.transcriptPurge = removeTranscripts(this, this.journal.takeIncognitoSessions());
+    // One scan of visible thread JSON serves activity and coordination recovery. It runs
+    // where activity's own check ran, so a corrupt thread still fails before any recovery write.
+    this.journal.validateVisibleThreadJson();
+    this.activity = new ActivityStore(this, true);
     this.push = new PushStore(this);
     this.speech = new SpeechStore(this);
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
     this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
-    this.coordination = new Coordination(this);
-    this.stewards = new Stewards(this);
+    this.desktopUpdates = new DesktopUpdates(this);
+    this.coordination = new Coordination(this, true);
     this.group = new GroupStore(this);
     this.group.restore();
     this.delegation = new Delegation(this);
@@ -302,7 +371,9 @@ export class Core {
 
     this.workforce = new AgentStore(this);
     this.pullRequests = new PullRequests(this);
+    this.pullRequestWatches = new PullRequestWatches(this, (threadId, args) => this.pullRequests.gh(threadId, args), options.pullRequestWatches);
     registerModules(this);
+    phase('startup.stores-ready', 'Stores and RPC handlers ready', { methods: this.router.methods().length });
     this.#onShutdown = options.onShutdown;
     this.router.register('core.shutdown', () => {
       if (!this.requestShutdown()) throw new Error('This embedded core does not support process shutdown.');
@@ -315,22 +386,36 @@ export class Core {
     this.procs.applySettings(this.settings.get());
     this.accounts.ensureDefaults();
     this.accounts.recheckSignedOut();
-    this.#stopDeletionRetention = scheduleThreadDeletionRetention(this);
+    this.#stopDeletionRetention = scheduleThreadDeletionRetention(this, options.retentionPassMs);
     this.#stopDoneRetention = scheduleDoneRetention(this);
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
     this.threads.agentState.backgroundHistory.interruptLive();
-    this.threads.recoverStuckTurns();
+    const recovered = this.threads.recoverStuckTurns();
+    // After recovery: a thread a usage limit stopped resumes at its window's reset, across restarts.
+    this.threads.limitResumes.start();
     this.threads.cards.restoreAsyncQuestions();
+    phase('startup.recovered', `Previous run recovered, ${recovered} unfinished turns`, { stuckTurns: recovered });
+    queueMicrotask(() => {
+      void this.drafts.recover().catch(error => this.log('warn', `draft recovery failed: ${String(error)}`));
+      void this.attachmentUploads.recover().catch(error => this.log('warn', `attachment recovery failed: ${String(error)}`));
+    });
     queueMicrotask(() => this.threads.titles.recover());
     this.agentRuntime = new AgentRuntime(this);
     this.brain.start();
     this.mergedPrArchive = new MergedPrArchive(this, this.pullRequests);
     this.mergedPrArchive.start();
-    this.logs.record('info', 'Core started', { source: 'core', event: 'core.started' }, this.startedAt);
+    this.worktreeCleanup = new WorktreeCleanup(this);
+    this.worktreeCleanup.start();
+    this.pullRequestWatches.start();
+    this.logs.record('info', `Core ${this.version} started in ${Date.now() - this.startedAt} ms, ${process.platform} ${process.arch}, Bun ${process.versions.bun ?? 'unknown'}`, {
+      source: 'core', event: 'core.started', durationMs: Date.now() - this.startedAt,
+      data: { version: this.version, channel: this.channel, os: process.platform, arch: process.arch, bun: process.versions.bun ?? null, pid: process.pid, cliShim: this.cliDir !== null, trace: this.procs.capability().mode },
+    });
   }
 
   setEndpoint(host: string, port: number): void {
+    this.logs.info(`Listening on ${host}:${port}`, { source: 'core', event: 'core.listening', data: { port } });
     this.endpoint = { host, port };
   }
 
@@ -367,7 +452,8 @@ export class Core {
       version: this.version,
       ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true },
+      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true },
+      coreId: this.coordination.card().coreId,
       hostname: hostname(),
       os: currentOs(),
       channel: this.channel,
@@ -396,9 +482,12 @@ export class Core {
     this.workflows.beginClose();
     this.coordination.beginClose();
     void this.mergedPrArchive.close();
+    void this.worktreeCleanup.close();
+    void this.pullRequestWatches.close();
     this.group.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
+    this.threads.limitResumes.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
     return this.#drainPromise;
   }
@@ -415,23 +504,31 @@ export class Core {
   get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
+    const closingAt = performance.now();
     await this.browser.close();
     this.devices.stop();
+    this.lazyMcp.close();
     this.artifactPreviews.stop();
     this.threads.sideQuestions.close();
     await this.mergedPrArchive.close();
+    await this.worktreeCleanup.close();
+    await this.pullRequestWatches.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
+    this.threads.limitResumes.close();
     await this.agentRuntime.close();
+    this.workforce.close();
     this.#stopping = true;
     await this.#stopDoneRetention();
+    await this.drafts.close().catch(error => this.log('warn', `draft shutdown cleanup failed: ${String(error)}`));
+    await this.attachmentUploads.close().catch(error => this.log('warn', `attachment shutdown cleanup failed: ${String(error)}`));
     await this.brain.close();
     this.updates.close();
     this.providers.close();
     this.serverUpdates.close();
+    this.desktopUpdates.close();
     await this.drain();
     await this.delegation.close();
-    this.stewards.close();
     await this.coordination.close();
     await this.group.close();
     await this.speech.close();
@@ -457,10 +554,35 @@ export class Core {
     this.#stopMoves();
     this.#stopDeletionRetention();
     await this.stopArtifactRetention();
+    if (!this.journal.isClosed()) {
+      // Incognito conversations end with the core. Their rows go now, while the
+      // journal can still say which transcripts no other thread names.
+      await this.threads.transcriptPurge;
+      this.journal.purgeIncognitoThreads();
+      await removeTranscripts(this, this.journal.takeIncognitoSessions());
+    }
     this.journal.close();
     // Every agent is stopped by now, so nothing holds an incognito folder.
     eraseIncognitoRoot(this.dataDir, (message) => console.error(message));
-    this.logs.record('info', 'Core stopped', { source: 'core', event: 'core.stopped' });
+    this.logs.record('info', `Core stopped after ${Math.round((Date.now() - this.startedAt) / 1000)} s up; closing took ${Math.round(performance.now() - closingAt)} ms`, { source: 'core', event: 'core.stopped', durationMs: performance.now() - closingAt, data: { uptimeS: Math.round((Date.now() - this.startedAt) / 1000) } });
     await this.logs.close();
   }
+}
+
+/**
+ * Who each thread is, for the log records about it. A burst of records about
+ * one turn reads the journal once a second, not once a record.
+ */
+function threadIdentities(journal: Journal): (threadId: string) => ThreadIdentity | null {
+  const cache = new Map<string, { at: number; identity: ThreadIdentity | null }>();
+  return (threadId) => {
+    const now = Date.now();
+    const kept = cache.get(threadId);
+    if (kept !== undefined && now - kept.at < 1000) return kept.identity;
+    const thread = journal.getThread(threadId);
+    const identity = thread === null ? null : { providerId: thread.providerId, model: thread.model, parentThreadId: thread.parentThreadId ?? null };
+    cache.set(threadId, { at: now, identity });
+    if (cache.size > 512) cache.delete(cache.keys().next().value!);
+    return identity;
+  };
 }

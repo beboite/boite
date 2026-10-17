@@ -11,17 +11,24 @@ export { parseBranchHeader, parseNumstat, parseStatus } from './git/porcelain.ts
 
 export async function gitStatus(core: Core, threadId: ThreadId): Promise<GitStatus> {
   const cwd = threadCwd(core, threadId);
-  const status = await git(core, threadId, cwd, ['status', '--porcelain=v1', '-z', '--branch']);
+  // Both reads start together: neither needs the other's answer, and in series
+  // they cost the sum of two full walks of the working tree. The status is
+  // still judged first, so its refusal wins over anything the numbers say.
+  const reading = git(core, threadId, cwd, ['status', '--porcelain=v1', '-z', '--branch']);
+  // A repository with no commit has no HEAD to compare to: the paths are still
+  // reported, without numbers, rather than failing the whole read.
+  // The plumbing `diff-index`, not `diff`: the porcelain writes a refreshed
+  // index back whatever GIT_OPTIONAL_LOCKS says. `-M` keeps its renames.
+  const counting = git(core, threadId, cwd, ['diff-index', '-M', '--numstat', '-z', 'HEAD']);
+  // Left unread when the status refuses: its rejection must not go unhandled.
+  counting.catch(() => {});
+  const status = await reading;
   if (status.code === OUTSIDE_A_REPOSITORY) notARepository(threadId, status.stderr);
   if (status.code !== 0) {
     throw refused(`git status failed on thread ${threadId}: ${status.stderr.trim() || `exit ${status.code}`}`, { threadId });
   }
   const parsed = parseStatus(status.stdout);
-  // A repository with no commit has no HEAD to compare to: the paths are still
-  // reported, without numbers, rather than failing the whole read.
-  // The plumbing `diff-index`, not `diff`: the porcelain writes a refreshed
-  // index back whatever GIT_OPTIONAL_LOCKS says. `-M` keeps its renames.
-  const numstat = await git(core, threadId, cwd, ['diff-index', '-M', '--numstat', '-z', 'HEAD']);
+  const numstat = await counting;
   const numbers = numstat.code === 0 ? parseNumstat(numstat.stdout) : new Map<string, { additions: number | null; deletions: number | null }>();
   for (const change of parsed.changes) {
     const counted = numbers.get(change.path);
@@ -41,7 +48,10 @@ export function registerGitMethods(core: Core): void {
   core.router.register('git.diff', (params, ctx) => {
     if (ctx.connection.identity.principal === 'session') {
       assertDeviceReadable(core, params.threadId);
-      assertDeviceFile(core, params.threadId, threadCwd(core, params.threadId), params.path);
+      const cwd = threadCwd(core, params.threadId);
+      assertDeviceFile(core, params.threadId, cwd, params.path);
+      // The origin is read too, at HEAD: it answers to the same rules as the path.
+      if (typeof params.oldPath === 'string') assertDeviceFile(core, params.threadId, cwd, params.oldPath);
     }
     return gitDiff(core, params);
   });

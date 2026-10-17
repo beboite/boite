@@ -10,7 +10,7 @@ const harness = await startTestCore();
 try {
   const client = await harness.connect();
   const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-  const agent = await client.call('agents.profile.save', { value: { name: 'Bench', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory'], accountIntegration: 'provider' } });
+  const agent = await client.call('agents.profile.save', { value: { name: 'Bench', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory'] } });
   const scope = { kind: 'agent' as const, id: agent.id };
   const r = harness.core.workforce.records;
   r.transaction(() => {

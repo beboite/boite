@@ -172,9 +172,12 @@ test('a cached remote model waits for the restarted core catalog before creating
 });
 
 test('a failed catalog read preserves the draft and its cached selection', async ({ ready }) => {
+  // The catalog comes from browser storage, so the core is asked before the thread is made.
+  const { store: first } = await ready({ delayMs: 0 });
+  const accountId = first.accountsOf('codex')[0]!.id;
+  await first.probeModels('codex', accountId);
+  first.detach();
   const { store, client } = await ready({ delayMs: 0 });
-  const accountId = store.accountsOf('codex')[0]!.id;
-  await store.probeModels('codex', accountId);
   const choice = { providerId: 'codex', accountId, model: 'codex-demo', effort: 'high', permissionMode: 'default' as const };
   store.startDraft(store.projects[0]!.id);
   store.remember(choice);
@@ -231,4 +234,39 @@ test('a built-in default the account no longer lists moves to its later revision
   expect(await store.prepareDraftChoice(stale)).toBeNull();
   expect(store.error).toContain('claude-opus-5-5');
   call.mockRestore();
+});
+
+test('a default saved under a vendor route opens on the model the catalog lists in its place, with its effort', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
+  const provider = store.providerOf('claude')!;
+  const account = store.accountsOf('claude')[0]!;
+  const catalog: ModelInfo[] = [
+    { id: 'claude-opus-5-5', name: 'Opus 5.5', effort: { levels: [...levels, { id: 'xhigh', label: 'xhigh' }], default: 'high' } },
+    { id: 'antigravity/claude-opus-5-5', name: 'Opus 5.5 (Antigravity)' }
+  ];
+  const call = vi.spyOn(client, 'call').mockResolvedValue({ models: catalog } as never);
+  await store.probeModels('claude', account.id);
+  // Saved while the core still listed the gateway's route beside the native model.
+  store.modelDefaults = { claude: { model: 'claude/claude-opus-5-5', effort: 'xhigh' } };
+  expect(store.defaultModelOf(provider, account.id)).toBe('claude-opus-5-5');
+  expect(store.defaultEffortOf(provider.id, account.id, 'claude-opus-5-5')).toBe('xhigh');
+  store.startDraft(store.projects[0]!.id);
+  expect(store.defaultChoice()).toMatchObject({ model: 'claude-opus-5-5', effort: 'xhigh' });
+  // A draft that kept the route id shows the model with its efforts and sends on the listed id.
+  const saved = { providerId: provider.id, accountId: account.id, model: 'claude/claude-opus-5-5', effort: 'xhigh', speed: null, permissionMode: 'default' as const };
+  expect(store.modelOf(saved)?.effort?.levels.map(level => level.id)).toContain('xhigh');
+  expect(await store.prepareDraftChoice(saved)).toEqual({ ...saved, model: 'claude-opus-5-5' });
+  expect(store.error).toBeNull();
+  call.mockRestore();
+});
+
+test('a draft on a model the core already listed is created without reading the catalog again', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
+  const accountId = store.accountsOf('codex')[0]!.id;
+  await store.probeModels('codex', accountId);
+  const choice = { providerId: 'codex', accountId, model: 'codex-demo', effort: 'high', speed: null, permissionMode: 'default' as const };
+  const calls = vi.spyOn(client, 'call');
+  // A refresh still reading behind the send must not hold it.
+  expect(await store.prepareDraftChoice(choice)).toEqual(choice);
+  expect(calls.mock.calls.some(([method]) => method === 'providers.probe')).toBe(false);
 });

@@ -12,6 +12,7 @@
       "executable": [
         { "kind": "file", "value": "{agentsDir}/claude.exe" },
         { "kind": "file", "value": "{home}/.local/bin/claude.exe" },
+        { "kind": "file", "value": "{npmRoot}/@anthropic-ai/claude-code/bin/claude.exe" },
         { "kind": "path", "value": "claude" }
       ],
       "install": {

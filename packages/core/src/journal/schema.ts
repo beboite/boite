@@ -5,7 +5,7 @@ import { nativeAgentPartSql } from './native-agent-parts.ts';
 import { createPartBlobs } from './part-blobs.ts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 32;
+export const SCHEMA_VERSION = 35;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -152,7 +152,8 @@ const SCHEMA_V8 = `
 ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'device';
 `;
 
-export function migrate(db: Database, file: string): void {
+/** Brings the journal to the current schema; returns the version found on disk and the one now stamped. */
+export function migrate(db: Database, file: string): { from: number; to: number } {
   const row = db.query('PRAGMA user_version').get() as { user_version: number } | null;
   let version = row?.user_version ?? 0;
   // An older core must not write a schema it does not know: it would stamp its
@@ -368,7 +369,7 @@ export function migrate(db: Database, file: string): void {
     thread_id TEXT NOT NULL, provider_id TEXT NOT NULL, session_generation INTEGER NOT NULL,
     parent_turn_id TEXT NOT NULL, task_id TEXT NOT NULL, payload TEXT NOT NULL,
     PRIMARY KEY(thread_id, provider_id, session_generation, parent_turn_id, task_id)
-  ); CREATE INDEX IF NOT EXISTS background_observations_thread ON background_observations(thread_id);
+  );
     CREATE INDEX IF NOT EXISTS background_observations_live ON background_observations(thread_id, provider_id, session_generation, json_extract(payload, '$.state'));
     CREATE INDEX IF NOT EXISTS background_observations_recent ON background_observations(thread_id, json_extract(payload, '$.observedAt') DESC);`);
   if (!hasColumn('threads', 'fork_origin')) db.exec('ALTER TABLE threads ADD COLUMN fork_origin TEXT');
@@ -409,8 +410,30 @@ export function migrate(db: Database, file: string): void {
       CREATE INDEX IF NOT EXISTS media_displays_thread ON media_displays (thread_id);`);
     version = 32;
   }
+  // When a thread was archived: the last one put away is the one brought back.
+  if (!hasColumn('threads', 'archived_at')) {
+    db.exec('ALTER TABLE threads ADD COLUMN archived_at INTEGER');
+    version = 33;
+  }
+  // What a conversation starts without (`ThreadContextMode`), as JSON; null for the whole setup.
+  if (!hasColumn('threads', 'context_mode')) {
+    db.exec('ALTER TABLE threads ADD COLUMN context_mode TEXT');
+    version = 34;
+  }
+  // The changed parts of a message still streaming, written between writes of
+  // its whole row (StreamBuffer). Few rows, all of messages in flight.
+  // background_observations_thread is a prefix of background_observations_live
+  // and _recent, which serve its every query.
+  if (version < 35) {
+    db.exec(`CREATE TABLE IF NOT EXISTS streaming_parts (
+        message_id TEXT NOT NULL, part_index INTEGER NOT NULL, thread_id TEXT NOT NULL, json TEXT NOT NULL,
+        PRIMARY KEY (message_id, part_index)) WITHOUT ROWID;
+      DROP INDEX IF EXISTS background_observations_thread;`);
+    version = 35;
+  }
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
+  return { from: row?.user_version ?? 0, to: version };
 }
 
 /** Old receipts lacked input identity. A hash match must name exactly one stored input. */

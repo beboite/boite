@@ -1,3 +1,4 @@
+import { errorText } from './errors';
 import { strings } from './strings';
 
 export type UpdateChannel = 'stable' | 'nightly';
@@ -80,10 +81,6 @@ const systemClock: UpdateClock = {
   clearInterval: (handle) => window.clearInterval(handle as number)
 };
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function tauriBackend(): AppUpdateBackend {
   const invoke = async <T>(command: string, args?: Record<string, unknown>): Promise<T> => {
     const api = await import('@tauri-apps/api/core');
@@ -147,7 +144,7 @@ function queryFixture(): AppUpdateTestFixture | undefined {
   if (!import.meta.env.DEV || query.get('fake') !== '1') return undefined;
   if (window.__BOITE_APP_UPDATE_TEST__) return window.__BOITE_APP_UPDATE_TEST__;
   const phase = query.get('appUpdate');
-  if (!['checking', 'ready', 'waiting', 'downloading', 'error'].includes(phase ?? '')) return undefined;
+  if (!['checking', 'available', 'ready', 'waiting', 'downloading', 'error'].includes(phase ?? '')) return undefined;
   const channel: UpdateChannel = query.get('appUpdateChannel') === 'nightly' ? 'nightly' : 'stable';
   const currentChannel: UpdateChannel = query.get('appUpdateCurrentChannel') === 'nightly' ? 'nightly' : 'stable';
   // A running check has found nothing yet: the shell clears the offer when it starts one.
@@ -301,6 +298,38 @@ export class AppUpdater {
       });
   }
 
+  /**
+   * Brings the offered release to `ready`: checks again after a failure,
+   * downloads it when it is only available, and waits for both. Resolves
+   * whether it is ready to install.
+   */
+  async prepare(): Promise<boolean> {
+    if (!this.snapshot.supported || ['waiting', 'installing'].includes(this.snapshot.phase)) return false;
+    if (['idle', 'current', 'error'].includes(this.snapshot.phase)) {
+      this.check();
+      await this.settled();
+    }
+    // A check the timer started is still on its way: what it finds decides.
+    await this.settled();
+    if (this.snapshot.phase === 'available') this.download();
+    await this.settled();
+    return this.ready;
+  }
+
+  /**
+   * Installs `version` without asking here: the owner asked from another
+   * machine of the group, where nobody here can answer a dialog. Nothing
+   * happens unless it is the release this window offers. Resolves whether the
+   * install started.
+   */
+  async installRequested(version: string): Promise<boolean> {
+    if (!this.snapshot.supported || this.snapshot.version !== version) return false;
+    if (['waiting', 'installing'].includes(this.snapshot.phase)) return true;
+    if (!await this.prepare() || this.snapshot.version !== version) return false;
+    this.install();
+    return true;
+  }
+
   /** Cancellation must reach native code while the install invocation is pending. */
   async cancelInstall(): Promise<boolean> {
     if (this.snapshot.phase !== 'waiting' || this.cancelling || !this.#backend.cancelInstall) return false;
@@ -309,7 +338,7 @@ export class AppUpdater {
     try {
       return await this.#backend.cancelInstall();
     } catch (error) {
-      if (generation === this.#generation) this.snapshot = { ...this.snapshot, error: message(error) };
+      if (generation === this.#generation) this.snapshot = { ...this.snapshot, error: errorText(error) };
       return false;
     } finally {
       if (generation === this.#generation) this.cancelling = false;
@@ -332,9 +361,13 @@ export class AppUpdater {
     this.check(this.snapshot.channel);
   }
 
+  /**
+   * A release found is announced at once and downloaded only when asked
+   * (`download`, `prepare`): downloading by itself first would hold the
+   * announcement back for the whole download.
+   */
   #apply(snapshot: UpdateSnapshot): void {
     this.snapshot = snapshot;
-    if (snapshot.phase === 'available') this.#downloadRequested = true;
     if (['ready', 'waiting', 'installing'].includes(snapshot.phase)) this.#downloadRequested = false;
     if (['waiting', 'installing'].includes(snapshot.phase)) this.#pendingCheck = null;
     queueMicrotask(() => this.#pump(this.#generation));
@@ -342,7 +375,7 @@ export class AppUpdater {
 
   #fail(error: unknown, generation: number): void {
     if (generation !== this.#generation) return;
-    this.snapshot = { ...this.snapshot, phase: 'error', error: message(error), supported: this.snapshot.supported || this.#isShell() };
+    this.snapshot = { ...this.snapshot, phase: 'error', error: errorText(error), supported: this.snapshot.supported || this.#isShell() };
   }
 
   #pump(generation: number): void {

@@ -3,76 +3,80 @@
     "schema": 1,
     "id": "bots",
     "name": "B.O.T.S",
-    "version": "0.1.4",
+    "version": "0.1.16",
     "description": "Little robots on your desktop that follow your Boite agents, answer your questions and keep you company while you work.",
     "homepage": "https://github.com/beboite/bots",
     "executable": "bots",
     "artifacts": {
       "win32-x64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-x86_64-pc-windows-msvc.exe",
-        "sha256": "d39d6aa1883f45d6a96d89e6032fd75e466001313a5da336b1764c6254cb0553"
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-x86_64-pc-windows-msvc.exe",
+        "sha256": "2d04730442c180197d289e839ce537000b5b50d03ea73f82340e21d11aecab35"
       },
       "win32-arm64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-aarch64-pc-windows-msvc.exe",
-        "sha256": "0dbbf835c85559e3d4c16a24e4e7acf63cd4f5dcfba3f558b0b555f4d10a9272"
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-aarch64-pc-windows-msvc.exe",
+        "sha256": "ae2572423be48ba61e1650616cbe8096af28855e983fc0d8ff1ff3b0bd9eecf6"
       },
       "darwin-x64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-x86_64-apple-darwin",
-        "sha256": "45d056ba52d9342ff03241f6adeef561cf6496451d233505dad5c2909a32fe37"
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-x86_64-apple-darwin",
+        "sha256": "9453ed0dfbe6525725afb1bb0a706d7f8064d129d357407c654acd59f13e5912"
       },
       "darwin-arm64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-aarch64-apple-darwin",
-        "sha256": "f2f9c1cf77009e008dc63b0d9981910d180b1ffc77aba9d25be9d9c24c878302"
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-aarch64-apple-darwin",
+        "sha256": "603d4574950696ce427c8560918e7c83bd6bdde4ee17f6a092b10bd3927d217a"
       },
       "linux-x64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-x86_64-unknown-linux-gnu",
-        "sha256": "98d43e9729736af212d362502ae8b3dfadf8d140b6a8d715fb7107136e7baba7"
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-x86_64-unknown-linux-gnu",
+        "sha256": "7c6bf86aae15f002ca0ce3c97147228ff1c837aaee41c129c261fd4695f98b38"
       },
       "linux-arm64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.4/bots-aarch64-unknown-linux-gnu",
-        "sha256": "f7416340b2e700c5be1a2be0d8e660dd85eae3ed24ad9f83dbc2428f5690f054"
+        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-aarch64-unknown-linux-gnu",
+        "sha256": "66b3ed9dd2434eded78aff427d4c85936ef497ca54f0084b5aed766c443d17e9"
       }
     },
     "provides": {
       "desktopApp": {}
+    },
+    "updates": {
+      "repository": "https://github.com/beboite/bots",
+      "ref": "main"
     }
   },
   {
     "schema": 1,
-    "id": "kebacc-switcher",
-    "name": "kebacc-switcher",
-    "version": "2.0.1",
-    "description": "Save and switch Claude, Codex and Antigravity CLI logins, with quota readings for each saved account.",
-    "homepage": "https://github.com/kebab1337420/kebacc-switch",
-    "executable": "kebacc",
+    "id": "douane",
+    "name": "Douane",
+    "version": "0.3.0",
+    "description": "Local gateway for AI coding subscriptions: pools Claude, Codex, Grok, Copilot and API key accounts behind one OpenAI and Anthropic compatible endpoint, with quota tracking and a dashboard.",
+    "homepage": "https://github.com/beboite/douane",
+    "executable": "douane",
     "artifacts": {
       "win32-x64": {
-        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-x86_64-pc-windows-msvc.exe",
-        "sha256": "9edc5c3af1db76e97a9c07e2fd1c3399ad8c9db22e0ad2684a1b885e33acc538"
-      },
-      "win32-arm64": {
-        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-aarch64-pc-windows-msvc.exe",
-        "sha256": "ed5a23820361e47d88540b5cf30bf6c90ee0739c23fba937463d2f5716986f6e"
-      },
-      "darwin-x64": {
-        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-x86_64-apple-darwin",
-        "sha256": "7d1f32dfb73b094a6b9c8111fbab2b0d2b743dc224f6c5bd8e551d2acaf35c36"
+        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-windows-x64.exe",
+        "sha256": "9dfbdacb3845438b147a33daa9fb000941c756a3afb598bd1b12813627429a81"
       },
       "darwin-arm64": {
-        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-aarch64-apple-darwin",
-        "sha256": "85951d81d5db5e676b5950ece8a818673eecb5d1f46ff980236c9e40c3cf8ef6"
+        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-macos-arm64",
+        "sha256": "c1f97fb350a7a56c160e062bdf1d09a93b59946a21eaccb6a2912d836ec65ae8"
+      },
+      "darwin-x64": {
+        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-macos-x64",
+        "sha256": "129e1d3e3604f935476cdb5e9cef97fbeabce8e519ce6677a2822a7803235d1b"
       },
       "linux-x64": {
-        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-x86_64-unknown-linux-gnu",
-        "sha256": "b683ac5b491bc45e94cb1392e9a1743e8ac9e244d71ed7c024809ac4ddb82500"
+        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-linux-x64",
+        "sha256": "5964cc8f84d0ddfed15954e09d3ceccfe5b5ecb53997b00ab4e15d6e16388210"
       },
       "linux-arm64": {
-        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-aarch64-unknown-linux-gnu",
-        "sha256": "258dd96565bad8c4194b1fdaf182d784d8a617cef0a397c1210a9a4cb9e2df17"
+        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-linux-arm64",
+        "sha256": "cf2bf1869d29616a1b18859f66ba5103d3873b1767ddd049bebb9fd7d19bfa9a"
       }
     },
     "provides": {
-      "accountPools": { "providers": ["claude", "codex", "antigravity"] }
+      "gateway": {}
+    },
+    "updates": {
+      "repository": "https://github.com/beboite/douane",
+      "ref": "main"
     }
   }
 ]

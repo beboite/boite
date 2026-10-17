@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { onMount, tick } from 'svelte';
   import { Check, Download, FileText, Image, Film, Music2, Maximize2, RefreshCw, X } from '@lucide/svelte';
   import { ATTACHMENT_MAX_BYTES, FILE_TICKET_TTL_MS, imageSize, type MessagePart } from '@boite/contracts';
@@ -11,6 +12,7 @@
   import { browserDownload, decodeBase64, saveAttachment, saveAttachmentUrl } from '../lib/attachment-save';
   import { galleryFrom, media, viewerHost, type Gallery, type MediaItem } from '../lib/media-gallery';
   import { videoPlayable } from '../lib/video-support';
+  import { mediaKey, rememberedSize, rememberSize, type MediaSize } from '../lib/media-size';
   import ImageViewer from './ImageViewer.svelte';
 
   let { file, store, threadId, messageId, partIndex, path, line, onclose }: {
@@ -67,8 +69,15 @@
   });
   /** A deferred picture not fetched yet: its box and blur wait for it to near the screen. */
   const waiting = $derived(file?.type === 'file' && !!file.dataDeferred && box !== null && !url && !error);
-  const boxWidth = $derived(box === null ? undefined : `min(${box.width}px, calc(min(480px, 65vh) * ${box.width} / ${box.height}))`);
-  const boxRatio = $derived(box === null ? undefined : `${box.width} / ${box.height}`);
+  /** The size this attachment loaded at, here or in an earlier mount of its row (lib/media-size.ts). */
+  const sizeKey = $derived(mediaKey({ threadId, messageId, partIndex, artifactId: file?.type === 'artifact' ? file.id : undefined, path }));
+  let learned = $state<MediaSize | null>(null);
+  /** A picture or a video, known from the part before an artifact's bytes say so. */
+  const visual = $derived(image || video || (!mime && /^(image|video)\//.test(file?.mimeType ?? '')));
+  /** What the preview reserves before the bytes or the metadata arrive: the picture's own size, else a size already learnt. */
+  const frame = $derived(box ?? (visual ? learned ?? rememberedSize(sizeKey) : null));
+  const boxWidth = $derived(frame === null ? undefined : `min(${frame.width}px, calc(min(480px, 65vh) * ${frame.width} / ${frame.height}))`);
+  const boxRatio = $derived(frame === null ? undefined : `${frame.width} / ${frame.height}`);
   /** The light copy the core made for the timeline (`loadDisplayImage`), drawn until the original is asked for. */
   let copy = $state('');
   let copyShown = $state(false);
@@ -96,7 +105,7 @@
     if (!directory || !path || opening) return;
     opening = true;
     try { await openLocalFile(directory, path); }
-    catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    catch (reason) { error = errorText(reason); }
     finally { opening = false; }
   }
 
@@ -113,7 +122,7 @@
       if (file?.type === 'artifact') await loadArtifact();
       saved = (body ? await saveAttachment(name, body, andOpen) : await saveAttachmentUrl(name, url, andOpen))?.path ?? '';
       error = '';
-    } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    } catch (reason) { error = errorText(reason); }
     finally { saving = false; }
     return true;
   }
@@ -221,12 +230,16 @@
   function imageLoaded(event: Event) {
     const element = event.currentTarget as HTMLImageElement;
     dimensions = `${element.naturalWidth} × ${element.naturalHeight}`;
+    learned = rememberSize(sizeKey, element.naturalWidth, element.naturalHeight);
   }
 
   function mediaLoaded(event: Event) {
     const element = event.currentTarget as HTMLMediaElement;
     duration = Number.isFinite(element.duration) ? element.duration : 0;
-    if (element instanceof HTMLVideoElement) dimensions = `${element.videoWidth} × ${element.videoHeight}`;
+    if (element instanceof HTMLVideoElement) {
+      dimensions = `${element.videoWidth} × ${element.videoHeight}`;
+      learned = rememberSize(sizeKey, element.videoWidth, element.videoHeight);
+    }
   }
 
   onMount(() => {
@@ -251,23 +264,26 @@
         <span class="enlarge"><Maximize2 size={16} /></span>
       </button>
     </div>
+  {:else if file && frame !== null && !url && loading}
+    <!-- Mounted again, the file keeps the size it loaded at while its bytes come back. -->
+    <div class="preview" data-testid="artifact-reserved"><div class="clip boxed" style:width={boxWidth} style:aspect-ratio={boxRatio}></div></div>
   {:else if showPreview && url}
     <div class="preview" data-testid="artifact-content">
       {#if previewError || unplayable}
         <div class="media-fallback" role="status" data-testid="media-fallback">{#if video}<Film size={28} />{:else}<FileText size={28} />{/if}<p>{video ? strings.artifacts.videoFailed : strings.artifacts.mediaFailed}</p>
           <div class="fallback-actions">
             {#if video}<a class="ghost small download-label" href={url} download={name} onclick={download} data-testid="media-fallback-download"><Download size={14} /><span class="ui-label">{strings.artifacts.download}</span></a>{/if}
-            {#if !unplayable}<button type="button" class="ghost small" onclick={load}><RefreshCw size={14} /><span class="ui-label">{strings.artifacts.retry}</span></button>{/if}
+            {#if !unplayable}<button type="button" class="ghost small" onclick={load}><RefreshCw size={14} /><span class="ui-label">{strings.common.retry}</span></button>{/if}
           </div>
         </div>
       {:else}
         {#key attempt}
           {#if text !== null}<pre>{#if line}<span class="line">{`${path}:${line}\n`}</span>{/if}{text}</pre>
-          {:else if image}<button type="button" class="shot" class:boxed={box !== null} style:width={boxWidth} style:aspect-ratio={boxRatio} bind:this={shot} use:media={mediaItem} onclick={() => view(shot)} title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} data-testid="artifact-enlarge">{#if box !== null && !dimensions && file?.type === 'file' && file.preview}<img class="blur" src={file.preview} alt="" aria-hidden="true" />{/if}<img src={url} alt={name} loading="lazy" decoding="async" onload={imageLoaded} onerror={() => previewError = true} /><span class="enlarge"><Maximize2 size={16} /></span></button>
+          {:else if image}<button type="button" class="shot" class:boxed={frame !== null} style:width={boxWidth} style:aspect-ratio={boxRatio} bind:this={shot} use:media={mediaItem} onclick={() => view(shot)} title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} data-testid="artifact-enlarge">{#if box !== null && !dimensions && file?.type === 'file' && file.preview}<img class="blur" src={file.preview} alt="" aria-hidden="true" />{/if}<img src={url} alt={name} loading="lazy" decoding="async" onload={imageLoaded} onerror={() => previewError = true} /><span class="enlarge"><Maximize2 size={16} /></span></button>
           {:else if pdf && file}
             <!-- Only signature-checked PDF content reaches the built-in viewer. -->
             <iframe title={name} src={url} referrerpolicy="no-referrer"></iframe>
-          {:else if video}<div class="clip" bind:this={clip} use:media={mediaItem}><video src={url} aria-label={name} controls playsinline preload="metadata" onloadedmetadata={mediaLoaded} onerror={() => previewError = true}><track kind="captions" /></video><button type="button" class="enlarge" onclick={() => view(clip)} title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} data-testid="video-enlarge"><Maximize2 size={16} /></button></div>
+          {:else if video}<div class="clip" class:boxed={frame !== null} style:width={boxWidth} style:aspect-ratio={boxRatio} bind:this={clip} use:media={mediaItem}><video src={url} aria-label={name} controls playsinline preload="metadata" onloadedmetadata={mediaLoaded} onerror={() => previewError = true}><track kind="captions" /></video><button type="button" class="enlarge" onclick={() => view(clip)} title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} data-testid="video-enlarge"><Maximize2 size={16} /></button></div>
           {:else if audio}<audio src={url} aria-label={name} controls preload="metadata" onloadedmetadata={mediaLoaded} onerror={() => previewError = true}></audio>
           {:else}<p>{directory ? strings.artifacts.openLocal : strings.artifacts.unavailable}</p>{/if}
         {/key}
@@ -280,7 +296,7 @@
       {#if image}<Image size={18} />{:else if video}<Film size={18} />{:else if audio}<Music2 size={18} />{:else}<FileText size={20} />{/if}
       <span class="label"><span class="filename">{name}</span><small>{loading ? strings.artifacts.loading : saving ? strings.artifacts.saving : saved ? strings.artifacts.saved : [bytes(size), dimensions || (box ? `${box.width} × ${box.height}` : ''), duration ? millis(duration * 1000) : ''].filter(Boolean).join(' · ')}</small></span>
     </button>
-    {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open"><span class="ui-label">{strings.artifacts.open}</span></button>{/if}
+    {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open"><span class="ui-label">{strings.common.open}</span></button>{/if}
     {#if url || (file?.type === 'file' && file.dataDeferred)}
       {#if deferredImage}<button class="ghost small" type="button" onclick={() => { imageRequested = true; if (waiting) void load(); }} data-testid="artifact-load-image"><span class="ui-label">{strings.artifacts.loadImage}</span></button>
       {:else if rich && previewable && !inlineMedia}<button class="ghost small" type="button" onclick={() => expanded = !expanded} aria-expanded={expanded} data-testid="artifact-preview"><span class="ui-label">{strings.artifacts.preview}</span></button>{/if}
@@ -288,7 +304,7 @@
     {/if}
     {#if onclose}<button class="ghost small icon" type="button" onclick={onclose} aria-label={strings.artifacts.close}><X size={16} /></button>{/if}
   </div>
-  {#if error}<div class="error" role="alert"><p>{error}</p><button type="button" class="ghost small" onclick={load} disabled={loading}><span class="ui-label">{strings.artifacts.retry}</span></button></div>{/if}
+  {#if error}<div class="error" role="alert"><p>{error}</p><button type="button" class="ghost small" onclick={load} disabled={loading}><span class="ui-label">{strings.common.retry}</span></button></div>{/if}
 </section>
 {#if viewing}<ImageViewer items={viewing.items} index={viewing.index} onclose={() => viewing = null} />{/if}
 
@@ -311,6 +327,9 @@
   .enlarge { position: absolute; right: 10px; top: 10px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-sm); background: var(--color-surface); box-shadow: var(--shadow-e1); opacity: 0; transition: opacity var(--dur-1); }
   .shot:hover .enlarge, .shot:focus-visible .enlarge, .shot.boxed:hover .enlarge, .clip:hover .enlarge, .clip .enlarge:focus-visible { opacity: 1; }
   .clip { position: relative; }
+  /* Sized from a size already learnt, the player keeps its box while the metadata loads. */
+  .clip.boxed { max-width: 100%; margin: auto; }
+  .clip.boxed video { width: 100%; height: 100%; min-width: 0; max-height: none; }
   .clip .enlarge { padding: 0; border: 0; color: inherit; }
   small, .line { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .download { display: inline-flex; align-items: center; justify-content: center; min-height: var(--control); }
@@ -321,7 +340,8 @@
   .media-fallback { min-height: 150px; max-width: 360px; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 20px; text-align: center; color: var(--color-muted-foreground); }
   .error { order: 2; padding: 0 12px 10px; }
   p { margin: 12px; font-size: var(--text-sm); overflow-wrap: anywhere; }
-  pre { margin: 0; padding: 12px; max-height: 420px; overflow: auto; font-family: var(--font-mono); font-size: var(--text-sm); }
+  /* Text belongs to the conversation's vertical scroll; long lines still scroll sideways. */
+  pre { margin: 0; padding: 12px; overflow-x: auto; font-family: var(--font-mono); font-size: var(--text-sm); }
   img, video { display: block; width: auto; height: auto; max-width: 100%; max-height: min(480px, 65vh); margin: auto; object-fit: contain; }
   img { min-height: 80px; }
   video { min-width: min(320px, 100%); }

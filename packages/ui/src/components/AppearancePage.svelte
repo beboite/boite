@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import { Minus, Plus } from '@lucide/svelte';
   import { onMount, untrack } from 'svelte';
@@ -11,7 +12,7 @@
   import { readTheme, setTheme, THEME_STORAGE_KEY, type Theme } from '../lib/theme';
   import { COLORS_EVENT } from '../lib/theme-colors';
   import { readChatWidth, setChatWidth, type ChatWidth } from '../lib/chat-width';
-  import { readTerminalCursor, setTerminalCursor, type TerminalCursor } from '../lib/terminal-cursor';
+  import { readTerminalCursor, readTerminalGpu, setTerminalCursor, setTerminalGpu, type TerminalCursor } from '../lib/terminal-cursor';
   import { matchingPreset, work, type PanelStart, type Profile, type StartIn } from '../lib/work-prefs.svelte';
   import ThemeColors from './ThemeColors.svelte';
   import { controlGroups } from '../lib/control-groups';
@@ -61,7 +62,7 @@
   function zoomTo(factor: number) {
     zoomError = '';
     setZoom(factor).catch((error: unknown) => {
-      zoomError = fill(strings.settings.zoomFailed, { error: error instanceof Error ? error.message : String(error) });
+      zoomError = fill(strings.settings.zoomFailed, { error: errorText(error) });
     });
   }
   const smallest = ZOOM_STEPS[0] ?? ZOOM_DEFAULT;
@@ -103,6 +104,7 @@
   }
 
   let terminalCursor = $state<TerminalCursor>(untrack(() => readTerminalCursor()));
+  let terminalGpu = $state(untrack(() => readTerminalGpu()));
   let cursors = $derived<{ id: TerminalCursor; label: string }[]>([
     { id: 'bar', label: strings.settings.terminalCursorBar },
     { id: 'block', label: strings.settings.terminalCursorBlock },
@@ -223,6 +225,11 @@
         {/each}
       </div>
     </div>
+    <label class="switch-row">
+      <span class="text ui-label" title={strings.settings.terminalGpuHint}>{strings.settings.terminalGpu}</span>
+      <input type="checkbox" role="switch" checked={terminalGpu} data-testid="terminal-gpu"
+        onchange={(event) => { terminalGpu = event.currentTarget.checked; setTerminalGpu(terminalGpu); }} />
+    </label>
     <label class="switch-row">
       <span class="text ui-label">{strings.settings.groupChanges}</span>
       <input type="checkbox" role="switch" checked={chatPrefs.groupChanges} data-testid="chat-group-changes" onchange={event => setChatPref('groupChanges', event.currentTarget.checked)} />
@@ -406,7 +413,10 @@
     :global(.settings .page) .switch-row:has(.segmented) { flex-direction: column; align-items: stretch; }
     :global(.settings .page) .segmented { display: flex; }
     .faces { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .segmented button { flex: 1; min-width: 0; }
+    /* Each option grows from its own word: equal thirds cut "Soulignement"
+       and "Modifications" past their button's edge. */
+    .segmented button { flex: 1 1 auto; min-width: 0; padding: 0 6px; }
+    .segmented button .ui-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* A code face runs wide: each name takes the room it needs, a step smaller. */
     .monos button { flex: 1 1 auto; min-width: auto; padding: 0 6px; font-size: var(--text-xs); }
     .card-head .segmented { flex: 1 1 100%; }

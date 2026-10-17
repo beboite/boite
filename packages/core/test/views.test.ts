@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_ENV, VIEW_CONTENT_POLICY, VIEW_HELP, VIEW_GUIDE_LINE, viewDocument, viewFrameHeight, viewTitleOf, readViewMessage, type MessagePart } from '@boite/contracts';
 import { agentGuide } from '../src/agent-guide.ts';
@@ -51,6 +51,14 @@ async function cli(...args: string[]): Promise<{ code: number; output: string; e
 
 test('the session guide names the command and what calls for it, and view help carries the rules', async () => {
   expect(agentGuide(true)).toContain(VIEW_GUIDE_LINE);
+  // The logs hint stands without a skill (one that could not be written), and only while agents may read logs.
+  expect(agentGuide(true, true, [])).toContain('`boite logs problems`');
+  expect(agentGuide(true, false, [])).not.toContain('boite logs');
+  // The diagnostic skill is offered only beside its logs; the others stand on their own.
+  const skills = [{ name: 'boite-report-issue', description: 'd1', path: '/r' }, { name: 'boite-prove-it', description: 'd2', path: '/p' }];
+  expect(agentGuide(true, false, skills)).not.toContain('boite-report-issue');
+  expect(agentGuide(true, false, skills)).toContain('boite-prove-it: d2\nFile: /p');
+  expect(agentGuide(true, true, skills)).toContain('; skill boite-report-issue: /r');
   expect(VIEW_GUIDE_LINE).toMatch(/when asked for a visual or a schema/);
   // One line of the session prompt, which every turn of every thread pays for.
   expect(VIEW_GUIDE_LINE.length).toBeLessThan(240);
@@ -175,6 +183,9 @@ test('boite view publishes a page as an artifact that opens only on the view rou
   expect(stored).toContain('boite-view-theme');
   expect(stored).toContain('<circle cx="20"');
   expect(readdirSync(join(harness.dataDir, 'artifacts')).filter(name => name.endsWith('.partial'))).toEqual([]);
+  // The output hands the agent the line that places the page in its answer, a path with spaces in angle brackets.
+  write('views/two words.html', page('<p>quiet</p>', '<title>Two [words]</title>'));
+  expect((await cli('view', 'views/two words.html')).output).toContain('place: ![Two words](<views/two words.html>) alone on a line of your answer');
   const history = await client.call('threads.get', { threadId });
   expect(history.messages.find(message => message.id === result.message.id)?.parts).toEqual(result.message.parts);
 
@@ -188,6 +199,26 @@ test('boite view publishes a page as an artifact that opens only on the view rou
   expect(response.headers.get('content-disposition')).toBeNull();
   expect(await response.text()).toBe(stored);
   expect((await fetch(new URL(shown.url, harness.url), { method: 'POST' })).status).toBe(405);
+
+  // The snapshot was gzipped once at publication: a client reading gzip gets that copy, under the same policy.
+  const view = async (encoding: string) => {
+    const { url } = await client.call('artifacts.read', { threadId, messageId: result.message.id, artifactId: part.id, view: true });
+    return fetch(new URL(url, harness.url), { headers: { 'accept-encoding': encoding }, decompress: false });
+  };
+  const compressed = await view('gzip, deflate, br');
+  expect(compressed.headers.get('content-encoding')).toBe('gzip');
+  expect(compressed.headers.get('vary')).toBe('accept-encoding');
+  expect(compressed.headers.get('content-security-policy')).toBe(`sandbox allow-scripts; ${VIEW_CONTENT_POLICY}`);
+  expect(compressed.headers.get('cache-control')).toBe('no-store');
+  expect(new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(await compressed.arrayBuffer())))).toBe(stored);
+  const identity = await view('identity');
+  expect(identity.headers.get('content-encoding')).toBeNull();
+  expect(await identity.text()).toBe(stored);
+  // A view published before the copy existed is sent as it is.
+  rmSync(join(harness.dataDir, 'artifacts', `${part.id}.gz`));
+  const older = await view('gzip');
+  expect(older.headers.get('content-encoding')).toBeNull();
+  expect(await older.text()).toBe(stored);
 
   // The download address of the same snapshot never opens as a page, and a file ticket is nothing on the view route.
   const download = await client.call('artifacts.read', ids);
@@ -244,12 +275,24 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   const loud = await cli('view', 'views/loud.html');
   expect(loud.code).toBe(0);
   expect(loud.output).toContain("advice: 1 fixed color (#ff0000) will not follow the user's theme");
+  // The output hands the agent the line that places the page in its answer, a path with spaces in angle brackets.
+  expect(loud.output).toContain('place: ![loud](views/loud.html) alone on a line of your answer');
 
   // Without a doctype a root is as tall as the window it is loaded in: the stored page has one, so its own height is what is measured.
   write('views/bare.html', '<html><head></head><body><div style="height:120px"></div></body></html>');
   const bare = viewOf((await agent.call('artifacts.view', { threadId, path: 'views/bare.html' })).message.parts)!.view!;
   expect(bare.height).toBeGreaterThanOrEqual(120);
   expect(bare.height).toBeLessThan(200);
+
+  // A page wider than the answer is refused, naming the outermost element that sticks out; what a scrolling box holds is the page's own business.
+  write('views/wide.html', page('<div class="flow" style="display:flex;gap:8px"><div style="flex:none;width:200px">a</div><div style="flex:none;width:200px">b</div></div>\n<div style="overflow-x:auto"><div style="width:2000px">scrolls</div></div>'));
+  const wide = await agent.call('artifacts.view', { threadId, path: 'views/wide.html' }).then(() => null, (error: Error) => error.message);
+  expect(wide).toContain('at 330px wide the page is cut on the right');
+  expect(wide).toContain('<div> inside <div class="flow"> ends 78px past the right edge');
+  expect(wide).not.toContain('at 816px');
+  // A card on the very edge of the column fits: the frame keeps room for its border and shadow.
+  write('views/edge.html', page('<div class="grid"><div class="card">1</div><div class="card">2</div><div class="card">3</div><div class="card">4</div><div class="card">5</div></div>'));
+  expect((await agent.call('artifacts.view', { threadId, path: 'views/edge.html' })).checked).toBe(true);
 
   write('views/throws.html', page('<p>before</p>\n<script>\n  const stage = document.querySelector("#stage");\n  stage.getContext("2d");\n</script>'));
   const thrown = await agent.call('artifacts.view', { threadId, path: 'views/throws.html' }).then(() => null, (error: Error) => error.message);
@@ -265,7 +308,10 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   write('views/stores.html', page('<script>localStorage.setItem("seen", "1");</script>'));
   const stored = await agent.call('artifacts.view', { threadId, path: 'views/stores.html' }).then(() => null, (error: Error) => error.message);
   expect(stored).toMatch(/SecurityError/);
-  expect(readdirSync(join(harness.dataDir, 'artifacts')).length).toBe(4);
+  // Five views were kept, each with its gzipped copy; the refused ones left neither.
+  const kept = readdirSync(join(harness.dataDir, 'artifacts'));
+  expect(kept.filter(name => !name.endsWith('.gz')).length).toBe(5);
+  expect(kept.filter(name => name.endsWith('.gz')).sort()).toEqual(kept.filter(name => !name.endsWith('.gz')).map(name => `${name}.gz`).sort());
 }, 90_000);
 
 /** The gated test runs with the machine's browser: the core started without one is replaced. */

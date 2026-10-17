@@ -7,7 +7,7 @@ import { FakeClient } from '../lib/fake-client';
 import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
-import { repliesOf } from '../lib/question-reply.svelte';
+import { repliesOf, TYPING_PAUSE_MS } from '../lib/question-reply.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 import { setExperiment } from '../lib/experiments';
@@ -122,7 +122,9 @@ afterEach(() => {
   document.body.innerHTML = '';
   window.localStorage.clear();
   // Each test's fake numbers its questions from one again, on the same store.
-  Object.assign(repliesOf(store), { picks: {}, ignored: {}, docked: null, chosen: null });
+  const replies = repliesOf(store);
+  for (const pause of replies.pauses.values()) clearTimeout(pause);
+  Object.assign(replies, { picks: {}, ignored: {}, docked: null, chosen: null, waiting: {}, typing: {}, pauses: new Map() });
   // The device's work record is module state: the next test starts with no record.
   work.load();
   vi.restoreAllMocks();
@@ -1027,6 +1029,16 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   expect(document.activeElement).toBe(outside);
   expect(input().value).toBe('Keep writing while looking');
   outside.remove();
+  // A second click on the tile, or one on the enlarged picture, puts it away.
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  query<HTMLButtonElement>('[data-testid=composer-image-shrink]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  expect(input().value).toBe('Keep writing while looking');
   query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
 
@@ -1120,6 +1132,49 @@ test('an ignored async question stays docked while an ordinary message goes out 
   expect(prompt.parts).toEqual([{ type: 'text', text: 'something else entirely' }]);
   expect(store.pendingQuestions.map((question) => question.id)).toContain(asked.id);
   expect(document.querySelector('[data-testid=activity-question]')).not.toBeNull();
+});
+
+test('a question asked over a draft leaves it an ordinary message until its card is chosen', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  await type('my own steering message');
+  // Another client starts a turn that asks without stopping, while the draft is in the box.
+  await store.client!.call('turns.start', { threadId: 't-trace', prompt: '[ask] from elsewhere' });
+  await waitFor(() => store.pendingQuestions.some((question) => question.threadId === 't-trace'));
+  const asked = store.pendingQuestions.find((question) => question.threadId === 't-trace')!;
+  await new Promise((resolve) => setTimeout(resolve, TYPING_PAUSE_MS + 50));
+  // The pause passed, but the draft predates the question: the box still writes messages.
+  expect(document.querySelector('[data-testid=composer-reply]')).toBeNull();
+  expect(input().placeholder).not.toBe('Write your answer');
+  expect(input().value).toBe('my own steering message');
+  // The card's "Answer in writing" hands the question the box, draft included.
+  query<HTMLButtonElement>('[data-testid=question-write]').click();
+  await waitFor(() => document.querySelector<HTMLElement>('[data-testid=composer-reply]')?.dataset.question === asked.id);
+  expect(input().value).toBe('my own steering message');
+});
+
+test('a question asked while the user types takes the emptied composer only after a pause', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  await type('half a thought');
+  await type('');
+  await store.client!.call('turns.start', { threadId: 't-trace', prompt: '[ask] from elsewhere' });
+  await waitFor(() => store.pendingQuestions.some((question) => question.threadId === 't-trace'));
+  expect(document.querySelector('[data-testid=composer-reply]')).toBeNull();
+  const asked = store.pendingQuestions.find((question) => question.threadId === 't-trace')!;
+  // Typing in another thread within that pause does not end this one's.
+  await type('');
+  await store.open('t-descriptors');
+  await waitFor(() => store.openThread?.id === 't-descriptors');
+  await type('elsewhere');
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace');
+  expect(document.querySelector('[data-testid=composer-reply]')).toBeNull();
+  await waitFor(() => document.querySelector<HTMLElement>('[data-testid=composer-reply]')?.dataset.question === asked.id, 2000);
+  expect(input().placeholder).toBe('Write your answer');
+  // Once released, typing again does not hand the box back to messages.
+  await type('my answer');
+  expect(query('[data-testid=composer-reply]').dataset.question).toBe(asked.id);
 });
 
 test('a question card does not take a sent message being edited as its answer', async ({ app: _app }) => {
@@ -1339,6 +1394,9 @@ test('a draft shows its first prompt while the thread is still being created', a
   expect(store.openThread).toBeNull();
   expect(input().value).toBe('');
   expect(document.querySelector('[data-testid=draft-empty]')).toBeNull();
+  // Already the thread's composer, or it shrinks a second time when the thread opens.
+  expect(document.querySelector('[data-testid=chat]')!.classList.contains('drafting')).toBe(false);
+  expect(document.querySelector('.composer-wrap')!.classList.contains('centered')).toBe(false);
   release();
   await waitFor(() => store.openThread !== null && !store.busy && Object.keys(store.staged).length === 0);
   expect(shown().length).toBe(1);
@@ -1849,4 +1907,117 @@ test('a delayed side fork acknowledgement preserves navigation to another conver
   await new Promise(resolve => setTimeout(resolve, 30));
   expect(store.openThread!.id).toBe('t-descriptors');
   expect(document.querySelector('[data-testid=btw-answer]')).toBeNull();
+});
+
+/** One keystroke's worth of editing: the browser's beforeinput, the new value, then input. */
+function edit(inputType: string, value: string, caret: number, data: string | null = null): void {
+  const field = input();
+  field.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType, data }));
+  field.value = value;
+  field.setSelectionRange(caret, caret);
+  field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType, data }));
+}
+
+/** jsdom has no DataTransfer: the clipboard a copy writes and a paste reads, as a plain map. */
+function clipboard(): DataTransfer {
+  const data = new Map<string, string>();
+  return {
+    items: [],
+    getData: (type: string) => data.get(type) ?? '',
+    setData: (type: string, value: string) => { data.set(type, value); }
+  } as unknown as DataTransfer;
+}
+
+function clipboardEvent(type: 'copy' | 'cut' | 'paste', data: DataTransfer): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: data });
+  input().dispatchEvent(event);
+  return event;
+}
+
+test('Ctrl+Z after deleting everything and a stray key brings back the text and its images, and Ctrl+Y redoes', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('Look at ');
+  paste(pngFile('first.png'));
+  await waitFor(() => input().value === 'Look at [Image 1] ');
+  paste(pngFile('second.png'));
+  await waitFor(() => input().value === 'Look at [Image 1] [Image 2] ');
+  const full = input().value;
+  input().focus();
+  // Ctrl+A, Backspace: every reference goes, and every picture with it.
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => chips().length === 0);
+  edit('insertText', 'x', 1, 'x');
+  expect(input().value).toBe('x');
+
+  expect(press('z', { ctrlKey: true })).toBe(false);
+  await waitFor(() => input().value === '');
+  press('z', { ctrlKey: true });
+  await waitFor(() => input().value === full && chips().length === 2);
+  expect(chips().map(chip => chip.getAttribute('title'))).toEqual(['[Image 1] · first.png', '[Image 2] · second.png']);
+  expect([input().selectionStart, input().selectionEnd]).toEqual([0, full.length]);
+
+  press('y', { ctrlKey: true });
+  await waitFor(() => input().value === '' && chips().length === 0);
+  press('z', { ctrlKey: true, shiftKey: true });
+  await waitFor(() => input().value === 'x');
+  // The context menu's Undo is ours too, and never reaches the textarea's own stack.
+  const undo = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'historyUndo' });
+  input().dispatchEvent(undo);
+  expect(undo.defaultPrevented).toBe(true);
+  await waitFor(() => input().value === '');
+
+  // A sent prompt is gone for good: undo after Enter brings nothing back.
+  press('z', { ctrlKey: true });
+  await waitFor(() => input().value === full);
+  await type('sent prompt');
+  input().focus();
+  press('Enter');
+  await waitFor(() => input().value === '' && !store.busy);
+  press('z', { ctrlKey: true });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  expect(input().value).toBe('');
+  expect(chips()).toEqual([]);
+});
+
+test('copying an image reference carries its picture to another composer, and stays text in its own', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('A ');
+  paste(pngFile('first.png'));
+  await waitFor(() => input().value === 'A [Image 1] ');
+  paste(pngFile('second.png'));
+  await waitFor(() => input().value === 'A [Image 1] [Image 2] ');
+  input().focus();
+  input().setSelectionRange(12, 21);
+  const copied = clipboard();
+  expect(clipboardEvent('copy', copied).defaultPrevented).toBe(true);
+  expect(copied.getData('text/plain')).toBe('[Image 2]');
+
+  // Back into the same prompt it is plain text: its reference already names that picture.
+  input().setSelectionRange(input().value.length, input().value.length);
+  expect(clipboardEvent('paste', copied).defaultPrevented).toBe(false);
+  expect(chips()).toHaveLength(2);
+
+  await store.open('t-descriptors');
+  await waitFor(() => store.openThread?.id === 't-descriptors' && !store.busy);
+  await type('see ');
+  input().focus();
+  input().setSelectionRange(4, 4);
+  expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
+  await waitFor(() => input().value === 'see [Image 1]');
+  expect(chips().map(chip => chip.getAttribute('title'))).toEqual(['[Image 1] · second.png']);
+  // Twice is the same picture under the same number, and the text-only fallback finds the copy too.
+  const stripped = clipboard();
+  stripped.setData('text/plain', '[Image 2]');
+  expect(clipboardEvent('paste', stripped).defaultPrevented).toBe(true);
+  await waitFor(() => input().value === 'see [Image 1][Image 1]');
+  expect(chips()).toHaveLength(1);
+  // The paste is one step: undo takes its text and its picture together.
+  press('z', { ctrlKey: true });
+  press('z', { ctrlKey: true });
+  await waitFor(() => input().value === 'see ' && chips().length === 0);
+  expect(store.composerStates['t-trace']!.attachments).toHaveLength(2);
 });

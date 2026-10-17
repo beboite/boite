@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { MAX_THREAD_TERMINALS, type RpcEvents } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { HISTORY_CHARS, OutputHistory, commandLine, pickShell, threadTerminalId, windowsPty } from '../src/terminals.ts';
+import { HistoryAnnounce, defaultHistoryFile, integrate, parseHistory } from '../src/terminal-integration.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -62,6 +64,98 @@ async function addTerminalLoginProvider(harness: TestCore, client: CoreClient): 
 }
 
 describe('terminals', () => {
+  test.skipIf(process.platform !== 'linux')('closing a terminal stops jobs in their own process groups even when they ignore hangups', async () => {
+    const id = 'terminal:stubborn-job';
+    const pidFile = join(harness.dataDir, 'job.pid');
+    const chosen = process.env['BOITE_TERMINAL_SHELL'];
+    process.env['BOITE_TERMINAL_SHELL'] = '/bin/bash';
+    let job = 0;
+    const running = () => {
+      try { return readFileSync(`/proc/${job}/stat`, 'utf8').split(') ')[1]!.split(' ')[0] !== 'Z'; }
+      catch { return false; }
+    };
+    try {
+      harness.core.terminals.open(id, { cwd: harness.dataDir, env: { ...process.env, HOME: harness.dataDir }, cols: 80, rows: 24 });
+      // Bash job control gives this background job a group separate from the shell's.
+      harness.core.terminals.write(id, `${commandLine('posix', ['/bin/sh', '-c', 'trap "" HUP TERM; echo $$ > "$1"; exec sleep 60', 'job', pidFile])} &\r`);
+      // The redirection creates the file before echo writes the pid into it.
+      await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').endsWith('\n'));
+      job = Number(readFileSync(pidFile, 'utf8').trim());
+      expect(job).toBeGreaterThan(0);
+      expect(running()).toBe(true);
+      const group = Number(readFileSync(`/proc/${job}/stat`, 'utf8').split(') ')[1]!.split(' ')[2]);
+      expect(group).toBe(job);
+      expect(group).not.toBe(harness.core.journal.listProcesses(id, 10)[0]!.pid);
+      await harness.core.terminals.close(id);
+      await waitFor(() => !running(), 3000);
+    } finally {
+      if (job > 0 && running()) process.kill(job, 'SIGKILL');
+      await harness.core.terminals.close(id);
+      if (chosen === undefined) delete process.env['BOITE_TERMINAL_SHELL'];
+      else process.env['BOITE_TERMINAL_SHELL'] = chosen;
+    }
+  }, 15_000);
+
+  test.skipIf(process.platform !== 'linux')('a prepared login runs before a shell profile can read its command as an answer', async () => {
+    const id = 'login:profile-read';
+    const result = join(harness.dataDir, 'login.answer');
+    const stolen = join(harness.dataDir, 'profile.answer');
+    writeFileSync(join(harness.dataDir, '.bashrc'), `printf 'profile asks: '\nread answer\nprintf '%s' "$answer" > ${commandLine('posix', [stolen])}\n`);
+    const chosen = process.env['BOITE_TERMINAL_SHELL'];
+    process.env['BOITE_TERMINAL_SHELL'] = '/bin/bash';
+    // Opened in the core, not by a client: no socket attached it, so its output is read on the bus.
+    let text = '';
+    const off = harness.core.bus.onAny((name, payload) => {
+      if (name === 'terminal.output' && (payload as RpcEvents['terminal.output']).id === id) text += (payload as RpcEvents['terminal.output']).data;
+    });
+    const seen = { text: () => text };
+    try {
+      harness.core.terminals.open(id, {
+        cwd: harness.dataDir, env: { ...process.env, HOME: harness.dataDir }, cols: 100, rows: 24,
+        type: ['/bin/sh', '-c', 'printf "login ready:%s\\n" "$1"; read reply; printf "%s" "$reply" > "$2"', 'login', 'literal & | < >', result],
+      });
+      await waitFor(() => seen.text().includes('login ready:literal & | < >'), 1500);
+      expect(existsSync(stolen)).toBe(false);
+      harness.core.terminals.write(id, 'login-answer\r');
+      await waitFor(() => existsSync(result));
+      expect(readFileSync(result, 'utf8')).toBe('login-answer');
+      // The ordinary shell remains available once the login finishes, with its own profile.
+      await waitFor(() => seen.text().includes('profile asks:'));
+      harness.core.terminals.write(id, 'profile-answer\r');
+      await waitFor(() => existsSync(stolen));
+      expect(readFileSync(stolen, 'utf8')).toBe('profile-answer');
+    } finally {
+      off();
+      await harness.core.terminals.close(id);
+      if (chosen === undefined) delete process.env['BOITE_TERMINAL_SHELL'];
+      else process.env['BOITE_TERMINAL_SHELL'] = chosen;
+    }
+  }, 15_000);
+
+  test('the output of a shell reaches only the windows that attached it, and its exit every window', async () => {
+    const watching = await harness.connect();
+    const other = await harness.connect();
+    const { threadId } = await echoThread(harness, watching);
+    const id = threadTerminalId(threadId);
+    const seen = watch(watching, id);
+    const elsewhere = watch(other, id);
+    let stray = 0;
+    other.on('terminal.output', () => { stray++; });
+    await watching.call('terminals.open', { threadId, cols: 80, rows: 24 });
+    await watching.call('terminals.write', { id, data: 'echo only-here\r' });
+    await waitFor(() => seen.text().includes('only-here\r\n'), SHELL_MS);
+    await watching.call('terminals.close', { id });
+    await waitFor(() => elsewhere.exited() !== null && seen.exited() !== null);
+    expect(stray).toBe(0);
+
+    // A socket that closed watches nothing: the next window to attach the id is the only one that hears it.
+    await other.call('terminals.open', { threadId, cols: 80, rows: 24 });
+    watching.close();
+    await other.call('terminals.write', { id, data: 'echo now-here\r' });
+    await waitFor(() => elsewhere.text().includes('now-here\r\n'), SHELL_MS);
+    await other.call('terminals.close', { id });
+  }, 30_000);
+
   test('a thread shell runs in its working directory, takes keys, resizes, reattaches and closes', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
@@ -225,6 +319,82 @@ describe('terminals', () => {
     }
   }, 60_000);
 
+  test('a thread\'s bash or PowerShell marks each prompt and command, reports its directory, and lists what ran in its history', async () => {
+    // A home and a history file of the test's own: bash reads no ~/.bashrc of the user's,
+    // and neither shell writes to the user's history. PowerShell still loads the user's profile.
+    const pwsh = process.platform === 'win32' ? Bun.which('pwsh.exe') : null;
+    if (process.platform === 'win32' && pwsh === null) return;
+    // macOS ships bash 3.2, which has no PS0 and so never marks a command running;
+    // its users get zsh or a login bash, which start without the integration.
+    if (process.platform === 'darwin') return;
+    const home = mkdtempSync(join(tmpdir(), 'boite-shell-home-'));
+    const saved = { shell: process.env['BOITE_TERMINAL_SHELL'], home: process.env['HOME'], history: process.env['BOITE_TERMINAL_HISTORY'], histfile: process.env['HISTFILE'] };
+    process.env['BOITE_TERMINAL_SHELL'] = pwsh ?? '/bin/bash';
+    process.env['HOME'] = home;
+    // PSReadLine ignores APPDATA: without this it would save to the user's own history.
+    process.env['BOITE_TERMINAL_HISTORY'] = join(home, 'ConsoleHost_history.txt');
+    delete process.env['HISTFILE'];
+    try {
+      const client = await harness.connect();
+      const { threadId } = await echoThread(harness, client);
+      const id = threadTerminalId(threadId);
+      const seen = watch(client, id);
+      const opened = await client.call('terminals.open', { threadId, cols: 100, rows: 30 });
+      expect(opened.shell).toEqual({ name: pwsh === null ? 'bash' : 'pwsh', kind: pwsh === null ? 'posix' : 'powershell', integrated: true });
+      await waitFor(() => seen.text().includes('\x1b]133;B'), SHELL_MS);
+      expect(seen.text()).toContain('\x1b]133;A');
+      // The shell reports the directory it resolved: macOS's /var is /private/var, and a
+      // Windows runner's RUNNER~1 is runneradmin. Either form names the same folder.
+      const forms = [opened.cwd, realpathSync.native(opened.cwd)];
+      if (!forms.some((form) => seen.text().includes(`\x1b]633;P;Cwd=${form}`))) {
+        throw new Error(`expected Cwd to be one of ${forms.join(', ')} in ${JSON.stringify(seen.text().slice(-2000))}`);
+      }
+
+      // A failing command: C as it runs, then D with its status before the next prompt.
+      const failing = pwsh === null ? 'ls /boite-missing-path' : 'cmd /c exit 3';
+      // PSReadLine colours the typed line, so the output is cut where the typing began.
+      const typedAt = seen.text().length;
+      await client.call('terminals.write', { id, data: `${failing}\r` });
+      await waitFor(() => /\x1b\]133;D;[1-9]/.test(seen.text().slice(typedAt)), SHELL_MS);
+      const after = seen.text().slice(typedAt);
+      expect(after.indexOf('\x1b]133;C')).toBeGreaterThan(-1);
+      expect(after.indexOf('\x1b]133;C')).toBeLessThan(after.indexOf('\x1b]133;D;'));
+      if (pwsh !== null) expect(after).toContain('\x1b]133;D;3');
+
+      const echoedAt = seen.text().length;
+      await client.call('terminals.write', { id, data: 'echo boite-history-marker\r' });
+      // The next prompt's input mark comes after bash's `history -a`: the command is in the file by then.
+      await waitFor(() => /\x1b\]133;D;0[\s\S]*\x1b\]133;B/.test(seen.text().slice(echoedAt)), SHELL_MS);
+      // Written as each command ran, not when the shell exits. PSReadLine saves on its own
+      // schedule, so the list is asked again until the command is in it.
+      let commands: string[] = [];
+      const until = Date.now() + SHELL_MS;
+      while (Date.now() < until && commands[0] !== 'echo boite-history-marker') {
+        commands = (await client.call('terminals.history', { id })).commands;
+        if (commands[0] !== 'echo boite-history-marker') await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      // Exactly the two commands: the shell read and wrote the test's own file, nothing of the user's.
+      expect(commands).toEqual(['echo boite-history-marker', failing]);
+      await client.call('terminals.close', { id });
+      await waitFor(() => seen.exited() !== null, SHELL_MS);
+    } finally {
+      for (const [name, value] of [['BOITE_TERMINAL_SHELL', saved.shell], ['HOME', saved.home], ['BOITE_TERMINAL_HISTORY', saved.history], ['HISTFILE', saved.histfile]] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test('cmd or sh starts without the integration, and its history is empty', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const opened = await client.call('terminals.open', { threadId, cols: 80, rows: 24 });
+    expect(opened.shell?.integrated).toBe(false);
+    expect((await client.call('terminals.history', { id: opened.id })).commands).toEqual([]);
+    await client.call('terminals.close', { id: opened.id });
+  }, 30_000);
+
   test('removing a thread stops every one of its shells and drops their process records', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
@@ -243,7 +413,7 @@ describe('terminals', () => {
     expect(records(other)).toBeGreaterThan(0);
   }, 30_000);
 
-  test('a terminal login types its command, and closing the shell rechecks the account', async () => {
+  test('a terminal login runs its command, and closing the shell rechecks the account', async () => {
     const client = await harness.connect();
     await addTerminalLoginProvider(harness, client);
     const account = await client.call('accounts.add', { providerId: 'echo-menu', label: 'Menu', useDefaultLocation: false });
@@ -257,9 +427,10 @@ describe('terminals', () => {
 
     const opened = await client.call('accounts.loginTerminal', { accountId: account.id, cols: 120, rows: 30 });
     expect(opened.cwd).toBe(account.isolationDir ?? '');
-    // The shell prompt comes up, the command is typed on it, the CLI prints its link.
+    // The login starts in the PTY, and its CLI prints the sign-in link.
     await waitFor(() => seen.text().includes('example.invalid/login?code=echo'), SHELL_MS);
-    expect(seen.text()).toContain('echo-login.ts');
+    if (process.platform === 'win32') expect(seen.text()).toContain('echo-login.ts');
+    else expect(harness.core.journal.listProcesses(id, 10)[0]?.commandLine).toContain('echo-login.ts');
     // Attaching again is the same shell, not a second login, and no piped one starts beside it.
     expect((await client.call('accounts.loginTerminal', { accountId: account.id, cols: 100, rows: 30 })).id).toBe(id);
     await expect(client.call('accounts.login', { accountId: account.id })).rejects.toThrow(/already running/);
@@ -376,5 +547,53 @@ describe('shells', () => {
     expect(commandLine('powershell', ['opencode', 'auth', 'login'])).toBe('& opencode auth login');
     expect(commandLine('cmd', ['C:\\Program Files\\op\\opencode.exe', 'auth'])).toBe('"C:\\Program Files\\op\\opencode.exe" auth');
     expect(commandLine('posix', ['/opt/my tools/grok', "it's", '--device-auth'])).toBe("'/opt/my tools/grok' 'it'\\''s' --device-auth");
+  });
+});
+
+describe('shell integration', () => {
+  test('bash and PowerShell get it; cmd, sh, zsh, a login bash and the opt-out do not', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'boite-integration-'));
+    try {
+      const bash = integrate({ exe: '/bin/bash', args: [], kind: 'posix' }, dir, 'linux', {});
+      expect(bash.integrated).toBe(true);
+      expect(bash.shell.args).toEqual(['--rcfile', join(dir, 'shell-integration', 'boite.bash'), '-i']);
+      expect(existsSync(join(dir, 'shell-integration', 'boite.bash'))).toBe(true);
+      // A second shell finds the same file and leaves no half-written copy behind.
+      integrate({ exe: '/bin/bash', args: [], kind: 'posix' }, dir, 'linux', {});
+      expect(readdirSync(join(dir, 'shell-integration'))).toEqual(['boite.bash']);
+      const pwsh = integrate({ exe: 'C:\\pwsh\\pwsh.exe', args: ['-NoLogo'], kind: 'powershell' }, dir, 'win32', {});
+      expect(pwsh.shell.args.slice(0, 3)).toEqual(['-NoLogo', '-NoExit', '-EncodedCommand']);
+      expect(Buffer.from(pwsh.shell.args[3]!, 'base64').toString('utf16le')).toContain('133;C');
+      for (const shell of [
+        { exe: 'C:\\Windows\\System32\\cmd.exe', args: [], kind: 'cmd' as const },
+        { exe: '/bin/sh', args: [], kind: 'posix' as const },
+        { exe: '/bin/zsh', args: [], kind: 'posix' as const },
+        { exe: '/bin/bash', args: ['-l'], kind: 'posix' as const },
+      ]) {
+        expect(integrate(shell, dir, 'linux', {})).toEqual({ shell, integrated: false });
+      }
+      expect(integrate({ exe: '/bin/bash', args: [], kind: 'posix' }, dir, 'linux', { BOITE_TERMINAL_INTEGRATION: '0' }).integrated).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a history file reads newest first, each command once, PowerShell continuations and bash timestamps included', () => {
+    expect(parseHistory('git status\r\nls\r\nGet-ChildItem |`\r\n  Select Name\r\ngit status\r\n', 'powershell')).toEqual(['git status', 'Get-ChildItem |\n  Select Name', 'ls']);
+    // The user's own continuation backtick is saved doubled and keeps one, as PSReadLine recalls it.
+    expect(parseHistory('Get-Item x ``\r\n  -Force\r\n', 'powershell')).toEqual(['Get-Item x `\n  -Force']);
+    expect(parseHistory('#1700000000\nmake\n#1700000001\ncd src\n\nmake\n', 'posix')).toEqual(['make', 'cd src']);
+    expect(parseHistory(Array.from({ length: 900 }, (_, i) => `cmd ${i}`).join('\n'), 'posix')).toHaveLength(500);
+  });
+
+  test('the history file the integration names is found across chunk boundaries, else the shell\'s default', () => {
+    const announce = new HistoryAnnounce();
+    announce.feed('prompt\x1b]633;P;History');
+    announce.feed('File=/home/u/.bash_history\x07$ ');
+    expect(announce.path).toBe('/home/u/.bash_history');
+    expect(defaultHistoryFile({ name: 'pwsh', kind: 'powershell', integrated: true }, 'win32', { APPDATA: 'C:\\Users\\u\\AppData\\Roaming' }, 'C:\\Users\\u'))
+      .toBe('C:\\Users\\u\\AppData\\Roaming\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt');
+    expect(defaultHistoryFile({ name: 'bash', kind: 'posix', integrated: true }, 'linux', {}, '/home/u')).toBe('/home/u/.bash_history');
+    expect(defaultHistoryFile({ name: 'sh', kind: 'posix', integrated: false }, 'linux', {}, '/home/u')).toBeNull();
   });
 });

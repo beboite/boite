@@ -15,7 +15,7 @@ const HISTORY = AGENT_HISTORY_PAGE * 3 + 7;
 
 async function agentOf(h: TestCore, c: CoreClient, name = 'Historian'): Promise<AgentProfile> {
   const account = (await c.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-  return c.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory'], accountIntegration: 'provider' } });
+  return c.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory'] } });
 }
 
 /** Terminal work with a run carrying large frozen instructions, and a message, per step. Created directly: nothing executes. */

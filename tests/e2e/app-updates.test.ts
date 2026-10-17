@@ -43,17 +43,18 @@ async function pickLocale(locale: 'en' | 'fr') {
 beforeAll(async () => { const port = await freePort(); base = `http://127.0.0.1:${port}`; server = await startUi(port); }, 60_000);
 beforeEach(async () => { page = await BrowserPage.launch({ url: `${base}/?fake=1` }); await width(1400); }, 30_000);
 afterEach(async () => { await page?.close(); }, 15_000);
-afterAll(async () => { await server?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 30_000);
 
-test('updates are reached through Machines without adding a footer shortcut', async () => {
+test('the footer button and Machines both reach updates, and the foot fits its controls', async () => {
   await page.navigate(`${base}/?fake=1&open=recent&machines=1&appUpdate=ready&appUpdateChannel=nightly`);
-  await page.waitFor(`window.__boiteTest?.workspace.machines.length === 2 && ['machine-status', 'add-project', 'nav-limits', 'nav-settings'].every(name => document.querySelector('[data-testid="' + name + '"]'))`);
-  expect(await page.evaluate(`document.querySelector('${id('nav-app-update')}') === null`)).toBe(true);
+  await page.waitFor(`window.__boiteTest?.workspace.machines.length === 2 && ['machine-status', 'add-project', 'nav-updates', 'nav-limits', 'nav-settings'].every(name => document.querySelector('[data-testid="' + name + '"]'))`);
+  // A downloaded release is announced in the foot, bottom left, beside Settings.
+  expect(await page.evaluate(`document.querySelector('${id('nav-updates')}') !== null`)).toBe(true);
   expect((await page.text(id('add-project'))).trim()).toBe('');
   expect((await page.text(id('panel-toggle'))).trim()).toBe('');
   await page.evaluate('window.__boiteTest.workspace.active.setSidebarWidth(208)');
   expect(await page.evaluate(`(() => {
-    const controls = ['machine-status', 'add-project', 'nav-limits', 'nav-settings'].map(name => document.querySelector('[data-testid="' + name + '"]').getBoundingClientRect());
+    const controls = ['machine-status', 'add-project', 'nav-updates', 'nav-limits', 'nav-settings'].map(name => document.querySelector('[data-testid="' + name + '"]').getBoundingClientRect());
     const foot = document.querySelector('.foot').getBoundingClientRect();
     return controls.every((box, index) => box.width >= 26 && box.right <= foot.right && (!index || box.left >= controls[index - 1].right));
   })()`)).toBe(true);
@@ -66,8 +67,7 @@ test('updates are reached through Machines without adding a footer shortcut', as
   await page.click(id('settings-tab-machines'));
   await page.waitFor(`document.querySelector('${id('machines-page')}')`);
   expect(await page.evaluate('window.__boiteTest.workspace.active.machineId')).toBe(active);
-  expect(await page.evaluate(`document.querySelector('${id('nav-app-update')}') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('app-update-popover')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('updates-card')}') === null`)).toBe(true);
   expect(await page.text(id('app-update-card'))).toContain('Boite Nightly 2.0.0-nightly.8');
   expect(await page.text(id('app-update-published'))).toMatch(/Released .*ago/);
   expect(await page.evaluate(`document.querySelector('${id('app-update-changelog')}').href`)).toBe('https://github.com/beboite/boite/releases/tag/v2.0.0-nightly.8');
@@ -103,10 +103,10 @@ test('General has no update controls or shortcut and the Machines tab opens upda
   await page.waitFor(`document.querySelector('${id('settings-page')}')`);
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('app-update-install')}') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('nav-app-update')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('updates-card')}') === null`)).toBe(true);
   await page.click(id('settings-tab-machines'));
   await page.waitFor(`document.querySelector('${id('machines-page')}') && document.querySelector('${id('app-update-install')}')`);
-  expect(await page.evaluate(`document.querySelector('${id('app-update-popover')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('updates-card')}') === null`)).toBe(true);
 }, 30_000);
 
 test('channel options preserve the installed channel and nightly window name', async () => {
@@ -134,7 +134,7 @@ test('download progress and retry fit a narrow desktop', async () => {
 
 test('a running check remains visible and disabled in Machines', async () => {
   await updates('checking', true);
-  expect(await page.evaluate(`document.querySelector('${id('nav-app-update')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('updates-card')}') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('app-update-check')}').disabled`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('app-update-check')}').getAttribute('aria-busy')`)).toBe('true');
   await capture('checking-desktop');

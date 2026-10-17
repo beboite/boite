@@ -3,14 +3,18 @@
 ## Subscription proxy
 
 Settings, Providers offers an optional subscription proxy for Claude, Codex and
-OpenCode 2, and for Grok when the gateway is Douane.
+both OpenCode versions, and for Grok when the gateway is Douane.
 Choose Douane or CLIProxyAPI, enter the gateway's API URL and its limits dashboard
 URL, enable the switch and save. The API URL accepts an origin or a path ending
 in `/v1`. Model discovery runs on the machine hosting the core. The agent's own
 discovery runs through the gateway first, so each model keeps the effort scale,
 speed tiers (Fast) and names a direct subscription shows. `GET /v1/models` then
 adds the models only the gateway routes, and stands alone when the agent's
-discovery fails. Paired phones use that same catalog.
+discovery fails. A route named after the vendor (`claude/claude-opus-5-5`) is
+the agent's own model and is listed once, under its native id
+(`nativeModelId` in contracts). A default model, draft or composer choice saved
+under the route id opens on that native id with its effort. Paired phones use
+that same catalog.
 
 Claude Code is told the gateway is first-party, because the gateway relays Messages
 unchanged to Anthropic on a subscription: tool search, first-party model aliases
@@ -19,7 +23,7 @@ and the one-hour prompt cache stay on (`_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
 that needs a native login (`CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK`). Codex already
 sends its service tier and prompt cache key to a custom provider.
 
-While the proxy is enabled, Claude, Codex and OpenCode 2 show one account named
+While the proxy is enabled, Claude, Codex and both OpenCode versions show one account named
 after the gateway, Douane or CLIProxyAPI, with the API URL's origin, and so
 does Grok behind Douane. It has no rename,
 check, remove or add actions, and the provider row reads Ready · via Douane.
@@ -44,7 +48,9 @@ because Antigravity, their own harness, cannot run through a gateway. Open
 models (`gpt-oss`, Kimi, Qwen, Llama, DeepSeek, Mistral, GLM) are offered to
 each harness whose API the gateway advertises for them, under any routing
 prefix. A name the rules do not recognize takes its vendor from the routing
-prefix (`codex/`, `claude/`, ...). A catalog without endpoint metadata keeps
+prefix (`codex/`, `claude/`, ...). OpenCode also accepts Antigravity Claude
+routes when the catalog explicitly advertises Chat Completions (`openai`);
+other proprietary routes keep their native-harness restriction. A catalog without endpoint metadata keeps
 the older rule, which matches the whole id against the harness's native model
 names. With Douane, the core reads `GET /v1/quotas` with the proxy key and
 Limits shows native bars, described in [usage](usage.md#gateway-quotas). With
@@ -53,16 +59,97 @@ dashboard inside Boite instead of the account popup. Desktop uses the shell's
 existing browser view, and browsers and phones use an iframe. The dashboard must permit embedding
 and its configured URL must be reachable from the device displaying it.
 HTTPS browser sessions require an HTTPS dashboard URL; Boite shows this before
-creating a blocked HTTP frame. Open dashboard provides a separate sign-in page,
+creating a blocked HTTP frame. Open Douane (Open CLIProxyAPI) provides a separate sign-in page,
 then Reload retries the embedded view. Some gateways refuse framing or restrict
-cross-site cookies; those dashboards remain available through Open dashboard.
+cross-site cookies; those dashboards remain available through that button.
 Show account limits opens the native limits and monitoring switches for agents
 that keep their own configuration; Show proxy dashboard returns to the gateway.
 
+### Douane on this machine
+
+The proxy card's first choice is where the gateway runs: Remote gateway (the
+URLs above, typed by the user) or Douane on this machine, the Douane plugin
+(Settings > Plugins, [gateways](plugins.md#gateways)). Settings store it as
+`subscriptionProxy.mode`, `remote` or `local`; settings with no `mode` read as
+remote, unchanged. In local mode the kind is Douane and the core writes both
+URLs from the plugin's port: `baseUrl` `http://127.0.0.1:<port>/v1` and
+`dashboardUrl` `http://127.0.0.1:<port>/admin/`, and follows the plugin when
+it moves to another port. The proxy key stays the placeholder, since a
+loopback Douane asks clients for no key. `subscriptionProxyOf`, model
+discovery, the gateway account view and Limits then work as with a remote
+Douane.
+
+The card says whether the plugin runs (`Douane <version> answers on
+127.0.0.1:<port>`), is stopped or starting, or is not installed, with Open
+Plugins when it does not run. Choosing local mode starts nothing: the plugin
+runs from its own row, whether or not the proxy uses it.
+
+### Open Douane
+
+Open Douane, or Open CLIProxyAPI, opens the gateway's dashboard URL in the
+system browser (`openExternal`). It sits beside Save proxy in the settings, at
+the top of Limits whenever the proxy is on, and in the embedded dashboard's
+header. A dashboard at a loopback address (`localhost`, `127.0.0.1`, `::1`)
+answers only on the core's machine, so the button shows there alone: in the
+desktop app on its own core, or in a browser that reaches its core at a
+loopback address. A phone or another computer gets no button for it rather
+than a dead link (`gatewayDashboardReachable` in contracts,
+`lib/gateway-dashboard.ts`).
+
+### Moving connections to Douane
+
+Move my connections to Douane, under the proxy settings, appears once a Douane
+gateway is saved and the core advertises `features.gatewayMove`. The Douane
+plugin's row in Settings > Plugins offers it too while the plugin runs; that
+one sends `target: "plugin"` and moves into the plugin whatever the proxy
+points at. It lists what
+this machine's accounts hold that Douane can serve, default and isolated
+accounts alike (`subscriptionProxy.movePlan`), and the user ticks what to move:
+
+- Claude's `.credentials.json`, Codex's `auth.json` and Grok's `auth.json`,
+  sent whole.
+- OpenCode's `opencode/auth.json`: its `github-copilot` entry, alone, becomes a
+  Copilot account. Each `type: "api"` key becomes a custom endpoint
+  `{"type":"openai_compatible","route","base_url","api_key","dialect":"chat"}`.
+  The route is OpenCode's provider id, lowercased, renamed when Douane keeps
+  that name for a provider of its own: `opencode` (Zen) becomes `zen`, any
+  other such name takes `-api`. The address is the provider's `api` field in
+  OpenCode's catalog cache, `$XDG_CACHE_HOME/opencode/models.json` (else
+  `~/.cache/opencode/models.json`, on every OS), which an isolated account
+  shares. `opencode-go` goes to Douane's own `opencode_go` provider as its
+  key instead.
+- Not movable, with the reason on the line: a signed-out account, a file that
+  is not JSON, a key whose provider has no `api` address in the catalog
+  (`noAddress`), a provider whose package is not an OpenAI-compatible one
+  (`otherApi`), an OpenCode OAuth sign-in other than Copilot's
+  (`otherSignIn`). OpenCode 2 keeps its sign-ins in a database and is not
+  listed.
+
+`subscriptionProxy.move` makes the core read each ticked file again and post
+it alone to `POST <gateway>/admin/api/accounts/import`. The client never
+receives a value; a gateway's error that repeats a value of the payload has
+it replaced by `[hidden]`, and the log line counts items only. Each line then
+reads Moved, Already there or Refused with Douane's reason. Before posting,
+the core reads `GET /admin/api/accounts` and skips what Douane already has
+and could not tell apart by itself: an endpoint with the same route and
+address, a Copilot or OpenCode Go account, a sign-in whose email matches the
+Boite account's. An endpoint whose route Douane already serves at another
+address is refused (`routeTaken`). Douane updates a sign-in it recognizes by
+its account id instead of adding it twice; that line reads Already there.
+
+A remote Douane can ask for a management token (`management_token_env`), or
+sit behind a login page. The dialog takes an optional token, sent as
+`x-management-key` and saved on the core like the proxy key (journal setting
+`subscription-proxy-management-token`, never sent to a client; the plan only
+says whether one is saved). A 401 or 403 asks for that token, and a redirect or
+an HTML page says the API is behind a login, both with `field:
+managementToken`. A local Douane answers on loopback without one. What moving
+a sign-in means for Boite's own copy: [accounts](accounts.md#moving-a-login-to-douane).
+
 Which agents the proxy serves is decided per provider, not per protocol
 (`subscriptionProxyServes` in the contract): the Claude and Codex protocols
-whole, and OpenCode 2 by its id, because ACP is also what Antigravity and
-OpenCode 1 speak, and those keep their own configuration. Grok is served by
+whole, and both OpenCode versions by their ids, because ACP is also what
+Antigravity and other agents speak, and those keep their own configuration. Grok is served by
 its id too, and by Douane alone (`SUBSCRIPTION_PROXY_KIND_PROVIDERS`): behind
 CLIProxyAPI it keeps its own sign-in.
 
@@ -86,24 +173,54 @@ key and would send that token to the gateway, so `GROK_AUTH_PATH` points it at
 finds no sign-in, and the account's own stays for when the proxy is off. This
 was measured on Grok CLI 1.0.46, where `GROK_AUTH_PATH` is not documented.
 
-OpenCode 2 does not move to the gateway, it gains it: the core adds one
-provider to OpenCode's inline configuration, named after the gateway's kind
-(`douane` or `cliproxyapi`), which calls the gateway's Chat Completions route
-(`@opencode/ai/providers/openai-compatible`, `settings.baseURL`, the key read
-from `BOITE_SUBSCRIPTION_PROXY_KEY`). OpenCode's own providers stay beside it.
+Both OpenCode versions gain the gateway as an additional provider, named after
+its kind (`douane` or `cliproxyapi`), calling its Chat Completions route.
+OpenCode 1 uses the singular `provider` configuration with
+`npm: @ai-sdk/openai-compatible` and `options.baseURL`; its `options.apiKey`
+references `{env:BOITE_SUBSCRIPTION_PROXY_KEY}`. OpenCode 2 keeps its plural
+`providers` configuration with `package: @opencode/ai/providers/openai-compatible`,
+`settings.baseURL` and `env: [BOITE_SUBSCRIPTION_PROXY_KEY]`. Existing inline
+permissions and other providers are preserved. The key is never embedded in
+that configuration, and disabling the proxy restores the descriptor's original
+environment and native account checks.
+
 The picker lists OpenCode's own models first, then the gateway's as
-`douane/<gateway id>`: every model but those with a harness of their own, so
-no Claude, GPT or Grok model, and Gemini, Muse and the open families. A custom
-provider only knows the models its configuration names, so the core keeps the
-last catalog it read (the journal setting `subscription-proxy-opencode-models`)
-and writes it into that block at every spawn; a restart starts a turn on a
-gateway model without probing first. While the proxy is on, the gateway is the
-login: an OpenCode 2 account reads `ok` with no sign-in of its own. OpenCode 2
-lists none of an injected provider's models in its ACP model option and still
-takes them, and for about half a second after `session/new` it refuses one it
-has not loaded yet: the driver sends a model under the injected prefix
+`douane/<gateway id>`: Gemini, Muse, the open families, and Antigravity Claude
+models whose catalog row explicitly includes `openai` in
+`supported_endpoint_types`. A Claude route with no endpoint metadata or only
+Messages support is not added; GPT, Grok and other Claude routes remain in
+their native harnesses. Older catalogs without endpoint metadata still offer
+Gemini, Muse and open models. Gateway model IDs retain their routing prefix in
+the provider configuration, so selecting `douane/antigravity/claude-opus-4-6-thinking`
+calls the gateway with `antigravity/claude-opus-4-6-thinking`.
+
+The injected models preserve positive integer `context_length` (or
+`context_window`) and `max_output_tokens` as their context and output limits.
+OpenCode 1 requires both values to emit a valid limit object; an incomplete
+pair is omitted. OpenCode 2 accepts either validated limit independently.
+Advertised thinking budgets, dynamic thinking or effort levels enable
+OpenCode 1's `reasoning` capability and its `reasoning_content` replay field;
+OpenCode 2 receives `compatibility.reasoningField` instead. Missing or malformed
+metadata adds no inferred limits or thinking capability. These values survive
+the persisted catalog, so later spawns keep them. OpenCode still applies its
+own output ceiling; the catalog does not override that runtime policy.
+
+OpenCode 1.19 sends `x-opencode-session-id` on every model request and
+`X-Session-Id` for custom providers, using its own conversation ID. A gateway
+can use that ID for signed-thinking replay between tool turns without a
+shared prompt hash or a process-wide session value.
+
+A custom provider only knows the models its configuration names, so the core
+keeps the last catalog it read (the journal setting
+`subscription-proxy-opencode-models`) and writes it into that block at every
+spawn; a restart starts a turn on a gateway model without probing first. While
+the proxy is on, either OpenCode account reads `ok` with no native sign-in.
+OpenCode 2 lists none of an injected provider's models in its ACP model option
+and still takes them, and for about half a second after `session/new` it refuses
+one it has not loaded yet: the driver sends a model under the injected prefix
 (`BOITE_SUBSCRIPTION_PROXY_PREFIX`) though it is not listed, and asks again
-after 250, 500, 1,000 and 1,500 ms before it warns.
+after 250, 500, 1,000 and 1,500 ms before it warns. Both versions receive that
+prefix; agents without it keep the normal model-option validation.
 
 An optional API key stays on the core and is supplied through the agent's
 environment, never a URL or process argument. Leave the key field empty to keep
@@ -285,17 +402,25 @@ session protocol either.
   already names its package (`packages/core/src/providers/versions.ts`).
 - A `file` candidate that starts with `{npmRoot}` is looked for under each
   global npm `node_modules` directory, the same list an `npm` candidate walks,
-  with the profile's `path` names as the bin hints. That is how Codex and
+  with the profile's `path` names as the bin hints. That is how Claude, Codex and
   OpenCode find the program their npm package vendors under nvm-windows, fnm,
   scoop or a custom prefix, where the shim on PATH is a `.cmd`. The token is
   expanded at each resolution, not at load, and only at the start of a `file`
   value.
 - A PATH lookup, for a candidate, a `detect.command` or the npm roots, is
   remembered for 30 seconds per name and PATH, so the provider list and each
-  turn start do not walk PATH again. A remembered program that is gone is looked
-  up again. A reload, a managed install or uninstall and an update forget every
-  lookup; a program installed outside Boite shows up within 30 seconds, or at
-  once on a reload.
+  turn start do not walk PATH again. What an `npm` candidate resolves to is
+  remembered the same way, per spec, PATH and npm prefix variables. A
+  remembered program or script that is gone is looked up again. A reload, a
+  managed install or uninstall and an update forget every lookup; a program
+  installed outside Boite shows up within 30 seconds, or at once on a reload.
+- On Linux and macOS, a `codex` that PATH resolves to npm's
+  `@openai/codex/bin/codex.js` launcher is replaced by the executable vendor
+  binary the launcher would start (the platform package beside it, or the
+  launcher's own `vendor/`). The updater still runs the launcher, which tells
+  `codex update` which package manager owns the install. The launcher is a
+  Node process that otherwise stays up beside each Codex process. A wrapper script in front of it, which may set limits of its
+  own, is still what runs (`packages/core/src/providers/codex-launcher.ts`).
 - `launch.args` put the agent into the mode Boite speaks to. The `agy` driver
   adds its print-mode flags itself, because the same binary also answers
   `agy models` for the probe, so the Antigravity CLI declares none; anything a
@@ -639,8 +764,12 @@ provider on, runs a turn, resumes it on a new process and moves the session to
 local stand-in for the gateway, which received the turn on its Chat
 Completions route with the key and the gateway's own model id; no turn went
 through a real Douane or CLIProxyAPI. Not verified either: Windows and macOS,
-an OAuth sign-in, and image attachments, which is why `capabilities.images` is
-false.
+and an OAuth sign-in. Images are on: 2.0.30 answers `initialize` with
+`promptCapabilities.image` true, and an ACP image block reached a stand-in
+gateway, declared with the same provider block Boite writes, as a Chat
+Completions `image_url` part. OpenCode 1 stays at `images: false`: 1.19.2 also
+advertises images, but replaces one with an error text for a gateway model
+that declares no image input, which is every model the gateway block lists.
 
 ## Turning a provider off
 
@@ -703,13 +832,21 @@ other interactive-only commands.
 
 ## The models probe
 
-`providers.probe` spawns one short-lived process under the synthetic thread
+`providers.probe` first considers the explicitly scoped composing or viewed
+session for Codex and ACP. It reuses only a compatible account, descriptor,
+environment, workspace and context mode. Codex asks the idle host for its list;
+ACP shares compatible initialization and reads its catalog without changing its
+model. Missing ACP effort metadata and invalidated catalogs use an isolated probe.
+
+Otherwise it spawns one short-lived process under the synthetic thread
 `probe:<providerId>:<accountId>`, exactly the way a session would, so it sits in
-a Job Object and in the trace like any other, then asks the protocol's own
-question:
+a Job Object and in the trace like any other, then asks the protocol's own question:
 
 - Claude: SDK `supportedModels()` without a user prompt, with
-  `settings.disableAllHooks` so no `SessionStart` hook fires. Effort levels, adaptive
+  `settings.disableAllHooks` so no `SessionStart` hook fires, and
+  `strictMcpConfig` with no servers so it starts none of the user's MCP servers
+  (an empty `mcpServers` alone passes no flag). The CLI quota read, titles and
+  side questions do the same. Effort levels, adaptive
   thinking and Fast support come from each returned model. Descriptor effort
   controls stay hidden until that account has answered.
 - ACP: `initialize` and `session/new`, then whichever of two answers the agent
@@ -726,8 +863,35 @@ question:
   for the model it lands on, and a failed read keeps the list already cached.
   A model's scale is read once, even when the agent names none for it. The
   config options a turn's own `session/new` or `session/load` answers are kept
-  for the account too, so a later process that resumes a session seeds its
-  controls from them instead of opening a discovery `session/new` every time.
+  for the account too. A process that resumes a session loads it first and
+  opens a discovery `session/new` only when the load answered no options and
+  nothing is cached; both OpenCode majors answer them on load. A probe or a
+  discovery session is deleted with `session/delete` when the agent advertises
+  `sessionCapabilities.delete` (OpenCode 2 does), so none of them stays in the
+  agent's own session list. A refresh drops cached catalogs but keeps the one
+  a session still opening reads: the composer refreshes as the app opens while
+  the draft's process starts, and that answer is as fresh as a probe's.
+- ACP after a sign-in: the login process, already running and signed in,
+  opens one `session/new` in an empty folder and its answer becomes the
+  account's catalog, told to clients as `providers.probed`. No probe process
+  starts for an account that just signed in. A sign-in whose session did not
+  open within 30 seconds is still signed in; the next look at the models probes.
+- Under the `antigravity` quirk a probe waits 90 seconds instead of 20. The
+  agent is a PyInstaller one-file program that unpacks about 1.2 GB before its
+  server reads a line: 45 to 54 seconds on an 8 GB laptop with 600 MB free.
+  Each launch, probe, sign-in or session, unpacks into its own folder under
+  `<isolationDir>/tmp`, set as `TEMP`, `TMP` and `TMPDIR`, and the folder goes
+  once the process has exited. Every one of them ends in a forced stop, which
+  would otherwise leave the unpacked copy in the user's temp folder. What a
+  stopped core left there is removed the first time the account launches again.
+- ACP controls on a running session: a model, effort or mode goes out only
+  when the session's own last answer does not already report it. OpenCode 2
+  puts the effort back on `default` with any model change, so the effort goes
+  again after one; a thread with no effort sends `default` when the agent lists
+  it, and a thread back on the agent's own model asks for the model the
+  session opened on. A value the agent refuses is not asked again in that
+  process: an injected gateway model it never takes costs one round of retries,
+  not one per turn.
 - Codex: `initialize`, the `initialized` notification, then `model/list` until no
   cursor comes back. Each model carries its own efforts and its own default, so
   two models on one account can offer two different scales. `serviceTiers` supplies
@@ -751,22 +915,38 @@ question:
   suffix, stays as listed.
 - pi: `get_state`, `get_available_models` and `get_available_thinking_levels`.
   Each model id carries its provider prefix, because that is what pi's `--model`
-  takes and two providers can ship a name. An unauthenticated pi answers with
+  takes and two providers can ship a name. The thinking level `get_state` reports
+  is the default effort of the model the probe's session is on, and of no other:
+  pi does not say which level it would run another model on, so those models
+  carry their scale without a default. A thread that picks one sends no level,
+  pi keeps its own clamped to that model, and the reasoning chip reads Default
+  until a level is picked. On such a model the reasoning popover, and the
+  phone's options sheet, offer Default to hand a picked level back to pi. An unauthenticated pi answers with
   nothing, so the descriptor's models are left standing rather than replaced by an
   empty list.
 
-The child is killed through the registry on every path. The answer keeps the
+The disposable child is killed through the registry on every path; a reused
+session retains its ordinary lifecycle. The answer keeps the
 descriptor's `default` first, so the choice can always go back to the agent, is
 cached per provider and account until a `providers.reload` that changes a
 descriptor, what one resolves to or a rejection, or a change to that
 account, and reaches every client as `providers.probed`. A reload that changes
 none of that emits no `providers.updated`. Two callers at once share
 one process. `refresh: true` bypasses a completed cache entry, sharing any probe
-already in flight. The UI keeps a persistent display cache and reads asynchronously.
+already in flight. Until that read answers, the account's previous list still
+answers model checks, and a read that fails leaves it in place; a reload or a
+change to the account drops it as before. The caller is answered as soon as the
+models are read: the process exits, its trace closes and its directory goes
+afterwards, and the next probe of the same account that needs a fresh read waits
+for that; a read the cache answers does not. Claude takes up to a second to exit. The UI keeps a persistent display cache and reads asynchronously.
 Cleanup starts the registry's bounded stop before waiting for process pipes to
 close. A missing close event gets one additional second, then a
 `provider.probeCleanup` warning. The original models or discovery error still
 reach the caller, and the next request for that account can proceed.
+A model picked from a list the core gave on this connection lands at once, and
+a draft created on it is not read again, except an ACP effort that list carries
+no scale for. A list restored from browser storage, or one the core has not
+given yet, is read before the pick or the send.
 A probe that finds no executable, whose agent dies or that runs past
 twenty seconds, thirty for pi, throws with the reason and caches nothing. `threads.create` and
 `threads.update` accept what the last probe listed on top of the descriptor's; a
@@ -796,6 +976,12 @@ remaining approval requests; ACP has no standard hook-disable call. Antigravity
 uses its permission-skip flag. Questions seeking input still ask for real
 answers; YOLO does not invent form values or complete a device sign-in.
 
+- Claude takes a changed mode in place through the SDK's `setPermissionMode`,
+  sent before the next prompt and only when the mode moved. Claude can also move
+  by itself: EnterPlanMode puts it in `plan`, and an ExitPlanMode the user
+  refuses or stops leaves it there. The driver records the mode each `init`
+  and `status` frame reports, so the next turn on the same process sees the
+  drift and puts the thread's mode back before its prompt goes in.
 - ACP standardises the call, `session/set_mode`, and standardises none of the ids
   inside `availableModes`: the same mode is spelled `acceptEdits`,
   `accept_edits` and `auto_edit` by three different agents. So each Boite mode
@@ -854,9 +1040,11 @@ The composer offers four of the six and names each by what the agent may do
 without asking (`lib/permission-modes.ts`): Ask, Edit freely, Auto and YOLO.
 The list follows the agent. Codex loses Edit freely, which is the same pair as
 its default, and its default reads "This folder", because workspace-write lets
-it edit and run commands there without a card. An agent whose
-`capabilities.approvals` is false gets no mode chip: every choice would describe
-something it does not do. No confirmation keeps the warning colour on its chip,
+it edit and run commands there without a card. agy asks nothing but takes the
+mode at launch, so it keeps a chip with Auto, Edit freely and its default, read
+as "agy settings"; YOLO is the same flag as Auto there and shows as Auto. Any
+other agent whose `capabilities.approvals` is false gets no mode chip: every
+choice would describe something it does not do. No confirmation keeps the warning colour on its chip,
 since it reaches the whole computer.
 
 A permission is not the only thing an agent asks. A protocol that carries a
@@ -876,6 +1064,12 @@ Send takes the card's picks with the text and files
 paste or a drop, with its caps and image reduction, and a file alone is a valid
 answer. Ignore on that line sets the thread's questions aside, and the composer
 sends ordinary messages again; the card's "Answer in writing" brings it back.
+A question never takes a composer the user is writing in. One that arrives
+while its thread's composer holds text or files stays out of it until that
+composer is empty, so Enter still sends the draft as a message; one that
+arrives within 1.5 s of a keystroke waits for that pause. "Answer in writing"
+takes it at once, draft included. Once a question has the composer, typing
+again does not give it back.
 No protocol carries an image in
 a question's answer (Claude's `AskUserQuestion` takes strings, Codex's
 `requestUserInput` and Muse's `userInput` take text, pi's dialogs a value), so
@@ -884,6 +1078,112 @@ and appends their paths to the answer text, with the note prompts use; the
 agent reads them with its own tools (Read, `view_image`). The journalled answer
 and the card keep only each file's kind, type, name and size, never its bytes
 or path. ACP and Antigravity questions offer options only, so they take no files.
+
+## Claude's system prompt
+
+Without a `systemPrompt` option the Agent SDK sends an empty one, and the CLI
+then gives the model one identity line. The driver asks for Claude Code's own
+prompt instead (`preset: 'claude_code'`), the one Anthropic tunes per model, and
+appends Boite's guide to it. Measured on 2026-10-15 with Claude Code 2.1.300
+against a local fake API server, with memory off and the dynamic sections moved
+out, the preset adds these characters to the system prompt:
+
+| Model | Characters | What it adds |
+| --- | --- | --- |
+| Opus 5.5, Sonnet 5.5 | 3,260 | Harness rules, safety, code style, confirmation of hard-to-reverse actions, honest reports, context management |
+| Haiku 5.5 | 6,052 | The same, plus a section on finishing a turn's work before asking |
+| Fable 5.1 | 9,332 | The same, plus rules for scope and for the final message |
+
+`excludeDynamicSections` moves the working directory and memory path to the
+first message, so threads in different worktrees share one cached system
+prompt. `autoMemoryEnabled: false` keeps the preset's file-based memory out:
+memory belongs to the user's brain and Boite's own notes. A context mode keeps
+the preset, which carries Haiku's section, and drops only Boite's guide when it
+drops guides.
+
+The CLI records a session's system prompt on its first request and sends that
+record until compaction, even when a later launch passes different text. A
+thread started before this change keeps its empty prompt until it compacts or
+starts a new session; a change to the guide reaches a running session the same
+way.
+
+## Reasoning and tool summaries
+
+What a thread shows of an agent's reasoning is what its protocol sends. Measured
+on 2026-10-14 with Claude Code 2.1.299 and Codex 0.162.1:
+
+| Provider | Reasoning text | Batch summaries |
+| --- | --- | --- |
+| Claude | A summary per thinking block: the driver passes `--thinking-display summarized` through `extraArgs` | `tool_use_summary` with `CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES=1`, kept as each call's `summary` |
+| Codex | Summary deltas, a bold heading then a paragraph; `auto` and `detailed` gave the same shape | none |
+| ACP (Grok, OpenCode), pi | What the agent streams as thought chunks | none |
+
+A CLI the SDK drives is non-interactive, and for that case Claude Code asks the
+API to leave reasoning out (`omitted`): the blocks arrive with empty text, which
+is what left a thread with "Thinking" rows and nothing in them. The display only
+moves what comes back; the model thinks, and is billed, the same. Whether and how
+much it thinks stays with the CLI (effort, `alwaysThinkingEnabled`), which is why
+the driver sets the flag rather than the SDK's `thinking` option. The API
+refuses `highlights` (one title per stretch of thinking) for a subscription
+login: `thinking.adaptive.display: Input should be 'summarized', 'omitted'`, and
+the CLI falls back to `omitted` for the rest of the process.
+
+Claude 5.1 and later write the short line they put ahead of a tool call ("Now
+I'll run the tests.") as a thinking block, not as text. When two non-empty
+thinking blocks of one API message come right before a tool call, the driver
+turns the second into a text part in place, so it reads as the agent's
+narration between tool groups; the first stays folded as reasoning. One
+thinking block before a call is reasoning, and a model before 5.1 (the model
+of the stream's `message_start`, else the thread's) writes its updates as text,
+so its consecutive thinking blocks share one part as before.
+
+Each tool summary is one request the CLI sends to Haiku after a batch of calls
+finished (`source=tool_use_summary_generation` in its debug log), on the
+thread's account. It names the calls it covers, so it can arrive while the next
+batch already runs; a call of an earlier turn is not redrawn. The other
+progress messages the CLI sends (`thinking_tokens`, `api_retry`, `status`,
+`task_progress`) feed the turn's footer (`drivers/claude/progress.ts`, see
+[trace](trace.md)); `prompt_suggestion` and `rate_limit_event` stay unused by
+the timeline.
+
+## Claude's MCP servers on demand
+
+Claude Code starts every stdio server of the user's `mcpServers` with each
+session, called or not. A Claude turn hands the CLI each of those servers as a
+Streamable HTTP entry under the core's `/mcp/lazy/<registration>/<name>`
+instead (`packages/core/src/mcp/lazy.ts`). The entry carries
+`Authorization: Bearer ${BOITE_AGENT_TOKEN}`: the CLI expands the variable from
+its environment, so the token never reaches its command line. A token of
+another thread gets 404, a wrong one 401.
+
+The servers come from the `.claude.json` the CLI reads (`CLAUDE_CONFIG_DIR`,
+else the home directory), without the ones its project lists under
+`disabledMcpServers`. HTTP and SSE servers stay the CLI's own. A passed entry
+replaces the config's server of the same name, so the CLI starts none of them.
+
+The first session of a server starts it for the handshake and saves what it
+answered (`initialize` result and the tools, prompts, resources and templates
+lists) in the journal setting `mcp-manifest:<fingerprint>`, keyed by command,
+arguments and environment. The folder is not in the key: each worktree would
+start every server once more. Later sessions with the same MCP protocol version
+get the handshake, the lists, `ping` and `logging/setLevel` from that manifest
+without a process. The first other request starts the real server under the
+thread, in the thread's folder, with the CLI's environment plus the server's
+own and the agent variables, then forwards it. A request that comes during the
+server's handshake waits for it, and one the CLI cancels meanwhile is dropped
+unanswered. The server stays for the rest of
+the session. Its own requests (roots, sampling, elicitation) reach the CLI on
+its GET stream, or on its newest open POST stream when there is none. Once a
+server is live, the core reads its lists again and saves them; when its tools
+differ from what the session was given, the session gets
+`notifications/tools/list_changed`.
+
+The CLI's end releases the registration, not the turn's: a warm or viewed
+session keeps its CLI across turns, and the servers it started with it. The
+core then closes each server's stdin and kills it after 3 seconds. A server
+whose command, arguments or environment hold a `${...}` reference stays with
+the CLI, which expands it. Set `BOITE_LAZY_MCP=0` in the core's environment
+to give the CLI the servers as configured.
 
 ## Stdio transport failures
 
@@ -918,6 +1218,31 @@ Each retry is logged, and a third failure keeps the agent's exit error visible.
 An initialization RPC error waits up to 2 seconds for process closure and remaining
 stderr before the retry decision, so a process that stays alive cannot stall it.
 
+Every `thread/start`, `thread/resume` and `thread/fork` sends
+`mcp_optional_startup_grace_ms: 10000` in its per-thread configuration, unless
+`config/read` shows the user set that key, `0` included (Codex then waits for
+each server's own `startup_timeout_sec`). Codex
+waits that long for the MCP servers of `config.toml` before the first model
+request and leaves out any server still starting; its default of about a second
+is too short for a cold `npx` or `uvx` server, whose tools would then be missing
+from the first turn of each new process. A server that hangs delays only that
+first turn, by 10 seconds.
+
+A thread archived in the Codex app or CLI, which share the default account's
+history, makes `thread/resume` answer `session <id> is archived`. Boite then calls
+`thread/unarchive` on it and resumes once more, so the thread keeps its native
+history instead of failing every turn. A rollout that is gone is different: the
+turn starts a new native thread and carries the conversation in its prompt.
+
+The app-server that writes a title or a branch name starts with
+`features.plugins=false` and `features.apps=false`, reads the effective
+configuration of the thread's folder with `config/read`, and opens its ephemeral
+thread with every MCP server listed there set to `enabled = false`. Without it,
+each title would start the user's MCP servers and plugins, and a server could act
+on the prompt. A Codex that refuses `config/read` writes no title: the attempt
+fails with that reason rather than start the servers, and the thread keeps the
+title it has.
+
 ### Codex task tracking
 
 Boite enables `tools.update_plan.enabled` through the per-thread configuration
@@ -939,7 +1264,9 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
   `turn/start`, so an item that arrives before the answer still finds its turn.
 - An item notification carries the whole item so far. Text already written from
   `item/delta` is remembered per item and field, and a snapshot only adds what
-  lies past it, so an answer is drawn once whichever way it arrived.
+  lies past it, so an answer is drawn once whichever way it arrived. Only the
+  running turn's items are recorded, and the record is emptied when the turn
+  ends: a delta of another turn's item (a queued one, a replay) is dropped.
 - Text sent while a turn runs, an asynchronous answer or a coordination
   message, goes out as `turn/steer` naming that turn in `expectedTurnId`. A
   host whose turn already ended refuses it, and the text waits for the next turn.

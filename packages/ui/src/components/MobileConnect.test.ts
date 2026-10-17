@@ -5,8 +5,9 @@ import { RpcFailure, WsClient, type SocketLike } from '../lib/client';
 import type { Endpoint } from '../lib/endpoint';
 import { FakeClient } from '../lib/fake-client';
 import { Store, store as primary } from '../lib/store.svelte';
+import { localNetwork } from '../lib/local-network.svelte';
 import { workspace } from '../lib/workspace.svelte';
-import { strings } from '../lib/strings';
+import { fill, strings } from '../lib/strings';
 import MobileConnect from './MobileConnect.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
@@ -18,6 +19,7 @@ afterEach(async () => {
   workspace.machines = [];
   workspace.active = primary;
   workspace.error = null;
+  localNetwork.state = 'unknown';
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -33,8 +35,10 @@ class TestSocket implements SocketLike {
   onerror: (() => void) | null = null;
   send(data: string) { this.sent.push(JSON.parse(data)); }
   close() { this.onclose?.(); }
-  refuse(message = 'the token is wrong') {
+  /** Answers the hello with a refusal. A hello that waits for the device key to load is waited for first. */
+  async refuse(message = 'the token is wrong') {
     this.onopen?.();
+    if (this.sent.length === 0) await vi.waitFor(() => expect(this.sent.length).toBeGreaterThan(0));
     this.onmessage?.({ data: JSON.stringify({ id: this.sent[0]!.id, error: { code: RpcErrorCode.Unauthorized, message } }) });
   }
 }
@@ -57,25 +61,33 @@ async function refused(error: Error) {
   return store;
 }
 
-test('an installed app without a browser key offers pairing; a bad link keeps recovery open', async () => {
+test('an app without a browser key offers the scan and a pasted link; a bad link keeps recovery open', async () => {
   const store = await refused(new RpcFailure({ code: RpcErrorCode.Unauthorized, message: 'Missing credential' }));
   expect(store.pairingRequired).toBe(true);
   expect(store.error).toBe(strings.errors.unpaired);
   const onpaired = vi.fn();
   mounted = mount(MobileConnect, { target: document.body, props: { store, onpaired } });
   flushSync();
-  expect(document.body.textContent).toContain(strings.mobile.pairInstalled);
   expect(document.querySelector('[data-testid=machine-scan]')).not.toBeNull();
+  expect(document.querySelector('[data-testid=machine-paste-open]')).not.toBeNull();
+  // No code to type: a phone that cannot scan pastes the link the other machine copied.
+  expect(document.querySelector('[data-testid=machine-code-open]')).toBeNull();
+  expect(document.querySelector('[data-testid=machine-add-open]')).toBeNull();
+  expect(document.querySelector('[data-testid=machine-link]')).toBeNull();
   expect(document.querySelector('[data-testid=mobile-reconnect]')).toBeNull();
-  document.querySelector<HTMLButtonElement>('[data-testid=machine-add-open]')!.click();
+  // A browser tab is not the installed app: no word about scanning from it.
+  expect(document.querySelector('[data-testid=mobile-pair-hint]')).toBeNull();
+  const pair = vi.spyOn(workspace, 'pair');
+  document.querySelector<HTMLButtonElement>('[data-testid=machine-paste-open]')!.click();
   flushSync();
   const input = document.querySelector<HTMLInputElement>('[data-testid=machine-link]')!;
-  input.value = 'not a pairing link';
+  input.value = 'K7QM-2222';
   input.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
   document.querySelector<HTMLButtonElement>('[data-testid=machine-add]')!.click();
-  await vi.waitFor(() => expect(document.querySelector('[role=alert]')?.textContent).toBe(strings.errors.pairingLink));
-  expect(input.value).toBe('not a pairing link');
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=machine-paste-form] [role=alert]')?.textContent).toBe(strings.errors.pairingLink));
+  expect(input.value).toBe('K7QM-2222');
+  expect(pair).toHaveBeenCalledWith('K7QM-2222', '');
   expect(onpaired).not.toHaveBeenCalled();
 
   // A known pairing problem must not hide a later transport failure.
@@ -159,7 +171,7 @@ test.each([
   const store = new Store();
   stores.push(store);
   const opening = store.connectEndpoint({ ...endpoint, url: 'https://computer.example' } as Endpoint);
-  sockets[0]!.refuse(message);
+  await sockets[0]!.refuse(message);
   await opening;
   expect(store.pairingRequired).toBe(pairing);
   expect(store.error).toBe(expected);
@@ -187,7 +199,7 @@ test('a revoked response queued by the old client cannot mark its replacement as
   expect(store.error).toBe('socket error');
 });
 
-test('the installed app pairs from a typed code, and says to scan from here rather than the camera', async () => {
+test('the installed app pairs from a pasted link, and says to scan from here rather than the camera', async () => {
   const store = await refused(new RpcFailure({ code: RpcErrorCode.Unauthorized, message: 'Missing credential' }));
   Object.defineProperty(navigator, 'standalone', { value: true, configurable: true });
   try {
@@ -196,28 +208,67 @@ test('the installed app pairs from a typed code, and says to scan from here rath
     mounted = mount(MobileConnect, { target: document.body, props: { store, onpaired } });
     flushSync();
     expect(document.querySelector('[data-testid=mobile-pair-hint]')?.textContent).toBe(strings.mobile.scanInApp);
-    // Scan stays the first thing offered; the code is the second way in.
+    // Scan stays the first thing offered; the pasted link is the second way in.
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('.pair-machine button')].map((button) => button.dataset['testid']);
-    expect(buttons.indexOf('machine-scan')).toBeLessThan(buttons.indexOf('machine-code-open'));
-    document.querySelector<HTMLButtonElement>('[data-testid=machine-code-open]')!.click();
+    expect(buttons.indexOf('machine-scan')).toBeLessThan(buttons.indexOf('machine-paste-open'));
+    document.querySelector<HTMLButtonElement>('[data-testid=machine-paste-open]')!.click();
     flushSync();
-    const input = document.querySelector<HTMLInputElement>('[data-testid=machine-code]')!;
-    expect(input.getAttribute('autocapitalize')).toBe('characters');
-    const type = (value: string) => {
-      input.value = value;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      flushSync();
-      document.querySelector<HTMLButtonElement>('[data-testid=machine-code-submit]')!.click();
-      flushSync();
-    };
-    type('K7QM-22');
-    expect(document.querySelector('[data-testid=machine-code-form] [role=alert]')?.textContent).toBe(strings.machines.codeInvalid);
-    expect(pair).not.toHaveBeenCalled();
-    type(' k7qm-2222 ');
+    const input = document.querySelector<HTMLInputElement>('[data-testid=machine-link]')!;
+    input.value = ' https://computer.example/?grant=one-time-test-grant ';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(document.querySelector('[data-testid=machine-link-target]')?.textContent).toContain('computer.example');
+    document.querySelector<HTMLButtonElement>('[data-testid=machine-add]')!.click();
     await vi.waitFor(() => expect(onpaired).toHaveBeenCalledOnce());
-    expect(pair).toHaveBeenCalledWith(`${location.origin}/?grant=K7QM2222`, '');
-    expect(document.querySelector('[data-testid=machine-code-form]')).toBeNull();
+    expect(pair).toHaveBeenCalledWith('https://computer.example/?grant=one-time-test-grant', '');
+    expect(document.querySelector('[data-testid=machine-paste-form]')).toBeNull();
   } finally {
     delete (navigator as { standalone?: boolean }).standalone;
+  }
+});
+
+test('the app blocked from the local network says how to allow it, and says what to answer before Chrome asks', async () => {
+  const store = await refused(new RpcFailure({ code: RpcErrorCode.Internal, message: 'socket error' }));
+  localNetwork.state = 'prompt';
+  mounted = mount(MobileConnect, { target: document.body, props: { store, onpaired: vi.fn() } });
+  flushSync();
+  // Not answered yet: the usual wait, and the answer the next attempt needs.
+  expect(document.querySelector('h1')?.textContent).toBe(strings.mobile.offlineTitle);
+  expect(document.querySelector('[data-testid=mobile-local-network-ask]')?.textContent).toBe(strings.mobile.localNetworkAsk);
+  expect(document.querySelector('[data-testid=mobile-local-network]')).toBeNull();
+  // Refused: retrying cannot help until the setting changes, and the screen names it.
+  localNetwork.state = 'denied';
+  flushSync();
+  expect(document.querySelector('h1')?.textContent).toBe(strings.mobile.localNetworkTitle);
+  expect(document.querySelector('[data-testid=mobile-local-network]')?.textContent).toBe(fill(strings.mobile.localNetworkBody, { host: location.host }));
+  expect(document.querySelector('[data-testid=mobile-local-network-ask]')).toBeNull();
+  expect(document.querySelector('[data-testid=mobile-reconnect]')).not.toBeNull();
+  // Allowed: the waiting screen as before, nothing about the network.
+  localNetwork.state = 'granted';
+  flushSync();
+  expect(document.querySelector('h1')?.textContent).toBe(strings.mobile.offlineTitle);
+  expect(document.querySelector('[data-testid=mobile-local-network]')).toBeNull();
+  expect(document.querySelector('[data-testid=mobile-local-network-ask]')).toBeNull();
+  // Troubleshoot unfolds the checks: the permission's live state and the machine's address to open in a tab.
+  const toggle = document.querySelector<HTMLButtonElement>('[data-testid=connect-troubleshoot-toggle]')!;
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  toggle.click();
+  flushSync();
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(document.querySelector('[data-testid=check-local-network-state]')?.textContent?.trim()).toBe(strings.mobile.localNetworkStates.granted);
+  localNetwork.state = 'denied';
+  flushSync();
+  expect(document.querySelector('[data-testid=check-local-network-state]')?.textContent?.trim()).toBe(strings.mobile.localNetworkStates.denied);
+  expect(document.querySelector<HTMLAnchorElement>('[data-testid=check-reach-open]')?.href).toBe('https://computer.example/');
+  // Nearby devices is Android's own permission: no word of it elsewhere.
+  expect(document.querySelector('[data-testid=check-nearby]')).toBeNull();
+  await unmount(mounted!);
+  Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 16; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36', configurable: true });
+  try {
+    mounted = mount(MobileConnect, { target: document.body, props: { store, onpaired: vi.fn() } });
+    flushSync();
+    expect(document.querySelector('[data-testid=check-nearby]')?.textContent).toContain(strings.mobile.checkNearby);
+  } finally {
+    delete (navigator as { userAgent?: string }).userAgent;
   }
 });

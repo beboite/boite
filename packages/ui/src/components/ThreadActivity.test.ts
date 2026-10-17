@@ -1,7 +1,8 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { QuestionRequest, Thread, ThreadActivity } from '@boite/contracts';
+import type { QuestionRequest, Thread, ThreadActivity, ThreadSummary } from '@boite/contracts';
 import { Store } from '../lib/store.svelte';
+import { replyTarget } from '../lib/question-reply.svelte';
 import ThreadActivityView from './ThreadActivity.svelte';
 
 let view: ReturnType<typeof mount> | undefined;
@@ -97,6 +98,46 @@ test('another thread\'s question comes up open over one folded here, as many que
   flushSync(() => { store.openThread = { id: 'other', activity: { goal: null, loop: null, tasks: [] } } as unknown as Thread; });
   expect(fold().getAttribute('aria-expanded')).toBe('true');
   expect(document.querySelector('[data-testid=activity-question]:not([hidden])')!.getAttribute('data-question')).toBe('second');
+});
+
+test('a sub-agent\'s questions and permission wait in its parent\'s dock, named, opened, never answered by the parent\'s composer', () => {
+  const question = (id: string, threadId: string, async: boolean): QuestionRequest => ({
+    id, threadId, turnId: 'turn', text: `Which way for ${id}?`, options: [{ id: 'a', label: 'A' }], allowText: true, multiple: false, ...(async ? { async: true } : {}), createdAt: 1
+  });
+  const store = render({ goal: null, loop: null, tasks: [] });
+  const open = vi.spyOn(store, 'open').mockResolvedValue(undefined as never);
+  const row = (id: string, title: string, parentThreadId: string | null, archived = false) => ({ id, title, parentThreadId, archived, status: 'running' }) as ThreadSummary;
+  flushSync(() => {
+    store.threads = [row('thread', 'Parent', null), row('child', 'Migrate the keys', 'thread'), row('gone', 'Archived child', 'thread', true), row('stranger', 'Elsewhere', null)];
+    // Its own question without stopping, a child's of both kinds, and questions no child of this thread asked.
+    store.pendingQuestions = [question('own', 'thread', true), question('child-async', 'child', true), question('child-stop', 'child', false), question('archived', 'gone', true), question('stranger', 'stranger', true)];
+    store.pendingPermissions = [{ id: 'perm', threadId: 'child', turnId: 'turn', toolName: 'Bash', input: { command: 'bun run migrate' }, description: 'Run it', createdAt: 2 }];
+  });
+  const docked = () => [...document.querySelectorAll<HTMLElement>('[data-testid=activity-question]')];
+  expect(docked().map(card => card.dataset['question'])).toEqual(['own', 'child-async', 'child-stop']);
+  expect(document.querySelector('[data-testid=activity-question-index]')!.textContent).toBe('3 of 3');
+  const shown = () => document.querySelector<HTMLElement>('[data-testid=activity-question]:not([hidden])')!;
+  // The newest is up: a child's, with whose it is and the way into it, and no hand-off to this composer.
+  expect(shown().dataset['question']).toBe('child-stop');
+  expect(shown().querySelector('[data-testid=activity-subagent-question]')!.textContent).toContain('Asked by Migrate the keys');
+  expect(shown().querySelector('[data-testid=question-write]')).toBeNull();
+  expect(document.querySelector('[data-testid=composer-reply]')).toBeNull();
+  expect(replyTarget(store)).toBeNull();
+  shown().querySelector<HTMLButtonElement>('[data-testid=activity-open-subagent]')!.click();
+  expect(open).toHaveBeenCalledWith('child');
+  // Back on its own question, the composer answers that one again.
+  document.querySelector<HTMLButtonElement>('[data-testid=activity-question-next]')!.click();
+  flushSync();
+  expect(shown().dataset['question']).toBe('own');
+  expect(shown().querySelector('[data-testid=activity-subagent-question]')).toBeNull();
+  expect(replyTarget(store)?.id).toBe('own');
+
+  const wait = document.querySelector<HTMLElement>('[data-testid=activity-subagent-permission]')!;
+  expect(wait.dataset['thread']).toBe('child');
+  expect(wait.textContent).toContain('Migrate the keys waits for your permission');
+  expect(wait.textContent).toContain('Run a command');
+  wait.querySelector<HTMLButtonElement>('[data-testid=activity-open-subagent]')!.click();
+  expect(open).toHaveBeenLastCalledWith('child');
 });
 
 test('a blocked goal asks for an answer and its reply button focuses the composer', () => {

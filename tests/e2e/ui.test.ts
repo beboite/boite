@@ -31,7 +31,7 @@ const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png')
 const IMPORT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-import.png');
 const EXPERIMENTS_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-experiments.png');
 /** The cache `public/sw.js` opens, before the build appends its id; every other cache is deleted on activate. */
-const UI_CACHE_PREFIX = 'boite-ui-v3-';
+const UI_CACHE_PREFIX = 'boite-ui-v4-';
 
 let core: RunningCore;
 let page: BrowserPage;
@@ -67,7 +67,7 @@ afterAll(async () => {
   await core?.stop();
   if (projectDir !== undefined) await removeDirectory(projectDir);
   if (worktreesDir !== undefined) await removeDirectory(worktreesDir);
-}, 15_000);
+}, 30_000);
 
 test('the core serves the production bundle: no fake client, no Svelte dev runtime', async () => {
   const index = await (await fetch(`${core.url}/`)).text();
@@ -416,7 +416,8 @@ test(
     // user bubble carries the thumbnail as a part of the journalled message.
     expect(await page.evaluate<number>(`document.querySelectorAll('${testid('composer-attachment')}').length`)).toBe(0);
     const assistant = await page.evaluate<string>(ASSISTANT_TEXT);
-    expect(assistant).toMatch(/\[image image\/png, \d+ bytes, square\.png\] what is this square/);
+    // Boite's own lines can sit between the image the echo names first and the text typed.
+    expect(assistant).toMatch(/\[image image\/png, \d+ bytes, square\.png\][\s\S]*what is this square/);
     const images = await page.evaluate<string[]>(
       `Array.from(document.querySelectorAll('${testid('message')}[data-role=user] ${testid('image-part')}')).map((img) => img.getAttribute('src').slice(0, 22))`,
     );
@@ -507,9 +508,9 @@ test(
 test(
   'the trace panel lists what the turn launched, or says it launched nothing',
   async () => {
-    // The header button opens the panel itself; the trace is one card of its
-    // launcher, or the tab that is already there.
-    await page.click(testid('panel-toggle'));
+    // The header button opens the panel itself, unless a wide window already
+    // shows it; the trace is one card of its launcher, or the tab already there.
+    if (!(await page.evaluate<boolean>(`!!document.querySelector('${testid('right-panel')}')`))) await page.click(testid('panel-toggle'));
     await page.waitFor(
       `document.querySelector('${testid('launch-trace')}') || document.querySelector('${testid('trace-panel')}')`,
     );
@@ -693,7 +694,7 @@ test(
 );
 
 test(
-  'a second browser pairs on the one-time link, gets a key of its own, and the desktop can revoke it',
+  'a second browser is added on the one-time link with a device key of its own, and the desktop can remove it',
   async () => {
     // A fresh profile, like a phone: no stored endpoint, only the grant link the
     // owner minted for it.
@@ -702,9 +703,11 @@ test(
     try {
       await phone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
-      const stored = await phone.evaluate<{ url: string; token: string }>(`JSON.parse(localStorage.getItem('boite.core'))`);
-      expect(stored.token).toHaveLength(64);
-      expect(stored.token).not.toBe(core.token);
+      // What it keeps is its own device key and the machine it signs for, no key of the core's.
+      const stored = await phone.evaluate<{ url: string; token: string; signs?: string }>(`JSON.parse(localStorage.getItem('boite.core'))`);
+      expect(stored.token).toBe('');
+      expect(stored.signs).toMatch(/^[0-9a-f]{64}$/);
+      expect(await phone.evaluate<string>(`JSON.parse(localStorage.getItem('boite.device')).secret`)).toMatch(/^[A-Za-z0-9_-]{43}$/);
       expect(await phone.evaluate<string>('location.search')).toBe('');
       await phone.waitFor(`document.querySelector('[data-testid=mobile-menu]')`);
       await mobileAction(phone, 'mobile-settings');
@@ -730,7 +733,7 @@ test(
       // The desktop lists the phone and revokes it; the phone's socket closes and its key is dead.
       await page.click(testid('nav-settings'));
       await page.click(testid('settings-tab-machines'));
-      await page.waitFor(`document.querySelector('${testid('paired-devices')} li[data-session-id]')`, 30_000);
+      await page.waitFor(`document.querySelector('${testid('group-card')} ${testid('group-device')}')`, 30_000);
       const client = await connect(core.url, core.token);
       try {
         const sessions = await client.call('sessions.list', {});
@@ -739,10 +742,10 @@ test(
       } finally {
         client.close();
       }
-      await page.waitFor(`!document.querySelector('${testid('paired-devices')}')`, 30_000);
+      await page.waitFor(`!document.querySelector('${testid('group-device')}')`, 30_000);
       // The phone's reconnect is refused once, then it stops, drops its dead key and says why.
       await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'closed'`, 30_000);
-      await phone.waitFor(`document.querySelector('[data-testid=mobile-connect] [data-testid=machine-add-open]')`, 30_000);
+      await phone.waitFor(`document.querySelector('[data-testid=mobile-connect] [data-testid=machine-scan]')`, 30_000);
       expect(await phone.text('[data-testid=mobile-connect] h1')).toBe('Your Boite, on your phone');
       expect(await phone.evaluate(`document.querySelector('${testid('error-toast')}') === null`)).toBe(true);
       expect(await phone.evaluate<string | null>(`localStorage.getItem('boite.core')`)).toBeNull();
@@ -843,6 +846,8 @@ test(
     const entries = await page.evaluate<string[]>(cachedPaths);
     expect(entries).toContain('/');
     expect(entries.filter((path) => path.startsWith('/assets/')).length).toBeGreaterThan(0);
+    // The browser reads English (`--lang=en-US`): the French catalogue the inline locale map names is never stored.
+    expect(entries.filter((path) => path.startsWith('/assets/strings.fr-'))).toEqual([]);
 
     // The core goes away, and the reload has nothing but that cache to load from.
     const { port, dataDir, token } = core;

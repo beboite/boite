@@ -11,11 +11,12 @@
    * nothing is drawn; a second machine, a filter or a connection in trouble
    * brings back one icon, the count or the chosen machine's name beside it
    * only while it filters the list. A remote machine that is merely switched
-   * off is grey in the menu and raises no warning (`machineHealth`).
+   * off is grey in the menu and raises no warning (`machineHealth`). The
+   * thread list and the agents list both carry it.
    */
-  let { store, filter = null, onfilter }: { store: Store; filter?: string | null; onfilter?: (id: string | null) => void } = $props();
+  let { store, filter = null, onfilter, testid = 'machine-status' }: { store: Store; filter?: string | null; onfilter?: (id: string | null) => void; testid?: string } = $props();
 
-  const machines = $derived([...(workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.machines.local, store }])]
+  const machines = $derived([...workspace.machinesOr(store)]
     .sort((a, b) => Number(isThisPC(b)) - Number(isThisPC(a))));
   const health = $derived(new Map(machines.map(m => [m, machineHealth(m, store)])));
   const issues = $derived(machines.filter(m => health.get(m) === 'lost').length);
@@ -31,16 +32,16 @@
     ] : []),
     { id: 'manage', label: strings.connection.manage, icon: 'settings' }
   ]);
-  function pick(id: string) {
+  function choose(id: string) {
     if (id === 'manage') store.showSettings('machines');
     else onfilter?.(id === 'all' ? null : id);
   }
 </script>
 
 <!-- The wrapper stays, empty, so the connection state is always readable on it. -->
-<div class="machines" class:problem={issues > 0} class:filtered={chosen !== null} data-testid="status-connection" data-state={store.connection} aria-live="polite">
+<div class="machines" class:problem={issues > 0} class:filtered={chosen !== null} data-testid={testid === 'machine-status' ? 'status-connection' : `${testid}-status`} data-state={store.connection} aria-live="polite">
   {#if shown}
-    <Menu {items} onpick={pick} {label} variant="ghost" testid="machine-status">
+    <Menu {items} onpick={choose} {label} variant="ghost" {testid}>
       {#if issues}<TriangleAlert size={16} />{:else}<Monitor size={16} />{/if}
       {#if chosen}<span class="name ui-label">{chosen.label}</span>{/if}
     </Menu>

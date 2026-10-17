@@ -20,7 +20,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('model picker account tooltips keep emails private on desktop and phone', async () => {
   await page.navigate(`${uiUrl}/?fake=1&open=recent`);
@@ -139,8 +139,8 @@ test('the Limits page turns the monitoring of each account on and off', async ()
   const opencode = `${id('limits-tracked')} ${id('quota-monitor')}[data-account-id="a-opencode"]`;
   await page.waitFor(`document.querySelector('${opencode}')`);
   expect(await page.evaluate(`document.querySelector('${opencode}').checked`)).toBe(true);
-  // The Antigravity CLI's own reading starts off, and the only switch that turns it on is here.
-  expect(await page.evaluate(`document.querySelector('${id('limits-tracked')} ${id('quota-monitor')}[data-account-id="quota:antigravity-cli"]').checked`)).toBe(false);
+  // The fake finds agy, so its own reading starts on, and this is the switch that turns it off.
+  expect(await page.evaluate(`document.querySelector('${id('limits-tracked')} ${id('quota-monitor')}[data-account-id="quota:antigravity-cli"]').checked`)).toBe(true);
   await page.click(opencode);
   await page.waitFor(`!document.querySelector('${opencode}').checked && !document.querySelector('${id('usage-limits')} [data-provider="opencode"]')`);
   await capture('limits-tracked.png');
@@ -151,6 +151,21 @@ test('the Limits page turns the monitoring of each account on and off', async ()
   await capture('limits-tracked-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+}, 30_000);
+
+test('Short answers starts on and saves when flipped', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(`${uiUrl}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  await page.click(id('nav-settings')); await page.click(id('settings-tab-general'));
+  const toggle = id('setting-short-answers');
+  await page.waitFor(`document.querySelector('${toggle}') && !document.querySelector('${toggle}').disabled`);
+  expect(await page.evaluate(`document.querySelector('${toggle}').checked`)).toBe(true);
+  await capture('short-answers-desktop.png');
+  await page.click(toggle);
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.settings?.shortAnswers === false`);
+  await page.click(toggle);
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.settings?.shortAnswers === true`);
 }, 30_000);
 
 test('the experiment adds the Threads and Agents switch on the desktop and Agents in the phone menu', async () => {
@@ -206,9 +221,9 @@ test('the compact quota page shows limits and reset times', async () => {
   expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderRadius`)).toBe('0px');
   expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderTopWidth`)).toBe('1px');
   await capture('quota-popup.png');
-  // Only signed-in providers the user reads: Antigravity's CLI source is off, echo and pi report nothing.
+  // Only signed-in providers the user reads: the fake finds agy, so its CLI source is read; echo and pi report nothing.
   const listed = await page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('quota-provider')}')).map(el => el.dataset.provider)`);
-  expect(listed).toEqual(expect.arrayContaining(['claude', 'codex', 'grok', 'opencode']));
+  expect(listed).toEqual(expect.arrayContaining(['claude', 'codex', 'grok', 'opencode', 'antigravity-cli']));
   for (const absent of ['antigravity', 'echo', 'pi']) expect(listed).not.toContain(absent);
   const resets = await page.evaluate<{ text: string; title: string; icon: boolean }[]>(`[...document.querySelectorAll('${id('quota-popup')} .summary .reset')].map(el => ({ text: el.textContent.trim(), title: el.title, icon: !!el.querySelector('svg[aria-hidden="true"]') }))`);
   expect(resets.length).toBeGreaterThan(0);
@@ -218,6 +233,7 @@ test('the compact quota page shows limits and reset times', async () => {
     expect(reset.icon).toBe(true);
   }
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  const folded = await page.evaluate<number>(`document.querySelector('section').scrollHeight`);
   // Unfolded, an account lists each window with its own bar; there is nothing to set here.
   await page.click('[data-provider="claude"] .summary');
   await page.waitFor(`document.querySelectorAll('#usage-a-claude-main [role="meter"]').length === 3`);
@@ -226,7 +242,8 @@ test('the compact quota page shows limits and reset times', async () => {
   await page.click('[data-provider="claude"] .summary');
   await page.waitFor(`!document.querySelector('#usage-a-claude-main')`);
   expect(await page.evaluate(`document.querySelector('section').scrollWidth <= document.querySelector('section').clientWidth`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('section').scrollHeight <= document.querySelector('section').clientHeight`)).toBe(true);
+  // Folding it back leaves the list as tall as before; six accounts may scroll the 460-pixel popup.
+  expect(await page.evaluate<number>(`document.querySelector('section').scrollHeight`)).toBe(folded);
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
   await capture('quota-popup-light.png');
   await page.evaluate(`document.documentElement.dataset.theme = 'grain'`);

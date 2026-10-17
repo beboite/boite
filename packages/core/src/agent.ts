@@ -206,6 +206,7 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('devices.input', (params, { connection }) => core.devices.input(params, connection));
   core.router.register('devices.screenshot', (params, { connection }) => core.devices.screenshot(params, connection));
   core.router.register('devices.close', (params, { connection }) => core.devices.close(params, connection));
+  core.router.register('browser.remoteWatch', (params, { connection }) => core.browser.remoteWatch(params, connection));
   core.router.register('browser.remoteStatus', (params, { connection }) => core.browser.remoteStatus(params, connection));
   core.router.register('browser.command', params => core.browser.command(params));
   core.router.register('browser.importCookies', params => core.browser.importCookies(params));

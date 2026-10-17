@@ -2,7 +2,8 @@
  * Notifications: a toast when a thread finishes, fails, or asks something
  * while the user is looking elsewhere. "Elsewhere" is either another thread
  * in this window or another window altogether; the open thread on a focused
- * window says it on the screen already and gets no toast.
+ * window says routine news on the screen already. Questions and permissions
+ * still notify: an open window does not prove the user noticed the request.
  *
  * The decision is pure and tested; the delivery is the shell's `notify`
  * command (a Windows toast whose click comes back as `notification://open`),
@@ -13,7 +14,7 @@
  * of it.
  */
 
-import { notifiesOnFinish, threadActive, type NotificationLabel, type ThreadSummary, type Turn } from '@boite/contracts';
+import { notifiesOnFinish, threadBusy, type NotificationLabel, type ThreadSummary, type Turn } from '@boite/contracts';
 import { PUSH_ENABLED_KEY } from './pwa';
 import { strings } from './strings';
 
@@ -30,9 +31,10 @@ export interface NotifyDecision {
   enabled: boolean;
 }
 
-/** A toast goes out when the switch is on and the user could not have seen it happen. */
+/** Requests for input notify wherever the user is; routine news only when looking elsewhere. */
 export function shouldNotify(input: NotifyDecision): boolean {
   if (!input.enabled) return false;
+  if (input.kind === 'needs-you') return true;
   if (!input.focused) return true;
   return input.openThreadId !== input.threadId;
 }
@@ -45,7 +47,8 @@ export function shouldNotify(input: NotifyDecision): boolean {
 export function finishNotifies(threads: readonly ThreadSummary[], turn: Pick<Turn, 'threadId' | 'status' | 'execution'>): boolean {
   const thread = threads.find((t) => t.id === turn.threadId);
   if (thread === undefined) return turn.status === 'done' || turn.status === 'error';
-  const activeChildren = threads.filter((t) => t.parentThreadId === thread.id && threadActive(t.status)).length;
+  // A child waiting on its own background work is still at work: its result has not come back.
+  const activeChildren = threads.filter((t) => t.parentThreadId === thread.id && threadBusy(t)).length;
   return notifiesOnFinish(thread, turn, activeChildren);
 }
 

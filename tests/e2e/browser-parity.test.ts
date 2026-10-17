@@ -10,6 +10,8 @@ test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, th
   const fixture = readFileSync(join(import.meta.dir, 'fixtures/browser-parity.html'), 'utf8');
   const site = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     const path = new URL(request.url).pathname;
+    // A sized popup answers the page that opened it, then closes.
+    if (path === '/popup') return new Response(`<!doctype html><script>opener.postMessage({ popup: 'answered', at: location.pathname }, '*'); close()</script>`, { headers: { 'content-type': 'text/html;charset=utf-8' } });
     return new Response(path === '/' ? fixture : 'Missing demo resource', { status: path === '/' ? 200 : 404, headers: { 'content-type': 'text/html;charset=utf-8' } });
   } });
   const session = await startBrowserSession(executable!);
@@ -39,6 +41,15 @@ test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, th
     for (let i = 0; i < 100 && !saved().includes('hosted'); i++) await Bun.sleep(100);
     expect(saved()).toContain('"login"');
     console.log('Saved sign-ins reach the hosted tab, and its own reach the core');
+    // The agent's tab is off screen, so its sized popup opens hidden; its page
+    // must still run and answer through `window.opener`.
+    const answer = await command({ kind: 'evaluate', expression: `new Promise((resolve, reject) => {
+      addEventListener('message', event => resolve(event.data), { once: true });
+      setTimeout(() => reject(new Error('the hidden popup never answered its opener')), 10000);
+      if (!open('/popup', 'agent-popup', 'width=420,height=320')) reject(new Error('window.open returned null'));
+    })` }, id);
+    expect(answer.value).toEqual({ popup: 'answered', at: '/popup' });
+    console.log('A hidden popup of an off-screen agent tab answered its opener');
     expect(JSON.stringify(await command({ kind: 'snapshot' }, id))).toContain('ATELIER BOITE');
     await command({ kind: 'preset', preset: 'iphone-15-pro' }, id);
     expect((await command({ kind: 'evaluate', expression: '[innerWidth,innerHeight]' }, id)).value).toEqual([393, 852]);

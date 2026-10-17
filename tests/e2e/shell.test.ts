@@ -307,7 +307,7 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     found = await waitForHealthyCore(ownDataDir);
     client = await connect(`http://127.0.0.1:${found.port}`, found.token);
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], accountIntegration: 'provider', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
+    const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
     ownPage = await BrowserPage.attach(port); await ownPage.waitFor(TAURI_READY);
     await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid=titlebar] .close')`);
     const started = client.next('turn.started', () => true, 10000);
@@ -573,7 +573,7 @@ afterAll(async () => {
   if (coreFile !== undefined) killProcessTree(coreFile.pid);
   if (dataDir !== '') await removeDirectory(dataDir);
   if (projectDir !== '') await removeDirectory(projectDir);
-}, 15_000);
+}, 30_000);
 
 shellTest(
   'the hidden shell starts a core of its own and reaches it',
@@ -888,14 +888,11 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
   try {
     await page?.click(testid('nav-settings'));
     await page?.click(testid('settings-tab-machines'));
-    if (await page?.evaluate(`!!document.querySelector('[data-testid=group-name]')`)) {
-      await page?.type(testid('group-name'), 'Home');
-      await page?.click(testid('group-create'));
-    }
-    await page?.waitFor(`document.querySelector('[data-testid=group-invite]')`);
-    await page?.click(testid('group-invite'));
-    await page?.waitFor(`document.querySelector('[data-testid=group-invite-code]')?.value.startsWith('boite-group:')`);
-    const invite = await page!.evaluate<string>(`document.querySelector('[data-testid=group-invite-code]').value`);
+    // Add a device starts a group on a machine in no group; the remote machine pastes its link, as a computer does.
+    await page?.click(testid('group-add-device'));
+    await page?.waitFor(`(document.querySelector('[data-testid=add-device]')?.dataset.link ?? '').includes('#join=')`);
+    const invite = await page!.evaluate<string>(`document.querySelector('[data-testid=add-device]').dataset.link`);
+    await page?.click(testid('add-device-close'));
     await remoteClient.call('group.join', { invite });
     await page?.waitFor(`document.querySelectorAll('[data-testid=machine-card]').length === 2`);
     await page?.click(testid('settings-back'));

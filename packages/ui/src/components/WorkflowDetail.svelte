@@ -1,16 +1,15 @@
 <script lang="ts">
-  import { ArrowLeft, RotateCcw } from '@lucide/svelte';
-  import { onDestroy } from 'svelte';
+  import { ArrowLeft, MessageSquare, RotateCcw } from '@lucide/svelte';
   import type { DelegationProfile, WorkflowNode, WorkflowRun } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { nodeTiming, routeOf, shown } from '../lib/workflow-view';
-  import AgentElapsed from './AgentElapsed.svelte';
-  import DelegationTranscript from './DelegationTranscript.svelte';
+  import Elapsed from './Elapsed.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
-  import WorkflowMark from './WorkflowMark.svelte';
+  import StatusMark from './StatusMark.svelte';
+  import { workflowTone } from '../lib/thread-state';
 
-  /** One step: where it sits in the plan, its executions, and the conversation of the one picked. */
+  /** One step: where it sits in the plan, its executions, and a way into the chat of the one picked. */
   let { store, run, node, profiles, onback }: { store: Store; run: WorkflowRun; node: WorkflowNode; profiles: DelegationProfile[]; onback: () => void } = $props();
 
   let picked = $state<string | null>(null);
@@ -33,28 +32,17 @@
     picked = null;
   });
 
-  // The picked execution's conversation streams in, the way a team member's does.
-  $effect(() => {
-    const threadId = instance?.threadId ?? null;
-    if (store.delegationSelectedAgentId !== threadId) void store.selectDelegatedAgent(threadId);
-  });
-  onDestroy(() => { void store.selectDelegatedAgent(null); });
-
-  async function openThread(threadId: string): Promise<void> {
-    await store.selectDelegatedAgent(null);
-    await store.open(threadId);
-  }
 </script>
 
 <article class="detail" data-testid="workflow-detail" data-node-id={node.id}>
   <header>
     <button type="button" class="ghost small icon" aria-label={strings.workflow.back} title={strings.workflow.back} data-testid="workflow-back" onclick={onback}><ArrowLeft size={15} strokeWidth={1.75} /></button>
     <div class="title">
-      <strong><WorkflowMark status={node.status} /><span class="ui-label">{node.title}</span></strong>
+      <strong><StatusMark {...workflowTone(node.status)} /><span class="ui-label">{node.title}</span></strong>
       <small>
         {strings.workflow.stepStatus[node.status]}
         {#if route}· <ProviderLogo providerId={route.providerId} size={12} /> {route.model || route.profile}{/if}
-        {#if timing.startedAt !== null}· <AgentElapsed startedAt={timing.startedAt} finishedAt={timing.finishedAt} active={timing.active} />{/if}
+        {#if timing.startedAt !== null}· <Elapsed startedAt={timing.startedAt} finishedAt={timing.finishedAt} active={timing.active} />{/if}
       </small>
     </div>
     {#if canRetry}
@@ -77,9 +65,9 @@
       <div class="instances" role="listbox" aria-label={strings.workflow.items}>
         {#each node.instances as inst (inst.key)}
           <button type="button" class="instance" class:chosen={inst.key === instance?.key} role="option" aria-selected={inst.key === instance?.key} data-testid="workflow-instance" onclick={() => (picked = inst.key)}>
-            <WorkflowMark status={inst.status} />
+            <StatusMark {...workflowTone(inst.status)} />
             <span class="label ui-label">{inst.label || inst.key}</span>
-            {#if inst.startedAt !== null}<span class="time"><AgentElapsed startedAt={inst.startedAt} finishedAt={inst.finishedAt} active={inst.status === 'running'} /></span>{/if}
+            {#if inst.startedAt !== null}<span class="time"><Elapsed startedAt={inst.startedAt} finishedAt={inst.finishedAt} active={inst.status === 'running'} /></span>{/if}
           </button>
         {/each}
       </div>
@@ -97,15 +85,7 @@
         <pre class="well mono" data-testid="workflow-output">{shown(instance.output)}</pre>
       {/if}
       {#if instance.threadId}
-        <div class="conversation-head">
-          <p class="section-label">{strings.workflow.conversation}</p>
-          <button type="button" class="quiet small" data-testid="workflow-open-thread" onclick={() => void openThread(instance.threadId!)}><span class="ui-label">{strings.workflow.openThread}</span></button>
-        </div>
-        {#if store.delegationThread?.id === instance.threadId}
-          <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>
-        {:else}
-          <p class="muted">{strings.delegation.loadingTranscript}</p>
-        {/if}
+        <button type="button" class="quiet open" data-testid="workflow-open-thread" data-preload-thread={instance.threadId} onclick={() => void store.open(instance.threadId!)}><MessageSquare size={14} strokeWidth={1.75} /><span class="ui-label">{strings.workflow.openThread}</span></button>
       {:else}
         <p class="muted">{strings.workflow.notStarted}</p>
         {#if instance.task}<p class="section-label">{strings.workflow.task}</p><pre class="well">{instance.task}</pre>{/if}
@@ -133,10 +113,7 @@
   .time { flex: none; color: var(--color-subtle); font-size: var(--text-xs); }
   .well { margin: 0; max-height: 220px; padding: 8px 10px; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: var(--text-sm); }
   .well.mono { font-family: var(--font-mono); font-size: 13px; }
-  .conversation-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  /* The conversation takes the height left under the step; a long one scrolls with the body. */
-  .transcript { flex: 1 0 auto; display: flex; min-height: 160px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
-  .transcript :global(.transcript-list) { max-height: none; overflow: visible; }
+  .open { align-self: flex-start; margin-top: 6px; gap: 6px; }
   .muted { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .error { margin: 0; color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
 </style>

@@ -60,6 +60,31 @@
   }
 
   const images = $derived(imagesOf(message));
+  /**
+   * The pictures keep to one row of thumbnails: the ones that wrap past it are
+   * clipped, and a "+N" over the last one in the row unfolds the rest. Every
+   * thumbnail stays laid out, so the bubble is as wide as all of them would be
+   * and what fits never depends on what is shown.
+   */
+  let row = $state<HTMLDivElement>();
+  let rowSize = $state<DOMRectReadOnly>();
+  let unfolded = $state(false);
+  let fits = $state(Infinity);
+  let cover = $state<{ left: number; width: number } | null>(null);
+  $effect(() => {
+    void rowSize?.width;
+    void images.length;
+    if (!row || unfolded) { fits = Infinity; cover = null; return; }
+    const tiles = Array.from(row.querySelectorAll<HTMLElement>(':scope > .shot'));
+    const top = tiles[0]?.offsetTop;
+    const count = tiles.filter(tile => tile.offsetTop === top).length;
+    const last = tiles[count - 1];
+    fits = count;
+    cover = count < tiles.length && last ? { left: last.offsetLeft, width: last.offsetWidth } : null;
+  });
+  // The tile under the +N is pointer-blocked and its focus ring would be hidden:
+  // it is inert like the wrapped ones, and counted with them.
+  let hidden = $derived(cover ? images.length - fits + 1 : 0);
   /** The timeline's viewer; outside one (a test, a preview) the message shows its own. */
   const host = viewerHost();
   let viewing = $state<Gallery | null>(null);
@@ -121,7 +146,7 @@
       <span class="agent-source">
         <span class="agent-label">{strings.chat.promptFromAgent}</span>
         {#if starterPresent}
-          <button type="button" class="agent-link" data-testid="spawn-marker-open" title={strings.chat.openLinkedThread} onclick={() => void store.open(startedBy.threadId)}>{startedBy.title}</button>
+          <button type="button" class="agent-link" data-testid="spawn-marker-open" data-preload-thread={startedBy.threadId} title={strings.chat.openLinkedThread} onclick={() => void store.open(startedBy.threadId)}>{startedBy.title}</button>
         {:else}
           <strong>{startedBy.title}</strong>
         {/if}
@@ -145,7 +170,7 @@
     {/if}
   {/each}
   {#if images.length > 0}
-    <div class="images">
+    <div class="images" class:unfolded bind:this={row} bind:contentRect={rowSize} style:--thumb="{THUMB_HEIGHT}px" data-testid="message-images">
       {#each images as { image, index }, at (at)}
         <!-- One box from the blur to the light copy to the original: nothing changes size. -->
         <button
@@ -153,13 +178,26 @@
           class="shot"
           title={image.alt ?? strings.chat.imagePart}
           aria-busy={opening === index}
+          inert={at >= (cover ? fits - 1 : fits)}
           use:media={() => viewed(image, at)}
           onclick={(event) => void open(event.currentTarget, image, index, at)}
           data-testid="image-open"
         >
-          <ChatImage {store} threadId={message.threadId} messageId={message.id} partIndex={index} {image} maxHeight={THUMB_HEIGHT} />
+          <ChatImage {store} threadId={message.threadId} messageId={message.id} partIndex={index} {image} tile={THUMB_HEIGHT} />
         </button>
       {/each}
+      {#if cover}
+        <button
+          type="button"
+          class="more"
+          style:left="{cover.left}px"
+          style:width="{cover.width}px"
+          aria-label={fill(strings.composer.attachMore, { count: String(hidden) })}
+          title={fill(strings.composer.attachMore, { count: String(hidden) })}
+          onclick={() => unfolded = true}
+          data-testid="message-images-more"
+        >+{hidden}</button>
+      {/if}
     </div>
   {/if}
 </div>
@@ -224,20 +262,23 @@
   .file-attachment > span > span { overflow-wrap: anywhere; font-size: var(--text-sm); }
   .file-attachment small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .images {
+    position: relative;
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    max-height: calc(var(--thumb) + 2px);
+    overflow: hidden;
     margin-top: 8px;
   }
 
-  .user-text + .images {
-    margin-top: 8px;
+  .images.unfolded {
+    max-height: none;
   }
 
   .shot {
+    flex: none;
     height: auto;
     width: auto;
-    max-width: 100%;
     padding: 0;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
@@ -249,6 +290,24 @@
   .shot:hover:not(:disabled) {
     background: var(--color-surface);
     border-color: var(--color-edge);
+  }
+
+  /* Over the row's last thumbnail, which still shows through. */
+  .more {
+    position: absolute;
+    top: 0;
+    height: calc(var(--thumb) + 2px);
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: color-mix(in oklab, var(--color-background) 72%, transparent);
+    color: var(--color-foreground);
+    font-size: var(--text-lg);
+    font-weight: 600;
+  }
+
+  .more:hover {
+    background: color-mix(in oklab, var(--color-background) 58%, transparent);
   }
 
   .shot[aria-busy='true'] {

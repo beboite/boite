@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
-import { PROTOCOL_VERSION, RpcErrorCode, type Thread, type ThreadStatus } from '@boite/contracts';
+import { INITIAL_PAGE_BYTES, PROTOCOL_VERSION, RpcErrorCode, TRACE_LIMIT, type ProcessRecord, type Thread, type ThreadStatus } from '@boite/contracts';
 import { RpcFailure, WsClient, droppedFailure, type SocketLike } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
@@ -425,6 +425,30 @@ test('a delayed thread list cannot undo a newer pin event', async ({ store, clie
   } finally { gate.resolve(); await loading; spy.mockRestore(); }
 });
 
+test('a load sample during a thread list keeps the list row and adds only its load', async ({ store, client }) => {
+  const call = client.call.bind(client);
+  const gate = deferred();
+  const held = store.threads.find(row => row.id === 't-trace')!;
+  Object.assign(held, { status: 'running', title: 'old title' });
+  let asked = false;
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const value = await call(method, params);
+    if (method !== 'threads.list') return value;
+    asked = true; await gate.promise;
+    return (value as typeof store.threads).map(row => row.id === 't-trace' ? { ...row, status: 'idle', title: 'new title' } : row) as never;
+  });
+  const loading = store.reload();
+  try {
+    await vi.waitFor(() => expect(asked).toBe(true));
+    client.sampleLoad('t-trace', 3);
+    expect(held.load?.processes).toBe(3);
+    gate.resolve();
+    await loading;
+    const row = store.threads.find(row => row.id === 't-trace')!;
+    expect({ status: row.status, title: row.title, processes: row.load?.processes }).toEqual({ status: 'idle', title: 'new title', processes: 3 });
+  } finally { gate.resolve(); await loading; spy.mockRestore(); }
+});
+
 test('a secondary login read cannot hold an accepted prompt behind reload', async ({ store, client }) => {
   await store.open('t-trace');
   const call = client.call.bind(client);
@@ -663,6 +687,39 @@ test.for(['return-to-thread', 'newer-read'])('trace ignores an older response af
   } finally { released.resolve(); spy.mockRestore(); }
 });
 
+test('process events wait for the trace surface, which keeps the latest the core would return', async ({ store, client }) => {
+  await store.open('t-trace');
+  const record = (pid: number, exitedAt: number | null = null): ProcessRecord => ({
+    pid, parentPid: null, threadId: 't-trace', exe: 'bash.exe', commandLine: null, startedAt: pid, exitedAt, exitCode: exitedAt === null ? null : 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null,
+  });
+  // An agent's shell loop: hundreds of processes a minute, and no surface drawing them.
+  const before = store.trace;
+  for (let pid = 1; pid <= 300; pid += 1) { client.traceProcess(record(pid)); client.traceProcess(record(pid, pid + 1)); }
+  expect(store.trace).toBe(before);
+  store.traceWatched = true;
+  try {
+    for (let pid = 1; pid <= TRACE_LIMIT + 50; pid += 1) client.traceProcess(record(pid));
+    client.traceProcess(record(TRACE_LIMIT + 50, 999));
+    expect(store.trace).toHaveLength(TRACE_LIMIT);
+    expect(store.trace[0]).toMatchObject({ pid: TRACE_LIMIT + 50, exitedAt: 999 });
+    expect(store.trace.at(-1)?.pid).toBe(51);
+    // Events that land while the core's list is on its way stay ahead of it, within the same bound.
+    const gate = deferred<void>(), call = client.call.bind(client);
+    const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+      if (method !== 'trace.get') return call(method, params);
+      await gate.promise;
+      return Array.from({ length: TRACE_LIMIT }, (_, at) => record(1000 + at)) as never;
+    });
+    try {
+      const reading = store.refreshTrace();
+      for (let pid = 2000; pid < 2000 + TRACE_LIMIT; pid += 1) client.traceProcess(record(pid));
+      gate.resolve(); await reading;
+      expect(store.trace).toHaveLength(TRACE_LIMIT);
+      expect(store.trace[0]?.pid).toBe(2000 + TRACE_LIMIT - 1);
+    } finally { gate.resolve(); spy.mockRestore(); }
+  } finally { store.traceWatched = false; }
+});
+
 test('an older page cannot release a newer thread paging guard or duplicate its cursor request', async () => {
   const client = new FakeClient({ delayMs: 0, long: true }), store = new Store(); store.attach(client); await store.connect();
   const second = await client.call('threads.fork', { threadId: 't-long', messageId: 'm-long-399' }); await store.open('t-long');
@@ -745,7 +802,8 @@ test('a later navigation wins while the previous agent subscription is being rel
   const real = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
     if (method === 'threads.unsubscribe' && params.threadId === 't-team-running') {
-      return new Promise(resolve => { release = () => { void real(method as never, params as never).then(resolve); }; });
+      // Nothing waits on this unsubscribe now: a close may drop it, and the store's catch must see that.
+      return new Promise((resolve, reject) => { release = () => { real(method as never, params as never).then(resolve, reject); }; });
     }
     return real(method as never, params as never);
   }) as typeof client.call);
@@ -790,7 +848,8 @@ test('a reconnect catches up the agent transcript and the team statuses the gap 
   await waitFor(() => ((store.delegationThread?.messages.at(-1)?.parts[0] as { text?: string } | undefined)?.text === full ? true : undefined));
   expect(store.delegationSelectedAgentId).toBe('t-team-running');
   expect(store.delegationThread?.messages.map((message) => message.id)).toEqual(['m-t-team-running-1', 'm-t-team-running-2']);
-  expect(called).toHaveBeenCalledWith('threads.get', { threadId: 't-team-running', after: 'm-t-team-running-1' });
+  // Light like the thread's own pages: the transcript draws a call's name and status, never its output.
+  expect(called).toHaveBeenCalledWith('threads.get', expect.objectContaining({ threadId: 't-team-running', after: 'm-t-team-running-1', maxBytes: INITIAL_PAGE_BYTES, compactTools: true }));
 });
 
 test('starting a draft cancels a pending child subscription even without an open subscription', async ({ createStore }) => {
@@ -909,7 +968,7 @@ test('launching from a child refreshes its team and returns the sibling without 
   expect(agent).not.toBeNull();
   expect(agent?.thread.parentThreadId).toBe('t-trace');
   expect(store.openThread?.id).toBe('t-team-done');
-  expect(store.delegation?.agents).toHaveLength(3);
+  expect(store.delegation?.agents).toHaveLength(5);
   expect(store.delegation?.agents.some(entry => entry.thread.id === agent?.thread.id)).toBe(true);
   const call = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation((async (method, params) => {
@@ -972,7 +1031,7 @@ test('uninstalled setup starts without account-dependent demo state', async ({ c
   expect(await client.call('scheduler.get', {})).toMatchObject({ running: [], queued: [] });
   // No folder yet: the app lands on a draft in the drafts, which nothing has made.
   expect(store.projects).toEqual([]);
-  expect(store.draft).toEqual({ projectId: null, worktree: false });
+  expect(store.draft).toEqual({ projectId: null, worktree: false, id: expect.any(String), createdAt: expect.any(Number) });
   expect((await client.call('sessions.list', {})).length).toBeGreaterThan(0);
 });
 
@@ -1116,8 +1175,8 @@ test.for(['input', 'inputText', 'output', 'documents'])('reading cache excludes 
   await store.open('t-scheduler');
   await store.open('t-bench');
   const cached = store.openThread!.messages.find(message => message.id === 'cached-only');
-  // What a page would defer stays a preview in the cache; a streaming input has nothing to fetch back.
-  if (field === 'output') expect(cached?.parts[0]).toMatchObject({ outputDeferred: true, output: large.slice(0, 1024) });
+  // What a page would defer stays deferred in the cache, a successful output with no preview; a streaming input has nothing to fetch back.
+  if (field === 'output') expect(cached?.parts[0]).toMatchObject({ outputDeferred: true, output: '' });
   else if (field === 'input') expect(cached?.parts[0]).toMatchObject({ inputDeferred: true, input: { nested: { text: large.slice(0, 1024) } } });
   else if (field === 'documents') expect(cached?.parts[0]).toMatchObject({ documentsDeferred: true, documents: [{ kind: 'markdown', text: '' }] });
   else expect(cached).toBeUndefined();
@@ -1219,6 +1278,51 @@ describe('Store', () => {
       await client.settled();
       expect(sent).toHaveLength(1);
     } finally {
+      focused.mockRestore();
+      setNotificationSender(null);
+    }
+  });
+
+  test('an asynchronous question notifies while its conversation is open and focused', async ({ store, client }) => {
+    const sent: Toast[] = [];
+    setNotificationSender(async toast => { sent.push(toast); });
+    const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    try {
+      await store.open('t-scheduler');
+      const text = 'Subagents are paused. Should I continue myself?';
+      const { questionId } = await client.call('questions.ask', { threadId: 't-scheduler', text, options: ['Continue'] });
+      expect(store.pendingQuestions.some(request => request.id === questionId && request.async)).toBe(true);
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      expect(sent[0]).toMatchObject({ threadId: 't-scheduler', body: text });
+      await store.setNotifications(false);
+      await client.call('questions.ask', { threadId: 't-scheduler', text: 'Another question', options: [] });
+      expect(sent).toHaveLength(1);
+    } finally {
+      focused.mockRestore();
+      setNotificationSender(null);
+    }
+  });
+
+  test('a focused asynchronous question uses push alone on a subscribed PWA', async ({ store, client }) => {
+    const sent: Toast[] = [];
+    setNotificationSender(async toast => { sent.push(toast); });
+    const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const subscription = vi.fn().mockResolvedValue({ endpoint: 'https://web.push.apple.com/test' });
+    vi.stubGlobal('Notification', Object.assign(vi.fn(), { permission: 'granted' }));
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistration: vi.fn().mockResolvedValue({ pushManager: { getSubscription: subscription } }) } });
+    localStorage.setItem('boite.web-push', 'on');
+    try {
+      store.endpointUrl = location.origin;
+      await store.open('t-scheduler');
+      const { questionId } = await client.call('questions.ask', { threadId: 't-scheduler', text: 'Continue without subagents?', options: [] });
+      expect(store.pendingQuestions.some(request => request.id === questionId)).toBe(true);
+      await vi.waitFor(() => expect(subscription).toHaveBeenCalledOnce());
+      // Drain the delivery microtasks after the subscription check.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(sent).toHaveLength(0);
+    } finally {
+      localStorage.removeItem('boite.web-push');
+      vi.unstubAllGlobals();
       focused.mockRestore();
       setNotificationSender(null);
     }
@@ -1460,6 +1564,48 @@ describe('Store', () => {
     expect(probed.slice(0, 3)).toEqual(['default', 'anthropic/claude-sonnet-5', 'openai/gpt-5-codex']);
     // A provider that is not ACP keeps the descriptor's list either way.
     expect(store.modelsOf('echo', 'a-echo').map((m) => m.id)).toEqual(['echo-1']);
+  });
+
+  test('a long thread is placed whole on open, and any stretch of it fills by position', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0, long: true });
+    store.attach(client);
+    await store.connect();
+    await store.open('t-long');
+    const ids = () => (store.openThread?.messages ?? []).map((message) => Number(message.id.replace('m-long-', '')));
+    const placement = () => store.messagePlacement('t-long', store.openThread!.messages);
+
+    // The first forty, and the 360 above them sized without being read.
+    expect(placement().first).toBe(360);
+    // Straight to the top, without the pages in between.
+    expect(await store.loadRange(0, 120)).toBe(120);
+    expect(ids().slice(0, 2)).toEqual([0, 1]);
+    expect(store.messagesBefore).toBeNull();
+    expect([...placement().gaps]).toEqual([['m-long-360', { from: 120, count: 240 }]]);
+    // A stretch in the middle splits the gap in two.
+    expect(await store.loadRange(200, 60)).toBe(60);
+    expect([...placement().gaps]).toEqual([['m-long-200', { from: 120, count: 80 }], ['m-long-360', { from: 260, count: 100 }]]);
+    // The cursor still works under it: a page above the first message held lands where it belongs.
+    await store.loadRange(120, 80);
+    await store.loadRange(260, 100);
+    expect(ids()).toEqual(Array.from({ length: 400 }, (_, index) => index));
+    expect(placement().gaps.size).toBe(0);
+    // In journal order, the latest turn still last.
+    expect(store.openThread!.turns.at(-1)?.queuedAt).toBe(Math.max(...store.openThread!.turns.map((turn) => turn.queuedAt)));
+    expect(store.loadingRange).toBe(false);
+  });
+
+  test('a rewind elsewhere of a message inside a missing stretch reads the thread again', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0, long: true });
+    store.attach(client);
+    await store.connect();
+    await store.open('t-long');
+    await store.loadRange(0, 40);
+    expect(store.messagesBefore).toBeNull();
+    // Another client rewinds m-long-100, inside the gap between 40 and 360: what is held after it
+    // can no longer be vouched for, so the thread is read again rather than kept with a hole.
+    await client.call('threads.rewind', { threadId: 't-long', messageId: 'm-long-100' });
+    await vi.waitFor(() => expect(store.openThread?.messages.at(-1)?.id).toBe('m-long-99'));
+    expect(store.openThread?.messages.at(0)?.id).toBe('m-long-60');
   });
 
   test('a long thread opens on its last page and loadOlder walks back in order', async ({ createStore }) => {
@@ -2000,38 +2146,53 @@ test('account lifecycle newer cancellation beats a stale reload snapshot', async
   }
 });
 
-test('closing a pairing link discards a pending replacement from the same core', async ({ store, client }) => {
-  await store.mintPairing();
+test('Add a device on a core older than the method says to update that machine, not "unknown method"', async ({ store, client }) => {
+  const call = client.call.bind(client);
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'group.addDevice') throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method group.addDevice' });
+    return call(method, params);
+  });
+  try {
+    await store.addDevice();
+    expect(store.deviceInvite).toBeNull();
+    expect(store.error).not.toContain('unknown method');
+    const hostname = store.core?.hostname;
+    expect(store.error).toBe(hostname ? strings.errors.olderCore.replace('{machine}', hostname) : strings.errors.olderCoreHere);
+  } finally { spy.mockRestore(); }
+});
+
+test('closing Add a device discards a pending replacement from the same core', async ({ store, client }) => {
+  await store.addDevice();
   const call = client.call.bind(client);
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
     const result = await call(method, params);
-    if (method === 'pairing.grant') await gate;
+    if (method === 'group.addDevice') await gate;
     return result;
   });
   try {
-    const pending = store.mintPairing();
-    store.closePairing();
+    const pending = store.addDevice();
+    store.closeDeviceInvite();
     release();
     await pending;
-    expect(store.pairing).toBeNull();
+    expect(store.deviceInvite).toBeNull();
   } finally { release(); spy.mockRestore(); }
 });
 
-test('replacing a machine endpoint clears its previous pairing link before connecting', async ({ store, client }) => {
-  await store.mintPairing();
-  expect(store.pairing).not.toBeNull();
+test('replacing a machine endpoint clears its previous Add a device link before connecting', async ({ store, client }) => {
+  await store.addDevice();
+  expect(store.deviceInvite).not.toBeNull();
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const connect = vi.spyOn(store, 'connect').mockReturnValue(gate);
   let connecting: Promise<void> | undefined;
   try {
     connecting = store.connectEndpoint({ url: 'https://replacement.test', token: 'fixture-token', paired: true });
-    expect(store.pairing).toBeNull();
+    expect(store.deviceInvite).toBeNull();
     release();
     await connecting;
-    expect(store.pairing).toBeNull();
+    expect(store.deviceInvite).toBeNull();
   } finally {
     release();
     await connecting;

@@ -22,6 +22,11 @@ The client saves the exchanged session key and discards the grant
 connects remembered machines. A fresh local core without threads yields to a
 remembered core on the same computer that already has them.
 
+Repairing the primary connection saves its accepted device credential or session
+key before reporting the handshake as ready. Draft storage and list loading may
+still be pending; reloading then needs no new pairing link. Connecting another
+machine saves its credentials without replacing the primary startup endpoint.
+
 A machine that is off does not hold the others back. When the machine the
 window opens on has not said hello after two seconds, the other remembered
 machines are connected without it, and the window opens on the first that
@@ -61,13 +66,17 @@ removed during startup. Paired remote connections are retained. The sidebar
 counter and project picker use the workspace's connected machine list.
 
 The machine list shows connection errors and lets you reopen a host or remove
-it. Remove machine asks first, then closes that host's socket and forgets its
-saved address and key, so connecting it again needs a new pairing link. It does
-not stop agents, remove files or revoke the key on the remote host. Use the remote
-core's paired-device list to revoke it. The primary core stays attached.
+it. Remove machine asks first, then closes that host's socket and forgets it on
+this device. It does not stop agents, remove files or take this device out of
+the group: **Remove from the group** on the device's row does that, on every
+machine. The primary core stays attached.
 
 If a machine goes offline, its known rows remain visible and its machine badge
-shows the disconnected state. Other hosts remain usable. WebSocket reconnection
+shows the disconnected state. A turn those rows last saw at work is only a last
+known state: the row reads "Unreachable" with that state in its tooltip instead
+of spinning and counting time, a folded project drops its summary mark, its
+working counter loses its colour, and the Threads count leaves the machine out.
+Other hosts remain usable. WebSocket reconnection
 reloads the host's project and thread summaries. An initial connection whose
 handshake does not finish within twelve seconds can be retried from Machines.
 Once the machine has said hello, loading its lists is waited for however long
@@ -76,7 +85,9 @@ it takes on a slow link; the connection is never dropped for it.
 The client detects silent remote sockets (`packages/ui/src/lib/client.ts`).
 On a remote host, 25 seconds without any
 frame while no call waits for its answer sends a `hello`, which the core
-answers on an open connection with its info and nothing else. If no frame of
+answers on an open connection with its info and nothing else. That `hello`
+carries no token and no device signature, since the core reads none of its
+params once the socket is authenticated. If no frame of
 any kind arrives within 15 seconds, the socket is replaced and the calls it
 carried fail with "connection lost; check the conversation before resending".
 While a call waits, silence may be its answer still downloading, one frame of
@@ -115,12 +126,12 @@ PC's own core, or a machine whose last known threads still had a turn queued,
 running or waiting when the connection went.
 
 A key a remote core refuses is not retried: the machine shows as closed with
-the reason. A page opened on its own core with no key says the device holds
-none. Click the affected machine's **Pair again** control and paste a new
-pairing link from that machine. This replaces the key of a listed machine that
-is not connected, the page's own included, which cannot be removed. Device-only
-clients can also paste the link under **Add a machine**. Only a connected
-machine is refused as already connected.
+the reason. A page opened on its own core with no key says the device is not in
+its group yet. A phone then scans the QR code of **Add a device** from any
+machine of the group, or pastes its link ([phone](phone.md#adding-a-phone)); a
+computer's browser pastes the copied link under **Add a machine**. Both are the affected machine's
+**Add again** control too. Only a connected machine is refused as already
+connected.
 
 The link decides which machine is reached; the name only labels it. Once a
 link is pasted the form names the host it reaches and the listed machine at
@@ -133,21 +144,26 @@ when renaming.
 Settings, Machines and updates shows each machine on one row: its icon, its
 name, whether it is connected and one word about its updates. The row's chevron
 opens its details: its address, Boite's version on that machine with its
-update, its agents with theirs and the automatic update switch, Settings for
+update (on another Windows PC, its desktop app as its window reports it,
+[updated from here](updates.md#the-desktop-app-of-another-pc)), its agents
+with theirs and the automatic update switch, Settings for
 this machine and Remove machine. A machine alone on its list shows its details
 without a click. Before this, a machine appeared twice, once as an updates
 card listing every agent version and once as a connection.
 
 One Check for updates button at the top reads everything again: the desktop
 app, Boite on every machine connected with full control, and the agents there.
+Update all beside it, shown while something can update, installs all of it
+([update everything](updates.md#update-everything)).
 The row's word is the most pressing of what it finds: a failed update, then
 one in progress, then one available, then a check in progress, then Up to
 date. A row says nothing until something has answered.
 
-Phones and other devices has one button, Add a phone, which draws the QR code.
-Reachable on the local network and Full control sit under More options. Phone
-app keeps the Tailscale HTTPS switch in view and folds the address of a
-reverse proxy of one's own under Use another HTTPS address.
+The group card lists the machines, then the phones and browsers of the group,
+and has one button, **Add a device**, which draws the QR code and offers the
+link ([groups](groups.md#using-it)). Phone app keeps the Tailscale HTTPS switch and
+Reachable on the local network in view, and folds the address of a reverse
+proxy of one's own under Use another HTTPS address.
 
 ## Agent links
 
@@ -209,8 +225,11 @@ behavior are documented there.
 ## Browser and phone connections
 
 The desktop shell is an allowed origin on every core. A browser or phone has
-the origin of the core serving its page. On each additional machine, add that
-exact origin to Machines, Allowed browser origins. Origins contain a scheme,
+the origin of the machine serving its page, which every machine of that
+machine's [group](groups.md#devices) accepts on its own: the addresses it gives
+and the origins its page was served at. A page served by something outside the
+group needs its exact origin under Advanced, Allowed browser origins, on each
+machine it opens a socket on. Origins contain a scheme,
 host and optional port, with no wildcard. A pasted address keeps only its
 origin: the core drops a trailing `/` or a path, since the browser's `Origin`
 header never carries one, and a line given twice is kept once. Save the list on
@@ -218,22 +237,21 @@ that core.
 Removing an origin blocks new connections from it; existing authenticated
 connections must be revoked separately if they should lose access immediately.
 
-The machines of a [group](groups.md) allow each other's addresses as origins,
-so this list is only needed outside one.
-
 The origin permission does not replace authentication. Every socket still needs
-its own valid token or one-time grant. HTTPS pages need secure WebSocket
-endpoints. [Phone setup](phone.md#https-and-installation)
-owns HTTPS/pairing setup; [server deployment](server.md) owns host reachability.
+its own credential: a device signature, a token, a one-time grant or a group
+ticket. HTTPS pages
+need secure WebSocket endpoints. [Phone setup](phone.md#https-and-installation)
+owns HTTPS and adding a phone; [server deployment](server.md) owns host
+reachability.
 
 ## Two views
 
-The sidebar's Display options menu (the sliders icon) chooses between Projects
+The sidebar's Display options panel (the sliders icon) chooses between Projects
 and Recent, above its grouping switches. Projects is the default. Projects
 appear by recent user activity, using the latest accepted user message among
 their visible threads, or creation time when no message exists. Assistant
-output and title changes leave that order alone. The order button under the
-switch toggles to Custom order; then drag project headers to rearrange them,
+output and title changes leave that order alone. The panel's Project order
+choice switches to Custom; then drag project headers to rearrange them,
 with the mouse or, on a phone, after holding a header still for a moment; a
 line shows where the project lands and Escape cancels. Their menus also offer Move project up and Move
 project down, including on a phone. Switching back to recent activity keeps
@@ -265,10 +283,15 @@ metadata comes from the execution machine's `gh pr list`, using the branch
 associated with the thread. A shared checkout's current branch alone does not
 identify a thread's PR. Non-repositories and detached checkouts have no PR.
 Lookups share the common Git directory across worktrees: `git remote -v` is
-cached for five minutes and the newest 200 PRs for one minute, errors included.
+cached for five minutes and the newest 200 PRs for 15 seconds; a failed read is
+kept 15 seconds. The merged-PR archive reads the same two caches.
 A missing branch gets its own lookup only when that list was full. At most two
 commands run at once, each with a ten-second deadline through `procs` as
-`pull-request:<threadId>`. Folded projects defer lookups until opened.
+`pull-request:<threadId>`. Folded projects defer lookups until opened. A client
+asks again every 15 seconds while the thread works and once a minute at rest,
+not while its page is hidden. These rounds skip a merged PR; a status change, a
+remount, a reconnect and Refresh PR still ask, so a newer PR on the same branch
+replaces it.
 
 When a machine drops, its cards stay listed, greyed, and still open. The client
 asks nothing of the core then: it shows the timeline it last read for that
@@ -293,6 +316,14 @@ meanwhile is put back on the written one first; a choice for another agent or
 account is ignored. A new thread needs the core, so a
 draft keeps its text until the machine returns. A machine offline since the app
 started has no cards to open: the client keeps no copy of the thread list.
+
+Archiving or restoring a project of a machine that is offline still works: the
+project moves at once and the choice is kept on this device, per core, in
+localStorage (`boite.pendingArchive.v1`). The machine's next project list is
+shown with those choices laid over it, then each is sent with
+`projects.archive`. A call lost with the connection waits for the next
+reconnect; a refused one, or a project the machine no longer lists, drops the
+choice (`store/projects.svelte.ts`).
 
 A lookup the user did not ask for fails quietly, and once `gh` is missing or
 signed out the core stops starting it. The thread menu's refresh reads the

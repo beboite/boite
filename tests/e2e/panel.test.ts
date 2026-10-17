@@ -34,7 +34,7 @@ beforeAll(async () => {
   // A cold vite and a cold Chromium on a loaded runner: the budget readability.test.ts gives the same start.
 }, 90_000);
 
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('the browser follows layout changes without measuring its slot on every idle frame', async () => {
   await onStore(`store.panel.closeAll(); store.panel.open('browser');`);
@@ -90,7 +90,10 @@ test('the browser follows layout changes without measuring its slot on every idl
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   await phone(false);
   await onStore(`store.panel.closeAll();`);
-});
+  // Sixty idle frames alone take a second, and the file's first test loads the
+  // browser surface cold: 2.3 to 3.1 s on the Windows runner when it passed, past
+  // the 5 s default once (2026-10-11), and up to 4.9 s on a loaded workstation.
+}, 60_000);
 
 test('a browser keeps its live page and form across conversation switches and closes explicitly at both widths', async () => {
   for (const narrow of [false, true]) {

@@ -14,7 +14,9 @@ async function newMobileThread() {
 }
 async function capture(name: string) {
   const settled = await page.evaluate<{ timedOut: boolean; fonts: FontFaceSetLoadStatus; animations: Array<{ playState: AnimationPlayState; currentTime: number | null; endTime: number }> }>(`(async () => {
-    const animations = document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity);
+    // Skipped content (the chat behind the list) advances no animation until it shows again: nothing of it is on screen.
+    const animations = document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity
+      && (!(animation.effect instanceof KeyframeEffect) || animation.effect.target?.checkVisibility?.({ contentVisibilityAuto: true }) !== false));
     const ready = Promise.all([document.fonts.ready, ...animations.map(animation => animation.finished.catch(() => {}))]);
     return Promise.race([
       ready.then(() => ({ timedOut: false, fonts: document.fonts.status, animations: [] })),
@@ -39,7 +41,7 @@ beforeAll(async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor(`document.querySelector('[data-testid=mobile-menu]')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('phone settings expose owner protection and keep paired devices out of remote administration', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
@@ -56,7 +58,7 @@ test('phone settings expose owner protection and keep paired devices out of remo
   await capture('phone-settings-home-dark.png');
   await page.click('[data-testid=mobile-settings-phone]');
   await page.waitFor(`document.querySelector('[data-testid=phone-settings]')`);
-  expect(await page.evaluate(`document.querySelector('[data-testid=phone-public-url]') === null && document.querySelector('[data-testid=pairing-card]') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=phone-public-url]') === null && document.querySelector('[data-testid=group-add-device]') === null`)).toBe(true);
   await capture('phone-settings-notifications.png');
   await page.evaluate('history.back()');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
@@ -108,8 +110,15 @@ test('phone navigates conversations, activity and settings without a sidebar', a
 test('draft survives navigation and the light phone layout fits landscape', async () => {
   await page.evaluate(`(() => { const t = document.querySelector('[data-testid=composer-input]'); t.value = 'Keep this draft'; t.dispatchEvent(new Event('input', {bubbles:true})); })()`);
   await navigateMobile('mobile-conversations');
+  // A new thread opens a draft of its own; the written one waits in the list and comes back from its row.
+  const draftRow = `[...document.querySelectorAll('[data-testid=draft-row]')].find(row => row.title === 'Keep this draft')`;
+  await page.waitFor(`!!${draftRow}`);
   await page.click('[data-testid=mobile-header] [data-testid=mobile-new]');
-  expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('Keep this draft');
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('');
+  await navigateMobile('mobile-conversations');
+  await page.waitFor(`!!${draftRow}`);
+  await page.evaluate(`${draftRow}.click()`);
+  await page.waitFor(`document.querySelector('[data-testid=composer-input]')?.value === 'Keep this draft'`);
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 700, height: 390, deviceScaleFactor: 1, mobile: true });
   await capture('mobile-landscape.png');
@@ -216,7 +225,7 @@ test('leaving a long conversation right after a scroll returns to that scroll', 
   try { await page.navigate(`${origin}/?fake=1&open=recent&long=1`); }
   finally { await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }); }
   await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('Four hundred')`);
-  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.settleAnimations();
   await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
   await page.evaluate(`(() => { globalThis.__holdMeasurements = true; const t=document.querySelector('[data-testid=timeline]'); t.scrollTop = t.scrollHeight - t.clientHeight - 1200; t.dispatchEvent(new Event('scroll')); })()`);
   await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');

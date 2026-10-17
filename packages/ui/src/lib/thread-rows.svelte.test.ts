@@ -122,3 +122,33 @@ test('a list prunes only its own machine layouts, never the thread on screen', (
   expect(bare('t-gone')).toBe(true);
   expect(bare(key('http://a.test', 't-gone'))).toBe(false);
 });
+
+test('a load tick that changes nothing leaves the open thread and its fields untouched', async () => {
+  const { store, client } = await ready();
+  try {
+    const id = store.threadsOf('p-boite')[0]!.id;
+    await store.open(id);
+    const open = store.openThread!;
+    let loads = 0;
+    let contexts = 0;
+    const stop = $effect.root(() => {
+      $effect(() => { void open.load; loads++; });
+      $effect(() => { void open.context; contexts++; });
+    });
+    flushSync();
+    client.sampleLoad(id, 3);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    const load = open.load;
+    expect(load?.processes).toBe(3);
+    client.sampleLoad(id, 3);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    expect(open.load).toBe(load);
+    expect([loads, contexts]).toEqual([2, 1]);
+    stop();
+  } finally {
+    store.detach();
+    client.close();
+  }
+});

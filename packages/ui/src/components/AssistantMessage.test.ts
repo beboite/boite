@@ -1,7 +1,9 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import type { Message } from '@boite/contracts';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
+import { workspace } from '../lib/workspace.svelte';
 import AssistantMessage from './AssistantMessage.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
@@ -32,6 +34,40 @@ test('live paragraphs update without rebuilding completed prose when tools and r
     flushSync();
     expect(document.querySelectorAll('[data-testid=paragraph]')).toHaveLength(2);
     expect(document.querySelector('[data-testid=paragraph]')).toBe(first);
+  } finally { store.detach(); client.close(); }
+});
+
+test('a line naming a page the turn published cuts the answer there, without drawing again what is above it', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client);
+  try {
+    await store.connect(); await store.open('t-trace');
+    const message = store.openThread!.messages.at(-1)!;
+    const view: Message = { id: 'm-orbit', threadId: message.threadId, turnId: message.turnId, role: 'assistant', state: 'complete', createdAt: message.createdAt, parts: [
+      { type: 'artifact', id: 'a-orbit', name: 'orbit.html', mimeType: 'text/html', bytes: 10, view: { title: 'Orbit', height: 300, source: '.boite/views/orbit.html' } },
+    ] };
+    message.state = 'streaming';
+    message.parts = [{ type: 'text', text: 'The orbit first.\n\n![Orbit](.boite/views/orbit.html)' }];
+    mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: message.threadId, message, signedOut: null, showModel: false, views: [view] } });
+    flushSync();
+    const order = () => Array.from(document.querySelectorAll('[data-testid=text-run], [data-testid=inline-view], [data-testid=chat-file]')).map(node => node.getAttribute('data-testid') === 'text-run' ? 'text' : 'page');
+    // The line being written is not shown as a raw link: the page takes its place once the line is complete.
+    expect(document.querySelector('[data-testid=paragraph-pending]')).toBeNull();
+    expect(order()).toEqual(['text']);
+    const first = document.querySelector('[data-testid=paragraph]');
+    if (message.parts[0]?.type !== 'text') throw new Error('missing text');
+    message.parts[0].text += '\n\nThen the bars.';
+    flushSync();
+    expect(order()).toEqual(['text', 'page', 'text']);
+    expect(document.querySelector('[data-testid=paragraph]')).toBe(first);
+    expect(document.querySelector('[data-testid=paragraph-pending]')?.textContent).toBe('Then the bars.');
+    expect(document.querySelector('[data-testid=text-part]')!.textContent).not.toContain('orbit.html');
+    // A line naming no page of the turn stays text where it is.
+    message.parts[0].text += '\n\n![Gone](gone.html)\n\nThe end.';
+    message.state = 'complete';
+    flushSync();
+    expect(order()).toEqual(['text', 'page', 'text']);
+    expect(document.querySelector('[data-testid=text-part]')!.textContent).toContain('GoneThe end.');
   } finally { store.detach(); client.close(); }
 });
 
@@ -111,4 +147,32 @@ test('hidden protocol text reserves no row and gains its row when visible text a
     expect(document.querySelectorAll('.parts > .part')).toHaveLength(3);
     expect(document.querySelector('[data-kind=text]')?.textContent).toContain('Found the file.');
   } finally { store.detach(); client.close(); }
+});
+
+test('a thread link in reasoning or a tool document starts from the machine and thread of the message, not the page hash', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client);
+  const opened = vi.spyOn(workspace, 'openThreadLink').mockResolvedValue();
+  try {
+    await store.connect(); await store.open('t-trace');
+    const message = store.openThread!.messages.at(-1)!;
+    message.parts = [
+      { type: 'tool', toolId: 'plan', name: 'Plan', input: {}, output: 'ok', status: 'done', documents: [{ kind: 'markdown', title: null, text: 'Ask `boite/thr_tkw9n9qt4100rvq2jmg1`' }] },
+      { type: 'text', text: 'Between.' },
+      { type: 'thinking', text: 'Ask `thr_tkw9n9qt4100rvq2jmg2` first', startedAt: 0, finishedAt: 2000 },
+    ];
+    mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: message.threadId, message, signedOut: null, showModel: false } });
+    flushSync();
+    document.querySelector<HTMLButtonElement>('[data-testid=tool-toggle]')!.click();
+    document.querySelector<HTMLButtonElement>('[data-testid=thinking-toggle]')!.click();
+    flushSync();
+    const links = document.querySelectorAll<HTMLAnchorElement>('[data-thread-address]');
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      link.dispatchEvent(click);
+      expect(click.defaultPrevented).toBe(true);
+    }
+    expect(opened.mock.calls).toEqual([[store, message.threadId, 'boite', 'thr_tkw9n9qt4100rvq2jmg1'], [store, message.threadId, null, 'thr_tkw9n9qt4100rvq2jmg2']]);
+  } finally { opened.mockRestore(); store.detach(); client.close(); }
 });

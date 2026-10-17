@@ -10,9 +10,9 @@ describe('persistent agents over RPC', () => {
   let profile: AgentSave<AgentProfile>;
   beforeEach(async () => {
     h = await startTestCore(); client = await h.connect();
-    h.core.workforce.setLimits({ backgroundConcurrency: 2, paused: true, kebaccExperiment: false });
+    h.core.workforce.setLimits({ backgroundConcurrency: 2, paused: true });
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    profile = { value: { name: 'Researcher', instructions: 'Explore the requested subject.', domain: 'Research', avatar: 'violet', status: 'active', tools: ['messages', 'missions', 'memory', 'artifacts', 'decisions'], accountIntegration: 'provider', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } };
+    profile = { value: { name: 'Researcher', instructions: 'Explore the requested subject.', domain: 'Research', avatar: 'violet', status: 'active', tools: ['messages', 'missions', 'memory', 'artifacts', 'decisions'], selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } };
   });
   afterEach(async () => { await h.stop(); });
 
@@ -82,13 +82,6 @@ describe('persistent agents over RPC', () => {
     const target = { kind: 'group' as const, id: second.id };
     expect(h.core.workforce.canRead(agent.id, source, target)).toBe(false);
     expect(h.core.workforce.canRead(agent.id, source, source)).toBe(true);
-  });
-
-  test('the kebacc experiment cannot create an internal account switching path', async () => {
-    await expect(client.call('agents.profile.save', { value: { ...profile.value, accountIntegration: 'kebacc-experiment' } })).rejects.toThrow('experiment');
-    await client.call('agents.limits.set', { backgroundConcurrency: 2, paused: false, kebaccExperiment: true });
-    await expect(client.call('agents.profile.save', { value: { ...profile.value, accountIntegration: 'kebacc-experiment' } })).rejects.toThrow('Antigravity CLI');
-    expect((await client.call('agents.snapshot', {})).profiles).toHaveLength(0);
   });
 
   test('an unused provider account still belongs to its persistent profile', async () => {

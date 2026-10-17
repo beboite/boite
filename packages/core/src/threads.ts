@@ -41,11 +41,12 @@ import { AUTO_COMPACT_LABEL, AutoCompaction } from './threads/auto-compact.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { ThreadSpawns } from './threads/spawn.ts';
-import { checkAttachmentArray, checkAttachments, checkCwd, checkTurnRequest, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
+import { checkAttachmentArray, checkAttachments, checkTurnRequest, titleOf } from './threads/inputs.ts';
 import { RestartHandoff } from './threads/handoff.ts';
 import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
+import { LimitResumes } from './threads/limit-resume.ts';
 import { ThreadTitles } from './threads/retitle.ts';
 import { SideQuestions } from './threads/side-questions.ts';
 import { messagePage, threadSnapshot, type MessagePage } from './threads/snapshot.ts';
@@ -55,7 +56,9 @@ import { TurnRunner } from './threads/turn-runner.ts';
 import { markQueuedStopped } from './threads/turn-settlement.ts';
 import { ThreadFocus } from './threads/focus.ts';
 import { ProgressState } from './threads/progress.ts';
-import { checkIncognito, eraseIncognito, makeIncognitoFolder } from './threads/incognito.ts';
+import { eraseIncognito } from './threads/incognito.ts';
+import { removeTranscripts, threadSessions, type NativeSession } from './threads/transcript-purge.ts';
+import { ThreadCreation } from './threads/creation.ts';
 import { accountRemoved, followAgent } from './threads/account-fallback.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
@@ -86,6 +89,7 @@ export class ThreadStore {
   /** Builds what a driver gets for a turn. */
   readonly contexts: TurnContexts;
   readonly focus: ThreadFocus;
+  readonly creation: ThreadCreation;
   readonly progress: ProgressState;
   /** Permission and question cards. */
   readonly cards: ThreadCards;
@@ -104,15 +108,20 @@ export class ThreadStore {
   readonly spawns: ThreadSpawns;
   /** The `autoCompact` setting: compactions the core opens between turns. */
   readonly autoCompact: AutoCompaction;
+  /** Threads a usage limit stopped, resumed once its window resets (`threads/limit-resume.ts`). */
+  readonly limitResumes: LimitResumes;
   private readonly recovery: ThreadRecovery;
   /** Turns a restart hands to the next core (`threads/handoff.ts`). */
   readonly handoff: RestartHandoff;
   private readonly removing = new Set<ThreadId>();
+  /** The last purge's removal of native transcripts (`threads/transcript-purge.ts`), which tests wait for. */
+  transcriptPurge: Promise<string[]> = Promise.resolve([]);
 
   constructor(private readonly core: Core) {
     this.runner = new TurnRunner(core, this);
     this.contexts = new TurnContexts(core, this);
     this.focus = new ThreadFocus(core);
+    this.creation = new ThreadCreation(core);
     this.progress = new ProgressState(core);
     this.cards = new ThreadCards(core, this);
     this.deferred = new DeferredInput(core, this);
@@ -124,6 +133,7 @@ export class ThreadStore {
     this.moves = new ThreadMove(core, this);
     this.spawns = new ThreadSpawns(core, this);
     this.autoCompact = new AutoCompaction(core, this);
+    this.limitResumes = new LimitResumes(core, this);
     this.recovery = new ThreadRecovery(core);
     this.handoff = new RestartHandoff(core, this);
   }
@@ -148,7 +158,7 @@ export class ThreadStore {
    * one page here; the rest is walked back through `messages`, whose cursor is
    * `messagesBefore`.
    */
-  get(threadId: ThreadId, after?: MessageId, options: Pick<RpcParams<'threads.get'>, 'limit' | 'compactTools' | 'compactFiles' | 'compactImages' | 'compactToolParts' | 'around' | 'sync' | 'open'> = {}): Thread {
+  get(threadId: ThreadId, after?: MessageId, options: Pick<RpcParams<'threads.get'>, 'limit' | 'maxBytes' | 'compactTools' | 'compactFiles' | 'compactImages' | 'compactToolParts' | 'around' | 'sync' | 'open'> = {}): Thread {
     return threadSnapshot(this.core, this.withLoad(this.require(threadId)), after, options, this.agentState);
   }
 
@@ -165,93 +175,9 @@ export class ThreadStore {
 
   // -- writes ---------------------------------------------------------------
 
-  /**
-   * The thread in its own git worktree: the branch and directory are made
-   * first, under the id the thread will carry, and the record is written only
-   * once git succeeded. Everything a refusal can come from is checked before
-   * git makes anything, and a refusal after that removes the worktree and its
-   * branch again, so nothing is left behind but the trace of the git processes.
-   */
-  async createInWorktree(params: CreateParams): Promise<ThreadSummary> {
-    if (params.cwd !== undefined) {
-      throw refused('cwd and worktree exclude each other: a worktree is the working directory', { cwd: params.cwd });
-    }
-    if (params.incognito === true) {
-      throw refused('incognito and worktree exclude each other: an incognito conversation works in a folder the core makes', { field: 'incognito', expected: 'absent or false with worktree' });
-    }
-    const { project, provider, account } = this.check(params);
-    if (project.kind === 'drafts') {
-      throw refused('a draft has no worktree: the drafts folder is not a git repository', { projectId: project.id });
-    }
-    const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
-    checkEffort(provider, account.id, model, params.effort ?? null);
-    checkSpeed(provider, account.id, model, params.speed ?? null);
-    const id = newId('thr_');
-    const placed = await this.core.worktrees.add(id, project, params.worktree?.branch);
-    try {
-      return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch, branchNamingPending: placed.namingPending });
-    } catch (error) {
-      await this.core.worktrees.remove(id, project, placed);
-      throw error;
-    }
-  }
-
+  createInWorktree(params: CreateParams): Promise<ThreadSummary> { return this.creation.createInWorktree(params); }
   create(params: CreateParams, placed?: { id: ThreadId; branch: string | null; branchNamingPending?: boolean; parentThreadId?: ThreadId }): ThreadSummary {
-    const { project, provider, account } = this.check(params);
-    const incognito = checkIncognito(params, project, placed !== undefined);
-
-    const now = Date.now();
-    const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
-    const effort = checkEffort(provider, account.id, model, params.effort ?? null);
-    const speed = checkSpeed(provider, account.id, model, params.speed ?? null);
-    const id = placed?.id ?? newId('thr_');
-    // A worktree's directory is the core's own and uses the configured storage;
-    // anything a client names has to be inside it. A draft with no directory
-    // named gets a new folder of its own, made once everything else passed;
-    // an incognito one gets it in the data directory, away from the drafts.
-    const cwd =
-      params.cwd !== undefined && params.cwd.length > 0
-        ? placed !== undefined
-          ? params.cwd
-          : checkCwd(project, params.cwd)
-        : incognito
-          ? makeIncognitoFolder(this.core.dataDir, id)
-          : project.kind === 'drafts'
-            ? makeDraftFolder(project.path, draftFolderName(titleOf(params.title), new Date(now)))
-            : project.path;
-    const thread: ThreadSummary = {
-      id,
-      ...(placed?.parentThreadId ? { parentThreadId: placed.parentThreadId } : {}),
-      ...(incognito ? { incognito: true as const } : {}),
-      projectId: project.id,
-      title: titleOf(params.title),
-      titleSource: 'prompt',
-      providerId: provider.id,
-      accountId: account.id,
-      model,
-      effort,
-      speed,
-      cwd,
-      branch: placed?.branch ?? null,
-      branchNamingPending: placed?.branchNamingPending ?? false,
-      permissionMode: params.permissionMode ?? 'default',
-      status: 'idle',
-      unread: false,
-      archived: false,
-      pinned: false,
-      sessionId: null,
-      load: null,
-      context: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.core.journal.append({ type: 'thread.created', threadId: thread.id, version: 1, payload: thread }, () => {
-      this.core.journal.putThread(thread);
-    });
-    this.core.bus.emit('thread.created', thread);
-    // A thread started in a project put away says the project is in use again.
-    if (project.archived === true) this.core.projects.archive(project.id, false);
-    return thread;
+    return this.creation.create(params, placed);
   }
 
   /**
@@ -354,19 +280,7 @@ export class ThreadStore {
   }
 
   /** The project, provider and account a new thread names, each refused by name when wrong. */
-  private check(params: CreateParams): { project: Project; provider: ProviderDescriptor; account: Account } {
-    const project = this.core.projects.require(params.projectId);
-    const provider = this.core.providers.require(params.providerId);
-    const account = this.core.accounts.require(params.accountId);
-    if (account.providerId !== provider.id) {
-      throw refused('the account belongs to another provider', {
-        accountId: account.id,
-        accountProviderId: account.providerId,
-        providerId: provider.id,
-      });
-    }
-    return { project, provider, account };
-  }
+  private check(params: CreateParams): { project: Project; provider: ProviderDescriptor; account: Account } { return this.creation.check(params); }
 
   update(params: {
     threadId: ThreadId;
@@ -459,7 +373,8 @@ export class ThreadStore {
     if (!thread || thread.updatedAt !== expected.updatedAt || thread.cwd !== expected.cwd || thread.branch !== expected.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread)) return null;
     const archivedThread = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof, reason: { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: Date.now() } });
-      const saved = this.save({ ...thread, archived: true, doneAt: Date.now() }, 'thread.archived');
+      const now = Date.now();
+      const saved = this.save({ ...thread, archived: true, doneAt: now, archivedAt: now }, 'thread.archived');
       if (thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
@@ -474,13 +389,13 @@ export class ThreadStore {
       const state = archiveState(this.core.journal, thread.id);
       if (state.reason?.type !== 'pr-merged') continue;
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, reason: undefined, generation: state.generation + 1 });
-      this.save({ ...thread, archived: false, doneAt: null }, 'thread.archived');
+      this.save({ ...thread, archived: false, doneAt: null, archivedAt: null }, 'thread.archived');
     }
   }
 
   archive(threadId: ThreadId, archived: boolean, onlyIfIdle = false): ThreadSummary {
     this.require(threadId);
-    if (archived && onlyIfIdle) assertIdleFamily(this.core, threadId);
+    if (archived && onlyIfIdle) assertIdleFamily(this.core, threadId, 'explicit');
     if (archived) {
       // Temporary inference belongs to the visible family, including retained descendants.
       const family = this.core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];
@@ -497,7 +412,7 @@ export class ThreadStore {
       this.agentState.commands.delete(threadId);
       this.agentState.noteBackground(threadId, []);
       // Nobody answers a card on a thread put away, and no turn should start from one.
-      this.cards.clearQuestionsOf(threadId, true);
+      this.cards.clearQuestionsOf(threadId, true, 'archive');
       this.deferred.deferredAnswers.delete(threadId);
       this.deferred.consumed.delete(threadId);
       this.deferred.pendingWakes.delete(threadId);
@@ -515,7 +430,9 @@ export class ThreadStore {
       }
       // Keep deletion retryable until staging commits its tombstone and clears this date.
       const doneAt = archived && (onlyIfIdle || this.removing.has(threadId)) ? thread.doneAt ?? (onlyIfIdle ? Date.now() : null) : null;
-      const saved = this.save({ ...thread, archived, doneAt }, 'thread.archived');
+      // Archiving an archived thread again keeps its time: nothing new was put away.
+      const archivedAt = archived ? (thread.archived ? thread.archivedAt ?? null : Date.now()) : null;
+      const saved = this.save({ ...thread, archived, doneAt, archivedAt }, 'thread.archived');
       if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
@@ -603,8 +520,13 @@ export class ThreadStore {
   purgeDeleted(): void {
     const days = this.core.settings.get().threadDeletionRetentionDays ?? DEFAULT_THREAD_DELETION_RETENTION_DAYS;
     if (days === 0) return;
-    if (this.core.journal.purgeDeletedThreads(Date.now() - days * 86_400_000) > 0) {
+    let sessions: NativeSession[] = [];
+    const purged = this.core.journal.purgeDeletedThreads(Date.now() - days * 86_400_000, ids => {
+      sessions = threadSessions(this.core.journal.db, ids);
+    });
+    if (purged > 0) {
       this.core.bus.emit('thread.deletionsUpdated', {});
+      this.transcriptPurge = removeTranscripts(this.core, sessions);
     }
   }
 
@@ -771,16 +693,28 @@ export class ThreadStore {
     return turn;
   }
 
+  /**
+   * Cancels what the core planned to try again on the thread: a capacity retry
+   * its turn waits for, which then fails with the refusal, or a resume after a
+   * usage limit. False when nothing was planned.
+   */
+  cancelRetry(threadId: ThreadId): boolean {
+    this.require(threadId);
+    return this.runner.cancelRetry(threadId) || this.limitResumes.cancel(threadId, 'cancelled by the user');
+  }
+
   stopTurn(threadId: ThreadId): boolean {
     this.require(threadId);
     this.handoff.forget(threadId);
+    // Stop on a thread waiting for a usage limit to reset means: do not resume it.
+    const plannedResume = this.limitResumes.cancel(threadId, 'the thread was stopped');
     this.core.coordination.pause(threadId);
     // Runs first: once they are stopped, a team with no child has nothing left to pause.
     const childrenStopped = this.core.workflows.stopRoot(threadId, 'Stopped with its thread') + this.core.delegation.stop(threadId);
     if (this.core.scheduler.stop(threadId) || childrenStopped > 0) return true;
     // No turn left, but the agent still runs work in the background: Stop ends
     // the agent process, and that work with it.
-    if ((this.agentState.background.get(threadId)?.length ?? 0) === 0) return false;
+    if ((this.agentState.background.get(threadId)?.length ?? 0) === 0) return plannedResume;
     this.releaseAgent(threadId);
     this.agentState.noteBackground(threadId, []);
     return true;
@@ -799,8 +733,7 @@ export class ThreadStore {
   }
 
   stopQueuedCoordination(threadId: ThreadId): boolean {
-    const queued = this.core.journal.listTurns(threadId).find(turn => turn.status === 'queued' && turn.execution?.operation === 'coordination');
-    return queued === undefined ? false : this.core.scheduler.stop(threadId);
+    return this.core.journal.queuedTurn(threadId, 'coordination') === null ? false : this.core.scheduler.stop(threadId);
   }
 
   canSteer(threadId: string): boolean { return typeof this.runner.handles.get(threadId)?.steer === 'function'; }
@@ -808,7 +741,7 @@ export class ThreadStore {
   async steer(threadId: string, text: string): Promise<boolean> {
     const handle = this.runner.handles.get(threadId);
     if (!handle?.steer || this.runner.steering.has(threadId)) return false;
-    const turn = this.core.journal.listTurns(threadId).find(t => t.status === 'running');
+    const turn = this.core.journal.runningTurn(threadId);
     if (!turn) return false;
     this.runner.steering.add(threadId);
     try {
@@ -859,20 +792,21 @@ export class ThreadStore {
     return this.cards.listPermissions(threadId);
   }
 
-  answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }): void {
-    this.cards.answerPermission(params);
+  /** `by` names who decided in the log: the user, or an agent acting for them. */
+  answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }, by = 'user'): void {
+    this.cards.answerPermission(params, by);
   }
 
   listQuestions(threadId?: ThreadId): QuestionRequest[] {
     return this.cards.listQuestions(threadId);
   }
 
-  answerQuestion(params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; attachments?: Attachment[] }): void {
-    this.cards.answerQuestion(params);
+  answerQuestion(params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; attachments?: Attachment[] }, by = 'user'): void {
+    this.cards.answerQuestion(params, by);
   }
 
-  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }): void {
-    this.cards.skipQuestion(params);
+  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }, by = 'user'): void {
+    this.cards.skipQuestion(params, by);
   }
 
   askAsync(params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean }): { questionId: RequestId } {

@@ -1,6 +1,12 @@
-import { accessSync, constants, existsSync, lstatSync, realpathSync } from 'node:fs';
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, linkSync, lstatSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import type { ServerUpdatePlatform, UpdateCommand } from '../server-update/types.ts';
+import { recoveryLink, type ServerUpdatePlatform, type UpdateCommand } from '../server-update/types.ts';
+
+/** One quoted word of a unit command line. systemd would expand `$` and `%` inside it, so those are refused. */
+export function unitWord(path: string): string {
+  if (/[\p{Cc}$%]/u.test(path)) throw new Error(`Server update path ${JSON.stringify(path)} must not contain $, % or control characters`);
+  return `"${path.replace(/[\\"]/g, char => `\\${char}`)}"`;
+}
 
 /** Only the user service whose main process is this standalone core may replace its installation. */
 export function linuxServerUpdates(): ServerUpdatePlatform {
@@ -35,8 +41,20 @@ export function linuxServerUpdates(): ServerUpdatePlatform {
       // A new systemd cgroup survives the core unit's default KillMode=control-group.
       const operation = basename(dirname(plan));
       if (!/^\.boite-update-[a-f0-9-]{36}$/.test(operation)) throw new Error('Server update plan must be in its private operation directory');
-      await run('systemd-run', ['--user', `--unit=${operation.slice(1)}`, '--collect', '--quiet', '--property=Nice=10',
-        '--property=MemoryMax=512M', '--property=CPUQuota=100%', executable, 'update-apply', plan]);
+      // The recovery runs the very binary that ran the worker, whatever the switch did to the installation.
+      const recovery = recoveryLink(plan);
+      rmSync(recovery, { force: true });
+      try { linkSync(executable, recovery); } catch { copyFileSync(executable, recovery); chmodSync(recovery, 0o700); }
+      try {
+        await run('systemd-run', ['--user', `--unit=${operation.slice(1)}`, '--collect', '--quiet', '--property=Nice=10',
+          // Throttled, not capped: the snapshot's page cache once filled a 512M MemoryMax and the kernel killed the worker mid-copy.
+          '--property=MemoryHigh=1G', '--property=CPUQuota=100%',
+          // The recovery may stop the old core, restore a snapshot and wait for health.
+          '--property=TimeoutStopSec=15min',
+          // Runs however the worker ends, a kill included: it completes or undoes the switch and starts the service again.
+          `--property=ExecStopPost=-${unitWord(recovery)} update-recover ${unitWord(plan)}`,
+          executable, 'update-apply', plan]);
+      } catch (error) { rmSync(recovery, { force: true }); throw error; }
     },
     control: async (service, action) => { await command([action, service]); },
     mainPid: async (service) => Number(await command(['show', service, '--property=MainPID', '--value'])),

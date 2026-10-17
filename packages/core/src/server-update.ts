@@ -44,7 +44,16 @@ export class ServerUpdates {
   private get platform(): ServerUpdatePlatform | undefined { return this.options.platform ?? processPlatform.serverUpdates; }
   snapshot(): ServerUpdateStatus { return { ...this.state }; }
   private move(patch: Partial<ServerUpdateStatus>): ServerUpdateStatus {
+    const was = this.state.phase;
     this.state = { ...this.state, ...patch };
+    // Each phase once, not each download tick; checking and current are the routine poll.
+    if (this.state.phase !== was && !['checking', 'current'].includes(this.state.phase)) {
+      // The version comes from the network and the error can hold a command's stderr: one line each, so neither forges a record.
+      const line = (value: string, max: number): string => value.replace(/[\r\n\u2028\u2029]+/g, ' | ').replace(/[\p{C}]/gu, '').trim().slice(0, max);
+      this.core.logs.record(this.state.phase === 'error' ? 'warn' : 'info', `Server update ${was} -> ${this.state.phase}: ${this.state.currentVersion} to ${this.state.version ? line(this.state.version, 80) : 'unknown'} (${this.state.mode}, ${this.state.channel})${this.state.error ? `: ${line(this.state.error, 500)}` : ''}`, {
+        source: 'updates', event: `server-update.${this.state.phase}`, data: { from: was, phase: this.state.phase, mode: this.state.mode, current: this.state.currentVersion, version: this.state.version, channel: this.state.channel, totalBytes: this.state.total, error: this.state.error ?? null },
+      });
+    }
     this.core.bus.emit('core.updateChanged', this.snapshot());
     return this.snapshot();
   }
@@ -109,6 +118,10 @@ export class ServerUpdates {
 
   private async prepare(offer: ServerOffer, abort: AbortController): Promise<void> {
     const installation = this.installation!;
+    // A worker cut off with its recovery, by a power cut, left its files beside the installation.
+    try { (await import('./server-update/apply.ts')).clearStaleUpdates(dirname(installation.directory)); }
+    catch (error) { this.core.log('warn', `server update cleanup: ${messageOf(error)}`); }
+    if (abort.signal.aborted || this.closed) return;
     const id = randomUUID();
     const directory = join(dirname(installation.directory), `.boite-update-${id}`);
     this.directory = directory;
@@ -123,7 +136,7 @@ export class ServerUpdates {
       const archive = join(directory, 'payload.zip');
       archiveHash = await downloadPayload(offer, archive, abort.signal, progress);
       if (abort.signal.aborted) return;
-      unpackPayload(archive, join(directory, 'stage'), offer.version);
+      await unpackPayload(archive, join(directory, 'stage'), offer.version, abort.signal);
     }
     if (abort.signal.aborted || this.closed) return;
     const plan: ServerUpdatePlan = { id, installation, dataDir: this.core.dataDir, version: offer.version,
@@ -146,8 +159,13 @@ export class ServerUpdates {
         }
       } else {
         let admission: 'accepted' | 'busy' | 'unsupported';
+        const admit = () => writeFileSync(join(directory, 'admitted'), id, { mode: 0o600 });
         try {
-          admission = this.core.requestIdleShutdown(() => writeFileSync(join(directory, 'admitted'), id, { mode: 0o600 }));
+          // Idle installs at once; busy work ends its tool call, 30 s at most, and resumes
+          // after the restart, as a desktop update does. Waiting for idle held a server
+          // with an agent working for hours on "Waiting for work to finish" for good.
+          admission = this.core.requestIdleShutdown(admit);
+          if (admission === 'busy') admission = this.core.requestUpdateHandoff(admit);
         } catch (error) {
           this.cancelFiles(); this.abort = null; this.poll = null;
           this.move({ phase: 'error', error: messageOf(error) });
@@ -195,8 +213,8 @@ export class ServerUpdates {
   }
   start(): void {
     this.first = setTimeout(() => {
-      void this.status(true).catch(error => this.core.log('warn', `server update check: ${messageOf(error)}`));
-      this.interval = setInterval(() => { void this.status(true).catch(error => this.core.log('warn', `server update check: ${messageOf(error)}`)); }, 6 * 60 * 60 * 1000);
+      void this.status(true).catch(error => this.core.log('warn', `server update check: ${messageOf(error)}`, { source: 'updates', event: 'server-update.check-failed' }));
+      this.interval = setInterval(() => { void this.status(true).catch(error => this.core.log('warn', `server update check: ${messageOf(error)}`, { source: 'updates', event: 'server-update.check-failed' })); }, 6 * 60 * 60 * 1000);
       this.interval.unref();
     }, 8000);
     this.first.unref();

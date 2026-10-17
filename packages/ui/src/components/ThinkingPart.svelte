@@ -1,26 +1,26 @@
 <script lang="ts">
-  import { page } from '../lib/page-hidden.svelte';
+  import { secondClock } from '../lib/clock.svelte';
   import { Brain, ChevronRight } from '@lucide/svelte';
   import { renderMarkdown } from '../lib/markdown';
+  import { workspace } from '../lib/workspace.svelte';
   import { ParagraphScan } from '../lib/message-display';
   import { strings } from '../lib/strings';
   import { elapsed } from '../lib/format';
+  import { ThoughtTitleScan } from '../lib/tool-groups';
+  import type { Store } from '../lib/store.svelte';
 
-  let { text, live = false, startedAt = null, finishedAt = null }: { text: string; live?: boolean; startedAt?: number | null; finishedAt?: number | null } = $props();
+  /** `store` and `threadId` say where a thread link in the reasoning starts from. */
+  let { text, live = false, startedAt = null, finishedAt = null, store, threadId }: { text: string; live?: boolean; startedAt?: number | null; finishedAt?: number | null; store?: Store; threadId?: string } = $props();
 
-  let now = $state(Date.now());
-  const hidden = $derived(page.hidden);
-  $effect(() => {
-    if (!live || startedAt === null || hidden) return;
-    now = Date.now();
-    const timer = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
-  const took = $derived(startedAt === null || (!live && finishedAt === null) ? '' : elapsed((live ? now : finishedAt!) - startedAt));
+  const took = $derived(startedAt === null || (!live && finishedAt === null) ? '' : elapsed((live ? secondClock.now : finishedAt!) - startedAt));
 
   // Folded by default, and the fold belongs to this part alone.
   let open = $state(false);
   const empty = $derived(text.trim().length === 0);
+  // What the step is about ("Inspecting the driver"), the plain word while it has none.
+  // The scan resumes where the last delta left off.
+  const titles = new ThoughtTitleScan();
+  const label = $derived(titles.title(text) ?? strings.chat.thinking);
   const shown = $derived(open && !empty);
 
   // Built on the first open, then folded rather than thrown away: that is what
@@ -50,7 +50,7 @@
     onclick={() => (open = !open)}
   >
     <span class="glyph"><Brain size={15} strokeWidth={1.75} /></span>
-    <span class="label ui-label">{strings.chat.thinking}</span>
+    <span class="label ui-label" data-testid="thinking-label" title={empty ? undefined : label}>{label}</span>
     {#if took}<span class="took ui-label" data-testid="thinking-elapsed">{took}</span>{/if}
     {#if live}
       <span class="dot" aria-label={strings.chat.streaming}></span>
@@ -58,10 +58,11 @@
     {#if !empty}<span class="fold-caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} /></span>{/if}
   </button>
 
-  <div class="fold" class:open={shown} inert={!shown}>
-    <div class="clip">
+  <div class="disclosure-fold" class:open={shown} inert={!shown}>
+    <div>
       {#if built}
-        <div class="body" data-testid="thinking-text">
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+        <div class="body" data-testid="thinking-text" onclick={event => workspace.followThreadLink(event, store, threadId)}>
           {#each content.blocks as block, index (index)}<div class="paragraph">{@html renderMarkdown(block)}</div>{/each}
           {#if content.pending}<div class="paragraph">{content.pending}</div>{/if}
         </div>
@@ -95,6 +96,9 @@
   }
 
   .label {
+    /* A thought's title can be a whole sentence: it shrinks to an ellipsis, the time and caret stay. */
+    flex: 0 1 auto;
+    min-width: 0;
     font-weight: 400;
     text-align: left;
     overflow: hidden;
@@ -107,27 +111,7 @@
     height: 6px;
     border-radius: 50%;
     background: var(--color-live);
-    animation: pulse 1.6s ease-in-out infinite;
-  }
-
-  /* The rows track carries the open and the close, the same trick as the tool card. */
-  .fold {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows var(--dur-3) var(--ease-out-quint),
-      opacity var(--dur-3) var(--ease-out-quint);
-  }
-
-  .fold.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-
-  .clip {
-    min-height: 0;
-    overflow: hidden;
+    animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops);
   }
 
   .body {

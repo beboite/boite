@@ -1,3 +1,4 @@
+import { createWithPreparation, mergeCreationSnapshot } from './thread-creation';
 import type {
   Message,
   MessageId,
@@ -9,25 +10,28 @@ import type {
   ThreadRewind,
   ThreadSummary
 } from '@boite/contracts';
-import { readingCacheBytes, READING_CACHE_BYTES } from '../reading-cache';
+import { ReadingCache, readingCacheBytes } from '../reading-cache';
 import type { ToolPart } from '../tool-groups';
-import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, forTransport } from '@boite/contracts';
+import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES, READING_PAGE_BYTES, forTransport } from '@boite/contracts';
+import { fullMessage } from './full-message';
+import { askPage, ThreadPreloads } from './thread-preload';
 import { lightPage, NewerPages, setMessagesAfter, type ReadingPosition } from './reading-pages.svelte';
 export type { ReadingPosition } from './reading-pages.svelte';
 import { forgetArchivedThread } from '../archive-history';
 import { rightPanel } from '../right-panel.svelte';
-import { workingChildren, type WorkingChildren, lastIndexById, mergeResumed, patchRow, reconcileThread, resumeRequest, threadsByProject } from '../thread-rows';
+import { workingChildren, type WorkingChildren, lastIndexById, mergeResumed, patchFields, patchRow, reconcileThread, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
-import { RpcErrorCode } from '@boite/contracts';
+import { RpcErrorCode, threadActive } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { strings } from '../strings';
+import { archiveWhile, keepArchived, pinWhile } from './optimistic';
 
 /** What a rewind hands back to the composer: the removed message's content, and how the agent forgets it. */
 export type RewoundMessage = Omit<ThreadRewind, 'thread'>;
 
 /** The row part of a thread, without what only an open thread carries. */
 function summaryOf(thread: Thread): ThreadSummary {
-  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesAfter: _after, messagesFrom: _from, messagesSync: _sync, messagesUnchanged: _unchanged, ...summary } = thread;
+  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesAfter: _after, messagesFrom: _from, messagesSync: _sync, messagesUnchanged: _unchanged, messageOffset: _offset, ...summary } = thread;
   return summary;
 }
 
@@ -46,6 +50,7 @@ export class Threads {
   loadingBytes = $state<{ threadId: ThreadId; received: number; total: number } | null>(null);
   /** The pages below a window opened around a reading position. */
   readonly newer: NewerPages;
+  readonly preloads: ThreadPreloads;
   /** The threads a `threads.retitle` is out for: their menu item waits. */
   retitling = $state<ThreadId[]>([]);
   /**
@@ -54,7 +59,7 @@ export class Threads {
    */
   rewinding = $state<Record<ThreadId, MessageId>>({});
   readonly readingPositions = new Map<string, ReadingPosition>();
-  readingThreads = new Map<string, Thread>();
+  readonly readingThreads = new ReadingCache();
   subscribedThreadId: ThreadId | null = null;
   /** The newest navigation intent, including drafts, pages and detached clients. */
   openGeneration = 0;
@@ -64,7 +69,8 @@ export class Threads {
   /** Refreshing this visit keeps disclosures; leaving it invalidates their pending fetches. */
   #toolOutputVisit = 0;
 
-  constructor(private readonly ctx: StoreContext) { this.newer = new NewerPages(ctx); }
+  constructor(private readonly ctx: StoreContext) { this.newer = new NewerPages(ctx); this.preloads = new ThreadPreloads(ctx, this); }
+  get openTarget(): ThreadId | null { return this.#openTarget; }
 
   async capabilities(threadId: ThreadId) {
     const client = this.ctx.client;
@@ -107,17 +113,11 @@ export class Threads {
     if (!thread || (this.loadingThreadId === thread.id && thread.messages.length === 0)) return;
     // Keep more small visits within the same 16 MiB budget. An expanded tool
     // gives its full output back to the core before it enters this cache.
-    this.readingThreads.delete(thread.id);
     const messages = forTransport(thread.messages, lightPage(this.ctx));
-    const snapshot = messages.every((message, index) => message === thread.messages[index]) ? thread : { ...thread, messages };
-    const bytes = readingCacheBytes(messages);
-    if (bytes <= READING_CACHE_BYTES) this.readingThreads.set(thread.id, snapshot);
-    let total = [...this.readingThreads.values()].reduce((sum, held) => sum + readingCacheBytes(held.messages), 0);
-    while (this.readingThreads.size > 16 || total > 4 * READING_CACHE_BYTES) {
-      const oldest = this.readingThreads.keys().next().value!;
-      total -= readingCacheBytes(this.readingThreads.get(oldest)!.messages);
-      this.readingThreads.delete(oldest);
-    }
+    const kept = messages.every((message, index) => message === thread.messages[index]) ? thread : { ...thread, messages };
+    // The deep proxy on screen weighs several times its data: once the next thread is painted, plain data replaces it.
+    this.readingThreads.remember(thread.id, kept, readingCacheBytes(messages), held => $state.snapshot(held) as Thread,
+      () => this.openThread?.id !== thread.id && this.preloads.waitingThreadId !== thread.id);
   }
 
   #unreadCount = $derived(this.threads.filter((t) => t.unread).length);
@@ -127,7 +127,7 @@ export class Threads {
 
   get busy(): boolean {
     const status = this.openThread?.status;
-    return status === 'running' || status === 'queued' || status === 'waiting';
+    return status !== undefined && threadActive(status);
   }
 
   /** One pass over the rows per change of a project, flag or the list itself; a load tick is none of those. */
@@ -137,9 +137,10 @@ export class Threads {
   }
 
   #workingChildren = $derived(workingChildren(this.threads));
-  /** The thread's delegated agents still at work, the parent waiting on them; null when none is. */
+  /** The thread's delegated agents still at work or asking the user; null when none is. */
   subagents(threadId: ThreadId): WorkingChildren | null { return this.#workingChildren.get(threadId) ?? null; }
-  moveBlocked(threadId: ThreadId): boolean { return this.#workingChildren.has(threadId); }
+  /** A move waits on the children at work; one that only asks, its turn over, does not hold it. */
+  moveBlocked(threadId: ThreadId): boolean { return (this.#workingChildren.get(threadId)?.count ?? 0) > 0; }
 
   async compact(): Promise<void> {
     const thread = this.openThread;
@@ -230,7 +231,7 @@ export class Threads {
 
   /** The thread as `threads.rewind` left it, over every copy this client holds. */
   applyRewound(thread: Thread): void {
-    this.upsertThread(summaryOf(thread));
+    this.upsertThread(summaryOf(thread)); this.ctx.positions.note(thread.id, thread.messages, thread.messageOffset);
     // A cached visit holds the removed messages: the next open reads the thread again.
     this.readingThreads.delete(thread.id);
     for (const held of this.threadSnapshots(thread.id)) {
@@ -254,7 +255,7 @@ export class Threads {
     for (const thread of this.threadSnapshots(threadId)) {
       const index = lastIndexById(thread.messages, messageId);
       if (index < 0) {
-        if (thread.messagesBefore !== null) stale = true;
+        if (thread.messagesBefore !== null || this.ctx.positions.hasGap(thread)) stale = true;
         continue;
       }
       const gone = new Set(thread.messages.slice(index).map((message) => message.turnId));
@@ -271,7 +272,8 @@ export class Threads {
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
-      const fresh = await client.call('threads.get', { threadId });
+      // The page a first visit reads: what the copies held cannot be patched, so they start over.
+      const fresh = this.ctx.positions.noted(threadId, await client.call('threads.get', { threadId, limit: INITIAL_MESSAGE_PAGE, maxBytes: INITIAL_PAGE_BYTES, ...lightPage(this.ctx) }));
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       for (const held of this.threadSnapshots(threadId)) {
         held.messages = fresh.messages;
@@ -291,7 +293,7 @@ export class Threads {
    * refused subscribe leaves the thread on screen with the socket it had
    * rather than with none at all.
    */
-  async open(threadId: ThreadId, navigate = true, options: { requests?: boolean } = {}): Promise<void> {
+  async open(threadId: ThreadId, navigate = true, options: { requests?: boolean; liveCreation?: boolean } = {}): Promise<void> {
     const s = this.ctx.store;
     const { delegation } = this.ctx;
     const client = this.ctx.client;
@@ -309,17 +311,19 @@ export class Threads {
       }
     };
     const previousThread = this.openThread;
-    const held = this.openThread?.id === threadId ? this.openThread : this.readingThreads.get(threadId);
+    let held = this.openThread?.id === threadId ? this.openThread : this.readingThreads.get(threadId);
+    // A press on this thread already asked for its page (`thread-preload.ts`): the open takes it over.
+    const preloaded = this.preloads.claim(threadId, client, held);
     const deselect = this.openThread?.id !== threadId && s.delegationSelectedAgentId && s.delegationSelectedAgentId !== threadId;
     // Paint a recent visit in this task. Its revalidation and subscription can
     // take a whole network round trip without holding the reader's text back.
     const row = this.threads.find(thread => thread.id === threadId);
-    if (held) this.#show(Object.assign(held, row), navigate);
+    if (held) held = this.#showHeld(Object.assign(held, row), navigate);
     else if (row) this.#show({ ...row, messages: [], turns: [], commands: [], messagesBefore: null }, navigate);
     this.loadingThreadId = held ? null : threadId;
     const deselected = deselect ? s.selectDelegatedAgent(null) : Promise.resolve();
     let loaded = false;
-    const summaryRead = this.ctx.threadReads.begin(threadId);
+    const summaryRead = preloaded?.summaryRead ?? this.ctx.threadReads.begin(threadId);
     let permissionRead: ReturnType<StoreContext['requests']['permissionRead']> | undefined;
     let questionRead: ReturnType<StoreContext['requests']['questionRead']> | undefined;
     try {
@@ -329,28 +333,13 @@ export class Threads {
       // were three quarters of a second before the last card was right, and the
       // messages waited behind a subscribe and an unsubscribe they do not need.
       const bundled = s.core?.features?.threadSnapshots === true;
-      const subscribed = bundled ? null : client.call('threads.subscribe', { threadId });
-      // A thread already in hand, open or among the recent ones, asks only for
-      // what it cannot vouch for: a reconnect on a long conversation used to
-      // download its last 120 messages again for the two that were new.
-      const resume = resumeRequest(threadId, held);
-      // A long thread left away from its end opens where the reader was: the
-      // page around the message at the top of their view, not the last one.
-      const features = s.core?.features;
-      const saved = held || !features?.readingPages ? undefined : this.readingPositions.get(threadId);
-      const around = saved && !saved.pinned ? saved.anchor?.id : undefined;
-      const fetched = client.call('threads.get', { ...resume, limit: held ? MESSAGE_PAGE_MAX : INITIAL_MESSAGE_PAGE, ...lightPage(this.ctx), ...(around ? { around } : {}),
-        ...(bundled ? {
-          sync: held?.messagesSync && held.messagesSync.from === resume.after ? held.messagesSync : true,
-          open: { ...(previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId ? { previous } : {}), ...(options.requests === false ? { requests: false } : {}), markRead: true }
-        } : {})
-      }, held || !features?.chunkedAnswers ? {} : {
-        // The loading view counts the page in as the core slices it.
-        onProgress: (received, total) => { if (newest() && this.loadingThreadId === threadId) this.loadingBytes = { threadId, received, total }; }
-      });
+      // A claimed press left the previous thread, the unread mark and the requests to this open.
+      const { subscribed, fetched, around } = preloaded ?? askPage(this.ctx, this, client, threadId, held,
+        { ...(previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId ? { previous } : {}), ...(options.requests === false ? { requests: false } : {}), markRead: true }, newest);
+      const bundledRequests = bundled && !preloaded;
       if (options.requests !== false) {
-        permissionRead = this.ctx.requests.permissionRead(client, threadId, bundled ? () => fetched.then(thread => thread.opened?.permissions ?? []) : undefined);
-        questionRead = this.ctx.requests.questionRead(client, threadId, bundled ? () => fetched.then(thread => thread.opened?.questions ?? []) : undefined);
+        permissionRead = this.ctx.requests.permissionRead(client, threadId, bundledRequests ? () => fetched.then(thread => thread.opened?.permissions ?? []) : undefined);
+        questionRead = this.ctx.requests.questionRead(client, threadId, bundledRequests ? () => fetched.then(thread => thread.opened?.questions ?? []) : undefined);
       }
       const permissionsAsked = permissionRead?.promise ?? Promise.resolve([]);
       const questionsAsked = questionRead?.promise ?? Promise.resolve([]);
@@ -371,7 +360,7 @@ export class Threads {
       this.subscribedThreadId = threadId;
       // A thread already left that the core will not let go of costs a few
       // events, not the open of this one.
-      const unsubscribed: Promise<unknown> = !bundled && previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId
+      const unsubscribed: Promise<unknown> = (!bundled || preloaded) && previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId && previous !== this.preloads.waitingThreadId
         ? client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined)
         : Promise.resolve();
       this.ctx.composer.settle(threadId);
@@ -393,7 +382,9 @@ export class Threads {
       }
       // A window that now reaches the end says so, over the cursor a held copy had.
       if (held && thread.messagesAfter === undefined) delete held.messagesAfter;
+      if (options.liveCreation && this.openThread?.id === threadId) mergeCreationSnapshot(thread, this.openThread);
       this.#show(held ? reconcileThread(held, thread) : thread, navigate, true);
+      this.preloads.done(preloaded);
       loaded = true;
       this.loadingThreadId = null;
       this.loadingBytes = null;
@@ -405,6 +396,8 @@ export class Threads {
       if (!newest()) return;
       permissionRead?.apply(permissions);
       questionRead?.apply(questions);
+      // Its sub-agents asking the user show in its dock: their requests are read the same way.
+      if (options.requests !== false) this.ctx.requests.readChildren(client, threadId);
       if (thread.unread) {
         await client.call('threads.markRead', { threadId });
         if (!newest()) return;
@@ -428,12 +421,22 @@ export class Threads {
       }
       await retire();
     } finally {
+      this.preloads.done(preloaded);
       summaryRead.cancel();
       permissionRead?.cancel();
       questionRead?.cancel();
       if (newest()) { this.loadingThreadId = null; this.loadingBytes = null; }
       await deselected;
     }
+  }
+
+  /** A plain visit becomes a new proxy on screen that does not write through to it: later changes go to what this answers. */
+  #showHeld(held: Thread, navigate: boolean): Thread {
+    this.#show(held, navigate);
+    const shown = this.openThread;
+    if (!shown || shown === held || shown.id !== held.id) return held;
+    this.readingThreads.replace(held.id, held, shown);
+    return shown;
   }
 
   /** Select the history synchronously; network work never owns navigation. */
@@ -525,7 +528,7 @@ export class Threads {
     const navigation = this.openGeneration;
     const current = () => generation === this.#olderGeneration && this.ctx.currentNavigation(client, navigation);
     try {
-      const page = await client.call('messages.list', { threadId: open.id, before: cursor, ...lightPage(this.ctx) });
+      const page = this.ctx.positions.noted(open.id, await client.call('messages.list', { threadId: open.id, before: cursor, maxBytes: READING_PAGE_BYTES, ...lightPage(this.ctx) }));
       const still = this.openThread;
       if (!current() || !still || still.id !== open.id || still.messagesBefore !== cursor) return 0;
       const known = new Set(still.messages.map((m) => m.id));
@@ -563,7 +566,7 @@ export class Threads {
     const loading = read.catch(async (error): Promise<Partial<ToolPart> | null> => {
       if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
       if (this.ctx.client !== client || generation !== this.#toolOutputVisit) return null;
-      const message = await this.#fullMessage(client, threadId, messageId, generation);
+      const message = await fullMessage(client, this.threadSnapshots(threadId), threadId, messageId, () => this.ctx.client === client && generation === this.#toolOutputVisit);
       const part = message?.parts.find(part => part.type === 'tool' && part.toolId === toolId);
       if (part?.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${toolId} is not a tool of message ${messageId}` });
       return part;
@@ -593,13 +596,15 @@ export class Threads {
     speed?: string | null;
     worktree?: { branch?: string };
     incognito?: boolean;
+    preparationId?: string;
+    subscribe?: boolean;
   }, options: { navigate?: boolean } = {}): Promise<ThreadSummary | null> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return null;
     const generation = this.openGeneration;
     try {
-      const summary = await client.call('threads.create', input);
+      const summary = await createWithPreparation(client, input, () => this.ctx.currentClient(client, clientGeneration));
       if (!this.ctx.currentClient(client, clientGeneration)) return null;
       this.upsertThread(summary);
       if (options.navigate !== false && this.ctx.currentNavigation(client, generation)) await this.ctx.store.open(summary.id);
@@ -622,7 +627,7 @@ export class Threads {
       if (!this.ctx.currentClient(client, clientGeneration)) return false;
       this.upsertThread(summary);
       const open = this.openThread;
-      if (open && open.id === threadId) Object.assign(open, summary);
+      if (open && open.id === threadId) patchFields(open, summary);
       return true;
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
@@ -653,7 +658,7 @@ export class Threads {
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.upsertThread(summary);
       const open = this.openThread;
-      if (open && open.id === threadId) Object.assign(open, summary);
+      if (open && open.id === threadId) patchFields(open, summary);
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     } finally {
@@ -666,7 +671,8 @@ export class Threads {
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
-      const summary = await client.call('threads.pin', { threadId, pinned });
+      const shown = [this.threads.find((t) => t.id === threadId), this.openThread?.id === threadId ? this.openThread : null];
+      const summary = await pinWhile(shown, pinned, () => client.call('threads.pin', { threadId, pinned }));
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.upsertThread(summary);
       const open = this.openThread;
@@ -700,7 +706,7 @@ export class Threads {
       if (!this.ctx.currentClient(client, clientGeneration)) return null;
       this.upsertThread(summary);
       const open = this.openThread;
-      if (open && open.id === threadId) Object.assign(open, summary);
+      if (open && open.id === threadId) patchFields(open, summary);
       return summary;
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
@@ -714,7 +720,7 @@ export class Threads {
     if (!client) return;
     const navigationGeneration = this.openGeneration;
     try {
-      await client.call('threads.archive', { threadId, archived: true, ...(onlyIfIdle ? { onlyIfIdle: true } : {}) });
+      await archiveWhile(() => this.threads, threadId, client.call('threads.archive', { threadId, archived: true, ...(onlyIfIdle ? { onlyIfIdle: true } : {}) }));
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.ctx.threadReads.change(threadId, null);
       this.threads = this.threads.filter((t) => t.id !== threadId);
@@ -794,7 +800,7 @@ export class Threads {
   upsertThread(summary: ThreadSummary): void {
     this.ctx.threadReads.change(summary.id, summary);
     const row = this.threads.find((t) => t.id === summary.id);
-    if (row) patchRow(row, summary);
+    if (row) patchRow(row, keepArchived(row, summary));
     else this.threads.push(summary);
   }
 
@@ -824,7 +830,7 @@ export class Threads {
   }
 
   threadSnapshots(threadId: ThreadId): Set<Thread> {
-    return new Set([this.openThread, this.ctx.store.delegationThread].filter((thread): thread is Thread => !!thread && thread.id === threadId));
+    return new Set([this.openThread, this.ctx.store.delegationThread, ...this.preloads.pages()].filter((thread): thread is Thread => !!thread && thread.id === threadId));
   }
 
   messages(threadId: ThreadId, messageId: string): Set<Message> {
@@ -852,7 +858,7 @@ export class Threads {
     if (held?.client === client && held.visit === visit) return held.promise;
     const promise = client.call('messages.attachment', { threadId, messageId, partIndex }).catch(async error => {
       if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
-      const message = await this.#fullMessage(client, threadId, messageId, visit);
+      const message = await fullMessage(client, this.threadSnapshots(threadId), threadId, messageId, () => this.ctx.client === client && visit === this.#toolOutputVisit);
       const part = message?.parts[partIndex];
       if (part?.type !== 'file' && part?.type !== 'image') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `part ${partIndex} is not an attachment of message ${messageId}` });
       return { data: part.data };
@@ -867,25 +873,6 @@ export class Threads {
     }).finally(() => { if (this.#attachments.get(key)?.promise === promise) this.#attachments.delete(key); });
     this.#attachments.set(key, { client, visit, promise });
     return promise;
-  }
-
-  /** Older cores expose full parts only through history pages. */
-  async #fullMessage(client: NonNullable<StoreContext['client']>, threadId: ThreadId, messageId: MessageId, visit: number): Promise<Message | undefined> {
-    if (this.ctx.client !== client || visit !== this.#toolOutputVisit) return undefined;
-    const thread = [...this.threadSnapshots(threadId)].find(held => held.messages.some(message => message.id === messageId));
-    const next = thread?.messages[lastIndexById(thread.messages, messageId) + 1]?.id;
-    const page = next
-      ? await client.call('messages.list', { threadId, before: next, limit: 1 })
-      : await client.call('threads.get', { threadId, after: messageId });
-    let message = page.messages.find(message => message.id === messageId);
-    let before = 'before' in page ? page.before : page.messagesBefore;
-    while (!message && before && this.ctx.client === client && visit === this.#toolOutputVisit) {
-      const older = await client.call('messages.list', { threadId, before, limit: MESSAGE_PAGE_MAX });
-      message = older.messages.find(message => message.id === messageId);
-      if (older.before === before) break;
-      before = older.before;
-    }
-    return message;
   }
 
   upsertTurn(threadId: ThreadId, turn: Thread['turns'][number]): void {

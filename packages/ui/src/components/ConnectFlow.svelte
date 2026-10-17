@@ -200,7 +200,7 @@
           <button type="button" class="icon ghost small" data-testid="connect-back" aria-label={strings.connect.back} title={strings.connect.back} onclick={back}><ArrowLeft size={16} /></button>
         {/if}
         <h2 id="connect-title">{provider ? provider.name : strings.connect.title}</h2>
-        <button type="button" class="icon ghost small close" data-testid="connect-close" aria-label={strings.connect.close} title={strings.connect.close} onclick={() => store.closeConnect()}><X size={16} /></button>
+        <button type="button" class="icon ghost small close" data-testid="connect-close" aria-label={strings.common.close} title={strings.common.close} onclick={() => store.closeConnect()}><X size={16} /></button>
       </div>
 
       <div class="body">
@@ -241,7 +241,7 @@
                 <span class="bar" class:indeterminate={install?.state !== 'downloading'} style="width: {ratio()}%"></span>
               </div>
               <p class="muted" role="status">{install?.state === 'downloading' ? fill(strings.install.downloading, { percent: percent(ratio()) }) : install?.state === 'verifying' ? strings.install.verifying : strings.install.extracting}</p>
-              <button type="button" class="quiet small" onclick={() => void store.cancelInstall(provider.id)}><span class="ui-label">{strings.install.cancel}</span></button>
+              <button type="button" class="quiet small" onclick={() => void store.cancelInstall(provider.id)}><span class="ui-label">{strings.common.cancel}</span></button>
             {:else if step === 'repair'}
               <button type="button" class="primary" onclick={async () => { await store.uninstallProvider(provider.id); await startInstall(); }}><span class="ui-label">{strings.install.repair}</span></button>
             {:else if step === 'manual'}
@@ -281,7 +281,7 @@
               {:else}
                 <p class="muted" role="status">{strings.accounts.loginStarting}</p>
               {/if}
-              <button type="button" class="quiet small" data-testid="connect-login-cancel" onclick={() => void store.cancelLogin(loginAccount.id)}><span class="ui-label">{strings.accounts.loginCancel}</span></button>
+              <button type="button" class="quiet small" data-testid="connect-login-cancel" onclick={() => void store.cancelLogin(loginAccount.id)}><span class="ui-label">{strings.common.cancel}</span></button>
             {:else if step === 'external'}
               <p>{fill(strings.connect.external, { provider: provider.name })}</p>
               <button type="button" class="quiet" disabled={detecting} data-testid="connect-check" onclick={() => void checkAgain()}><span class="ui-label">{strings.connect.checkAgain}</span></button>
@@ -401,7 +401,7 @@
 
   .track { width: 100%; height: 4px; border-radius: 999px; background: var(--color-hover); overflow: hidden; }
   .bar { display: block; height: 100%; background: var(--color-accent); transition: width var(--dur-2) var(--ease-out-quint); }
-  .bar.indeterminate { width: 30% !important; animation: slide 1.2s var(--ease-out-quint) infinite; }
+  .bar.indeterminate { width: 30% !important; animation: slide 1.2s var(--ease-out-quint) infinite var(--loops); }
   @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(330%); } }
 
   @media (max-width: 720px) {

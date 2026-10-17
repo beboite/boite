@@ -17,6 +17,54 @@ export interface PullRequestsRpcMethods {
   'threads.pullRequests': { params: { threadId: string; refresh?: boolean }; result: LinkedPullRequest[] };
   'threads.linkPullRequest': { params: { threadId: string; url: string }; result: LinkedPullRequest[] };
   'threads.unlinkPullRequest': { params: { threadId: string; url: string }; result: LinkedPullRequest[] };
+  /**
+   * Watches a pull request for the thread's agent: Boite reads it on GitHub
+   * and wakes the agent when it needs a look. `url` is a linked pull request's
+   * URL or number, or a new URL to link first; omitted, the thread's only
+   * linked pull request. Answers with what the first read saw.
+   */
+  'threads.watchPullRequest': { params: { threadId: string; url?: string }; result: PullRequestWatch };
+  /** Stops one watch (`url`: its URL or number), or every watch of the thread. Answers with those left. */
+  'threads.unwatchPullRequest': { params: { threadId: string; url?: string }; result: PullRequestWatch[] };
+}
+
+/**
+ * A pull request a thread's agent asked Boite to watch (`boite pr watch`).
+ * The core reads it about once a minute and wakes the agent with one message
+ * when a check fails, the required checks all passed, a review or a comment
+ * landed, or the branch started to conflict. It ends on merge or close, on
+ * Stop, on archive and on unwatch, and survives a core restart.
+ */
+export interface PullRequestWatch {
+  url: string;
+  repository: string;
+  number: number;
+  /** When the watch started. */
+  since: number;
+  /** What the last answer from GitHub showed; null before the first one. */
+  seen: PullRequestWatchSeen | null;
+  /**
+   * Why the last read got no answer and when the next one is tried: GitHub's
+   * rate limit, or GitHub or `gh` out of reach. The watch keeps going. Null
+   * once GitHub answers again.
+   */
+  paused: { reason: 'rate-limit' | 'unreachable'; until: number; message: string } | null;
+}
+/**
+ * A watch its agent still waits on: GitHub not read yet, or checks still
+ * running. Once they settle the agent has its answer, and the turn it ended on
+ * is finished work even though the watch stays to catch a review or a conflict.
+ */
+export function pullRequestWatchWaits(watch: PullRequestWatch): boolean {
+  return watch.seen === null || watch.seen.checks.running > 0;
+}
+export interface PullRequestWatchSeen {
+  checkedAt: number;
+  /** The head commit, abbreviated. */
+  head: string;
+  base: string;
+  checks: { total: number; running: number; failed: number };
+  conflicting: boolean;
 }
 export interface PullRequestComment { author: string; body: string; url: string; at: string; path?: string; line?: number; state?: string }
 export interface PullRequestCheck { name: string; state: string; url: string }

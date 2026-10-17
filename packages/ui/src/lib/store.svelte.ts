@@ -1,7 +1,9 @@
-import type { Message, PermissionMode, ProjectId, ProviderId, ThreadId } from '@boite/contracts';
+import { startDiagnosticsReport } from './diagnostics-report';
+import { RpcErrorCode, type AgentShape, type Message, type PermissionMode, type ProjectId, type ProviderId, type ThreadId } from '@boite/contracts';
 import type { Client } from './client';
+import { RpcFailure, wasClosed } from './rpc-error';
 import { readModelDefaults } from './model-defaults';
-import { readFavorites } from './model-order';
+import { modelFavorites } from './model-favorites.svelte';
 import { readLayout, readPrefs } from './prefs';
 import { watchIncognito } from './store/incognito.svelte';
 import type { Accounts } from './store/accounts.svelte';
@@ -11,6 +13,7 @@ import { StoreContext } from './store/context';
 import type { Delegation } from './store/delegation.svelte';
 import { listen } from './store/events';
 import { loadAttachments } from './store/reading-pages.svelte';
+import { releaseOlder } from './store/live-end';
 import type { Imports } from './store/imports.svelte';
 import type { Layout } from './store/layout.svelte';
 import type { Models } from './store/models.svelte';
@@ -25,7 +28,7 @@ import type { Workbench } from './store/workbench.svelte';
 import type { Workflows } from './store/workflows.svelte';
 
 export type Page = 'chat' | 'settings' | 'agents';
-export type SettingsTab = 'home' | 'advanced' | 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'task-manager' | 'experiments';
+export type { SettingsTab } from './settings-tabs';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -39,6 +42,13 @@ export interface LoginState {
 
 /** A thread that exists only in the UI until its first message is sent. */
 export interface Draft {
+  /**
+   * Which draft this is: a project can hold several. Absent only on drafts
+   * made before ids existed, which are keyed by their project instead.
+   */
+  id?: string;
+  /** When the draft was opened, which orders the list of drafts, newest first. */
+  createdAt?: number;
   /**
    * Null is the drafts project before the core made it: the first send asks
    * for it with `projects.drafts`, so opening the app writes nothing to disk.
@@ -92,20 +102,22 @@ export type FileAnswer<T> = { ok: true; value: T } | { ok: false; error: string 
 export class Store {
   readonly #ctx = new StoreContext(this);
   machineId = '';
-  visible = true;
-  #error = $state<{ message: string; severity: 'minor' | 'major' } | null>(null);
+  visible = $state(true);
+  #error = $state<{ message: string; severity: 'minor' | 'major'; offline: boolean } | null>(null);
   errorThreadId = $state<string | null>(null);
 
   get error(): string | null { return this.#error?.message ?? null; }
   get errorSeverity(): 'minor' | 'major' { return this.#error?.severity ?? 'major'; }
+  /** The error only says the call found the machine not connected, which its status already shows. */
+  get errorOffline(): boolean { return this.#error?.offline ?? false; }
   set error(value: string | null) {
-    this.#error = value === null ? null : { message: value, severity: 'major' };
+    this.#error = value === null ? null : { message: value, severity: 'major', offline: false };
     this.errorThreadId = null;
   }
 
   /** Only explicitly minor action failures expire; unknown failures remain visible. */
   reportError(error: unknown, severity: 'minor' | 'major' = 'major'): void {
-    this.#error = { message: this.#ctx.reason(error), severity };
+    this.#error = { message: this.#ctx.reason(error), severity, offline: wasClosed(error) };
     this.errorThreadId = null;
   }
 
@@ -126,6 +138,7 @@ export class Store {
     const ctx = this.#ctx;
     this.detach();
     ctx.threads.readingThreads.clear();
+    ctx.displayImages.clear();
     this.readingPositions.clear();
     ctx.composer.pendingSends.clear();
     ctx.composer.staged = {};
@@ -137,6 +150,7 @@ export class Store {
     this.probedModels = {};
     ctx.models.probeEpoch++;
     ctx.models.probeAttempts.clear();
+    ctx.models.forgetConfirmed();
     ctx.models.probeTimes.clear();
     ctx.models.effortAttempts.clear();
     ctx.models.probeRequests.clear();
@@ -144,13 +158,17 @@ export class Store {
     this.connection = client.state;
     this.prefs = readPrefs();
     this.modelDefaults = readModelDefaults();
-    this.favorites = readFavorites();
     const layout = readLayout();
     this.sidebarWidth = layout.sidebarWidth;
     this.sidebarCollapsed = layout.sidebarCollapsed;
     listen(ctx, client);
+    ctx.off.push(modelFavorites.register(ctx.models.favoritesTarget));
     ctx.off.push(ctx.composer.watchQueues());
+    ctx.off.push(ctx.draftStartup.watch());
     ctx.off.push(watchIncognito(ctx));
+    // Each machine hears about this window's own failures. Unit tests drive
+    // fake timers through stores by the hundred, so the reporter stays out of them.
+    if (import.meta.env.MODE !== 'test') ctx.off.push(startDiagnosticsReport(client));
   }
 
   detach(): void {
@@ -169,10 +187,6 @@ export class Store {
     this.coordinationLoading = false;
     this.coordinationSaving = false;
     this.coordinationError = null;
-    ctx.delegation.stewardsEpoch++;
-    this.stewards = null;
-    this.stewardsSaving = false;
-    this.stewardsError = null;
     ctx.delegation.delegationEpoch++;
     ctx.delegation.delegationSelectionEpoch++;
     ctx.delegation.delegationConfigureEpoch++;
@@ -234,28 +248,26 @@ export class Store {
   // Pairing: store/pairing.svelte.ts
   // -------------------------------------------------------------------------
 
-  get pairing() { return this.#ctx.pairing.pairing; }
-  set pairing(value) { this.#ctx.pairing.pairing = value; }
+  get deviceInvite() { return this.#ctx.pairing.deviceInvite; }
+  set deviceInvite(value) { this.#ctx.pairing.deviceInvite = value; }
   get sessions() { return this.#ctx.pairing.sessions; }
   set sessions(value) { this.#ctx.pairing.sessions = value; }
 
-  mintPairing(...args: Parameters<Pairing['mintPairing']>) { return this.#ctx.pairing.mintPairing(...args); }
-  closePairing() { return this.#ctx.pairing.closePairing(); }
+  addDevice() { return this.#ctx.pairing.addDevice(); }
+  closeDeviceInvite() { return this.#ctx.pairing.closeDeviceInvite(); }
+  revokeDevice(id: string) { return this.#ctx.pairing.revokeDevice(id); }
   loadSessions(...args: Parameters<Pairing['loadSessions']>) { return this.#ctx.pairing.loadSessions(...args); }
   revokeSession(...args: Parameters<Pairing['revokeSession']>) { return this.#ctx.pairing.revokeSession(...args); }
   get group() { return this.#ctx.pairing.group; }
   set group(value) { this.#ctx.pairing.group = value; }
   get groupKnown() { return this.#ctx.pairing.groupKnown; }
   set groupKnown(value) { this.#ctx.pairing.groupKnown = value; }
-  get groupInvite() { return this.#ctx.pairing.groupInvite; }
-  set groupInvite(value) { this.#ctx.pairing.groupInvite = value; }
   loadGroup(...args: Parameters<Pairing['loadGroup']>) { return this.#ctx.pairing.loadGroup(...args); }
   createGroup(...args: Parameters<Pairing['createGroup']>) { return this.#ctx.pairing.createGroup(...args); }
   renameGroup(...args: Parameters<Pairing['renameGroup']>) { return this.#ctx.pairing.renameGroup(...args); }
   joinGroup(...args: Parameters<Pairing['joinGroup']>) { return this.#ctx.pairing.joinGroup(...args); }
   leaveGroup(...args: Parameters<Pairing['leaveGroup']>) { return this.#ctx.pairing.leaveGroup(...args); }
   removeFromGroup(...args: Parameters<Pairing['removeFromGroup']>) { return this.#ctx.pairing.removeFromGroup(...args); }
-  inviteToGroup(...args: Parameters<Pairing['inviteToGroup']>) { return this.#ctx.pairing.inviteToGroup(...args); }
 
   // -------------------------------------------------------------------------
   // Layout, navigation and notifications: store/layout.svelte.ts
@@ -358,6 +370,8 @@ export class Store {
   terminalExited(...args: Parameters<Terminals['terminalExited']>) { return this.#ctx.terminals.terminalExited(...args); }
   focusShell(...args: Parameters<Terminals['focusShell']>) { return this.#ctx.terminals.focusShell(...args); }
   terminalCommand(...args: Parameters<Terminals['terminalCommand']>) { return this.#ctx.terminals.terminalCommand(...args); }
+  terminalScreen(...args: Parameters<Terminals['session']>) { return this.#ctx.terminals.session(...args); }
+  terminalHistory(...args: Parameters<Terminals['terminalHistory']>) { return this.#ctx.terminals.terminalHistory(...args); }
 
   // -------------------------------------------------------------------------
   // Models and the composer's choice: store/models.svelte.ts
@@ -370,7 +384,6 @@ export class Store {
   get draftChoice() { return this.#ctx.models.draftChoice; }
   set draftChoice(value) { this.#ctx.models.draftChoice = value; }
   get favorites() { return this.#ctx.models.favorites; }
-  set favorites(value) { this.#ctx.models.favorites = value; }
   get probedModels() { return this.#ctx.models.probedModels; }
   set probedModels(value) { this.#ctx.models.probedModels = value; }
   get probingModels() { return this.#ctx.models.probingModels; }
@@ -381,6 +394,7 @@ export class Store {
   modelOf(...args: Parameters<Models['modelOf']>) { return this.#ctx.models.modelOf(...args); }
   probeModelEffort(...args: Parameters<Models['probeModelEffort']>) { return this.#ctx.models.probeModelEffort(...args); }
   isProbing(...args: Parameters<Models['isProbing']>) { return this.#ctx.models.isProbing(...args); }
+  catalogHas(...args: Parameters<Models['catalogHas']>) { return this.#ctx.models.catalogHas(...args); }
   modelsPending(...args: Parameters<Models['modelsPending']>) { return this.#ctx.models.modelsPending(...args); }
   probeModels(...args: Parameters<Models['probeModels']>) { return this.#ctx.models.probeModels(...args); }
   defaultModelOf(...args: Parameters<Models['defaultModelOf']>) { return this.#ctx.models.defaultModelOf(...args); }
@@ -472,6 +486,8 @@ export class Store {
   setProjectWorktreeDefault(...args: Parameters<Projects['setProjectWorktreeDefault']>) { return this.#ctx.projects.setProjectWorktreeDefault(...args); }
   projectAutoArchiveMergedPrBusy(...args: Parameters<Projects['projectAutoArchiveMergedPrBusy']>) { return this.#ctx.projects.projectAutoArchiveMergedPrBusy(...args); }
   setProjectAutoArchiveMergedPr(...args: Parameters<Projects['setProjectAutoArchiveMergedPr']>) { return this.#ctx.projects.setProjectAutoArchiveMergedPr(...args); }
+  projectAutoRemoveWorktreesBusy(...args: Parameters<Projects['projectAutoRemoveWorktreesBusy']>) { return this.#ctx.projects.projectAutoRemoveWorktreesBusy(...args); }
+  setProjectAutoRemoveWorktrees(...args: Parameters<Projects['setProjectAutoRemoveWorktrees']>) { return this.#ctx.projects.setProjectAutoRemoveWorktrees(...args); }
   refreshProjectIcon(...args: Parameters<Projects['refreshProjectIcon']>) { return this.#ctx.projects.refreshProjectIcon(...args); }
   startDraft(...args: Parameters<Projects['startDraft']>) { return this.#ctx.projects.startDraft(...args); }
   setDraftProject(...args: Parameters<Projects['setDraftProject']>) { return this.#ctx.projects.setDraftProject(...args); }
@@ -508,6 +524,7 @@ export class Store {
   mergeBack(...args: Parameters<Threads['mergeBack']>) { return this.#ctx.threads.mergeBack(...args); }
   fork(...args: Parameters<Threads['fork']>) { return this.#ctx.threads.fork(...args); }
   open(...args: Parameters<Threads['open']>) { return this.#ctx.threads.open(...args); }
+  preload(threadId: ThreadId) { return this.#ctx.threads.preloads.preload(threadId); }
   loadToolOutput(...args: Parameters<Threads['loadToolOutput']>) { return this.#ctx.threads.loadToolOutput(...args); }
   loadMessageAttachment(...args: Parameters<Threads['loadMessageAttachment']>) { return this.#ctx.threads.loadMessageAttachment(...args); }
   /** The light copy of a deferred picture the timeline draws (`store/display-images.ts`); the original stays with `loadMessageAttachment`. */
@@ -520,12 +537,29 @@ export class Store {
   get loadingNewer() { return this.#ctx.threads.newer.loading; }
   loadNewer() { return this.#ctx.threads.newer.loadNewer(); }
   loadLatest() { return this.#ctx.threads.newer.loadLatest(); }
+  /** Where `messages` of `threadId` sit in it and what is missing between them (`lib/store/message-positions`). */
+  messagePlacement(threadId: string, messages: readonly Message[]) { return this.#ctx.positions.placement(threadId, messages); }
+  get loadingRange() { return this.#ctx.positions.loading; }
+  loadRange(from: number, limit: number, landing?: () => void) { return this.#ctx.positions.loadRange(from, limit, landing); }
   loadAttachments(threadId: ThreadId, message: Message) { return loadAttachments(this.#ctx, threadId, message); }
   loadOlder(...args: Parameters<Threads['loadOlder']>) { return this.#ctx.threads.loadOlder(...args); }
+  releaseOlder(threadId: ThreadId) { return releaseOlder(this.#ctx, threadId); }
   createThread(...args: Parameters<Threads['createThread']>) { return this.#ctx.threads.createThread(...args); }
   update(...args: Parameters<Threads['update']>) { return this.#ctx.threads.update(...args); }
   recoverTurn(...args: Parameters<Threads['recoverTurn']>) { return this.#ctx.threads.recoverTurn(...args); }
+  /** Gives up the retry the core planned for the thread; its row's `retry` clears with the core's update. */
+  async cancelRetry(threadId: ThreadId) {
+    const client = this.#ctx.client;
+    if (!client) return;
+    try { await client.call('turns.cancelRetry', { threadId }); } catch (error) { this.#ctx.fail(error); }
+  }
   threadCapabilities(...args: Parameters<Threads['capabilities']>) { return this.#ctx.threads.capabilities(...args); }
+  /** What the thread's last Claude request carried, read from its transcript on this store's machine. */
+  agentShape(threadId: ThreadId): Promise<AgentShape> {
+    const client = this.#ctx.client;
+    if (!client) return Promise.reject(new RpcFailure({ code: RpcErrorCode.Internal, message: 'not connected' }));
+    return client.call('threads.agentShape', { threadId });
+  }
   setPermissionMode(...args: Parameters<Threads['setPermissionMode']>) { return this.#ctx.threads.setPermissionMode(...args); }
   rename(...args: Parameters<Threads['rename']>) { return this.#ctx.threads.rename(...args); }
   retitle(...args: Parameters<Threads['retitle']>) { return this.#ctx.threads.retitle(...args); }
@@ -545,6 +579,7 @@ export class Store {
 
   get composerStates() { return this.#ctx.composer.composerStates; }
   get draftEntries() { return this.#ctx.drafts.entries; }
+  discardDraft(id: string) { return this.#ctx.drafts.discard(id); }
   get draftsReadable() { return this.#ctx.drafts.readable; }
   flushDrafts() { return this.#ctx.drafts.flush(); }
   set composerStates(value) { this.#ctx.composer.composerStates = value; }
@@ -606,12 +641,6 @@ export class Store {
   set coordinationSaving(value) { this.#ctx.delegation.coordinationSaving = value; }
   get coordinationError() { return this.#ctx.delegation.coordinationError; }
   set coordinationError(value) { this.#ctx.delegation.coordinationError = value; }
-  get stewards() { return this.#ctx.delegation.stewards; }
-  set stewards(value) { this.#ctx.delegation.stewards = value; }
-  get stewardsSaving() { return this.#ctx.delegation.stewardsSaving; }
-  set stewardsSaving(value) { this.#ctx.delegation.stewardsSaving = value; }
-  get stewardsError() { return this.#ctx.delegation.stewardsError; }
-  set stewardsError(value) { this.#ctx.delegation.stewardsError = value; }
   get delegation() { return this.#ctx.delegation.delegation; }
   set delegation(value) { this.#ctx.delegation.delegation = value; }
   get delegationThread() { return this.#ctx.delegation.delegationThread; }
@@ -627,12 +656,15 @@ export class Store {
 
   loadCoordination(...args: Parameters<Delegation['loadCoordination']>) { return this.#ctx.delegation.loadCoordination(...args); }
   configureCoordination(...args: Parameters<Delegation['configureCoordination']>) { return this.#ctx.delegation.configureCoordination(...args); }
-  loadStewards(...args: Parameters<Delegation['loadStewards']>) { return this.#ctx.delegation.loadStewards(...args); }
-  setSteward(...args: Parameters<Delegation['setSteward']>) { return this.#ctx.delegation.setSteward(...args); }
-  revokeSteward(...args: Parameters<Delegation['revokeSteward']>) { return this.#ctx.delegation.revokeSteward(...args); }
   loadDelegation(...args: Parameters<Delegation['loadDelegation']>) { return this.#ctx.delegation.loadDelegation(...args); }
   configureDelegation(...args: Parameters<Delegation['configureDelegation']>) { return this.#ctx.delegation.configureDelegation(...args); }
   selectDelegatedAgent(...args: Parameters<Delegation['selectDelegatedAgent']>) { return this.#ctx.delegation.selectDelegatedAgent(...args); }
+  /** The agents tab on the whole team: no agent picked, and no workflow graph left open over it. */
+  showTeam(): void {
+    const surface = this.panel.open('agents');
+    this.panel.update(surface.id, { runId: undefined });
+    void this.selectDelegatedAgent(null);
+  }
   spawnDelegatedAgent(...args: Parameters<Delegation['spawnDelegatedAgent']>) { return this.#ctx.delegation.spawnDelegatedAgent(...args); }
   messageDelegatedAgent(...args: Parameters<Delegation['messageDelegatedAgent']>) { return this.#ctx.delegation.messageDelegatedAgent(...args); }
   stopDelegatedAgent(...args: Parameters<Delegation['stopDelegatedAgent']>) { return this.#ctx.delegation.stopDelegatedAgent(...args); }
@@ -690,6 +722,7 @@ export class Store {
   setTasks(...args: Parameters<Workbench['setTasks']>) { return this.#ctx.workbench.setTasks(...args); }
   loadTodos(...args: Parameters<Workbench['loadTodos']>) { return this.#ctx.workbench.loadTodos(...args); }
   addTodo(...args: Parameters<Workbench['addTodo']>) { return this.#ctx.workbench.addTodo(...args); }
+  unwatchPullRequest(...args: Parameters<Workbench['unwatchPullRequest']>) { return this.#ctx.workbench.unwatchPullRequest(...args); }
   updateTodo(...args: Parameters<Workbench['updateTodo']>) { return this.#ctx.workbench.updateTodo(...args); }
   removeTodo(...args: Parameters<Workbench['removeTodo']>) { return this.#ctx.workbench.removeTodo(...args); }
   refreshResources(...args: Parameters<Workbench['refreshResources']>) { return this.#ctx.workbench.refreshResources(...args); }

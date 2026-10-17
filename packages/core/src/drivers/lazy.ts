@@ -1,4 +1,4 @@
-import type { AccountId, ModelInfo, Protocol, ProviderId, ThreadId } from '@boite/contracts';
+import type { AccountId, ModelInfo, Protocol, ProviderDescriptor, ProviderId, ThreadId } from '@boite/contracts';
 import type { Driver, ProbeContext, ProbeFilter, TurnHandle, TurnResult } from './types.ts';
 
 interface PendingLoad {
@@ -85,9 +85,13 @@ export function lazyDriver(
       }, cancelled, ctx.signal).result,
     } : {}),
     ...(options.prepare ? {
-      prepare: ctx => defer({ threadId: ctx.thread.id }, async driver => {
-        if (viewed.has(ctx.thread.id)) await driver.prepare?.(ctx);
-      }, () => undefined).result,
+      prepare: (ctx, request) => {
+        // Mark a loaded session before a synchronous startTurn can acquire it at zero retention.
+        if (loaded !== null) return viewed.has(ctx.thread.id) || request?.forTurn ? loaded.prepare?.(ctx, request) ?? Promise.resolve() : Promise.resolve();
+        return defer({ threadId: ctx.thread.id }, async driver => {
+          if (viewed.has(ctx.thread.id) || request?.forTurn) await driver.prepare?.(ctx, request);
+        }, () => undefined).result;
+      },
       setViewed(threadId: ThreadId, active: boolean) {
         if (active) viewed.add(threadId);
         else viewed.delete(threadId);
@@ -121,6 +125,9 @@ export function lazyDriver(
     probedModels(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null {
       return loaded?.probedModels?.(providerId, accountId) ?? null;
     },
+    // The sign-in that read the session may be the first use of this protocol.
+    rememberSession: (provider: ProviderDescriptor, accountId: AccountId, created: unknown): Promise<ModelInfo[] | null> =>
+      ready().then(driver => driver.rememberSession?.(provider, accountId, created) ?? null),
     forgetProbes(filter: ProbeFilter = {}) {
       for (const entry of pending) {
         if (entry.probe && (filter.providerId === undefined || filter.providerId === entry.probe.provider.id)

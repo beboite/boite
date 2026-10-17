@@ -25,7 +25,7 @@ beforeAll(async () => {
   await page.waitFor("document.querySelector('[data-testid=thread-title]')?.textContent.includes('Inspect the configuration')");
 }, 90_000);
 
-afterAll(async () => { await page?.close(); client?.close(); await core?.stop(); });
+afterAll(async () => { await page?.close(); client?.close(); await core?.stop(); }, 30_000);
 
 test('desktop and paired phone side answers stay temporary until explicitly forked while the main turn waits', async () => {
   await client.call('turns.start', { threadId, prompt: 'Read the configuration [permission]' });

@@ -1,17 +1,19 @@
 <script lang="ts">
+  import { errorText } from '../../lib/errors';
   import type { AgentsView } from '../../lib/agents.svelte';
   import { confirm } from '../../lib/confirm.svelte';
   import { strings } from '../../lib/strings';
   import AgentAccountAccess from './AgentAccountAccess.svelte';
+  import AgentBrainRoot from './AgentBrainRoot.svelte';
 
   let { view }: { view: AgentsView } = $props();
   const labels = $derived(strings.agents);
   const limits = $derived(view.snapshot!.limits);
 
   async function stopEngine() {
-    if (!await confirm.ask({ title: labels.stopEngine, body: labels.stopEngineBody, confirmLabel: labels.stopEngine, cancelLabel: labels.cancel, danger: true })) return;
+    if (!await confirm.ask({ title: labels.stopEngine, body: labels.stopEngineBody, confirmLabel: labels.stopEngine, cancelLabel: strings.common.cancel, danger: true })) return;
     try { await view.store.client?.call('core.shutdown', {}); view.store.client?.close(); }
-    catch (error) { view.error = error instanceof Error ? error.message : String(error); }
+    catch (error) { view.error = errorText(error); }
   }
 </script>
 
@@ -26,13 +28,11 @@
     <span class="text ui-label">{labels.paused}</span>
     <input type="checkbox" role="switch" disabled={view.pending} checked={limits.paused} onchange={event => { void view.call('agents.limits.set', { ...limits, paused: event.currentTarget.checked }); }} />
   </label>
-  <label class="switch-row">
-    <span class="text">{labels.kebacc}<span class="hint">{labels.kebaccHint}</span></span>
-    <input type="checkbox" role="switch" disabled={view.pending} checked={limits.kebaccExperiment} onchange={event => { void view.call('agents.limits.set', { ...limits, kebaccExperiment: event.currentTarget.checked }); }} />
-  </label>
 </section>
 
 <AgentAccountAccess {view} />
+
+<AgentBrainRoot {view} />
 
 <section class="card">
   <h2>{labels.dangerZone}</h2>

@@ -2,6 +2,7 @@
   import { ArrowUp, SquareArrowOutUpRight } from '@lucide/svelte';
   import type { AgentWork } from '@boite/contracts';
   import type { AgentsView } from '../../lib/agents.svelte';
+  import { providerName } from '../../lib/format';
   import { fill, strings } from '../../lib/strings';
   import AgentAvatar from './AgentAvatar.svelte';
   /**
@@ -48,7 +49,7 @@
     <div class="agent-actions">
       {#if ['paused', 'error'].includes(work.status)}<button class="small" disabled={view.pending} onclick={() => void control('resume')}>{strings.agents.resume}</button>{/if}
       {#if work.status === 'interrupted'}<button class="small" onclick={() => { reconciling = !reconciling; }}>{strings.agents.reconcile}</button>{/if}
-      {#if !['done', 'cancelled'].includes(work.status)}<button class="ghost small" disabled={view.pending} onclick={() => void control('cancel')}>{strings.agents.cancel}</button>{/if}
+      {#if !['done', 'cancelled'].includes(work.status)}<button class="ghost small" disabled={view.pending} onclick={() => void control('cancel')}>{strings.common.cancel}</button>{/if}
     </div>
     {#if reconciling && work.status === 'interrupted'}
       <form class="agents-form" onsubmit={e => { e.preventDefault(); void control('reconcile'); }}><p class="muted">{strings.agents.reconcileHint}</p><label>{strings.agents.reconcileNote}<textarea required bind:value={note} rows="3"></textarea></label><button class="primary" disabled={view.pending || !note.trim()}>{strings.agents.resume}</button></form>
@@ -61,7 +62,7 @@
   <p class="agent-work-prompt">{work.prompt.slice(0, 220)}</p>
   {#if work.error}<p class="agent-error"><span class="ui-label">{work.error}</span></p>{/if}
   {#if run}
-    <p class="muted">{strings.agents.requested}: {view.store.providerOf(run.execution.providerId)?.name ?? run.execution.providerId} · {run.execution.model ?? strings.agents.model}
+    <p class="muted">{strings.agents.requested}: {providerName(view.store, run.execution.providerId)} · {run.execution.model ?? strings.agents.model}
       {#if run.actualExecution?.model && run.actualExecution.model !== run.execution.model}<br />{strings.agents.executed}: {run.actualExecution.model}{/if}
     </p>
   {/if}
@@ -70,7 +71,7 @@
     {#if ['pending', 'running'].includes(work.status)}<button class="small" disabled={view.pending} onclick={() => void control('pause')}><span class="ui-label">{strings.agents.pause}</span></button>{/if}
     {#if ['paused', 'error'].includes(work.status)}<button class="small" disabled={view.pending} onclick={() => void control('resume')}><span class="ui-label">{strings.agents.resume}</span></button>{/if}
     {#if work.status === 'interrupted'}<button class="small" onclick={() => { reconciling = !reconciling; }}><span class="ui-label">{strings.agents.reconcile}</span></button>{/if}
-    {#if !['done', 'cancelled'].includes(work.status)}<button class="ghost small" disabled={view.pending} onclick={() => void control('cancel')}><span class="ui-label">{strings.agents.cancel}</span></button>{/if}
+    {#if !['done', 'cancelled'].includes(work.status)}<button class="ghost small" disabled={view.pending} onclick={() => void control('cancel')}><span class="ui-label">{strings.common.cancel}</span></button>{/if}
   </div>
   {#if reconciling && work.status === 'interrupted'}
     <form class="agents-form" onsubmit={e => { e.preventDefault(); void control('reconcile'); }}><p class="muted">{strings.agents.reconcileHint}</p><label>{strings.agents.reconcileNote}<textarea required bind:value={note} rows="3"></textarea></label><button class="primary" disabled={view.pending || !note.trim()}><span class="ui-label">{strings.agents.resume}</span></button></form>

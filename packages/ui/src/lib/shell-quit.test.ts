@@ -2,7 +2,8 @@ import { afterEach, expect, test, vi } from 'vitest';
 import type { ThreadSummary } from '@boite/contracts';
 import { Store } from './store.svelte';
 import { confirm } from './confirm.svelte';
-import { confirmedQuitHold, QUIT_CHECK_TIMEOUT_MS, shellQuit } from './shell-quit';
+import { closingStores, confirmedQuitHold, QUIT_CHECK_TIMEOUT_MS, shellQuit } from './shell-quit';
+import type { Machine } from './workspace.svelte';
 import { strings } from './strings';
 
 afterEach(() => { confirm.answer(false); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -31,6 +32,20 @@ test('idle machines close without asking; work on another machine requires confi
   await request();
   expect(quit).toHaveBeenCalledTimes(2);
   expect(busy.client!.call).toHaveBeenCalledWith('threads.list', { includeArchived: true });
+});
+
+test('only work on this PC holds the app open: another machine keeps its agents running', async () => {
+  const quit = vi.fn(async () => {});
+  const ask = vi.spyOn(confirm, 'ask').mockResolvedValue(false);
+  const here = Object.assign(machine(['idle']), { localCore: true, endpointUrl: 'http://127.0.0.1:3773' }) as Store;
+  const remote = Object.assign(machine(['running', 'waiting']), { localCore: false, endpointUrl: 'https://m2.example.com' }) as Store;
+  const unreachable = Object.assign(machine(['idle'], true), { localCore: false, endpointUrl: 'https://laptop.example.com' }) as Store;
+  const machines = [here, remote, unreachable].map((store, i) => ({ id: store.endpointUrl ?? `m${i}`, label: `m${i}`, store })) as Machine[];
+  expect(closingStores(machines)).toEqual([here]);
+  await shellQuit(() => closingStores(machines), quit)();
+  expect(ask).not.toHaveBeenCalled();
+  expect(quit).toHaveBeenCalledTimes(1);
+  expect(remote.client!.call).not.toHaveBeenCalled();
 });
 
 test('cancelling a keyboard close permits a second hold, while disposal during confirmation remains final', async () => {

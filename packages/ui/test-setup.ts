@@ -16,6 +16,19 @@ vi.stubGlobal('ResizeObserver', class {
   disconnect() {}
 });
 
+// jsdom's user-agent sheet hides `[popover]:not(:popover-open)`, but jsdom has
+// no Popover API and its selector engine never matches `:popover-open`
+// (jsdom/jsdom#3721), so every popover counts as display: none. Since jsdom
+// 30.1, focus() refuses an element hidden that way. The app only keeps a
+// `[popover]` node mounted while it is open (floating.ts, ContextMenu), which a
+// browser shows through showPopover(), so here it is shown as one. jsdom
+// cascades its user-agent sheet and the page's by specificity alone, so this
+// rule repeats the hiding selector to outrank it; `hidden` and an inline
+// `display` still win, as in a browser.
+const popoverShown = document.createElement('style');
+popoverShown.textContent = '[popover]:not(:popover-open):not(dialog[open]):not([hidden]) { display: block; }';
+document.head.append(popoverShown);
+
 // Nor a canvas: say so quietly, as a browser without one would, instead of
 // jsdom's "not implemented" on every image attached.
 HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext;

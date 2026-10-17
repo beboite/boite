@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { AppWindow, EyeOff, Globe, Plus, X } from '@lucide/svelte';
-  import type { AgentBrowserStatus, AgentBrowserTab } from '@boite/contracts';
+  import { REMOTE_WATCH_EVERY_MS, type AgentBrowserStatus, type AgentBrowserTab } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { liveViews, machineName } from '../lib/live-view.svelte';
@@ -31,6 +32,22 @@
   const tabs = $derived(status?.tabs ?? []);
   const live = $derived(!!status?.live && tabs.length > 0);
   const watched = $derived(tabs.find((tab) => tab.tabId === picked) ?? tabs.find((tab) => tab.active) ?? tabs[0] ?? null);
+  // A tab this app hosts shows its own page here, never asking for frames.
+  const native = $derived(here && agentHost.active && !!watched?.view);
+  const nativeTab = $derived(native ? watched?.tabId ?? null : null);
+
+  // The core keeps a tab awake while a viewer watches it (docs/browser.md):
+  // shown natively, the page tells it so while the window is visible. A new
+  // tab's draft covers the page, which may then sleep.
+  $effect(() => {
+    const client = store.client, tabId = drafted ? null : nativeTab, id = threadId;
+    if (!client || !tabId || store.connection !== 'ready') return;
+    const tell = () => { if (document.visibilityState === 'visible') void client.call('browser.remoteWatch', { threadId: id, tabId }).catch(() => {}); };
+    tell();
+    const timer = setInterval(tell, REMOTE_WATCH_EVERY_MS);
+    document.addEventListener('visibilitychange', tell);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tell); };
+  });
 
   function host(url: string): string {
     try { return new URL(url).host || url; } catch { return url; }
@@ -62,14 +79,14 @@
       if (reply.tabId && picked === before) picked = reply.tabId;
       // The user opened it himself: no cover over his own page.
       liveViews.show('agent-browser', key);
-    } catch (cause) { failure = cause instanceof Error ? cause.message : String(cause); }
+    } catch (cause) { failure = errorText(cause); }
     finally { opening = false; }
   }
   async function closeTab(tab: AgentBrowserTab) {
     const client = store.client;
     if (!client) return;
     try { await client.call('browser.command', { threadId, tabId: tab.tabId, action: { kind: 'close' } }); }
-    catch (cause) { failure = cause instanceof Error ? cause.message : String(cause); }
+    catch (cause) { failure = errorText(cause); }
   }
   function pick(tab: AgentBrowserTab) { picked = tab.tabId; drafting = false; failure = ''; }
 
@@ -93,7 +110,7 @@
         }, (cause) => {
           if (stopped) return;
           if (attempt < 4) retry = setTimeout(() => ask(attempt + 1), 1000);
-          else failure = cause instanceof Error ? cause.message : String(cause);
+          else failure = errorText(cause);
         });
       };
       ask(0);
@@ -153,7 +170,7 @@
         <p class="muted">{fill(strings.agentBrowser.newTabHint, { machine })}</p>
         <div class="omnibox">
           <input bind:this={field} bind:value={address} data-testid="agent-browser-start-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.addressPlaceholder} />
-          <button type="submit" class="primary small" disabled={!address.trim() || opening}><span class="ui-label">{strings.agentBrowser.open}</span></button>
+          <button type="submit" class="primary small" disabled={!address.trim() || opening}><span class="ui-label">{strings.common.open}</span></button>
         </div>
         {#if failure}<p class="failure" role="alert">{failure}</p>{/if}
       </form>
@@ -170,7 +187,7 @@
     {:else if watched}
       {#key watched.tabId}
         <!-- This app hosts the tab: its own webview shows here, nothing is streamed. -->
-        {#if here && agentHost.active && watched.view}<AgentNativeView view={watched.view} url={watched.url} />
+        {#if native && watched.view}<AgentNativeView view={watched.view} url={watched.url} />
         {:else}<RemoteBrowser {store} {threadId} tabId={watched.tabId} />{/if}
       {/key}
     {/if}

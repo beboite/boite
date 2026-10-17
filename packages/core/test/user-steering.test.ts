@@ -219,7 +219,9 @@ test('a follow-up cuts the running answer, so what the agent writes next lands a
   expect(await owner.call('turns.steer', { threadId, turnId: turn.id, prompt: 'Also reorder the buttons', clientRequestId: 'follow_up_split' })).toEqual({ accepted: true });
   emit.part(reply, 2, { type: 'text', text: '' });
   emit.delta(reply, 2, 'After');
-  const shape = () => h.core.journal.listMessages(threadId).filter(message => message.turnId === turn.id).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+  const shape = () => h.core.journal.listMessages(threadId).filter(message => message.turnId === turn.id)
+    // A stable sort: rows of one millisecond keep the journal's order, as a fast steer lands in the answer's.
+    .sort((a, b) => a.createdAt - b.createdAt)
     .map(message => [message.role, message.state, message.parts.map(part => part.type === 'text' ? part.text : part.type === 'tool' ? part.status : part.type).join('|')]);
   h.core.journal.flushDeltas();
   // The tool that was running when the follow-up arrived keeps its message open.

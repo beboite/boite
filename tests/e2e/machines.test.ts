@@ -13,9 +13,7 @@ let url: string;
 const cores: RunningCore[] = [];
 const id = (name: string) => `[data-testid="${name}"]`;
 async function capture(name: string) {
-  await page.evaluate(
-    `Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`
-  );
+  await page.settleAnimations();
   await page.screenshot(join(import.meta.dir, '.artifacts', name));
 }
 beforeAll(async () => {
@@ -28,7 +26,7 @@ afterAll(async () => {
   await page?.close();
   await server?.close();
   for (const core of cores) await core.stop();
-}, 15_000);
+}, 30_000);
 
 test('project and recent cards show both hosts, PRs and user-message ordering on desktop and phone', async () => {
   await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
@@ -123,9 +121,13 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.waitFor(`document.querySelector('${id('thread-title')}')?.textContent === 'Primary project'`);
     await page.click(id('nav-settings'));
     await page.click(id('settings-tab-machines'));
-    // Restore a legacy individual owner connection. The new UI folds it into the group automatically.
+    // Restore a legacy individual owner connection, as a desktop app paired before groups kept it: a key for that
+    // core alone. The new UI folds it into the group automatically.
     const grant = await b.call('pairing.grant', { role: 'owner' });
-    await page.evaluate(`globalThis.__boiteTest.workspace.pair(${JSON.stringify(grant.url)}, 'Remote')`);
+    const exchanged = await connect(second.url, '', { grant: grant.grant });
+    const key = exchanged.session!.token;
+    exchanged.close();
+    await page.evaluate(`globalThis.__boiteTest.workspace.add({ url: ${JSON.stringify(second.url)}, token: ${JSON.stringify(key)}, paired: true }, 'Remote')`);
     await page.waitFor(`document.querySelectorAll('[data-group-member="true"]').length === 2`);
     expect((await a.call('group.get', {}))?.id).toBe((await b.call('group.get', {}))?.id);
     expect(await page.evaluate(`document.querySelector('${id('machine-add-open')}') === null`)).toBe(true);
@@ -260,19 +262,17 @@ test('one invitation groups two real cores: the page connects the second by itse
     await page.click(id('nav-settings'));
     await page.click(id('settings-tab-machines'));
 
-    // One machine starts the group and mints an invitation.
-    await page.type(id('group-name'), 'Home');
-    await page.click(id('group-create'));
+    // Add a device on a machine in no group starts one, named after it, and gives the link a computer pastes.
+    await page.click(id('group-add-device'));
     await page.waitFor(`document.querySelectorAll('[data-group-member="true"], ${id('group-member')}').length === 1`);
-    expect((await a.call('group.get', {}))?.name).toBe('Home');
-    await page.click(id('group-invite'));
-    await page.waitFor(`document.querySelector('${id('group-invite-code')}')?.value.startsWith('boite-group:')`);
-    const invite = await page.evaluate<string>(`document.querySelector('${id('group-invite-code')}').value`);
+    expect((await a.call('group.get', {}))?.cores).toHaveLength(1);
+    await page.waitFor(`(document.querySelector('${id('add-device')}')?.dataset.link ?? '').includes('#join=')`);
+    const link = await page.evaluate<string>(`document.querySelector('${id('add-device')}').dataset.link`);
     await showGroup();
     await capture('group-invite-desktop.png');
 
-    // The other machine joins with it, as its own settings or `boite-core group join` would.
-    const joined = await b.call('group.join', { invite });
+    // The other machine pastes it under Join, as its own settings would; `boite-core group join` takes it too.
+    const joined = await b.call('group.join', { invite: link });
     expect(joined.cores).toHaveLength(2);
     // No pairing link for the second machine: the page was handed a key by it through the group.
     await page.waitFor(machines(2));
@@ -297,8 +297,9 @@ test('one invitation groups two real cores: the page connects the second by itse
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 
     // The key is remembered: a reload reconnects both without another ticket.
-    await page.evaluate('location.reload()');
+    await page.reload();
     await page.waitFor(machines(2));
+    if (await page.evaluate(`globalThis.__boiteTest.workspace.active.page === 'settings'`)) await page.click(id('settings-back'));
     await page.waitFor(`document.querySelector('[data-thread-id="${tb.id}"]')`);
     expect(await b.call('sessions.list', {})).toHaveLength(1);
 
@@ -319,7 +320,7 @@ test('one invitation groups two real cores: the page connects the second by itse
         saved.find((env) => env.url === ${JSON.stringify(second.url)}).url = 'http://127.0.0.1:${retired.port}';
         localStorage.setItem('boite.envs', JSON.stringify(saved));
       })()`);
-      await page.evaluate('location.reload()');
+      await page.reload();
       await page.waitFor(`${machines(2)} && globalThis.__boiteTest.workspace.machines.some(machine => machine.id === ${JSON.stringify(second.url)})`);
       expect(heard).toEqual([]);
       expect(await page.evaluate<string[]>(`JSON.parse(localStorage.getItem('boite.envs')).map((env) => env.url).sort()`)).toEqual([first.url, second.url].sort());
@@ -350,7 +351,7 @@ test('one invitation groups two real cores: the page connects the second by itse
     await first.stop({ keepDataDir: true });
     const asleep = Bun.listen({ hostname: '127.0.0.1', port: first.port, socket: { data() {}, open() {}, close() {}, error() {} } });
     try {
-      await page.evaluate('location.reload()');
+      await page.reload();
       await page.waitFor(`globalThis.__boiteTest?.workspace.active.endpointUrl === ${JSON.stringify(second.url)} && !!document.querySelector('${id('composer-input')}')`, 20_000);
       expect(await page.evaluate(`document.querySelector('${id('error-toast')}') === null`)).toBe(true);
       await page.type(id('composer-input'), 'Still reachable');
@@ -381,12 +382,29 @@ test('one invitation groups two real cores: the page connects the second by itse
     await page.evaluate(`document.querySelector('${id('main-machine')}').scrollIntoView({ block: 'center' })`);
     await capture('main-machine-phone.png');
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-    await page.evaluate('location.reload()');
+    await page.reload();
     await page.waitFor(`${machines(2)} && globalThis.__boiteTest.workspace.active.endpointUrl === ${JSON.stringify(awake.url)}`, 20_000);
 
     // Removed from the group: the second machine leaves, drops the phone's key, and the page lets it go.
+    const removalState = async () => {
+      const [workspace, firstGroup, secondGroup, sessions] = await Promise.all([
+        page.evaluate(`globalThis.__boiteTest.workspace.machines.map(machine => ({ id: machine.id, coreId: machine.coreId,
+          groupId: machine.groupId, connection: machine.store.connection, booted: machine.store.booted,
+          groupKnown: machine.store.groupKnown, group: machine.store.group?.id,
+          members: machine.store.group?.cores.map(core => core.coreId) }))`),
+        a.call('group.get', {}), b.call('group.get', {}), b.call('sessions.list', {})
+      ]);
+      const group = (value: typeof firstGroup) => value && { id: value.id, self: value.self, members: value.cores.map(core => core.coreId) };
+      return { workspace, firstGroup: group(firstGroup), secondGroup: group(secondGroup),
+        sessions: sessions.map(session => ({ id: session.id, role: session.role, group: session.group })) };
+    };
     await a.call('group.remove', { coreId: joined.self });
-    await page.waitFor(`globalThis.__boiteTest.workspace.machines.length === 1`, 20_000);
+    try {
+      await page.waitFor(`globalThis.__boiteTest.workspace.machines.length === 1`, 20_000);
+    } catch (error) {
+      console.error('Group removal state:', JSON.stringify(await removalState().catch(() => 'group diagnostics unavailable')));
+      throw error;
+    }
     expect(await b.call('group.get', {})).toBeNull();
     expect((await b.call('sessions.list', {})).filter((session) => session.group)).toEqual([]);
     await page.send('Emulation.clearDeviceMetricsOverride', {});

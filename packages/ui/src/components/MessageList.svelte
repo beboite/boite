@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
-  import type { Message } from '@boite/contracts';
+  import { MESSAGE_PAGE, type MemoryEvent, type Message, type Turn } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import MessageTurnSummary from './MessageTurnSummary.svelte';
   import TurnFiles from './TurnFilesLoader.svelte';
-  import { TurnFileCache, visibleTurnFiles, type TurnFilesData } from '../lib/turn-files';
+  import { TurnFileCache, answersByTurn, showsTurnFiles, type TurnFilesData } from '../lib/turn-files';
   import { chatPrefs } from '../lib/chat-prefs.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import AgentMessageGroup from './AgentMessageGroup.svelte';
@@ -20,24 +20,27 @@
   import MoveMarker from './MoveMarker.svelte';
   import SpawnMarker from './SpawnMarker.svelte';
   import MemoryRow from './MemoryRow.svelte';
-  import { placeMemoryEvents } from '../lib/memory-timeline';
+  import { mergeNoticeRows, placeMemoryEvents } from '../lib/memory-timeline';
   import MessageActions from './MessageActions.svelte';
   import { movedBy, pendingMoveOf, startedFrom, turnAnswer } from '../lib/message-display';
   import { focusComposer } from '../lib/focus';
   import { isSending } from '../lib/composer-queue';
   import { retryTurn } from '../lib/composer-edit';
   import { TurnProgress } from '../lib/turn-progress.svelte';
-  import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
+  import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, keepOnly, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
   import { TimelineRows, rowEstimate, rowIndexOf, seam, type TimelineRow } from '../lib/timeline-rows';
+  import { GapRows, NO_GAPS, READ_AHEAD, RangeAsk, gapHeight, loadKeepingReader, wantedRange } from '../lib/history-gaps';
+  import TimelineGap from './TimelineGap.svelte';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
   import { BottomEdge, BottomGlide, PointerHold, keysUp, pointedTurn, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
   import { selectionClicks } from '../lib/selection-clicks';
-  import { editWhole, pullNewer, pullOlder } from '../lib/reading-window';
+  import { editWhole, fillShort, pullNewer, pullOlder } from '../lib/reading-window';
   import { ReadingAnchor, type RowAnchor } from '../lib/reading-anchor';
   import { MediaQuery } from 'svelte/reactivity';
-  import { placeViews, viewPart } from '../lib/inline-view';
+  import { placeViews, turnViews, viewPart } from '../lib/inline-view';
+  import { filesLast, publishedFile } from '../lib/message-order';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -86,28 +89,36 @@
   /** Rows that follow the message sharing their millisecond: agent mail and a launch card, anchored with `<=`. */
   const after = (row: Message) => row.id.startsWith('coordination:') || row.id.startsWith('delegation:');
   const grouped = $derived.by(() => {
-    if (mail.length === 0 && launches.size === 0 && workflowRows.size === 0 && memoryRows.size === 0) return { timeline: messages, groups: new Map() };
+    if (mail.length === 0 && launches.size === 0 && workflowRows.size === 0 && memoryRows.size === 0) return { timeline: messages, groups: new Map(), notices: new Map<string, MemoryEvent[]>() };
     const activity: Message[] = [...launches.values()].map(({ id, createdAt }) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt }));
     const runs: Message[] = [...workflowRows].map(([id, run]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: run.createdAt }));
     const memory: Message[] = [...memoryRows].map(([id, event]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: event.at }));
     // Output that already existed in this millisecond precedes its exchange.
-    const rows = [...withAgentMail(messages, mail, threadId, shownTurns), ...activity, ...runs, ...memory].sort((a, b) =>
+    const sorted = [...withAgentMail(messages, mail, threadId, shownTurns), ...activity, ...runs, ...memory].sort((a, b) =>
       a.createdAt - b.createdAt || Number(after(a)) - Number(after(b)) || a.id.localeCompare(b.id));
-    return groupAgentMail(rows, mail);
+    const { rows, notices } = mergeNoticeRows(sorted, memoryRows);
+    return { ...groupAgentMail(rows, mail), notices };
   });
-  /** A turn's views go after its answer, and wait for a turn still running to end (`placeViews`). */
-  const timeline = $derived(placeViews(grouped.timeline, store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : []));
+  /** The pages each turn published: its answer places them, or they go after it once the turn ends (`placeViews`). */
+  let shownViews: ReadonlyMap<string, Message[]> | undefined;
+  const views = $derived.by(() => (shownViews = turnViews(grouped.timeline, shownViews)));
+  /** A finished turn's published files go after its answer, its pages after them. */
+  const timeline = $derived(placeViews(filesLast(grouped.timeline, shownTurns), shownTurns, views));
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   /** What the window lists and measures: a row per message, several for the message of a long turn (lib/timeline-rows.ts). */
-  const cut = new TimelineRows();
-  const rows = $derived.by(() => {
-    const built = cut.build(timeline, memoryPlacement.inline);
+  const cut = new TimelineRows(), gapRows = new GapRows();
+  /** Where the held messages sit in the thread, on a core that says so: each stretch missing between them is a gap row. */
+  const placement = $derived(store.openThread?.id === threadId ? store.messagePlacement?.(threadId, messages) ?? null : null);
+  const positional = $derived((placement?.first ?? null) !== null);
+  const gapped = $derived.by(() => {
+    const placed = gapRows.place(cut.build(timeline, memoryPlacement.inline), messages, placement?.gaps ?? NO_GAPS);
     // A row that grew or was cut weighs something else until it is measured.
-    if (cut.changedFrom < slots.dirty) slots.dirty = cut.changedFrom;
-    return built;
+    if (placed.at(cut.changedFrom) < slots.dirty) slots.dirty = placed.at(cut.changedFrom);
+    return placed;
   });
-  const timelineOrder = $derived.by(() => { void rows; return cut.order; });
+  const rows = $derived(gapped.rows);
+  const timelineOrder = $derived.by(() => { void rows; return gapped.gaps.length ? rows.map(row => row.id).join('\0') : cut.order; });
   const savedReading = untrack(() => store.readingPositions?.get(threadId));
 
   /** How often the bottom message's height is allowed to speak to the pin. */
@@ -123,9 +134,7 @@
     const at = timeline.findIndex((message) => message.id === seenLast);
     return at < 0 ? 0 : timeline.length - 1 - at;
   });
-  function markSeen() {
-    seenLast = timeline.at(-1)?.id ?? null;
-  }
+  function markSeen() { seenLast = timeline.at(-1)?.id ?? null; }
   let shown = savedReading ? untrack(() => threadId) : '';
 
   /** Measured slot heights by message id. What is not in here is worth its estimate. */
@@ -137,7 +146,7 @@
   /** One observer for the viewport's height and for every rendered message. */
   let boxes: ResizeObserver | undefined;
 
-  const slots = new SlotTotals<TimelineRow>(heights, row => rowEstimate(row, estimateSlot(row.message)));
+  const slots = new SlotTotals<TimelineRow>(heights, row => row.gap ? gapHeight(row.gap.count) : rowEstimate(row, estimateSlot(row.message)));
   /** Where the reader is, and the rows on the page by id (lib/reading-anchor.ts). */
   const anchors = new ReadingAnchor(savedReading);
   const savedTop = untrack(() => {
@@ -182,11 +191,7 @@
   let liftFrame = 0;
   let liftFrom = 0;
   let handledFocus = untrack(() => store.promptFocus);
-  function stopLift() {
-    cancelAnimationFrame(liftFrame);
-    liftFrame = 0;
-    lifting = false;
-  }
+  function stopLift() { cancelAnimationFrame(liftFrame); liftFrame = 0; lifting = false; }
   function releaseNavigation(event?: KeyboardEvent) {
     releaseAnchor(); navigationTarget = null;
     if (promptTarget) pinned = false;
@@ -220,8 +225,7 @@
     scrollTop = box.scrollTop;
   }
 
-  // Keep the target aligned as estimated heights become real measurements.
-  // Wheel, touch, scrollbar and keyboard input return control to the reader.
+  // Keep the target aligned as estimated heights become real measurements; wheel, touch, scrollbar and keyboard input return control to the reader.
   $effect(() => {
     const id = navigationTarget;
     void measured;
@@ -246,9 +250,7 @@
   /** A move the user made, said at the foot of the thread until the prompt that tells the agent goes. */
   const pendingMove = $derived(cutBelow || isSending(timeline.at(-1) ?? { id: '' }) ? null : pendingMoveOf(store.openThread, threadId));
 
-  function totals(list: TimelineRow[]): number[] {
-    return slots.totals(list, timelineOrder);
-  }
+  function totals(list: TimelineRow[]): number[] { return slots.totals(list, timelineOrder); }
 
   const promptInset = $derived(Math.min(96, Math.max(48, viewHeight * 0.12)));
   const promptLead = $derived.by(() => {
@@ -440,9 +442,7 @@
     }, wait);
   }
 
-  $effect(() => () => {
-    if (tailTimer) clearTimeout(tailTimer);
-  });
+  $effect(() => () => { if (tailTimer) clearTimeout(tailTimer); });
 
   /**
    * Every rendered message reports its height here and says which id it is. The
@@ -511,7 +511,8 @@
         rememberAnchor();
         const anchor = anchors.current;
         onMeasured(batch);
-        void tick().then(() => restoreAnchor(anchor));
+        // A row growing below moves no scroll position: the gap a later notch down is measured against grows with it.
+        void tick().then(() => { restoreAnchor(anchor); if (box.scrollTop === scrollTop) scrolledGap = box.scrollHeight - box.scrollTop - box.clientHeight; });
       });
     });
     boxes = observer;
@@ -525,17 +526,17 @@
     };
   });
 
-  function atBottom(box: HTMLDivElement): boolean {
-    return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-  }
+  function atBottom(box: HTMLDivElement): boolean { return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
 
-  let scrolledHeight = 0;
+  let scrolledHeight = 0, scrolledGap = 0;
   function onscroll() {
     const box = viewport;
     if (!box) return;
     const height = box.scrollHeight;
     const resized = height !== scrolledHeight;
     scrolledHeight = height;
+    // The browser keeping the text in place as a row above grows moves the list down, never nearer its bottom.
+    const distance = height - box.scrollTop - box.clientHeight, closer = distance < scrolledGap - 1; scrolledGap = distance;
     // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
     if (hold.held && box.scrollTop < scrollTop - 1) leftBottom = true;
     const moved = edge.moved(box);
@@ -546,15 +547,15 @@
     if (navigationTarget || promptTarget) return;
     // Read the anchor after the render, before another navigation can restore it.
     void tick().then(rememberAnchor);
-    const distance = height - box.scrollTop - box.clientHeight;
     if (glide.active) {
       if (distance > 1) return;
       endGlide(false);
     }
     // A busy phone delivers the touchstart after its scroll: a rise off the bottom is the reader too.
     if (rose && pinned && distance > 1) leftBottom = true;
-    // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom.
-    if (descended && atBottom(box)) leftBottom = false;
+    // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom. Moved down
+    // as far from it, by a row growing above after a small notch up, the list took it back and bounced each notch.
+    if (descended && closer && atBottom(box)) leftBottom = false;
     // A card shrinking can clamp scrollTop before new output grows the list again.
     pinned = !cutBelow && !leftBottom && (atBottom(box) || (pinned && resized && !hold.held));
     if (anchors.restoring) pinned = false;
@@ -590,13 +591,16 @@
   /** How close to the top the viewport gets before the page above it is asked for. */
   const LOAD_AT = 400;
 
-  /** The page above the window, its height put back into the scroll position (`pullOlder`). */
-  function loadAbove(box: HTMLDivElement): void {
-    pullOlder(store, box, LOAD_AT, rows[0]?.id, (head) => {
-      const before = head ? rows.findIndex(row => row.id === head) : rows.length;
-      return totals(rows)[Math.max(0, before)] ?? 0;
-    }, () => { scrollTop = box.scrollTop; });
-  }
+  /** The page above the window, its height put back into the scroll position (`pullOlder`), on a core that pages by cursor alone. */
+  const loadAbove = (box: HTMLElement) => positional ? undefined : pullOlder(store, box, LOAD_AT, rows[0]?.id, head => totals(rows)[Math.max(0, head ? rows.findIndex(row => row.id === head) : rows.length)] ?? 0, () => { scrollTop = box.scrollTop; }, id => anchors.nodes.get(id));
+  // On a core that places pages, the gap within a screen of the bottom, or `READ_AHEAD` screens of a reader above it, is read before it shows (lib/history-gaps.ts).
+  const asked = new RangeAsk(); onDestroy(() => asked.stop());
+  $effect(() => { void [measured, store.loadingRange, rows, viewHeight, pinned, scrollTop]; asked.soon(() => { if (!gapped.gaps.length || store.loadingRange || glide.active || lifting) return null; const total = totals(rows), reach = Math.max(LOAD_AT, viewHeight * (pinned ? 1 : READ_AHEAD)), top = pinned ? (total[rows.length] ?? 0) - viewHeight : scrollTop;
+    return { top, range: wantedRange(total, gapped.gaps, top - reach, top + viewHeight + reach, MESSAGE_PAGE) }; }, (from, limit) =>
+      // A page landing above the reader can weigh more than its gap: the row at the top of the view stays where it was.
+      loadKeepingReader(landing => store.loadRange(from, limit, landing), () => pinned ? undefined : viewport, tick, top => { scrollTop = top; })); });
+  // A list too short to scroll asks for the pages beside it, again after each lands (`fillShort`).
+  $effect(() => { void rows.length; void viewHeight; fillShort(viewport, store.openThread?.id === threadId, () => !!(navigationTarget || promptTarget), LOAD_AT, box => { loadAbove(box); pullNewer(store, box, LOAD_AT); }); });
 
   // The reader's own prompt takes the bottom, wherever the history was scrolled to.
   let jumpedFor = '';
@@ -663,11 +667,11 @@
     } else if (opened || pinned) {
       // Held by the reader or on its way down, the list is still at the bottom: it takes the new height once free.
       if (opened || untrack(following)) {
-        scrolledHeight = box.scrollHeight; edge.follow(box);
-        scrollTop = box.scrollTop;
+        // Followed, the live end lets go of the messages far above it, and the heights measured for them.
+        if (untrack(following) && untrack(() => store.releaseOlder(threadId)) > 0) void tick().then(() => keepOnly([heights, risen], rows, messages));
+        scrolledHeight = box.scrollHeight; edge.follow(box); scrollTop = box.scrollTop;
       }
-      pinned = true;
-      behind = false;
+      pinned = true; behind = false;
       untrack(markSeen);
     } else if (!glide.active) {
       behind = true;
@@ -698,26 +702,24 @@
   const firstAssistantInTurn = $derived.by(() => {
     const result = new Map<string, string>();
     for (const message of messages) {
-      // A view is drawn after the answer, wherever it was published: the answer's first message carries the model.
-      if (message.role === 'assistant' && !result.has(message.turnId) && !viewPart(message)) result.set(message.turnId, message.id);
+      // A view or a published file is drawn after the answer, wherever it was published: the answer's first message carries the model.
+      if (message.role === 'assistant' && !result.has(message.turnId) && !viewPart(message) && !publishedFile(message)) result.set(message.turnId, message.id);
     }
     return result;
   });
-  const lastInTurn = $derived.by(() => {
-    const result = new Map<string, string>();
-    for (const message of timeline) result.set(message.turnId, message.id);
-    return result;
-  });
-  /** Visible turn ends, kept as a stable string so scrolling within the same turns does not reread files. */
-  const closingTurns = $derived(rendered.filter(row => row.last && lastInTurn.get(row.message.turnId) === row.message.id).map(row => row.message.turnId).join('\0'));
-  /** One file summary at the turn's end, updated during work when changes are grouped. */
+  /** The last row of each turn: a later message of the same turn replaces an earlier one. */
+  const lastInTurn = $derived(new Map(timeline.map((message): [string, string] => [message.turnId, message.id])));
+  /** Each turn's answers, rebuilt when a message comes or goes, never on a part or a delta. */
+  const answers = $derived(answersByTurn(messages));
   const fileCache = new TurnFileCache();
-  const filesByTurn = $derived.by(() => {
+  /** A turn end's file summary, derived per closing row: a part on the running turn rereads no finished turn. */
+  function filesOf(turn: Turn): TurnFilesData | null {
     const thread = store.openThread;
-    if (!thread || thread.id !== threadId || closingTurns === '') return new Map<string, TurnFilesData>();
+    if (!thread || thread.id !== threadId || !showsTurnFiles(turn, chatPrefs.groupChanges)) return null;
     windowStats.turnFiles += 1;
-    return visibleTurnFiles(messages, thread.turns, new Set(closingTurns.split('\0')), thread.cwd, chatPrefs.groupChanges, fileCache);
-  });
+    const data = fileCache.read(turn.id, answers.get(turn.id) ?? [], thread.cwd, turn.status === 'running');
+    return data.files.length ? data : null;
+  }
 
   /**
    * Edit, retry and fork go through the core's rewind and fork, which a
@@ -728,8 +730,7 @@
     const thread = store.openThread;
     return thread !== null && thread.id === threadId && !thread.agentSessionId && thread.projectId !== null;
   });
-  // A prompt still waiting in the queue would run after the edit, on the rewound thread.
-  // So would an edit started under a prompt still on its way to the core.
+  // A prompt still waiting in the queue would run after the edit, on the rewound thread, as would an edit started under a prompt still on its way to the core.
   const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0 && !store.composerStates[threadId]?.sending);
 
   async function editMessage(message: Message): Promise<void> {
@@ -750,7 +751,7 @@
       rowOf={(id, part) => rows[rowIndexOf(rows, id, part)] ?? { id, from: 0 }} onclose={() => (store.findOpen = false)} />
   {/if}
   {#if !narrow.current}<MessageOutline {messages} active={activePrompt} jump={id => void jumpToMessage(id)}
-    hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; loadAbove(viewport); } }} />{/if}
+    hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = rows[0]?.gap ? Math.max(0, (totals(rows)[1] ?? 0) - viewport.clientHeight) : 0; pinned = false; loadAbove(viewport); } }} />{/if}
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} use:selectionClicks {onscroll} ontouchstart={press} onpointerdown={press} onpointerover={(event) => { pointed = pointedTurn(event); }} onpointerleave={() => { pointed = null; }} onkeydown={releaseNavigation} style:padding-top="{20 + promptLead}px" style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline" data-media-gallery>
@@ -761,10 +762,11 @@
         <div class="spacer" data-testid="timeline-above" style="height: {view.above}px"></div>
       {/if}
       {#each rendered as row, index (row.id)}
+        {#if row.gap}<TimelineGap {...row.gap} />{:else}
         {@const message = row.message}
         {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
-        {@const source = group || viewPart(message) ? messages.findLast(current => current.turnId === message.turnId) : message}
+        {@const source = group || viewPart(message) || publishedFile(message) ? messages.findLast(current => current.turnId === message.turnId) : message}
         {@const closes = row.last && turn !== undefined && lastInTurn.get(turn.id) === message.id}
         {@const joined = seam(rows[view.start + index - 1], row)}
         <article
@@ -782,8 +784,9 @@
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
           {:else if group}
             <AgentMessageGroup {store} {group} />
-          {:else if memoryRows.has(message.id)}
-            <MemoryRow event={memoryRows.get(message.id)!} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
+          {:else if grouped.notices.has(message.id)}
+            {@const notices = grouped.notices.get(message.id)!}
+            <MemoryRow event={notices[0]!} events={notices} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
           {:else if movedBy(message)}
             <MoveMarker notice={movedBy(message)!} />
           {:else if startedFrom(message)}
@@ -792,11 +795,11 @@
             <UserMessage {store} {message} {turn} {progress} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />
           {:else}
             <AssistantMessage {store} {threadId} {message} from={row.from} to={row.to} {signedOut} showModel={row.first && firstAssistantInTurn.get(message.turnId) === message.id}
-              latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} />
+              latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} views={views.get(message.turnId)} />
           {/if}
-          {#if turn && closes && filesByTurn.has(turn.id)}
-            <TurnFiles {store} {...filesByTurn.get(turn.id)!}
-              loadDiffs={() => Promise.all(filesByTurn.get(turn.id)!.deferred.map(source => store.loadToolOutput(threadId, source.messageId, source.toolId))).then(() => {})} />
+          {#if turn && closes}
+            {@const files = filesOf(turn)}
+            {#if files}<TurnFiles {store} {...files} loadDiffs={() => Promise.all(files.deferred.map(source => store.loadToolOutput(threadId, source.messageId, source.toolId))).then(() => {})} />{/if}
           {/if}
           {#if turn && closes}
             <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id}>
@@ -810,6 +813,7 @@
             </MessageTurnSummary>
           {/if}
         </article>
+        {/if}
       {/each}
       {#if view.below > 0}
         <div class="spacer" data-testid="timeline-below" style="height: {view.below}px"></div>
@@ -860,9 +864,7 @@
   }
 
   /* What a long thread's unrendered messages weigh, above and below the window. */
-  .spacer {
-    flex: 0 0 auto;
-  }
+  .spacer { flex: 0 0 auto; }
 
   /* paging: one muted line at the top while the page above is being read. */
   .loading-older { flex: 0 0 auto; text-align: center; color: var(--color-muted-foreground); font-size: var(--text-sm); }
@@ -873,9 +875,7 @@
     animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
-  .message.user {
-    align-items: flex-end;
-  }
+  .message.user { align-items: flex-end; }
 
   /* The rest of a cut message: the gap its first paragraph takes inside a message, and no rise of its own. */
   .message.rest {

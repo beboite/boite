@@ -7,6 +7,14 @@ starts with the panel closed, without changing the stored desktop layout.
 `lib/right-panel.svelte.ts` owns layout and `RightPanel.svelte` renders it;
 `lib/surface-labels.ts` defines labels and availability.
 
+The panel's left edge, the thread list's right edge, the terminal drawer's top
+edge and the line between two terminal panes share `ResizeHandle.svelte`. It is
+invisible at rest; after 160 ms of hover it draws a 2 px line with a grip, and a
+drag turns both to the accent. During a drag `html[data-resizing]` keeps the
+resize cursor on the whole page, turns off text selection and stops iframes
+from taking the pointer. Arrow keys step 16 px, Home and a double click restore
+the default, Escape cancels a drag. The size is saved once, when the drag ends.
+
 ## Browser tools
 
 On Windows, the browser's screen menu selects phone, tablet and desktop
@@ -60,6 +68,12 @@ unsaved file drafts. A machine that has not connected keeps its own layouts.
 [Automatic merged-PR archive](machines.md#merged-pr-conversations) documents
 the archive conditions.
 
+A conversation whose panel nobody opened or closed yet shows it open on its
+launcher, at the panel's width, when the window is at least 1200 px wide
+(`PANEL_AUTO_OPEN`); narrower, where the panel would lie over the chat, it waits
+to be asked for. Closing it is remembered per conversation, and a surface an
+agent opens replaces the launcher. Closing the last tab shuts the panel.
+
 A panel with no tab yet opens on the surface the device starts with, Files or
 Changes, or on its launcher. The tour's first question sets it and Settings,
 Appearance, Workspace changes it ([onboarding.md](onboarding.md)). Settings,
@@ -76,7 +90,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Changes  | one      | `git.status` of the working directory, a file's diff on click                 |
 | Files    | one      | the working directory as a tree, `files.list` one directory at a time         |
 | File     | per path | a text editor with save, an image viewer with zoom and pan, a video or audio player |
-| Tasks    | one      | goal and loop, the agent's tasks, the project's todo list                     |
+| Tasks    | one      | goal and loop, pull request watches, the agent's tasks, the project's todo list |
 | Discussions | one   | agent exchanges grouped by discussion, then one discussion's back and forth; a chat row opens it on its burst |
 | Subagents | one     | the thread's workflow runs and subagents in one list, a run's graph, a subagent's conversation, see [delegation.md](delegation.md) and [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
@@ -99,7 +113,20 @@ and link-local IPv4 addresses use HTTP when no scheme is given; public hosts
 use HTTPS. Loading and navigation failures appear in the toolbar. A page zoom
 other than 100% has a reset button.
 `lib/browser-bounds.ts` observes layout changes and follows finite layout
-animations, rather than measuring the page slot on every idle frame.
+animations, rather than measuring the page slot on every idle frame. A native
+page paints above every menu, so while an open menu or dialog overlaps the
+slot the page is parked and a still capture shows in its place. A layer marked
+`aria-hidden`, such as the edge scrollbars' full-window popover, does not count.
+
+On Windows a hidden page also sleeps: hiding a WebView2 stops its painting,
+not its timers and animations, so the shell calls `TrySuspend` right after it
+hides a page the user browses (`platform::suspend`). WebView2 wakes the page
+by itself when it is shown again or navigated, and every other call still
+reaches it asleep. A page WebView2 will not suspend, one playing audio for
+instance, keeps running and is logged at debug level. The Boite UI itself is
+never suspended, and neither is an agent's page: those wait off screen, shown,
+and sleep through the core ([the agent's browser](browser.md#a-tab-nobody-uses-sleeps)).
+The Linux and macOS shells have no such call.
 
 ### Browser profiles
 
@@ -142,8 +169,11 @@ Google" and most sign-in buttons do, gets a real popup window
 profile, or in the private session, and keeps `window.opener`: the sign-in
 answers the page through it and closes itself. Its title starts with the
 host it shows, since it has no address bar. Closing the tab closes its
-popups. A popup from the tab on screen comes to the front; one from a tab
-off screen opens behind without the focus. A `target="_blank"` link, or `window.open` without a size, opens a tab
+popups. A popup from the tab on screen comes to the front; one from a user's
+tab off screen opens behind without the focus. One from a tab an agent drives
+out of sight opens hidden, its page still running, and shows only while that
+tab is on screen, so an agent's `window.open` never puts a window over the
+user's work. A `target="_blank"` link, or `window.open` without a size, opens a tab
 in the same panel and profile instead, and that tab has no opener. So does a
 sized `window.open` while the tab already holds three popups: WebView2 has no
 popup blocker. Popups are
@@ -209,7 +239,9 @@ grammar on demand. Unknown languages and texts over 200,000 characters remain
 plain text. The editor keeps its selection, caret and scroll in a textarea
 over the colored text. Diffs render additions in green and deletions in red,
 including the text, line numbers and signs; unchanged context keeps syntax
-colors. Multiline tokens retain their color across folded context.
+colors. Multiline tokens retain their color across folded context. A diff
+draws plain rows first and highlights once the page is idle, the old side only
+when a line was removed; a text highlighted once is not highlighted again.
 
 Run `bun test tests/e2e/panel.test.ts` to check the panel at desktop and phone
 widths. Captures and `browser-idle.json`, which counts geometry reads across
@@ -246,7 +278,16 @@ which writes the index back: an agent's own `git add` or `git commit` never
 meets an `index.lock` the panel took. Each of those reads has 30 seconds. A git
 that has not answered by then is stopped by its own process id and the read
 fails with the command and the directory; the thread's other processes are
-left alone.
+left alone. A core runs at most eight such reads at once; the others wait for
+a slot before their git starts, and the wait does not count against the 30
+seconds.
+
+`git.diff` reads the side at the ref with one `git cat-file --batch -z`, which
+gives the object's size before its bytes, so a side over 16 MB is refused
+without being read; a git older than 2.36 reads it in three steps instead. The
+Changes tab sends `oldPath`, the rename origin its list gave (null for none),
+and the core then skips a status walk of its own. When a refreshed list moves
+that origin, the tab reads the diff once more.
 
 `files.read` answers text inline, cut at `FILE_MAX_BYTES`. A picture, a video,
 a sound or another binary comes as a url on the core's HTTP server,

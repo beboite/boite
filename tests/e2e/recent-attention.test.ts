@@ -20,7 +20,7 @@ const phoneToggle = (kind: 'done' | 'archived' | 'working') => `${id('mobile-lis
 const captures = process.env.BOITE_RECENT_CAPTURES ?? join(import.meta.dir, '.artifacts');
 
 async function capture(name: string): Promise<void> {
-  await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+  await page.settleAnimations();
   await page.screenshot(join(captures, name));
 }
 async function phone(): Promise<void> {
@@ -51,8 +51,15 @@ beforeEach(async () => {
   await page.waitFor(`globalThis.__boiteTest?.workspace.machines.length === 2 && document.querySelectorAll('${id('thread-row')}').length === 8`);
   [main, remote] = await page.evaluate<[string, string]>('globalThis.__boiteTest.workspace.machines.map(machine => machine.id)');
   await showThreadView(page, 'recent');
-});
-afterAll(async () => { await page?.close(); await server?.close(); });
+  // A reload and two waits: bun's 5 s hook default expires on a slow Windows runner before the test's own budget.
+}, 30_000);
+afterAll(async () => {
+  try {
+    await page?.close();
+  } finally {
+    await server?.close();
+  }
+}, 60_000);
 
 test('Done is collapsed, can be read and reopened, and keeps the other machine with the same thread id', async () => {
   await page.waitFor(`document.querySelector('${desktopRow(main)}')`);
@@ -142,7 +149,7 @@ test('a merged PR arrives in Done and project filtering and restoration follow t
   await page.waitFor(`!document.querySelector(${JSON.stringify(desktopRow(main, threadId))})`);
   await page.click(id('recent-done-toggle'));
   await page.waitFor(`document.querySelector(${JSON.stringify(inGroup('done', main, threadId))})`);
-  expect(await page.evaluate(`document.querySelector(${JSON.stringify(inGroup('done', main, threadId))}).querySelector('${id('done-thread-merged')}').getAttribute('href')`)).toBe('https://github.com/example/repo/pull/407');
+  expect(await page.evaluate(`document.querySelector(${JSON.stringify(inGroup('done', main, threadId))}).querySelector('${id('done-thread-pr')}').getAttribute('href')`)).toBe('https://github.com/example/repo/pull/407');
   await capture('recent-done-desktop.png');
   await page.click(id('project-filter'));
   await page.evaluate(`Array.from(document.querySelectorAll('${id('project-filter-menu')} [data-value]')).find(e => e.dataset.value === ${JSON.stringify(JSON.stringify(['http://builder.test', 'p-boite']))}).click()`);

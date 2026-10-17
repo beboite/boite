@@ -1,9 +1,12 @@
 name: android
 
-# The Android app: a Trusted Web Activity in apps/android that opens the core
-# at one host, vars.ANDROID_HOST. ci builds it unsigned to prove it compiles;
-# the nightly signs it, or takes the previous release's APK back when nothing
-# that goes into it changed (scripts/ci/android-apk.ts). docs/android.md.
+# The Android app: a Trusted Web Activity in apps/android that opens one
+# host: the phone app's own address (APP_ORIGIN in the contracts), or the
+# `host` input. ci builds it unsigned to prove it compiles; the nightly signs
+# it, or takes the previous release's back when nothing that goes into it
+# changed (scripts/ci/android-apk.ts). The app carries its own version,
+# apps/android/VERSION plus a patch counted from the last published APK, apart
+# from Boite's release version. docs/android.md.
 
 on:
   workflow_call:
@@ -12,7 +15,8 @@ on:
         description: Sign the APK and reuse the previous release's when nothing changed.
         type: boolean
         default: false
-      version:
+      host:
+        description: The bare hostname the app opens; empty opens the phone app's own address.
         type: string
         default: ''
     secrets:
@@ -27,6 +31,10 @@ on:
         description: Sign the APK and reuse the previous release's when nothing changed.
         type: boolean
         default: false
+      host:
+        description: The bare hostname the app opens; empty opens the phone app's own address.
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -50,26 +58,16 @@ jobs:
       - name: Choose the host and version
         id: meta
         env:
-          RELEASE: ${{ inputs.release }}
-          ANDROID_HOST: ${{ vars.ANDROID_HOST }}
-          INPUT_VERSION: ${{ inputs.version }}
+          ANDROID_HOST: ${{ inputs.host }}
         run: |
           host="$ANDROID_HOST"
           if [[ -z "$host" ]]; then
-            if [[ "$RELEASE" == 'true' ]]; then
-              echo '::error::the repository variable ANDROID_HOST is unset: a released APK has to name the host it opens' >&2
-              exit 1
-            fi
-            host=boite.example.com
+            # The address no machine serves, which every core trusts.
+            host=$(bun -e "import { APP_ORIGIN } from './packages/contracts/src/index.ts'; console.log(new URL(APP_ORIGIN).hostname)")
           fi
-          version="${INPUT_VERSION:-$(jq -r .version package.json)}"
-          {
-            echo "host=$host"
-            echo "version=$version"
-            # Android installs an update only over a smaller versionCode, and
-            # main only grows.
-            echo "code=$(git rev-list --count HEAD)"
-          } >> "$GITHUB_OUTPUT"
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+          # VERSION with patch 0; a release counts the patch in the next step.
+          bun scripts/ci/android-apk.ts version
           mkdir -p "$RUNNER_TEMP/apk"
       - name: Reuse the previous APK when nothing in it changed
         id: probe
@@ -81,32 +79,32 @@ jobs:
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
           bun scripts/ci/android-apk.ts reuse "$RUNNER_TEMP/releases.json" "$RUNNER_TEMP/apk"
-      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         if: steps.probe.outputs.reuse != 'true'
         with:
           distribution: temurin
           java-version: 17
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         if: steps.probe.outputs.reuse != 'true'
       - name: Build the APK
         if: steps.probe.outputs.reuse != 'true'
         working-directory: apps/android
         env:
           HOST: ${{ steps.meta.outputs.host }}
-          VERSION: ${{ steps.meta.outputs.version }}
-          CODE: ${{ steps.meta.outputs.code }}
+          VERSION: ${{ steps.probe.outputs.version || steps.meta.outputs.version }}
+          CODE: ${{ steps.probe.outputs.code || steps.meta.outputs.code }}
         run: ./gradlew --no-daemon assembleRelease "-PboiteHost=$HOST" "-PboiteVersion=$VERSION" "-PboiteVersionCode=$CODE"
       - name: Keep the unsigned APK
         if: ${{ !inputs.release }}
         env:
           VERSION: ${{ steps.meta.outputs.version }}
-        run: cp apps/android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/apk/boite-$VERSION-unsigned.apk"
+        run: cp apps/android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/apk/boite-android-$VERSION-unsigned.apk"
       - name: Sign it
         if: inputs.release && steps.probe.outputs.reuse != 'true'
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          VERSION: ${{ steps.meta.outputs.version }}
+          VERSION: ${{ steps.probe.outputs.version }}
         run: |
           set -euo pipefail
           # An unsigned APK is a file no phone installs: missing secrets fail the job.
@@ -116,7 +114,8 @@ jobs:
           fi
           bt=$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)
           ks="$RUNNER_TEMP/android.p12"
-          out="$RUNNER_TEMP/apk/boite-$VERSION.apk"
+          test -n "$VERSION"
+          out="$RUNNER_TEMP/apk/boite-android-$VERSION.apk"
           trap 'rm -f "$ks" "$RUNNER_TEMP/aligned.apk"' EXIT
           printf '%s' "$KEYSTORE_B64" | base64 -d > "$ks"
           "$bt/zipalign" -f -p 4 apps/android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"

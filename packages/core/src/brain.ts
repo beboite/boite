@@ -1,10 +1,11 @@
 /// <reference path="./text.d.ts" />
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { BrainConfig, BrainEntry, BrainStatus } from '@boite/contracts';
+import type { BrainConfig, BrainEntry, BrainStatus, Protocol } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
 import { BrainLinks, type BrainProfiles, type OwnedBrainLink } from './brain-links.ts';
+import { homePath } from './paths.ts';
 
 const FILE_LIMIT = 64 * 1024;
 const ENTRY_LIMIT = 500;
@@ -264,8 +265,13 @@ export class BrainStore {
     return status;
   }
 
-  /** Included in normal turns across all drivers, including already warm sessions. */
-  instructions(providerId?: string): string {
+  /**
+   * Included in normal turns across all drivers, including already warm sessions.
+   * `listed` holds the SKILL.md files, resolved through links, that the agent's
+   * harness already lists to its model (`nativeSkillFiles`): the catalog leaves
+   * them out so no skill reaches the model twice.
+   */
+  instructions(providerId?: string, listed: ReadonlySet<string> = NONE): string {
     const { path, enabled } = this.config();
     if (!enabled || !path) return '';
     const { entries, texts } = this.current(path);
@@ -274,7 +280,7 @@ export class BrainStore {
       if (entry.error) throw refused(entry.error);
       blocks.push(`Instructions from ${entry.path}:\n${texts.get(entry.path) ?? read(path, join(path, entry.path))}`);
     }
-    const skills = entries.filter(entry => entry.kind === 'skill' && !entry.error);
+    const skills = entries.filter(entry => entry.kind === 'skill' && !entry.error && !listedSkill(listed, join(path, entry.path)));
     if (skills.length) blocks.push('Available skills. Read the named SKILL.md before using a skill.\n' + skills.map(entry => `${entry.name}: ${entry.description}\nFile: ${join(path, entry.path)}`).join('\n'));
     const text = blocks.join('\n\n');
     if (Buffer.byteLength(text) > INSTRUCTIONS_LIMIT) throw refused(`Brain instructions and skill catalog exceed ${INSTRUCTIONS_LIMIT} bytes; reduce the entry files or catalog`);
@@ -304,6 +310,9 @@ export class BrainStore {
     if (this.closed) throw refused('Brain is shutting down');
     if (this.busy) throw refused('Brain synchronization is already running');
     this.busy = true;
+    const at = performance.now();
+    // Unknown until the post-fetch status: a failure before it must not read as up to date.
+    let counts: { ahead: number; behind: number } | null = null;
     try {
       const path = this.config().path;
       if (!path || !exists(join(path, '.git'))) throw refused('brain.path must point to the root of a Git checkout to synchronize');
@@ -319,6 +328,7 @@ export class BrainStore {
       if (state.branch !== started.branch || state.upstream !== started.upstream || state.head !== started.head) {
         throw refused('Brain branch, upstream or HEAD changed during synchronization. Retry from the intended branch.');
       }
+      counts = { ahead: state.ahead, behind: state.behind };
       if (state.dirty || (state.ahead > 0 && state.behind > 0)) throw refused('Brain has local changes or diverging commits. Resolve them before synchronizing; Boite does not merge conflicts.');
       if (state.behind > 0) await this.git(path, ['merge', '--ff-only', '@{upstream}']);
       // An external checkout after the check must never change what gets published.
@@ -327,7 +337,13 @@ export class BrainStore {
       this.core.journal.setSetting('brain.lastSync', Date.now());
       this.core.journal.setSetting('brain.pullError', null);
       this.links.apply(this.globalRoot());
+      this.core.logs.info(`Brain ${push ? 'synchronized' : 'pulled'}: ${state.behind} commits pulled${push ? `, ${state.ahead} pushed` : ''}`, { source: 'brain', event: 'brain.synced', durationMs: performance.now() - at, data: { ...counts, push } });
       return await this.status();
+    } catch (cause) {
+      // Stopped by the core shutting down: no failure to report.
+      if (this.closed) throw cause;
+      this.core.logs.warn(`Brain ${push ? 'synchronization' : 'automatic pull'} failed: ${messageOf(cause)}`, { source: 'brain', event: 'brain.sync-failed', durationMs: performance.now() - at, data: { ...counts, push } });
+      throw cause;
     } finally { this.busy = false; }
   }
 
@@ -373,4 +389,35 @@ export class BrainStore {
     await Promise.all(this.processes.values());
     await this.automatic;
   }
+}
+
+const NONE: ReadonlySet<string> = new Set();
+
+function listedSkill(listed: ReadonlySet<string>, file: string): boolean {
+  if (listed.size === 0) return false;
+  try { return listed.has(realpathSync(file)); } catch { return false; }
+}
+
+/**
+ * The skills a harness lists to its model by itself, as resolved SKILL.md
+ * paths. Claude Code reads `<config>/skills/<name>/SKILL.md` and the project's
+ * `<cwd>/.claude/skills/<name>/SKILL.md`, and names each one in its own context;
+ * a brain skill found there would otherwise arrive twice, once from the CLI and
+ * once in the catalog of every request. Other harnesses get the whole catalog.
+ * `skillTool` is false when a context mode removed the Skill tool, and with it
+ * the CLI's list.
+ */
+export function nativeSkillFiles(protocol: Protocol, env: Record<string, string>, options: { cwd?: string; skillTool?: boolean } = {}): ReadonlySet<string> {
+  if (protocol !== 'claude-sdk' || options.skillTool === false) return NONE;
+  const config = env['CLAUDE_CONFIG_DIR'] ?? process.env['CLAUDE_CONFIG_DIR'] ?? join(homePath(), '.claude');
+  const roots = [join(config, 'skills'), ...(options.cwd ? [join(options.cwd, '.claude', 'skills')] : [])];
+  const files = new Set<string>();
+  for (const root of roots) {
+    let names: string[];
+    try { names = readdirSync(root); } catch { continue; }
+    for (const name of names) {
+      try { files.add(realpathSync(join(root, name, 'SKILL.md'))); } catch { /* Not a skill folder. */ }
+    }
+  }
+  return files;
 }

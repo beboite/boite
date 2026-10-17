@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { Core } from '../src/core.ts';
 import { connect } from '../src/client.ts';
 import { startTestCore, removeDir, waitFor, type TestCore } from './harness.ts';
@@ -6,7 +6,7 @@ import { startTestCore, removeDir, waitFor, type TestCore } from './harness.ts';
 async function startSleepingAgent(h: TestCore) {
   const client = await h.connect();
   const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-  const agent = await client.call('agents.profile.save', { value: { name: 'Worker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory', 'missions', 'decisions'], accountIntegration: 'provider' } });
+  const agent = await client.call('agents.profile.save', { value: { name: 'Worker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory', 'missions', 'decisions'] } });
   await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [agent.id], text: '[sleep:60000] inspect workspace', requestId: 'recovery_001' });
   await waitFor(() => h.core.workforce.records.list('run').some(r => r.status === 'running'));
   const run = h.core.workforce.records.list('run')[0]!;
@@ -15,6 +15,11 @@ async function startSleepingAgent(h: TestCore) {
 
 async function crash(h: TestCore) {
   await h.core.agentRuntime.close();
+  // Disarm resident readers without draining the interrupted execution being recovered.
+  h.core.delegation.beginClose();
+  h.core.coordination.beginClose();
+  h.core.workflows.beginClose();
+  h.core.group.beginClose();
   h.core.journal.close();
   await h.server.stop();
   await h.core.close();
@@ -51,7 +56,14 @@ test('a durable decision survives restart, frees execution, and accepts only one
   expect(await agentClient.call('agents.decision.request', request)).toEqual(decision);
   await waitFor(() => h.core.scheduler.state().running.length === 0);
   expect(h.core.workforce.records.get('work', run.workId).status).toBe('waiting');
-  agentClient.close(); client.close(); await crash(h);
+  agentClient.close(); client.close();
+  const stop = h.server.stop.bind(h.server);
+  // A slow transport teardown must not let the resident sweeps read the closed journal.
+  const slowStop = spyOn(h.server, 'stop').mockImplementation(async () => {
+    await Bun.sleep(1100);
+    await stop();
+  });
+  try { await crash(h); } finally { slowStop.mockRestore(); }
   const next = new Core({ dataDir: h.dataDir, token: h.token });
   try {
     next.workforce.setLimits({ ...next.workforce.limits(), paused: true });

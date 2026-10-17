@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
 import type { AgentProfile } from '@boite/contracts';
-import { startTestCore, waitFor } from './harness.ts';
+import { quietAgent as quiet, startTestCore, waitFor } from './harness.ts';
 import { connect } from '../src/client.ts';
 
 test('declared shared write resources serialize agents until the holder stops', async () => {
@@ -11,7 +11,7 @@ test('declared shared write resources serialize agents until the holder stops', 
     const agents: AgentProfile[] = [];
     h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
     for (const name of ['First', 'Second']) {
-      const agent = await client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'], accountIntegration: 'provider' } });
+      const agent = await client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
       agents.push(agent);
       const scope = { kind: 'agent' as const, id: agent.id };
       await client.call('agents.resource.save', { value: { scope, name: 'Shared files', kind: 'directory', value: h.dataDir, access: 'write' } });
@@ -35,7 +35,7 @@ test('a decision continuation consumes the same group turn allowance', async () 
   try {
     const client = await h.connect();
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Worker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['decisions'], accountIntegration: 'provider' } });
+    const agent = await client.call('agents.profile.save', { value: { name: 'Worker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['decisions'] } });
     const group = await client.call('agents.group.save', { value: { name: 'One turn', memberIds: [agent.id], mode: 'round', maxTurns: 1, maxTurnsPerAgent: 1, paused: false } });
     await client.call('agents.message.send', { scope: { kind: 'group', id: group.id }, text: '[sleep:60000]', recipientIds: [], requestId: 'group_decision_001' });
     await waitFor(() => h.core.workforce.records.list('run').some(r => r.status === 'running'));
@@ -57,7 +57,9 @@ test('autonomous groups take bounded turns and paused groups retain their delive
     const client = await h.connect();
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     const agents = [];
-    for (const name of ['Researcher', 'Reviewer']) agents.push(await client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'], accountIntegration: 'provider' } }));
+    for (const name of ['Researcher', 'Reviewer']) agents.push(await client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } }));
+    // The subagent guide would fill the echo driver's 2,000-token window and add compactions to the count.
+    for (const agent of agents) await quiet(client, agent);
     const group = await client.call('agents.group.save', { value: { name: 'Ideas', memberIds: agents.map(a => a.id), mode: 'autonomous', maxTurns: 3, maxTurnsPerAgent: 2, paused: true } });
     await client.call('agents.message.send', { scope: { kind: 'group', id: group.id }, recipientIds: [agents[0]!.id], text: 'Discuss the design', requestId: 'bounded_001' });
     expect(h.core.workforce.records.list('work')).toHaveLength(1);
@@ -75,7 +77,7 @@ test('a persistent agent answers without a project and keeps group contexts sepa
   try {
     const client = await h.connect();
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Researcher', domain: '', instructions: 'Be concise.', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory'], accountIntegration: 'provider' } });
+    const agent = await client.call('agents.profile.save', { value: { name: 'Researcher', domain: '', instructions: 'Be concise.', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory'] } });
     const group = await client.call('agents.group.save', { value: { name: 'Ideas', memberIds: [agent.id], mode: 'mentions', maxTurns: 6, maxTurnsPerAgent: 2, paused: false } });
     await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [agent.id], text: 'private greeting', requestId: 'direct_001' });
     await client.call('agents.message.send', { scope: { kind: 'group', id: group.id }, recipientIds: [agent.id], text: 'shared greeting', requestId: 'shared_001' });
@@ -114,7 +116,7 @@ test('an idle agent runtime reads nothing until a record changes, then starts th
     expect(statusReads.mock.calls.length).toBe(before.status);
     expect(listReads.mock.calls.length).toBe(before.list);
     expect(limitReads()).toBe(before.limits);
-    const agent = await client.call('agents.profile.save', { value: { name: 'Quiet', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'], accountIntegration: 'provider' } });
+    const agent = await client.call('agents.profile.save', { value: { name: 'Quiet', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
     await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [], text: 'Wake up', requestId: 'quiet_runtime_wake' });
     await waitFor(() => r.list('run').some(run => run.status === 'done'));
   } finally { await h.stop(); }

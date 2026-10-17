@@ -51,7 +51,7 @@
       {/if}
       <label class="agent-field">{labels.text}<textarea required bind:value={text} rows="3"></textarea></label>
       {#if mode === 'memory'}<label class="agent-field">{labels.expiresAt}<input type="datetime-local" bind:value={expiry} /></label>{/if}
-      <div class="agent-form-actions"><button class="primary" disabled={view.pending}><span class="ui-label">{labels.save}</span></button><button type="button" class="ghost" onclick={() => { mode = null; }}><span class="ui-label">{labels.cancel}</span></button></div>
+      <div class="agent-form-actions"><button class="primary" disabled={view.pending}><span class="ui-label">{strings.common.save}</span></button><button type="button" class="ghost" onclick={() => { mode = null; }}><span class="ui-label">{strings.common.cancel}</span></button></div>
     </form>
   {/if}
 {/snippet}

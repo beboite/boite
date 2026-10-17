@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { scanBrain } from '../src/brain.ts';
+import { SHORT_ANSWERS } from '../src/agent-guide.ts';
+import { nativeSkillFiles, scanBrain } from '../src/brain.ts';
 import { BrainStore } from '../src/brain.ts';
 import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -122,7 +123,9 @@ test('startup and periodic pulls fetch without publishing and stop when disabled
     expect(pending!.ms).toBe(5 * 60_000);
   } finally { await brain.close(); }
   expect(pending).toBeNull();
-}, 30_000);
+  // About twenty git processes: 10 to 15 s on a Windows runner, past 30 s when its parallel workers load it
+  // (three PR runs on 2026-10-14), and the harness then stops the core under the last fetch.
+}, 90_000);
 
 test('automatic pulls wait for completion and shutdown drains the active attempt', async () => {
   await h.core.brain.configure({ path: root, enabled: true, autoPull: { onStartup: true, intervalMinutes: 1 } });
@@ -227,6 +230,34 @@ test('normal turns receive current instructions and skill paths without changing
   expect(h.core.brain.instructions()).toContain('Shared convention two');
 });
 
+test('Claude gets no skill twice: the catalog leaves out what its own skills folder lists', async () => {
+  const owner = await h.connect();
+  file(join(root, 'skills/review/SKILL.md'), '---\nname: review\ndescription: Review changes.\n---\nBody');
+  file(join(root, 'skills/ship/SKILL.md'), '---\nname: ship\ndescription: Ship a release.\n---\nBody');
+  await owner.call('brain.configure', { path: root, enabled: true });
+  const config = join(h.dataDir, 'claude-config');
+  mkdirSync(join(config, 'skills'), { recursive: true });
+  // How a brain's setup shares a skill with Claude Code: one link per skill.
+  symlinkSync(join(root, 'skills/review'), join(config, 'skills/review'), 'junction');
+  file(join(config, 'skills/own/SKILL.md'), '---\nname: own\ndescription: Outside the brain.\n---\n');
+  // A project skill: Claude Code lists it too when the thread runs in the brain's folder.
+  file(join(root, '.claude/skills/local/SKILL.md'), '---\nname: local\ndescription: A project skill.\n---\nBody');
+  const listed = nativeSkillFiles('claude-sdk', { CLAUDE_CONFIG_DIR: config }, { cwd: root });
+  expect([...listed].sort()).toEqual([
+    realpathSync(join(root, 'skills/review/SKILL.md')), realpathSync(join(config, 'skills/own/SKILL.md')), realpathSync(join(root, '.claude/skills/local/SKILL.md')),
+  ].sort());
+  const claude = h.core.brain.instructions('claude', listed);
+  expect(claude).not.toContain(join(root, 'skills/review/SKILL.md'));
+  expect(claude).not.toContain(join(root, '.claude/skills/local/SKILL.md'));
+  expect(claude).toContain(join(root, 'skills/ship/SKILL.md'));
+  // Elsewhere the project skill is the brain's alone to announce.
+  expect(h.core.brain.instructions('claude', nativeSkillFiles('claude-sdk', { CLAUDE_CONFIG_DIR: config }))).toContain(join(root, '.claude/skills/local/SKILL.md'));
+  // Another harness, or a Claude context mode without the Skill tool, keeps the whole catalog.
+  expect(nativeSkillFiles('codex-appserver', { CLAUDE_CONFIG_DIR: config }).size).toBe(0);
+  expect(nativeSkillFiles('claude-sdk', { CLAUDE_CONFIG_DIR: config }, { cwd: root, skillTool: false }).size).toBe(0);
+  expect(h.core.brain.instructions('codex')).toContain(join(root, 'skills/review/SKILL.md'));
+});
+
 test.each(['connected', 'disabled', 'disconnected'] as const)('Boite guide reaches the first session turn with a %s brain', async state => {
   const owner = await h.connect();
   const { threadId } = await echoThread(h, owner);
@@ -289,6 +320,40 @@ test('the Boite guide switch persists, and echo never receives the ask command',
   // Leaving the field out keeps the switch where it was.
   expect((await owner.call('brain.configure', { path: root, enabled: true })).config.boiteGuide).toBe(false);
   await expect(owner.call('brain.configure', { path: root, enabled: true, boiteGuide: 'yes' as never })).rejects.toThrow('boiteGuide');
+});
+
+test('short answers ride every turn until switched off, and the first lists the built-in skills', async () => {
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  const prompts: string[] = [];
+  const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+    prompts.push(ctx.prompt);
+    return echoDriver.startTurn({ ...ctx, prompt: 'Hello' });
+  } });
+  const run = async (prompt: string) => {
+    const turn = await owner.call('turns.start', { threadId, prompt });
+    await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done');
+    return prompts.at(-1)!;
+  };
+  try {
+    h.core.settings.set({ shortAnswers: true });
+    const first = await run('Hello');
+    // Said once a session, the style would fade: the warm second turn carries it as well.
+    const second = await run('Again');
+    expect(second).not.toContain('boite where');
+    for (const prompt of [first, second]) {
+      expect(prompt).toContain(SHORT_ANSWERS);
+      expect(prompt.indexOf(SHORT_ANSWERS)).toBeLessThan(prompt.indexOf('User request:'));
+    }
+    expect(first).toContain('boite-prove-it: ');
+    expect(first).toContain(join(h.dataDir, 'skills', 'boite-visual', 'SKILL.md'));
+    h.core.settings.set({ shortAnswers: false });
+    expect(await run('Third')).not.toContain('Answer style');
+    // Back on, the Boite guide switch still silences it with the rest of Boite's own text.
+    h.core.settings.set({ shortAnswers: true });
+    await owner.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
+    expect(await run('Fourth')).not.toContain('Answer style');
+  } finally { restore(); }
 });
 
 test('echo with the default guide and asynchronous questions finishes without asking', async () => {
@@ -412,6 +477,8 @@ test('two checkouts exchange existing commits; dirty and diverged histories rema
   expect(readFileSync(join(second, 'AGENTS.md'), 'utf8')).toBe('Local convention');
   file(join(root, 'untracked.txt'), 'Keep this');
   await expect(h.core.brain.sync()).rejects.toThrow('local file changes');
+  // Refused before the fetch: the log carries no ahead/behind it never measured.
+  expect((await h.core.logs.select(record => record.event === 'brain.sync-failed', 1))[0]?.data).toEqual({ push: true });
   expect(readFileSync(join(root, 'untracked.txt'), 'utf8')).toBe('Keep this');
   await git(root, ['add', 'untracked.txt']);
   await git(root, ['commit', '-m', 'Keep local notes']);
@@ -421,7 +488,9 @@ test('two checkouts exchange existing commits; dirty and diverged histories rema
   await expect(h.core.brain.sync()).rejects.toThrow('diverging');
   expect(await git(root, ['rev-parse', 'HEAD'])).toBe(before);
   expect((await h.core.brain.status()).git).toMatchObject({ ahead: 1, behind: 1, dirty: false });
-}, 30_000);
+  // About thirty git processes: 17 to 24 s on a Windows runner, past 30 s under parallel load
+  // (PR #503 on 2026-10-15), and the harness then stops the core under the last sync.
+}, 90_000);
 
 test.each(['fetch', 'push'] as const)('switching branches during %s cannot publish the newly selected branch', async phase => {
   const remote = join(h.dataDir, 'remote.git');

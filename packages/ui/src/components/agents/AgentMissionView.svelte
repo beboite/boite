@@ -3,6 +3,7 @@
   import type { AgentsView } from '../../lib/agents.svelte';
   import { strings } from '../../lib/strings';
   import { renderMarkdown } from '../../lib/markdown';
+  import { workspace } from '../../lib/workspace.svelte';
   import Menu from '../Menu.svelte';
   let { view, mission }: { view: AgentsView; mission: AgentMission } = $props();
   let adding = $state(false); let title = $state(''); let instructions = $state(''); let dependencies = $state<string[]>([]);
@@ -12,6 +13,8 @@
   let artifacts = $derived(view.snapshot?.artifacts.filter(a => a.missionId === mission.id) ?? []);
   const finished = $derived(mission.status === 'done' || mission.status === 'cancelled');
   const unfinished = $derived(tasks.some(t => !['done', 'cancelled'].includes(t.status)) || !!view.snapshot?.work.some(w => w.scope.kind === 'mission' && w.scope.id === mission.id && !['done', 'cancelled'].includes(w.status)));
+  // A mission starts from no thread, so no contact list names a far core: only a connected machine listing the id opens.
+  const followThread =(event: MouseEvent) => workspace.followThreadLink(event, view.store, undefined);
   const nameOf = (id: string) => view.snapshot?.profiles.find(a => a.id === id)?.name ?? id;
   async function addTask() {
     const task = await view.call('agents.task.save', { value: { missionId: mission.id, title, instructions, dependsOn: dependencies, assigneeId: null, status: 'open', generation: 0, leaseUntil: null, workspace: null, result: null } });
@@ -35,7 +38,7 @@
         {:else}
           {#if ['open', 'active'].includes(mission.status)}<button type="button" class="ghost small" onclick={() => void setStatus('paused')}><span class="ui-label">{labels.pause}</span></button>
           {:else if ['paused', 'waiting', 'review'].includes(mission.status)}<button type="button" class="ghost small" onclick={() => void setStatus('active')}><span class="ui-label">{labels.resume}</span></button>{/if}
-          <button type="button" class="ghost small" onclick={() => void setStatus('cancelled')}><span class="ui-label">{labels.cancel}</span></button>
+          <button type="button" class="ghost small" onclick={() => void setStatus('cancelled')}><span class="ui-label">{strings.common.cancel}</span></button>
           <button type="button" class="primary small" disabled={view.pending || unfinished} onclick={() => void setStatus('done')} data-testid="agent-mission-finish"><span class="ui-label">{labels.finishMission}</span></button>
         {/if}
       </div>
@@ -59,7 +62,7 @@
           <span class="agent-state ui-label" data-status={task.status}>{labels[task.status]}</span>
         </div>
       </div>
-      {#if task.result}<details class="agent-record" open={task.status === 'review'}><summary>{labels.result}</summary><div class="prose">{@html renderMarkdown(task.result)}</div></details>{/if}
+      {#if task.result}<details class="agent-record" open={task.status === 'review'}><summary>{labels.result}</summary><!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions --><div class="prose" onclick={followThread}>{@html renderMarkdown(task.result)}</div></details>{/if}
       {#if task.workspace}<p class="hint agent-prewrap">{labels.workspace}: <code>{task.workspace.path}</code> <button type="button" class="ghost small" onclick={() => { void navigator.clipboard.writeText(task.workspace!.path).catch(error => { view.error = String(error); }); }}><span class="ui-label">{labels.copyPath}</span></button></p>{/if}
       {#if task.status === 'review' && view.store.owner}
         <label class="agent-field">{labels.feedback}<textarea bind:value={feedback[task.id]} rows="2"></textarea></label>
@@ -72,7 +75,7 @@
       <label class="agent-field">{labels.task}<input required bind:value={title} data-testid="agent-task-title" /></label>
       <label class="agent-field">{labels.instructions}<textarea bind:value={instructions} rows="3"></textarea></label>
       {#if tasks.length}<fieldset class="agent-field"><legend>{labels.dependencies}</legend><div class="agent-checks">{#each tasks as task (task.id)}<label class="agent-chip-check"><input type="checkbox" checked={dependencies.includes(task.id)} onchange={() => { dependencies = dependencies.includes(task.id) ? dependencies.filter(id => id !== task.id) : [...dependencies, task.id]; }} /><span class="ui-label">{task.title}</span></label>{/each}</div></fieldset>{/if}
-      <div class="agent-form-actions"><button class="primary" disabled={view.pending}><span class="ui-label">{labels.save}</span></button><button type="button" class="ghost" onclick={() => { adding = false; }}><span class="ui-label">{labels.cancel}</span></button></div>
+      <div class="agent-form-actions"><button class="primary" disabled={view.pending}><span class="ui-label">{strings.common.save}</span></button><button type="button" class="ghost" onclick={() => { adding = false; }}><span class="ui-label">{strings.common.cancel}</span></button></div>
     </form>
   {/if}
 </section>
@@ -82,7 +85,7 @@
     <h2>{labels.artifacts}</h2>
     {#each artifacts as artifact (artifact.id)}
       {@const run = view.seen.runs.find(r => r.id === artifact.runId) ?? view.snapshot?.sessions.find(s => s.agentId === artifact.agentId && s.scope.kind === 'mission' && s.scope.id === mission.id)}
-      <article class="agent-task"><h3>{artifact.title}</h3><div class="prose">{@html renderMarkdown(artifact.summary)}</div><p class="hint">{labels.verification}: {artifact.verification || labels.noUsage}</p>{#if artifact.paths.length}<p class="agent-prewrap hint">{artifact.paths.join('\n')}</p>{/if}{#if artifact.commit}<code>{artifact.commit}</code>{/if}{#if run}<button type="button" class="ghost small" onclick={() => void view.store.open(run.threadId)}><span class="ui-label">{labels.openRun}</span></button>{/if}</article>
+      <article class="agent-task"><h3>{artifact.title}</h3><!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions --><div class="prose" onclick={followThread}>{@html renderMarkdown(artifact.summary)}</div><p class="hint">{labels.verification}: {artifact.verification || labels.noUsage}</p>{#if artifact.paths.length}<p class="agent-prewrap hint">{artifact.paths.join('\n')}</p>{/if}{#if artifact.commit}<code>{artifact.commit}</code>{/if}{#if run}<button type="button" class="ghost small" onclick={() => void view.store.open(run.threadId)}><span class="ui-label">{labels.openRun}</span></button>{/if}</article>
     {/each}
   </section>
 {/if}

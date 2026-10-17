@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { page } from '../lib/page-hidden.svelte';
+  import { errorText } from '../lib/errors';
+  import { secondClock } from '../lib/clock.svelte';
   import { Bot, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, Wrench, X } from '@lucide/svelte';
   import type { ToolDocument, ToolStatus } from '@boite/contracts';
   import { elapsed, json } from '../lib/format';
@@ -7,10 +8,11 @@
   import { familyOf, liveLabel, runSummary, toolLine, type ToolPart } from '../lib/tool-groups';
   import { describeTool, fileName } from '../lib/tool-summary';
   import { toolErrorPreview } from '../lib/tool-error';
-  import { diffCounts, diffRows } from '../lib/diff';
+  import { diffCountsOf } from '../lib/diff';
   import DiffView from './DiffView.svelte';
   import DocumentView from './DocumentView.svelte';
   import { chatPrefs } from '../lib/chat-prefs.svelte';
+  import type { Store } from '../lib/store.svelte';
 
   /*
    * One tool call as a plain line of the timeline: what it did
@@ -34,7 +36,9 @@
     startedAt = null,
     finishedAt = null,
     background = false,
-    nested = false
+    nested = false,
+    store,
+    threadId
   }: {
     name: string;
     input: unknown;
@@ -57,21 +61,16 @@
     background?: boolean;
     /** Inside an expanded group, show the individual command rather than another summary. */
     nested?: boolean;
+    /** Where a thread link in a document starts from. */
+    store?: Store;
+    threadId?: string;
   } = $props();
 
-  let now = $state(Date.now());
-  const hidden = $derived(page.hidden);
-  // A running call ticks once a second while the page is on screen.
-  $effect(() => {
-    if (status !== 'running' || startedAt === null || hidden) return;
-    now = Date.now();
-    const timer = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
   /** Shown from one second on: a quick call needs no clock. */
   let took = $derived.by(() => {
     if (startedAt === null) return '';
-    const end = status === 'running' ? now : finishedAt;
+    // A running call reads the second clock, paused while the page is hidden.
+    const end = status === 'running' ? secondClock.now : finishedAt;
     if (end === null || end === undefined) return '';
     const spent = end - startedAt;
     return spent >= 1000 ? elapsed(spent) : '';
@@ -120,13 +119,13 @@
     // A cut input would spell out a cut change.
     if (attached.length > 0 || streaming || failed || inputDeferred) return attached;
     const change = describeTool(name, input).change;
-    return change ? [{ kind: 'diff', ...change }] : [];
+    return change ? [change] : [];
   });
   let others = $derived(documents.filter((doc) => doc.kind !== 'diff'));
   let compact = $derived(!nested && documents.length === 0 && diffs.length === 0);
   let label = $derived(streaming ? liveLabel(part) : compact ? status === 'running' ? liveLabel(part) : runSummary([part]) : line.text);
   let counts = $derived(documentsDeferred ? { added: 0, removed: 0 } : diffs.reduce((sum, doc) => {
-    const one = diffCounts(diffRows(doc.oldText, doc.newText));
+    const one = diffCountsOf(doc);
     return { added: sum.added + one.added, removed: sum.removed + one.removed };
   }, { added: 0, removed: 0 }));
   /**
@@ -161,7 +160,7 @@
     if (!shown || !deferred || !loadOutput || attempted) return;
     attempted = true;
     loading = true;
-    void loadOutput().catch(reason => { loadError = reason instanceof Error ? reason.message : String(reason); }).finally(() => { loading = false; });
+    void loadOutput().catch(reason => { loadError = errorText(reason); }).finally(() => { loading = false; });
   });
 </script>
 
@@ -202,8 +201,8 @@
     <span class="fold-caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} /></span>
   </button>
 
-  <div class="fold" class:open={shown} inert={!shown}>
-    <div class="clip">
+  <div class="disclosure-fold" class:open={shown} inert={!shown}>
+    <div>
       {#if built}
         <div class="body">
           {#if loading}<p data-testid="tool-output-loading">{strings.app.loading}</p>{/if}
@@ -220,13 +219,13 @@
             {/if}
             <div class="diffs">
               {#each diffs as doc, index (index)}
-                <div data-testid="tool-document" data-kind="diff"><DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {headless} /></div>
+                <div data-testid="tool-document" data-kind="diff"><DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {doc} {headless} /></div>
               {/each}
             </div>
             {#if others.length > 0}
               <div class="documents">
                 {#each others as doc, index (index)}
-                  <DocumentView {doc} />
+                  <DocumentView {doc} {store} {threadId} />
                 {/each}
               </div>
             {/if}
@@ -255,7 +254,7 @@
               <div class="section-label">{strings.chat.toolDocuments}</div>
               <div class="documents">
                 {#each documents as doc, index (index)}
-                  <DocumentView {doc} />
+                  <DocumentView {doc} {store} {threadId} />
                 {/each}
               </div>
             {/if}
@@ -350,12 +349,7 @@
     height: 6px;
     border-radius: 50%;
     background: currentColor;
-    animation: pulse 1.6s var(--ease-out-quint) infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: .3; }
+    animation: pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops);
   }
 
   .took {
@@ -377,34 +371,7 @@
     border-radius: 50%;
     border: 1.5px solid var(--color-edge);
     border-top-color: var(--color-live);
-    animation: spin 0.9s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  /* The open and the close are the same move: the rows track goes 0fr to 1fr,
-     so the card grows to whatever the body measures without a pixel written. */
-  .fold {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows var(--dur-3) var(--ease-out-quint),
-      opacity var(--dur-3) var(--ease-out-quint);
-  }
-
-  .fold.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-
-  .clip {
-    min-height: 0;
-    overflow: hidden;
+    animation: spin 0.9s steps(54) infinite var(--loops);
   }
 
   /* The body sits under the line's words, past the glyph. */
@@ -484,7 +451,7 @@
     vertical-align: -2px;
     background: var(--color-foreground);
     border-radius: 1px;
-    animation: blink 1s steps(2, start) infinite;
+    animation: blink 1s steps(2, start) infinite var(--loops);
   }
 
   /* An endless loop stops under reduced motion; the static mark keeps its colour. */

@@ -1,4 +1,4 @@
-import type { PermissionMode, ProviderId, ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
+import type { PermissionMode, ProviderId, ThreadId, ThreadRetry, ThreadSummary, Turn, TurnId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
 import type { TurnResult } from '../drivers/types.ts';
@@ -8,6 +8,7 @@ import { reportSettlementError, settleTurn } from './turn-settlement.ts';
 import type { ThreadStore } from '../threads.ts';
 import { setThreadStatus, withLoad } from './records.ts';
 import { TurnAttempts, type TurnAttemptState } from './turn-attempts.ts';
+import { stderrTail } from '../drivers/stderr-tail.ts';
 
 export { STOP_DEADLINE, STOP_DEADLINE_ERROR } from './turn-attempts.ts';
 
@@ -33,7 +34,7 @@ export class TurnRunner {
 
   /** Mail is a timeline boundary even when the provider has not accepted it yet. */
   noteMail(threadId: ThreadId, at: number): void {
-    const turn = this.core.journal.listTurns(threadId).findLast(turn => turn.status === 'running');
+    const turn = this.core.journal.runningTurn(threadId);
     if (turn) this.answerAfter.set(turn.id, Math.max(at, this.answerAfter.get(turn.id) ?? 0));
   }
 
@@ -45,6 +46,16 @@ export class TurnRunner {
   /** Withdraws a pause not yet taken. */
   cancelPause(threadId: ThreadId): void {
     this.attempts.cancelPause(threadId);
+  }
+
+  /** The capacity retry the thread's turn waits for, or null. */
+  retryOf(threadId: ThreadId): ThreadRetry | null {
+    return this.attempts.retryOf(threadId);
+  }
+
+  /** Gives up a capacity retry: the turn fails with the refusal. False when none waits. */
+  cancelRetry(threadId: ThreadId): boolean {
+    return this.attempts.cancelRetry(threadId);
   }
 
   /** True while the thread's turn waits for its agent's update. */
@@ -94,6 +105,9 @@ export class TurnRunner {
         setThreadStatus(this.core, threadId, 'running');
       })());
       started = true;
+      // A delegated agent with a worktree of its own: made from its parent's HEAD before the agent starts in it.
+      const entering = this.core.delegation.worktrees.enter(threadId);
+      if (entering) await entering;
       this.core.workforce.resident.assertThreadRoute(threadId, state.thread);
       const provider = this.core.providers.require(state.thread.providerId);
       const account = this.core.accounts.require(state.thread.accountId);
@@ -143,6 +157,13 @@ export class TurnRunner {
     this.core.bus.emit('turn.finished', finished);
     if (result.status === 'error') {
       this.core.log('error', `turn ${turnId} failed: ${result.diagnosticError ?? result.error ?? 'unknown error'}`, { source: thread.providerId, event: 'turn.failed', threadId, turnId });
+      // The agent's own last words are usually the cause; provider output is otherwise never persisted.
+      // Only this turn's: a quick retry must not blame the previous turn's lines on it.
+      // After settlement: a diagnostic failure must not skip the moves, wakes and flushes below.
+      try {
+        const tail = stderrTail(threadId, undefined, undefined, running.startedAt ?? 0);
+        if (tail !== null) this.core.logs.warn(`The agent's last ${tail.length} characters on stderr before turn ${turnId} failed are in data.stderrTail and stay on this machine`, { source: thread.providerId, event: 'turn.failed.stderr', threadId, turnId, data: { stderrTail: tail } });
+      } catch { /* the turn's own record above already says it failed */ }
     }
     if (!next) return;
     if (!threadOwned) {
@@ -159,6 +180,8 @@ export class TurnRunner {
     // A thread an agent started answers it before a failure pauses its coordination.
     await this.threads.spawns.finished(finished);
     if (result.status !== 'done') this.core.coordination.pause(threadId);
+    // A spent subscription window: the thread may resume by itself once it resets (`threads/limit-resume.ts`).
+    if (result.status === 'error' && result.refusal?.kind === 'usage-limit' && !next.archived) this.threads.limitResumes.turnFailed(next, finished, result.refusal.resetsAt);
     if (result.status === 'done' && sameSession && !queued.execution?.operation) this.threads.titles.autoRefine(threadId);
     if (sameSession) this.threads.autoCompact.turnFinished(next, finished);
     const woke = this.threads.deferred.pendingWakes.get(threadId);

@@ -3,7 +3,9 @@ import { parseGroupRelayUrl, RpcErrorCode, type CoreInfo, type Principal, type T
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
 import { deviceLabel, noteThisComputer } from '../device';
-import { clearStoredEndpoint, droppedSince, relayKeyFor, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, removeBrought, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
+import { appPage } from '../app-origin';
+import { deviceKey, dropDeviceKey } from '../device-key';
+import { clearStoredEndpoint, droppedSince, relayKeyFor, rememberDevice, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, removeBrought, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
 import { onboardingSeen } from '../onboarding';
 import { rightPanel } from '../right-panel.svelte';
 import { fill, strings } from '../strings';
@@ -11,6 +13,7 @@ import { reconcileRows, unlistedPanels } from '../thread-rows';
 import { work } from '../work-prefs.svelte';
 import { installStatesOf } from './accounts.svelte';
 import type { StoreContext } from './context';
+import { SETTINGS_TABS, type SettingsTab } from '../settings-tabs';
 import { retainRows } from './snapshot-reads';
 
 /**
@@ -41,7 +44,7 @@ function askToFollowLink(url: string): Promise<boolean> {
     title: strings.machines.linkTitle.replace('{host}', host),
     body: strings.machines.linkBody,
     confirmLabel: strings.machines.linkConfirm,
-    cancelLabel: strings.machines.linkCancel,
+    cancelLabel: strings.common.cancel,
     danger: true
   });
 }
@@ -104,10 +107,10 @@ export class Connection {
     await this.ctx.threads.unsubscribe();
   }
 
-  async connectEndpoint(endpoint: Endpoint): Promise<void> {
+  async connectEndpoint(endpoint: Endpoint, rememberActive = false): Promise<void> {
     const s = this.ctx.store;
-    s.closePairing();
-    this.attachEndpoint(endpoint, false);
+    s.closeDeviceInvite();
+    this.attachEndpoint(endpoint, rememberActive);
     const client = this.ctx.client;
     let timedOut = false;
     // Only a handshake that never finished is given up on. Once the machine
@@ -147,17 +150,26 @@ export class Connection {
         this.paired = false;
         const { FakeClient } = await import('../fake-client');
         // `&long=1` adds the four-hundred-message thread the windowed list is
-        // looked at on, `&heavy=1` the forty messages and 11.5 MiB of tool calls
-        // a long agent session leaves, `&principal=session` answers as a paired
-        // phone, so the screens a device is refused can be walked without pairing one.
+        // looked at on (`&copies=<n>` n more for the reading cache), `&heavy=1` the forty messages and 11.5 MiB of tool calls
+        // a long agent session leaves, `&working=<n>` n more threads at work, `&principal=session` answers as a paired
+        // phone, so the screens a device is refused can be walked without pairing one,
+        // `&missing=<method>,...` answers those methods like an older machine,
+        // and `&load=<n>` adds n threads that stream without end (`&loadtick=<ms>`).
         s.attach(
           new FakeClient({
             long: params.get('long') === '1',
+            ...(params.get('copies') ? { longCopies: Number(params.get('copies')) } : {}),
             heavy: params.get('heavy') === '1',
+            ...(params.get('working') ? { working: Number(params.get('working')) } : {}),
+            ...(params.get('load') ? { load: Number(params.get('load')) } : {}),
+            ...(params.get('loadtick') ? { loadTickMs: Number(params.get('loadtick')) } : {}),
             delegationDemo: params.get('team') === '1',
-            stewardDemo: params.get('steward') === '1',
+            agentsDemo: params.get('agents') === '1',
+            subagentsDemo: params.get('subagents') === '1',
+            watchDemo: params.get('watch') === '1',
             uninstalled: params.get('uninstalled') === '1',
-            ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {})
+            ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {}),
+            ...(params.get('missing') ? { missing: params.get('missing')!.split(',') } : {})
           })
         );
       } else {
@@ -175,6 +187,8 @@ export class Connection {
           // printed, or a start that never answered.
           const refusal = window.__TAURI_INTERNALS__ ? shellEndpointError() : null;
           if (refusal) s.error = fill(strings.errors.coreStart, { reason: refusal });
+          // The phone app before any machine: its screen is the way in.
+          if (appPage()) this.pairingRequired = true;
           this.booted = true;
           return;
         }
@@ -200,6 +214,9 @@ export class Connection {
       // `&panel=<kind>` opens that surface on the thread the page lands on, so
       // a capture of it needs no clicks. Fake core only, like `&long=1`.
       if (import.meta.env.DEV && params.get('fake') === '1') this.#openQueryPanel(params.get('panel'));
+      // `&settings=<tab>` opens that Settings page the same way, for a capture of it.
+      const tab = import.meta.env.DEV && params.get('fake') === '1' ? params.get('settings') : null;
+      if (tab !== null && (SETTINGS_TABS as readonly string[]).includes(tab)) s.showSettings(tab as SettingsTab);
     } finally {
       this.booted = true;
     }
@@ -245,12 +262,21 @@ export class Connection {
     this.pairingRequired = repairing;
     this.ctx.store.error = null;
     this.localCore = endpoint.local === true;
-    this.#keyless = endpoint.token === '' && endpoint.grant === undefined && endpoint.ticket === undefined;
+    this.#keyless = endpoint.token === '' && endpoint.grant === undefined && endpoint.ticket === undefined && endpoint.signs === undefined;
     let key = endpoint.token;
     const began = Date.now();
+    // A phone or a browser is a device of its group: one key, signed for each machine. The desktop app is its machine's own.
+    const admitting = window.__TAURI_INTERNALS__ === undefined && endpoint.grant !== undefined;
     const client = new WsClient({
       url,
       token: endpoint.token,
+      ...(endpoint.signs !== undefined || admitting ? { signer: { key: deviceKey, coreId: endpoint.signs ?? null } } : {}),
+      onDevice: (_device, coreId) => {
+        if (this.ctx.client !== client) return;
+        this.environments = rememberDevice(url, coreId);
+        if (rememberActive) storeEndpoint({ url, token: '', paired: true, signs: coreId });
+        return true;
+      },
       ...(endpoint.grant === undefined ? {} : { grant: endpoint.grant }),
       ...(endpoint.ticket === undefined ? {} : { ticket: endpoint.ticket }),
       // Reached through another member: the key for that member, as it stands at each connection.
@@ -279,7 +305,10 @@ export class Connection {
       onRevoked: () => {
         if (this.ctx.client !== client) return;
         // Only the key this connection presented is dead: another window may have paired this machine anew meanwhile.
-        if (rememberActive && readStoredEndpoint()?.token === key) clearStoredEndpoint();
+        // A device key a machine of its group refuses was removed from that group: the app makes a new one when it is added again.
+        if (client.deviceId !== null) dropDeviceKey(client.deviceId);
+        const stored = readStoredEndpoint();
+        if (rememberActive && stored?.url === url && stored.token === key) clearStoredEndpoint();
         this.environments = removeEnvironment(url, key);
         this.connection = 'closed';
         this.pairingRequired = true;
@@ -302,11 +331,10 @@ export class Connection {
     this.ctx.composer.composerInsertions.clear();
     s.openThread = null;
     s.draft = null;
-    s.closePairing();
+    s.closeDeviceInvite();
     s.sessions = [];
     s.group = null;
     s.groupKnown = false;
-    s.groupInvite = null;
     s.projects = [];
     s.threads = [];
     // What the next core answers replaces these; one that cannot answer must not show the last one's.
@@ -380,6 +408,7 @@ export class Connection {
       this.connection = client.state;
       this.principal = client.principal;
       this.pairingRequired = false;
+      void this.#handOverKey(client, core);
       void s.reload();
       await Promise.all([this.ctx.drafts.start(), this.reloading?.essential]);
     } catch (error) {
@@ -389,6 +418,28 @@ export class Connection {
         this.#authenticationFailed(error);
       }
       else this.ctx.fail(error);
+    }
+  }
+
+  /**
+   * A phone paired the older way, with a key for this machine alone, hands
+   * over its device key: from the next connection on it signs, here and on
+   * every machine of the group. Its old key keeps working until then.
+   */
+  async #handOverKey(client: Client, core: CoreInfo): Promise<void> {
+    const url = this.endpointUrl;
+    if (window.__TAURI_INTERNALS__ !== undefined || this.localCore || url === null || !core.features?.deviceKeys || !core.coreId) return;
+    if (this.principal === 'owner' || this.principal === 'agent') return;
+    const saved = readEnvironments().find((env) => env.url === url);
+    if (saved === undefined || saved.token === '' || saved.signs !== undefined) return;
+    try {
+      const key = await deviceKey();
+      if (this.ctx.client !== client) return;
+      await client.call('group.enrollDevice', { ...key.enroll(core.coreId), name: deviceLabel() ?? 'browser' });
+      if (this.ctx.client !== client) return;
+      this.environments = rememberDevice(url, core.coreId);
+    } catch {
+      // Refused or cut: the old key still works, and the next connection asks again.
     }
   }
 
@@ -418,7 +469,14 @@ export class Connection {
       return;
     }
     storeEndpoint(env);
-    await this.#switchTo({ url: env.url, token: env.token, ...(env.paired ? { paired: true } : {}) });
+    // What opens it travels with it: the device key's machine, and the group's marks of a machine it brought.
+    await this.#switchTo({
+      url: env.url, token: env.token, ...(env.paired ? { paired: true } : {}),
+      ...(env.signs === undefined ? {} : { signs: env.signs }),
+      ...(env.coreId === undefined ? {} : { coreId: env.coreId }),
+      ...(env.groupId === undefined ? {} : { groupId: env.groupId }),
+      ...(env.epoch === undefined ? {} : { epoch: env.epoch })
+    });
   }
 
   /**
@@ -515,7 +573,11 @@ export class Connection {
       if (current()) apply(value); else cancel?.();
     }).catch(error => { cancel?.(); if (current()) this.ctx.fail(error); });
     const primary = [
-      slice(client.call('projects.list', {}), rows => { s.projects = retainRows(s.projects, projectRead.apply(rows, s.projects)); this.ctx.projects.bootListAt = Date.now(); }, () => projectRead.cancel()),
+      slice(client.call('projects.list', {}), rows => {
+        s.projects = retainRows(s.projects, this.ctx.projects.withPendingArchives(projectRead.apply(rows, s.projects)));
+        this.ctx.projects.bootListAt = Date.now();
+        void this.ctx.projects.sendPendingArchives(rows);
+      }, () => projectRead.cancel()),
       slice(client.call('threads.list', {}), rows => {
         s.threads = reconcileRows(s.threads, threadRead.apply(rows, s.threads));
         const read = reopened && s.openThread?.unread === false ? s.threads.find(t => t.id === s.openThread?.id) : undefined;
@@ -554,8 +616,6 @@ export class Connection {
       // Beside the lists, not among them: the machines of the group are connected once it answers.
       void s.loadGroup();
       void s.refreshMemory();
-      // Grants already read may have changed while the machine was away; unread ones wait for the settings.
-      if (s.stewards !== null) void s.loadStewards();
       if (open && reopened && s.openThread?.id === open.id) {
         await this.ctx.delegation.refreshDelegated(client);
         if (!current() || s.openThread?.id !== open.id) return;

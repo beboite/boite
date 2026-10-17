@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '../lib/errors';
   import { parseChord, type KeybindingCommand } from '@boite/contracts';
   import { RotateCcw, Search, X } from '@lucide/svelte';
   import InfoTip from './InfoTip.svelte';
@@ -155,7 +156,7 @@
     try {
       await openOwnFile(path);
     } catch (error) {
-      store.reportError(fill(strings.keyboard.openFailed, { reason: error instanceof Error ? error.message : String(error) }), 'minor');
+      store.reportError(fill(strings.keyboard.openFailed, { reason: errorText(error) }), 'minor');
     }
   }
 </script>
@@ -429,7 +430,7 @@
     border-radius: var(--radius-sm);
     font-size: var(--text-sm);
     color: var(--color-muted-foreground);
-    animation: listen 1.2s var(--ease-out-quint) infinite alternate;
+    animation: listen 1.2s var(--ease-out-quint) infinite alternate var(--loops);
   }
   @keyframes listen {
     from { border-color: var(--color-edge); }

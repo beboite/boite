@@ -31,16 +31,23 @@ and [release layout](releasing.md).
 ## One WebSocket, one contract
 
 The core serves JSON-RPC 2.0 at `/rpc`. The `Origin` must be absent for a native
-client, a permitted shell origin, the core's own origin or an exact browser
-origin the owner configured in Machines. The first frame must be `hello` with
-an accepted token within five seconds, or the socket closes with `4001`.
+client, a permitted shell origin, the core's own origin, an origin a machine of
+its [group](groups.md) gives or is served at, or an exact origin the owner added
+under Advanced. The origin check only keeps arbitrary websites out: the first
+frame must still be `hello` with an accepted credential within five seconds, or
+the socket closes with `4001`.
 The owner token is 32 random bytes generated on first start and stored in
-`<dataDir>/core.json` with the port and PID.
+`<dataDir>/core.json` with the port, PID and start time, and on Linux a start
+key: the boot id and the start in clock ticks since boot. The shell takes a
+live PID for another process that got the number, not for the core, when its
+start key differs (Linux) or when it started more than two seconds after that
+time (Windows, macOS). The Linux start time follows every step of the wall
+clock, so it is never compared there. `core.lock` carries the same key.
 
 | Principal | Credential and authority |
 | --- | --- |
-| Owner | Core token or owner pairing; may configure the core |
-| Session | Paired-device token; limited to `DEVICE_METHODS` and `DEVICE_EVENTS` |
+| Owner | Core token, a group ticket from a member, or an owner pairing; may configure the core |
+| Session | A device of the group, signing with its own key; limited to `DEVICE_METHODS` and `DEVICE_EVENTS` |
 | Agent | In-memory per-thread token supplied to a launched process; limited to `AGENT_METHODS` and its authenticated thread |
 
 `hello` also names the client and, optionally, its `device`: the shell sends
@@ -72,7 +79,15 @@ of leaving an unanswered request behind.
 
 ## The journal is the truth, the tables are a projection
 
-`bun:sqlite` uses WAL mode. An append to
+`bun:sqlite` uses WAL mode with SQLite's automatic checkpoint off
+(`journal/wal-checkpoints.ts`). A Worker with its own connection, started at
+the first checkpoint after a write, runs a passive checkpoint once the WAL
+passes 4 MiB and truncates it after 30 s without writes. The main thread
+checkpoints when the Worker is unavailable or when the WAL reaches 16 MiB
+because writes kept landing during the Worker's passes, and it truncates the
+WAL at close. A write that binds more than 64 KiB, such as a message's parts,
+runs on a statement finalized after use (`journal/statements.ts`): a cached
+statement keeps its last bound values alive. An append to
 `events(id, thread_id, ts, type, version, payload)` and its projection changes
 commit in one transaction. Events have versions but are not replayed to rebuild
 the tables. Retention runs one minute after startup and daily, deleting events
@@ -94,9 +109,11 @@ again from the message when missing ([performance](performance.md)).
 A tool output, tool input text, file or image of 32 KiB or more is stored in
 `part_blobs`, one row per value, and its part in the message row names it under
 `$blob`. Journal reads put the values back. A page asked with `compactTools`
-reads only the first 1,024 characters of a finished tool's output; its resume
-proof hashes a digest of the whole value. A streaming message stores only the
-parts that changed since its last committed write. Rows written before schema
+reads only the first 1,024 characters of a finished tool's output, and sends
+them only for a call that failed or was refused; its resume proof hashes a
+digest of the whole value. A streaming message stores only the
+parts that changed since its last committed write, and a value whose digest
+matches the stored one is not written again. Rows written before schema
 31 kept their values inline; three minutes after startup the core moves them
 one message per tick, pauses while a message streams, and records the last
 rowid done in the `part-blobs:moved-through` setting.
@@ -108,8 +125,12 @@ Schema 31 fills it once from the stored parts; writes keep it current.
 Text deltas coalesce per thread every 16 ms. Streaming message parts stay in
 memory and overlay stored rows on reads. Writes normally happen at most every
 500 ms, adapt to slow storage up to 5 seconds, and also happen on completion,
-turn end, explicit persistence and close. While writes succeed, a crash can lose
-the last write window. Failed background writes retain dirty parts and retry
+turn end, explicit persistence and close. A timed write puts only the changed
+parts in `streaming_parts`, one row per part; the message row is written whole
+on completion, at turn end, at close and every 30 seconds while the message
+streams, so a raw SQL reader of `messages.parts` lags by up to 30 seconds. At
+startup the core folds any `streaming_parts` rows a stopped core left into
+their messages. While writes succeed, a crash can lose the last write window. Failed background writes retain dirty parts and retry
 with exponential backoff up to 5 seconds. Buffered deltas for completed messages
 are dropped after three failed flushes, with a diagnostic. Thread activity is a
 settings row; detected project icons are derived rows that can be rebuilt.
@@ -134,9 +155,24 @@ markers. Restore retains history and previous archive flags without restarting
 agents. The default deletion retention is 30 days; `threadDeletionRetentionDays`
 accepts 0 to 3650, with 0 disabling automatic purge. Startup and minute passes
 purge expired families transactionally. Reads and restoration also check expiry.
-Project removal purges its pending deletions. Files, worktrees, branches and
-native provider transcripts stay on disk. See
+Project removal purges its pending deletions. Files, worktrees and branches
+stay on disk; the
+[settled worktree cleanup](development.md#settled-worktree-cleanup) later removes
+a deleted thread's worktree when nothing in it would be lost. See
 [thread lifecycle](development.md#thread-lifecycle).
+
+A purge, and the erase of an incognito conversation, also removes the native
+transcripts of a Claude account Boite isolated itself
+([accounts](accounts.md#transcripts-boite-removes)): every session the thread
+and its turns named, that no remaining thread names (a fork can resume its
+source's session). The user's own `~/.claude`, and any directory Boite did not
+make, keep theirs. Other providers' transcripts and a removed project's threads
+stay on disk. On 2026-10-17 a desktop core's isolated account held 887 Claude
+sessions (5,090 MiB): 360 named by a live thread (3,892 MiB), 494 by a deleted
+thread waiting for its purge (1,026 MiB, what the purge frees as those
+deletions expire) and 33 by nothing (172 MiB, 0.8 MiB of it untouched for 7
+days, so no sweep of older files was added), read from a read-only copy of its
+journal.
 
 The journal does not replace a provider's native transcript. A turn resumes the
 selected account's `sessionId`. An account change starts a fresh session seeded
@@ -159,15 +195,59 @@ phone offer Resume and Discard through `turns.recover`; neither creates a second
 input. Work that may already have reached a provider is never replayed by this
 recovery path. Explicit restart handoff keeps its own authorization rules.
 
+A turn a provider refused for availability retries at capacity within the same
+turn, or, with `autoResumeLimitedThreads`, resumes after a usage limit's reset
+from a plan journalled under `limit-resumes`; `ThreadSummary.retry` shows
+either ([usage](usage.md#when-a-provider-refuses-a-turn)).
+
 Owner and paired-device connections name one visible conversation through
-`threads.focus`. Claude and Codex can prepare their traced process and native
-session before a prompt, without creating a turn, message or model prompt.
+`threads.focus`. Claude, Codex, ACP, pi and Muse can prepare their traced process
+and native session before a prompt, without creating a turn, message or model prompt.
 Viewed sessions stay ready across completed turns even when
 `warmProcessMinutes` is zero. The last viewer leaving starts a 30-second grace,
 extended by a longer configured warm period. Hidden pages and machine or phone
 navigation release focus. Preparation uses the normal account isolation and
 install leases; failure is logged and a later prompt can start normally.
-Other drivers retain their post-turn lifecycle.
+
+A visible draft with text or attachments reserves its final directory or
+worktree through `drafts.prepare`. Each connection holds one invisible workspace;
+the reservation expires after ten minutes. No prompt text, turn or conversation
+is published during preparation. `threads.create` adopts a matching reservation
+and can subscribe before answering, allowing the first turn to start while the
+UI hydrates its conversation. Late snapshots preserve newer streamed messages,
+turns and summary updates. Selection changes, abandonment and disconnect release
+the native session and reserved workspace. Older cores use ordinary creation.
+Private ownership intent is journalled before creating a reserved folder or
+worktree. Startup recovery preserves published conversations and retries cleanup
+of abandoned reservations. Active reservations and pending cleanup share limits
+of four per connection and 32 globally; failed cleanup keeps its ownership intent.
+Reserved git operations have a ten-second deadline. Expiry stops the reservation's
+registered process group or Windows job and allows up to three seconds to drain
+inherited pipes before cleanup. A reserved branch is created atomically with an
+ownership reflog entry. Rollback checks that entry and the branch registered at
+the checkout path before overriding its initialization lock; a competing branch,
+checkout and its commits remain untouched.
+Cleanup failures preserve the original creation error and are logged. During
+shutdown, draft and upload cleanup failures do not prevent process or journal
+closure; retained ownership remains available for recovery.
+
+Checkpoint capture and native preparation can run together, but prompt dispatch
+waits for the checkpoint. This transient preparation does not extend post-turn
+retention. Stop or checkpoint failure releases it before a prompt can leave.
+
+Attachments selected in the composer upload through connection-owned leases.
+Completed upload IDs replace only the wire bytes when sending; durable drafts
+retain the original bytes. The core validates ownership, metadata and SHA-256
+before restoring the original attachment for validation and journaling. Leases
+expire after ten minutes, have per-connection and global byte/count budgets, and
+are removed on release, disconnect or shutdown. Expired references retry inline
+with the same input receipt. Upload instances record their owning process before
+writing bodies. Startup removes only instances whose recorded owner is proved
+dead, including reuse of the current PID with a newer start identity. Live owners,
+unavailable identities, other hostnames and unknown legacy directories remain
+untouched: a local process probe cannot establish another host's owner is dead.
+Rejected uploads retain their selected entry, so typing does not retry them.
+Sending uses the original bytes; deselecting and reselecting permits a new upload.
 
 ## Delegation shares the scheduler
 
@@ -281,11 +361,15 @@ hook discovery and reports; [usage](usage.md) owns limits and monitoring.
 
 ## The models probe
 
-`providers.probe` uses a short-lived traced process and the agent's own discovery
-operation. Concurrent reads share an operation; caches belong to a provider and
+`providers.probe` uses the agent's own discovery operation. Codex and ACP can
+read through an explicitly targeted, compatible prepared session; other reads
+use a short-lived traced process. Compatibility includes account, descriptor,
+environment, workspace and context mode. Missing ACP effort metadata uses an
+isolated probe rather than changing a prepared session's selection.
+Concurrent reads share an operation; caches belong to a provider and
 account. Changed descriptors or account state invalidate them, and a stale
-completion cannot replace a newer cache entry. The process is closed on every
-path. Background failures retain display fallbacks; explicit refreshes report
+completion cannot replace a newer cache entry. Disposable processes close on
+every path. Background failures retain display fallbacks; explicit refreshes report
 their reason. See [provider discovery](providers.md#the-models-probe).
 
 ## The UI streams, and stops streaming
@@ -355,14 +439,15 @@ A restart continuation remains durable until it starts or is explicitly excluded
 
 ## Groups
 
-A group is one roster every member core holds: the machines of one owner,
-their public keys and addresses, and the devices paired with them. Members
+A group is one roster every member core holds: the machines of one owner, their
+public keys, addresses and the origins their pages are served at, and the
+devices of the group, each with one Ed25519 key a member signed in. Members
 exchange it through the signed coordination endpoint and merge it by revision.
-A client of one member gets a signed ticket for another, which that one
-exchanges at `hello` for a session of its own; browser origins and coordination
-peers are read off the same roster. A member listens on its tailnet address
-beside the one it started on. [Groups](groups.md) describes the trust this
-assumes and where it stops.
+A device says `hello` on any member with a signature made for that member; a
+member's desktop app gets a signed ticket from its own core for the others.
+Browser origins and coordination peers are read off the same roster. A member
+listens on its tailnet address beside the one it started on. [Groups](groups.md)
+describes the trust this assumes and where it stops.
 
 ## The phone keeps the app
 
@@ -370,4 +455,4 @@ The service worker registers after first paint on the core's HTTP(S) origin.
 Navigation is network-first with a cached shell fallback; hashed assets are
 cache-first. RPC, upgrades, the worker and the manifest are never cached.
 An offline phone can draw the shell and reconnect when the core returns.
-[Phone](phone.md) owns pairing, secure origins and device limits.
+[Phone](phone.md) owns adding a device, secure origins and device limits.

@@ -11,7 +11,8 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
   await page.waitFor(`document.querySelector('[data-testid="composer-effort"]')`);
 }, 60_000);
-afterAll(async () => { await page?.close(); await server?.close(); });
+// Closing Chrome and its profile can take seconds on a loaded Windows runner.
+afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('text and icons share a vertical centre across reading fonts, menus and phone controls', async () => {
   const pairs: [string, string][] = [
@@ -19,7 +20,6 @@ test('text and icons share a vertical centre across reading fonts, menus and pho
     ['[data-testid="composer-picker"]', '[data-testid="composer-picker"] .label'],
     ['[data-testid="composer-effort"]', '[data-testid="composer-effort"]'],
     ['[data-testid="composer-mode"]', '[data-testid="composer-mode"]'],
-    ['[data-testid="project-sort"]', '[data-testid="project-sort"]'],
   ];
   for (const font of ['inter', 'geist', 'plex', 'atkinson', 'figtree', 'source', 'dm', 'system']) {
     await page.evaluate(`(async () => {

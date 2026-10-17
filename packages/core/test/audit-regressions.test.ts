@@ -72,20 +72,23 @@ test('a symlink diff is the link text', async () => {
   expect(side.tooBig).toBe(false);
 });
 
-test('a poisoned checkpoint blob is rewritten from the file', async () => {
+for (const store of ['own folder', 'shared store'] as const) test(`a poisoned checkpoint blob is rewritten from the file (${store})`, async () => {
   harness = await startTestCore();
   const client = await harness.connect();
   const { threadId } = await echoThread(harness, client);
   const root = outside('boite-checkpoint-');
   writeFileSync(join(root, 'note.txt'), 'hello\n');
-  const objects = join(harness.dataDir, 'checkpoint-objects');
-  const first = await snapshot(harness.core, threadId, root, objects);
+  const objects = join(harness.dataDir, 'checkpoints', threadId, 'objects');
+  const shared = store === 'shared store' ? join(harness.dataDir, 'checkpoints', 'objects') : undefined;
+  const first = await snapshot(harness.core, threadId, root, objects, undefined, shared);
   const hash = createHash('sha256').update('hello\n').digest('hex');
   expect(first['note.txt']?.hash).toBe(hash);
-  writeFileSync(join(objects, hash), 'poison');
-  const second = await snapshot(harness.core, threadId, root, objects);
+  // Same length, written in place: with the shared store both names see it.
+  writeFileSync(join(objects, hash), 'poiso\n');
+  const second = await snapshot(harness.core, threadId, root, objects, undefined, shared);
   expect(second['note.txt']?.hash).toBe(hash);
   expect(readFileSync(join(objects, hash)).toString()).toBe('hello\n');
+  if (shared) expect(readFileSync(join(shared, hash.slice(0, 2), hash)).toString()).toBe('hello\n');
 });
 
 test('held answers are journaled once and still prefix the next prompt', async () => {

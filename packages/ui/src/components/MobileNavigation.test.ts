@@ -96,7 +96,10 @@ test('a parent on another machine shows its working sub-agents, counted, and Rec
     await settle();
     const state = () => document.querySelector<HTMLElement>(`[data-machine-id="${remote.machineId}"][data-thread-id="${parent.id}"] [data-testid=thread-state]`);
     expect(state()?.dataset['state']).toBe('delegating');
-    expect(state()?.querySelector('[data-testid=thread-state-text]')?.textContent).toMatch(/^2 sub-agents · 1m/);
+    expect(state()?.querySelector('[data-testid=thread-state-text]')?.textContent).toMatch(/^1m/);
+    // The count rides the same chip a computer's row shows: once, never also written out.
+    expect(state()?.querySelector('[data-testid=thread-subagents]')?.textContent).toBe('2');
+    expect(state()?.textContent).not.toContain('sub-agents');
     expect(state()?.getAttribute('title')).toMatch(/^Waiting on 2 sub-agents/);
     // A child is never a row of its own.
     expect(document.querySelector('[data-thread-id="child-1"]')).toBeNull();

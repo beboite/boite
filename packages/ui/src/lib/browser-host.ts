@@ -15,6 +15,7 @@
  *
  * No port is opened: WebView2 hands each webview's protocol to the app itself.
  */
+import { errorText } from './errors';
 import { BROWSER_HOST_BATCH_BYTES, BROWSER_HOST_BATCH_MAX, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE } from '@boite/contracts';
 import type { BrowserEvent } from './browser-bridge';
 
@@ -45,14 +46,31 @@ export const HOST_PAGE_EVENTS = [
   'Network.requestWillBeSent', 'Network.responseReceived', 'Network.loadingFailed', 'Log.entryAdded',
 ] as const;
 
+/**
+ * A page's network events, cut to what the core reads of them
+ * (`packages/core/src/browser/page-events.ts`): a request's address, and a
+ * response only when it failed. Headers and initiator stacks never cross the
+ * loopback link. `null` drops the event. Read another field there, keep it here.
+ */
+export function compactPageEvent(method: string, params: Record<string, unknown>): Record<string, unknown> | null {
+  if (method === 'Network.requestWillBeSent') {
+    const request = params.request as { url?: unknown } | undefined;
+    return { requestId: params.requestId, request: { url: request?.url } };
+  }
+  if (method === 'Network.responseReceived') {
+    const response = params.response as { status?: unknown; statusText?: unknown; url?: unknown } | undefined;
+    if (typeof response?.status !== 'number' || response.status < 400) return null;
+    return { requestId: params.requestId, response: { status: response.status, statusText: response.statusText, url: response.url } };
+  }
+  return params;
+}
+
 /** Every agent webview's id starts so; the shell gives those the agent's DevTools methods (`browser_control.rs`). */
 export const AGENT_VIEW_PREFIX = 'agent-';
 
 /** `relay` is the core's connection the webview answers on; `profile` the one its pages run in. */
 interface Target { id: string; relay: string; profile: string; context: string | null; url: string; title: string; off: (() => void) | null }
 interface Message { id?: number; method?: string; params?: Record<string, unknown>; sessionId?: string }
-
-const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 
 export class BrowserHostRelay {
   #targets = new Map<string, Target>();
@@ -90,7 +108,7 @@ export class BrowserHostRelay {
     const { id, method = '', params = {}, sessionId } = parsed;
     if (typeof id !== 'number') return;
     const answer = (result: unknown) => this.#send(profile, { id, result: result ?? {}, ...(sessionId ? { sessionId } : {}) });
-    const fail = (cause: unknown) => this.#send(profile, { id, error: { message: message(cause) }, ...(sessionId ? { sessionId } : {}) });
+    const fail = (cause: unknown) => this.#send(profile, { id, error: { message: errorText(cause) }, ...(sessionId ? { sessionId } : {}) });
     if (sessionId !== undefined) {
       if (!this.#targets.has(sessionId)) { fail(`no webview ${sessionId}: it was closed`); return; }
       this.bridge.relay(sessionId, method, params).then(answer, fail);
@@ -172,7 +190,8 @@ export class BrowserHostRelay {
     this.bridge.create(target.id, url, profile === DEFAULT_BROWSER_PROFILE ? undefined : profile);
     try {
       const off = await this.bridge.events(target.id, HOST_PAGE_EVENTS, (method, params) => {
-        if (this.#targets.has(target.id)) this.#send(target.relay, { method, params, sessionId: target.id });
+        const compact = this.#targets.has(target.id) ? compactPageEvent(method, params) : null;
+        if (compact) this.#send(target.relay, { method, params: compact, sessionId: target.id });
       });
       if (this.#targets.has(target.id)) target.off = off; else off();
     } catch (cause) {

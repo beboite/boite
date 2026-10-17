@@ -1,8 +1,6 @@
-import type { ProcessRecord, ThreadResources } from '@boite/contracts';
+import { TRACE_LIMIT, type ProcessRecord, type ThreadResources } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams } from './errors.ts';
-
-const DEFAULT_TRACE_LIMIT = 200;
 
 
 export function registerTraceMethods(core: Core): void {
@@ -14,7 +12,7 @@ export function registerTraceMethods(core: Core): void {
   });
   core.router.register('resources.memoryStatus', () => core.procs.memory.status());
   core.router.register('trace.get', (params): ProcessRecord[] =>
-    core.journal.listProcesses(params.threadId, params.limit ?? DEFAULT_TRACE_LIMIT),
+    core.journal.listProcesses(params.threadId, params.limit ?? TRACE_LIMIT),
   );
   core.router.register('resources.list', (): ThreadResources[] => {
     // Live only: a task manager shows what runs now. The client polls it while
