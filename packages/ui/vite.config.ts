@@ -151,9 +151,42 @@ function localePreload(): Plugin {
   };
 }
 
+/**
+ * The phone's navigation is a chunk the page imports outside the shell
+ * (`src/lib/deferred-parts.ts`), not a file index.html names, so the service
+ * worker would not store it at install and an offline phone would open with
+ * no header. index.html gets its static graph, JavaScript and styles, in a
+ * meta tag the browser fetches nothing for and `public/sw.js` precaches.
+ */
+function offlineParts(): Plugin {
+  return {
+    name: 'boite-offline-parts',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(_html, context) {
+        const bundle = context.bundle ?? {};
+        const navigation = Object.values(bundle).find(
+          (file) => file.type === 'chunk' && /[\\/]src[\\/]components[\\/]MobileNavigation\.svelte$/.test(file.facadeModuleId ?? '')
+        );
+        if (!navigation) throw new Error('src/components/MobileNavigation.svelte is not a chunk of its own: deferred-parts.ts must import it dynamically');
+        const files = new Set<string>();
+        const visit = (name: string) => {
+          const file = bundle[name];
+          if (file?.type !== 'chunk' || files.has(name)) return;
+          files.add(name);
+          for (const css of file.viteMetadata?.importedCss ?? []) files.add(css);
+          for (const imported of file.imports) visit(imported);
+        };
+        visit(navigation.fileName);
+        return [{ tag: 'meta', attrs: { name: 'boite-offline', content: [...files].map((name) => `./${name}`).join(' ') }, injectTo: 'head' }];
+      },
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [lucideGlyph(), completeCatalogues(), svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), prepaintMinify(), precompress()],
+  plugins: [lucideGlyph(), completeCatalogues(), svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), offlineParts(), prepaintMinify(), precompress()],
   base: './',
   define: { __BOITE_VERSION__: JSON.stringify(releaseVersion()) },
   // AudioWorklet modules must be same-origin files, never data URLs under the shell CSP.

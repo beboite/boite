@@ -182,6 +182,16 @@ test('installation also caches the one catalogue this device speaks, so an offli
   expect(await install(['fr-FR'], 'xx')).toContain('/assets/strings.fr-ef.js');
 });
 
+test("installation also caches the phone navigation's files the build lists, and nothing outside assets", async () => {
+  const sw = worker();
+  sw.fetch.mockResolvedValue(new Response('<meta name="boite-offline" content="./assets/MobileNavigation-ab.js ./assets/activity-cd.js ./assets/MobileNavigation-ef.css ./elsewhere.js"><script src="./assets/index-ab.js"></script>'));
+  await sw.emit('install');
+  expect(sw.cache.addAll).toHaveBeenCalledExactlyOnceWith([
+    '/assets/index-ab.js', '/assets/MobileNavigation-ab.js', '/assets/activity-cd.js', '/assets/MobileNavigation-ef.css',
+    '/manifest.webmanifest', '/icons/icon-192.png', '/fonts/Inter-latin.woff2', '/fonts/GeistMono-latin.woff2'
+  ]);
+});
+
 test('activation keeps other apps caches and RPC is never handled', async () => {
   const sw = worker();
   await sw.emit('activate');
@@ -193,12 +203,12 @@ test('activation keeps other apps caches and RPC is never handled', async () => 
 test("a build's worker opens a cache of its own, and activating it drops the previous build's files", async () => {
   const stamped = stampWorkerCache(source, '0123456789abcdef');
   expect(stamped).not.toBe(source);
-  const sw = worker(stamped, ['boite-ui-v5', 'boite-ui-v5-fedcba9876543210', 'boite-ui-v5-0123456789abcdef', 'another-app']);
+  const sw = worker(stamped, ['boite-ui-v6', 'boite-ui-v6-fedcba9876543210', 'boite-ui-v6-0123456789abcdef', 'another-app']);
 
   await sw.emit('install');
-  expect(sw.caches.open).toHaveBeenCalledWith('boite-ui-v5-0123456789abcdef');
+  expect(sw.caches.open).toHaveBeenCalledWith('boite-ui-v6-0123456789abcdef');
   await sw.emit('activate');
-  expect(sw.caches.delete.mock.calls.map(([name]) => name)).toEqual(['boite-ui-v5', 'boite-ui-v5-fedcba9876543210']);
+  expect(sw.caches.delete.mock.calls.map(([name]) => name)).toEqual(['boite-ui-v6', 'boite-ui-v6-fedcba9876543210']);
 
   // A second build is a different file, which is what makes the browser install it.
   expect(stampWorkerCache(source, 'fedcba9876543210')).not.toBe(stamped);

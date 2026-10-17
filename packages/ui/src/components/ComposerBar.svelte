@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowUp, GitBranch, Mic, Paperclip, Square } from '@lucide/svelte';
+  import { ArrowUp, GitBranch, Mic, MicOff, Paperclip, Square } from '@lucide/svelte';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import type { PermissionMode, ProviderSummary } from '@boite/contracts';
@@ -313,8 +313,10 @@
     {#key `${key}:${store.draft?.projectId ?? ''}`}
       <Deferred part={parts.Dictation}>
         {#snippet children(Dictation)}<Dictation {store} onbusy={(busy) => dictating = busy} {onpreview} ontext={ontranscript} />{/snippet}
-        <!-- The microphone's idle face until its chunk lands (App starts it with the app): same box, same glyph. -->
-        {#snippet pending()}<span class="dictation-stand-in"><button type="button" class="icon" title={strings.speech.start} aria-label={strings.speech.start} disabled={store.connection !== 'ready'}><Mic size={16} strokeWidth={1.75} /></button></span>{/snippet}
+        <!-- The microphone's idle face until its chunk lands (App starts it with the app): same box, same glyph, nothing to press yet. -->
+        {#snippet pending()}<span class="dictation-stand-in"><button type="button" class="icon" title={strings.speech.start} aria-label={strings.speech.start} disabled><Mic size={16} strokeWidth={1.75} /></button></span>{/snippet}
+        <!-- A chunk that failed: the same button says so and asks again. -->
+        {#snippet failure(retry)}<span class="dictation-stand-in failed"><button type="button" class="icon" data-testid="dictation-retry" title={strings.parts.dictationFailed} aria-label={strings.parts.dictationFailed} onclick={retry}><MicOff size={16} strokeWidth={1.75} /></button></span>{/snippet}
       </Deferred>
     {/key}
   {/key}
@@ -337,6 +339,7 @@
 <style>
   .dictation-stand-in { display: flex; align-items: center; flex: none; }
   .dictation-stand-in button { flex: none; width: var(--control); height: var(--control); }
+  .dictation-stand-in.failed button { color: var(--color-danger); }
   /* The button in the chip bar is what opens it; the field itself never shows. */
   .file {
     display: none;

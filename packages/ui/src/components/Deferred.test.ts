@@ -54,3 +54,32 @@ test('a quiet part draws nothing until it lands, and asks again once the browser
   expect(calls).toBe(2);
   expect(query('part')?.textContent).toBe('face');
 });
+
+test('a stand-in covers only the wait: a failure shows its own face with a retry, or the notice without one', async () => {
+  const stand = createRawSnippet(() => ({ render: () => '<i data-testid="stand-in">mic</i>' }));
+  const failure = createRawSnippet((retry: () => () => void) => ({
+    render: () => '<button data-testid="own-retry">retry</button>',
+    setup: (node: Element) => { node.addEventListener('click', () => retry()()); }
+  }));
+  let calls = 0;
+  const fails = () => new LazyComponent<string>(() => (calls += 1) === 1 ? Promise.reject(new Error('offline')) : Promise.resolve({ default: 'dictation' }));
+
+  const own = fails();
+  running = mount(Deferred<string>, { target: document.body, props: { part: own, children: child, pending: stand, failure } });
+  flushSync();
+  expect(query('stand-in')).not.toBeNull();
+  await settle();
+  expect(query('stand-in')).toBeNull();
+  (query('own-retry') as HTMLButtonElement).click();
+  await settle();
+  expect(calls).toBe(2);
+  expect(query('part')?.textContent).toBe('dictation');
+
+  unmount(running, { outro: false });
+  document.body.innerHTML = '';
+  calls = 0;
+  running = mount(Deferred<string>, { target: document.body, props: { part: fails(), children: child, pending: stand } });
+  await settle();
+  expect(query('stand-in')).toBeNull();
+  expect(query('deferred-failed')?.getAttribute('role')).toBe('alert');
+});

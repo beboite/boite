@@ -35,6 +35,8 @@ test('a catalogue that did not load leaves a notice whose retry boots the app', 
     await page.send('Network.setBlockedURLs', { urls: [] });
     await page.click('[data-testid=boot-failure] button');
     await page.waitFor(`document.querySelector('.app.ready') !== null`, 30_000);
+    // One app: the failed boot mounted nothing, so the retry is the only mount.
+    expect(await page.evaluate<number>(`document.querySelectorAll('.app').length`)).toBe(1);
     expect(page.errors()).toEqual([]);
   } finally {
     await page.close();

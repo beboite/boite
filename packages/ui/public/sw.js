@@ -13,7 +13,7 @@
  * leaving other apps alone. Bump the version whenever the strategy below
  * changes, so a dev server's unstamped worker moves on too.
  */
-const CACHE = 'boite-ui-v5';
+const CACHE = 'boite-ui-v6';
 const SHELL = '/';
 const MANIFEST = '/manifest.webmanifest';
 const WORKER = '/sw.js';
@@ -36,12 +36,16 @@ self.addEventListener('install', (event) => {
       const shell = await fetch(SHELL, { cache: 'reload' });
       if (!shell.ok) throw new Error('the app shell could not be cached');
       const html = await shell.clone().text();
-      // What the document itself loads (a `src` or `href`), and the one
-      // catalogue this device speaks: the app mounts only with a catalogue, so
-      // an offline open of this build needs it as much as the entry.
+      // What the document itself loads (a `src` or `href`), the one catalogue
+      // this device speaks, and the phone navigation's files the build lists
+      // in a meta tag (`offlineParts` in vite.config.ts): the app mounts only
+      // with a catalogue and a phone draws its header and recovery screen from
+      // that chunk, so an offline open of this build needs them as much as the entry.
       const assets = new Set([...html.matchAll(/(?:src|href)="\.?(\/assets\/[^"]+)"/g)].map((found) => found[1]));
       const catalogue = await catalogueFor(html);
       if (catalogue) assets.add(catalogue);
+      const offline = /<meta name="boite-offline" content="([^"]*)"/.exec(html)?.[1] ?? '';
+      for (const path of offline.split(' ')) if (path.startsWith('./assets/')) assets.add(path.slice(1));
       await cache.addAll([...assets, MANIFEST, '/icons/icon-192.png', '/fonts/Inter-latin.woff2', '/fonts/GeistMono-latin.woff2']);
       await cache.put(SHELL, shell);
       await self.skipWaiting();

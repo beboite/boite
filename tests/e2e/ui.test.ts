@@ -31,7 +31,7 @@ const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png')
 const IMPORT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-import.png');
 const EXPERIMENTS_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-experiments.png');
 /** The cache `public/sw.js` opens, before the build appends its id; every other cache is deleted on activate. */
-const UI_CACHE_PREFIX = 'boite-ui-v5-';
+const UI_CACHE_PREFIX = 'boite-ui-v6-';
 
 let core: RunningCore;
 let page: BrowserPage;

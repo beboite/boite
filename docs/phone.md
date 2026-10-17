@@ -472,10 +472,10 @@ core behind it; both are skipped. A registration that fails is one
 
 ## What is cached, and what never is
 
-Each build uses `boite-ui-v5-<build id>`, where the build ID hashes the asset
+Each build uses `boite-ui-v6-<build id>`, where the build ID hashes the asset
 filenames. Vite stamps it into `dist/sw.js` before compression. Activation
 removes older `boite-ui-` caches, including their hashed assets, and leaves
-other applications' caches alone. Development uses unstamped `boite-ui-v5`.
+other applications' caches alone. Development uses unstamped `boite-ui-v6`.
 
 | Request | Rule |
 |---|---|
@@ -509,7 +509,12 @@ the locale map of an inline script: the language the page last spoke, which it
 writes beside the notification words, else the device's first language the
 build has, else English. The app mounts only with a catalogue, so an offline
 open needs it as much as the entry; the other languages stay on the wire until
-someone picks one. Every successful navigation refreshes the offline
+someone picks one. It also stores the phone navigation's chunk and the files
+it imports, which the build lists in a `boite-offline` meta tag
+(`offlineParts` in `packages/ui/vite.config.ts`): the header and the recovery
+screen live there, and the browser fetches nothing for that tag, so the
+desktop shell never loads them (`tests/e2e/offline-phone.test.ts`). Every
+successful navigation refreshes the offline
 HTML. Network errors and HTTP 5xx responses fall back to that cached shell.
 Secondary screens are cached when opened; an uncached Settings screen names
 the missing connection instead of silently failing.

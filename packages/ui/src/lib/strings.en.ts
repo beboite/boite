@@ -2832,7 +2832,8 @@ export const strings = {
   parts: {
     loading: 'Loading',
     failed: 'This part of Boite did not load.',
-    navigationFailed: 'The navigation did not load.'
+    navigationFailed: 'The navigation did not load.',
+    dictationFailed: 'Dictation did not load. Try again'
   },
 
   common: {
