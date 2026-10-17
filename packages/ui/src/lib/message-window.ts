@@ -203,3 +203,9 @@ export function reaches(total: number[], count: number, from: number, at: number
   }
   return low;
 }
+
+/** Keeps in each of `held` only the ids `lists` still carry: the heights and rises of rows `releaseOlder` took off the head go. */
+export function keepOnly(held: readonly (Map<string, unknown> | Set<string>)[], ...lists: readonly (readonly { id: string }[])[]): void {
+  const ids = new Set(lists.flatMap((list) => list.map((row) => row.id)));
+  for (const kept of held) for (const id of [...kept.keys()]) if (!ids.has(id)) kept.delete(id);
+}

@@ -150,7 +150,7 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 594,500 |
+| UI entry chunk | 594,800 |
 | UI files, excluding `.br` and `.gz` copies | 5,028,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,379,000 |
@@ -163,6 +163,12 @@ build:ui` on Windows, against 593,177 and 5,012,389 for `7c7327ab` built the
 same way: the rest watcher, the loop phase and the shell's focus cue add 1,302
 entry bytes, and the six easing staircases of `app.css` most of the 8,486. The
 limits rise by that growth to 594,500 and 5,028,000.
+
+On 2026-10-17, letting the followed live end of the open thread go past the
+reading cache's bound measures 594,696 entry bytes and 5,022,260 UI bytes after
+a fresh `bun run build:ui` on Windows, against 594,479 and 5,020,875 before it.
+`store/live-end.ts` and the list's pruning of the heights it measured add 217
+entry bytes; the entry limit rises to 594,800 and the UI limit stays.
 
 On 2026-10-17, the MCP servers started on demand, the frozen idle browser tabs
 and the batched process records of PR #566 measure 4,378,383 core JavaScript

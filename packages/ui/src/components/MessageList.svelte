@@ -27,7 +27,7 @@
   import { isSending } from '../lib/composer-queue';
   import { retryTurn } from '../lib/composer-edit';
   import { TurnProgress } from '../lib/turn-progress.svelte';
-  import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
+  import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, keepOnly, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
   import { TimelineRows, rowEstimate, rowIndexOf, seam, type TimelineRow } from '../lib/timeline-rows';
   import { GapRows, NO_GAPS, RangeAsk, gapHeight, loadKeepingReader, wantedRange } from '../lib/history-gaps';
   import TimelineGap from './TimelineGap.svelte';
@@ -667,11 +667,11 @@
     } else if (opened || pinned) {
       // Held by the reader or on its way down, the list is still at the bottom: it takes the new height once free.
       if (opened || untrack(following)) {
-        scrolledHeight = box.scrollHeight; edge.follow(box);
-        scrollTop = box.scrollTop;
+        // Followed, the live end lets go of the messages far above it, and the heights measured for them.
+        if (untrack(following) && untrack(() => store.releaseOlder(threadId)) > 0) void tick().then(() => keepOnly([heights, risen], rows, messages));
+        scrolledHeight = box.scrollHeight; edge.follow(box); scrollTop = box.scrollTop;
       }
-      pinned = true;
-      behind = false;
+      pinned = true; behind = false;
       untrack(markSeen);
     } else if (!glide.active) {
       behind = true;

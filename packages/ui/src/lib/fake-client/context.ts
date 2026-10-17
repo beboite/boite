@@ -103,6 +103,10 @@ export interface FakeClientOptions {
   heavy?: boolean;
   /** Seeds this many more threads at work, their load sampled every second: what `?fake=1&working=16` shows. */
   working?: number;
+  /** Seeds this many threads that work without end, what `?fake=1&load=16` streams (`load.ts`). */
+  load?: number;
+  /** Milliseconds between two ticks of that load, 100 unless `&loadtick=<ms>` says otherwise. */
+  loadTickMs?: number;
   /** A fresh machine with no agents, accounts or projects, for the setup flow. */
   uninstalled?: boolean;
   /** Adds a deterministic active team for visual checks on `?fake=1&team=1`. */

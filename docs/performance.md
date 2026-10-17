@@ -895,6 +895,55 @@ its frame rate stands for a fast one; at 60 Hz the staircases save little in
 front and the rest still saves the whole cost. Not measured in WebView2.
 [Report](../bench/results/2026-10-17-ui-at-rest.md).
 
+## What a long day holds
+
+The desktop page of a machine with many agents at work stays open for days,
+often minimized. `bench/ui-heap.ts` plays that stream on the fake client
+(`?fake=1&load=<n>`, `lib/fake-client/load.ts`): each busy thread types two
+deltas and starts one short-lived process per tick, sends its row and load
+every ten ticks, a tool call with a 16 KiB output every thirty, a new turn
+every three hundred. `&machines=1` gives the second machine the same load in
+its own store. The bench samples the JS heap with garbage collected twice, the
+DOM, the listeners and the renderer's private bytes, and `--core` plays echo
+agents on a real core instead.
+
+What the UI held without bound:
+
+- The open thread's live end. Messages arriving on the subscribed thread were
+  appended for as long as it stayed open, while a thread left keeps 4 MiB in
+  the reading cache. Now, while the list follows the bottom,
+  `store/live-end.ts` weighs the live end each time a message arrives (never
+  on a delta) and, past twice the reading cache's per-thread bound (8 MiB or
+  2,000 messages), keeps the newest 4 MiB or 1,000 messages with their turns
+  and sets `messagesBefore` to the first one kept: scrolling up reads the rest
+  again from the core. The heights and rises the list measured for the rows
+  that left go with them.
+- The trace panel's process rows, about 850 bytes of heap each, at one row per
+  process the open thread starts. The client now keeps at most `TRACE_LIMIT`
+  (200) of them, and none while the trace view is closed.
+
+Not growing: thread rows, delegation refreshes, Tauri IPC callbacks and the
+module caches (Markdown, highlighting, measured heights, media sizes) stay
+flat, as does the DOM of a visible list. A hidden page runs no frame callback
+and no `ResizeObserver`, so a long answer streamed while minimized mounts its
+rows until the window comes back.
+
+`bun bench/ui-heap.ts --bundle <dir> --machines --load 4 --tick 25 --switch 0 --minutes 9 --sample 60`,
+2026-10-17, Windows 11, headless Chrome on the GPU, same bundle with the bound
+turned off for the first column:
+
+| minute | heap before, MiB | messages held | heap after, MiB | messages held | trace rows |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 51.3 | 22 | 51.3 | 22 | 5 |
+| 3 | 53.6 | 68 | 54.6 | 68 | 7,165 |
+| 4 | 58.2 | 84 | 56.4 | 38 | 9,553 |
+| 6 | 64.1 | 114 | 59.4 | 44 | 14,250 |
+| 9 | 72.4 | 150 | 64.9 | 30 | 20,092 |
+
+The heap still rises 1.5 MiB a minute after the change: the trace rows, about
+16 MiB at minute 9. Without them the heap after the change stays between 48
+and 49 MiB from minute 3 on, while before it rises from 48 to 57 MiB.
+
 ## Browser tools and review bundle size
 
 Measured on Windows with Bun 1.4.2 on 2026-10-02, using `bun run build:ui`
@@ -1158,6 +1207,7 @@ bun bench/codex-live-output.ts                 # redraws and characters of one r
 bun bench/provider-list.ts                     # time per providers list() and summary(); ONLY=1 under strace -c
 bun run bench/continuation.ts 100 1024 25 1100            # history a fresh session carries: messages, tool KiB, files, file KiB
 bun run bench/queue-admission.ts 1024 16                  # one scheduler pass over held child turns: turns, teams
+bun bench/ui-heap.ts --machines --load 4 --tick 25 --switch 0 --minutes 9   # heap, DOM and private bytes of a page left open on busy agents
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts
