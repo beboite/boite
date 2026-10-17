@@ -50,8 +50,8 @@ when the full core suite is absent. The focused E2E type job runs
 
 The required Windows stress job runs all three existing offline scenarios with
 `bun run test:stress`: protocol isolation/cancellation/recovery, failed health
-reporting, and loaded desktop/phone-width UI. It builds the UI first and retains
-fixture evidence under `tests/e2e/.artifacts/stress/`. Live-provider tests stay
+reporting, and loaded desktop/phone-width UI. It tests the UI the `Build UI`
+job built (below) and retains fixture evidence under `tests/e2e/.artifacts/stress/`. Live-provider tests stay
 disabled. See [performance](performance.md#concurrent-agent-stress) for workloads
 and [portability](portability.md) for what these fixtures cannot prove.
 
@@ -67,11 +67,17 @@ a tree no later change affected, as far as the path rules above hold; the
 nightly publishes on that. Without an answer from the API, the run selects every
 check. Tags, reusable full calls and manual runs use `full`. PR portable
 desktop legs are Linux x64 and macOS ARM64; warm/full runs use both
-architectures of each OS.
+architectures of each OS. The core suite follows the same rule for its Intel
+Mac: a PR runs it on Linux x64/ARM64, Windows and macOS ARM64, and warm/full
+runs add `Core tests (macOS x64)` on `macos-15-intel` (`coreRunners` in
+`changes.ts`). That job took 322 to 409 s a PR on a scarce runner (2026-10-17);
+an Intel-only core failure now shows on the main push.
 
 `desktop.yml` holds the desktop builds: the Windows installer job and one job
 per portable platform, named after it (`Desktop / macOS x64`). `ci.yml` calls
-it with the Rust tests; the nightly calls it without them. Only `CI required`
+it with the Rust tests; the nightly calls it without them. On Windows they run
+in `Desktop / Windows x64 Rust tests`, a job of their own beside the installer
+build; portable jobs keep them in line. Only `CI required`
 and `PR title` are required checks, so a display name can change freely, except
 the `release.yml` job names that `server-provenance.ts` checks.
 
@@ -83,7 +89,7 @@ desktop leg took 14.0 minutes and the Apple Silicon one 8.1 (nightly run
 37234148865, the longest job of that run).
 
 Core changes run the full core suite on Windows, Linux x64/ARM64 and macOS
-ARM64/Intel in every mode. Linux desktop packages build on Ubuntu 22.04,
+ARM64 in every mode, and on Intel macOS outside PRs. Linux desktop packages build on Ubuntu 22.04,
 setting a glibc 2.35 floor. Portable jobs run Rust tests and installed smoke
 checks against Debian, extracted AppImage and macOS application bundles.
 These verify startup, UI serving, authenticated RPC and a fixture echo turn
@@ -106,15 +112,19 @@ the step.
 
 ## Build cost
 
-Cargo, Vitest and BuildKit save caches only from `main`. Cargo namespaces
+Cargo, Vitest, the Bun store and BuildKit save caches only from `main`. Cargo namespaces
 separate Windows release builds and each portable runner. Vitest stores
 transforms under `node_modules/.vitest-cache`; its namespace includes
 `bun.lock`, Svelte/Vitest configuration and `packages/ui/icon-plugin.ts`.
 Each Docker architecture has its own BuildKit scope. Agent dependency manifests
 are copied before source files, so a core edit does not reinstall CLIs.
 
-Bun follows `packageManager` and installs with `--frozen-lockfile`, without a
-cached download store. UI tests use at most eight workers. Core files run in
+Bun follows `packageManager` and installs with `--frozen-lockfile`. The setup
+action restores Bun's download store (`bun pm cache`) keyed on OS,
+architecture, Bun version and `bun.lock`, falling back to the newest store of
+the same Bun; only `main` saves it. Install still links every package and runs
+lifecycle scripts, so a stale store costs downloads only. Uncached, install took
+20 to 33 s on the Windows and macOS runners (2026-10-17). UI tests use at most eight workers. Core files run in
 fresh Bun processes, four at once by default; `BOITE_TEST_WORKERS` accepts 1 to
 8 and `bun run --cwd packages/core test:serial` runs one file at a time. Each
 core has a fresh data directory and port. Full per-file output and nonzero
@@ -141,7 +151,11 @@ Fold-reveal coverage includes lazy rows arriving after the opening animation;
 the follow period starts when content is ready, and user input still cancels it.
 
 The Windows job shares release-profile Rust dependencies, builds the installer
-once, and stages its existing core beside the shell for native E2E. Installer
+once, and stages its existing core beside the shell for native E2E. The shell's
+Rust tests run beside it in their own job, which restores the same
+`desktop-release-v1` cache and never saves it: the test build turns on
+`tauri/test` and drops `custom-protocol`, so it needs neither the UI nor the
+staged core, and in line it added 97 to 102 s after the 221 s build. Installer
 regressions set `BOITE_CI_INSTALLER_REQUIRED=1`, so missing NSIS or generated
 fixtures fail rather than skip. Unsupported local runs keep intentional skips.
 The tested installer becomes the release artifact.
@@ -153,7 +167,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 485,800 |
 | UI files, excluding `.br` and `.gz` copies | 4,727,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,391,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,413,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -166,6 +180,21 @@ ships as latin, latin-ext and rest subsets and the onboarding clip is
 re-encoded at 15 fps; a notice and a retry cover a catalogue or a lazy part
 that fails to load. The limits fall to 485,800 and 4,727,000; the core
 limits stay. [Performance](performance.md#static-files) has the boot files.
+
+On 2026-10-18, removing a purged or erased thread's Claude transcripts and
+muting new audio sessions on Core Audio's notice, rebased on `b611c01f`,
+measure 4,400,530 core JavaScript bytes after a fresh `bun run build:core` on
+Windows, against 4,390,768 for that main: `threads/transcript-purge.ts`,
+`threads/native-sessions.ts` and the notification vtables of
+`audio-sessions.ts` add 9,762 bytes. The core JavaScript limit rises to
+4,401,000; the other limits stay.
+
+On 2026-10-18, the checkpoint store (blob and manifest compression, the
+background adoption pass and 50-turn retention in `checkpoint-store.ts` and
+`code-checkpoints.ts`, and the agent browser's profile trim) merged with
+`origin/main` at `0990d9ab` measures 4,412,886 core JavaScript bytes after a
+fresh `bun run build:core` on Windows, against 4,400,530 for that main, 12,356
+more. The core JavaScript limit rises to 4,413,000; the other limits stay.
 
 On 2026-10-17, PR #566 merged with `origin/main` at `b6ae659a`, which brings
 the thread links and agent mail direction (PR #562), measures 595,205 entry
@@ -760,15 +789,44 @@ runner observations remain in the [dated report](../bench/results/2026-09-29-res
 
 `BOITE_E2E_PREBUILT_UI=1` tests the built production UI and refuses missing
 artifacts; local E2E rebuilds by default. `shell.test.ts` runs against the
-installer in the desktop job. Every other E2E file enters three independent
-Windows shards through `bun test --shard=N/3`. Each shard builds from the same
-checkout and owns its Vite cache and fake-client bundle. Files run sequentially
-within a shard with separate ports, data and browser profiles. Matrix
-`fail-fast: false` preserves other shards' results after a failure.
+installer in the desktop job. Every other E2E file enters one of three Windows
+shards. Files run sequentially within a shard with separate ports, data and
+browser profiles. Matrix `fail-fast: false` preserves other shards' results
+after a failure.
+
+The `Build UI` job builds both UIs once on Linux: `bun run build:ui` (artifact
+`ui-dist`, `.well-known` included) and the fake-client bundle
+(`bun tests/e2e/lib/warm.ts --build-only`, artifact `ui-e2e-fake`). The shards
+and stress download them instead of building about 31 s each on Windows.
+On `6004522f` (2026-10-17), the Linux UI of `app.yml` run 39065496375 and a
+Windows build of the same commit had the same 459 files and, chunk hashes aside,
+the same JavaScript, HTML and manifest. The only differences: lightningcss
+rounds one `lab()` value in the CSS at its sixth decimal (`.857866` against
+`.857878`), which renames every chunk importing that stylesheet and the service
+worker's build id, and each `.gz` carries its OS byte (3 or 10). The installer
+still builds its own UI on Windows.
+
+Shards are cut by `scripts/ci/e2e-shards.ts` from
+[e2e-durations.json](../scripts/ci/e2e-durations.json), the seconds each file
+took on recorded green runs: files go longest first to the lightest shard, and
+a file with no record counts as the median. `bun test --shard` cut by file
+count and ran 285 to 317, 410 to 417 and 501 to 519 s of tests; the recorded
+seconds of 2026-10-17 split into 376, 376 and 376 s. Refresh the record after
+adding or reshaping heavy files, from one or more green `ci.yml` runs:
+
+```sh
+bun scripts/ci/e2e-shards.ts refresh <run id> [<run id> ...]
+```
+
+It reads each run's `E2E n/3` logs with `gh`, where `bun test` opens a group
+per file, averages the runs and prints the new split. `bun scripts/ci/e2e-shards.ts
+<shard> 3` prints a shard's files. `e2e-shards.test.ts` fails when the record
+splits the current files more than 15 % apart.
 
 `tests/e2e/lib/warm.ts` logs phase starts, elapsed times and errors, optimizes
 Vite once with `NODE_ENV=test`, and builds `BOITE_E2E_FAKE_UI` with the same
-fixture plugin used by `startDevUi`. It consumes the optimized dependency body
+fixture plugin used by `startDevUi`; in CI it runs `--prebuilt` on the
+downloaded bundle and refuses a directory without `index.html`. It consumes the optimized dependency body
 before closing Vite. Tests importing or blocking `/src/` URLs still use a dev
 server, warming reachable modules within its 60-second hook. Job deadlines stay
 35 minutes. Failure captures are attempted on cancellation too.
@@ -808,7 +866,8 @@ RPC errors through `catch` and `toMatchObject` to avoid Bun 1.4.2 Windows
 
 ### Measuring the E2E partition
 
-`bench/e2e.ts` compares serial and sharded runs using JUnit case identities.
+`bench/e2e.ts` compares serial and sharded runs using JUnit case identities;
+its shards are the CI ones.
 It refuses failures, skips or a changed case list. Build/staging commands,
 the 2026-09-28 local comparison and the first hosted PR #108 run are preserved
 in the [dated report](../bench/results/2026-09-29-resources.md#e2e-partition-measurements-2026-09-28).

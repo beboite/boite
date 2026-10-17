@@ -155,11 +155,24 @@ markers. Restore retains history and previous archive flags without restarting
 agents. The default deletion retention is 30 days; `threadDeletionRetentionDays`
 accepts 0 to 3650, with 0 disabling automatic purge. Startup and minute passes
 purge expired families transactionally. Reads and restoration also check expiry.
-Project removal purges its pending deletions. Files, worktrees, branches and
-native provider transcripts stay on disk; the
+Project removal purges its pending deletions. Files, worktrees and branches
+stay on disk; the
 [settled worktree cleanup](development.md#settled-worktree-cleanup) later removes
 a deleted thread's worktree when nothing in it would be lost. See
 [thread lifecycle](development.md#thread-lifecycle).
+
+A purge, and the erase of an incognito conversation, also removes the native
+transcripts of a Claude account Boite isolated itself
+([accounts](accounts.md#transcripts-boite-removes)): every session the thread
+and its turns named, that no remaining thread names (a fork can resume its
+source's session). The user's own `~/.claude`, and any directory Boite did not
+make, keep theirs. Other providers' transcripts and a removed project's threads
+stay on disk. On 2026-10-17 a desktop core's isolated account held 887 Claude
+sessions (5,090 MiB): 360 named by a live thread (3,892 MiB), 494 by a deleted
+thread waiting for its purge (1,026 MiB, what the purge frees as those
+deletions expire) and 33 by nothing (172 MiB, 0.8 MiB of it untouched for 7
+days, so no sweep of older files was added), read from a read-only copy of its
+journal.
 
 The journal does not replace a provider's native transcript. A turn resumes the
 selected account's `sessionId`. An account change starts a fresh session seeded
@@ -168,6 +181,14 @@ retry on a fresh session; other failures retain the ID. Each accepted turn
 freezes its execution target, so later picker changes cannot redirect queued
 work. Permission modes follow the current selection, including during a running
 turn. [Model switching](model-switching.md) owns transfer and revision rules.
+
+File checkpoints live beside the journal, not in it: `checkpoints/<thread>/`
+holds one zstd manifest per turn and hard links into the content-addressed
+store `checkpoints/objects/`, whose blobs are zstd frames named by the SHA-256
+of their original bytes (`threads/checkpoint-store.ts`). Each thread keeps the
+newest 50 turns, and none once archived or done for 7 days; a background pass
+moves older layouts to this one and collects unlinked blobs
+([context](context.md)).
 
 ## The scheduler tracks independent turns
 

@@ -548,7 +548,10 @@ when the core advertises `chunkedAnswers`.
 - A spawn of a bare name (`gh`, git when its lookup found no real binary)
   reuses the remembered PATH lookup (`bun bench/spawn-lookup.ts`).
 - On Windows new processes inside 100 ms share one audio-session walk, and
-  the jobs Worker drops the global job's copy of every start and exit.
+  the jobs Worker drops the global job's copy of every start and exit. A new
+  audio session is reported by Core Audio, so with no traced session the walk
+  runs every 30 seconds instead of every second
+  ([the audio mute](trace.md#the-audio-mute), `bun bench/guard-cpu.ts`).
 - A project names its icon by version or stack id only. The image, up to
   256 KB, is a `projects.icon` call made once per project and version, when a
   tile first draws it; a list never carries it ([project icons](project-icons.md)).
@@ -1256,6 +1259,38 @@ a core ([results](../bench/results/2026-10-15-perf-browser.md)), with a
 version that asked every second frame; the late acknowledgement that replaced
 it has not been measured.
 
+## Checkpoints and the agent browser on disk
+
+File checkpoints took 2,830 MiB of the user's data directory on 2026-10-17:
+80,430 blobs written before the shared store stayed private copies in their
+thread folders, every blob and manifest was raw, and every turn of every
+thread kept its checkpoint. A blob is now a zstd frame when that saves a
+tenth, a manifest always one, a background pass links or moves the old copies
+into the shared store, and each thread keeps the newest 50 turns, none once
+archived or done for 7 days ([context](context.md)). A snapshot no longer
+reads a shared frame whole before linking it: its size and its first four
+bytes, then the hash check of the rewind.
+
+`bun run bench/checkpoint-store.ts --source <checkpoints>` on a copy of that
+folder, 2026-10-17, Windows 11
+([results](../bench/results/2026-10-17-checkpoint-store.md)):
+
+| | Files (inodes) | Bytes | Manifest bytes |
+|---|---:|---:|---:|
+| Before | 100,096 | 3,034 MiB | 200 MiB |
+| After adoption and compression | 25,685 | 353 MiB | 41 MiB |
+| After 50-turn retention | 14,532 | 183 MiB | 37 MiB |
+
+20 rewinds sampled across the folders restored 243 files byte for byte
+afterwards. The one-time pass read 856 MiB and ran 1,062 s without pauses.
+
+The agent browser's `browser/default` held 664 MiB the same day, 394 MiB of
+Edge components and 198 MiB of caches. It now starts with
+`--disable-component-update` and `--disk-cache-size=67108864`, and a profile
+loses those folders once before its next start
+([browser](browser.md#processes-and-profiles)); the size of a profile after
+that was not measured.
+
 ## Benches
 
 ```sh
@@ -1278,6 +1313,7 @@ bun run bench/continuation.ts 100 1024 25 1100            # history a fresh sess
 bun run bench/queue-admission.ts 1024 16                  # one scheduler pass over held child turns: turns, teams
 bun bench/ui-heap.ts --machines --load 4 --tick 25 --switch 0 --minutes 9   # heap, DOM and private bytes of a page left open on busy agents
 bun bench/process-log-replay.ts <logs directory>          # process records a log directory holds, and what this store writes of them
+bun run bench/checkpoint-store.ts --source <checkpoints>  # store passes and retention on a copy: bytes, inodes, 20 rewinds
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts

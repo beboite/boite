@@ -45,6 +45,34 @@ export function findChromium(env: Record<string, string | undefined> = process.e
   return { path: null, reason: 'no Chromium-based browser (Chrome, Chromium, Edge or Brave) was found on this machine; install one or set BOITE_BROWSER to its executable' };
 }
 
+const DISK_CACHE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * What a profile made before `--disable-component-update` downloaded or
+ * cached for the browser itself: components, provenance models and the two
+ * caches. Never cookies, logins or `Local State`.
+ */
+const PROFILE_LEFTOVERS = [
+  'component_crx_cache', 'ProvenanceData', 'ProvenanceDataAllowList', 'ProvenanceDataTensors',
+  'Edge Wallet', 'Edge Entity Extraction', 'Edge Shopping', join('Default', 'Cache'), join('Default', 'Code Cache'),
+];
+const TRIMMED = 'boite-trimmed';
+
+/**
+ * Removes those folders from a profile once, before its browser starts. The
+ * mark stays only when every one went, so a folder still held is tried again
+ * at the next start.
+ */
+export function trimProfile(profileDir: string): void {
+  const mark = join(profileDir, TRIMMED);
+  if (existsSync(mark)) return;
+  let complete = true;
+  for (const name of PROFILE_LEFTOVERS) {
+    try { rmSync(join(profileDir, name), { recursive: true, force: true }); } catch { complete = false; }
+  }
+  if (complete) writeFileSync(mark, '');
+}
+
 /**
  * Headless, muted, no first-run page, no sync or background downloads. The
  * window size is the page's viewport until a viewer or the agent sets one.
@@ -85,6 +113,9 @@ export function chromiumArgs(profileDir: string, platform = process.platform, us
     '--hide-scrollbars',
     '--window-size=1280,800',
     '--disable-background-networking',
+    // No component downloads (Edge fetched about 400 MB of them into a profile), and a 64 MiB HTTP cache.
+    '--disable-component-update',
+    `--disk-cache-size=${DISK_CACHE_BYTES}`,
     '--disable-sync',
     '--disable-features=Translate,MediaRouter,OptimizationHints',
     '--password-store=basic',

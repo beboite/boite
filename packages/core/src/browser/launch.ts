@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { SpawnedProcess, SpawnOptions } from '../procs.ts';
 import { Cdp } from './cdp.ts';
-import { chromiumArgs, clearActivePort, IDENTITY_SCRIPT, pipesDevTools, waitForEndpoint, windowedUserAgent, type BrowserIdentity } from './chromium.ts';
+import { chromiumArgs, clearActivePort, IDENTITY_SCRIPT, pipesDevTools, trimProfile, waitForEndpoint, windowedUserAgent, type BrowserIdentity } from './chromium.ts';
 
 /** A browser process the core started and speaks to. */
 export interface Started { cdp: Cdp; kill(): void; exited: Promise<unknown> }
@@ -26,6 +26,7 @@ const IDENTITY_TIMEOUT_MS = 20_000;
  */
 export async function startChromium(spawn: SpawnBrowser, path: string, dir: string, timeoutMs: number, userAgent?: string): Promise<Started> {
   mkdirSync(dir, { recursive: true });
+  trimProfile(dir);
   const piped = pipesDevTools();
   if (!piped) clearActivePort(dir);
   const spawned = spawn(path, chromiumArgs(dir, process.platform, userAgent), { agentRoot: false, ...(piped ? { extraPipes: 2 } : {}) });

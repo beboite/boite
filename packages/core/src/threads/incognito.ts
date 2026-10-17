@@ -4,6 +4,7 @@ import type { Project, RpcParams, ThreadId, ThreadSummary } from '@boite/contrac
 import type { Core } from '../core.ts';
 import { removeDir } from '../fs-retry.ts';
 import { messageOf, refused } from '../errors.ts';
+import { removeTranscripts, threadSessions } from './transcript-purge.ts';
 
 /** True when `threads.create` asked for an incognito thread it may make: in the drafts, in a folder of the core's choosing. */
 export function checkIncognito(params: RpcParams<'threads.create'>, project: Project, placed: boolean): boolean {
@@ -20,11 +21,13 @@ export function checkIncognito(params: RpcParams<'threads.create'>, project: Pro
 /**
  * `threads.remove` on an incognito family whose work has stopped. Nothing to
  * undo: the history leaves the journal now, events included, and the folder
- * the agent worked in goes with it.
+ * the agent worked in goes with it, with its native transcripts.
  */
 export async function eraseIncognito(core: Core, root: ThreadSummary, ids: ThreadId[]): Promise<void> {
+  const sessions = threadSessions(core.journal.db, ids);
   core.journal.deleteThreads(ids);
   for (const id of ids) core.bus.emit('thread.removed', { threadId: id, undoable: false });
+  await removeTranscripts(core, sessions);
   await eraseIncognitoFolder(core.dataDir, root.cwd, message => core.log('warn', message));
   if (root.projectId !== null && core.journal.getProject(root.projectId)) core.projects.announce(root.projectId);
 }
