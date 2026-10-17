@@ -527,13 +527,16 @@
 
   function atBottom(box: HTMLDivElement): boolean { return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
 
-  let scrolledHeight = 0;
+  let scrolledHeight = 0, scrolledGap = 0;
   function onscroll() {
     const box = viewport;
     if (!box) return;
     const height = box.scrollHeight;
     const resized = height !== scrolledHeight;
     scrolledHeight = height;
+    // The browser keeping the text in place as a row above grows moves the list down, never nearer its bottom.
+    const distance = height - box.scrollTop - box.clientHeight, closer = distance < scrolledGap - 1;
+    scrolledGap = distance;
     // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
     if (hold.held && box.scrollTop < scrollTop - 1) leftBottom = true;
     const moved = edge.moved(box);
@@ -544,15 +547,15 @@
     if (navigationTarget || promptTarget) return;
     // Read the anchor after the render, before another navigation can restore it.
     void tick().then(rememberAnchor);
-    const distance = height - box.scrollTop - box.clientHeight;
     if (glide.active) {
       if (distance > 1) return;
       endGlide(false);
     }
     // A busy phone delivers the touchstart after its scroll: a rise off the bottom is the reader too.
     if (rose && pinned && distance > 1) leftBottom = true;
-    // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom.
-    if (descended && atBottom(box)) leftBottom = false;
+    // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom. Moved down
+    // as far from it, by a row growing above after a small notch up, the list took it back and bounced each notch.
+    if (descended && closer && atBottom(box)) leftBottom = false;
     // A card shrinking can clamp scrollTop before new output grows the list again.
     pinned = !cutBelow && !leftBottom && (atBottom(box) || (pinned && resized && !hold.held));
     if (anchors.restoring) pinned = false;
