@@ -150,20 +150,23 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 597,000 |
-| UI files, excluding `.br` and `.gz` copies | 5,019,500 |
+| UI entry chunk | 594,000 |
+| UI files, excluding `.br` and `.gz` copies | 5,023,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,356,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-17, Windows CI measured the UI entry chunk at 595,360 bytes for
-the first head of PR #562, 2,183 bytes over its `origin/main` base at
-`7c7327ab`. That PR adds thread links in answers (`chat-links.ts`,
-`workspace.openThreadLink`), the direction line on agent mail rows and their
-strings, all in modules the entry already loads. On top of the PR watch state
-below and the 594,000 that PR #568 set in `budgets.json` for the Agents tab,
-the entry limit becomes 597,000; the other limits stay unchanged.
+On 2026-10-17, PR #562 adds thread links in answers, reasoning and mission
+results (`chat-links.ts`, `workspace.openThreadLink` and `followThreadLink`)
+and the direction line on agent mail rows. Windows CI measured 5,020,641 UI
+bytes at `634840c3` against 5,016,064 for `origin/main` at `b8967956`, and a
+590,540-byte entry chunk against 593,510: since `workspace.svelte.ts` imports
+`chat-links.ts`, Rollup moves that module out of the entry into the workspace
+chunk. A local `vite build` the same day read 590,507 and 593,513 for the
+entry and 300,238 and 293,671 for the workspace chunk. The UI limit becomes
+5,023,000; the entry limit is the 594,000 PR #568 set in `budgets.json` for
+the Agents tab, which this table had left at 593,500.
 
 On 2026-10-17, Windows CI measured a 593,177-byte UI entry chunk for
 `origin/main` at `7c7327ab`, already over its 593,000 limit after PRs #558 to
