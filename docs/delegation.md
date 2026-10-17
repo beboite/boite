@@ -188,7 +188,7 @@ boundary without a result: the parent hears nothing, the team stays as it was,
 and the next core starts the child again on the same task, told that Boite
 restarted ([restart handoff](restart-handoff.md)). After a crash, the core
 pauses only a team with a message still to deliver or a child turn it cut
-short.
+short; a handoff older than an hour pauses the teams of the children it cut.
 
 A pause records who set it (`pausedBy`, `pausedAt`), and that decides whether
 the parent agent may lift it with `boite delegate resume`:
@@ -196,7 +196,7 @@ the parent agent may lift it with `boite delegate resume`:
 | Paused by | `pausedBy` | The parent agent resumes |
 | --- | --- | --- |
 | Its own `delegate stop` | `agent` | at any time |
-| A crash of the core | `restart` | at any time |
+| A crash of the core, or a handoff past its hour | `restart` | at any time |
 | The owner's Stop, or archiving | `stop` | once the owner wrote to the conversation again |
 | The owner's Pause in Subagents > Settings | `owner` | never |
 
@@ -207,7 +207,8 @@ team held at once, sends each child whose last turn stopped, failed or was
 interrupted
 a message to continue from where it stopped, and resumes the team's
 [workflow](workflows.md) runs that a pause held, under the same rules. A child
-is continued once per stopped turn: a second resume sends nothing.
+is continued once per stopped turn: a second resume sends nothing, whoever
+asks, unless a Stop rejected that continuation before it reached the child.
 
 ## Workflows
 

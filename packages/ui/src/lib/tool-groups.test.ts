@@ -124,6 +124,7 @@ test('a running command says what it is for, else the program and its subcommand
   expect(liveLabel(tool('Bash', { command: 'boite agents send thr_1 "redo it"' }, { status: 'running' }))).toBe('Running boite agents send');
   expect(liveLabel(tool('PowerShell', { command: 'git -C D:/x status', description: '  ' }, { status: 'running' }))).toBe('Running git');
   expect(commandOf('FOO=1 bun run check --watch')).toBe('bun run check');
+  expect(commandOf(`FOO="hello world" BAR='a b' gh repo create`)).toBe('gh repo create');
   expect(commandOf('cat package.json')).toBe('cat');
 });
 

@@ -151,15 +151,18 @@ export function unwrapCommand(command: string): string {
   return current;
 }
 
+/** `FOO=bar`, `FOO="a b"` or `FOO='a b'`: a variable set for the command after it. */
+const ASSIGNMENT = String.raw`\w+=(?:"[^"]*"|'[^']*'|\S*)`;
 /** Steps a reader skips to find what runs: moving somewhere, setting a variable. */
-const PREAMBLE = /^(cd|set-location|pushd|sl|export|set)\b|^\$env:|^\w+=\S*$/i;
+const PREAMBLE = new RegExp(String.raw`^(cd|set-location|pushd|sl|export|set)\b|^\$env:|^${ASSIGNMENT}$`, 'i');
+const LEADING_ASSIGNMENTS = new RegExp(String.raw`^(${ASSIGNMENT}\s+)+`);
 
 /** The part of a command that runs the program: `git status` for `cd src && git status`. */
 function programSegment(command: string): string {
   const segments = unwrapCommand(command).split(/&&|\|\||;|\|/).map((segment) => segment.trim()).filter(Boolean);
   const segment = segments.find((entry) => !PREAMBLE.test(entry)) ?? segments[0] ?? '';
   // Leading `FOO=bar` assignments and PowerShell's `&` call operator come before the program.
-  return segment.replace(/^&\s+/, '').replace(/^(\w+=\S*\s+)+/, '');
+  return segment.replace(/^&\s+/, '').replace(LEADING_ASSIGNMENTS, '');
 }
 
 /** The program a command runs, `git` for `cd src && git status`, empty when there is none to name. */

@@ -52,7 +52,7 @@ again with "Interrupted by a core restart", its run still running. Once the
 next core listens, each cut child gets the continuation above with its task
 from the parent, and each run launches its waiting steps again. A child the
 owner stopped, steered or archived meanwhile, or whose team was paused, stays
-as it is. After a crash, recovery
+as it is. After a crash, or when the record is past its hour, recovery
 pauses the team and the runs instead, marked as held by a restart: the parent
 agent resumes them with `boite delegate resume`
 ([delegation](delegation.md#stop-pause-and-resume),

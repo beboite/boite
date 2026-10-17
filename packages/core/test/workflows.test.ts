@@ -9,6 +9,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { runCli } from '../src/cli.ts';
 import { startServer } from '../src/server.ts';
+import { HANDOFF } from '../src/threads/handoff.ts';
 import { AGENT_ENV } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -343,6 +344,12 @@ test('an agent changes only the runs it started, resumes its own pause, and the 
     // Its own pause is its to lift.
     expect(await agent.call('workflows.control', { threadId, runId: theirs.id, action: 'pause' })).toMatchObject({ status: 'paused', pausedBy: 'agent' });
     expect((await agent.call('workflows.control', { threadId, runId: theirs.id, action: 'resume' })).status).toBe('running');
+    // Its stop of the team while the run goes on is its own too, and the owner saving settings keeps it so.
+    await agent.call('delegation.stop', { threadId });
+    expect(h.core.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'agent' });
+    await owner.call('delegation.configure', { threadId, config: { ...h.core.delegation.config(threadId), anyModel: false } });
+    expect(h.core.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'agent', anyModel: false });
+    expect((await agent.call('delegation.resume', { threadId })).unpaused).toBe(true);
     // The owner's waits for the owner's next word, for a resume and for a retry alike.
     expect(await owner.call('workflows.control', { threadId, runId: theirs.id, action: 'pause' })).toMatchObject({ status: 'paused', pausedBy: 'owner' });
     await expect(agent.call('workflows.control', { threadId, runId: theirs.id, action: 'resume' })).rejects.toThrow('once they write to the conversation again');
@@ -379,8 +386,9 @@ test('a step sent back to work in its own conversation counts for its run, which
   await waitFor(() => h.core.workflows.get(threadId, run.id).delivered);
 });
 
-test('a restart handoff cuts steps and subagents without failing them, and the next core continues both', async () => {
-  const resumed = (prompt: string) => prompt.includes('Boite restarted') || prompt.includes('Try this workflow step again');
+/** A run's step and a subagent at work when an update's handoff stops the core; the core is closed after. */
+async function cutByHandoff() {
+  const resumed = (prompt: string) => prompt.includes('Boite restarted') || prompt.includes('Try this workflow step again') || prompt.includes('Continue your task');
   const { held, prompts } = scripted(ctx => ctx.thread.parentThreadId && !resumed(ctx.prompt) ? { hold: true } : 'resumed and done');
   let stops = 0;
   const h = await startTestCore({ onShutdown: () => { stops += 1; } }); cores.push(h);
@@ -401,17 +409,46 @@ test('a restart handoff cuts steps and subagents without failing them, and the n
   await h.core.drain();
   await h.server.stop();
   await h.core.close();
+  return { h, threadId, run, child: child.thread.id, step, prompts };
+}
 
+test('a restart handoff cuts steps and subagents without failing them, and the next core continues both', async () => {
+  const { h, threadId, run, child, step, prompts } = await cutByHandoff();
   const next = new Core({ dataDir: h.dataDir, token: h.token });
   const server = startServer({ core: next, host: '127.0.0.1', port: 0 });
   try {
     expect(next.delegation.config(threadId).paused).toBe(false);
     await waitFor(() => next.workflows.get(threadId, run.id).status === 'done', 5000);
     expect(prompts.filter(p => p.threadId === step).at(-1)!.prompt).toContain('Interrupted by a core restart');
-    await waitFor(() => next.journal.listTurns(child.thread.id).at(-1)?.status === 'done', 5000);
-    expect(next.journal.listTurns(child.thread.id).at(-1)!.execution?.operation).toBe('resume');
-    expect(prompts.filter(p => p.threadId === child.thread.id).at(-1)!.prompt).toContain('Write the parser');
+    await waitFor(() => next.journal.listTurns(child).at(-1)?.status === 'done', 5000);
+    expect(next.journal.listTurns(child).at(-1)!.execution?.operation).toBe('resume');
+    expect(prompts.filter(p => p.threadId === child).at(-1)!.prompt).toContain('Write the parser');
     expect(next.journal.getSetting('delegation-restart-cut')).toBeFalsy();
+  } finally {
+    await server.stop();
+    await next.close();
+  }
+});
+
+test('a handoff older than an hour continues nothing: the team and the run wait, held by the restart', async () => {
+  const { h, threadId, run, child } = await cutByHandoff();
+  const maxAge = HANDOFF.maxAgeMs;
+  HANDOFF.maxAgeMs = -1;
+  const next = new Core({ dataDir: h.dataDir, token: h.token });
+  HANDOFF.maxAgeMs = maxAge;
+  const server = startServer({ core: next, host: '127.0.0.1', port: 0 });
+  try {
+    // Before, the cut child got a paid continuation anyway and its team showed no pause.
+    expect(next.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'restart' });
+    expect(next.workflows.get(threadId, run.id)).toMatchObject({ status: 'paused', pausedBy: 'restart' });
+    expect(next.journal.getSetting('delegation-restart-cut')).toBeFalsy();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(next.journal.listTurns(child).at(-1)!.status).toBe('stopped');
+    expect(next.delegation.resume(threadId, undefined, 'agent')).toEqual({ unpaused: true, agents: [child], runs: [] });
+    // The owner started the run, so resuming it stays theirs.
+    expect(next.delegation.resume(threadId, undefined, 'owner')).toMatchObject({ unpaused: false, runs: [run.id] });
+    await waitFor(() => next.workflows.get(threadId, run.id).status === 'done', 5000);
+    await waitFor(() => next.journal.listTurns(child).at(-1)?.status === 'done', 5000);
   } finally {
     await server.stop();
     await next.close();

@@ -135,15 +135,17 @@ An update or a restart from the app hands the run over: each running step is
 cut at its next tool boundary and waits again with "Interrupted by a core
 restart", the run stays running, and the next core runs those steps again with
 that line in their prompt ([restart handoff](restart-handoff.md)). After a
-crash, nothing resumes paid work by itself: running runs pause, marked as held
-by a restart, and each interrupted execution waits on its own thread. Resume
-runs it again with the same line in its prompt.
+crash, or a handoff older than an hour, nothing resumes paid work by itself:
+running runs pause, marked as held by a restart, and each interrupted execution
+waits on its own thread. Resume runs it again with the same line in its prompt.
 
 A step sent back to work in its own conversation still counts for its run. When
 the owner stops a step, the run fails with it; a turn started later in that
 step's conversation, by the owner or a letter, takes the step back: the run
 runs again, the "Not started" executions wait again, and the step's answer
-feeds the steps after it as if it had never stopped.
+feeds the steps after it as if it had never stopped. A paused run takes such a
+turn too, since the turn runs either way; the pause still holds the steps after
+it until the run resumes.
 
 A pause records who set it (`pausedBy`), and that decides who lifts it:
 

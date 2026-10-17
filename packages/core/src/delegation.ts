@@ -16,7 +16,7 @@ import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
 import { permissionWake, questionWake, worktreeLine } from './delegation/messages.ts';
 import { ChildWorktrees } from './delegation/worktrees.ts';
 import { pauseHold, pauseOver } from './delegation/pauses.ts';
-import { recordRestartCut, resumeRestartCuts } from './delegation/restart.ts';
+import { dropRestartCuts, recordRestartCut, resumeRestartCuts } from './delegation/restart.ts';
 import { DELEGATION_WORDS, delegationPrompt, subagentGuide } from './delegation/guide.ts';
 import type { Connection } from './router.ts';
 
@@ -61,9 +61,10 @@ export class Delegation {
     // A core that died preserves relationships/results, but restarts no paid work: a team
     // with mail still to deliver or a child turn cut short waits until its agent or its
     // owner resumes it. A team with nothing pending has nothing to restart and stays usable.
-    // A handoff stopped its children on purpose: they resume once the server listens.
-    const pending = core.threads.handoff.handedOver ? new Set<string>() : new Set((core.journal.db.query(`SELECT root_id FROM delegation_messages WHERE status = 'received'
-      UNION SELECT a.root_id FROM delegated_agents a JOIN turns t ON t.thread_id = a.thread_id WHERE t.status IN ('queued', 'running')`).all() as { root_id: string }[]).map(row => row.root_id));
+    // A handoff stopped its children on purpose: they resume once the server listens. One this
+    // core does not carry on (older than an hour, unreadable) leaves their teams held like a crash.
+    const pending = core.threads.handoff.handedOver ? new Set<string>() : new Set([...(core.journal.db.query(`SELECT root_id FROM delegation_messages WHERE status = 'received'
+      UNION SELECT a.root_id FROM delegated_agents a JOIN turns t ON t.thread_id = a.thread_id WHERE t.status IN ('queued', 'running')`).all() as { root_id: string }[]).map(row => row.root_id), ...dropRestartCuts(core)]);
     // Only children carry a team summary, and only pending roots get paused: the other threads are not read.
     for (const thread of core.journal.listChildThreads()) this.summaries.set(thread.id, teamState(thread));
     for (const thread of core.journal.listThreadsIn(pending)) {
@@ -154,9 +155,9 @@ export class Delegation {
     return { enabled: saved.enabled, paused: saved.paused, ...pause, profiles: saved.profiles, anyModel: saved.anyModel !== false };
   }
   /** Pauses the team, keeping a stricter pause it already holds. */
-  private pause(rootId: string, by: PauseOrigin): void {
+  private pause(rootId: string, by: PauseOrigin, at = Date.now()): void {
     const config = this.config(rootId);
-    const pause = pauseOver(config.paused ? { by: config.pausedBy, at: config.pausedAt } : null, by);
+    const pause = pauseOver(config.paused ? { by: config.pausedBy, at: config.pausedAt } : null, by, at);
     this.saveConfig(rootId, { ...config, paused: true, pausedBy: pause.by, pausedAt: pause.at });
   }
   /** Why the conversation's agent may not lift the team's pause, or null. */
@@ -243,7 +244,7 @@ export class Delegation {
     const current = this.config(threadId);
     const pause = current.paused ? { by: current.pausedBy ?? 'owner', at: current.pausedAt ?? Date.now() } : { by: 'owner' as const, at: Date.now() };
     this.saveConfig(threadId, config.paused ? { ...config, pausedBy: pause.by, pausedAt: pause.at } : config);
-    if (!config.enabled || config.paused) this.stop(threadId, undefined, 'owner');
+    if (!config.enabled || config.paused) this.stop(threadId, undefined, pause.by, pause.at);
     else this.handOver(threadId);
     this.changed(threadId);
     this.core.scheduler.onSettingsChanged();
@@ -710,8 +711,9 @@ export class Delegation {
   /**
    * `by` is who asked, recorded on the pause it may leave: the owner's Stop
    * (the default), the owner's settings, or the conversation's own agent.
+   * `at` dates that pause; saving the settings of a paused team keeps its own.
    */
-  stop(threadId: string, agentId?: string, by: PauseOrigin = 'stop'): number {
+  stop(threadId: string, agentId?: string, by: PauseOrigin = 'stop', at = Date.now()): number {
     const thread = this.core.threads.require(threadId);
     if (thread.parentThreadId && agentId && agentId !== threadId) throw refused('an agent may stop only itself or its direct children');
     const root = this.root(threadId);
@@ -727,7 +729,7 @@ export class Delegation {
       || children.some(row => this.busy(this.core.threads.require(row.thread_id)))
       || this.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE root_id = ? AND status = 'received' LIMIT 1").get(root.id) !== null;
     const pausing = !thread.parentThreadId && !agentId && live();
-    if (pausing) this.pause(root.id, by);
+    if (pausing) this.pause(root.id, by, at);
     const workflow = this.core.workflows.active(root.id);
     this.core.logs.info(`Stopping ${ids.length > 0 ? `${ids.length} subagents` : 'the workflows'} of ${root.id}${pausing ? `; the team is paused (${this.config(root.id).pausedBy})` : ''}`, { source: 'delegation', event: 'delegation.stopped', threadId: root.id, data: { agents: ids.length, workflow, paused: pausing, by: agentId ? 'agent' : thread.parentThreadId ? 'self' : 'parent', pausedBy: pausing ? by : null } });
     let stopped = 0;
@@ -775,7 +777,11 @@ export class Delegation {
       const lost = withLoad(this.core, child).backgroundWait?.state === 'interrupted';
       if (turn.status === 'done' && !lost) continue;
       const why = turn.status === 'done' ? 'its background work ended without waking it' : `it ended ${turn.status}${turn.error ? `: ${turn.error}` : ''}`;
-      this.send({ threadId: root.id, toThreadId: child.id, requestId: `resume:${turn.id}`, text: `Continue your task from where your last turn stopped (${why}). Check what is already done before redoing anything, then finish and end with your result.`.slice(0, 4000) }, principal === 'agent' ? 'agent' : 'user');
+      // One continuation per stopped turn, whoever asks: a second resume finds it on its way; one a Stop rejected goes again.
+      const requestId = `resume:${turn.id}`;
+      const sent = this.core.journal.db.query('SELECT status FROM delegation_messages WHERE sender_id = ? AND (request_id = ? OR substr(request_id, 1, ?) = ?)').all(root.id, requestId, requestId.length + 1, `${requestId}:`) as { status: string }[];
+      if (sent.some(row => row.status !== 'rejected')) continue;
+      this.send({ threadId: root.id, toThreadId: child.id, requestId: sent.length ? `${requestId}:${sent.length}` : requestId, text: `Continue your task from where your last turn stopped (${why}). Check what is already done before redoing anything, then finish and end with your result.`.slice(0, 4000) }, principal === 'agent' ? 'agent' : 'user');
       agents.push(child.id);
     }
     const runs = agentId === undefined ? this.core.workflows.resumePaused(root.id, principal) : [];

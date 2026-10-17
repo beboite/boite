@@ -14,6 +14,18 @@ export function recordRestartCut(core: Core, turn: Turn): void {
 }
 
 /**
+ * The previous core cut these children, but this one does not carry its
+ * handoff on (older than an hour, unreadable): none of them resumes, and their
+ * parents are returned so recovery holds those teams as after a crash.
+ */
+export function dropRestartCuts(core: Core): string[] {
+  const cut = (core.journal.getSetting(RESTART_CUT) as RestartCut[] | undefined) ?? [];
+  if (!cut.length) return [];
+  core.journal.deleteSetting(RESTART_CUT);
+  return cut.flatMap(({ childId }) => core.journal.getThread(childId)?.parentThreadId ?? []);
+}
+
+/**
  * Once the server listens after a restart handoff: each child the handoff
  * cut gets the continuation its parent's cut turn gets. A new instruction,
  * a Stop or an archive since then decides instead, and so does a pause of its
