@@ -1,12 +1,13 @@
 import { expect, test } from 'bun:test';
 import { generateKeyPairSync, createHash, randomBytes, sign } from 'node:crypto';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { zipSync } from 'fflate';
 import { Database } from 'bun:sqlite';
 import { downloadPayload, verifyPayload, unpackPayload } from '../src/server-update/release.ts';
-import { applyServerUpdate } from '../src/server-update/apply.ts';
+import { applyServerUpdate, clearStaleUpdates, recoverServerUpdate } from '../src/server-update/apply.ts';
+import { linuxServerUpdates, unitWord } from '../src/platform/linux-server-update.ts';
 import type { ServerUpdatePlan, ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { echoThread, holdAccountTurns, startTestCore, waitFor } from './harness.ts';
 
@@ -191,13 +192,8 @@ test('a failed update admission write leaves the server running and reports the 
   } finally { await h.stop(); rmSync(root, { recursive: true, force: true }); }
 });
 
-const APPLY_CASES = {
-  installs: 'installs the complete bundle and checks the new process health',
-  fails: 'restores the previous binary, SQLite journal and pairing on a failed restart',
-  full: 'leaves the server running when the disk cannot hold the backup',
-} as const;
-for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper ${APPLY_CASES[mode]}`, async () => {
-  const fails = mode === 'fails';
+/** An installation, its data and a staged update, as the core leaves them for the worker. */
+async function updateFixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'boite-server-apply-')));
   const install = join(root, 'install');
   const data = join(root, 'data');
@@ -209,12 +205,6 @@ for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper $
   // A bulk store the snapshot leaves out: a rollback keeps the live one.
   mkdirSync(join(data, 'checkpoints', 'thr_a'), { recursive: true });
   writeFileSync(join(data, 'checkpoints', 'thr_a', 'object'), 'checkpoint bytes');
-  // Two older snapshots: a successful update keeps the newest two in all.
-  const older = ['bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc'].map((name, index) => {
-    const path = join(root, `.boite-backup-${name}`);
-    mkdirSync(path); utimesSync(path, new Date(2026, 0, 1 + index), new Date(2026, 0, 1 + index));
-    return path;
-  });
   const db = new Database(join(data, 'journal.db'));
   db.run('CREATE TABLE saved (message TEXT)'); db.run("INSERT INTO saved VALUES ('conversation')"); db.close();
   const entries = { 'boite-core': Buffer.from('new executable'), 'boite': Buffer.from('new shim'), 'ui/index.html': Buffer.from('new UI'), 'server-release.json': Buffer.from('{"version":"2.1.0"}') };
@@ -223,49 +213,210 @@ for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper $
   await unpackPayload(join(operation, 'payload.zip'), join(operation, 'stage'), '2.1.0');
   const plan: ServerUpdatePlan = { id, installation: { directory: install, executable: join(install, 'boite-core'), service: 'test.service' }, dataDir: data,
     version: '2.1.0', previousVersion: '2.0.0', originalPid: 123, healthUrl: 'http://127.0.0.1:7337/health', archiveHash: createHash('sha256').update(archive).digest('hex') };
-  writeFileSync(join(operation, 'plan.json'), JSON.stringify(plan));
-  writeFileSync(join(operation, 'admitted'), id);
-  let pid = 123;
+  const file = join(operation, 'plan.json');
+  writeFileSync(file, JSON.stringify(plan));
+  const state = { pid: 123 };
   const controls: string[] = [];
   const platform: ServerUpdatePlatform = { inspect: async () => null, launch: async () => undefined,
-    mainPid: async () => pid,
+    mainPid: async () => state.pid,
     control: async (_unit, action) => {
-      controls.push(action); pid = action === 'start' ? 456 : 0;
+      controls.push(action); state.pid = action === 'start' ? 456 : 0;
       if (action === 'start' && readFileSync(join(install, 'boite-core'), 'utf8') === 'new executable') {
         const migrated = new Database(join(data, 'journal.db')); migrated.run('ALTER TABLE saved ADD COLUMN newer_schema INTEGER'); migrated.close();
         writeFileSync(join(data, 'pairing.json'), 'new run changed pairing');
         writeFileSync(join(data, 'checkpoints', 'thr_a', 'object2'), 'written by the new run');
       }
     } };
+  const result = () => JSON.parse(readFileSync(join(data, 'server-update-result.json'), 'utf8')) as { version: string; error: string | null };
+  /** The previous binary, journal, pairing and live checkpoints, as a rollback must leave them. */
+  const expectPrevious = () => {
+    expect(readFileSync(join(install, 'boite-core'), 'utf8')).toBe('old executable');
+    expect(readFileSync(join(data, 'pairing.json'), 'utf8')).toBe('test pairing survives');
+    const restored = new Database(join(data, 'journal.db'));
+    expect(restored.query('SELECT * FROM saved').all()).toEqual([{ message: 'conversation' }]); restored.close();
+    expect(readFileSync(join(data, 'checkpoints', 'thr_a', 'object'), 'utf8')).toBe('checkpoint bytes');
+  };
+  return { root, install, data, id, operation, backup: join(root, `.boite-backup-${id}`), file, plan, state, controls, platform, result, expectPrevious,
+    stop: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+const APPLY_CASES = {
+  installs: 'installs the complete bundle and checks the new process health',
+  fails: 'restores the previous binary, SQLite journal and pairing on a failed restart',
+  full: 'restarts the untouched server when the disk cannot hold the backup',
+} as const;
+for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper ${APPLY_CASES[mode]}`, async () => {
+  const fails = mode === 'fails';
+  const f = await updateFixture();
+  // Two older snapshots: a successful update keeps the newest two in all.
+  const older = ['bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc'].map((name, index) => {
+    const path = join(f.root, `.boite-backup-${name}`);
+    mkdirSync(path); utimesSync(path, new Date(2026, 0, 1 + index), new Date(2026, 0, 1 + index));
+    return path;
+  });
+  writeFileSync(join(f.operation, 'admitted'), f.id);
   try {
-    const run = applyServerUpdate(join(operation, 'plan.json'), platform, { pollMs: 5, healthTimeoutMs: 35,
+    const run = applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35,
       spareBytes: mode === 'full' ? Number.MAX_SAFE_INTEGER : 0,
       health: async () => fails ? null : { ok: true, version: '2.1.0', pid: 456 } });
     if (mode === 'full') {
       await expect(run).rejects.toThrow('Not enough disk space');
-      expect(controls).toEqual([]);
-      expect(existsSync(join(root, `.boite-backup-${id}`))).toBe(false);
-      expect(readFileSync(join(install, 'boite-core'), 'utf8')).toBe('old executable');
-      expect(JSON.parse(readFileSync(join(data, 'server-update-result.json'), 'utf8')).error).toContain('Server update was not installed. Not enough disk space');
+      // The core admitted the update and exits by itself; it is started again as it was.
+      expect(f.controls).toEqual(['stop', 'start']);
+      expect(existsSync(f.backup)).toBe(false);
+      expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('old executable');
+      expect(f.result().error).toContain('Server update was not installed. Not enough disk space');
     } else if (fails) {
       await expect(run).rejects.toThrow('healthy');
-      expect(readFileSync(join(install, 'boite-core'), 'utf8')).toBe('old executable');
-      expect(readFileSync(join(data, 'pairing.json'), 'utf8')).toBe('test pairing survives');
-      const restored = new Database(join(data, 'journal.db'));
-      expect(restored.query('SELECT * FROM saved').all()).toEqual([{ message: 'conversation' }]); restored.close();
-      expect(readFileSync(join(data, 'checkpoints', 'thr_a', 'object'), 'utf8')).toBe('checkpoint bytes');
-      expect(controls).toEqual(['stop', 'start', 'stop', 'start']);
+      f.expectPrevious();
+      expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
       expect(older.every(path => existsSync(path))).toBe(true);
+      // The failure stays for diagnosis, marked as handled for the recovery and the next update.
+      expect(existsSync(join(f.operation, 'finished'))).toBe(true);
     } else {
       await run;
-      expect(readFileSync(join(install, 'boite-core'), 'utf8')).toBe('new executable');
-      expect(readFileSync(join(install, 'ui', 'index.html'), 'utf8')).toBe('new UI');
-      expect(readFileSync(join(root, `.boite-backup-${id}`, 'installation', 'boite-core'), 'utf8')).toBe('old executable');
-      expect(existsSync(join(root, `.boite-backup-${id}`, 'data', 'pairing.json'))).toBe(true);
-      expect(existsSync(join(root, `.boite-backup-${id}`, 'data', 'checkpoints'))).toBe(false);
-      expect(controls).toEqual(['stop', 'start']);
+      expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('new executable');
+      expect(readFileSync(join(f.install, 'ui', 'index.html'), 'utf8')).toBe('new UI');
+      expect(readFileSync(join(f.backup, 'installation', 'boite-core'), 'utf8')).toBe('old executable');
+      expect(existsSync(join(f.backup, 'data', 'pairing.json'))).toBe(true);
+      expect(existsSync(join(f.backup, 'data', 'checkpoints'))).toBe(false);
+      expect(existsSync(join(f.backup, 'data.partial'))).toBe(false);
+      expect(f.controls).toEqual(['stop', 'start']);
       // The oldest snapshot goes; this one and the newest older one stay.
       expect(older.map(path => existsSync(path))).toEqual([false, true]);
     }
+    // The recovery that follows any worker exit has nothing left to do.
+    const controls = f.controls.length;
+    await recoverServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35 });
+    expect(f.controls.length).toBe(controls);
+  } finally { f.stop(); }
+});
+
+/**
+ * Where a worker killed mid-update (the memory controller once did it 30 s
+ * into the snapshot copy) leaves the disk, rebuilt step by step.
+ */
+const KILLED_AT = {
+  copy: 'during the snapshot copy',
+  switch: 'between moving the installation aside and moving the new one in',
+  health: 'while the new version was starting, and it never became healthy',
+  // A version the worker rejected stays rejected, even if it answers health once restarted.
+  rejected: 'between stopping the rejected version and moving it aside',
+  restore: 'during its own rollback, once the restored data had been copied',
+} as const;
+for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`the recovery of a worker killed ${KILLED_AT[point]} restores the previous version and starts it`, async () => {
+  const f = await updateFixture();
+  const link = join(f.root, `.boite-recover-${f.id}`);
+  try {
+    writeFileSync(join(f.operation, 'admitted'), f.id);
+    writeFileSync(link, 'recovery executable');
+    f.state.pid = 0;
+    mkdirSync(f.backup);
+    if (point === 'copy') {
+      mkdirSync(join(f.backup, 'data.partial'));
+      writeFileSync(join(f.backup, 'data.partial', 'pairing.json'), 'test pairing survives');
+    } else {
+      cpSync(f.data, join(f.backup, 'data'), { recursive: true, filter: (source) => !source.includes('checkpoints') });
+      renameSync(f.install, join(f.backup, 'installation'));
+      if (point !== 'switch') {
+        renameSync(join(f.operation, 'stage'), f.install);
+        await f.platform.control(f.plan.installation.service, 'start');
+      }
+      if (point === 'rejected' || point === 'restore') {
+        writeFileSync(join(f.operation, 'rolling-back'), '');
+        await f.platform.control(f.plan.installation.service, 'stop');
+      }
+      if (point === 'restore') {
+        renameSync(f.install, join(f.operation, 'failed-installation'));
+        renameSync(join(f.backup, 'installation'), f.install);
+        const restored = `${f.data}.restore-${f.id}`;
+        cpSync(join(f.backup, 'data'), restored, { recursive: true });
+        renameSync(join(f.data, 'checkpoints'), join(restored, 'checkpoints'));
+        renameSync(f.data, `${f.data}.failed-${f.id}`);
+      }
+    }
+    f.controls.length = 0;
+    await recoverServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, health: async () => point === 'rejected' ? { ok: true, version: '2.1.0', pid: 456 } : null,
+      env: { SERVICE_RESULT: 'oom-kill', EXIT_CODE: 'killed', EXIT_STATUS: 'KILL' } });
+    f.expectPrevious();
+    expect(f.controls.at(-1)).toBe('start');
+    expect(f.state.pid).toBe(456);
+    expect(f.result().error).toBe('Server update failed; the previous version was restored. The update worker ended before it finished (oom-kill, killed, KILL)');
+    // A snapshot cut short goes; a complete one stays with the failure.
+    expect(existsSync(f.backup)).toBe(point !== 'copy');
+    expect(existsSync(f.operation)).toBe(false);
+    expect(existsSync(link)).toBe(false);
+  } finally { f.stop(); }
+});
+
+test('the recovery of a worker killed before it saw the new version healthy keeps that version', async () => {
+  const f = await updateFixture();
+  try {
+    writeFileSync(join(f.operation, 'admitted'), f.id);
+    // A health check that never answers holds the worker where a kill would have cut it.
+    const worker = applyServerUpdate(f.file, f.platform, { pollMs: 5, spareBytes: 0, health: () => new Promise(() => undefined) });
+    await waitFor(() => f.state.pid === 456);
+    await recoverServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 1000, health: async () => ({ ok: true, version: '2.1.0', pid: 456 }) });
+    void worker;
+    expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('new executable');
+    expect(f.result().error).toBeNull();
+    expect(f.controls).toEqual(['stop', 'start']);
+    expect(existsSync(join(f.backup, 'data', 'journal.db'))).toBe(true);
+    expect(existsSync(f.operation)).toBe(false);
+  } finally { f.stop(); }
+});
+
+test('the recovery of a worker that never had the core stop closes admission and leaves the server alone', async () => {
+  const f = await updateFixture();
+  try {
+    await recoverServerUpdate(f.file, f.platform);
+    expect(f.controls).toEqual([]);
+    expect(existsSync(f.operation)).toBe(false);
+    // The core's acknowledgement now fails, so it keeps running instead of stopping for a worker that is gone.
+    expect(() => writeFileSync(join(f.operation, 'admitted'), f.id)).toThrow();
+    expect(existsSync(join(f.root, 'data', 'server-update-result.json'))).toBe(false);
+  } finally { f.stop(); }
+});
+
+test('the next update clears what a worker cut off with its recovery left, and keeps a handled failure', () => {
+  const root = mkdtempSync(join(tmpdir(), 'boite-server-stale-'));
+  const uuid = (c: string) => `${c.repeat(8)}-${c.repeat(4)}-${c.repeat(4)}-${c.repeat(4)}-${c.repeat(12)}`;
+  try {
+    const unfinished = join(root, `.boite-update-${uuid('a')}`);
+    const handled = join(root, `.boite-update-${uuid('b')}`);
+    mkdirSync(join(unfinished, 'stage'), { recursive: true });
+    mkdirSync(handled); writeFileSync(join(handled, 'finished'), '');
+    writeFileSync(join(root, `.boite-recover-${uuid('a')}`), '');
+    const partial = join(root, `.boite-backup-${uuid('a')}`);
+    const complete = join(root, `.boite-backup-${uuid('b')}`);
+    mkdirSync(join(partial, 'data.partial'), { recursive: true });
+    mkdirSync(join(complete, 'data'), { recursive: true });
+    mkdirSync(join(root, 'install'));
+    clearStaleUpdates(root);
+    expect(readdirSync(root).sort()).toEqual([`.boite-backup-${uuid('b')}`, `.boite-update-${uuid('b')}`, 'install']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('the Linux worker is throttled rather than capped and its unit recovers the service however it ends', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'boite-server-launch-')));
+  const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  try {
+    const executable = join(root, 'install', 'boite-core');
+    mkdirSync(dirname(executable)); writeFileSync(executable, 'core');
+    const plan = join(root, `.boite-update-${id}`, 'plan.json');
+    let args: string[] = [];
+    await linuxServerUpdates().launch(async (_command, given) => { args = given; return ''; }, executable, plan);
+    const link = join(root, `.boite-recover-${id}`);
+    expect(readFileSync(link, 'utf8')).toBe('core');
+    expect(args).toContain('--property=MemoryHigh=1G');
+    expect(args.some(arg => arg.includes('MemoryMax'))).toBe(false);
+    expect(args).toContain(`--property=ExecStopPost=-${unitWord(link)} update-recover ${unitWord(plan)}`);
+    expect(args.slice(-3)).toEqual([executable, 'update-apply', plan]);
+    // A refused launch takes its link back.
+    rmSync(link);
+    await expect(linuxServerUpdates().launch(async () => { throw new Error('systemd-run: refused'); }, executable, plan)).rejects.toThrow('refused');
+    expect(existsSync(link)).toBe(false);
+    expect(unitWord('/srv/my "boite"')).toBe(String.raw`"/srv/my \"boite\""`);
+    expect(() => unitWord('/srv/$HOME/boite')).toThrow('must not contain');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

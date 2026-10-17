@@ -151,11 +151,20 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 593,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,994,000 |
+| UI files, excluding `.br` and `.gz` copies | 5,019,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,314,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,356,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-16, the server update recovery (PR #552) on `origin/main` at
+`08c11d82` measures 4,353,036 core JavaScript bytes after a fresh `bun run
+build:core` on Windows, against 4,348,624 for that main; Windows CI measured
+4,352,918 for the first push. The update worker's recovery, its idempotent
+rollback and the stale update cleanup add 4,412 bytes, 112 of them in
+`main.js`, which stays under its limit. The core limit becomes 4,356,000; the other limits stay
+unchanged. The table before this still showed 4,994,000 and 4,314,000 while
+`budgets.json` held the 5,019,500 and 4,350,000 that PRs #545 to #550 set.
 
 On 2026-10-16, shared git reads, checkpoint blobs and merged-PR backoff
 (PR #526) merged with `origin/main` at `83f1720a` measure 4,988,020 UI bytes and
