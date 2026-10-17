@@ -121,6 +121,12 @@ Unicode 11 widths keep emoji and East Asian text at the two cells the shell
 counts. The end-to-end pages run the DOM renderer, whose rows they read, unless
 a test asks for `terminalGpu`. Hiding the drawer or switching threads detaches its element;
 reopening reuses the screen, scrollback, selection and full-screen program state.
+A detached screen gives its WebGL context back at once (Chromium keeps sixteen
+at most) and takes a new one when it shows again, which draws it once. After
+five minutes detached (`HIDDEN_RELEASE_MS`) the whole xterm goes and the shell
+keeps running; shown again, the screen is drawn from the core's snapshot, so its
+scrollback is the snapshot's 256 KiB rather than 10,000 lines, and its selection
+and find matches start over. The shell's exit is still heard while released.
 
 Reloading, opening another window or reconnecting replays the 256 KiB snapshot.
 Truncation prefers a nearby line boundary. Output arriving before the response is

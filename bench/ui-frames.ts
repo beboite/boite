@@ -277,7 +277,8 @@ async function main(): Promise<void> {
     /** Writes the large file in the open thread's folder and opens it in the panel, not awaited: its highlight runs in the measured window. */
     const openLargeFile = async (): Promise<void> => {
       await page.call(`async function (text) { const s = globalThis.__bench.store; await s.client.call('files.write', { threadId: s.openThread.id, path: 'bench-large.ts', text }); }`, LARGE_FILE);
-      await page.evaluate(`(() => { const s = globalThis.__bench.store; globalThis.__bench.panel.for(s.threadKey(s.openThread.id)).openFile('bench-large.ts'); })()`);
+      // Opened 200 ms into the measured window, so the window holds the open and the grammar's run.
+      await page.evaluate(`(() => { const s = globalThis.__bench.store; setTimeout(() => globalThis.__bench.panel.for(s.threadKey(s.openThread.id)).openFile('bench-large.ts'), 200); })()`);
     };
     const activity = `(() => { const t = globalThis.__bench.store.openThread; t.activity = { goal: { objective: 'Verify the bench', status: 'running', iterations: 1, error: null }, loop: null, tasks: Array.from({ length: 12 }, (_, i) => ({ id: 't' + i, text: 'Bench task number ' + i + ' with a line long enough to wrap', status: i < 4 ? 'completed' : i === 4 ? 'in_progress' : 'pending' })) }; })()`;
     const openActivity = async (): Promise<void> => {

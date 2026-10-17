@@ -1,3 +1,5 @@
+import { highlightText, knownLanguage, type Language } from './code-grammar';
+
 /** File names select a grammar; unknown files remain plain text. No guessing on every keystroke. */
 const EXTENSIONS: Record<string, string> = {
   ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
@@ -10,33 +12,6 @@ const EXTENSIONS: Record<string, string> = {
   c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp', cc: 'cpp', sql: 'sql', rb: 'ruby', php: 'php'
 };
 const ALIASES: Record<string, string> = { html: 'xml', svelte: 'xml', vue: 'xml', ts: 'typescript', js: 'javascript', shell: 'bash', sh: 'bash', toml: 'ini', 'c#': 'csharp' };
-const LOADERS = {
-  typescript: () => import('highlight.js/lib/languages/typescript'),
-  javascript: () => import('highlight.js/lib/languages/javascript'),
-  xml: () => import('highlight.js/lib/languages/xml'),
-  css: () => import('highlight.js/lib/languages/css'),
-  scss: () => import('highlight.js/lib/languages/scss'),
-  json: () => import('highlight.js/lib/languages/json'),
-  markdown: () => import('highlight.js/lib/languages/markdown'),
-  yaml: () => import('highlight.js/lib/languages/yaml'),
-  ini: () => import('highlight.js/lib/languages/ini'),
-  bash: () => import('highlight.js/lib/languages/bash'),
-  powershell: () => import('highlight.js/lib/languages/powershell'),
-  python: () => import('highlight.js/lib/languages/python'),
-  rust: () => import('highlight.js/lib/languages/rust'),
-  go: () => import('highlight.js/lib/languages/go'),
-  csharp: () => import('highlight.js/lib/languages/csharp'),
-  java: () => import('highlight.js/lib/languages/java'),
-  // C uses the shared C/C++ grammar to avoid bundling a second copy of its tokens.
-  c: () => import('highlight.js/lib/languages/cpp'),
-  cpp: () => import('highlight.js/lib/languages/cpp'),
-  sql: () => import('highlight.js/lib/languages/sql'),
-  ruby: () => import('highlight.js/lib/languages/ruby'),
-  php: () => import('highlight.js/lib/languages/php'),
-  dockerfile: () => import('highlight.js/lib/languages/dockerfile'),
-  makefile: () => import('highlight.js/lib/languages/makefile')
-};
-type Language = keyof typeof LOADERS;
 
 export function codeLanguage(path: string, hint?: string | null): Language | null {
   const name = path.replaceAll('\\', '/').split('/').at(-1)?.toLowerCase() ?? '';
@@ -45,39 +20,7 @@ export function codeLanguage(path: string, hint?: string | null): Language | nul
     : EXTENSIONS[name.split('.').at(-1) ?? ''];
   const requested = hint?.toLowerCase();
   const language = inferred ?? (requested ? ALIASES[requested] ?? requested : null);
-  return language && Object.hasOwn(LOADERS, language) ? language as Language : null;
-}
-
-const loaded = new Map<Language, Promise<void>>();
-async function load(language: Language): Promise<void> {
-  let pending = loaded.get(language);
-  if (!pending) {
-    pending = Promise.all([import('highlight.js/lib/core'), LOADERS[language]()]).then(([{ default: highlighter }, { default: grammar }]) => {
-      highlighter.registerLanguage(language, grammar);
-    });
-    loaded.set(language, pending);
-    pending.catch(() => loaded.delete(language));
-  }
-  await pending;
-}
-
-/** Each line closes and reopens a multiline token so folded diff context keeps its grammar. */
-function linesOf(html: string): string[] {
-  const lines: string[] = [];
-  const spans: string[] = [];
-  let line = '';
-  for (const token of html.split(/(<span\b[^>]*>|<\/span>|\n)/)) {
-    if (token === '\n') {
-      lines.push(line + '</span>'.repeat(spans.length));
-      line = spans.join('');
-    } else {
-      if (token.startsWith('<span')) spans.push(token);
-      else if (token === '</span>') spans.pop();
-      line += token;
-    }
-  }
-  lines.push(line);
-  return lines;
+  return language && knownLanguage(language) ? language : null;
 }
 
 /** Large files stay editable without sending megabytes through a grammar on each edit. */
@@ -110,7 +53,7 @@ export function highlightCode(text: string, language: Language | null): Promise<
     highlighted.set(key, known);
     return known.lines;
   }
-  const entry = { lines: highlightNow(text, language), chars: key.length };
+  const entry = { lines: highlightAway(text, language), chars: key.length };
   highlighted.set(key, entry);
   highlightedChars += entry.chars;
   trimHighlighted();
@@ -129,11 +72,59 @@ export function highlightCode(text: string, language: Language | null): Promise<
   return entry.lines;
 }
 
-async function highlightNow(text: string, language: Language): Promise<string[]> {
-  await load(language);
-  // HTML-like templates can contain both script and style blocks.
-  if (language === 'xml') await Promise.all([load('javascript'), load('typescript'), load('css')]);
-  const { default: highlighter } = await import('highlight.js/lib/core');
-  // Textareas normalize CRLF. A stray CR inside a token span would add a second visual line.
-  return linesOf(highlighter.highlight(text.replace(/\r\n?/g, '\n'), { language, ignoreIllegals: true }).value);
+/**
+ * Texts from this length go through the grammar in a worker. A 190,000
+ * character file spent 108 to 242 ms in the grammar on the main thread
+ * (2026-10-17, `bench/ui-frames.ts`, large file highlight); a diff of a few
+ * hundred lines stays here, where posting it would cost more than running it.
+ */
+export const WORKER_FROM = 20_000;
+
+interface Job {
+  resolve(lines: string[]): void;
+  reject(error: Error): void;
+  /** Runs the text here instead, when the worker could not start. */
+  here(): void;
+}
+
+/** The worker, made on the first long text; null once it could not start, and every text then runs here. */
+let worker: Worker | null | undefined;
+let lastJob = 0;
+const jobs = new Map<number, Job>();
+
+function highlightWorker(): Worker | null {
+  if (worker !== undefined) return worker;
+  if (typeof Worker === 'undefined') return worker = null;
+  try {
+    worker = new Worker(new URL('./code-highlight.worker.ts', import.meta.url), { type: 'module' });
+  } catch {
+    return worker = null;
+  }
+  worker.onmessage = ({ data }: MessageEvent<{ id: number; lines?: string[]; error?: string }>) => {
+    const job = jobs.get(data.id);
+    if (!job) return;
+    jobs.delete(data.id);
+    if (data.lines) job.resolve(data.lines);
+    else job.reject(new Error(data.error ?? 'highlight failed'));
+  };
+  // A worker that failed to load answers nothing: what it was given runs here.
+  worker.onerror = (event) => {
+    event.preventDefault();
+    worker?.terminate();
+    worker = null;
+    const waiting = [...jobs.values()];
+    jobs.clear();
+    for (const job of waiting) job.here();
+  };
+  return worker;
+}
+
+function highlightAway(text: string, language: Language): Promise<string[]> {
+  const away = text.length >= WORKER_FROM ? highlightWorker() : null;
+  if (!away) return highlightText(text, language);
+  return new Promise((resolve, reject) => {
+    const id = ++lastJob;
+    jobs.set(id, { resolve, reject, here: () => { highlightText(text, language).then(resolve, reject); } });
+    away.postMessage({ id, text, language });
+  });
 }

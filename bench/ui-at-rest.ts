@@ -23,6 +23,10 @@
  *
  * "Blurred" scenarios are a window left visible while another application has
  * the focus: the page gets its `blur` and `document.hasFocus()` turns false.
+ * "Hidden terminals" opens five shells in the drawer, hides it and adds the
+ * WebGL contexts still alive after the collections: those the page made, less
+ * those lost or collected. With `--wait 310` it reads them past the five
+ * minutes a hidden screen keeps its xterm.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -51,6 +55,22 @@ const WAIT = Number(option('wait') ?? 0);
 
 /** Long enough that the answer still streams through the measured window. */
 const PROMPT = 'Streaming bench paragraph with enough words to wrap across the column.\n\n'.repeat(300);
+/** Counts the WebGL contexts the page makes, and those it loses or lets the collector take. */
+const GL_COUNTER = `(() => {
+  const gl = window.__gl = { made: 0, gone: 0 };
+  const collected = new FinalizationRegistry((state) => { if (!state.gone) { state.gone = true; gl.gone++; } });
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+    const context = getContext.call(this, type, ...rest);
+    if (context && /webgl/.test(type) && !this.__glState) {
+      const state = this.__glState = { gone: false };
+      gl.made++;
+      this.addEventListener('webglcontextlost', () => { if (!state.gone) { state.gone = true; gl.gone++; } });
+      collected.register(context, state);
+    }
+    return context;
+  };
+})()`;
 const SETUP = `window.__long = []; try { new PerformanceObserver((list) => { for (const e of list.getEntries()) window.__long.push(e.duration); }).observe({ type: 'longtask', buffered: true }); } catch {} try { localStorage.setItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}, ${JSON.stringify(JSON.stringify({ version: ONBOARDING_VERSION, at: 0 }))}); } catch {}`;
 
 /** One DevTools connection: the browser's, or a page's. */
@@ -199,9 +219,27 @@ async function main(): Promise<void> {
       // The fake agent reasons over the whole prompt before it answers.
       await page.waitFor(`document.querySelectorAll('.prose.live .paragraph').length >= 2`, 60_000);
     };
+    /** Ctrl and a letter, as the keyboard sends it: the terminal's own chords read it from its text box. */
+    const chord = async (key: string): Promise<void> => {
+      const code = `Key${key.toUpperCase()}`, windowsVirtualKeyCode = key.toUpperCase().charCodeAt(0);
+      for (const type of ['rawKeyDown', 'keyUp']) await page.send('Input.dispatchKeyEvent', { type, modifiers: 2, key, code, windowsVirtualKeyCode });
+    };
+    const terminals = async (count: number): Promise<void> => {
+      await page.evaluate(GL_COUNTER);
+      await chord('j');
+      // The GPU draws the text on a canvas: the screen is up once xterm has its text box and the keyboard.
+      await page.waitFor(`document.querySelector('[data-testid=terminal] .xterm') && document.activeElement?.classList.contains('xterm-helper-textarea')`);
+      for (let tab = 2; tab <= count; tab++) {
+        await chord('n');
+        await page.waitFor(`document.querySelectorAll('[data-testid=terminal-tab]').length === ${tab} && document.activeElement?.classList.contains('xterm-helper-textarea')`);
+        await Bun.sleep(300);
+      }
+      await chord('j');
+      await page.waitFor(`!document.querySelector('[data-testid=terminal-drawer]')`);
+    };
     const phone = { width: 390, height: 844, mobile: true };
     const desktop = { width: 1280, height: 890, mobile: false };
-    const scenarios: Record<string, { query: string; size: typeof desktop; stream: boolean; focused: boolean; list?: boolean }> = {
+    const scenarios: Record<string, { query: string; size: typeof desktop; stream: boolean; focused: boolean; list?: boolean; terminals?: number }> = {
       'nothing working': { query: '', size: desktop, stream: false, focused: true },
       'working': { query: `working=${WORKING}`, size: desktop, stream: false, focused: true },
       'working streaming': { query: `working=${WORKING}&stream=tokens`, size: desktop, stream: true, focused: true },
@@ -209,6 +247,7 @@ async function main(): Promise<void> {
       'working blurred streaming': { query: `working=${WORKING}&stream=tokens`, size: desktop, stream: true, focused: false },
       'phone working streaming': { query: `working=${WORKING}&stream=tokens`, size: phone, stream: true, focused: true },
       'phone working list': { query: `working=${WORKING}`, size: phone, stream: false, focused: true, list: true },
+      'hidden terminals': { query: '', size: desktop, stream: false, focused: true, terminals: 5 },
     };
 
     type Process = { id: number; type: string; cpuTime: number };
@@ -260,6 +299,7 @@ async function main(): Promise<void> {
         try {
           await open(scenario.query, scenario.size.width, scenario.size.height, scenario.size.mobile);
           if (scenario.stream) await stream();
+          if (scenario.terminals) await terminals(scenario.terminals);
           if (scenario.list) { await page.evaluate(`document.querySelector('[data-testid=mobile-back]')?.click()`); await Bun.sleep(600); }
           await focus(scenario.focused);
           const hasFocus = await page.evaluate<boolean>('document.hasFocus()');
@@ -278,7 +318,10 @@ async function main(): Promise<void> {
           if (SHOTS) await Bun.write(join(SHOTS, `${name.replaceAll(' ', '-')}-${run + 1}.png`), Buffer.from(((await page.send('Page.captureScreenshot', { format: 'png' })) as { data: string }).data, 'base64'));
           if (PROFILE) { const { profile: cpu } = await page.send('Profiler.stop') as { profile: unknown }; await Bun.write(join(PROFILE, `${name.replaceAll(/[ ,]+/g, '-')}.cpuprofile`), JSON.stringify(cpu)); }
           const live = scenario.stream ? await page.evaluate<boolean>(`!!document.querySelector('.prose.live')`) : null;
-          console.log(`${name} | ${cost.renderer.toFixed(0)} | ${cost.gpu.toFixed(0)} | ${cost.browser.toFixed(0)} | ${cost.main.toFixed(0)} | ${cost.fps.toFixed(1)} | ${cost.longTasks} (${cost.longMs.toFixed(0)}) | ${cost.heapMiB.toFixed(1)}${scenario.stream ? `, ${grew} characters streamed${live ? '' : ', the answer ended inside the window'}` : ''}`);
+          // The collector's callbacks run after it, in tasks of their own.
+          if (scenario.terminals) await Bun.sleep(500);
+          const gl = scenario.terminals ? await page.evaluate<{ made: number; gone: number }>('window.__gl') : null;
+          console.log(`${name} | ${cost.renderer.toFixed(0)} | ${cost.gpu.toFixed(0)} | ${cost.browser.toFixed(0)} | ${cost.main.toFixed(0)} | ${cost.fps.toFixed(1)} | ${cost.longTasks} (${cost.longMs.toFixed(0)}) | ${cost.heapMiB.toFixed(1)}${scenario.stream ? `, ${grew} characters streamed${live ? '' : ', the answer ended inside the window'}` : ''}${gl ? `, WebGL contexts made ${gl.made}, alive ${gl.made - gl.gone}` : ''}`);
         } catch (error) {
           console.log(`${name} | failed: ${error instanceof Error ? error.message : String(error)}`);
         }
