@@ -606,7 +606,7 @@ phone on the LAN gets the gzip.
 Every static answer outside `/assets/` carries an `ETag` and a `Last-Modified` of the variant sent,
 so revalidating the shell, `sw.js` or the manifest is a 304 without a body.
 Fonts and icons are fresh for a day: a phone on plain http has no service
-worker and would otherwise fetch the two default faces, 144 KB, on every load.
+worker and would otherwise fetch the two default faces, 118 KB, on every load.
 A view is gzipped once when it is published and sent compressed to a client
 that reads gzip. The [2026-10-15 report](../bench/results/2026-10-15-perf-media.md)
 has the bytes before and after.
@@ -633,8 +633,45 @@ Day labels and clock times in an agent conversation reuse one
 `Intl.DateTimeFormat` per language (`lib/format.ts`), as hover titles already
 did: `toLocaleString` with a locale builds a new formatter per call.
 
-The French catalogue and the quota window are chunks of their own too, so an
-English page does not download or parse either (`docs/language.md`).
+Every catalogue and the quota window are chunks of their own too, so a page
+downloads and parses only the language it speaks (`docs/language.md`). Nine
+components the first frame does not draw load the same way
+(`lib/deferred-parts.ts`, the terminal drawer and, outside the shell, the
+phone's navigation, which the boot screen waits for): the image viewer, the
+diff, the quota overview, the coordination panel, the updates notice, the
+robot face and the dictation button, prefetched in the idle pass. The
+dictation button draws a disabled microphone of the same size until its chunk
+lands. `qrcode` loads when a code is drawn. The modules the boot shares with a
+lazy chunk are one `boot` chunk (a Rolldown `codeSplitting` group in
+`vite.config.ts`), because the core speaks HTTP/1.1 and a browser fetches six
+files at a time. Geist and Geist Mono ship as latin, latin-ext and rest
+subsets with their weight axis; the mono latin cut carries the arrows and box
+drawing a terminal draws.
+
+On 2026-10-18 on Windows, `bun run build:ui` of `1c168fd6` and of this
+change, the files `index.html` names plus the device's catalogue, gzip at
+level 9 and brotli at 11:
+
+| Measure | Before | After |
+| --- | ---: | ---: |
+| Entry chunk | 594,958 | 483,801 |
+| UI files, excluding `.br` and `.gz` | 5,026,229 | 4,707,299 |
+| Boot files, English device | 65 | 6 |
+| Boot raw, English | 1,587,262 | 1,367,851 |
+| Boot gzip, English | 480,577 | 401,218 |
+| Boot brotli, English | 403,084 | 332,900 |
+| Boot files, French device | 66 | 6 |
+| Boot raw, French | 1,737,518 | 1,388,003 |
+| Boot gzip, French | 530,399 | 406,698 |
+| Boot brotli, French | 445,627 | 337,950 |
+
+`bun run bench/bandwidth.ts --rtt 150 --only page --locale en|fr`, three
+runs each on the same day and machine, medians: a cold page load (html,
+scripts, styles, the default fonts, manifest and worker) went from 576,490
+bytes in 2,032 ms to 460,785 bytes in 493 ms on an English device, and from
+619,254 bytes in 2,051 ms to 465,835 bytes in 469 ms on a French one. A warm
+reload stays at 306 to 310 ms. The idle prefetch grows from 555,493 to 600,268
+bytes, what the boot no longer carries.
 
 The service worker still asks the core for the app shell first, but waits
 2.5 s at most before serving the cached one; the late answer is stored for the
