@@ -328,12 +328,13 @@ export class Journal {
     this.deleteThreads([...roots, ...children.map(row => row.id)]);
   }
 
-  /** Purge expired families atomically, using their root's deletion time. */
-  purgeDeletedThreads(before: number): number {
+  /** Purge expired families atomically, using their root's deletion time; `beforeDelete` reads their rows last. */
+  purgeDeletedThreads(before: number, beforeDelete?: (threadIds: string[]) => void): number {
     if (this.closed) return 0;
     const rows = this.db.query(`SELECT thread_id FROM thread_deletions WHERE root_id IN
       (SELECT root_id FROM thread_deletions WHERE thread_id = root_id AND deleted_at <= ?)`)
       .all(before) as { thread_id: string }[];
+    if (rows.length > 0) beforeDelete?.(rows.map(row => row.thread_id));
     this.deleteThreads(rows.map(row => row.thread_id));
     return rows.length;
   }
