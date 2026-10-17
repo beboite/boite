@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import ThinkingPart from './ThinkingPart.svelte';
 import * as markdown from '../lib/markdown';
+import { workspace } from '../lib/workspace.svelte';
 
 vi.mock('../lib/markdown', async (original) => {
   const actual = await original<typeof import('../lib/markdown')>();
@@ -103,4 +104,17 @@ test('a reasoning with no text offers nothing to unfold', () => {
   flushSync();
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
   expect(document.querySelector('.disclosure-fold')!.classList.contains('open')).toBe(true);
+});
+
+test('a thread named in reasoning opens through the thread link, not the page hash', () => {
+  const opened = vi.spyOn(workspace, 'openThreadLink').mockResolvedValue();
+  running = mount(ThinkingPart, { target: document.body, props: { text: 'Ask `boite/thr_tkw9n9qt4100rvq2jmg1` first' } });
+  document.querySelector<HTMLButtonElement>('[data-testid=thinking-toggle]')!.click();
+  flushSync();
+  const link = document.querySelector<HTMLAnchorElement>('[data-thread-address]')!;
+  const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+  link.dispatchEvent(click);
+  expect(click.defaultPrevented).toBe(true);
+  expect(opened).toHaveBeenCalledWith(workspace.active, workspace.active.openThread?.id, 'boite', 'thr_tkw9n9qt4100rvq2jmg1');
+  opened.mockRestore();
 });
