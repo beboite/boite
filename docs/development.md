@@ -608,7 +608,9 @@ branch; inspect the running UI over CDP for installation claims.
 `bun run stage:core` builds and stages the core. Staging copies artifacts into
 the bundler resources and beside a release shell. On Windows the sidecar is
 Bun's baseline runtime, with `core/main.js` and split chunks in the adjacent
-`core/` directory. Other platforms use the compiled core. Windows verifies the
+`core/` directory, so `stage:core` runs `build:core` there and compiles no
+`boite-core.exe`; a bench that times the compiled core on Windows needs
+`bun run build:core:exe` first. Other platforms use the compiled core. Windows verifies the
 runtime archive's SHA-256 and executable signature and caches it under
 `node_modules/.cache` for the running Bun version.
 

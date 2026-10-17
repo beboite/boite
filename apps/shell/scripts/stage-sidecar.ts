@@ -21,7 +21,7 @@
  * end to end suite drives, so the copy goes there too whenever that exe exists.
  * `tests/e2e/shell.test.ts` refuses a sidecar older than the core sources and
  * names the fix, `bun run stage:core`, which is this script after
- * `bun run build:core:exe`.
+ * `build-core.ts` (`build:core` on Windows, `build:core:exe` elsewhere).
  *
  * Run from the repository root: `bun run apps/shell/scripts/stage-sidecar.ts`.
  */

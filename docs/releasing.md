@@ -39,9 +39,13 @@ to the app attaches the previous APK under its original name.
 [Android](android.md#the-app-version) has the full rule.
 
 - `build:ui` writes `packages/ui/dist`. That directory is what the core serves at
-  `/` and what the shell bundles as its frontend. The Tauri config also runs it
-  as its own before-build command, so a shell build never ships a UI older than
-  the sources.
+  `/`, with a `.br` and a `.gz` copy beside each text asset. The Tauri config
+  runs it as its own before-build command, so a shell build never ships a UI
+  older than the sources, then `apps/shell/scripts/stage-frontend.ts` copies it
+  to `apps/shell/dist` without those compressed copies. That copy is the
+  shell's `frontendDist`, embedded in the executable: the window never asks for
+  the `.br` and `.gz` files, which took 2 MB of it. The installed `ui/`
+  directory, which the core serves to phones, stays the complete dist.
 - `build:core` cleans and writes `packages/core/dist`: `main.js`, `jobs-worker.js`,
   `guard-worker.js`, `artifact-retention-worker.js`, and hashed chunks for the main module and lazy drivers.
   Keep every emitted file together when distributing this bundle. Lazy imports
@@ -74,7 +78,10 @@ to the app attaches the previous APK under its original name.
   that is not shipped. `apps/shell/scripts/tauri.ts` adds
   `tauri.bundle.windows.conf.json`, which names the `core` directory as a
   resource, to any Windows build that passes the bundle overlay.
-- `stage:core` puts the sidecar, all three workers and the two `boite` shims
+- `stage:core` builds the core with `apps/shell/scripts/build-core.ts`, then
+  stages it. On Windows that build is `build:core` alone: the sidecar is the
+  runtime, so the compiled `boite-core.exe` was a 105 MB write nothing read.
+  Elsewhere it is `build:core:exe`. It then puts the sidecar, all three workers and the two `boite` shims
   (`packages/core/shims`, see [cli.md](cli.md)) where the two things that
   run them look. The bundler wants
   `apps/shell/src-tauri/binaries/boite-core-<target triple>`, with `.exe` on Windows, for
@@ -89,6 +96,23 @@ to the app attaches the previous APK under its original name.
   staging supports Windows x64 and Linux/macOS x64 and ARM64. On Apple Silicon,
   `BOITE_TARGET=x86_64-apple-darwin` builds the Intel core, sidecar and bundle
   instead, as CI does.
+
+The shell's release profile in `apps/shell/src-tauri/Cargo.toml` uses
+fat LTO over one codegen unit and keeps `panic = "unwind"`, which the update
+commands' `catch_unwind` needs. It strips nothing: the Windows symbols stay in
+the PDB beside the build, which a hang dump needs to name the frames.
+Measured on 2026-10-17 with `bun run --cwd apps/shell tauri build --no-bundle`
+on the same base:
+
+| build | `boite-shell.exe` bytes | embedded `.br`/`.gz` names |
+| --- | ---: | ---: |
+| Cargo defaults, full `packages/ui/dist` | 20,631,552 | 246 |
+| thin LTO, filtered UI | 17,369,088 | 0 |
+| fat LTO, filtered UI | 16,665,088 | 0 |
+
+A publishing run builds with it; a pull request keeps Cargo's defaults
+([CI](ci.md#build-cost)). For a local iteration set
+`CARGO_PROFILE_RELEASE_LTO=false` and `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`.
 
 The shell passes Tauri's resource directory to the core through `BOITE_UI_DIR`,
 so the installed core can serve the phone UI from the macOS application bundle
@@ -270,6 +294,15 @@ name is `Boite`. The install is per user and asks for no elevation.
 - `boite` and `boite.cmd`, the CLI shims the core puts on an agent's PATH; each
   invokes the adjacent core's CLI entry ([cli.md](cli.md)).
 - `ui/`, the same build a phone gets over the pairing link.
+
+`core/` and `ui/` hold only the current build. Their file names carry a hash,
+and the template only copies files and deletes the ones a build lists, so each
+update used to leave the previous build's chunks beside the new ones and an
+uninstall left them all: an install updated since 2026-09-28 held 3,614 files
+and 243 MB, about 108 MB of them stale. The installer hook now removes both
+directories once the core of that install has stopped, before the copy, and
+the uninstall hook removes them too (`windows/hooks.nsh`). Nothing else in the
+install directory is touched.
 
 The identifier is fresh, so Boite installs beside Boite Legacy rather than over
 it. To see the exact file list a build produced, read
