@@ -383,6 +383,9 @@ test('a row growing above a reader just off the bottom leaves the reader there',
   await page.waitFor('window.__boiteTest?.workspace.active.booted');
   await page.evaluate(`window.__boiteTest.workspace.active.open('t-long')`);
   await page.waitFor(`document.querySelectorAll('${timeline} [data-mid]').length > 3`);
+  // An untouched conversation opens its panel on the launcher at this width: once
+  // it is in, the chat column keeps its width while the rows are measured.
+  await page.waitFor(`document.querySelector('[data-testid=panel-launcher]')`);
   await settled();
   const box = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${timeline}').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -30 });
