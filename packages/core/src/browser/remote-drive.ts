@@ -33,6 +33,8 @@ interface RemoteDriveContext {
   send(tab: Tab, method: string, params?: Record<string, unknown>): Promise<unknown>;
   /** `strict`: a size change or a read of the page's size, which no capture may overlap. */
   screen<T>(tab: Tab, run: () => Promise<T>, strict?: boolean): Promise<T>;
+  /** Runs `run` on the tab's page awake (`sleep.ts`). */
+  use<T>(tab: Tab, run: () => Promise<T>): Promise<T>;
 }
 
 export class RemoteDrive {
@@ -62,6 +64,13 @@ export class RemoteDrive {
     this.#streams.delete(key);
     clearTimeout(entry.idle);
     entry.stream.close();
+  }
+
+  /** Whether a viewer is shown the tab now: a screencast of it runs, or a viewer asked within the screencast's idle time. */
+  watching(tabId: string): boolean {
+    for (const entry of this.#streams.values()) if (entry.tabId === tabId) return true;
+    for (const viewer of this.#viewers.values()) if (viewer.tabId === tabId && Date.now() - viewer.requestedAt < STREAM_IDLE_MS) return true;
+    return false;
   }
 
   /** Whether a viewer that asked within `withinMs` is shown this screencast. */
@@ -107,7 +116,11 @@ export class RemoteDrive {
     const viewer: Viewer = { requestedAt: Date.now(), tabId: tab.id, options: { maxWidth, quality: quality ?? 55 }, frames: previous?.frames ?? [] };
     this.#viewers.set(key, viewer);
     // The desktop app's webviews have one DevTools session each, the agent's: no second one to stream on.
-    if (!tab.engine.hosted) return this.#streamed(tab, viewer, after);
+    return this.context.use(tab, () => tab.engine.hosted ? this.#captured(tab, viewer, maxWidth, quality) : this.#streamed(tab, viewer, after));
+  }
+
+  /** A capture of a tab the desktop app hosts, shared by the viewers that ask within `FRAME_REUSE_MS`. */
+  async #captured(tab: Tab, viewer: Viewer, maxWidth: number | undefined, quality: number | undefined): Promise<RemoteBrowserFrame> {
     const wanted = `${maxWidth ?? 0}:${quality ?? 55}`;
     if (!tab.frame || tab.frame.key !== wanted || Date.now() - tab.frame.at > FRAME_REUSE_MS) {
       const promise = this.#capture(tab, maxWidth, quality ?? 55);
@@ -182,6 +195,10 @@ export class RemoteDrive {
     const saved = this.#viewers.get(`${connection.id}:${threadId}`)?.frames.find(entry => entry.frame.id === frameId && Date.now() - entry.frame.at < FRAME_LIFE_MS);
     if (!saved) throw refused('refresh the live browser before interacting');
     const tab = this.context.tabOf(threadId, saved.frame.tabId);
+    return this.context.use(tab, () => this.#input(tab, saved, input));
+  }
+
+  async #input(tab: Tab, saved: Saved, input: RpcParams<'browser.remoteInput'>['input']): Promise<{ ok: true }> {
     const changed = () => refused('the page changed; wait for a fresh frame before interacting');
     const retire = () => { this.stale(tab); for (const viewer of this.#viewers.values()) viewer.frames = viewer.frames.filter(entry => entry.frame.tabId !== tab.id); };
     switch (input.kind) {
@@ -236,7 +253,8 @@ export class RemoteDrive {
     this.#viewer(threadId, connection);
     const saved = this.#viewers.get(`${connection.id}:${threadId}`)?.frames.find(entry => entry.frame.id === frameId && Date.now() - entry.frame.at < FRAME_LIFE_MS);
     if (!saved) throw refused('refresh the live browser before copying');
-    const text = String(await this.context.evaluate(this.context.tabOf(threadId, saved.frame.tabId), selectionScript(REMOTE_SELECTION_MAX), 5000) ?? '');
+    const tab = this.context.tabOf(threadId, saved.frame.tabId);
+    const text = String(await this.context.use(tab, () => this.context.evaluate(tab, selectionScript(REMOTE_SELECTION_MAX), 5000)) ?? '');
     return { text: text.slice(0, REMOTE_SELECTION_MAX), truncated: text.length > REMOTE_SELECTION_MAX };
   }
 

@@ -728,7 +728,9 @@ listener; the `pre-setup` phase record times the process start to `setup`.
 
 On Windows the main page drops to WebView2's low memory level while the window
 waits in the tray, from a close or a login start, and returns to normal before
-it shows. Browser surfaces and a minimized window keep the normal level.
+it shows. A minimized window keeps the normal level for the main page. A
+hidden page the user browses drops to the low level and is suspended
+([browser tabs nobody uses](#browser-tabs-nobody-uses)).
 
 The window is built hidden. It appears once the page has painted and either the
 core answered or two seconds passed, so a fast start shows no empty frame and a
@@ -929,6 +931,36 @@ only when the page draws, and a viewer naming the frame it shows gets
 of base64 and the core's Chrome from 8 % to 0 % of a core; on a moving page the
 trip lost about 72 ms at the same four frames a second and the same Chrome CPU
 ([results](../bench/results/2026-10-15-perf-browser.md)).
+
+## Browser tabs nobody uses
+
+The agent browser runs every tab as shown, focused and unthrottled, so a page
+left open runs at full speed with nobody on it. On 2026-10-17 one renderer of
+M2's agent browser had run 16 hours at 38 % of a core, and on the Windows
+desktop two renderers of the shell used 0.4 and 0.25 of a core with nobody
+looking; a hidden native tab of another conversation ran 30 minutes at 1.5
+cores and grew to 14 GB. A tab of the agent browser now sleeps 30 seconds
+after its last use once no viewer, recording or running turn holds it, and a
+hidden native page of the desktop is suspended with its memory level low
+([the agent's browser](browser.md#a-tab-nobody-uses-sleeps)).
+
+`bun bench/browser-sleep.ts` opens a page that draws a canvas every animation
+frame and runs a timer every 10 ms in a scratch core's browser, as an agent
+would, and reads the CPU of that browser's processes for 20 s while the tab is
+still within its wait, then 20 s after it. On NUNO-X870 (Windows, headless
+Edge, Bun 1.4.2) on 2026-10-17:
+
+| Tab             | Renderer | GPU process | Other browser processes | Next command |
+| --------------- | -------- | ----------- | ----------------------- | ------------ |
+| Awake (before)  | 19.1 %   | 22.7 %      | 4.1 %                   | 3 ms         |
+| Asleep (after)  | 0.2 %    | 0.1 %       | 2.7 %                   | 59 ms        |
+
+Percentages are of one core. The first command on a sleeping tab pays the
+wake, two DevTools round trips and the page's first frames. The same freeze
+through `Page.setWebLifecycleState` alone, with focus emulation left on,
+changed nothing: the page drew 1,095 animation frames in the 10 s it was
+frozen (`Emulation.setFocusEmulationEnabled` keeps it shown). The desktop's `TrySuspend` was not measured in the app; it is
+covered by a unit test of which pages it applies to.
 
 ## Browser recordings
 

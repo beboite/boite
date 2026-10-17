@@ -52,6 +52,8 @@ export function createBrowserFixture() {
       if (path === '/popup') return new Response('<title>Popup</title>popup', { headers: { 'content-type': 'text/html' } });
       // Draws `hz` times a second, like a video or an animation slower than the screen.
       if (path === '/ticking') return new Response(`<title>Ticking</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},${1000 / Number(new URL(request.url).searchParams.get('hz') ?? 10)})</script>`, { headers: { 'content-type': 'text/html' } });
+      // Animates every frame and every 16 ms; `gaps()` returns the longest pause of each since it was last called.
+      if (path === '/animated') return new Response('<title>Animated</title><script>let last=performance.now(),gap=0,tick=Date.now(),tickGap=0;function draw(t){gap=Math.max(gap,t-last);last=t;requestAnimationFrame(draw)}requestAnimationFrame(draw);setInterval(()=>{const now=Date.now();tickGap=Math.max(tickGap,now-tick);tick=now},16);window.gaps=()=>{const r=[Math.round(gap),tickGap];gap=0;tickGap=0;return r}</script>', { headers: { 'content-type': 'text/html' } });
       if (path === '/moving') return new Response('<title>Moving</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},16)</script>', { headers: { 'content-type': 'text/html' } });
       return new Response('missing', { status: 404 });
     } });

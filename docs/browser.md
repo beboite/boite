@@ -124,6 +124,39 @@ other alert is accepted and a confirm or prompt declined, so a person acting in
 the panel never confirms by accident. All are noted in the diagnostics. Downloads are refused. Archiving or removing the
 conversation closes its tabs.
 
+### A tab nobody uses sleeps
+
+The browser runs every tab as shown (`--disable-renderer-backgrounding` and
+the timer and occlusion flags beside it) and each tab emulates focus, so a
+page left open runs at full speed. On 2026-10-17 one renderer of M2's agent
+browser had run 16 hours at 38 % of a core with no agent on it. A tab
+therefore sleeps (`browser/sleep.ts`): its page is frozen with
+`Page.setWebLifecycleState`, which stops its timers, its animation frames and
+its tasks. It sleeps once all of these hold for 30 seconds
+(`SLEEP_AFTER_MS`): no agent command or viewer request runs on it, no viewer
+is shown it (a screencast of it runs, or a viewer asked within 3 seconds), no
+recording runs in it, and its conversation has no running turn. The check
+runs again every 30 seconds while something holds the tab. The wait covers the
+gap after a turn ends or the last viewer leaves: a follow-up turn or a viewer
+coming back within it finds the page as it left it, and an abandoned page runs
+at most a minute.
+
+Focus emulation keeps a page shown, and Chromium does not freeze a shown page:
+the call answers but the page keeps running. Focus emulation goes off before
+the freeze and back on after the wake. The tab wakes before every agent
+command, every frame, input or copy of a viewer, and when its conversation
+starts a turn, so the agent's pages run while it works, as they did when it
+last looked. Freezing and waking take turns per tab: a command that arrives
+while the page is being frozen waits for the freeze, wakes the page and only
+then runs, and the page is visible and focused again when it does. A tab
+closed while asleep is woken first. A page asleep keeps its state; its timers
+resume where they stopped, and a page that reads the clock sees the time pass.
+
+A tab the desktop app hosts gets the same calls through the relay: `Page` and
+`Emulation` are among the domains an agent webview takes. The desktop's own
+pages, the ones the user browses, are suspended once hidden
+([panel](panel.md#surfaces)).
+
 An open tab does not hold back an update of the core: the browser's processes
 are not counted as work under way. The update closes them, the cookies are
 saved first, and the tabs themselves are not reopened.
@@ -321,8 +354,11 @@ a paired viewer's frames and taps, a popup becoming a tab, the user agent a
 page, a worker, a request and a popup send without `Headless`, with
 `navigator.webdriver` false and full client hints, cookies kept per
 profile across a restart, a profile copied in by the owner, an MP4 recording
-read back, a recording discarded at the end of a turn, and a machine without a
-browser. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
+read back, a recording discarded at the end of a turn, a page that sleeps
+once nobody uses it and meets the next command and viewer awake and focused,
+and a machine without a browser. `browser-sleep.test.ts` checks, with the page
+stubbed, that a command arriving during a freeze runs after the wake, and that
+a held or closed tab never sleeps. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
 `tests/e2e/agent-browser-core.test.ts` runs the whole path on a real core: the
 owner's desktop at 1280 × 900 and a paired phone at 390 × 844 see the cover,
 show the page and tap it, and the tap reaches the page. `browser-remote.test.ts`

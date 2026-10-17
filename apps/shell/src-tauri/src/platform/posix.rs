@@ -52,6 +52,9 @@ pub(crate) fn idle_ms() -> Option<u64> { None }
 /// WebKitGTK and WKWebView offer no memory level for one page.
 pub(crate) fn memory_level<R: tauri::Runtime>(_webview: &tauri::Webview<R>, _low: bool) {}
 
+/// WebKit has no call to put a hidden page to sleep.
+pub(crate) fn suspend<R: tauri::Runtime>(_webview: &tauri::Webview<R>) {}
+
 pub(crate) fn foreground(window: &tauri::Window) -> bool {
     window.is_focused().unwrap_or(false)
 }
