@@ -777,22 +777,22 @@ export class PluginStore {
     }
   }
 
-  /** Starts the plugin's desktop app if it provides one, is installed and enabled. */
-  private resumeApp(id: string): void {
+  /** Starts the plugin's desktop app and gateway it provides: at core start those that start with it, after an install those left enabled. */
+  private resumeApp(id: string, atStart = false): void {
     if (this.closing) return;
     try {
       const disk = this.onDisk(id);
-      if (disk.kind === 'installed' && providesApp(disk.installed.manifest)) this.apps.resume(id, this.directory(id));
-      if (disk.kind === 'installed' && providesGateway(disk.installed.manifest)) this.gateways.resume(id, this.directory(id));
+      if (disk.kind === 'installed' && providesApp(disk.installed.manifest)) this.apps.resume(id, this.directory(id), atStart);
+      if (disk.kind === 'installed' && providesGateway(disk.installed.manifest)) this.gateways.resume(id, this.directory(id), atStart);
     } catch (error) {
       this.core.log('warn', `plugin ${id} app did not start: ${messageOf(error)}`);
     }
   }
 
   /**
-   * At core start: every installed desktop app the owner left enabled. One
-   * plugin the store cannot read is logged by `resumeApp` and skipped; the
-   * others still start.
+   * At core start: every installed desktop app and gateway that starts with
+   * the core. One plugin the store cannot read is logged by `resumeApp` and
+   * skipped; the others still start.
    */
   startApps(): void {
     let ids: string[];
@@ -802,7 +802,20 @@ export class PluginStore {
       this.core.log('warn', `desktop apps did not start: ${messageOf(error)}`);
       return;
     }
-    for (const id of ids) if (!this.jobs.has(id)) this.resumeApp(id);
+    for (const id of ids) if (!this.jobs.has(id)) this.resumeApp(id, true);
+  }
+
+  /** `plugins.autostart`: whether the plugin's desktop app and gateway start when the core starts. */
+  async autostart(params: RpcParams<'plugins.autostart'>): Promise<PluginState> {
+    const id = this.known(params.id);
+    if (typeof params.autostart !== 'boolean') throw invalidParams('autostart must be true or false', { field: 'autostart', expected: 'true or false' });
+    const installed = this.usable(id);
+    const app = providesApp(installed.manifest);
+    const gateway = providesGateway(installed.manifest);
+    if (!app && !gateway) throw refused(`${id} provides no desktop app or gateway to start with Boite.`);
+    if (app) await this.apps.setAutostart(id, this.directory(id), params.autostart);
+    if (gateway) await this.gateways.setAutostart(id, this.directory(id), params.autostart);
+    return this.state(id);
   }
 
   /** `plugins.app`: start, stop or restart a desktop-app plugin. */

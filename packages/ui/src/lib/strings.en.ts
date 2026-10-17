@@ -2733,6 +2733,7 @@ export const strings = {
     appStart: 'Start',
     appStop: 'Stop',
     appRestart: 'Restart',
+    startWithBoite: 'Start with Boite',
     /** A gateway plugin: run in the background on a loopback port, for the subscription proxy. */
     gateway: 'Gateway',
     gatewayRunning: '{version} on 127.0.0.1:{port}',

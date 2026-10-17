@@ -168,10 +168,10 @@ running; the app then talks to the core like any client.
 `desktopApp` takes no field; any key in it is refused. The artifact is the
 app's single release executable.
 
-The core starts an installed, enabled app:
+The core starts an installed app:
 
-- when the core starts;
-- right after its install or an update finishes;
+- when the core starts, if Start with Boite is on (`autostart`);
+- right after its install or an update finishes, if it is on (`enabled`);
 - when the owner clicks Start or Restart in Settings > Plugins
   (`plugins.app {id, action: "start" | "stop" | "restart"}`).
 
@@ -196,18 +196,25 @@ browser's host.
 Exits and stops:
 
 - An exit with code 0 leaves the app stopped. It starts again on the next core
-  start or when the owner starts it.
+  start while Start with Boite is on, or when the owner starts it.
 - Any other exit, or a signal, starts it again after 2 seconds, then 10, then
   30. A fourth crash within five minutes leaves it crashed, with the exit code
   and a message on its row, until the owner starts it.
-- Stop kills the app's process tree and turns it off: it does not start with
-  the core again until the owner starts it. Start and Restart turn it back on.
+- Stop kills the app's process tree and turns it off until the next core
+  start, or for good while Start with Boite is off. Start and Restart turn it
+  back on.
 - Uninstall kills it first. An update kills it before the new executable
   replaces the old one, and starts the new one after.
 - Core shutdown kills it.
 
-Whether the app is on is kept in `<dataDir>/plugins/<id>/app.json`, across core
-restarts and updates. A first install turns it on.
+Start with Boite is the switch under the app's state on its row
+(`plugins.autostart {id, autostart}`). It decides only what the next core
+start does: nothing running starts or stops when it changes.
+
+Both choices are kept in `<dataDir>/plugins/<id>/app.json`
+(`{"enabled": true, "autostart": true}`), across core restarts and updates. A
+first install turns both on. A file written before `autostart` existed starts
+with the core when it was left on, as that core did.
 
 A Linux core with neither `DISPLAY` nor `WAYLAND_DISPLAY` set has no desktop to
 show a window on: it does not start the app, and the row says so.
@@ -218,9 +225,12 @@ and Restart. `plugins.app` answers with the plugin's state, and every change is
 announced by `plugins.updated`. The state is `PluginState.app`:
 
 ```ts
-{ enabled: boolean; status: 'stopped' | 'starting' | 'running' | 'crashed' | 'unavailable';
+{ enabled: boolean; autostart: boolean; status: 'stopped' | 'starting' | 'running' | 'crashed' | 'unavailable';
   pid: number | null; exitCode: number | null; error: string | null; startedAt: number | null }
 ```
+
+A core older than `plugins.autostart` sends no `autostart`, and the row shows
+no switch.
 
 ### Showing Boite
 
@@ -295,8 +305,9 @@ URLs.
 
 The core runs it:
 
-- when the core starts, after its install or an update, and on Start or
-  Restart (`plugins.gateway {id, action: "start" | "stop" | "restart"}`);
+- when the core starts while Start with Boite is on, after its install or an
+  update while it is on, and on Start or Restart
+  (`plugins.gateway {id, action: "start" | "stop" | "restart"}`);
 - from its data directory, through the core's process launcher as
   `plugin:<id>:gateway`, with no window and no `DISPLAY` requirement;
 - with the core's environment minus every agent variable, `BOITE_TOKEN` and
@@ -307,8 +318,9 @@ Its stdout and stderr go to the core log line by line (`source: plugins`,
 `/health` answers, within 30 seconds; one that stays silent is stopped and
 treated as a crash. Crashes, Stop, uninstall and core shutdown follow the
 [desktop apps](#desktop-apps)' rules: 2, 10 and 30 seconds, then `crashed`
-after a fourth exit within five minutes; whether it is on is kept in
-`<dataDir>/plugins/<id>/gateway.json`.
+after a fourth exit within five minutes; whether it is on and whether it
+starts with Boite are kept in `<dataDir>/plugins/<id>/gateway.json`, and the
+same switch sits on its row.
 
 An update waits until `in_flight` reads 0 (five minutes at most, then it goes
 ahead), stops the gateway, keeps the old executable as `<executable>.previous`
@@ -324,7 +336,7 @@ it down with the core.
 `PluginState.gateway` carries its state:
 
 ```ts
-{ enabled: boolean; status: 'stopped' | 'starting' | 'running' | 'updating' | 'crashed';
+{ enabled: boolean; autostart: boolean; status: 'stopped' | 'starting' | 'running' | 'updating' | 'crashed';
   port: number; version: string | null; pid: number | null; exitCode: number | null;
   error: string | null; startedAt: number | null; dataDir: string }
 ```
@@ -366,8 +378,8 @@ then records the install:
 <dataDir>/plugins/seat-pool/
   seat-pool.exe        the executable (no extension off Windows)
   installed.json       what was installed, from where, when
-  app.json             a desktop app only: whether it is on, once changed
-  gateway.json         a gateway only: whether it is on, once changed
+  app.json             a desktop app only: whether it is on and starts with Boite, once changed
+  gateway.json         a gateway only: whether it is on and starts with Boite, once changed
 ```
 
 ```json

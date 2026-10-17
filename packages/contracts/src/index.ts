@@ -671,6 +671,12 @@ export interface PluginGatewayState {
   /** Whether the core runs it. True after a first install, kept across restarts and updates. */
   enabled: boolean;
   /**
+   * Whether the core starts it when the core starts, whatever a stop left
+   * `enabled` at. True after a first install. Absent from cores older than
+   * `plugins.autostart`.
+   */
+  autostart?: boolean;
+  /**
    * `starting`: launched and not answering `/health` yet, or waiting to start
    * again after a crash. `updating`: a newer release waits for the requests in
    * flight to end. `crashed`: it failed four times in five minutes; it waits
@@ -694,6 +700,12 @@ export interface PluginGatewayState {
 export interface PluginAppState {
   /** Whether the core starts the app. True after a first install, kept across restarts and updates. */
   enabled: boolean;
+  /**
+   * Whether the core starts the app when the core starts, whatever a stop
+   * left `enabled` at. True after a first install. Absent from cores older
+   * than `plugins.autostart`.
+   */
+  autostart?: boolean;
   /**
    * `stopped`: not running, after a stop, a clean exit or before the first start.
    * `crashed`: it failed four times in five minutes; it waits for the owner.
@@ -4082,8 +4094,15 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * disables and kills it, `restart` kills and launches it again.
    */
   'plugins.app': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
-  /** Owner-only. Start, stop or restart a gateway plugin; stop keeps it off across core starts until a start. */
+  /** Owner-only. Start, stop or restart a gateway plugin. */
   'plugins.gateway': { params: { id: string; action: 'start' | 'stop' | 'restart' }; result: PluginState };
+  /**
+   * Owner-only. Whether the plugin's desktop app and gateway start when the
+   * core starts. It changes nothing running now; a stop no longer keeps a
+   * plugin off across core starts once this is on. A client offers it only
+   * when the plugin's state carries `autostart`.
+   */
+  'plugins.autostart': { params: { id: string; autostart: boolean }; result: PluginState };
   /**
    * Reads the update source of one recommended plugin, or of every one that
    * names a source, now. Answers once the reads finish; each changed state is

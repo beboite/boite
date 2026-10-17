@@ -64,9 +64,9 @@ export class FakePlugins {
       this.#pluginRuns.set(plugin.id, (this.#pluginRuns.get(plugin.id) ?? 0) + 1);
       if (plugin.origin === 'url') return this.#dropPlugin(plugin);
       // The core kills the app and deletes its directory, `app.json` with it: what is left is a fresh, enabled app.
-      const app: PluginAppState | null = plugin.app === null ? null : { enabled: true, status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null };
+      const app: PluginAppState | null = plugin.app === null ? null : { enabled: true, autostart: true, status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null };
       // A gateway's data directory stays; its program and `gateway.json` go.
-      const gateway = plugin.gateway == null ? null : { ...plugin.gateway, enabled: true, status: 'stopped' as const, pid: null, version: null, startedAt: null, error: null };
+      const gateway = plugin.gateway == null ? null : { ...plugin.gateway, enabled: true, autostart: true, status: 'stopped' as const, pid: null, version: null, startedAt: null, error: null };
       Object.assign(plugin, { status: 'not-installed', version: null, progress: 0, error: null, rejected: null, app, gateway });
       this.host.emit('plugins.updated', structuredClone(plugin));
       return structuredClone(plugin);
@@ -105,7 +105,16 @@ export class FakePlugins {
       if (plugin.gateway == null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${plugin.id} provides no gateway.` });
       plugin.gateway = params.action === 'stop'
         ? { ...plugin.gateway, enabled: false, status: 'stopped', pid: null, version: null, startedAt: null, error: null }
-        : runningGateway(plugin.version, 4000 + this.host.nextId(), this.host.now());
+        : { ...runningGateway(plugin.version, 4000 + this.host.nextId(), this.host.now()), autostart: plugin.gateway.autostart };
+      this.host.emit('plugins.updated', structuredClone(plugin));
+      return structuredClone(plugin);
+    },
+    'plugins.autostart': (params) => {
+      const plugin = this.#requirePlugin(params.id);
+      if (plugin.status !== 'installed') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `Install ${plugin.id} first.` });
+      if (plugin.app === null && plugin.gateway == null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${plugin.id} provides no desktop app or gateway to start with Boite.` });
+      if (plugin.app !== null) plugin.app = { ...plugin.app, autostart: params.autostart };
+      if (plugin.gateway != null) plugin.gateway = { ...plugin.gateway, autostart: params.autostart };
       this.host.emit('plugins.updated', structuredClone(plugin));
       return structuredClone(plugin);
     },
@@ -142,7 +151,7 @@ export class FakePlugins {
 
   /** A desktop app the fake has just started, as the core reports it. */
   #running(app: PluginAppState | null): PluginAppState {
-    return { enabled: true, status: 'running', pid: 4000 + this.host.nextId(), exitCode: app?.exitCode ?? null, error: null, startedAt: this.host.now() };
+    return { enabled: true, autostart: app?.autostart ?? true, status: 'running', pid: 4000 + this.host.nextId(), exitCode: app?.exitCode ?? null, error: null, startedAt: this.host.now() };
   }
 
   #plugins: PluginState[] = fakePlugins();
@@ -251,7 +260,7 @@ export class FakePlugins {
     const existing = this.#plugins.find((entry) => entry.id === manifest.id);
     const pools = manifest.provides.accountPools?.providers ?? [];
     const app: PluginAppState | null = manifest.provides.desktopApp === undefined ? null
-      : existing?.app ?? { enabled: true, status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null };
+      : existing?.app ?? { enabled: true, autostart: true, status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null };
     const plugin: PluginState = {
       id: manifest.id, name: manifest.name, origin: 'url', description: manifest.description, homepage: manifest.homepage,
       version: existing?.version ?? null, availableVersion: manifest.version, status: 'installing', progress: 0, error: null,
