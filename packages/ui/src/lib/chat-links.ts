@@ -51,7 +51,31 @@ export function fileLike(text: string): boolean {
   return /^(?:\.{0,2}[\\/]|[a-z]:[\\/]|file:\/\/)/i.test(text) || /^[\w@.-]+[\\/][^\s]+$/.test(text) || /^[\w.-]+\.[a-z\d]{1,8}(?::\d+)?$/i.test(text);
 }
 
+/**
+ * A thread as `boite agents` names it: `thr_x`, `<machine>/thr_x` or
+ * `<core-id>/thr_x`.
+ */
+const THREAD_ID = 'thr_[0-9a-z]{12,32}';
+const THREAD_TOKEN = String.raw`(?:[\w.-]+\/)?${THREAD_ID}`;
+const THREAD_ADDRESS = new RegExp(String.raw`^(?:([\w.-]+)\/)?(${THREAD_ID})$`);
+
+export function threadAddress(text: string): { where: string | null; threadId: string } | null {
+  const match = THREAD_ADDRESS.exec(text);
+  return match ? { where: match[1] ?? null, threadId: match[2]! } : null;
+}
+
+export function threadLinkHtml(label: string, address: string): string {
+  return `<a href="#thread" data-thread-address="${escapeHtml(address)}">${escapeHtml(label)}</a>`;
+}
+
+/** A code span's link: a thread first, since `machine/thr_x` also reads as a relative path. */
+export function codeLinkHtml(value: string): string | null {
+  if (threadAddress(value)) return threadLinkHtml(value, value);
+  return fileLike(value) ? linkHtml(value, value) : null;
+}
+
 export function linkHtml(label: string, raw: string): string {
+  if (threadAddress(raw)) return threadLinkHtml(label, raw);
   const link = chatLink(raw);
   if (!link) return escapeHtml(label);
   const title = escapeHtml(label);
@@ -61,8 +85,13 @@ export function linkHtml(label: string, raw: string): string {
 
 const ABSOLUTE_PATH = String.raw`(?:[A-Za-z]:[\\/]|\.\.?[\\/]|\/)[^\s<>]+`;
 const RELATIVE_PATH = String.raw`((?:[\w@.-]+[\\/])+[\w@.-]+\.[\w.-]+(?::\d+)?)`;
-/** The tokens other than `[label](destination)`: group 1 an autolink's address, group 2 a relative path. */
-const OTHER_TOKENS = String.raw`<((?:https?:\/\/|mailto:)[^>\s]+)>|https?:\/\/[^\s<>]+|` + `${RELATIVE_PATH}|${ABSOLUTE_PATH}`;
+/**
+ * The tokens other than `[label](destination)`: group 1 an autolink's address,
+ * group 2 a relative path, group 3 a thread. The thread comes before the
+ * absolute path, which would otherwise take `/thr_x` out of `machine/thr_x`,
+ * and is no thread where a path goes on around it (`thr_x.ts`, `src\thr_x`).
+ */
+const OTHER_TOKENS = String.raw`<((?:https?:\/\/|mailto:)[^>\s]+)>|https?:\/\/[^\s<>]+|` + `${RELATIVE_PATH}|(${THREAD_TOKEN})(?![\\w/\\\\-]|\\.\\w)|${ABSOLUTE_PATH}`;
 
 const SPACE = /\s/;
 
@@ -192,7 +221,7 @@ export class BracketLinks {
   }
 }
 
-type LinkToken = { index: number; text: string; label?: string; target?: string; auto?: string };
+type LinkToken = { index: number; text: string; label?: string; target?: string; auto?: string; thread?: boolean };
 
 /**
  * The link tokens of `text`, in order: the leftmost of the next bracket link
@@ -212,6 +241,11 @@ function* linkTokens(text: string): Generator<LinkToken> {
   const nextOther = (from: number): LinkToken | null => {
     tokens.lastIndex = from;
     for (let match = tokens.exec(text); match; match = tokens.exec(text)) {
+      if (match[3] !== undefined) {
+        if (match.index === 0 || !/[\w:/\\.-]/.test(text[match.index - 1]!)) return { index: match.index, text: match[0], thread: true };
+        tokens.lastIndex = match.index + 1;
+        continue;
+      }
       if (match[2] === undefined || match.index === 0 || !/[\w:]/.test(text[match.index - 1]!)) return { index: match.index, text: match[0], auto: match[1] };
       absoluteAt.lastIndex = match.index;
       const absolute = absoluteAt.exec(text);
@@ -240,6 +274,11 @@ function* linkTokens(text: string): Generator<LinkToken> {
 export function richInline(text: string, format: (text: string) => string): string {
   let out = '', start = 0;
   for (const token of linkTokens(text)) {
+    if (token.thread) {
+      out += format(text.slice(start, token.index)) + threadLinkHtml(token.text, token.text);
+      start = token.index + token.text.length;
+      continue;
+    }
     let raw = token.target ?? token.auto ?? token.text;
     let suffix = '';
     if (token.label === undefined && token.auto === undefined) {

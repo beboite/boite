@@ -12,6 +12,7 @@
   import DiffView from './DiffView.svelte';
   import DocumentView from './DocumentView.svelte';
   import { chatPrefs } from '../lib/chat-prefs.svelte';
+  import type { Store } from '../lib/store.svelte';
 
   /*
    * One tool call as a plain line of the timeline: what it did
@@ -35,7 +36,9 @@
     startedAt = null,
     finishedAt = null,
     background = false,
-    nested = false
+    nested = false,
+    store,
+    threadId
   }: {
     name: string;
     input: unknown;
@@ -58,6 +61,9 @@
     background?: boolean;
     /** Inside an expanded group, show the individual command rather than another summary. */
     nested?: boolean;
+    /** Where a thread link in a document starts from. */
+    store?: Store;
+    threadId?: string;
   } = $props();
 
   /** Shown from one second on: a quick call needs no clock. */
@@ -219,7 +225,7 @@
             {#if others.length > 0}
               <div class="documents">
                 {#each others as doc, index (index)}
-                  <DocumentView {doc} />
+                  <DocumentView {doc} {store} {threadId} />
                 {/each}
               </div>
             {/if}
@@ -248,7 +254,7 @@
               <div class="section-label">{strings.chat.toolDocuments}</div>
               <div class="documents">
                 {#each documents as doc, index (index)}
-                  <DocumentView {doc} />
+                  <DocumentView {doc} {store} {threadId} />
                 {/each}
               </div>
             {/if}

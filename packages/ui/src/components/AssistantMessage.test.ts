@@ -1,8 +1,9 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { Message } from '@boite/contracts';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
+import { workspace } from '../lib/workspace.svelte';
 import AssistantMessage from './AssistantMessage.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
@@ -146,4 +147,32 @@ test('hidden protocol text reserves no row and gains its row when visible text a
     expect(document.querySelectorAll('.parts > .part')).toHaveLength(3);
     expect(document.querySelector('[data-kind=text]')?.textContent).toContain('Found the file.');
   } finally { store.detach(); client.close(); }
+});
+
+test('a thread link in reasoning or a tool document starts from the machine and thread of the message, not the page hash', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client);
+  const opened = vi.spyOn(workspace, 'openThreadLink').mockResolvedValue();
+  try {
+    await store.connect(); await store.open('t-trace');
+    const message = store.openThread!.messages.at(-1)!;
+    message.parts = [
+      { type: 'tool', toolId: 'plan', name: 'Plan', input: {}, output: 'ok', status: 'done', documents: [{ kind: 'markdown', title: null, text: 'Ask `boite/thr_tkw9n9qt4100rvq2jmg1`' }] },
+      { type: 'text', text: 'Between.' },
+      { type: 'thinking', text: 'Ask `thr_tkw9n9qt4100rvq2jmg2` first', startedAt: 0, finishedAt: 2000 },
+    ];
+    mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: message.threadId, message, signedOut: null, showModel: false } });
+    flushSync();
+    document.querySelector<HTMLButtonElement>('[data-testid=tool-toggle]')!.click();
+    document.querySelector<HTMLButtonElement>('[data-testid=thinking-toggle]')!.click();
+    flushSync();
+    const links = document.querySelectorAll<HTMLAnchorElement>('[data-thread-address]');
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      link.dispatchEvent(click);
+      expect(click.defaultPrevented).toBe(true);
+    }
+    expect(opened.mock.calls).toEqual([[store, message.threadId, 'boite', 'thr_tkw9n9qt4100rvq2jmg1'], [store, message.threadId, null, 'thr_tkw9n9qt4100rvq2jmg2']]);
+  } finally { opened.mockRestore(); store.detach(); client.close(); }
 });
