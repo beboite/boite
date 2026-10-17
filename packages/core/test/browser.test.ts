@@ -80,6 +80,16 @@ real('a page nobody drives or watches sleeps, and meets the next command or view
   const watched = await evaluate('gaps()') as [number, number];
   expect(watched[0]).toBeLessThan(500);
   expect(watched[1]).toBeLessThan(500);
+  // Once the viewer leaves it sleeps again; a client that shows the tab's own
+  // page asks for no frames, and one `browser.remoteWatch` keeps it awake.
+  // The screencast stops up to twice its idle time after the last frame.
+  await Bun.sleep(7500);
+  expect(await owner.call('browser.remoteWatch', { threadId, tabId: tabId! })).toEqual({ ok: true });
+  expect((await evaluate('gaps()') as [number, number])[0]).toBeGreaterThan(800);
+  await Bun.sleep(1500);
+  const shown = await evaluate('gaps()') as [number, number];
+  expect(shown[0]).toBeLessThan(500);
+  expect(shown[1]).toBeLessThan(500);
 }, 150_000);
 
 real('boite browse opens its page as a new tab of the conversation browser, not in a panel of its own', async () => {

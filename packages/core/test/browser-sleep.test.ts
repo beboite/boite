@@ -27,7 +27,7 @@ const until = async (check: () => boolean) => { for (let i = 0; i < 200 && !chec
 // command runs, never the other way round.
 test('a use that arrives during a freeze runs after the page is active again', async () => {
   const { tab, calls, holdNext, release, held } = fakeTab();
-  const sleep = new TabSleep<Sleeper>(() => false, 20);
+  const sleep = new TabSleep<Sleeper>(() => false, () => false, 20);
   holdNext('Page.setWebLifecycleState');
   sleep.schedule(tab);
   await until(() => held('Page.setWebLifecycleState'));
@@ -50,7 +50,7 @@ test('a use that arrives during a freeze runs after the page is active again', a
 test('a tab sleeps only once nothing uses or holds it, and a dropped tab never does', async () => {
   const { tab, calls } = fakeTab();
   let holding = true;
-  const sleep = new TabSleep<Sleeper>(() => holding, 20);
+  const sleep = new TabSleep<Sleeper>(() => holding, () => false, 20);
   // A use that runs longer than the wait keeps the page awake throughout.
   await sleep.use(tab, () => Bun.sleep(60));
   expect(calls).toEqual([]);
@@ -65,4 +65,22 @@ test('a tab sleeps only once nothing uses or holds it, and a dropped tab never d
   await Bun.sleep(60);
   // Woken for that use, and never frozen again once its tab is gone.
   expect(calls.slice(2)).toEqual(['Page.setWebLifecycleState {"state":"active"}', 'Emulation.setFocusEmulationEnabled {"enabled":true}']);
+});
+
+// A turn that runs for half an hour without touching its tab must not keep
+// it awake throughout: the turn holds it only for a while after its last use,
+// and the next command wakes it.
+test('a running turn keeps an unused tab awake for a while only, and its next command wakes it', async () => {
+  const { tab, calls } = fakeTab();
+  const sleep = new TabSleep<Sleeper>(() => false, () => true, 20, 150);
+  await sleep.use(tab, async () => {});
+  await Bun.sleep(100);
+  expect(tab.sleep.asleep).toBe(false);
+  await until(() => tab.sleep.asleep);
+  await sleep.use(tab, async () => { calls.push('command'); });
+  expect(calls.slice(-3)).toEqual(['Page.setWebLifecycleState {"state":"active"}', 'Emulation.setFocusEmulationEnabled {"enabled":true}', 'command']);
+  // The command starts the turn's hold again.
+  await Bun.sleep(100);
+  expect(tab.sleep.asleep).toBe(false);
+  sleep.drop(tab);
 });

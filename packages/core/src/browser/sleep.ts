@@ -5,13 +5,18 @@
  */
 
 /**
- * How long a tab stays awake after the last use, once nothing holds it. An
- * agent's turn holds it, so the wait only covers the gap after the turn ends
- * or the last viewer leaves: a follow-up turn or a viewer coming back within
- * it finds the page as it left it, and an abandoned animation runs at most
- * this long, plus one more wait if a holder was still there at the check.
+ * How long a tab stays awake after the last use, once nothing holds it: a
+ * follow-up turn or a viewer coming back within it finds the page as it left
+ * it, and an abandoned animation runs at most this long, plus one more wait
+ * if a holder was still there at the check.
  */
 export const SLEEP_AFTER_MS = 30_000;
+/**
+ * How long the agent's running turn keeps a tab awake after its last use: a
+ * turn that works elsewhere for half an hour leaves the tab asleep, and its
+ * next command wakes it.
+ */
+export const TURN_HOLD_MS = 5 * 60_000;
 
 /** What the sleep of one tab needs of it: its page's DevTools session. */
 export interface Sleeper {
@@ -24,6 +29,8 @@ export interface SleepState {
   /** Uses running now: a command, a viewer's frame or input. */
   uses: number;
   usedAt: number;
+  /** When a holder was last seen: the wait for sleep runs from the later of this and `usedAt`. */
+  heldAt: number;
   timer?: ReturnType<typeof setTimeout>;
   /** Freezing and waking take turns, so a wake asked during a freeze lands after it. */
   turn: Promise<void>;
@@ -31,7 +38,7 @@ export interface SleepState {
 }
 
 export function sleepState(): SleepState {
-  return { asleep: false, uses: 0, usedAt: Date.now(), turn: Promise.resolve(), dropped: false };
+  return { asleep: false, uses: 0, usedAt: Date.now(), heldAt: 0, turn: Promise.resolve(), dropped: false };
 }
 
 const STEP_MS = 5000;
@@ -39,9 +46,10 @@ const STEP_MS = 5000;
 export class TabSleep<T extends Sleeper> {
   /**
    * `held` says whether something keeps the tab awake without a use running:
-   * a viewer's screencast, a recording, the agent's turn.
+   * a viewer, a recording. `turning` says whether its agent's turn runs, which
+   * keeps it awake only `turnMs` after its last use.
    */
-  constructor(private held: (tab: T) => boolean, public afterMs = SLEEP_AFTER_MS) {}
+  constructor(private held: (tab: T) => boolean, private turning: (tab: T) => boolean = () => false, public afterMs = SLEEP_AFTER_MS, public turnMs = TURN_HOLD_MS) {}
 
   /** Runs `run` on an awake page, and starts the wait for sleep again once it ends. */
   async use<R>(tab: T, run: () => Promise<R>): Promise<R> {
@@ -75,11 +83,12 @@ export class TabSleep<T extends Sleeper> {
     clearTimeout(state.timer);
     if (state.dropped || state.asleep) return;
     // setTimeout fires at once past 2^31 - 1 ms.
-    const left = Math.min(2 ** 31 - 1, Math.max(0, state.usedAt + this.afterMs - Date.now()));
+    const left = Math.min(2 ** 31 - 1, Math.max(0, Math.max(state.usedAt, state.heldAt) + this.afterMs - Date.now()));
     state.timer = setTimeout(() => {
       if (state.dropped || state.asleep) return;
-      if (state.uses > 0 || this.#held(tab)) { state.usedAt = Date.now(); this.schedule(tab); return; }
-      if (Date.now() - state.usedAt < this.afterMs) { this.schedule(tab); return; }
+      // The turn holds from the last use, not from the last check, so a turn that leaves the tab alone lets it sleep.
+      if (state.uses > 0 || this.#held(tab) || this.#turnHolds(tab)) { state.heldAt = Date.now(); this.schedule(tab); return; }
+      if (Date.now() - Math.max(state.usedAt, state.heldAt) < this.afterMs) { this.schedule(tab); return; }
       void this.#sleep(tab);
     }, left);
     (state.timer as { unref?: () => void }).unref?.();
@@ -94,6 +103,12 @@ export class TabSleep<T extends Sleeper> {
     try { return this.held(tab); } catch { return true; }
   }
 
+  #turnHolds(tab: T): boolean {
+    let turning: boolean;
+    try { turning = this.turning(tab); } catch { turning = true; }
+    return turning && Date.now() - tab.sleep.usedAt < this.turnMs;
+  }
+
   /**
    * A focused page is never frozen: focus emulation keeps it shown, and
    * Chromium leaves a shown page running (measured on 2026-10-17).
@@ -101,7 +116,7 @@ export class TabSleep<T extends Sleeper> {
    */
   #sleep(tab: T): Promise<void> {
     return this.#queue(tab, async () => {
-      if (tab.sleep.asleep || tab.sleep.dropped || tab.sleep.uses > 0 || this.#held(tab)) return;
+      if (tab.sleep.asleep || tab.sleep.dropped || tab.sleep.uses > 0 || this.#held(tab) || this.#turnHolds(tab)) return;
       try {
         await tab.page.send('Emulation.setFocusEmulationEnabled', { enabled: false }, STEP_MS);
         await tab.page.send('Page.setWebLifecycleState', { state: 'frozen' }, STEP_MS);

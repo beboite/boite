@@ -940,7 +940,8 @@ M2's agent browser had run 16 hours at 38 % of a core, and on the Windows
 desktop two renderers of the shell used 0.4 and 0.25 of a core with nobody
 looking; a hidden native tab of another conversation ran 30 minutes at 1.5
 cores and grew to 14 GB. A tab of the agent browser now sleeps 30 seconds
-after its last use once no viewer, recording or running turn holds it, and a
+after its last use once no viewer or recording holds it and no running turn
+used it in the last 5 minutes, and a
 hidden native page of the desktop is suspended with its memory level low
 ([the agent's browser](browser.md#a-tab-nobody-uses-sleeps)).
 

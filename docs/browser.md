@@ -134,12 +134,18 @@ therefore sleeps (`browser/sleep.ts`): its page is frozen with
 `Page.setWebLifecycleState`, which stops its timers, its animation frames and
 its tasks. It sleeps once all of these hold for 30 seconds
 (`SLEEP_AFTER_MS`): no agent command or viewer request runs on it, no viewer
-is shown it (a screencast of it runs, or a viewer asked within 3 seconds), no
-recording runs in it, and its conversation has no running turn. The check
-runs again every 30 seconds while something holds the tab. The wait covers the
-gap after a turn ends or the last viewer leaves: a follow-up turn or a viewer
+is shown it, no recording runs in it, and its conversation has no running
+turn that used it in the last 5 minutes (`TURN_HOLD_MS`). A viewer is shown it
+while a screencast of it runs, a viewer asked for a frame within 3 seconds, or
+a client said within 15 seconds that it shows the tab's own page
+(`browser.remoteWatch`, `REMOTE_WATCH_MS`). The desktop app says so every 5
+seconds while its panel shows a tab it hosts and its window is visible: that
+page is the agent's own webview, which asks for no frames. The check runs
+again every 30 seconds while something holds the tab. The wait covers the gap
+after a turn ends or the last viewer leaves: a follow-up turn or a viewer
 coming back within it finds the page as it left it, and an abandoned page runs
-at most a minute.
+at most a minute. A turn that works elsewhere for half an hour lets its tab
+sleep about 5 minutes after it last used it, and its next command wakes it.
 
 Focus emulation keeps a page shown, and Chromium does not freeze a shown page:
 the call answers but the page keeps running. Focus emulation goes off before
@@ -356,9 +362,11 @@ page, a worker, a request and a popup send without `Headless`, with
 profile across a restart, a profile copied in by the owner, an MP4 recording
 read back, a recording discarded at the end of a turn, a page that sleeps
 once nobody uses it and meets the next command and viewer awake and focused,
-and a machine without a browser. `browser-sleep.test.ts` checks, with the page
+one kept awake by `browser.remoteWatch`, and a machine without a browser. `browser-sleep.test.ts` checks, with the page
 stubbed, that a command arriving during a freeze runs after the wake, and that
-a held or closed tab never sleeps. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
+a held or closed tab never sleeps, and that a running turn holds an unused
+tab only 5 minutes. `AgentBrowserSurface.test.ts` checks that the desktop app
+reports a hosted tab it shows, only while its window is visible. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
 `tests/e2e/agent-browser-core.test.ts` runs the whole path on a real core: the
 owner's desktop at 1280 × 900 and a paired phone at 390 × 844 see the cover,
 show the page and tap it, and the tap reaches the page. `browser-remote.test.ts`

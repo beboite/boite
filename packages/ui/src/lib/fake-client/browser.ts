@@ -3,7 +3,7 @@ import { refusal } from './shared';
 import { fakeBrowserScreen, type FakePage } from './browser-screen';
 import type { FakeContext, FakeMethods } from './context';
 
-type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteSelection' | 'browser.remoteStatus' | 'browser.hostAttach' | 'browser.hostDetach' | 'browser.hostReply';
+type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteSelection' | 'browser.remoteStatus' | 'browser.remoteWatch' | 'browser.hostAttach' | 'browser.hostDetach' | 'browser.hostReply';
 
 /** `selected`: the typed text is selected, by a double click or select-all, until the next click or key. */
 interface Tab extends FakePage { tabId: string; profile: string; history: string[]; historyIndex: number; at: number; selected?: boolean }
@@ -151,6 +151,11 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       watching(threadId);
       const tabs = tabsOf(browsers.get(threadId));
       return { live: tabs.length > 0, tabs, available: true };
+    },
+    'browser.remoteWatch': async ({ threadId, tabId }) => {
+      watching(threadId);
+      if (!browsers.get(threadId)?.tabs.some(one => one.tabId === tabId)) throw refusal('that browser tab is closed');
+      return { ok: true };
     },
     'browser.remoteFrame': async ({ threadId, tabId, maxWidth, quality, after }) => {
       watching(threadId);

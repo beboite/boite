@@ -2,7 +2,7 @@
   import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import { AppWindow, EyeOff, Globe, Plus, X } from '@lucide/svelte';
-  import type { AgentBrowserStatus, AgentBrowserTab } from '@boite/contracts';
+  import { REMOTE_WATCH_EVERY_MS, type AgentBrowserStatus, type AgentBrowserTab } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { liveViews, machineName } from '../lib/live-view.svelte';
@@ -32,6 +32,21 @@
   const tabs = $derived(status?.tabs ?? []);
   const live = $derived(!!status?.live && tabs.length > 0);
   const watched = $derived(tabs.find((tab) => tab.tabId === picked) ?? tabs.find((tab) => tab.active) ?? tabs[0] ?? null);
+  // A tab this app hosts shows its own page here, never asking for frames.
+  const native = $derived(here && agentHost.active && !!watched?.view);
+  const nativeTab = $derived(native ? watched?.tabId ?? null : null);
+
+  // The core keeps a tab awake while a viewer watches it (docs/browser.md):
+  // shown natively, the page tells it so while the window is visible.
+  $effect(() => {
+    const client = store.client, tabId = nativeTab, id = threadId;
+    if (!client || !tabId || store.connection !== 'ready') return;
+    const tell = () => { if (document.visibilityState === 'visible') void client.call('browser.remoteWatch', { threadId: id, tabId }).catch(() => {}); };
+    tell();
+    const timer = setInterval(tell, REMOTE_WATCH_EVERY_MS);
+    document.addEventListener('visibilitychange', tell);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tell); };
+  });
 
   function host(url: string): string {
     try { return new URL(url).host || url; } catch { return url; }
@@ -171,7 +186,7 @@
     {:else if watched}
       {#key watched.tabId}
         <!-- This app hosts the tab: its own webview shows here, nothing is streamed. -->
-        {#if here && agentHost.active && watched.view}<AgentNativeView view={watched.view} url={watched.url} />
+        {#if native && watched.view}<AgentNativeView view={watched.view} url={watched.url} />
         {:else}<RemoteBrowser {store} {threadId} tabId={watched.tabId} />{/if}
       {/key}
     {/if}

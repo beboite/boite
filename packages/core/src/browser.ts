@@ -84,7 +84,7 @@ export class AgentBrowser {
   #off: Array<() => void> = [];
   #watching = false;
   /** A tab nobody drives or watches is frozen until its next use (`browser/sleep.ts`). */
-  readonly #sleep = new TabSleep<Tab>(tab => this.#held(tab));
+  readonly #sleep = new TabSleep<Tab>(tab => this.#held(tab), tab => this.#core.journal.runningTurn(tab.threadId) !== null);
 
   constructor(core: Core, private findBrowser = findChromium) {
     this.#core = core;
@@ -104,9 +104,9 @@ export class AgentBrowser {
   get sleepAfterMs(): number { return this.#sleep.afterMs; }
   set sleepAfterMs(ms: number) { this.#sleep.afterMs = ms; }
 
-  /** What keeps a tab awake with no command running: a viewer, a recording, its conversation's running turn. */
+  /** What keeps a tab awake with no command running: a viewer, a recording. Its conversation's running turn does too, for a while (`sleep.ts`). */
   #held(tab: Tab): boolean {
-    return !!tab.recorder?.running || this.#remote.watching(tab.id) || this.#core.journal.runningTurn(tab.threadId) !== null;
+    return !!tab.recorder?.running || this.#remote.watching(tab.id);
   }
 
   /**
@@ -577,6 +577,10 @@ export class AgentBrowser {
 
   remoteFrame(params: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame | RemoteBrowserUnchanged> {
     return this.#remote.remoteFrame(params, connection);
+  }
+
+  remoteWatch(params: RpcParams<'browser.remoteWatch'>, connection: Connection): Promise<{ ok: true }> {
+    return this.#remote.remoteWatch(params, connection);
   }
 
   remoteInput(params: RpcParams<'browser.remoteInput'>, connection: Connection): Promise<{ ok: true }> {

@@ -142,6 +142,12 @@ export interface BrowserRpcMethods {
   'browser.remoteFrame': { params: { threadId: string; tabId?: string } & RemoteFrameOptions; result: RemoteBrowserFrame | RemoteBrowserUnchanged };
   /** Whether the conversation's agent has a browser open on this machine, and its tabs. */
   'browser.remoteStatus': { params: { threadId: string }; result: AgentBrowserStatus };
+  /**
+   * Owner only: this client shows the tab's own page, not its frames (a tab
+   * the desktop app hosts, in its panel), so the tab stays awake for
+   * `REMOTE_WATCH_MS` as if a viewer watched it.
+   */
+  'browser.remoteWatch': { params: { threadId: string; tabId: string }; result: { ok: true } };
   /** Input on the tab a frame showed, from a viewer: never a script. */
   'browser.remoteInput': { params: { threadId: string; frameId: string; input: RemoteBrowserInput }; result: { ok: true } };
   /**

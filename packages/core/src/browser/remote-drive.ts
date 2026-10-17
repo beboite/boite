@@ -1,6 +1,6 @@
 // Validates remote viewers and owns their captures, saved frames and page input.
 import {
-  remoteBrowserInputError, remoteFrameOptionsError, REMOTE_SELECTION_MAX, REMOTE_URL_MAX,
+  remoteBrowserInputError, remoteFrameOptionsError, REMOTE_SELECTION_MAX, REMOTE_URL_MAX, REMOTE_WATCH_MS,
   type AgentBrowserStatus, type RemoteBrowserFrame, type RemoteBrowserSelection, type RemoteBrowserUnchanged, type RpcParams, type ThreadId,
 } from '@boite/contracts';
 import type { Connection } from '../router.ts';
@@ -45,11 +45,14 @@ export class RemoteDrive {
    * a phone on a slow link is never sent the desktop's wider, heavier frames.
    */
   #streams = new Map<string, StreamEntry>();
+  /** Per client and conversation, the tab whose own page it shows and when it last said so (`browser.remoteWatch`). */
+  #shown = new Map<string, { tabId: string; at: number }>();
   constructor(private context: RemoteDriveContext) {}
 
   dropTab(id: string): void {
     for (const viewer of this.#viewers.values()) viewer.frames = viewer.frames.filter(saved => saved.frame.tabId !== id);
     for (const [key, entry] of this.#streams) if (entry.tabId === id) this.#stopStream(key);
+    for (const [key, shown] of this.#shown) if (shown.tabId === id) this.#shown.delete(key);
   }
 
   /** The tab moved to another document, size or color scheme: no viewer is shown what it was before. */
@@ -70,7 +73,20 @@ export class RemoteDrive {
   watching(tabId: string): boolean {
     for (const entry of this.#streams.values()) if (entry.tabId === tabId) return true;
     for (const viewer of this.#viewers.values()) if (viewer.tabId === tabId && Date.now() - viewer.requestedAt < STREAM_IDLE_MS) return true;
+    for (const shown of this.#shown.values()) if (shown.tabId === tabId && Date.now() - shown.at < REMOTE_WATCH_MS) return true;
     return false;
+  }
+
+  /** A client shows the tab's own page: it is woken now and stays awake while the client keeps saying so. */
+  async remoteWatch({ threadId, tabId }: RpcParams<'browser.remoteWatch'>, connection: Connection): Promise<{ ok: true }> {
+    this.#viewer(threadId, connection);
+    const tab = this.context.tabOf(threadId, tabId);
+    const key = `${connection.id}:${threadId}`;
+    for (const [id, shown] of this.#shown) if (Date.now() - shown.at >= REMOTE_WATCH_MS) this.#shown.delete(id);
+    if (this.#shown.size >= 32 && !this.#shown.has(key)) throw refused('too many remote browser viewers');
+    this.#shown.set(key, { tabId: tab.id, at: Date.now() });
+    await this.context.use(tab, async () => {});
+    return { ok: true };
   }
 
   /** Whether a viewer that asked within `withinMs` is shown this screencast. */
