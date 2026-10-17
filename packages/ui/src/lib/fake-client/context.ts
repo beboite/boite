@@ -111,6 +111,8 @@ export interface FakeClientOptions {
   uninstalled?: boolean;
   /** Adds a deterministic active team for visual checks on `?fake=1&team=1`. */
   delegationDemo?: boolean;
+  /** Two parents at work, one whose sub-agents ask a question and a permission, on `?fake=1&subagents=1`. */
+  subagentsDemo?: boolean;
   /** An agent with an entrusted project, a picture, a memory pass and a notice, on `?fake=1&agents=1`. */
   agentsDemo?: boolean;
   /** Two pull request watches on the trace thread, one paused by GitHub's rate limit, on `?fake=1&watch=1`. */

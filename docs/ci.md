@@ -150,12 +150,31 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 595,200 |
-| UI files, excluding `.br` and `.gz` copies | 5,028,000 |
+| UI entry chunk | 598,000 |
+| UI files, excluding `.br` and `.gz` copies | 5,032,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,380,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,391,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-17, PR #566 merged with `origin/main` at `ec52ba98`, which brings
+subagent counts, their questions in the parent and agent-side resume (PR #567),
+measures 597,841 entry bytes, 5,031,574 UI bytes and 4,390,771 core JavaScript
+bytes after fresh `bun run build:ui` and `bun run build:core` on Windows. Each
+PR's growth over `6004522f` is kept; the entry, UI and core limits rise to
+598,000, 5,032,000 and 4,391,000.
+
+On 2026-10-17, subagent counts, their questions in the parent and agent-side
+resume (PR #567) merged with `origin/main` at `6004522f` measure a 596,347-byte
+UI entry chunk, 5,021,711 UI bytes and 4,366,674 core JavaScript bytes with
+`measure()` from `scripts/ci/budgets.ts` after fresh builds on Windows, against
+593,513, 5,016,415 and 4,355,255 for that main on the same machine. The parent
+row's subagent chip, the children's questions and permissions in the parent's
+dock and the reads that keep them add 2,834 entry bytes and 5,296 UI bytes;
+pause provenance, `delegation.resume`, the restart cut that continues children
+and steps, the workflow adoption of a resumed step and one continuation per
+stopped turn add 11,419 core bytes, none of them in `main.js`. The entry, UI
+and core limits rise to 596,500, 5,022,000 and 4,367,000.
 
 On 2026-10-17, opening an untouched conversation's panel on its launcher
 (PR #563) merged with `origin/main` at `acb17c0a` measures 593,610 UI entry

@@ -1,9 +1,8 @@
 import type { ServerWebSocket } from 'bun';
 import type { Channel, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
-import { APP_ORIGIN, FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_CONTENT_POLICY, VIEW_ROUTE, VIEW_SANDBOX } from '@boite/contracts';
+import { APP_ORIGIN, FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_ROUTE } from '@boite/contracts';
 import { timingSafeEqual } from 'node:crypto';
-import { constants, existsSync, statSync } from 'node:fs';
-import { open, type FileHandle } from 'node:fs/promises';
+import { existsSync, statSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { dirname, join, normalize, resolve, sep } from 'node:path';
 import { eventThreadId, type EventPayload } from './bus.ts';
@@ -22,8 +21,7 @@ import { handleFrame } from './server/frame.ts';
 import { authenticateToken } from './server/hello.ts';
 import { FrameQueue } from './server/frame-queue.ts';
 import { Refusals } from './server/refusals.ts';
-import { fdResponse } from './server/file-response.ts';
-import { VIEW_GZIP_SUFFIX } from './views.ts';
+import { ticketedFile, viewPage } from './server/tickets.ts';
 export { ServerConnection } from './server/connection.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
@@ -337,76 +335,6 @@ function mayReadTodos(core: Core, connection: Connection, projectId: string): bo
 }
 
 /**
- * The file a ticket opens: what `files.read` could not put in a JSON frame.
- * The ticket is the whole address, so no request here names a path and no
- * answer says what an unknown one missed. A `Range` is honoured because that
- * is how a video seeks, and nothing is cached because the ticket outlives
- * neither the ten minutes nor the next write to the file.
- */
-async function ticketedFile(core: Core, ticket: string, range: string | null): Promise<Response> {
-  const opened = await core.fileTickets.open(ticket);
-  if (opened === null) return new Response('unknown or expired ticket', { status: 404 });
-  const headers: Record<string, string> = {
-    'content-type': opened.mime,
-    'cache-control': 'no-store',
-    // The type is the one the extension named and nothing the bytes suggest,
-    // and a ticket opened as a page downloads instead of rendering: an agent
-    // picks what the panel opens, so no file of its may run in a window.
-    // Neither header touches an <img> or a <video> loading the same address.
-    'x-content-type-options': 'nosniff',
-    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(opened.name ?? 'download')}`,
-  };
-  return fdResponse(opened.handle, opened.size, range, headers);
-}
-
-/**
- * A published view, opened as a page: the one address of the core where an
- * agent's HTML runs. Only a ticket minted for a view opens here, so a file
- * ticket still only downloads. The sandbox puts the page on an opaque origin,
- * whether a client frames it or someone opens the address: it has no storage,
- * no cookie and no way to the core's socket, and the policy lets it load and
- * call nothing. The snapshot never changes, but its ticket does not outlive
- * ten minutes, so nothing is cached. `publishView` gzipped the snapshot once
- * beside it; a client that reads gzip gets that copy, and a view published
- * before the copy existed is sent as it is.
- */
-async function viewPage(core: Core, ticket: string, acceptEncoding: string | null): Promise<Response> {
-  const opened = await core.fileTickets.open(ticket);
-  if (opened === null || !opened.view) {
-    void opened?.handle.close();
-    return new Response('unknown or expired ticket', { status: 404 });
-  }
-  const headers: Record<string, string> = {
-    'content-type': 'text/html; charset=utf-8',
-    'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff',
-    'referrer-policy': 'no-referrer',
-    'content-security-policy': `sandbox ${VIEW_SANDBOX}; ${VIEW_CONTENT_POLICY}`,
-    vary: 'accept-encoding',
-  };
-  if (acceptedEncodings(acceptEncoding).includes('gzip')) {
-    const compressed = await openViewCopy(`${opened.path}${VIEW_GZIP_SUFFIX}`);
-    if (compressed !== null) {
-      void opened.handle.close();
-      return fdResponse(compressed.handle, compressed.size, null, { ...headers, 'content-encoding': 'gzip' });
-    }
-  }
-  return fdResponse(opened.handle, opened.size, null, headers);
-}
-
-/** The gzipped copy of a view, opened without following a link; null when it is missing or not a file. */
-async function openViewCopy(path: string): Promise<{ handle: FileHandle; size: number } | null> {
-  let handle: FileHandle;
-  try { handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); } catch { return null; }
-  try {
-    const stats = await handle.stat();
-    if (stats.isFile()) return { handle, size: stats.size };
-  } catch { /* Closed below. */ }
-  await handle.close();
-  return null;
-}
-
-/**
  * `core.shutdown` for a caller with no WebSocket: the desktop shell before it
  * hands its files to the installer, the installer itself, and a shell that
  * found an older core than itself. Only the core token opens it, only through
@@ -581,7 +509,7 @@ export function startServer(options: ServerOptions): RunningServer {
 
       if (url.pathname.startsWith(`${VIEW_ROUTE}/`)) {
         if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
-        return viewPage(core, url.pathname.slice(VIEW_ROUTE.length + 1), request.headers.get('accept-encoding'));
+        return viewPage(core, url.pathname.slice(VIEW_ROUTE.length + 1), acceptedEncodings(request.headers.get('accept-encoding')).includes('gzip'));
       }
 
       // What this machine trusts of its own accord: itself, the shell, and the addresses its owner gave it.
@@ -770,7 +698,11 @@ export function startServer(options: ServerOptions): RunningServer {
     // first start after an update there is no kept reading, and a turn resumed
     // before it would be refused for good.
     void core.providers.settle().finally(() => {
-      if (!stopping) core.threads.handoff.resume();
+      if (stopping) return;
+      core.threads.handoff.resume();
+      // The children and steps the handoff cut go on with their conversations.
+      core.delegation.resumeAfterRestart();
+      core.workflows.resumeAfterRestart();
     });
     // Desktop-app plugins the owner left enabled, now that they have an address to reach.
     core.plugins.startApps();
@@ -827,6 +759,11 @@ export function startServer(options: ServerOptions): RunningServer {
       // trace panel reads it.
       name.startsWith('process.');
     const threadId = eventThreadId(payload);
+    // A child's question or permission is also for the windows that have its parent open:
+    // children are no sidebar rows, so the parent is where the user meets them.
+    const parentId = threadId !== null && (name.startsWith('question.') || name.startsWith('permission.'))
+      ? core.journal.getThread(threadId)?.parentThreadId ?? null
+      : null;
     const loadRow = name === 'thread.load' ? loadRowSender(core, payload as RpcEvents['thread.load']) : null;
     // Serialized once per projection, not once per socket.
     const frames: EventFrames = new Map();
@@ -835,7 +772,7 @@ export function startServer(options: ServerOptions): RunningServer {
       if (!mayReceiveEvent(name, connection)) continue;
       if (connection.identity.principal === 'agent' && name !== 'todos.updated' && name !== 'agents.changed' && connection.identity.threadId !== threadId) continue;
       if ((name === 'collaboration.changed' || name === 'delegation.changed' || name === 'workflows.changed') && !connection.subscriptions.has(threadId ?? '')) continue;
-      if (scoped && (threadId === null || !connection.subscriptions.has(threadId))) continue;
+      if (scoped && (threadId === null || !(connection.subscriptions.has(threadId) || (parentId !== null && connection.subscriptions.has(parentId))))) continue;
       // The whole activity, loop history included, is for the clients that have
       // that thread open; an agent socket still gets its own thread's.
       if (name === 'thread.activity' && connection.identity.principal !== 'agent' && (threadId === null || !connection.subscriptions.has(threadId))) continue;

@@ -315,6 +315,7 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   // then each name, description and path, once a session.
   // Then 81 for `[--worktree]` and what it gives: a child on a branch of its own (3869 measured 2026-10-15).
   // Then 75 for `boite pr watch`: a watched PR wakes the agent, so it stops polling CI (3941 measured with both lines, 2026-10-15).
+  // Then 7 for `stop|resume`: the parent continues what a stop or a restart cut (3958 measured 2026-10-17, 3951 before).
   expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3960);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
@@ -1081,4 +1082,50 @@ test('a spawn reads no agent: a speed on a model or profile whose tiers are not 
     // Read and empty is a model without tiers, not an unread one.
     await expect(agent.call('delegation.spawn', { threadId, model: 'twin/plain', speed: 'fast', task: 'No tier', requestId: 'read-plain' })).rejects.toThrow('speed: twin/plain offers no speed tier; leave speed out');
   } finally { agent.close(); }
+});
+
+test('the parent agent resumes its own stop and a Stop once the owner wrote again, never the Settings pause', async () => {
+  const running = scripted(); const { h, owner, threadId, config } = await setup();
+  const cli = parentCli(h, threadId);
+  // A refusal: the agent reads why on stderr, with a failing exit code.
+  const refused = async (args: string[]) => {
+    let err = '';
+    const code = await runCli(args, { out: () => {}, err: s => { err += s; }, env: { BOITE_THREAD_ID: threadId, BOITE_CORE_URL: h.url, BOITE_AGENT_TOKEN: h.core.agents.tokenFor(threadId) }, cwd: h.dataDir });
+    expect(code).not.toBe(0); return err;
+  };
+  const child = JSON.parse(await cli(['delegate', 'spawn', 'worker', 'Write the parser', '--json'])) as DelegatedAgent;
+  await waitFor(() => running.has(child.thread.id));
+  // Its own stop: before, only the owner's Settings lifted the pause it left.
+  expect(await cli(['delegate', 'stop'])).toContain('boite delegate resume continues it');
+  expect(h.core.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'agent' });
+  expect((await cli(['delegate', 'list'])).split('\n')[0]).toStartWith('subagents: paused by you (boite delegate resume)');
+  running.delete(child.thread.id);
+  const resumed = await cli(['delegate', 'resume']);
+  expect(resumed).toContain('The team is no longer paused.');
+  expect(resumed).toContain(`continued: ${child.thread.id}`);
+  await waitFor(() => running.has(child.thread.id));
+  expect(running.get(child.thread.id)!.ctx.prompt).toContain('Continue your task from where your last turn stopped (it ended stopped');
+  // Twice is once: the continuation of that stop already went.
+  expect(await cli(['delegate', 'resume'])).toContain('No stopped subagent to continue.');
+
+  // The owner's Stop holds until the owner writes again.
+  await owner.call('turns.stop', { threadId });
+  await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle');
+  expect(h.core.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'stop' });
+  expect(await refused(['delegate', 'resume'])).toContain('once they write to it again');
+  running.delete(child.thread.id);
+  await owner.call('turns.start', { threadId, prompt: 'Go on with the parser' });
+  expect(await cli(['delegate', 'resume', child.thread.id])).toContain(`continued: ${child.thread.id}`);
+  await waitFor(() => running.has(child.thread.id));
+  running.get(threadId)!.finish();
+  await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+
+  // The Settings switch is the owner's alone, whatever the owner writes after it.
+  await owner.call('delegation.configure', { threadId, config: { ...config, paused: true } });
+  expect(h.core.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'owner' });
+  await owner.call('turns.start', { threadId, prompt: 'Still there?' });
+  expect(await refused(['delegate', 'resume'])).toContain('Subagents > Settings');
+  expect(await refused(['delegate', 'spawn', 'worker', 'More'])).toContain('only they resume them');
+  expect((await owner.call('delegation.resume', { threadId })).unpaused).toBe(true);
+  expect(h.core.delegation.config(threadId).pausedBy).toBeUndefined();
 });

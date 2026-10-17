@@ -112,7 +112,7 @@ export class ResidentAgents {
     }
     for(const thread of this.core.journal.listThreads()){
       const owner=this.ownerOf(thread.id);if(!owner||!thread.parentThreadId)continue;
-      if(!this.allowed(owner,thread,true)||this.records.get('profile',owner).status!=='active')this.core.delegation.stop(thread.id);
+      if(!this.allowed(owner,thread,true)||this.records.get('profile',owner).status!=='active')this.core.delegation.stop(thread.id,undefined,'owner');
     }
   }
   /** Where brains live: the folder the owner chose, else the core's data directory. */

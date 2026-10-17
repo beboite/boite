@@ -21,7 +21,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // Follow and steer an owner-enabled team from the phone, without changing routes or limits.
   // Bounded child results and event-driven waits expose the same family read scope as delegation.get.
   'delegation.get', 'delegation.result', 'delegation.wait', 'delegation.send', 'delegation.stop',
-  // Follow a workflow, pause or stop it; resume and retry spend budget and stay the owner's (checked in workflows.control).
+  // Follow a workflow, pause or stop it; resume and retry spend budget and are refused to a phone (checked in workflows.control).
   'workflows.list', 'workflows.get', 'workflows.control', 'workflows.templates.list',
   // Coordination is visible with the conversation; only the owner enables it.
   'collaboration.get',

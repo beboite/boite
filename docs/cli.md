@@ -336,6 +336,7 @@ boite delegate send <thread-id> <text>
 boite delegate wait [thread-id] [--timeout <s>]
 boite delegate result <thread-id> <turn-id> [offset]
 boite delegate stop [thread-id]
+boite delegate resume [thread-id]
 boite workflow help|check|run|list|show|extend|pause|resume|stop|retry
 boite workflow output|templates|save|start
 boite help
@@ -569,7 +570,11 @@ child has none, whatever the parent runs on. Tiers come from `boite delegate mod
 a spawn naming a speed on a model or profile on an agent-owned list not read yet is
 refused and says to list the delegation models and spawn again. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;
-only the owner can change profiles or resume a paused team.
+`delegate resume` lifts that pause, a crash's, or the owner's Stop once the
+owner wrote again, continues the children whose last turn stopped, or only the
+one named, and resumes the workflow runs a pause held
+([delegation](delegation.md#stop-pause-and-resume)). Only the owner changes
+profiles or lifts the pause set in Subagents > Settings.
 [Workflows](workflows.md) run a JSON plan of such children: `workflow help`
 prints the whole format, `workflow run` starts it and opens it in the panel,
 and the results come back as one message when the run ends.

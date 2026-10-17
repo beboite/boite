@@ -3513,9 +3513,21 @@ export interface DelegationProfile {
   model: string;
   effort: string | null;
 }
+/**
+ * Who paused a team or a workflow run, which decides who may lift the pause.
+ * `owner`: Subagents > Settings, or a run paused from its panel or a phone.
+ * `stop`: the owner's Stop on the conversation. `agent`: the conversation's
+ * own agent. `restart`: the core restarted over the work. The agent lifts its
+ * own and a restart's at any time, a Stop or a paused run once the owner wrote
+ * to the conversation after it, and never the Settings switch.
+ */
+export type PauseOrigin = 'owner' | 'stop' | 'agent' | 'restart';
 export interface DelegationConfig {
   enabled: boolean;
   paused: boolean;
+  /** Set by the core while paused; a pause saved before it was recorded reads as the owner's. Ignored in `delegation.configure`. */
+  pausedBy?: PauseOrigin;
+  pausedAt?: Timestamp;
   profiles: DelegationProfile[];
   /**
    * The agent may start a child on any installed model it can run, with any
@@ -3523,6 +3535,12 @@ export interface DelegationConfig {
    * model and the profiles. Missing on older cores and saved configs: on.
    */
   anyModel?: boolean;
+}
+/** What `delegation.resume` did: whether the pause lifted, which children got a continuation, which runs resumed. */
+export interface DelegationResumed {
+  unpaused: boolean;
+  agents: ThreadId[];
+  runs: string[];
 }
 /**
  * On from the first turn: a conversation delegates to its own model, or to
@@ -3958,6 +3976,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
   'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };
+  /**
+   * Lifts the team's pause when the caller may (`PauseOrigin`), hands over the
+   * mail it held and sends each stopped or failed child, or only `agentId`, a
+   * continuation. Without `agentId` it also resumes the root's paused runs the
+   * caller may resume. Refused with the reason when the pause stays.
+   */
+  'delegation.resume': { params: { threadId: ThreadId; agentId?: ThreadId }; result: DelegationResumed };
   'delegation.result': { params: { threadId: ThreadId; agentId: ThreadId; turnId: TurnId; offset?: number; limit?: number }; result: DelegationResultPage };
   'delegation.wait': { params: { threadId: ThreadId; agentId?: ThreadId; timeoutMs?: number }; result: DelegationWaitResult };
   'brain.status': { params: Record<string, never>; result: BrainStatus };
