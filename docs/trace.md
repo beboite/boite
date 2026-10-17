@@ -181,6 +181,13 @@ about a thread also names its agent, `providerId`, `model` and
 `[thr_child claude/claude-opus-5-5 <thr_parent]` on every line. Turn records
 carry the queue wait, the duration, the token counts and the effort; process
 records the program's file name, pid, exit code, CPU time and peak memory.
+A start waits up to 2 seconds for its exit before it is written. A process
+that exits cleanly within that time gets no record of its own: its turn's
+`process.batch` record, written every 10 seconds, counts those processes by
+program with their CPU time (`3 short processes ran: bash.exe 2, sed.exe 1`).
+A crash (a signal or a Windows status code) keeps both records. On 2026-10-17,
+20 agents ran 90 processes a second, which filled the eight core files in four
+minutes.
 
 The sink redacts configured credentials and recognized sensitive fields before
 bounding messages to 4,096 characters, metadata to 200 and `data` strings to
