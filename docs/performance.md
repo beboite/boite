@@ -909,17 +909,21 @@ needed:
   them. `saveModels` now writes at most once a second, the last state, and on
   `pagehide`; `restoreModels` compares the lists field by field (`sameJson`).
   A `thread.load` sample, one per working thread at each load report, found its
-  row with `Array.find` through the store's proxy; `Threads.rowOf` reads an id
-  index rebuilt only when the list is replaced or grows.
+  row with `Array.find` through the store's proxy; `Threads.rowOf` reads the
+  row's position from an id index and checks the id there, so a row replaced
+  in place is still found, and builds the index again when the list is
+  replaced, grows or moves.
 - A composer tile drew its picture as a `data:` URL, the whole picture decoded
   for a 56 by 42 tile, with a multi-megabyte string in the DOM.
   `lib/attachment-previews.svelte.ts` makes one WebP thumbnail at twice the
   tile's size when the picture is attached, and the enlarged preview draws the
   bytes through an object URL; each URL is revoked when its picture leaves the
   prompt. What is sent does not change.
-- A hidden terminal kept its xterm and its WebGL context. It now gives the
-  context back as it leaves the page, and the whole xterm after five minutes
-  hidden ([terminal](terminal.md#the-screen)).
+- A hidden terminal kept its xterm and its WebGL context. It now loses the
+  context through `WEBGL_lose_context` as it leaves the page (xterm's addon
+  only removes its canvas, which holds the context until a collection), and
+  drops the whole xterm after five minutes hidden
+  ([terminal](terminal.md#the-screen)).
 - Every row of a windowed list had its own `ResizeObserver`, and every
   threshold an `IntersectionObserver` crossed read the list's place again. The
   rows of a list share one observer, and those notifications read the layout
@@ -945,10 +949,21 @@ after 120 s:
 | JS heap, MiB | 9.9 to 14.5 | 11.2 to 14.6 |
 
 The long tasks are the page's load, which this change does not touch, and the
-heap stays within run-to-run noise. With five terminals opened then hidden
-(`--only "hidden terminals"`, Chrome's GPU rasterizer so xterm draws on
-WebGL), the base held 5 WebGL contexts, after 0; after `--wait 310` the heap
-read 10.2 MiB on the base and 9.9 MiB after, the xterms gone.
+heap stays within run-to-run noise.
+
+With five terminals opened then hidden, `bun bench/ui-at-rest.ts --only
+"hidden terminals"` (2026-10-18, xterm on WebGL, the base being `origin/main`
+at `b611c01f`) counts the contexts still live, neither lost nor collected,
+before the window's two forced collections and after them:
+
+| Run | Base | After |
+| --- | --- | --- |
+| `--runs 2`, window 1 s after hiding | 5 live, then 5; heap 12.5 and 16.4 MiB | 0 live, then 0; heap 10.2 and 10.1 MiB |
+| `--wait 310`, window 310 s after hiding | 5 live, then 5; heap 12.9 MiB | 0 live, then 0; heap 12.5 MiB |
+
+The base keeps every hidden screen's context; after, each is lost as its
+screen leaves the page. Past five minutes the xterms are gone too, which
+moves the heap by less than its run-to-run spread.
 
 `bun bench/ui-frames.ts --only "<scenario>" --runs 3`, 2026-10-17, headless
 Chrome at 1280 by 890:

@@ -171,6 +171,7 @@ export class TerminalSession {
   #fit: FitAddon | null = null;
   #search: SearchAddon | null = null;
   #webgl: { dispose(): void } | null = null;
+  #webglLost: { dispose(): void } | null = null;
   #WebglAddon: (new () => { dispose(): void; onContextLoss: (listener: () => void) => { dispose(): void } }) | null = null;
   #host: HTMLElement | null = null;
   #onexit: TerminalMount['onexit'];
@@ -635,10 +636,26 @@ export class TerminalSession {
     };
   }
 
-  /** The WebGL context goes with the screen out of the page; `gpu` still says how it draws when shown. */
+  /**
+   * The WebGL context goes with the screen out of the page; `gpu` still says how
+   * it draws when shown. The addon only removes its canvas, which would hold the
+   * context until a collection, so the context is lost here: Chromium keeps
+   * sixteen at most.
+   */
   #dropGpu(): void {
-    this.#webgl?.dispose();
+    const addon = this.#webgl;
+    if (addon === null) return;
+    const canvases = [...this.#term?.element?.querySelectorAll('canvas') ?? []];
+    // Disposed first: this loss is not the browser's, and must not turn the GPU off.
+    this.#webglLost?.dispose();
+    this.#webglLost = null;
+    addon.dispose();
     this.#webgl = null;
+    for (const canvas of canvases) {
+      if (canvas.isConnected) continue;
+      const gl = canvas.getContext('webgl2') as WebGL2RenderingContext | null;
+      gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    }
   }
 
   /** WebGL once the screen is in the page; the DOM renderer when it fails or its context is lost. */
@@ -650,9 +667,10 @@ export class TerminalSession {
       term.loadAddon(addon as never);
       this.#webgl = addon;
       this.gpu = true;
-      const lost = addon.onContextLoss(() => {
+      const lost = this.#webglLost = addon.onContextLoss(() => {
         lost.dispose();
         addon.dispose();
+        if (this.#webglLost === lost) this.#webglLost = null;
         if (this.#webgl === addon) this.#webgl = null;
         this.gpu = false;
         // Do not ask again: a browser out of contexts would lose the next one too.

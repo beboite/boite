@@ -2,6 +2,7 @@ import { expect, test, vi } from 'vitest';
 import type { RpcEventName, RpcEvents, ThreadSummary } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
+import { restoreThread } from './archive';
 
 async function connected() {
   const client = new FakeClient({ delayMs: 0 });
@@ -15,7 +16,7 @@ async function connected() {
   store.attach(client);
   await store.connect();
   const emit = <E extends RpcEventName>(event: E, payload: RpcEvents[E]) => handlers.get(event)!(payload);
-  return { store, emit, close() { store.detach(); client.close(); } };
+  return { store, client, emit, close() { store.detach(); client.close(); } };
 }
 
 const load = (processes: number): RpcEvents['thread.load']['load'] => ({ processes, cpuPercent: processes, memoryBytes: 1_000_000 * processes });
@@ -42,6 +43,34 @@ test('load samples find their row through the id index, after the list is replac
     emit('thread.load', { threadId: 't-index-added', load: load(4) });
     expect(store.threads.some(row => row.id === first.id)).toBe(false);
     expect(store.threads.find(row => row.id === 't-index-added')!.load?.processes).toBe(4);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('a row written in place behind the index, as a restore does, still gets its updates and samples', async () => {
+  const fixture = await connected();
+  try {
+    const { store, client, emit } = fixture;
+    const first = store.threads[0]!;
+    const clone = (id: string, title: string) => ({ ...JSON.parse(JSON.stringify(first)), id, title, archived: false }) as ThreadSummary;
+    emit('thread.load', { threadId: first.id, load: load(1) });
+    // The core announces the restored row, then the archive call answers with its own copy.
+    emit('thread.updated', clone('t-restored', 'Restored'));
+    const call = vi.spyOn(client, 'call').mockImplementation(async (_method, params) => clone((params as { threadId: string }).threadId, 'From the answer') as never);
+    await restoreThread(store, 't-restored');
+    emit('thread.updated', clone('t-restored', 'Renamed later'));
+    emit('thread.load', { threadId: 't-restored', load: load(7) });
+    const held = (id: string) => store.threads.find(row => row.id === id)!;
+    expect(held('t-restored').title).toBe('Renamed later');
+    expect(held('t-restored').load?.processes).toBe(7);
+    expect(store.threads.filter(row => row.id === 't-restored')).toHaveLength(1);
+
+    // A restore the event never announced appends the row behind the index.
+    await restoreThread(store, 't-unannounced');
+    call.mockRestore();
+    emit('thread.load', { threadId: 't-unannounced', load: load(5) });
+    expect(held('t-unannounced').load?.processes).toBe(5);
   } finally {
     fixture.close();
   }

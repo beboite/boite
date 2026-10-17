@@ -150,12 +150,25 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 596,500 |
-| UI files, excluding `.br` and `.gz` copies | 5,037,000 |
+| UI entry chunk | 598,500 |
+| UI files, excluding `.br` and `.gz` copies | 5,158,500 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,391,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the UI runtime change rebased on `origin/main` at `b611c01f`
+measures 598,199 entry bytes and 5,157,985 UI bytes after fresh
+`bun run build:ui` and `bun run build:core` on Windows, against 595,295 and
+5,036,764 for that main on the same machine. The highlight worker
+(`code-highlight.worker.ts`) is 114,882 bytes: Vite builds a worker as a bundle
+of its own, so it carries highlight.js and every grammar the page already loads
+lazily. It is fetched with the first text of 20,000 characters or more, never at
+startup ([panel](panel.md)). Composer thumbnails, the resting second clock,
+the shared list and picture observers, the hidden terminal's release and the
+worker's fallback add the other 6,339 UI bytes, 2,904 of them in the entry.
+The entry and UI limits rise to 598,500 and 5,158,500; the core limit stays at
+4,391,000.
 
 On 2026-10-17, PR #566 merged with `origin/main` at `b6ae659a`, which brings
 the thread links and agent mail direction (PR #562), measures 595,205 entry

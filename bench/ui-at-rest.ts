@@ -18,15 +18,16 @@
  *
  * Each row also gives the long tasks (over 50 ms) the page ran from its load to
  * the end of the window, and the JS heap after two forced collections at the
- * end. `--wait <seconds>` leaves the scenario running that long before the
- * window, for a heap read after minutes rather than seconds.
+ * end. `--wait <seconds>` leaves the scenario running exactly that long before
+ * the window, instead of one second, for a heap read after minutes.
  *
  * "Blurred" scenarios are a window left visible while another application has
  * the focus: the page gets its `blur` and `document.hasFocus()` turns false.
  * "Hidden terminals" opens five shells in the drawer, hides it and adds the
- * WebGL contexts still alive after the collections: those the page made, less
- * those lost or collected. With `--wait 310` it reads them past the five
- * minutes a hidden screen keeps its xterm.
+ * WebGL contexts the page made and those still live, neither lost nor
+ * collected, read before the window's collections and after them. With
+ * `--wait 310` the window opens past the five minutes a hidden screen keeps
+ * its xterm.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -50,23 +51,30 @@ const CSS = option('css');
 const PROFILE = option('profile');
 /** A PNG of each scenario as it was measured. */
 const SHOTS = option('shots');
-/** Seconds the scenario runs before the measured window. */
+/** Seconds between the end of the scenario's setup and the measured window; one when unset. */
 const WAIT = Number(option('wait') ?? 0);
 
 /** Long enough that the answer still streams through the measured window. */
 const PROMPT = 'Streaming bench paragraph with enough words to wrap across the column.\n\n'.repeat(300);
-/** Counts the WebGL contexts the page makes, and those it loses or lets the collector take. */
+/**
+ * Counts the WebGL contexts the page makes and, when read, those still live:
+ * neither lost nor collected. A context whose canvas left the page still counts
+ * against Chromium's sixteen until one of the two happens.
+ */
 const GL_COUNTER = `(() => {
-  const gl = window.__gl = { made: 0, gone: 0 };
-  const collected = new FinalizationRegistry((state) => { if (!state.gone) { state.gone = true; gl.gone++; } });
+  const held = [];
+  const seen = new WeakSet();
+  window.__gl = {
+    made: 0,
+    live: () => held.filter((ref) => { const context = ref.deref(); return context !== undefined && !context.isContextLost(); }).length,
+  };
   const getContext = HTMLCanvasElement.prototype.getContext;
   HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
     const context = getContext.call(this, type, ...rest);
-    if (context && /webgl/.test(type) && !this.__glState) {
-      const state = this.__glState = { gone: false };
-      gl.made++;
-      this.addEventListener('webglcontextlost', () => { if (!state.gone) { state.gone = true; gl.gone++; } });
-      collected.register(context, state);
+    if (context && /webgl/.test(type) && !seen.has(context)) {
+      seen.add(context);
+      held.push(new WeakRef(context));
+      window.__gl.made++;
     }
     return context;
   };
@@ -259,7 +267,8 @@ async function main(): Promise<void> {
       page.listeners.set('Tracing.dataCollected', (params) => {
         for (const event of params['value'] as { name: string; ph: string }[]) if (event.name === 'DrawFrame') frames.push(1);
       });
-      page.listeners.set('Tracing.tracingComplete', () => done());
+      let traced = false;
+      page.listeners.set('Tracing.tracingComplete', () => { traced = true; done(); });
       page.onClose = () => done();
       await page.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { includedCategories: ['disabled-by-default-devtools.timeline.frame'] } });
       const metrics = async () => Object.fromEntries(((await page.send('Performance.getMetrics')) as { metrics: { name: string; value: number }[] }).metrics.map((metric) => [metric.name, metric.value]));
@@ -274,7 +283,8 @@ async function main(): Promise<void> {
       const late = setTimeout(() => done(), 30_000);
       await complete;
       clearTimeout(late);
-      if (frames.length === 0) throw new Error('the trace came back without a frame');
+      // A page with nothing on screen to change draws no frame: only a trace that never ended is a failure.
+      if (!traced) throw new Error('the trace never completed');
       // CPU seconds per wall second, in thousandths of a core.
       // Only processes alive at both ends: the last page's renderer can exit inside the window.
       const share = (type: string) => after.filter((entry) => entry.type === type).reduce((sum, entry) => {
@@ -292,7 +302,7 @@ async function main(): Promise<void> {
     };
 
     console.log(`# ui-at-rest, ${WORKING} working threads, ${SECONDS} s windows, ${new Date().toISOString().slice(0, 10)}, ${compositing}`);
-    console.log(`scenario | renderer ms/s | GPU ms/s | browser ms/s | renderer main ms/s | frames/s | long tasks since load (ms) | JS heap MiB${WAIT ? `, after ${WAIT} s` : ''}`);
+    console.log(`scenario | renderer ms/s | GPU ms/s | browser ms/s | renderer main ms/s | frames/s | long tasks since load (ms) | JS heap MiB${WAIT ? `, window opened ${WAIT} s after the setup` : ''}`);
     for (const [name, scenario] of Object.entries(scenarios)) {
       if (ONLY && !ONLY.includes(name)) continue;
       for (let run = 0; run < RUNS; run++) {
@@ -309,7 +319,8 @@ async function main(): Promise<void> {
             functionDeclaration: `function (css) { const style = document.createElement('style'); style.textContent = css; document.head.append(style); }`,
             arguments: [{ value: CSS }],
           });
-          await Bun.sleep(1000 + WAIT * 1000);
+          await Bun.sleep((WAIT || 1) * 1000);
+          const liveBefore = scenario.terminals ? await page.evaluate<number>('window.__gl.live()') : null;
           if (PROFILE) { await page.send('Profiler.enable'); await page.send('Profiler.setSamplingInterval', { interval: 200 }); await page.send('Profiler.start'); }
           const written = () => page.evaluate<number>(`[...document.querySelectorAll('[data-testid=message]')].at(-1)?.textContent.length ?? 0`);
           const from = await written();
@@ -318,10 +329,10 @@ async function main(): Promise<void> {
           if (SHOTS) await Bun.write(join(SHOTS, `${name.replaceAll(' ', '-')}-${run + 1}.png`), Buffer.from(((await page.send('Page.captureScreenshot', { format: 'png' })) as { data: string }).data, 'base64'));
           if (PROFILE) { const { profile: cpu } = await page.send('Profiler.stop') as { profile: unknown }; await Bun.write(join(PROFILE, `${name.replaceAll(/[ ,]+/g, '-')}.cpuprofile`), JSON.stringify(cpu)); }
           const live = scenario.stream ? await page.evaluate<boolean>(`!!document.querySelector('.prose.live')`) : null;
-          // The collector's callbacks run after it, in tasks of their own.
+          // A WeakRef read in the task that made it holds its target: read them in a later one.
           if (scenario.terminals) await Bun.sleep(500);
-          const gl = scenario.terminals ? await page.evaluate<{ made: number; gone: number }>('window.__gl') : null;
-          console.log(`${name} | ${cost.renderer.toFixed(0)} | ${cost.gpu.toFixed(0)} | ${cost.browser.toFixed(0)} | ${cost.main.toFixed(0)} | ${cost.fps.toFixed(1)} | ${cost.longTasks} (${cost.longMs.toFixed(0)}) | ${cost.heapMiB.toFixed(1)}${scenario.stream ? `, ${grew} characters streamed${live ? '' : ', the answer ended inside the window'}` : ''}${gl ? `, WebGL contexts made ${gl.made}, alive ${gl.made - gl.gone}` : ''}`);
+          const gl = scenario.terminals ? await page.evaluate<{ made: number; live: number }>('({ made: window.__gl.made, live: window.__gl.live() })') : null;
+          console.log(`${name} | ${cost.renderer.toFixed(0)} | ${cost.gpu.toFixed(0)} | ${cost.browser.toFixed(0)} | ${cost.main.toFixed(0)} | ${cost.fps.toFixed(1)} | ${cost.longTasks} (${cost.longMs.toFixed(0)}) | ${cost.heapMiB.toFixed(1)}${scenario.stream ? `, ${grew} characters streamed${live ? '' : ', the answer ended inside the window'}` : ''}${gl ? `, WebGL contexts made ${gl.made}, live ${liveBefore} before the collections and ${gl.live} after` : ''}`);
         } catch (error) {
           console.log(`${name} | failed: ${error instanceof Error ? error.message : String(error)}`);
         }
