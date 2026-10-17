@@ -205,7 +205,7 @@
       <div class="row" data-thread-id={row.thread.id} data-machine-id={row.machine.id}>
         <button class="ghost thread" class:offline={row.machine.store.connection !== 'ready'} data-testid="mobile-thread-{row.thread.id}" onclick={() => { show('chat'); void workspace.select(row.machine.store, row.thread.id); }}>
           <span class="summary"><ThreadHeadline owner={row.machine.store} thread={row.thread} wrap /><span class="detail" title={row.thread.branch ?? undefined}>{[projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
-          <ThreadState thread={row.thread} {now} subagents={row.machine.store.subagents(row.thread.id)} countSubagents away={row.machine.store.connection !== 'ready'} />
+          <ThreadState thread={row.thread} {now} subagents={row.machine.store.subagents(row.thread.id)} away={row.machine.store.connection !== 'ready'} />
         </button>
         <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => rowAction(row.machine.store, row.thread, action, row.machine.id)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
       </div>

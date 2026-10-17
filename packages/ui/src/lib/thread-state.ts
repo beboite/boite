@@ -28,9 +28,20 @@ export function avatarStatus(status: ThreadStatus | undefined): 'running' | 'wai
   return status === 'waiting' ? 'waiting' : status === 'running' || status === 'queued' ? 'running' : 'idle';
 }
 
-/** `delegated`: how many of the thread's delegated agents still have a turn under way. */
-export function threadState(thread: StateFields, delegated = 0): ThreadState | null {
+/** What a parent's delegated agents add to its state: how many are at work, and how many wait on the user. */
+export type Delegated = number | { count: number; asking: number } | null;
+
+/**
+ * `delegated`: how many of the thread's delegated agents still have a turn
+ * under way, or that count with how many of them ask the user. A sub-agent's
+ * question is the user's turn on its parent too, which the sidebar shows when
+ * the child has no row of its own; only the parent's own failure outranks it.
+ */
+export function threadState(thread: StateFields, delegated: Delegated = 0): ThreadState | null {
+  const working = typeof delegated === 'number' ? delegated : delegated?.count ?? 0;
+  const asking = typeof delegated === 'number' ? 0 : delegated?.asking ?? 0;
   if (needsUser(thread)) return 'waiting';
+  if (asking > 0 && thread.status !== 'error') return 'waiting';
   switch (thread.status) {
     case 'running':
       return 'working';
@@ -42,7 +53,7 @@ export function threadState(thread: StateFields, delegated = 0): ThreadState | n
       return 'queued';
     case 'idle': {
       // The parent's turn ended, its work did not: its result comes back with the sub-agents'.
-      if (delegated > 0) return 'delegating';
+      if (working > 0) return 'delegating';
       const wait = thread.backgroundWait;
       if (wait?.state === 'interrupted') return 'interrupted';
       const kinds = thread.backgroundWork?.kinds ?? [];
@@ -62,10 +73,10 @@ const ROLLUP_ORDER: ThreadState[] = ['waiting', 'error', 'interrupted', 'working
 
 /**
  * The most urgent state among a project's threads and how many threads are in
- * it; null when every one is at rest. `delegated` counts a thread's working
- * delegated agents, as `threadState` takes it.
+ * it; null when every one is at rest. `delegated` gives a thread's delegated
+ * agents, as `threadState` takes them.
  */
-export function projectRollup<T extends StateFields>(threads: readonly T[], delegated: (thread: T) => number = () => 0): { kind: ThreadState; count: number } | null {
+export function projectRollup<T extends StateFields>(threads: readonly T[], delegated: (thread: T) => Delegated = () => 0): { kind: ThreadState; count: number } | null {
   const states = threads.map(thread => threadState(thread, delegated(thread)));
   for (const kind of ROLLUP_ORDER) {
     const count = states.filter(state => state === kind).length;

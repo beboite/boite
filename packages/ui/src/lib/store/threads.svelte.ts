@@ -12,7 +12,8 @@ import type {
 } from '@boite/contracts';
 import { ReadingCache, readingCacheBytes } from '../reading-cache';
 import type { ToolPart } from '../tool-groups';
-import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES, MESSAGE_PAGE_MAX, READING_PAGE_BYTES, forTransport } from '@boite/contracts';
+import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES, READING_PAGE_BYTES, forTransport } from '@boite/contracts';
+import { fullMessage } from './full-message';
 import { askPage, ThreadPreloads } from './thread-preload';
 import { lightPage, NewerPages, setMessagesAfter, type ReadingPosition } from './reading-pages.svelte';
 export type { ReadingPosition } from './reading-pages.svelte';
@@ -136,9 +137,10 @@ export class Threads {
   }
 
   #workingChildren = $derived(workingChildren(this.threads));
-  /** The thread's delegated agents still at work, the parent waiting on them; null when none is. */
+  /** The thread's delegated agents still at work or asking the user; null when none is. */
   subagents(threadId: ThreadId): WorkingChildren | null { return this.#workingChildren.get(threadId) ?? null; }
-  moveBlocked(threadId: ThreadId): boolean { return this.#workingChildren.has(threadId); }
+  /** A move waits on the children at work; one that only asks, its turn over, does not hold it. */
+  moveBlocked(threadId: ThreadId): boolean { return (this.#workingChildren.get(threadId)?.count ?? 0) > 0; }
 
   async compact(): Promise<void> {
     const thread = this.openThread;
@@ -394,6 +396,8 @@ export class Threads {
       if (!newest()) return;
       permissionRead?.apply(permissions);
       questionRead?.apply(questions);
+      // Its sub-agents asking the user show in its dock: their requests are read the same way.
+      if (options.requests !== false) this.ctx.requests.readChildren(client, threadId);
       if (thread.unread) {
         await client.call('threads.markRead', { threadId });
         if (!newest()) return;
@@ -562,7 +566,7 @@ export class Threads {
     const loading = read.catch(async (error): Promise<Partial<ToolPart> | null> => {
       if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
       if (this.ctx.client !== client || generation !== this.#toolOutputVisit) return null;
-      const message = await this.#fullMessage(client, threadId, messageId, generation);
+      const message = await fullMessage(client, this.threadSnapshots(threadId), threadId, messageId, () => this.ctx.client === client && generation === this.#toolOutputVisit);
       const part = message?.parts.find(part => part.type === 'tool' && part.toolId === toolId);
       if (part?.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${toolId} is not a tool of message ${messageId}` });
       return part;
@@ -854,7 +858,7 @@ export class Threads {
     if (held?.client === client && held.visit === visit) return held.promise;
     const promise = client.call('messages.attachment', { threadId, messageId, partIndex }).catch(async error => {
       if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
-      const message = await this.#fullMessage(client, threadId, messageId, visit);
+      const message = await fullMessage(client, this.threadSnapshots(threadId), threadId, messageId, () => this.ctx.client === client && visit === this.#toolOutputVisit);
       const part = message?.parts[partIndex];
       if (part?.type !== 'file' && part?.type !== 'image') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `part ${partIndex} is not an attachment of message ${messageId}` });
       return { data: part.data };
@@ -869,25 +873,6 @@ export class Threads {
     }).finally(() => { if (this.#attachments.get(key)?.promise === promise) this.#attachments.delete(key); });
     this.#attachments.set(key, { client, visit, promise });
     return promise;
-  }
-
-  /** Older cores expose full parts only through history pages. */
-  async #fullMessage(client: NonNullable<StoreContext['client']>, threadId: ThreadId, messageId: MessageId, visit: number): Promise<Message | undefined> {
-    if (this.ctx.client !== client || visit !== this.#toolOutputVisit) return undefined;
-    const thread = [...this.threadSnapshots(threadId)].find(held => held.messages.some(message => message.id === messageId));
-    const next = thread?.messages[lastIndexById(thread.messages, messageId) + 1]?.id;
-    const page = next
-      ? await client.call('messages.list', { threadId, before: next, limit: 1 })
-      : await client.call('threads.get', { threadId, after: messageId });
-    let message = page.messages.find(message => message.id === messageId);
-    let before = 'before' in page ? page.before : page.messagesBefore;
-    while (!message && before && this.ctx.client === client && visit === this.#toolOutputVisit) {
-      const older = await client.call('messages.list', { threadId, before, limit: MESSAGE_PAGE_MAX });
-      message = older.messages.find(message => message.id === messageId);
-      if (older.before === before) break;
-      before = older.before;
-    }
-    return message;
   }
 
   upsertTurn(threadId: ThreadId, turn: Thread['turns'][number]): void {

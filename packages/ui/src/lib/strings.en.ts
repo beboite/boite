@@ -991,9 +991,12 @@ export const strings = {
       delegating: 'Sub-agents',
       delegatingOne: 'Waiting on 1 sub-agent',
       delegatingMany: 'Waiting on {count} sub-agents',
-      /** What a phone row shows beside the radar: how many sub-agents are at work. */
-      subagentsOne: '1 sub-agent',
-      subagentsMany: '{count} sub-agents',
+      /** The chip a parent's row carries while its delegated agents work, in every state. */
+      subagentsOne: '1 sub-agent at work',
+      subagentsMany: '{count} sub-agents at work',
+      /** The same chip once a sub-agent asks the user something: the parent reads Needs you. */
+      subagentsAskingOne: '1 sub-agent needs you',
+      subagentsAskingMany: '{count} sub-agents need you',
       /** The turn ended, the agent still watches something: a monitor it left going. */
       monitoring: 'Monitoring',
       monitoringFor: 'Monitoring for {elapsed}',
@@ -1181,6 +1184,11 @@ export const strings = {
     questionNext: 'Next question',
     questionFold: 'Fold the question',
     questionUnfold: 'Open the question',
+    /** A sub-agent's question or permission, docked in its parent: whose it is, and the way into its conversation. */
+    subagentAsks: 'Asked by {title}',
+    subagentPermission: '{title} waits for your permission',
+    openSubagent: 'Open',
+    openSubagentHint: 'Open {title}',
     loop: 'Loop',
     tasks: 'Tasks',
     taskCount: '{done}/{total} tasks',

@@ -35,7 +35,7 @@ test('a parent whose turn ended waits on its working sub-agents with the monitor
   ] as unknown as ThreadSummary[];
   const working = workingChildren(children);
   expect([...working.keys()]).toEqual(['parent']);
-  expect(working.get('parent' as ThreadId)).toEqual({ count: 2, since: NOW - 90_000 });
+  expect(working.get('parent' as ThreadId)).toEqual({ count: 2, since: NOW - 90_000, asking: 0 });
 
   const state = draw({ status: 'idle', unread: true, backgroundWork: { kinds: ['shell'], since: NOW } }, working.get('parent' as ThreadId)!);
   expect(state.dataset['state']).toBe('delegating');
@@ -99,7 +99,40 @@ test('a parent counts a child waiting on its background work among its working s
     child('b', { backgroundWait: { state: 'interrupted', for: 'build', reason: 'error', at: NOW } }),
     child('c', {}),
   ]);
-  expect(working.get('p' as ThreadId)).toEqual({ count: 1, since: NOW - 60_000 });
+  expect(working.get('p' as ThreadId)).toEqual({ count: 1, since: NOW - 60_000, asking: 0 });
+});
+
+test('a parent at work shows its sub-agents on a chip, and one whose child asks reads Needs you', () => {
+  vi.useFakeTimers({ now: NOW });
+  const child = (id: string, fields: Partial<ThreadSummary>) => ({ id: id as ThreadId, parentThreadId: 'p' as ThreadId, archived: false, status: 'running', runningSince: NOW - 30_000, ...fields }) as ThreadSummary;
+  // Its own turn runs: the chip says it has children, which the working state alone never did.
+  const working = draw({ status: 'running', runningSince: NOW - 65_000 }, { count: 2, since: NOW - 30_000, asking: 0 });
+  expect(working.dataset['state']).toBe('working');
+  const chip = working.querySelector<HTMLElement>('[data-testid=thread-subagents]')!;
+  expect(chip.textContent).toBe('2');
+  expect(chip.getAttribute('aria-label')).toBe('2 sub-agents at work');
+  expect(chip.classList.contains('asking')).toBe(false);
+  unmount(running!, { outro: false });
+  running = null;
+
+  // A question asked without stopping, and a turn stopped on a card: both ask, busy or not; an archived child is gone.
+  const asking = workingChildren([
+    child('a', { openQuestions: 1 }),
+    child('b', { status: 'waiting' }),
+    child('c', { status: 'idle', runningSince: null, openQuestions: 1 }),
+    child('d', { status: 'waiting', archived: true }),
+  ]).get('p' as ThreadId)!;
+  expect(asking).toEqual({ count: 2, since: NOW - 30_000, asking: 3 });
+  const parent = draw({ status: 'running', runningSince: NOW - 65_000 }, asking);
+  expect(parent.dataset['state']).toBe('waiting');
+  expect(parent.textContent).toContain('Needs you');
+  const asks = parent.querySelector<HTMLElement>('[data-testid=thread-subagents]')!;
+  expect(asks.classList.contains('asking')).toBe(true);
+  expect(asks.getAttribute('title')).toBe('2 sub-agents at work\n3 sub-agents need you');
+  // Only the parent's own failure outranks a child's question, in the row and the folded project alike.
+  expect(threadState({ status: 'error', unread: false }, asking)).toBe('error');
+  expect(threadState({ status: 'idle', unread: false }, { count: 0, asking: 1 })).toBe('waiting');
+  expect(projectRollup([{ status: 'running', unread: false }, { status: 'idle', unread: false }], thread => thread.status === 'idle' ? asking : 0)).toEqual({ kind: 'waiting', count: 1 });
 });
 
 test('a monitoring thread counts from its oldest task and says what still runs', () => {
