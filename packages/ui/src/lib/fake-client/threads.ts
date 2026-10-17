@@ -7,6 +7,7 @@ import { DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_D
 import { steerUser } from './user-steering';
 import { recoverTurn } from './recovery';
 import { RpcFailure } from '../client';
+import { decodeBase64 } from '../attachment-save';
 import { checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
 import { moveToAccount, usableAccount } from './account-fallback';
 import { writeTitle } from './titles';
@@ -370,7 +371,10 @@ export function threadMethods(ctx: FakeContext) {
       if (!message) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `message ${params.messageId} is not a message of thread ${params.threadId}`, data: { threadId: params.threadId, messageId: params.messageId } });
       const part = message.parts[params.partIndex];
       if (part?.type !== 'file' && part?.type !== 'image') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `part ${params.partIndex} is not an attachment of message ${params.messageId}`, data: { messageId: params.messageId, partIndex: params.partIndex } });
-      return { data: part.data };
+      // The fake makes no copies: `display` and `thumb` give the original, and `ticket` an address of it, as a blob the page can load.
+      if (params.ticket !== true) return { data: part.data };
+      const bytes = decodeBase64(part.data);
+      return { data: '', url: URL.createObjectURL(new Blob([bytes], { type: part.mimeType })), mimeType: part.mimeType, bytes: bytes.length };
     },
     'threads.update': async (params) => {
       const thread = ctx.thread(params.threadId);
