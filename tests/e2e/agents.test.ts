@@ -362,6 +362,35 @@ test('a new agent runs on the machine picked in its form, and opens there', asyn
   expect(byMachine['Builder']).toContain('Scout');
   expect(Object.entries(byMachine).filter(([label]) => label !== 'Builder').flatMap(([, list]) => list)).not.toContain('Scout');
   await capture('agents-created-on-builder-desktop.png');
+
+  // The list holds every machine's agents, the way the thread list holds every machine's threads.
+  const scout = await page.evaluate<string>(`(async () => (await window.__boiteTest.workspace.active.client.call('agents.snapshot', {})).profiles.find(a => a.name === 'Scout').id)()`);
+  const local = await page.evaluate<string>(`(async () => {
+    const [builder, primary] = ['http://builder.test', null].map(id => window.__boiteTest.workspace.machines.find(m => id ? m.id === id : m.id !== 'http://builder.test').store);
+    const { id, revision, createdAt, updatedAt, ...value } = (await builder.client.call('agents.snapshot', {})).profiles.find(a => a.name === 'Scout');
+    const saved = await primary.client.call('agents.profile.save', { value: { ...value, name: 'Keeper', projectIds: [] } });
+    await window.__boiteTest.workspace.select(primary);
+    primary.showAgents();
+    return saved.id;
+  })()`);
+  const onBuilder = `[data-machine-id="http://builder.test"] [data-testid="agent-entry-${scout}"]`;
+  const onLocal = `[data-machine-id]:not([data-machine-id="http://builder.test"]) [data-testid="agent-entry-${local}"]`;
+  await page.waitFor(`window.__boiteTest.workspace.active.machineId !== 'http://builder.test' && document.querySelector('${onLocal}') && document.querySelector('${onBuilder}')`);
+  expect(await page.evaluate(`document.querySelector('[data-machine-id="http://builder.test"] .machine')?.getAttribute('aria-label')`)).toBe('Builder');
+  await capture('agents-all-machines-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await capture('agents-all-machines-phone.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  // A row of another machine opens its conversation there.
+  await page.click(onBuilder);
+  await page.waitFor(`window.__boiteTest.workspace.active.machineId === 'http://builder.test' && document.querySelector('${onBuilder}')?.getAttribute('aria-current') === 'page'`);
+  // The machine button narrows the list to one machine, and "All machines" brings the others back.
+  await page.click('[data-testid="agents-machine"]');
+  await page.click('[data-testid="agents-machine-menu"] [data-value="http://builder.test"]');
+  await page.waitFor(`!document.querySelector('${onLocal}') && document.querySelector('[data-testid="agent-entry-${scout}"]')`);
+  await page.click('[data-testid="agents-machine"]');
+  await page.click('[data-testid="agents-machine-menu"] [data-value="all"]');
+  await page.waitFor(`document.querySelector('${onLocal}')`);
 }, 60000);
 
 test('an agent answers with pictures, keeps its memory, looks after projects, and its work opens from the menu', async () => {
