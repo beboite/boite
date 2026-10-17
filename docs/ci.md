@@ -153,9 +153,17 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 596,500 |
 | UI files, excluding `.br` and `.gz` copies | 5,037,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,391,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,401,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, removing a purged or erased thread's Claude transcripts and
+muting new audio sessions on Core Audio's notice, rebased on `b611c01f`,
+measure 4,400,530 core JavaScript bytes after a fresh `bun run build:core` on
+Windows, against 4,390,768 for that main: `threads/transcript-purge.ts`,
+`threads/native-sessions.ts` and the notification vtables of
+`audio-sessions.ts` add 9,762 bytes. The core JavaScript limit rises to
+4,401,000; the other limits stay.
 
 On 2026-10-17, PR #566 merged with `origin/main` at `b6ae659a`, which brings
 the thread links and agent mail direction (PR #562), measures 595,205 entry
