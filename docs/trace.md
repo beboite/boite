@@ -364,14 +364,38 @@ case and briefly takes focus; ordinary automation must not enable it.
 
 ## The audio mute
 
-The same Windows Worker initializes COM and polls the default render endpoint
-once per second and after a new PID. A PID that comes less than 100 ms after
-the last walk waits for one shared walk at the end of those 100 ms, so a build
-that starts hundreds of processes walks at most ten times a second. It mutes unmuted sessions belonging to
+The same Windows Worker initializes COM and walks the sessions of the default
+render endpoint after a new PID and whenever Core Audio reports a change: the
+first walk of an endpoint registers `IAudioSessionNotification` on its session
+manager and `IMMNotificationClient` on the device enumerator, so a session that
+opens, a device that comes or goes and a new default device each start a walk.
+Both objects are vtables built in `audio-sessions.ts`; their only JavaScript is
+one thread-safe `JSCallback` that answers S_OK on Core Audio's thread and runs
+on the Worker's, and `IUnknown` points at kernel32 functions that read no
+argument. A PID or a notice that comes less than 100 ms after the last walk
+waits for one shared walk at the end of those 100 ms, so a build that starts
+hundreds of processes walks at most ten times a second.
+
+Core Audio reports no mute change, so the Worker still walks once a second
+while a traced process has a session (an agent that unmutes itself, or a
+session that opened muted from Windows' remembered state, is muted again within
+a second), and when the endpoint refused the registrations, which is one
+`session-skipped` note. Otherwise the clock is a walk every 30 seconds, for a
+notice that never came. One walk costs 0.6 to 1.5 ms of CPU with 5 to 7
+sessions and 1.9 to 2.3 ms with 20 to 22, plus 3 to 15 ms of round trips to the
+audio service (2026-10-17, a Windows 11 desktop, `bun bench/audio-walk.ts 0`
+and `bun bench/audio-walk.ts 15`, whose extra sessions are the silent-tone
+fixture). Over 60 seconds with one traced PID that plays nothing, the Worker
+process used 156, 172 and 141 ms of CPU with the one-second walk and 62, 109
+and 203 ms with notices, against 78, 94 and 188 ms tracing nothing (same day,
+`bun bench/guard-cpu.ts 60`, then `nopid`, alternated three times; Windows
+counts CPU in 15.6 ms steps and the third round ran beside other work): the
+Worker now walks about twice a minute instead of sixty times. It mutes unmuted
+sessions belonging to
 traced processes and holds their volume interfaces. Unreadable sessions are
-reported once; a failed or changed endpoint is reopened. With no endpoint it
-retries every 30 seconds. A COM startup refusal disables this half for that
-Worker's lifetime.
+reported once; a failed or changed endpoint is reopened and registered again.
+With no endpoint it retries every 30 seconds. A COM startup refusal disables
+this half for that Worker's lifetime.
 
 On process exit, setting disable or Worker shutdown, it restores only mutes it
 applied and releases interfaces. User-muted sessions remain muted. Core shutdown
@@ -379,7 +403,8 @@ waits up to one second for release (two when the wake failed and the pump may
 be in a one-second wait) so Windows' persistent session mute does not
 carry into a later launch. `process.muted` identifies the thread and PID.
 Logic tests use a fake endpoint; the native audio test opens a session with two
-seconds of zeroed PCM, without audible content.
+seconds of zeroed PCM, without audible content, once at start and once four
+seconds late, which only Core Audio's notice can catch inside the test's window.
 
 ## Turning them off
 
