@@ -1,6 +1,6 @@
 import { archiveState } from '../merged-pr-archive-state.ts';
 import { worktreeRemovalOf } from '../worktree-cleanup-state.ts';
-import { backgroundWait } from '@boite/contracts';
+import { backgroundWait, pullRequestWatchWaits } from '@boite/contracts';
 import type { BackgroundTask, BackgroundWait, MessageId, MessagePart, MoveNotice, RpcParams, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { notFound } from '../errors.ts';
@@ -56,13 +56,15 @@ export function pendingMoveNote(core: Core, threadId: ThreadId): MoveNotice | nu
 export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
   const busy = thread.status === 'running' || thread.status === 'waiting';
   const tasks = core.threads?.agentState.background.get(thread.id) ?? [];
+  const watches = core.pullRequestWatches?.of(thread.id) ?? [];
   return {
     ...thread,
     archiveReason: thread.archived ? archiveState(core.journal, thread.id).reason : undefined,
     worktreeRemoved: thread.branch === null ? undefined : worktreeRemovalOf(core.journal, thread) ?? undefined,
     load: core.procs.loadOf(thread.id),
     runningSince: busy ? core.journal.runningSince(thread.id) : null,
-    requestSince: busy || tasks.length > 0 ? core.journal.requestSince(thread.id) : null,
+    // A watch still waiting on checks carries the request on, like a monitor.
+    requestSince: busy || tasks.length > 0 || watches.some(pullRequestWatchWaits) ? core.journal.requestSince(thread.id) : null,
     progress: busy ? core.threads?.progress?.get(thread.id) ?? null : null,
     backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) },
     backgroundWait: thread.parentThreadId ? backgroundWaitOf(core, thread, tasks) : null,
@@ -71,7 +73,7 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
     pendingAnswers: [...(core.threads?.deferred?.deferredAnswers.get(thread.id) ?? [])],
     openQuestions: core.threads?.cards?.openAsyncCount(thread.id) ?? 0,
     retry: core.threads?.runner?.retryOf(thread.id) ?? core.threads?.limitResumes?.retryOf(thread.id) ?? null,
-    pullRequestWatches: core.pullRequestWatches?.of(thread.id) ?? [],
+    pullRequestWatches: watches,
   };
 }
 

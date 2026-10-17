@@ -150,12 +150,18 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 593,000 |
+| UI entry chunk | 593,500 |
 | UI files, excluding `.br` and `.gz` copies | 5,019,500 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,356,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-17, Windows CI measured a 593,177-byte UI entry chunk for
+`origin/main` at `7c7327ab`, already over its 593,000 limit after PRs #558 to
+#560. The PR watch state (PR #564) adds 236 bytes there, 593,413 in total, and
+201 bytes in a fresh Linux `bun run build:ui` (538,541 to 538,742). The entry
+limit becomes 593,500; the other limits stay unchanged.
 
 On 2026-10-16, the server update recovery (PR #552) on `origin/main` at
 `08c11d82` measures 4,353,036 core JavaScript bytes after a fresh `bun run
