@@ -12,10 +12,10 @@
     }
   },
   "build": {
-    "frontendDist": "../../../packages/ui/dist",
+    "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "bun run --cwd ../../packages/ui dev",
-    "beforeBuildCommand": "bun run --cwd ../../packages/ui build"
+    "beforeBuildCommand": "bun run --cwd ../../packages/ui build && bun scripts/stage-frontend.ts"
   },
   "app": {
     "windows": [],

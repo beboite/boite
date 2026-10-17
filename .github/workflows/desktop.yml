@@ -58,6 +58,11 @@ permissions:
 
 env:
   CARGO_BUILD_JOBS: 8
+  # The shell's release profile (Cargo.toml) is what ships: fat LTO over one
+  # codegen unit, about 7 more minutes per build. A run that publishes nothing
+  # builds and tests with Cargo's defaults, as before that profile.
+  CARGO_PROFILE_RELEASE_LTO: ${{ inputs.sign-updates && 'fat' || 'false' }}
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ inputs.sign-updates && '1' || '16' }}
 
 jobs:
   windows:
