@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fingerprintOf, LAZY_MCP_ROUTE, userStdioServers, type StdioServer } from '../src/mcp/lazy.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -98,7 +98,8 @@ test('a session gets its servers from what they answered before, and starts one 
   const called = await post(url, token, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'echo', arguments: { said: 'hi' } } }, session);
   expect(called.messages).toHaveLength(1);
   expect(called.messages[0]!.id).toBe(3);
-  expect(JSON.parse(called.messages[0]!.result.content[0].text)).toEqual({ arguments: { said: 'hi' }, cwd, thread: threadId, own: 'own' });
+  // The server reads its folder resolved: a temporary folder on macOS is under /private/var.
+  expect(JSON.parse(called.messages[0]!.result.content[0].text)).toEqual({ arguments: { said: 'hi' }, cwd: realpathSync(cwd), thread: threadId, own: 'own' });
   expect(starts(startsFile)).toBe(2);
   expect(harness.core.procs.liveOf(threadId as never).length).toBeGreaterThan(0);
 

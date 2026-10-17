@@ -969,8 +969,8 @@ hidden native page of the desktop is suspended with its memory level low
 `bun bench/browser-sleep.ts` opens a page that draws a canvas every animation
 frame and runs a timer every 10 ms in a scratch core's browser, as an agent
 would, and reads the CPU of that browser's processes for 20 s while the tab is
-still within its wait, then 20 s after it. On NUNO-X870 (Windows, headless
-Edge, Bun 1.4.2) on 2026-10-17:
+still within its wait, then 20 s after it. On Windows 11 (headless Edge,
+Bun 1.4.2) on 2026-10-17:
 
 | Tab             | Renderer | GPU process | Other browser processes | Next command |
 | --------------- | -------- | ----------- | ----------------------- | ------------ |
