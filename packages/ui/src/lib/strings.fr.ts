@@ -1475,7 +1475,7 @@ export const fr: Translation = {
     about: 'Travaille sur',
     replyTo: 'En réponse à',
     more: '+{count} autres',
-    sentOne: 'Transmis à', sentMany: '{count} messages transmis à',
+    sentOne: 'Envoyé à', sentMany: '{count} messages envoyés à',
     receivedOne: 'Reçu de', receivedMany: '{count} messages reçus de',
     exchanged: 'Échange avec',
     threadMissing: "Aucune machine connectée n'a cette conversation.",

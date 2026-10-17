@@ -641,8 +641,10 @@ export class Workspace {
   /**
    * A thread an answer names the way `boite agents` prints it: `thr_x`,
    * `<machine>/thr_x` or `<core-id>/thr_x`, read in `from` on `owner`.
-   * A connected machine that lists the thread opens it, the owner's first;
-   * otherwise the owner's contacts say which core holds it.
+   * A connected machine that lists the thread opens it: the owner's when no
+   * machine is named, the one named, only the owner for `here`. Otherwise the
+   * owner's contacts say which core holds it, and last the one machine listing
+   * the id, which the agent may know by another name.
    */
   async openThreadLink(owner: Store, from: string | undefined, where: string | null, threadId: string): Promise<void> {
     const core = where !== null && /^[0-9a-f]{64}$/.test(where) ? where : null;
@@ -650,8 +652,10 @@ export class Workspace {
     const names = (name: string) => where === null || where === 'here' || slug(name) === where.toLowerCase() || (/^[0-9a-f]{6,}$/.test(where) && name.startsWith(where));
     const holders = this.machines.filter(machine => machine.store.connection === 'ready' && machine.store.threads.some(thread => thread.id === threadId)
       && (core === null || machine.store.core?.coreId === core));
-    const named = holders.filter(machine => names(machine.label) || names(machine.store.core?.coreId ?? ''));
-    const pick = (where === null || where === 'here' ? holders.find(machine => machine.store === owner) : undefined) ?? (named.length === 1 ? named[0] : holders.length === 1 ? holders[0] : undefined);
+    const named = where === 'here' ? holders.filter(machine => machine.store === owner)
+      : holders.filter(machine => names(machine.label) || names(machine.store.core?.coreId ?? ''));
+    const pick = where === null ? holders.find(machine => machine.store === owner) ?? (holders.length === 1 ? holders[0] : undefined)
+      : named.length === 1 ? named[0] : undefined;
     if (pick) { await this.select(pick.store, threadId); return; }
     const client = owner.client;
     if (client && from && owner.connection === 'ready') {
@@ -662,6 +666,8 @@ export class Workspace {
         if (found.length === 1) { await this.openAgentThread(owner, self, found[0]!); return; }
       } catch { /* Coordination off on this thread: no contact names the core. */ }
     }
+    const only = where !== null && where !== 'here' && holders.length === 1 ? holders[0]! : null;
+    if (only) { await this.select(only.store, threadId); return; }
     owner.error = strings.agentMessages.threadMissing;
   }
 

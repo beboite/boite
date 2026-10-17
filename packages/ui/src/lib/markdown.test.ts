@@ -91,4 +91,10 @@ test('a thread address links to the thread, not to a file', () => {
   // Opening a thread reads no file, so a code span links it without rich links.
   expect(renderMarkdown('`boite/thr_tkw9n9qt4100rvq2jmg1`')).toBe(`<p><code>${thread('boite/thr_tkw9n9qt4100rvq2jmg1')}</code></p>`);
   expect(renderMarkdown('src/thr_tkw9n9qt4100rvq2jmg1.ts', true)).toBe('<p><a href="#file" data-file-path="src/thr_tkw9n9qt4100rvq2jmg1.ts">src/thr_tkw9n9qt4100rvq2jmg1.ts</a></p>');
+  // A path that goes on around the id is no thread; a link whose destination is one is.
+  for (const path of ['thr_tkw9n9qt4100rvq2jmg1.ts', 'src\\thr_tkw9n9qt4100rvq2jmg1', 'thr_tkw9n9qt4100rvq2jmg1-old']) {
+    expect(renderMarkdown(path, true)).not.toContain('data-thread-address');
+  }
+  expect(renderMarkdown('[open it](boite/thr_tkw9n9qt4100rvq2jmg1)', true))
+    .toBe('<p><a href="#thread" data-thread-address="boite/thr_tkw9n9qt4100rvq2jmg1">open it</a></p>');
 });

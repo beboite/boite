@@ -75,6 +75,7 @@ export function codeLinkHtml(value: string): string | null {
 }
 
 export function linkHtml(label: string, raw: string): string {
+  if (threadAddress(raw)) return threadLinkHtml(label, raw);
   const link = chatLink(raw);
   if (!link) return escapeHtml(label);
   const title = escapeHtml(label);
@@ -87,9 +88,10 @@ const RELATIVE_PATH = String.raw`((?:[\w@.-]+[\\/])+[\w@.-]+\.[\w.-]+(?::\d+)?)`
 /**
  * The tokens other than `[label](destination)`: group 1 an autolink's address,
  * group 2 a relative path, group 3 a thread. The thread comes before the
- * absolute path, which would otherwise take `/thr_x` out of `machine/thr_x`.
+ * absolute path, which would otherwise take `/thr_x` out of `machine/thr_x`,
+ * and is no thread where a path goes on around it (`thr_x.ts`, `src\thr_x`).
  */
-const OTHER_TOKENS = String.raw`<((?:https?:\/\/|mailto:)[^>\s]+)>|https?:\/\/[^\s<>]+|` + `${RELATIVE_PATH}|(${THREAD_TOKEN})(?![\\w/])|${ABSOLUTE_PATH}`;
+const OTHER_TOKENS = String.raw`<((?:https?:\/\/|mailto:)[^>\s]+)>|https?:\/\/[^\s<>]+|` + `${RELATIVE_PATH}|(${THREAD_TOKEN})(?![\\w/\\\\-]|\\.\\w)|${ABSOLUTE_PATH}`;
 
 const SPACE = /\s/;
 
@@ -240,7 +242,7 @@ function* linkTokens(text: string): Generator<LinkToken> {
     tokens.lastIndex = from;
     for (let match = tokens.exec(text); match; match = tokens.exec(text)) {
       if (match[3] !== undefined) {
-        if (match.index === 0 || !/[\w:/]/.test(text[match.index - 1]!)) return { index: match.index, text: match[0], thread: true };
+        if (match.index === 0 || !/[\w:/\\.-]/.test(text[match.index - 1]!)) return { index: match.index, text: match[0], thread: true };
         tokens.lastIndex = match.index + 1;
         continue;
       }

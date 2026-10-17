@@ -91,12 +91,14 @@ or an entrusted project that began later still shows.
 An answer that names a thread the way `boite agents` prints it (`thr_x`,
 `<machine>/thr_x` or `<core-id>/thr_x`) in a code span links to it, and so
 does a bare one with [Chat files and previews](chat-files.md) on
-(`lib/chat-links.ts`). Reasoning and a mission's results and artifacts link a
-code-span thread the same way. A click (`workspace.followThreadLink`) opens it
-on the connected machine that lists the
-thread, the one the address names when several do and this machine when none
-is named; otherwise this thread's contacts name its core. A thread no
-connected machine or contact holds leaves a notice instead.
+(`lib/chat-links.ts`), as does a Markdown link whose destination is one; an id
+inside a path (`thr_x.ts`, `src\thr_x`) stays text. Reasoning and a mission's
+results and artifacts link a code-span thread the same way. A click
+(`workspace.followThreadLink`) opens it on a connected machine that lists the
+thread: this one when none is named, the one the address names, only this one
+for `here`. Otherwise this thread's contacts name its core, and last the one
+machine listing the id opens, since an agent may know it by another name. A
+thread no connected machine or contact holds leaves a notice instead.
 
 ## Letters from the agent of a project
 
