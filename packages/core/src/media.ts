@@ -1,4 +1,4 @@
-import { DISPLAY_IMAGE_MAX, IMAGE_INLINE_CHARS, MESSAGE_PAGE, MESSAGE_PAGE_MAX, type ImagePreviews, type MessageId, type ThreadId } from '@boite/contracts';
+import { DISPLAY_IMAGE_MAX, DISPLAY_THUMB_MAX, IMAGE_INLINE_CHARS, MESSAGE_PAGE, MESSAGE_PAGE_MAX, type ImagePreviews, type MessageId, type ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
 import { mediaDisplay, mediaPreviews, messageIdsNear, putMediaDisplay, putMediaPreview, unscannedMedia } from './journal/media-previews.ts';
@@ -15,20 +15,40 @@ const WARM_BUDGET_MS = 1500;
 /** WebP copies made at once. Each decodes one picture on Bun's image worker, about 130 ms for a 1920 by 1080 screenshot. */
 const DISPLAY_CONCURRENCY = 2;
 /** What `messages.attachment` with `display` converts. A GIF keeps its frames by staying as it is. */
-const DISPLAY_TYPES = /^image\/(png|jpeg|webp)$/;
+export const DISPLAY_TYPES = /^image\/(png|jpeg|webp)$/;
+
+/** Which copy: the one the timeline draws, or the one a prompt's thumbnail draws. */
+export type DisplaySize = 'large' | 'thumb';
+const DISPLAY_SIZES: Record<DisplaySize, { max: number; quality: number }> = {
+  large: { max: DISPLAY_IMAGE_MAX, quality: 80 },
+  thumb: { max: DISPLAY_THUMB_MAX, quality: 75 },
+};
 
 /**
- * The copy of a picture the timeline draws: WebP at quality 80, its longer
- * side at most `DISPLAY_IMAGE_MAX`. Measured on 2026-10-07, 1.5 to 2.5 MB PNG
- * screenshots became 50 to 130 KB. Null when Bun cannot decode it or refuses
- * its size; AVIF would be smaller still, but Bun's Linux build cannot encode it.
+ * The `media_displays` row a copy is kept in. The large copy keeps the part's
+ * own index and a thumbnail's goes to `-2 - partIndex`, so the table needs no
+ * size column and the deletes of a thread or a rewind, which go by message,
+ * take both. An older core reads only indexes from 0 and never sees them.
  */
-export async function makeDisplay(data: string): Promise<Uint8Array | null> {
+function slotOf(partIndex: number, size: DisplaySize): number {
+  return size === 'large' ? partIndex : -2 - partIndex;
+}
+
+/**
+ * The copy of a picture the timeline draws: WebP, its longer side at most
+ * `DISPLAY_IMAGE_MAX` at quality 80, or `DISPLAY_THUMB_MAX` at quality 75 for
+ * a thumbnail. Measured on 2026-10-07, 1.5 to 2.5 MB PNG screenshots became
+ * 50 to 130 KB at the large size. `source` is the original as base64 or the
+ * bytes of a larger copy. Null when Bun cannot decode it or refuses its size;
+ * AVIF would be smaller still, but Bun's Linux build cannot encode it.
+ */
+export async function makeDisplay(source: string | Uint8Array, size: DisplaySize = 'large'): Promise<Uint8Array | null> {
   if (typeof Bun.Image !== 'function') return null;
+  const { max, quality } = DISPLAY_SIZES[size];
   try {
-    return await new Bun.Image(Buffer.from(data, 'base64'), { maxPixels: PREVIEW_MAX_PIXELS })
-      .resize(DISPLAY_IMAGE_MAX, DISPLAY_IMAGE_MAX, { fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 80 })
+    return await new Bun.Image(typeof source === 'string' ? Buffer.from(source, 'base64') : source, { maxPixels: PREVIEW_MAX_PIXELS })
+      .resize(max, max, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality })
       .bytes();
   } catch {
     return null;
@@ -143,51 +163,44 @@ export class MediaPreviews {
   }
 
   /**
-   * The WebP copy of a picture for `messages.attachment` with `display`, made
-   * once and kept in `media_displays`; null when the original is what to send:
-   * a GIF or another type, a picture Bun cannot convert, or one whose copy
-   * would not be lighter.
+   * A WebP copy for `messages.attachment` with `display`, made once and kept
+   * in `media_displays`. `source` is the original as base64 or the bytes of
+   * the large copy, which a thumbnail is made from when it is kept. The
+   * answer is the copy's bytes, or empty when the source is what to send: a
+   * picture Bun cannot convert, or one whose copy would not be lighter.
    */
-  async display(threadId: string, messageId: string, partIndex: number, mimeType: string, data: string): Promise<{ data: string; mimeType: string } | null> {
-    if (!DISPLAY_TYPES.test(mimeType)) return null;
-    const db = this.core.journal.db;
-    let held = this.held(threadId, messageId, partIndex);
-    if (held === null) {
-      const key = `${messageId}\0${partIndex}`;
-      let made = this.displays.get(key);
-      if (made === undefined) {
-        made = this.displayTurn(() => makeDisplay(data)).then(copy => {
-          // The original wins when it is already as light: a small PNG icon, a WebP sent as one.
-          const kept = copy !== null && copy.length < data.length * 3 / 4 ? copy : new Uint8Array(0);
-          try {
-            if (!this.core.journal.isClosed()) putMediaDisplay(db, threadId, messageId, partIndex, kept);
-          } catch (error) {
-            this.core.log('warn', `display copy of message ${messageId} part ${partIndex} was not kept: ${messageOf(error)}`);
-          }
-          return kept;
-        }).finally(() => this.displays.delete(key));
-        this.displays.set(key, made);
-      }
-      held = await made;
+  async display(threadId: string, messageId: string, partIndex: number, size: DisplaySize, source: string | Uint8Array): Promise<Uint8Array> {
+    const kept = this.kept(threadId, messageId, partIndex, size);
+    if (kept !== null) return kept;
+    const key = `${messageId}\0${partIndex}\0${size}`;
+    let made = this.displays.get(key);
+    if (made === undefined) {
+      const sourceBytes = typeof source === 'string' ? source.length * 3 / 4 : source.length;
+      made = this.displayTurn(() => makeDisplay(source, size)).then(copy => {
+        // The source wins when it is already as light: a small PNG icon, a WebP sent as one.
+        const light = copy !== null && copy.length < sourceBytes ? copy : new Uint8Array(0);
+        try {
+          if (!this.core.journal.isClosed()) putMediaDisplay(this.core.journal.db, threadId, messageId, slotOf(partIndex, size), light);
+        } catch (error) {
+          this.core.log('warn', `${size} copy of message ${messageId} part ${partIndex} was not kept: ${messageOf(error)}`);
+        }
+        return light;
+      }).finally(() => this.displays.delete(key));
+      this.displays.set(key, made);
     }
-    return held.length === 0 ? null : { data: Buffer.from(held).toString('base64'), mimeType: 'image/webp' };
+    return await made;
   }
 
   /**
-   * The copy `display` already kept, read without the original: null when
-   * none was made or the original is what to send. Only a copy of a message
-   * of `threadId` is found, so a hit needs no other check.
+   * The copy `display` already kept, read without the original: empty when
+   * its source is what to send, null when none was made. Only a copy of a
+   * message of `threadId` is found, so a hit needs no other check.
    */
-  keptDisplay(threadId: string, messageId: string, partIndex: number): { data: string; mimeType: string } | null {
-    const held = this.held(threadId, messageId, partIndex);
-    return held === null || held.length === 0 ? null : { data: Buffer.from(held).toString('base64'), mimeType: 'image/webp' };
-  }
-
-  private held(threadId: string, messageId: string, partIndex: number): Uint8Array | null {
+  kept(threadId: string, messageId: string, partIndex: number, size: DisplaySize): Uint8Array | null {
     try {
-      return mediaDisplay(this.core.journal.db, threadId, messageId, partIndex);
+      return mediaDisplay(this.core.journal.db, threadId, messageId, slotOf(partIndex, size));
     } catch (error) {
-      this.core.log('warn', `display copy of message ${messageId} part ${partIndex} could not be read: ${messageOf(error)}`);
+      this.core.log('warn', `${size} copy of message ${messageId} part ${partIndex} could not be read: ${messageOf(error)}`);
       return null;
     }
   }

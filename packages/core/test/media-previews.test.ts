@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { crc32, deflateSync } from 'node:zlib';
-import type { Message } from '@boite/contracts';
+import type { Message, RpcResult } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -213,6 +213,92 @@ describe('deferred pictures', () => {
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0 })).toEqual({ data: SCREEN });
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_shot', partIndex: 1, display: true })).toEqual({ data: SHOT });
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_gif', partIndex: 0, display: true })).toEqual({ data: gif });
+  });
+
+  test('with ticket a copy and an original come as a cached file route address, the same one while it lives', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    harness.core.journal.putMessage({ id: 'msg_screen', threadId, turnId: 'trn_seed', role: 'assistant', state: 'complete', createdAt: 3_001, parts: [{ type: 'file', mimeType: 'image/png', data: SCREEN, name: 'screen.png' }] });
+    const asked = { threadId, messageId: 'msg_screen', partIndex: 0 };
+
+    const copy = await client.call('messages.attachment', { ...asked, display: true, ticket: true });
+    expect(copy).toMatchObject({ data: '', mimeType: 'image/webp' });
+    expect(copy.url).toMatch(/^\/file\/[A-Za-z0-9_-]+$/);
+    const served = await fetch(`${harness.url}${copy.url}`);
+    expect(served.status).toBe(200);
+    expect(served.headers.get('content-type')).toBe('image/webp');
+    expect(served.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
+    const bytes = new Uint8Array(await served.arrayBuffer());
+    expect(bytes.length).toBe(copy.bytes!);
+    // The same bytes the base64 answer an older client asks for carries, and the same address asked again.
+    expect(Buffer.from(bytes).toString('base64')).toBe((await client.call('messages.attachment', { ...asked, display: true })).data);
+    expect((await client.call('messages.attachment', { ...asked, display: true, ticket: true })).url).toBe(copy.url);
+
+    const original = await client.call('messages.attachment', { ...asked, ticket: true });
+    expect(original).toMatchObject({ data: '', mimeType: 'image/png', bytes: Buffer.from(SCREEN, 'base64').length });
+    expect(original.url).not.toBe(copy.url);
+    const whole = await fetch(`${harness.url}${original.url}`);
+    expect(Buffer.from(await whole.arrayBuffer()).toString('base64')).toBe(SCREEN);
+    expect(whole.headers.get('content-disposition')).toContain('screen.png');
+    // Without ticket, the base64 answer is unchanged.
+    expect(await client.call('messages.attachment', asked)).toEqual({ data: SCREEN });
+  });
+
+  test('a thumbnail copy is made once at 320 px from the kept large copy, and leaves with its thread', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    harness.core.journal.putMessage({ id: 'msg_screen', threadId, turnId: 'trn_seed', role: 'assistant', state: 'complete', createdAt: 3_001, parts: [{ type: 'file', mimeType: 'image/png', data: SCREEN, name: 'screen.png' }] });
+    const asked = { threadId, messageId: 'msg_screen', partIndex: 0, display: true };
+    const large = await client.call('messages.attachment', asked);
+
+    // Once the large copy is kept, the thumbnail is made from it: the original is never read again.
+    const journal = harness.core.journal;
+    const messagePart = journal.messagePart.bind(journal);
+    let reads = 0;
+    journal.messagePart = (...args) => { reads += 1; return messagePart(...args); };
+    const made = Bun.Image.prototype.webp;
+    let encodes = 0;
+    Bun.Image.prototype.webp = function (...args) { encodes += 1; return made.apply(this, args); };
+    let thumb: RpcResult<'messages.attachment'>;
+    let again: string;
+    try {
+      thumb = await client.call('messages.attachment', { ...asked, thumb: true, ticket: true });
+      expect(encodes).toBe(1);
+      again = (await client.call('messages.attachment', { ...asked, thumb: true })).data;
+    } finally {
+      Bun.Image.prototype.webp = made;
+    }
+    // Asked again it is the same copy, kept, not made again.
+    expect(encodes).toBe(1);
+    expect(reads).toBe(0);
+    journal.messagePart = messagePart;
+    expect(thumb.mimeType).toBe('image/webp');
+    const bytes = new Uint8Array(await (await fetch(`${harness.url}${thumb.url}`)).arrayBuffer());
+    expect(Buffer.from(bytes).toString('base64')).toBe(again);
+    expect(await new Bun.Image(bytes).metadata()).toMatchObject({ width: 320, height: 180, format: 'webp' });
+    expect(bytes.length * 4).toBeLessThan(Buffer.from(large.data, 'base64').length);
+
+    // Kept beside the large one, under the part's thumbnail slot.
+    const kept = () => journal.db.query('SELECT part_index AS part, length(data) AS n FROM media_displays WHERE thread_id = ? ORDER BY part_index').all(threadId) as { part: number; n: number }[];
+    expect(kept()).toEqual([{ part: -2, n: bytes.length }, { part: 0, n: Buffer.from(large.data, 'base64').length }]);
+
+    // A thumbnail asked first, with no large copy yet, is made from the original.
+    harness.core.journal.putMessage({ id: 'msg_fresh', threadId, turnId: 'trn_seed', role: 'user', state: 'complete', createdAt: 3_002, parts: [{ type: 'image', mimeType: 'image/png', data: SCREEN, alt: null }] });
+    const fresh = await client.call('messages.attachment', { threadId, messageId: 'msg_fresh', partIndex: 0, display: true, thumb: true });
+    expect(await new Bun.Image(Buffer.from(fresh.data, 'base64')).metadata()).toMatchObject({ width: 320, height: 180 });
+
+    // The thread goes, and its copies and their addresses with it.
+    journal.deleteThreads([threadId]);
+    expect(kept()).toEqual([]);
+    expect((await fetch(`${harness.url}${thumb.url}`)).status).toBe(404);
+  });
+
+  test('a picture already smaller than the thumbnail is sent as its larger copy or as it is', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId);
+    // A 320 by 180 PNG of noise: no copy is lighter, so the original comes.
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_shot', partIndex: 1, display: true, thumb: true })).toEqual({ data: SHOT });
   });
 
   test('a light page still opens, sized and without blurs, when the blurs cannot be read', async () => {
