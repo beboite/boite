@@ -477,7 +477,7 @@ export class BrowserPage {
     const running = await this.evaluate<string[] | null>(`new Promise((resolve) => {
       let live = true, fonts = false;
       const done = (ok) => { if (!live) return; live = false; resolve(ok ? null : watched.filter((a) => !ended.has(a) && drawn(a))
-        .map((a) => (a.animationName ?? a.transitionProperty ?? a.id) + ' on .' + String(a.effect?.target?.className ?? '?').split(' ')[0] + ' ' + a.playState).concat(fonts ? [] : ['document.fonts'])); };
+        .map((a) => (a.animationName ?? a.transitionProperty ?? a.id) + ' on .' + String(a.effect?.target?.className ?? '?').split(' ')[0] + ' ' + a.playState).concat(fonts ? [] : [...document.fonts].filter((f) => f.status === 'loading').map((f) => 'font ' + f.family + ' ' + f.weight + ' loading').concat(['document.fonts ' + document.fonts.status]))); };
       const drawn = (a) => !(a.effect instanceof KeyframeEffect) || a.effect.target?.checkVisibility?.({ contentVisibilityAuto: true }) !== false;
       const ended = new Set();
       const watched = document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity && drawn(a));
@@ -491,7 +491,8 @@ export class BrowserPage {
       requestAnimationFrame(frame);
       setTimeout(() => done(false), ${CALL_TIMEOUT_MS - 5_000});
     })`);
-    if (running) throw new Error(`animations still running ${(CALL_TIMEOUT_MS - 5_000) / 1000} s after settleAnimations(): ${running.join(', ')}`);
+    if (running) throw new Error(`animations still running ${(CALL_TIMEOUT_MS - 5_000) / 1000} s after settleAnimations(): ${running.join(', ')}
+In flight: ${JSON.stringify(this.#inFlight())}`);
   }
 
   async screenshot(path: string): Promise<void> {
