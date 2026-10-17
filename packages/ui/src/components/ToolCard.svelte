@@ -343,7 +343,7 @@
     height: 6px;
     border-radius: 50%;
     background: currentColor;
-    animation: pulse 1.6s var(--ease-out-quint) infinite;
+    animation: pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops);
   }
 
   .took {
@@ -365,7 +365,7 @@
     border-radius: 50%;
     border: 1.5px solid var(--color-edge);
     border-top-color: var(--color-live);
-    animation: spin 0.9s linear infinite;
+    animation: spin 0.9s steps(54) infinite var(--loops);
   }
 
   /* The body sits under the line's words, past the glyph. */
@@ -445,7 +445,7 @@
     vertical-align: -2px;
     background: var(--color-foreground);
     border-radius: 1px;
-    animation: blink 1s steps(2, start) infinite;
+    animation: blink 1s steps(2, start) infinite var(--loops);
   }
 
   /* An endless loop stops under reduced motion; the static mark keeps its colour. */

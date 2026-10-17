@@ -430,7 +430,7 @@
     border-radius: var(--radius-sm);
     font-size: var(--text-sm);
     color: var(--color-muted-foreground);
-    animation: listen 1.2s var(--ease-out-quint) infinite alternate;
+    animation: listen 1.2s var(--ease-out-quint) infinite alternate var(--loops);
   }
   @keyframes listen {
     from { border-color: var(--color-edge); }

@@ -68,6 +68,6 @@
   .failed { display: grid; justify-items: start; gap: 8px; padding: 12px 4px; color: var(--color-danger); font-size: var(--text-sm); }
   .failed p { margin: 0; overflow-wrap: anywhere; }
   .muted { margin: 0; padding: 14px 4px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .actions :global(.spinning) { animation: spin 900ms linear infinite; }
+  .actions :global(.spinning) { animation: spin 900ms linear infinite var(--loops); }
   @media (prefers-reduced-motion: reduce) { .actions :global(.spinning) { animation: none; } }
 </style>

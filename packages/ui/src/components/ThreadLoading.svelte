@@ -70,7 +70,7 @@
   /* No total yet: a third of the track crossing it, by transform alone. */
   .bar.sweep {
     width: 33%;
-    animation: sweep 1.2s var(--ease-in-out, ease-in-out) infinite;
+    animation: sweep 1.2s var(--loop-ease-in-out-72) infinite var(--loops);
   }
 
   @keyframes sweep {

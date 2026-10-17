@@ -100,7 +100,7 @@
   }
 
   .terminal :global(.xterm-decoration.command-mark[data-status='running'])::before {
-    animation: command-running 1.2s var(--ease-out-quint) infinite;
+    animation: command-running 1.2s var(--loop-ease-out-quint-36) infinite var(--loops);
   }
 
   @keyframes command-running {

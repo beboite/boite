@@ -38,7 +38,7 @@ mod whip;
 unsafe extern "C" {}
 
 use serde_json::json;
-use tauri::{AppHandle, Manager, Webview, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, Webview, WindowEvent};
 use watchdog::Seen;
 
 use channel::Channel;
@@ -354,6 +354,13 @@ pub fn run() {
                     watchdog::saw(if *focused { Seen::Focused } else { Seen::Blurred });
                     shell_log::debug("window", "shell.window.focus", if *focused { "the window gained focus" } else { "the window lost focus" },
                         json!({ "focused": focused }));
+                    // The page pauses its endless animations behind another
+                    // application (packages/ui/src/lib/at-rest.ts) and asks
+                    // `user_presence` which window is in front: this is the
+                    // cue, since a webview's own blur misses some switches.
+                    if let Err(error) = closing.emit_to(browser::MAIN_LABEL, "window://focus", *focused) {
+                        eprintln!("[shell] the focus change could not be emitted: {error}");
+                    }
                 }
                 WindowEvent::Moved(_) => {
                     watchdog::saw(Seen::Moved);

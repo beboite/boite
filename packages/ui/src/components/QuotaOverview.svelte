@@ -253,7 +253,7 @@
   .empty p { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   /* The reading on screen is the previous one until the new one lands: grey, breathing. */
   .track[aria-busy='true'] { filter: saturate(0.15); }
-  .track[aria-busy='true'] .fill { animation: breathe 1.1s ease-in-out infinite alternate; }
+  .track[aria-busy='true'] .fill { animation: breathe 1.1s ease-in-out infinite alternate var(--loops); }
   @keyframes rise { from { opacity: 0; transform: translateY(-4px); } }
   @media (prefers-reduced-motion: reduce) { .details, .track[aria-busy='true'] .fill { animation: none; } .track, .fill { transition: none; } }
   :global(html[data-motion='reduced']) .track[aria-busy='true'] .fill { animation: none; }

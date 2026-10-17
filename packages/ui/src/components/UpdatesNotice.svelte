@@ -257,7 +257,7 @@
   .update-trigger { position: relative; flex: none; }
   .update-trigger.lit { color: var(--color-foreground); }
   .dot { position: absolute; width: 6px; height: 6px; right: 3px; top: 3px; border-radius: 50%; background: var(--color-accent); box-shadow: 0 0 0 2px var(--color-frame); }
-  .update-trigger.busy .dot { animation: pulse 1.4s var(--ease-out-quint) infinite; }
+  .update-trigger.busy .dot { animation: pulse 1.4s var(--ease-out-quint) infinite var(--loops); }
 
   .updates-card { display: flex; flex-direction: column; width: 336px; max-width: calc(100vw - 24px); padding: 0; color: var(--color-foreground); background: var(--color-surface-2); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); overflow: hidden; transform-origin: bottom left; animation: pop var(--dur-2) var(--ease-out-quint); }
   .updates-card:focus { outline: none; }
@@ -265,7 +265,7 @@
 
   header { display: flex; align-items: center; gap: 10px; padding: 12px 14px 10px; }
   .glyph { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-md); color: var(--color-accent); background: var(--color-accent-soft); transition: color var(--dur-2), background-color var(--dur-2); }
-  .glyph.busy :global(svg) { animation: breathe 1.6s ease-in-out infinite; }
+  .glyph.busy :global(svg) { animation: breathe 1.6s ease-in-out infinite var(--loops); }
   .glyph.done { color: var(--color-success); background: color-mix(in oklch, var(--color-success) 16%, transparent); }
   .glyph.done :global(svg) { animation: pop var(--dur-2) var(--ease-out-quint); }
   .title { flex: 1; min-width: 0; }
@@ -292,7 +292,7 @@
   .part.ready .state, .part.done .state { color: var(--color-success); }
   .track { grid-column: 2 / -1; height: 3px; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-surface-3); }
   .track span { display: block; height: 100%; border-radius: inherit; background: var(--color-accent); transition: width var(--dur-2) var(--ease-out-quint); }
-  .track.indeterminate span { opacity: 0.5; animation: loading-slide 1.2s ease-in-out infinite; }
+  .track.indeterminate span { opacity: 0.5; animation: loading-slide 1.2s ease-in-out infinite var(--loops); }
 
   .note { margin: 4px 14px 0; font-size: var(--text-xs); line-height: 1.45; color: var(--color-subtle); }
   footer { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 10px 10px; }

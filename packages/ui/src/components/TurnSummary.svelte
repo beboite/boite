@@ -142,11 +142,11 @@
   [data-testid='turn-progress'] { min-width: 0; overflow-wrap: anywhere; }
   .quiet { color: var(--color-muted-foreground); }
   .background { display: inline-flex; align-items: center; gap: 6px; color: var(--color-accent); }
-  .pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.6s var(--ease-out-quint) infinite; }
+  .pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops); }
   .paused .pulse { animation-play-state: paused; }
   .stop-background { display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: transparent; color: var(--color-muted-foreground); cursor: pointer; }
   .stop-background:hover { color: var(--color-danger); border-color: currentColor; }
-  .summary :global(.spinner) { animation: spin 1.5s linear infinite; }
+  .summary :global(.spinner) { animation: spin 1.5s steps(90) infinite var(--loops); }
   .paused :global(.spinner) { animation-play-state: paused; }
   @media (prefers-reduced-motion: reduce) { .summary :global(.spinner), .pulse { animation: none; } }
   :global(html[data-motion='reduced']) .summary :global(.spinner),

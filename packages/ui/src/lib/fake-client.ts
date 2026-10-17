@@ -1,4 +1,5 @@
 import { startupMethods, resetStartup } from './fake-client/startup';
+import { seedWorking } from './fake-client/working-seed';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
   RPC_CHUNK_BYTES,
@@ -7,6 +8,7 @@ import {
   type CoreLogContext,
   type HookRun,
   type MemoryEvent,
+  type ProcessRecord,
   type Principal,
   type RpcEventName,
   type RpcEvents,
@@ -92,6 +94,7 @@ export class FakeClient implements ObservableClient {
   #mergedPrSweep: Promise<number> | null = null;
   #doneSweep: Promise<void> | null = null;
   #transportGeneration = 0;
+  readonly #stopWorking: () => void;
 
   constructor(options: FakeClientOptions = {}) {
     const ctx = new FakeContext(options);
@@ -104,6 +107,7 @@ export class FakeClient implements ObservableClient {
     if (options.delegationDemo) seedDelegationDemo(ctx);
     if (options.agentsDemo) seedAgentsDemo(ctx);
     seedRetry(ctx);
+    this.#stopWorking = seedWorking(ctx, options.working ?? 0);
     if (options.watchDemo) {
       const at = Date.now();
       const watch = (number: number) => ({ url: `https://github.com/beboite/boite/pull/${number}`, repository: 'beboite/boite', number, since: at - 600_000 });
@@ -231,6 +235,7 @@ export class FakeClient implements ObservableClient {
 
   close(): void {
     const ctx = this.#ctx;
+    this.#stopWorking();
     closeSideQuestions(ctx);
     ctx.agents.close();
     unregisterCore(ctx);
@@ -337,6 +342,11 @@ export class FakeClient implements ObservableClient {
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */
   emitCoreLog(level: RpcEvents['core.log']['level'], message: string, context: CoreLogContext = {}): void {
     this.#ctx.emit('core.log', { level, message, at: this.#ctx.now(), ...context });
+  }
+
+  /** A traced process starting, or ending once `exitedAt` is set, as the core's `procs.ts` announces it to the thread's subscribers. */
+  traceProcess(record: ProcessRecord): void {
+    this.#ctx.emitToThread(record.threadId, record.exitedAt === null ? 'process.started' : 'process.exited', structuredClone(record));
   }
 
   emitMemory(event: MemoryEvent): void {

@@ -525,6 +525,11 @@ when the core advertises `chunkedAnswers`.
 - A streamed delta, part or turn looks up its message or turn from the end of
   the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.
+  `process.started` and `process.exited`, about 180 a second under sixteen
+  agents, are dropped until it is, and the list keeps the newest
+  `TRACE_LIMIT` (200) rows, what `trace.get` returns. The old handler copied a
+  list that only grew: 0.6 ms a start and exit after 10 minutes, 11 ms after
+  an hour, past a core at that rate (plain arrays in Bun, 2026-10-17).
 - Sidebar cards ask for their pull request when they mount or change branch,
   then on one timer per connection: every 15 seconds while the thread works,
   every 60 seconds at rest, above the core's 15-second cache of a repository's
@@ -766,9 +771,11 @@ limits expensive work while streaming, typing and scrolling:
 - Window-wide scrims use `--color-scrim`; backdrop blur stays on bounded
   floating surfaces such as the composer, activity panel and notifications.
 - Endless animations use opacity or transforms, apart from the small repainting
-  boxes named in `render-cost.test.ts`; the running group's shimmer moves in 30
-  steps a sweep, so it repaints 30 times in 2.2 s instead of every frame. Outer
-  app containers avoid `:has()`.
+  boxes named in `render-cost.test.ts`; the running group's shimmer moves in 33
+  steps a sweep, so it repaints 15 times a second instead of every frame. They
+  pause with the window at rest, and those on screen while agents work step on
+  a shared 60 Hz grid ("What the UI costs at rest"). Outer app containers avoid
+  `:has()`.
 - A closed fold's body skips its content once the close transition has run
   (`content-visibility: hidden`), so a group opened once no longer weighs on
   every layout of its row.
@@ -842,6 +849,51 @@ The [frame report](../bench/results/2026-09-30-ui-frames.md) and
 [typing/scroll report](../bench/results/2026-09-30-typing-and-scroll.md) retain
 2026-09-30 measurements and the streaming-fixture correction. They use software
 compositing and mobile emulation, with uncontrolled background load.
+
+## What the UI costs at rest
+
+A loop on screen, a spinner of a few pixels included, keeps the compositor
+drawing on every refresh of the monitor. Sixteen working threads put one on
+every row of the list: the GPU process near half a core with the window in
+front, and as much with Boite left visible beside a game.
+
+- `lib/at-rest.ts` marks `<html data-at-rest>` while the page is hidden,
+  another application is in front of its window, or nobody has touched the PC
+  for two minutes, and every endless animation reads its play state from
+  `var(--loops)`, paused there. In the shell the answer comes from
+  `user_presence` (the window in front and the system's last input, polled
+  every 5 s) and the shell's `window://focus` event, since the webview's own
+  focus moves to a browser surface of the same window. Any input on the page,
+  or the window brought to front, plays them again at once. A tour picture is
+  the exception: it plays while seen (`.agents/DESIGN.md`, 2026-10-16).
+- The loops on screen while agents work turn in `steps()` or ease down a
+  `--loop-*` staircase of `app.css`, one step a 60th of a second, and
+  `lib/loop-phase.ts` starts each on the same 60 Hz grid of the document
+  timeline, when it starts and when it resumes: together they make 60 frames a
+  second, not one a refresh of a 144 Hz monitor or of headless Chrome.
+- `render-cost.test.ts` rejects an endless animation that ignores
+  `var(--loops)` and a working-state loop off the 60 Hz grid.
+
+`bun bench/ui-at-rest.ts --runs 2`, 2026-10-17, headless Chrome on ANGLE
+Direct3D 11 (RTX 5080), `?fake=1&working=16`, 6 s windows, CPU per wall
+second of the renderer and GPU processes, the base being `7c7327ab` with this
+change's fake client:
+
+| Scenario | Renderer ms/s | GPU ms/s | Frames/s |
+| --- | --- | --- | --- |
+| Nothing working | 3 to 4, then 3 to 4 | 3 to 5, then 3 to 4 | 1.8, then 1.8 |
+| 16 working, in front | 136, then 75 | 414 to 436, then 135 to 143 | 352 to 357, then 63 |
+| 16 working, another application in front | 124 to 126, then 12 to 40 | 376 to 387, then 7 to 8 | 353 to 359, then 2.8 |
+| 16 working, phone list | 108 to 110, then 60 to 84 | 88 to 374, then 110 to 122 | 345 to 360, then 61 |
+| 16 working, one answer streaming | 439, then 435 to 457 | 458, then 440 to 454 | 357, then 331 to 345 |
+
+Renderer and GPU together drop 62 % with the window in front and 93 % behind
+another application. A streaming answer still draws on every frame: the fake
+agent writes a token every 16 ms, about 2,000 characters a second, and its
+layout, not the loops, sets the cost. Headless Chrome follows no monitor, so
+its frame rate stands for a fast one; at 60 Hz the staircases save little in
+front and the rest still saves the whole cost. Not measured in WebView2.
+[Report](../bench/results/2026-10-17-ui-at-rest.md).
 
 ## Browser tools and review bundle size
 
@@ -1099,6 +1151,7 @@ bun bench/ui-frames.ts --ui <other checkout>/packages/ui --cpu 4 --size 1920x108
 bun bench/ui-frames.ts --trace --only "typing,long thread scroll"   # layouts per window, and how many a script forced
 bun bench/ui-frames.ts --runs 5 --only "heavy thread scroll,heavy thread flick,heavy thread jumps,heavy scroll while streaming"
 bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited on the machine's GPU, never a software renderer
+bun bench/ui-at-rest.ts --runs 2                                   # renderer and GPU CPU, frames, with 16 threads at work, in front or behind
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
 bun bench/claude-turn-heap.ts                  # heap a scripted Claude turn leaves; STEER=1 IMAGE_MIB=0 for a follow-up cut
 bun bench/codex-live-output.ts                 # redraws and characters of one running Codex command's live output

@@ -142,11 +142,11 @@
   }
   .state :global(.spinner) {
     flex: none;
-    animation: spin 1s linear infinite;
+    animation: spin 1s steps(60) infinite var(--loops);
   }
   .state :global(.pulse) {
     flex: none;
-    animation: pulse 1.6s var(--ease-out-quint) infinite;
+    animation: pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops);
   }
   /* An endless loop stops under reduced motion; the ring keeps its colour. */
   @media (prefers-reduced-motion: reduce) { .state :global(.spinner), .state :global(.pulse) { animation: none; } }
