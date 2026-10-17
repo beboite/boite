@@ -151,17 +151,49 @@ export function unwrapCommand(command: string): string {
   return current;
 }
 
+/** `FOO=bar`, `FOO="a b"` or `FOO='a b'`: a variable set for the command after it. */
+const ASSIGNMENT = String.raw`\w+=(?:"[^"]*"|'[^']*'|\S*)`;
 /** Steps a reader skips to find what runs: moving somewhere, setting a variable. */
-const PREAMBLE = /^(cd|set-location|pushd|sl|export|set)\b|^\$env:|^\w+=\S*$/i;
+const PREAMBLE = new RegExp(String.raw`^(cd|set-location|pushd|sl|export|set)\b|^\$env:|^${ASSIGNMENT}$`, 'i');
+const LEADING_ASSIGNMENTS = new RegExp(String.raw`^(${ASSIGNMENT}\s+)+`);
 
-/** The program a command runs, `git` for `cd src && git status`, empty when there is none to name. */
-export function programOf(command: string): string {
+/** The part of a command that runs the program: `git status` for `cd src && git status`. */
+function programSegment(command: string): string {
   const segments = unwrapCommand(command).split(/&&|\|\||;|\|/).map((segment) => segment.trim()).filter(Boolean);
   const segment = segments.find((entry) => !PREAMBLE.test(entry)) ?? segments[0] ?? '';
   // Leading `FOO=bar` assignments and PowerShell's `&` call operator come before the program.
-  const words = segment.replace(/^&\s+/, '').replace(/^(\w+=\S*\s+)+/, '');
-  const { first } = splitFirst(words);
+  return segment.replace(/^&\s+/, '').replace(LEADING_ASSIGNMENTS, '');
+}
+
+/** The program a command runs, `git` for `cd src && git status`, empty when there is none to name. */
+export function programOf(command: string): string {
+  const { first } = splitFirst(programSegment(command));
   return first ? baseName(first) : '';
+}
+
+/** A word naming what a program does (`agents`, `run`, `status`), not a flag, a path or a value. */
+const SUBCOMMAND = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * The program and the subcommands that say what it does: `boite agents send`
+ * for `boite agents send thr_1 "redo it"`, `git status` for `git status --short`.
+ */
+export function commandOf(command: string): string {
+  const { first, rest } = splitFirst(programSegment(command));
+  if (!first) return '';
+  const subcommands: string[] = [];
+  for (const word of rest.split(/\s+/)) {
+    if (subcommands.length === 2 || !SUBCOMMAND.test(word)) break;
+    subcommands.push(word);
+  }
+  return [baseName(first), ...subcommands].join(' ');
+}
+
+/** What the agent said a command is for, as Claude's shell tools carry it while they run: its first line. */
+function intentOf(part: ToolPart): string {
+  const input = part.input;
+  const value = typeof input === 'object' && input !== null ? (input as { description?: unknown }).description : undefined;
+  return typeof value === 'string' ? value.trim().split('\n')[0]!.trim().slice(0, 160) : '';
 }
 
 function commandText(part: ToolPart): string {
@@ -219,15 +251,21 @@ export function toolLine(part: ToolPart): ToolLine {
   return { text, mono: false, title: full || text };
 }
 
-/** What a running run says on its folded line: "Running git", "Reading app.ts". */
+/**
+ * What a running run says on its folded line: the agent's own words for a
+ * command when it gave some ("Ask the media step to redo the assets"), else
+ * "Running git status", "Reading app.ts".
+ */
 export function liveLabel(part: ToolPart): string {
   const family = familyOf(part);
   if (typeof part.inputText === 'string') return family === 'command'
     ? fill(strings.chat.toolLive.command, { subject: strings.chat.toolCommandWord })
     : strings.chat.toolBare[family];
   if (family === 'command') {
-    const program = programOf(commandText(part));
-    return fill(strings.chat.toolLive.command, { subject: program || strings.chat.toolCommandWord });
+    const intent = intentOf(part);
+    if (intent) return intent;
+    const command = commandOf(commandText(part));
+    return fill(strings.chat.toolLive.command, { subject: command || strings.chat.toolCommandWord });
   }
   const subject = subjectOf(part, family);
   return subject ? fill(strings.chat.toolLive[family], { subject }) : strings.chat.toolBare[family];

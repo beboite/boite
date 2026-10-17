@@ -14,7 +14,8 @@ function delegationRoot(ctx: FakeContext, threadId: ThreadId): ThreadId {
 
 export function delegationConfig(ctx: FakeContext, rootId: ThreadId): DelegationConfig {
   const saved = ctx.delegationConfigs.get(rootId) ?? DEFAULT_DELEGATION_CONFIG;
-  return structuredClone({ enabled: saved.enabled, paused: saved.paused, profiles: saved.profiles, anyModel: saved.anyModel !== false });
+  const pause = saved.paused && saved.pausedBy ? { pausedBy: saved.pausedBy, ...(saved.pausedAt === undefined ? {} : { pausedAt: saved.pausedAt }) } : {};
+  return structuredClone({ enabled: saved.enabled, paused: saved.paused, ...pause, profiles: saved.profiles, anyModel: saved.anyModel !== false });
 }
 
 /** The account a parent's children use on a provider: the parent's own there, else the provider's first. */
@@ -126,7 +127,7 @@ export async function stopDelegation(ctx: FakeContext, rootId: ThreadId, agentId
   const selected = agentId ? rows.filter(row => row.threadId === agentId) : rows;
   if (agentId && selected.length === 0) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agentId must name a direct child' });
   // Nothing unfinished, nothing to stop: the team stays usable. Finished children are history.
-  if (!agentId && rows.some(row => threadActive(ctx.thread(row.threadId).status) || owesResult(ctx, row.threadId))) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true });
+  if (!agentId && rows.some(row => threadActive(ctx.thread(row.threadId).status) || owesResult(ctx, row.threadId))) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true, pausedBy: 'stop', pausedAt: Date.now() });
   let stopped = 0;
   for (const row of selected) {
     const thread = ctx.thread(row.threadId);
@@ -488,6 +489,17 @@ export function delegationMethods(ctx: FakeContext) {
       const stopped = await stopDelegation(ctx, root, target);
       ctx.emit('delegation.changed', { threadId: root });
       return { stopped };
+    },
+    // The core's resume also hands over held mail and sends stopped children a continuation; the fake lifts the pause.
+    'delegation.resume': async (params) => {
+      const root = delegationRoot(ctx, params.threadId);
+      const { pausedBy: _by, pausedAt: _at, ...config } = delegationConfig(ctx, root);
+      const unpaused = config.paused;
+      if (unpaused) {
+        ctx.delegationConfigs.set(root, { ...config, paused: false });
+        ctx.emit('delegation.changed', { threadId: root });
+      }
+      return { unpaused, agents: [], runs: [] };
     },
   } satisfies Partial<FakeMethods>;
 }

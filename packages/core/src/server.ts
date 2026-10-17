@@ -763,7 +763,11 @@ export function startServer(options: ServerOptions): RunningServer {
     // first start after an update there is no kept reading, and a turn resumed
     // before it would be refused for good.
     void core.providers.settle().finally(() => {
-      if (!stopping) core.threads.handoff.resume();
+      if (stopping) return;
+      core.threads.handoff.resume();
+      // The children and steps the handoff cut go on with their conversations.
+      core.delegation.resumeAfterRestart();
+      core.workflows.resumeAfterRestart();
     });
     // Desktop-app plugins the owner left enabled, now that they have an address to reach.
     core.plugins.startApps();
@@ -820,6 +824,11 @@ export function startServer(options: ServerOptions): RunningServer {
       // trace panel reads it.
       name.startsWith('process.');
     const threadId = eventThreadId(payload);
+    // A child's question or permission is also for the windows that have its parent open:
+    // children are no sidebar rows, so the parent is where the user meets them.
+    const parentId = threadId !== null && (name.startsWith('question.') || name.startsWith('permission.'))
+      ? core.journal.getThread(threadId)?.parentThreadId ?? null
+      : null;
     const loadRow = name === 'thread.load' ? loadRowSender(core, payload as RpcEvents['thread.load']) : null;
     // Serialized once per projection, not once per socket.
     const frames: EventFrames = new Map();
@@ -828,7 +837,7 @@ export function startServer(options: ServerOptions): RunningServer {
       if (!mayReceiveEvent(name, connection)) continue;
       if (connection.identity.principal === 'agent' && name !== 'todos.updated' && name !== 'agents.changed' && connection.identity.threadId !== threadId) continue;
       if ((name === 'collaboration.changed' || name === 'delegation.changed' || name === 'workflows.changed') && !connection.subscriptions.has(threadId ?? '')) continue;
-      if (scoped && (threadId === null || !connection.subscriptions.has(threadId))) continue;
+      if (scoped && (threadId === null || !(connection.subscriptions.has(threadId) || (parentId !== null && connection.subscriptions.has(parentId))))) continue;
       // The whole activity, loop history included, is for the clients that have
       // that thread open; an agent socket still gets its own thread's.
       if (name === 'thread.activity' && connection.identity.principal !== 'agent' && (threadId === null || !connection.subscriptions.has(threadId))) continue;

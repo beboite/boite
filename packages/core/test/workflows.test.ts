@@ -8,6 +8,8 @@ import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { runCli } from '../src/cli.ts';
+import { startServer } from '../src/server.ts';
+import { HANDOFF } from '../src/threads/handoff.ts';
 import { AGENT_ENV } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -305,6 +307,8 @@ test.each(['running', 'correction'] as const)('a restarted core pauses %s workfl
     const record = next.workflows.get(threadId, run.id);
     expect(record.status).toBe('paused');
     expect(record.error).toContain('restarted');
+    // A pause its agent may lift: a crash holds the run, it does not take it from the agent.
+    expect(record.pausedBy).toBe('restart');
     const inst = record.nodes[0]!.instances[0]!;
     expect(inst.status).toBe('waiting');
     if (phase === 'running') expect(inst.error).toBe('Interrupted by a core restart');
@@ -323,7 +327,7 @@ test.each(['running', 'correction'] as const)('a restarted core pauses %s workfl
   } finally { await next.close(); }
 });
 
-test('an agent changes only the runs it started, and a paused run waits for the owner', async () => {
+test('an agent changes only the runs it started, resumes its own pause, and the owner\'s once the owner wrote again', async () => {
   const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
   const { h, owner, threadId } = await setup();
   const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
@@ -337,11 +341,118 @@ test('an agent changes only the runs it started, and a paused run waits for the 
     await owner.call('workflows.control', { threadId, runId: mine.id, action: 'stop' });
     const theirs = await agent.call('workflows.start', { threadId, plan: { name: 'Theirs', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'theirs' });
     await waitFor(() => held.size === 1);
-    expect((await agent.call('workflows.control', { threadId, runId: theirs.id, action: 'pause' })).status).toBe('paused');
-    await expect(agent.call('workflows.control', { threadId, runId: theirs.id, action: 'retry' })).rejects.toThrow('the owner resumes it');
-    await expect(agent.call('workflows.control', { threadId, runId: theirs.id, action: 'resume' })).rejects.toThrow('owner action');
+    // Its own pause is its to lift.
+    expect(await agent.call('workflows.control', { threadId, runId: theirs.id, action: 'pause' })).toMatchObject({ status: 'paused', pausedBy: 'agent' });
+    expect((await agent.call('workflows.control', { threadId, runId: theirs.id, action: 'resume' })).status).toBe('running');
+    // Its stop of the team while the run goes on is its own too, and the owner saving settings keeps it so.
+    await agent.call('delegation.stop', { threadId });
+    expect(h.core.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'agent' });
+    await owner.call('delegation.configure', { threadId, config: { ...h.core.delegation.config(threadId), anyModel: false } });
+    expect(h.core.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'agent', anyModel: false });
+    expect((await agent.call('delegation.resume', { threadId })).unpaused).toBe(true);
+    // The owner's waits for the owner's next word, for a resume and for a retry alike.
+    expect(await owner.call('workflows.control', { threadId, runId: theirs.id, action: 'pause' })).toMatchObject({ status: 'paused', pausedBy: 'owner' });
+    await expect(agent.call('workflows.control', { threadId, runId: theirs.id, action: 'resume' })).rejects.toThrow('once they write to the conversation again');
+    await expect(agent.call('workflows.control', { threadId, runId: theirs.id, action: 'retry' })).rejects.toThrow('once they write to the conversation again');
+    await owner.call('turns.start', { threadId, prompt: 'Carry on with the workflow' });
+    const resumed = await agent.call('workflows.control', { threadId, runId: theirs.id, action: 'resume' });
+    expect(resumed.status).toBe('running');
+    expect(resumed.pausedBy).toBeUndefined();
     expect((await agent.call('workflows.control', { threadId, runId: theirs.id, action: 'stop' })).status).toBe('stopped');
   } finally { agent.close(); }
+});
+
+test('a step sent back to work in its own conversation counts for its run, which then finishes', async () => {
+  const { held, prompts } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Media', steps: [{ id: 'media', profile: 'fast', task: 'Make the titled assets' }, { id: 'ship', profile: 'fast', after: ['media'], task: 'Ship {{media}}' }] }, requestId: 'media' });
+  await waitFor(() => held.size === 1);
+  const step = run.nodes[0]!.instances[0]!.threadId!;
+  // The user stops the step in its conversation: the run fails with it.
+  await owner.call('turns.stop', { threadId: step });
+  expect((await settled(h, threadId, run.id)).status).toBe('failed');
+  // Then tells it to carry on there. Before, that answer stayed in the step's conversation and the run stayed failed.
+  await owner.call('turns.start', { threadId: step, prompt: 'Carry on, with the title "you are lost"' });
+  await waitFor(() => h.core.workflows.get(threadId, run.id).status === 'running');
+  expect(h.core.workflows.get(threadId, run.id).nodes[0]!.instances[0]).toMatchObject({ status: 'running', error: null });
+  held.get(step)!('Assets done, titled "you are lost"');
+  await waitFor(() => held.size === 1);
+  const ship = prompts.at(-1)!;
+  expect(ship.threadId).not.toBe(step);
+  expect(taskOf(ship.prompt)).toBe('Ship Assets done, titled "you are lost"');
+  [...held.values()][0]!('Shipped');
+  expect((await settled(h, threadId, run.id)).status).toBe('done');
+  // The root hears of the finished run too, not only of the failure.
+  await waitFor(() => h.core.workflows.get(threadId, run.id).delivered);
+});
+
+/** A run's step and a subagent at work when an update's handoff stops the core; the core is closed after. */
+async function cutByHandoff() {
+  const resumed = (prompt: string) => prompt.includes('Boite restarted') || prompt.includes('Try this workflow step again') || prompt.includes('Continue your task');
+  const { held, prompts } = scripted(ctx => ctx.thread.parentThreadId && !resumed(ctx.prompt) ? { hold: true } : 'resumed and done');
+  let stops = 0;
+  const h = await startTestCore({ onShutdown: () => { stops += 1; } }); cores.push(h);
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner, 'Parent');
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Long', steps: [{ id: 'a', task: 'a' }] }, requestId: 'long' });
+  const child = await owner.call('delegation.spawn', { threadId, task: 'Write the parser', requestId: 'parser' });
+  await waitFor(() => held.size === 2);
+  const step = run.nodes[0]!.instances[0]!.threadId!;
+  const response = await fetch(`${h.url}/shutdown-for-update?pid=${process.pid}`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } });
+  expect(response.status).toBe(202);
+  await waitFor(() => stops === 1);
+  // Before, the run failed with a stopped step and the parent got a "stopped" result for the child.
+  expect(h.core.workflows.get(threadId, run.id).status).toBe('running');
+  expect(h.core.workflows.get(threadId, run.id).nodes[0]!.instances[0]).toMatchObject({ status: 'waiting', error: 'Interrupted by a core restart' });
+  expect(h.core.delegation.get(threadId).messages.filter(letter => letter.origin === 'result')).toHaveLength(0);
+  owner.close();
+  await h.core.drain();
+  await h.server.stop();
+  await h.core.close();
+  return { h, threadId, run, child: child.thread.id, step, prompts };
+}
+
+test('a restart handoff cuts steps and subagents without failing them, and the next core continues both', async () => {
+  const { h, threadId, run, child, step, prompts } = await cutByHandoff();
+  const next = new Core({ dataDir: h.dataDir, token: h.token });
+  const server = startServer({ core: next, host: '127.0.0.1', port: 0 });
+  try {
+    expect(next.delegation.config(threadId).paused).toBe(false);
+    await waitFor(() => next.workflows.get(threadId, run.id).status === 'done', 5000);
+    expect(prompts.filter(p => p.threadId === step).at(-1)!.prompt).toContain('Interrupted by a core restart');
+    await waitFor(() => next.journal.listTurns(child).at(-1)?.status === 'done', 5000);
+    expect(next.journal.listTurns(child).at(-1)!.execution?.operation).toBe('resume');
+    expect(prompts.filter(p => p.threadId === child).at(-1)!.prompt).toContain('Write the parser');
+    expect(next.journal.getSetting('delegation-restart-cut')).toBeFalsy();
+  } finally {
+    await server.stop();
+    await next.close();
+  }
+});
+
+test('a handoff older than an hour continues nothing: the team and the run wait, held by the restart', async () => {
+  const { h, threadId, run, child } = await cutByHandoff();
+  const maxAge = HANDOFF.maxAgeMs;
+  HANDOFF.maxAgeMs = -1;
+  const next = new Core({ dataDir: h.dataDir, token: h.token });
+  HANDOFF.maxAgeMs = maxAge;
+  const server = startServer({ core: next, host: '127.0.0.1', port: 0 });
+  try {
+    // Before, the cut child got a paid continuation anyway and its team showed no pause.
+    expect(next.delegation.config(threadId)).toMatchObject({ paused: true, pausedBy: 'restart' });
+    expect(next.workflows.get(threadId, run.id)).toMatchObject({ status: 'paused', pausedBy: 'restart' });
+    expect(next.journal.getSetting('delegation-restart-cut')).toBeFalsy();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(next.journal.listTurns(child).at(-1)!.status).toBe('stopped');
+    expect(next.delegation.resume(threadId, undefined, 'agent')).toEqual({ unpaused: true, agents: [child], runs: [] });
+    // The owner started the run, so resuming it stays theirs.
+    expect(next.delegation.resume(threadId, undefined, 'owner')).toMatchObject({ unpaused: false, runs: [run.id] });
+    await waitFor(() => next.workflows.get(threadId, run.id).status === 'done', 5000);
+    await waitFor(() => next.journal.listTurns(child).at(-1)?.status === 'done', 5000);
+  } finally {
+    await server.stop();
+    await next.close();
+  }
 });
 
 test('templates are kept per project, refreshed by name, started by id, and the CLI speaks the same plan', async () => {
