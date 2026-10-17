@@ -39,7 +39,7 @@
   .reset :global(svg) { flex: none; opacity: 0.7; }
   /* The reading on screen is the previous one until the new one lands: grey, breathing. */
   .track[aria-busy='true'] { filter: saturate(0.15); }
-  .track[aria-busy='true'] .fill { animation: breathe 1.1s ease-in-out infinite alternate; }
+  .track[aria-busy='true'] .fill { animation: breathe 1.1s ease-in-out infinite alternate var(--loops); }
   .track.stale { opacity: 0.45; }
   @media (prefers-reduced-motion: reduce) {
     .track, .fill { transition: none; }

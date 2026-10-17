@@ -87,6 +87,9 @@ exit reconciliation because the port may report only the empty-job event.
 
 `process.started` and `process.exited` carry the available PID, parent PID,
 executable, command line, timestamps, exit code, CPU time, peak memory and I/O.
+The UI applies them only while the trace surface is on screen, which reads
+`trace.get` when it appears, and keeps the newest `TRACE_LIMIT` (200) rows,
+as many as `trace.get` returns without a `limit`.
 
 ## What a client sees
 

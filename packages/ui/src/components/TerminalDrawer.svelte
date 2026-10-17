@@ -447,7 +447,7 @@
 
   .status.running {
     background: var(--color-accent);
-    animation: status-running 1.2s var(--ease-out-quint) infinite;
+    animation: status-running 1.2s var(--loop-ease-out-quint-36) infinite var(--loops);
   }
 
   .status.failed { background: var(--ansi-red); }

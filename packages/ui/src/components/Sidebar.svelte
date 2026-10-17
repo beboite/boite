@@ -407,8 +407,8 @@
   .rollup.error { color: var(--color-danger); }
   .rollup.done { color: var(--color-success); }
   .rollup.queued { color: var(--color-muted-foreground); }
-  .rollup.delegating .dot, .rollup.monitoring .dot, .rollup.background .dot, .rollup.watching .dot { animation: pulse 1.6s var(--ease-out-quint) infinite; }
-  .rollup :global(.spinner) { animation: spin 1s linear infinite; }
+  .rollup.delegating .dot, .rollup.monitoring .dot, .rollup.background .dot, .rollup.watching .dot { animation: pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops); }
+  .rollup :global(.spinner) { animation: spin 1s steps(60) infinite var(--loops); }
   @media (prefers-reduced-motion: reduce) { .rollup .dot, .rollup :global(.spinner) { animation: none; } }
   :global(html[data-motion='reduced']) .rollup .dot,
   :global(html[data-motion='reduced']) .rollup :global(.spinner) { animation: none; }

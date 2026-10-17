@@ -331,7 +331,7 @@
   .radio { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--color-edge); transition: border-color var(--dur-2) var(--ease-out-quint), border-width var(--dur-2) var(--ease-out-quint); }
   .pick:hover:not(:disabled) .radio { border-color: var(--color-muted-foreground); }
   .pick[aria-checked='true'] .radio { border: 5px solid var(--color-accent); }
-  .model :global(.spinner) { flex: none; margin: 0 8px; color: var(--color-muted-foreground); animation: spin 1s linear infinite; }
+  .model :global(.spinner) { flex: none; margin: 0 8px; color: var(--color-muted-foreground); animation: spin 1s linear infinite var(--loops); }
 
   .field { display: flex; align-items: center; gap: 8px; flex: 0 1 380px; min-width: 0; }
   .field input { flex: 1; min-width: 0; }

@@ -77,7 +77,8 @@ export class Workbench {
   }
 
   resources = $state<ThreadResources[]>([]);
-  trace = $state<ProcessRecord[]>([]);
+  /** Replaced whole, never changed in place: no proxy over every record. */
+  trace = $state.raw<ProcessRecord[]>([]);
   /**
    * The todo cards of each project, keyed by project id: the list is the
    * project's, so every thread of it shows the same one.

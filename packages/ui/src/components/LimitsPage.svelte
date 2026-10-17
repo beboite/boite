@@ -185,7 +185,7 @@
   .group-head small { color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
   .gateway-empty { max-width: var(--settings-width); margin-bottom: 12px; }
   .refresh { flex: none; margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
-  .refresh :global(.spinning) { animation: spin 900ms linear infinite; }
+  .refresh :global(.spinning) { animation: spin 900ms linear infinite var(--loops); }
   .muted { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .resume { max-width: var(--settings-width); margin-top: 12px; padding: 6px var(--settings-padding); }
   .tracked { display: grid; gap: 2px; max-width: var(--settings-width); margin-top: 12px; padding: var(--settings-padding); }
@@ -202,7 +202,7 @@
   .empty { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: var(--settings-width); padding: var(--settings-padding); }
   .empty p { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .skeleton { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; max-width: var(--settings-width); }
-  .ghost-card { height: 150px; margin: 0; animation: ghost-breathe 1.4s var(--ease-out-quint) infinite alternate; }
+  .ghost-card { height: 150px; margin: 0; animation: ghost-breathe 1.4s var(--ease-out-quint) infinite alternate var(--loops); }
   @keyframes ghost-breathe { from { opacity: 0.45; } to { opacity: 0.9; } }
   @media (prefers-reduced-motion: reduce) {
     .refresh :global(.spinning), .ghost-card { animation: none; }

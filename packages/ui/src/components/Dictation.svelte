@@ -201,7 +201,7 @@
   .wave { display: block; width: 140px; height: 22px; margin: 0 4px; }
   .duration { min-width: 3.4ch; font-size: var(--text-xs); font-variant-numeric: tabular-nums; color: var(--color-muted-foreground); text-align: right; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  :global(.dictation .spinner) { animation: spin 1s linear infinite; }
+  :global(.dictation .spinner) { animation: spin 1s linear infinite var(--loops); }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (max-width: 720px) {
     .dictation button { width: var(--touch-target); height: var(--touch-target); border-radius: 50%; }
