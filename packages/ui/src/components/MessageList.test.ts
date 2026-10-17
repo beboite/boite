@@ -870,6 +870,30 @@ test('the scrollbar spans the whole thread, and a drag to the top reads the firs
   expect(live.openThread!.messages).toHaveLength(160);
 });
 
+test('a reader scrolling up without a pause gets the page above before its gap reaches the screen', async ({ createStore }) => {
+  const { store: live, client } = createStore({ delayMs: 0, long: true });
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const asked = vi.spyOn(live, 'loadRange');
+  stubLayout(400 * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages: live.openThread!.messages } });
+  await settle();
+
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+  // A wheel moves the view more often than frames are drawn. An ask put off by every move was never
+  // sent: the reader crossed the 360 unread messages on their estimate and landed at the top.
+  const gapBottom = 360 * ESTIMATE;
+  for (let top = timeline.scrollTop; top > gapBottom + 2 * VIEW_HEIGHT && asked.mock.calls.length === 0; top -= 40) {
+    timeline.scrollTop = top;
+    timeline.dispatchEvent(new Event('scroll'));
+    await new Promise((resolve) => setTimeout(resolve, 4));
+  }
+  expect(asked).toHaveBeenCalled();
+  expect(timeline.scrollTop).toBeGreaterThan(gapBottom + 2 * VIEW_HEIGHT);
+});
+
 test('with history still missing above, a streamed token rebuilds neither the rows nor the window', async ({ createStore }) => {
   const { store: live, client } = createStore({ delayMs: 0, long: true });
   live.attach(client);
