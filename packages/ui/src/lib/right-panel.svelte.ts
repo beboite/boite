@@ -8,7 +8,7 @@ import { secureId } from './secure-id';
  */
 
 import type { PanelSurface } from '@boite/contracts';
-import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { MediaQuery, SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { DEFAULT_BROWSER_PROFILE } from '@boite/contracts';
 import { browserBridge, type BrowserEvent } from './browser-bridge';
 import { browserProfiles } from './browser-profiles.svelte';
@@ -89,6 +89,8 @@ export const PANEL_DEFAULT = 360;
 export const PANEL_MIN = 300;
 /** The chat column never drops under this, whatever the drag asks for. */
 export const SIBLING_MIN = 360;
+/** The narrowest window where an untouched conversation opens its panel: sidebar, chat and a default panel side by side. */
+export const PANEL_AUTO_OPEN = 1200;
 
 export const AGENTS_SURFACE_ID = 'agents';
 
@@ -163,7 +165,8 @@ function parse(raw: string): Record<string, PanelState> {
     const stored = (value as PanelState).activeSurfaceId;
     const active = stored === 'workflow' ? AGENTS_SURFACE_ID : stored;
     out[threadId] = {
-      isOpen: (value as PanelState).isOpen === true && surfaces.length > 0,
+      // An open panel with no tab shows its launcher, which is a layout too.
+      isOpen: (value as PanelState).isOpen === true,
       activeSurfaceId:
         typeof active === 'string' && surfaces.some((surface) => surface.id === active)
           ? active
@@ -207,7 +210,20 @@ export class RightPanelStore {
    */
   readonly phoneShut = new SvelteSet<string>();
 
+  /**
+   * A window wide enough to keep the panel beside the chat with room to read:
+   * there, a conversation whose panel was never touched opens on the launcher.
+   * Narrower, the panel lies over the chat and waits to be asked for.
+   */
+  readonly #wide = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? new MediaQuery(`(min-width: ${PANEL_AUTO_OPEN}px)`)
+    : null;
+
   #bound = new Map<string, BoundPanel>();
+
+  get wide(): boolean {
+    return this.#wide?.current ?? false;
+  }
 
   constructor() {
     this.load();
@@ -351,7 +367,7 @@ export class BoundPanel {
 
   /** The layout as this device shows it: a panel a phone-width load shut reads closed. */
   get state(): PanelState {
-    const stored = this.#root.threads[this.#key] ?? emptyState();
+    const stored = this.#root.threads[this.#key] ?? this.#untouched();
     return stored.isOpen && this.#root.phoneShut.has(this.#key) ? { ...stored, isOpen: false } : stored;
   }
 
@@ -370,6 +386,14 @@ export class BoundPanel {
   get active(): Surface | null {
     const { activeSurfaceId, surfaces } = this.state;
     return surfaces.find((surface) => surface.id === activeSurfaceId) ?? null;
+  }
+
+  /**
+   * A conversation nobody opened or closed a tab in: on a wide window its panel
+   * shows the launcher, until the user closes it or an agent opens a surface.
+   */
+  #untouched(): PanelState {
+    return { ...emptyState(), isOpen: this.#key !== '' && this.#root.wide };
   }
 
   #write(next: PanelState): void {
