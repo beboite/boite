@@ -515,10 +515,10 @@ matches `:popover-open`, so its own sheet hides every `[popover]`. `test-setup.t
 shows them again; the app mounts a popover only while it is open.
 
 The UI keeps `typescript` 6 beside `@typescript/native` (TypeScript 7):
-svelte-check refuses `--tsgo` unless both are installed. Up to 4.7.7 its
+svelte-check refuses `--tsgo` unless both are installed. As of 4.7.7 its
 `bin/ts-version-check.js` throws when the package named `typescript` is major
-7, and its peer range stops at `^6.0.0`, so the UI moves its `typescript` to 7
-only once svelte-check accepts it. The check already runs on TypeScript 7.
+7, and its peer range stops at `^6.0.0`: re-check that range before moving the
+UI's `typescript` to 7. The check already runs on TypeScript 7.
 
 `bun run e2e` exercises real-core RPC with echo, browser UI and the Windows
 WebView2 shell when available. Shell automation sets `BOITE_SHELL_HIDDEN=1`.
