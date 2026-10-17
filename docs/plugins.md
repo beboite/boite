@@ -425,6 +425,10 @@ When the core checks:
 - when the owner clicks Check for updates on the plugin's row
   (`plugins.checkUpdates {id?}`), whether it is installed or not. A check
   finished less than ten seconds before answers instead of a new read.
+- when the owner installs or updates the plugin, before the download: a first
+  install brings the release the source names, not a pinned entry several
+  releases behind. A source that fails or takes more than 15 seconds leaves
+  the newest version already known.
 - A read that fails waits 15 minutes, then twice as long each time, up to six
   hours. The row shows the failure as a quiet note, never as an install error.
 

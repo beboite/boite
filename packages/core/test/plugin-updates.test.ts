@@ -117,6 +117,21 @@ describe('an update source', () => {
     expect(t.store.state('seat-pool')).toMatchObject({ version: '1.1.0', availableVersion: '1.1.0', updates: { available: null } });
   }, 30_000);
 
+  test('a first install reads the source before downloading, and a source that fails leaves the pinned entry', async () => {
+    const t = await setup();
+    t.publish(new Error('git fetch failed: could not resolve host'));
+    await t.installed('1.0.0');
+    expect(t.store.state('seat-pool').updates?.error).toBe('git fetch failed: could not resolve host');
+    await t.client.call('plugins.uninstall', { id: 'seat-pool' });
+
+    // Never checked while it was not installed, the source still names the release a first install brings.
+    t.clock.now += 11_000;
+    t.publish(release('1.1.0'));
+    await t.installed('1.1.0');
+    expect(t.reads()).toBe(2);
+    expect(t.asked).toEqual(['https://plugins.example.invalid/seat-pool-1.0.0', 'https://plugins.example.invalid/seat-pool-1.1.0']);
+  }, 30_000);
+
   test('the same or an older version is not offered, and an older one says why', async () => {
     const t = await setup();
     await t.installed('1.0.0');
