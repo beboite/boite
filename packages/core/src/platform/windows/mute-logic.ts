@@ -101,6 +101,8 @@ export class MuteLogic {
     this.#enabled = enabled;
     // Turning it off gives the user their sound back at once, not at the next exit.
     if (!enabled) this.releaseAll();
+    // A session opened while it was off sent its only notice then: walk for it now.
+    else this.wake();
   }
 
   /** Every pid with a session this class is holding muted. */

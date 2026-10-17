@@ -8,7 +8,8 @@
  */
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import { coInitialize, coUninitialize, openSessions } from '../src/platform/windows/audio-sessions.ts';
+import { CFunction, FFIType, ptr } from 'bun:ffi';
+import { coInitialize, coUninitialize, openSessions, vtables } from '../src/platform/windows/audio-sessions.ts';
 import type { AudioSession, AudioSessions } from '../src/platform/windows/audio-sessions.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -47,6 +48,31 @@ async function settles(predicate: () => boolean, timeoutMs: number): Promise<boo
     return false;
   }
 }
+
+(onWindows ? describe : describe.skip)('the objects Core Audio calls back', () => {
+  /** Calls a vtable slot the way Core Audio does, with `this` and up to two more pointers. */
+  function call(address: bigint, ...args: (Uint8Array | BigUint64Array | null)[]): number {
+    const native = CFunction({ ptr: Number(address) as never, args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
+    return native(...[...args, null, null, null].slice(0, 3).map((arg) => (arg === null ? null : ptr(arg))));
+  }
+
+  test('answer QueryInterface with E_NOINTERFACE and a null interface, count one reference, and take a property change', () => {
+    const { session, client } = vtables();
+    const self = new BigUint64Array(1);
+    const iid = new Uint8Array(16);
+    for (const table of [session, client]) {
+      const out = new BigUint64Array([0xdeadbeefn]);
+      expect(call(table[0]!, self, iid, out) >>> 0).toBe(0x80004002);
+      expect(out[0]).toBe(0n);
+      // A caller that passes no out parameter gets the same answer, not a crash.
+      expect(call(table[0]!, self, iid, null) >>> 0).toBe(0x80004002);
+      expect(call(table[1]!, self)).toBe(1);
+      expect(call(table[2]!, self)).toBe(1);
+    }
+    // OnPropertyValueChanged: S_OK, nothing to walk for.
+    expect(call(client[7]!, self, null, null)).toBe(0);
+  });
+});
 
 describeWindows('the audio sessions of the default endpoint', () => {
   let endpoint: AudioSessions | null = null;

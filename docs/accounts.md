@@ -325,19 +325,23 @@ that opens the model picker.
 A Claude account Boite created keeps its sessions as
 `<dataDir>/accounts/<id>/projects/<folder>/<sessionId>.jsonl`, with a
 `<sessionId>/` folder beside it for subagent sidechains. When a deleted
-conversation is purged, or an incognito one is erased,
+conversation is purged, or an incognito one is erased (by the user, when the
+core stops, or by the next core after one died with it open),
 `packages/core/src/threads/transcript-purge.ts` removes both for every session
 the conversation's turns named, current and earlier. It acts only where
 `ownIsolationDir` in `packages/core/src/accounts.ts` holds: the account's
 directory is exactly `<dataDir>/accounts/<id>` and not a link. A default account,
 whose directory is the user's own `~/.claude`, and an account pointed at a folder
 the user chose are never touched. A session another conversation still names,
-such as the source of a fork, stays. Links inside `projects` are skipped.
+such as the source of a fork, stays: the journal is asked again right before
+each path goes, since the disk is awaited between paths. A session being
+imported is left alone, and an import of a session whose transcript is being
+removed is refused. Links inside `projects` are skipped.
 
 Only the `claude-sdk` driver is covered. Codex and pi file their sessions by date
 or under an id Boite does not keep, so their transcripts stay where the agent
-wrote them. A path that cannot be removed is reported in one `warn` line per
-pass and never holds the purge back.
+wrote them. A path that cannot be listed, read or removed, other than a missing
+one, is reported in one `warn` line per pass and never holds the purge back.
 
 ## A conversation follows its agent
 

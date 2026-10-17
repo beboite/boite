@@ -1,8 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
+import { Core } from '../src/core.ts';
+import { newToken } from '../src/ids.ts';
 import { claudeProjectFolder } from '../src/imports/claude.ts';
 import { claudeSessionFixture, FIXTURE_SESSION_ID } from './fixtures/claude-session.ts';
 import { echoThread, startTestCore, testProject } from './harness.ts';
@@ -103,5 +106,111 @@ test('a purge never touches transcripts outside a directory Boite made for the a
     expect(existsSync(current.side)).toBe(true);
   } finally {
     rmSync(chosen, { recursive: true, force: true });
+  }
+});
+
+test('a session re-imported while its deleted thread waits keeps its transcript through a purge, and none starts while one is removed', async () => {
+  const project = await testProject(harness, client);
+  const account = await client.call('accounts.add', { providerId: 'claude', label: 'isolated' });
+  if (account.isolationDir === null) throw new Error('the account must be isolated');
+  const folder = join(account.isolationDir, 'projects', claudeProjectFolder(project.path));
+  const current = transcript(folder, FIXTURE_SESSION_ID, project.path);
+  const threadId = await importSession(account.id, project.id);
+  await client.call('settings.set', { threadDeletionRetentionDays: 1 });
+  await client.call('threads.remove', { threadId });
+  harness.core.journal.db.query('UPDATE thread_deletions SET deleted_at = ? WHERE root_id = ?').run(Date.now() - 2 * 86_400_000, threadId);
+
+  // The import stops at its read of the transcript; the purge runs across it.
+  const importing = harness.core.imports.run({ projectId: project.id, accountId: account.id, sessionId: FIXTURE_SESSION_ID });
+  harness.core.threads.purgeDeleted();
+  expect(await harness.core.threads.transcriptPurge).toEqual([]);
+  const again = await importing;
+  expect(existsSync(current.file)).toBe(true);
+  expect(existsSync(current.side)).toBe(true);
+
+  // Deleted again, a purge that is removing the session refuses an import of it.
+  await client.call('threads.remove', { threadId: again.id });
+  harness.core.journal.db.query('UPDATE thread_deletions SET deleted_at = ? WHERE root_id = ?').run(Date.now() - 2 * 86_400_000, again.id);
+  harness.core.threads.purgeDeleted();
+  const refusal = harness.core.imports.run({ projectId: project.id, accountId: account.id, sessionId: FIXTURE_SESSION_ID });
+  await expect(refusal).rejects.toThrow(/being removed/);
+  await harness.core.threads.transcriptPurge;
+  expect(existsSync(current.file)).toBe(false);
+});
+
+test('a projects folder that cannot be read is one warning of the pass, and the purge still goes', async () => {
+  if (process.platform !== 'win32' && process.getuid?.() === 0) return; // root reads through any mode
+  const project = await testProject(harness, client);
+  const account = await client.call('accounts.add', { providerId: 'claude', label: 'isolated' });
+  if (account.isolationDir === null) throw new Error('the account must be isolated');
+  const projects = join(account.isolationDir, 'projects');
+  const current = transcript(join(projects, claudeProjectFolder(project.path)), FIXTURE_SESSION_ID, project.path);
+  const threadId = await importSession(account.id, project.id);
+  const warnings: string[] = [];
+  const log = spyOn(harness.core, 'log').mockImplementation((level, message) => {
+    if (level === 'warn') warnings.push(message);
+  });
+  const deny = (on: boolean): void => {
+    if (process.platform !== 'win32') return chmodSync(projects, on ? 0o000 : 0o755);
+    const result = Bun.spawnSync(['icacls', projects, ...(on ? ['/deny', '*S-1-1-0:(RD)'] : ['/remove:d', '*S-1-1-0'])], { stdout: 'ignore', stderr: 'pipe' });
+    if (result.exitCode !== 0) throw new Error(`icacls ${projects}: ${result.stderr.toString()}`);
+  };
+  deny(true);
+  try {
+    expect(await purge(threadId)).toEqual([]);
+  } finally {
+    deny(false);
+    log.mockRestore();
+  }
+  expect(warnings.filter((message) => message.startsWith('thread purge:'))).toEqual([expect.stringContaining(projects)]);
+  expect(existsSync(current.file)).toBe(true);
+});
+
+/** A core of its own on `dataDir`, as `main` runs one, for a test that stops and starts it again. */
+function coreOn(dataDir: string): Core {
+  const core = new Core({ dataDir, token: newToken() });
+  core.settings.set({ asyncQuestions: false, shortAnswers: false });
+  return core;
+}
+
+test('an incognito conversation leaves no transcript when the core stops, nor when the next core finds it after a crash', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'boite-incognito-'));
+  const work = join(dataDir, 'work');
+  mkdirSync(work);
+  try {
+    let core = coreOn(dataDir);
+    const project = core.projects.add(work, 'work');
+    const account = core.accounts.add({ providerId: 'claude', label: 'isolated' });
+    if (account.isolationDir === null) throw new Error('the account must be isolated');
+    const folder = join(account.isolationDir, 'projects', claudeProjectFolder(project.path));
+    const run = { projectId: project.id, accountId: account.id, sessionId: FIXTURE_SESSION_ID };
+
+    // Open when the core stops: the shutdown erases it.
+    const atShutdown = transcript(folder, FIXTURE_SESSION_ID, project.path);
+    const held = await core.imports.run(run);
+    core.journal.db.query('UPDATE threads SET incognito = 1 WHERE id = ?').run(held.id);
+    await core.close();
+    expect(existsSync(atShutdown.file)).toBe(false);
+    expect(existsSync(atShutdown.side)).toBe(false);
+
+    // Open when the core died: the journal still has it, and the next core erases it.
+    core = coreOn(dataDir);
+    const atCrash = transcript(folder, FIXTURE_SESSION_ID, project.path);
+    const crashed = await core.imports.run(run);
+    await core.close();
+    const journal = new Database(join(dataDir, 'journal.db'));
+    journal.query('UPDATE threads SET incognito = 1 WHERE id = ?').run(crashed.id);
+    journal.close();
+    expect(existsSync(atCrash.file)).toBe(true);
+    core = coreOn(dataDir);
+    try {
+      await core.threads.transcriptPurge;
+      expect(existsSync(atCrash.file)).toBe(false);
+      expect(existsSync(atCrash.side)).toBe(false);
+    } finally {
+      await core.close();
+    }
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
   }
 });

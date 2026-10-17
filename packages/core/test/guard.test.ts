@@ -357,6 +357,23 @@ describe('the audio mute rule', () => {
     expect(mute.hasTracedSessions()).toBe(false);
   });
 
+  test('a session opened while the mute was off is muted the moment it is turned back on', () => {
+    const endpoint = new FakeEndpoint();
+    let clock = 5000;
+    const mute = new MuteLogic(endpoint.list, true, () => clock);
+    mute.addPid('thr_one', MUTED_PID);
+    expect(mute.hasTracedSessions()).toBe(false);
+
+    mute.setEnabled(false);
+    const mixer = endpoint.add(MUTED_PID);
+    // Its only notice came while the mute was off, and the 30 s clock is the next walk.
+    mute.wake();
+    clock += 3000;
+    mute.setEnabled(true);
+    expect(mixer.muted).toBe(true);
+    expect(mute.takeEvents().map((event) => event.kind)).toEqual(['session-muted']);
+  });
+
   test('a session of a traced pid is muted once and reported once', () => {
     const endpoint = new FakeEndpoint();
     const mixer = endpoint.add(MUTED_PID);

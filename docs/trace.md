@@ -371,12 +371,14 @@ manager and `IMMNotificationClient` on the device enumerator, so a session that
 opens, a device that comes or goes and a new default device each start a walk.
 Both objects are vtables built in `audio-sessions.ts`; their only JavaScript is
 one thread-safe `JSCallback` that answers S_OK on Core Audio's thread and runs
-on the Worker's, and `IUnknown` points at kernel32 functions that read no
-argument. A PID or a notice that comes less than 100 ms after the last walk
+on the Worker's. `IUnknown` and property changes are a few bytes of x64 or
+arm64 code in a page made executable once: QueryInterface writes null and
+answers E_NOINTERFACE, AddRef and Release answer 1. A PID or a notice that comes less than 100 ms after the last walk
 waits for one shared walk at the end of those 100 ms, so a build that starts
 hundreds of processes walks at most ten times a second.
 
-Core Audio reports no mute change, so the Worker still walks once a second
+Turning the mute back on walks at once, for a session that opened while it was
+off and sent its only notice then. Core Audio reports no mute change, so the Worker still walks once a second
 while a traced process has a session (an agent that unmutes itself, or a
 session that opened muted from Windows' remembered state, is muted again within
 a second), and when the endpoint refused the registrations, which is one
