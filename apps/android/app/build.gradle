@@ -74,7 +74,7 @@ def twaManifest = [
 ]
 
 android {
-    compileSdk 36
+    compileSdk 37
     namespace "com.boite.two"
     defaultConfig {
         applicationId twaManifest.applicationId

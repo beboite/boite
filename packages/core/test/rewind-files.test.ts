@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
-import { CodeCheckpoints } from '../src/threads/code-checkpoints.ts';
+import { CodeCheckpoints, IDLE_THREAD_MS, KEEP_TURNS } from '../src/threads/code-checkpoints.ts';
 import { restoreFiles, sharedBlob, snapshot } from '../src/threads/checkpoint-files.ts';
+import { BLOB_BYTE_LIMIT, decodeBlob, decodeManifest } from '../src/threads/checkpoint-store.ts';
 import { git } from '../src/git/read.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -452,3 +453,210 @@ test('a short shared blob left by a crash is replaced instead of linked', async 
   expect(await readFile(join(objects, hash), 'utf8')).toBe('complete content');
   expect(await readFile(sharedBlob(shared, hash), 'utf8')).toBe('complete content');
 });
+
+const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+/** The former layout of a thread folder: every blob a private copy of its own, raw, and no shared store. */
+async function privateCopies(thread: string): Promise<void> {
+  const objects = join(h.dataDir, 'checkpoints', thread, 'objects');
+  for (const name of await readdir(objects)) {
+    const bytes = await readFile(join(objects, name));
+    const raw = bytes.subarray(0, 4).equals(ZSTD_MAGIC) ? Buffer.from(Bun.zstdDecompressSync(bytes)) : bytes;
+    await writeFile(join(objects, `${name}.copy`), raw);
+    await rename(join(objects, `${name}.copy`), join(objects, name));
+  }
+}
+
+test('private copies from before the shared store are adopted once, end as one compressed inode, and both threads still rewind', async () => {
+  const initial = 'initial line of a source file\n'.repeat(40);
+  const agent = 'agent line of a source file\n'.repeat(40);
+  await writeFile(join(cwd, 'app.ts'), initial);
+  change = async () => { await writeFile(join(cwd, 'app.ts'), agent); };
+  const firstMessage = await run('first');
+  const first = threadId;
+  threadId = (await client.call('threads.create', { projectId: h.core.threads.require(first).projectId!, providerId: 'echo', accountId: h.core.threads.require(first).accountId })).id;
+  await writeFile(join(cwd, 'app.ts'), initial);
+  const secondMessage = await run('second');
+  const second = threadId;
+  await privateCopies(first);
+  await privateCopies(second);
+  await rm(join(h.dataDir, 'checkpoints', 'objects'), { recursive: true });
+  const named = (thread: string, text: string) => join(h.dataDir, 'checkpoints', thread, 'objects', hashOf(text));
+  expect((await stat(named(first, initial))).ino).not.toBe((await stat(named(second, initial))).ino);
+
+  await h.core.threads.codeCheckpoints.maintain();
+  const shared = join(h.dataDir, 'checkpoints', 'objects');
+  for (const text of [initial, agent]) {
+    const blob = await stat(sharedBlob(shared, hashOf(text)));
+    expect(blob.nlink).toBe(3);
+    for (const thread of [first, second]) expect((await stat(named(thread, text))).ino).toBe(blob.ino);
+    // Adopted into the store as a frame: the name stays the hash of the original bytes.
+    const stored = await readFile(sharedBlob(shared, hashOf(text)));
+    expect(stored.subarray(0, 4)).toEqual(ZSTD_MAGIC);
+    expect(stored.length).toBeLessThan(text.length / 4);
+  }
+  // Manifests became frames too, and the pass is marked done.
+  for (const thread of [first, second]) {
+    for (const name of (await readdir(join(h.dataDir, 'checkpoints', thread))).filter(name => name.endsWith('.json'))) {
+      expect((await readFile(join(h.dataDir, 'checkpoints', thread, name))).subarray(0, 4)).toEqual(ZSTD_MAGIC);
+    }
+  }
+  expect(h.core.journal.getSetting('checkpoints:stored-through')).toBe(true);
+
+  expect((await client.call('threads.rewind', { threadId: second, messageId: secondMessage })).files).toEqual({ status: 'restored', count: 1 });
+  expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe(initial);
+  await writeFile(join(cwd, 'app.ts'), agent);
+  expect((await client.call('threads.rewind', { threadId: first, messageId: firstMessage })).files).toEqual({ status: 'restored', count: 1 });
+  expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe(initial);
+});
+
+test('a copy that does not match its name is left alone, and the rest of the folder is still adopted', async () => {
+  const text = 'kept content\n'.repeat(30);
+  const other = 'other content\n'.repeat(30);
+  await writeFile(join(cwd, 'app.ts'), text);
+  await writeFile(join(cwd, 'other.ts'), other);
+  change = async () => { await writeFile(join(cwd, 'app.ts'), 'agent\n'.repeat(30)); };
+  await run('change');
+  await privateCopies(threadId);
+  await rm(join(h.dataDir, 'checkpoints', 'objects'), { recursive: true });
+  const objects = join(h.dataDir, 'checkpoints', threadId, 'objects');
+  await writeFile(join(objects, hashOf(text)), 'damaged');
+  await h.core.threads.codeCheckpoints.maintain();
+  const shared = join(h.dataDir, 'checkpoints', 'objects');
+  expect(await readFile(join(objects, hashOf(text)), 'utf8')).toBe('damaged');
+  await expect(stat(sharedBlob(shared, hashOf(text)))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect((await stat(join(objects, hashOf(other)))).ino).toBe((await stat(sharedBlob(shared, hashOf(other)))).ino);
+});
+
+test('compressed and raw blobs, framed and plain manifests all restore byte for byte', async () => {
+  const text = 'export const value = 1;\n'.repeat(200);
+  const random = Buffer.from(crypto.getRandomValues(new Uint8Array(4096)));
+  // A file that is itself a zstd frame is kept raw and found by its raw hash, never expanded.
+  const zst = Buffer.from(Bun.zstdCompressSync(Buffer.from('inner '.repeat(100))));
+  const old = 'written before compression\n'.repeat(50);
+  await writeFile(join(cwd, 'app.ts'), text);
+  await writeFile(join(cwd, 'random.bin'), random);
+  await writeFile(join(cwd, 'archive.zst'), zst);
+  await writeFile(join(cwd, 'old.ts'), old);
+  change = async () => {
+    for (const name of ['app.ts', 'random.bin', 'archive.zst', 'old.ts']) await writeFile(join(cwd, name), `changed ${name}`);
+  };
+  const messageId = await run('change');
+  const turnId = h.core.threads.get(threadId).turns[0]!.id;
+  const folder = join(h.dataDir, 'checkpoints', threadId);
+  const blob = (bytes: Buffer | string) => readFile(join(folder, 'objects', createHash('sha256').update(bytes).digest('hex')));
+  expect((await blob(text)).subarray(0, 4)).toEqual(ZSTD_MAGIC);
+  expect((await blob(text)).length).toBeLessThan(text.length / 10);
+  expect(await blob(random)).toEqual(random);
+  expect(await blob(zst)).toEqual(zst);
+  // An older core's raw blob and plain manifest beside the new ones.
+  const oldPath = join(folder, 'objects', hashOf(old));
+  await rm(oldPath);
+  await writeFile(oldPath, old);
+  const manifest = join(folder, `${turnId}.json`);
+  const framed = await readFile(manifest);
+  expect(framed.subarray(0, 4)).toEqual(ZSTD_MAGIC);
+  await writeFile(manifest, Buffer.from(Bun.zstdDecompressSync(framed)));
+  JSON.parse(await readFile(manifest, 'utf8'));
+
+  await new CodeCheckpoints(h.core).rewind(h.core.threads.require(threadId), [turnId], messageId, result => {
+    expect(result).toEqual({ status: 'restored', count: 4 });
+  });
+  expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe(text);
+  expect(await readFile(join(cwd, 'random.bin'))).toEqual(random);
+  expect(await readFile(join(cwd, 'archive.zst'))).toEqual(zst);
+  expect(await readFile(join(cwd, 'old.ts'), 'utf8')).toBe(old);
+});
+
+test('a stored frame never decodes past the 16 MiB file limit, and a raw frame named by its own bytes is returned as stored', async () => {
+  const large = Buffer.alloc(BLOB_BYTE_LIMIT + 1, 7);
+  const frame = Buffer.from(Bun.zstdCompressSync(large));
+  expect(frame.length).toBeLessThan(1024 * 1024);
+  // Named by what it decodes to: no checkpoint holds a file this large, so it is refused unexpanded.
+  expect(await decodeBlob(frame, createHash('sha256').update(large).digest('hex'))).toBeNull();
+  // An older core's blob of a `.zst` file: its raw bytes match the name.
+  expect(await decodeBlob(frame, createHash('sha256').update(frame).digest('hex'))).toBe(frame);
+  // A manifest frame is bounded the same way.
+  const huge = Buffer.from(Bun.zstdCompressSync(Buffer.alloc(65 * 1024 * 1024, 0x20)));
+  await expect(decodeManifest(huge)).rejects.toMatchObject({ code: 'ERR_BUFFER_TOO_LARGE' });
+});
+
+test('the background pass counts manifests against its tick budget and stops when a snapshot starts', async () => {
+  const folder = join(h.dataDir, 'checkpoints', threadId);
+  await mkdir(folder, { recursive: true });
+  for (let i = 0; i < 5; i++) await writeFile(join(folder, `turn_${i}.json`), JSON.stringify({ root: cwd, reason: 'legacy' }));
+  const framed = async () => {
+    let count = 0;
+    for (const name of await readdir(folder)) if ((await readFile(join(folder, name))).subarray(0, 4).equals(ZSTD_MAGIC)) count += 1;
+    return count;
+  };
+  const store = h.core.threads.codeCheckpoints as unknown as { migrateSome(names: number): Promise<boolean>; writing: number };
+  expect(await store.migrateSome(2)).toBe(false);
+  expect(await framed()).toBe(2);
+  store.writing = 1;
+  expect(await store.migrateSome(2)).toBe(false);
+  expect(await framed()).toBe(2);
+  store.writing = 0;
+  expect(await store.migrateSome(10)).toBe(true);
+  expect(await framed()).toBe(5);
+  expect(h.core.journal.getSetting('checkpoints:stored-through')).toBe(true);
+});
+
+test('a damaged shared frame of the right size is linked without reading it, and the rewind refuses it', async () => {
+  const content = 'complete content of a file\n'.repeat(60);
+  await writeFile(join(cwd, 'app.ts'), content);
+  const shared = join(h.dataDir, 'checkpoints', 'objects');
+  const hash = hashOf(content);
+  await snapshot(h.core, threadId, cwd, join(h.dataDir, 'checkpoints', 'thr_first', 'objects'), undefined, shared);
+  const path = sharedBlob(shared, hash);
+  const damaged = await readFile(path);
+  expect(damaged.subarray(0, 4)).toEqual(ZSTD_MAGIC);
+  damaged[damaged.length - 3]! ^= 0xff;
+  await writeFile(path, damaged);
+  const objects = join(h.dataDir, 'checkpoints', threadId, 'objects');
+  const before = await snapshot(h.core, threadId, cwd, objects, undefined, shared);
+  expect((await stat(join(objects, hash))).ino).toBe((await stat(path)).ino);
+  await writeFile(join(cwd, 'app.ts'), 'agent');
+  const after = await snapshot(h.core, threadId, cwd, objects, undefined, shared);
+  await expect(restoreFiles(cwd, objects, [{ name: 'app.ts', before: before['app.ts'], after: after['app.ts'] }])).rejects.toThrow('app.ts is missing or corrupt');
+  expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('agent');
+});
+
+test(`checkpoints are kept for the newest ${KEEP_TURNS} turns, and none for a thread archived over a week`, async () => {
+  await writeFile(join(cwd, 'app.ts'), 'turn 0');
+  let turn = 0;
+  change = async () => { turn += 1; await writeFile(join(cwd, 'app.ts'), `turn ${turn}`); };
+  for (let i = 0; i <= KEEP_TURNS; i++) await run(`turn ${i}`);
+  const turns = h.core.threads.get(threadId).turns.map(turn => turn.id);
+  expect(turns).toHaveLength(KEEP_TURNS + 1);
+  const messageOf = (turnId: string) => h.core.threads.get(threadId).messages.find(message => message.turnId === turnId && message.role === 'user')!.id;
+  const checkpoints = h.core.threads.codeCheckpoints;
+  await checkpoints.maintain();
+  const folder = join(h.dataDir, 'checkpoints', threadId);
+  expect((await readdir(folder)).filter(name => name.endsWith('.json'))).toHaveLength(KEEP_TURNS);
+  // The first turn's starting content was only in its own checkpoint.
+  await expect(stat(join(folder, 'objects', hashOf('turn 0')))).rejects.toMatchObject({ code: 'ENOENT' });
+  await Bun.sleep(10);
+  await checkpoints.collect(0);
+  await expect(stat(sharedBlob(join(h.dataDir, 'checkpoints', 'objects'), hashOf('turn 0')))).rejects.toMatchObject({ code: 'ENOENT' });
+
+  const thread = h.core.threads.require(threadId);
+  const oldest = await checkpoints.rewind(thread, turns, messageOf(turns[0]!), files => files);
+  expect(oldest).toEqual({ status: 'unavailable', count: 0, reason: `file checkpoints are kept for the newest ${KEEP_TURNS} turns of a conversation` });
+  expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe(`turn ${KEEP_TURNS + 1}`);
+  const kept = await checkpoints.rewind(thread, turns.slice(1), messageOf(turns[1]!), files => files);
+  expect(kept).toEqual({ status: 'restored', count: 1 });
+  expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('turn 1');
+
+  // Archived: kept for a week, gone after it.
+  await client.call('threads.archive', { threadId, archived: true });
+  await checkpoints.maintain(Date.now() + 6 * 86_400_000);
+  expect((await readdir(folder)).filter(name => name.endsWith('.json'))).toHaveLength(KEEP_TURNS);
+  // Restored: kept whatever the old archive date.
+  await client.call('threads.archive', { threadId, archived: false });
+  await checkpoints.maintain(Date.now() + IDLE_THREAD_MS + 60_000);
+  expect((await readdir(folder)).filter(name => name.endsWith('.json'))).toHaveLength(KEEP_TURNS);
+  await client.call('threads.archive', { threadId, archived: true });
+  await checkpoints.maintain(Date.now() + IDLE_THREAD_MS + 60_000);
+  await expect(stat(folder)).rejects.toMatchObject({ code: 'ENOENT' });
+// 51 real turns took 5.2 s on a loaded Windows machine, past Bun's default 5 s.
+}, 20000);
