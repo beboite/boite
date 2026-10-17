@@ -637,6 +637,33 @@ export class Workspace {
     return matches.find((machine) => machine.store.connection === 'ready') ?? matches[0] ?? null;
   }
 
+  /**
+   * A thread an answer names the way `boite agents` prints it: `thr_x`,
+   * `<machine>/thr_x` or `<core-id>/thr_x`, read in `from` on `owner`.
+   * A connected machine that lists the thread opens it, the owner's first;
+   * otherwise the owner's contacts say which core holds it.
+   */
+  async openThreadLink(owner: Store, from: string | undefined, where: string | null, threadId: string): Promise<void> {
+    const core = where !== null && /^[0-9a-f]{64}$/.test(where) ? where : null;
+    const slug = (name: string) => name.trim().replace(/\s+/g, '-').toLowerCase();
+    const names = (name: string) => where === null || where === 'here' || slug(name) === where.toLowerCase() || (/^[0-9a-f]{6,}$/.test(where) && name.startsWith(where));
+    const holders = this.machines.filter(machine => machine.store.connection === 'ready' && machine.store.threads.some(thread => thread.id === threadId)
+      && (core === null || machine.store.core?.coreId === core));
+    const named = holders.filter(machine => names(machine.label) || names(machine.store.core?.coreId ?? ''));
+    const pick = (where === null || where === 'here' ? holders.find(machine => machine.store === owner) : undefined) ?? (named.length === 1 ? named[0] : holders.length === 1 ? holders[0] : undefined);
+    if (pick) { await this.select(pick.store, threadId); return; }
+    const client = owner.client;
+    if (client && from && owner.connection === 'ready') {
+      try {
+        const [{ self }, { agents }] = await Promise.all([client.call('collaboration.get', { threadId: from }), client.call('collaboration.directory', { threadId: from })]);
+        const found = agents.filter(agent => agent.threadId === threadId && (core !== null ? agent.coreId === core
+          : where === 'here' ? agent.coreId === self.coreId : names(agent.machine) || names(agent.coreId)));
+        if (found.length === 1) { await this.openAgentThread(owner, self, found[0]!); return; }
+      } catch { /* Coordination off on this thread: no contact names the core. */ }
+    }
+    owner.error = strings.agentMessages.threadMissing;
+  }
+
   /** Resolve the authenticated core identity before using a machine-scoped thread id. */
   async openAgentThread(owner: Store, self: AgentAddress, address: AgentAddress): Promise<void> {
     const generation = ++this.#generation;

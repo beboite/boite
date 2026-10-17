@@ -82,3 +82,13 @@ test('links are found in linear time: a line of 32,000 brackets renders at once'
   expect(renderMarkdown(`${'['.repeat(100)}docs](https://a.b/c)`)).toBe(`<p><a href="https://a.b/c" target="_blank" rel="noopener noreferrer">${'['.repeat(99)}docs</a></p>`);
   expect(renderMarkdown('see ![a](<https://a.b/c d>) and [(x)](y(z)) now', true)).toBe('<p>see <a href="https://a.b/c%20d" target="_blank" rel="noopener noreferrer">a</a> and <a href="#file" data-file-path="y(z)">(x)</a> now</p>');
 });
+
+test('a thread address links to the thread, not to a file', () => {
+  const thread = (address: string) => `<a href="#thread" data-thread-address="${address}">${address}</a>`;
+  // `machine/thr_x` reads as a relative path, and its `/thr_x` as an absolute one.
+  expect(renderMarkdown('ask boite/thr_tkw9n9qt4100rvq2jmg1 or `thr_tkw9n9qt4100rvq2jmg1`.', true))
+    .toBe(`<p>ask ${thread('boite/thr_tkw9n9qt4100rvq2jmg1')} or <code>${thread('thr_tkw9n9qt4100rvq2jmg1')}</code>.</p>`);
+  // Opening a thread reads no file, so a code span links it without rich links.
+  expect(renderMarkdown('`boite/thr_tkw9n9qt4100rvq2jmg1`')).toBe(`<p><code>${thread('boite/thr_tkw9n9qt4100rvq2jmg1')}</code></p>`);
+  expect(renderMarkdown('src/thr_tkw9n9qt4100rvq2jmg1.ts', true)).toBe('<p><a href="#file" data-file-path="src/thr_tkw9n9qt4100rvq2jmg1.ts">src/thr_tkw9n9qt4100rvq2jmg1.ts</a></p>');
+});

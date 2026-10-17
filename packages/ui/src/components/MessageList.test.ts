@@ -269,7 +269,11 @@ test('agent exchange summaries retain chronology without exposing their letters 
   expect(rows[2]).toContain('After coordination');
   expect(rows[3]).toContain('Deployment agent');
   expect(rows[3]).toContain('Restart postponed.');
-  expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')].map(node => node.dataset.peer)).toEqual(['core-build/t-deploy', 'core-build/t-deploy']);
+  const exchanges = [...document.querySelectorAll<HTMLElement>('[data-testid=agent-discussion-row]')];
+  expect(exchanges.map(node => node.dataset.peer)).toEqual(['core-build/t-deploy', 'core-build/t-deploy']);
+  // Each row says which way it went: received on the right in the accent, sent on this agent's side.
+  expect(exchanges.map(node => [node.dataset.way, node.querySelector('[data-testid=agent-discussion-way]')?.textContent?.trim()]))
+    .toEqual([['in', 'Received from'], ['out', 'Sent to']]);
   expect(document.body.textContent).not.toContain('Boite agent coordination');
   expect(document.body.textContent).not.toContain('Awaiting provider turn');
 });
@@ -308,7 +312,7 @@ test('a completed mail-only turn keeps its footer below received and forwarded m
   const group = groups[0]!;
   const discussion = group.querySelector<HTMLElement>('[data-testid=agent-discussion-row]')!;
   expect(group.querySelectorAll('[data-testid=agent-discussion-row]')).toHaveLength(1);
-  expect(discussion.dataset).toMatchObject({ peer: 'core-peer/peer', count: '3' });
+  expect(discussion.dataset).toMatchObject({ peer: 'core-peer/peer', count: '3', way: 'both' });
   expect(discussion.querySelector('[data-testid=agent-discussion-title]')?.textContent).toBe('Peer');
   expect(discussion.querySelector('.counts')?.textContent?.replace(/\s/g, '')).toBe('12');
   expect(group.compareDocumentPosition(footers[1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

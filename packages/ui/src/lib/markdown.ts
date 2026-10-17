@@ -1,4 +1,4 @@
-import { BracketLinks, richInline, fileLike, linkHtml } from './chat-links';
+import { BracketLinks, richInline, codeLinkHtml, threadAddress, threadLinkHtml } from './chat-links';
 /**
  * The markdown an agent answer needs: paragraphs, headings, nested and task
  * lists, block quotes, tables, rules, fenced and inline code, bold, italic,
@@ -22,7 +22,9 @@ function inline(text: string, rich = false): string {
   // The lead stands in for a lookbehind (Safari before 16.4 cannot parse one): a
   // previous span always ends on a backtick, so consuming one character is equivalent.
   const protectedText = text.replace(/(^|[^`])(`+)(.+?)\2(?!`)/g, (_match, lead: string, _ticks: string, value: string) => {
-    code.push(`<code>${rich && fileLike(value) ? linkHtml(value, value) : escape(value)}</code>`);
+    // A thread is linked even without rich links: opening it needs no file access.
+    const link = rich ? codeLinkHtml(value) : threadAddress(value) ? threadLinkHtml(value, value) : null;
+    code.push(`<code>${link ?? escape(value)}</code>`);
     return `${lead}${marker}${code.length - 1}${marker}`;
   });
   // Format around opaque spans, then restore them without parsing their contents.

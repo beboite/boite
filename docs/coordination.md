@@ -52,9 +52,14 @@ delegation mail. A subagent's results and its coordination letters land in the
 same discussion.
 
 In the chat, a burst of mail shows one row per discussion it touched, in the
-order they started: the other conversation's title, a tag for how it relates to
-this thread, its project and machine, the last thing said and how many letters
-went each way. Ordinary messages and activity markers separate bursts. A burst
+order they started: which way it went, the other conversation's title, a tag
+for how it relates to this thread, its project and machine and the last thing
+said. A row that only received sits on the right in the accent under "Received
+from", like the letters reaching this thread in the discussion; a row that only
+sent sits on the left under "Sent to"; a row with both says "Exchange with" and
+how many letters went each way. A row that only sent still shows the other
+agent's provider, read from an earlier letter of that discussion. Ordinary
+messages and activity markers separate bursts. A burst
 that touched more than four discussions lists four and a line that opens the
 rest.
 
@@ -82,6 +87,14 @@ here, Parent, Subagent, or Looks after the project for the persistent agent
 the owner entrusted the thread's project to. The core works it out when it
 reads letters out (`AgentLetter.relation`), from the journal, so a delegation
 or an entrusted project that began later still shows.
+
+An answer that names a thread the way `boite agents` prints it (`thr_x`,
+`<machine>/thr_x` or `<core-id>/thr_x`) in a code span links to it, and so
+does a bare one with [Chat files and previews](chat-files.md) on
+(`lib/chat-links.ts`). A click opens it on the connected machine that lists the
+thread, the one the address names when several do and this machine when none
+is named; otherwise this thread's contacts name its core. A thread no
+connected machine or contact holds leaves a notice instead.
 
 ## Letters from the agent of a project
 

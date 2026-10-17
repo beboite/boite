@@ -812,6 +812,29 @@ test('ui.reveal naming a machine opens its thread on that machine\'s Store, desp
   expect(w.machineOf('nowhere')).toBeNull();
 });
 
+test('a thread link in an answer opens the thread on the machine it names, else where it is', async () => {
+  const { w, a, b } = await setup();
+  const id = a.threads[0]!.id;
+  const other = a.threads[1]!.id;
+  await w.select(a, id);
+  // Both machines list the id: no machine named keeps the reader's, a named one wins.
+  await w.openThreadLink(a, id, null, other);
+  expect(w.active).toBe(a);
+  expect(a.openThread?.id).toBe(other);
+  await w.openThreadLink(a, other, 'remote', id);
+  expect(w.active).toBe(b);
+  expect(b.openThread?.id).toBe(id);
+  // Only one machine lists it: that one, whatever name the agent knew it by.
+  a.threads = a.threads.filter(thread => thread.id !== other);
+  await w.openThreadLink(a, id, 'm2', other);
+  expect(w.active).toBe(b);
+  expect(b.openThread?.id).toBe(other);
+  await w.select(a, id);
+  await w.openThreadLink(a, id, null, 'thr_nowhere0000000000');
+  expect(w.active).toBe(a);
+  expect(a.error).toBe('No connected machine has this conversation.');
+});
+
 test('an unconnected core never opens a coincident local thread id', async () => {
   const { w, a } = await setup();
   const id = a.threads[0]!.id;

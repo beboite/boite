@@ -92,15 +92,17 @@ function agentOf(value: string | undefined): { providerId?: string; model?: stri
  * live summary wins over what a letter recorded when it was written: titles
  * change and agents finish. `agents` names the persistent agent behind a
  * thread of this machine (the agents directory, with the Agents experiment
- * on): a resident discussion takes that agent's name.
+ * on): a resident discussion takes that agent's name. `history` is the
+ * thread's whole mail when `mail` is a part of it: a part holding only this
+ * thread's letters learns the other agent from what it wrote earlier.
  */
 export function discussionsOf(mail: AgentMail[], store: Pick<Store, 'threads' | 'projects'> & Partial<Pick<Store, 'delegation'>>,
-  agents?: { agentOfThread(threadId: string): AgentProfile | null }): Discussion[] {
+  agents?: { agentOfThread(threadId: string): AgentProfile | null }, history?: AgentMail[]): Discussion[] {
   const byPeer = new Map<string, AgentMail[]>();
   for (const entry of mail) byPeer.set(entry.peer, [...(byPeer.get(entry.peer) ?? []), entry]);
   const discussions = [...byPeer].map(([key, entries]): Discussion => {
     const last = entries.at(-1)!;
-    const heard = entries.findLast(entry => entry.direction === 'incoming')?.letter.from;
+    const heard = (entries.findLast(entry => entry.direction === 'incoming') ?? history?.findLast(entry => entry.peer === key && entry.direction === 'incoming'))?.letter.from;
     const told = entries.findLast(entry => entry.direction === 'outgoing')?.letter;
     const address = last.direction === 'outgoing' ? last.letter.to : last.letter.from;
     const here = key.startsWith('here/');
