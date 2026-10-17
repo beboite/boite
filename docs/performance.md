@@ -940,9 +940,13 @@ turned off for the first column:
 | 6 | 64.1 | 114 | 59.4 | 44 | 14,250 |
 | 9 | 72.4 | 150 | 64.9 | 30 | 20,092 |
 
-The heap still rises 1.5 MiB a minute after the change: the trace rows, about
-16 MiB at minute 9. Without them the heap after the change stays between 48
-and 49 MiB from minute 3 on, while before it rises from 48 to 57 MiB.
+The heap still rises 1.5 MiB a minute in the after column: the trace rows,
+about 16 MiB at minute 9. Without them the heap after the change stays between
+48 and 49 MiB from minute 3 on, while before it rises from 48 to 57 MiB. With
+the trace bound beside it, so no trace row while the trace view is closed, the
+same command on a prebuilt `--bundle` measures 51.3 MiB at minute 0, then 45.3
+to 47.2 MiB from minute 1 to 9 (46.8 at minute 9), 28 to 68 messages held and
+140 to 146 MiB private in the renderer.
 
 ## Browser tools and review bundle size
 
