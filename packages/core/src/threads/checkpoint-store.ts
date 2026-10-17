@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { link, lstat, mkdir, open, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
+import { zstdDecompress } from 'node:zlib';
 
 /**
  * How checkpoint blobs and manifests sit on disk. A blob keeps the SHA-256 of
@@ -13,32 +15,32 @@ const ZSTD_LEVEL = 3;
 /** A compressed blob is kept only when it is at most this share of the original. */
 const KEEP_RATIO = 0.9;
 const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+/** No file over this size gets a checkpoint, so no blob decodes past it. */
+export const BLOB_BYTE_LIMIT = 16 * 1024 * 1024;
+const inflate = promisify(zstdDecompress);
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const framed = (bytes: Uint8Array) => bytes.length >= 4 && MAGIC.equals(bytes.subarray(0, 4));
 export const isBlobName = (name: string) => /^[0-9a-f]{64}$/.test(name);
 
-/**
- * The stored form of `bytes`. Raw bytes that already start with the magic (a
- * `.zst` file in a project) are always framed, so no reader takes them for a frame.
- */
+/** The stored form of `bytes`: a zstd frame when that saves at least a tenth, the bytes otherwise. */
 export async function encodeBlob(bytes: Buffer): Promise<Buffer> {
-  if (bytes.length < 64 && !framed(bytes)) return bytes;
+  if (bytes.length < 64) return bytes;
   const compressed = Buffer.from(await Bun.zstdCompress(bytes, { level: ZSTD_LEVEL }));
-  return compressed.length <= bytes.length * KEEP_RATIO || framed(bytes) ? compressed : bytes;
+  return compressed.length <= bytes.length * KEEP_RATIO ? compressed : bytes;
 }
 
 /**
  * The original bytes of a stored blob, or null when they do not hash to
- * `hash`. A blob written before compression that happens to start with the
- * magic is still found by its raw hash.
+ * `hash`. Raw bytes are checked first, so a `.zst` file kept raw is never
+ * expanded; a frame decodes to at most `BLOB_BYTE_LIMIT` bytes, so a small
+ * frame cannot fill memory.
  */
 export async function decodeBlob(stored: Buffer, hash: string): Promise<Buffer | null> {
-  if (framed(stored)) {
-    const content = await Bun.zstdDecompress(stored).then(bytes => Buffer.from(bytes), () => null);
-    if (content && sha256(content) === hash) return content;
-  }
-  return sha256(stored) === hash ? stored : null;
+  if (sha256(stored) === hash) return stored;
+  if (!framed(stored)) return null;
+  const content = await inflate(stored, { maxOutputLength: BLOB_BYTE_LIMIT }).catch(() => null);
+  return content && sha256(content) === hash ? content : null;
 }
 
 /** The original bytes of the blob at `path`, or null when it is missing or does not match its name. */

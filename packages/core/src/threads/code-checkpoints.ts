@@ -1,5 +1,5 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { ThreadRewind, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, refused } from '../errors.ts';
@@ -32,7 +32,8 @@ const TICK_BYTES = 16 * 1024 * 1024;
 /** The last thread folder moved to the shared, compressed form; `true` once every folder was. */
 const STORE_CURSOR = 'checkpoints:stored-through';
 
-interface Walk { folders: string[]; index: number; names?: string[]; next: number }
+/** `paths`: the blobs, then the manifests, of the folder under way. */
+interface Walk { folders: string[]; index: number; paths?: string[]; next: number }
 
 /** Private file snapshots, independent of the driver's native conversation checkpoints. */
 export class CodeCheckpoints {
@@ -319,9 +320,9 @@ export class CodeCheckpoints {
   }
 
   /**
-   * Up to `names` blob names of the walk, stopping early when a snapshot
-   * starts. True once every thread folder was moved, which a setting keeps
-   * across restarts.
+   * Up to `names` blobs and manifests of the walk, stopping early when a
+   * snapshot starts. True once every thread folder was moved, which a setting
+   * keeps across restarts.
    */
   private async migrateSome(names: number): Promise<boolean> {
     if (this.core.journal.isClosed()) return true;
@@ -338,19 +339,21 @@ export class CodeCheckpoints {
     let done = 0;
     while (walk.index < walk.folders.length) {
       const threadId = walk.folders[walk.index]!;
-      walk.names ??= await readdir(this.objects(threadId)).catch(() => [] as string[]);
-      while (walk.next < walk.names.length) {
-        if (this.closed || (names !== Infinity && (done >= names || migration.counts.bytesRead >= bytes || this.writing > 0))) return false;
-        await migration.blob(this.objects(threadId), walk.names[walk.next]!);
-        walk.next += 1; done += 1;
+      if (!walk.paths) {
+        const objects = (await readdir(this.objects(threadId)).catch(() => [] as string[])).map(name => join(this.objects(threadId), name));
+        const manifests = (await readdir(this.folder(threadId)).catch(() => [] as string[])).filter(name => name.endsWith('.json')).map(name => join(this.folder(threadId), name));
+        walk.paths = [...objects, ...manifests];
       }
-      const running = new Set([...this.active.keys()]);
-      for (const name of await readdir(this.folder(threadId)).catch(() => [] as string[])) {
-        if (name.endsWith('.json') && !running.has(name.slice(0, -'.json'.length))) await migration.manifest(join(this.folder(threadId), name));
+      while (walk.next < walk.paths.length) {
+        if (this.closed || (names !== Infinity && (done >= names || migration.counts.bytesRead >= bytes || this.writing > 0))) return false;
+        const path = walk.paths[walk.next]!;
+        if (!path.endsWith('.json')) await migration.blob(dirname(path), basename(path));
+        else if (!this.active.has(basename(path, '.json'))) await migration.manifest(path);
+        walk.next += 1; done += 1;
       }
       if (this.core.journal.isClosed()) return true;
       this.core.journal.setSetting(STORE_CURSOR, threadId);
-      walk.index += 1; walk.names = undefined; walk.next = 0;
+      walk.index += 1; walk.paths = undefined; walk.next = 0;
     }
     if (this.core.journal.isClosed()) return true;
     this.core.journal.setSetting(STORE_CURSOR, true);

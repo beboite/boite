@@ -5,13 +5,13 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { git } from '../git/read.ts';
-import { decodeBlob, encodeBlob, errno, NO_LINK, readBlob, sharedBlob } from './checkpoint-store.ts';
+import { BLOB_BYTE_LIMIT, decodeBlob, encodeBlob, errno, NO_LINK, readBlob, sharedBlob } from './checkpoint-store.ts';
 
 export { sharedBlob };
 
 const FILE_LIMIT = 20_000;
 const BYTE_LIMIT = 128 * 1024 * 1024;
-const FILE_BYTE_LIMIT = 16 * 1024 * 1024;
+const FILE_BYTE_LIMIT = BLOB_BYTE_LIMIT;
 const SKIP = new Set(['.git', '.boite', '.agents', 'node_modules']);
 
 /**

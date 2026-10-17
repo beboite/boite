@@ -290,10 +290,11 @@ stored under the core data directory. Each content is stored once in
 `checkpoints/objects/<first two hex digits>/<sha256>` and hard-linked into the
 folder of every thread that saved it, so each thread folder can rewind on its
 own. The name is the SHA-256 of the original bytes; the file holds a zstd
-frame (level 3) when that saves at least a tenth, the raw bytes otherwise, and
-a file that is itself a zstd frame is always framed again. Readers decompress
-anything that starts with the zstd magic and hash the result, so blobs written
-before compression read unchanged. Turn manifests (`<turn id>.json`) are zstd
+frame (level 3) when that saves at least a tenth, the raw bytes otherwise.
+Readers hash the stored bytes first, so a raw blob, a `.zst` file kept raw
+included, is never expanded; a blob that starts with the zstd magic and does
+not match decodes to at most 16 MiB, the largest file a checkpoint backs, and
+its result is hashed. Turn manifests (`<turn id>.json`) are zstd
 frames too, and plain JSON from older cores still reads. A snapshot links a
 shared frame of the expected size after checking its first four bytes; a raw
 shared blob is compared byte for byte. A file system without hard links gets
@@ -301,7 +302,7 @@ a private copy per thread.
 
 A background pass three minutes after startup moves folders saved before the
 shared store or before compression to that form, in ticks of at most 500
-names and 16 MiB read, waiting while a snapshot runs, and records its last
+blobs and manifests and 16 MiB read, waiting while a snapshot runs, and records its last
 folder in the `checkpoints:stored-through` setting, `true` once done. A
 private copy whose content is in the store becomes a link to it; one the
 store lacks is checked against its name, compressed and moved in; a file

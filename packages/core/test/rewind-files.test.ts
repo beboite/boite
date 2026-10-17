@@ -6,6 +6,7 @@ import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { CodeCheckpoints, IDLE_THREAD_MS, KEEP_TURNS } from '../src/threads/code-checkpoints.ts';
 import { restoreFiles, sharedBlob, snapshot } from '../src/threads/checkpoint-files.ts';
+import { BLOB_BYTE_LIMIT, decodeBlob } from '../src/threads/checkpoint-store.ts';
 import { git } from '../src/git/read.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -529,7 +530,7 @@ test('a copy that does not match its name is left alone, and the rest of the fol
 test('compressed and raw blobs, framed and plain manifests all restore byte for byte', async () => {
   const text = 'export const value = 1;\n'.repeat(200);
   const random = Buffer.from(crypto.getRandomValues(new Uint8Array(4096)));
-  // A file that is itself a zstd frame is stored framed again, never read as its own content.
+  // A file that is itself a zstd frame is kept raw and found by its raw hash, never expanded.
   const zst = Buffer.from(Bun.zstdCompressSync(Buffer.from('inner '.repeat(100))));
   const old = 'written before compression\n'.repeat(50);
   await writeFile(join(cwd, 'app.ts'), text);
@@ -546,7 +547,7 @@ test('compressed and raw blobs, framed and plain manifests all restore byte for 
   expect((await blob(text)).subarray(0, 4)).toEqual(ZSTD_MAGIC);
   expect((await blob(text)).length).toBeLessThan(text.length / 10);
   expect(await blob(random)).toEqual(random);
-  expect((await blob(zst)).equals(zst)).toBe(false);
+  expect(await blob(zst)).toEqual(zst);
   // An older core's raw blob and plain manifest beside the new ones.
   const oldPath = join(folder, 'objects', hashOf(old));
   await rm(oldPath);
@@ -564,6 +565,37 @@ test('compressed and raw blobs, framed and plain manifests all restore byte for 
   expect(await readFile(join(cwd, 'random.bin'))).toEqual(random);
   expect(await readFile(join(cwd, 'archive.zst'))).toEqual(zst);
   expect(await readFile(join(cwd, 'old.ts'), 'utf8')).toBe(old);
+});
+
+test('a stored frame never decodes past the 16 MiB file limit, and a raw frame named by its own bytes is returned as stored', async () => {
+  const large = Buffer.alloc(BLOB_BYTE_LIMIT + 1, 7);
+  const frame = Buffer.from(Bun.zstdCompressSync(large));
+  expect(frame.length).toBeLessThan(1024 * 1024);
+  // Named by what it decodes to: no checkpoint holds a file this large, so it is refused unexpanded.
+  expect(await decodeBlob(frame, createHash('sha256').update(large).digest('hex'))).toBeNull();
+  // An older core's blob of a `.zst` file: its raw bytes match the name.
+  expect(await decodeBlob(frame, createHash('sha256').update(frame).digest('hex'))).toBe(frame);
+});
+
+test('the background pass counts manifests against its tick budget and stops when a snapshot starts', async () => {
+  const folder = join(h.dataDir, 'checkpoints', threadId);
+  await mkdir(folder, { recursive: true });
+  for (let i = 0; i < 5; i++) await writeFile(join(folder, `turn_${i}.json`), JSON.stringify({ root: cwd, reason: 'legacy' }));
+  const framed = async () => {
+    let count = 0;
+    for (const name of await readdir(folder)) if ((await readFile(join(folder, name))).subarray(0, 4).equals(ZSTD_MAGIC)) count += 1;
+    return count;
+  };
+  const store = h.core.threads.codeCheckpoints as unknown as { migrateSome(names: number): Promise<boolean>; writing: number };
+  expect(await store.migrateSome(2)).toBe(false);
+  expect(await framed()).toBe(2);
+  store.writing = 1;
+  expect(await store.migrateSome(2)).toBe(false);
+  expect(await framed()).toBe(2);
+  store.writing = 0;
+  expect(await store.migrateSome(10)).toBe(true);
+  expect(await framed()).toBe(5);
+  expect(h.core.journal.getSetting('checkpoints:stored-through')).toBe(true);
 });
 
 test('a damaged shared frame of the right size is linked without reading it, and the rewind refuses it', async () => {

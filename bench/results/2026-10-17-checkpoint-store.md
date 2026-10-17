@@ -3,7 +3,8 @@
 Date: 2026-10-17. Machine: Windows 11 Pro, Ryzen 7 9800X3D, NTFS, Bun 1.4.2.
 Source: the user's live `checkpoints/` folder, opened read-only and copied to
 `D:/Dev/.temp/` with its hard links rebuilt by file ID, so the passes ran on
-the copy only. Other agents and builds ran on the machine at the same time.
+the copy only (the bench refuses a destination that overlaps the source, or
+one it did not create). Other agents and builds ran on the machine at the same time.
 
 ```sh
 bun run bench/checkpoint-store.ts --source <data dir>/checkpoints --phase copy     # 942 s
@@ -39,5 +40,5 @@ skipped the rest); the `rewinds` phase after the fix took 20.
 
 Not measured here: the rule that drops a thread archived or done for more
 than 7 days, since the bench does not read the journal; the core's own pass,
-which spreads the same work over ticks of 500 names or 16 MiB read, 200 ms
+which spreads the same work over ticks of 500 blobs and manifests or 16 MiB read, 200 ms
 apart.

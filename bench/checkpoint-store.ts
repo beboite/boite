@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
+import { existsSync, realpathSync } from 'node:fs';
 import { chmod, copyFile, link, lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { restoreFiles, type FileChange, type FileEntry } from '../packages/core/src/threads/checkpoint-files.ts';
 import { collectSharedBlobs } from '../packages/core/src/threads/checkpoint-files.ts';
 import { decodeManifest, readBlob, StoreMigration, trimFolder } from '../packages/core/src/threads/checkpoint-store.ts';
@@ -17,7 +18,9 @@ import { KEEP_TURNS } from '../packages/core/src/threads/code-checkpoints.ts';
 // so the archived-thread rule is not applied) and a collection, measures
 // again and runs the 20 rewinds through `restoreFiles`, checking every
 // restored file's SHA-256. rewinds: those 20 rewinds alone, on the copy as
-// it is. clean: removes the copy and the rewound files.
+// it is. clean: removes the copy and the rewound files. The destination must
+// lie outside the source, and the bench only writes or removes a destination
+// that holds its mark file, so a wrong --dest cannot touch real data.
 
 const arg = (name: string) => { const index = process.argv.indexOf(`--${name}`); return index < 0 ? undefined : process.argv[index + 1]; };
 const source = arg('source');
@@ -26,6 +29,33 @@ const dest = resolve(arg('dest') ?? 'D:/Dev/.temp/2026-10-17-boite-opti/bench-tm
 const phase = arg('phase') ?? 'all';
 const copy = join(dest, 'checkpoints');
 const rewinds = join(dest, 'rewinds');
+const mark = join(dest, '.checkpoint-store-bench');
+
+/** `path` with junctions and links resolved through its nearest existing parent, case-folded on Windows. */
+function canonical(path: string): string {
+  let head = resolve(path);
+  const tail: string[] = [];
+  while (!existsSync(head) && dirname(head) !== head) { tail.unshift(basename(head)); head = dirname(head); }
+  const full = join(realpathSync.native(head), ...tail);
+  return process.platform === 'win32' ? full.toLowerCase() : full;
+}
+const within = (child: string, parent: string) => { const path = relative(parent, child); return path === '' || (!path.startsWith('..') && !isAbsolute(path)); };
+{
+  const from = canonical(source), to = canonical(dest);
+  if (within(to, from) || within(from, to)) throw new Error(`--dest ${dest}: expected a folder outside --source ${source} that does not contain it`);
+}
+
+/** Claims the destination: an empty or missing folder gets the mark, one with other files and no mark is refused. */
+async function claim(): Promise<void> {
+  if (existsSync(mark)) return;
+  const present = (await readdir(dest).catch(() => [] as string[])).filter(name => name === 'checkpoints' || name === 'rewinds');
+  if (present.length) throw new Error(`--dest ${dest}: holds ${present.join(' and ')} without the bench's mark file; expected a folder this bench created`);
+  await mkdir(dest, { recursive: true });
+  await writeFile(mark, 'checkpoint-store bench scratch\n', { flag: 'wx' });
+}
+const owned = () => {
+  if (!existsSync(mark)) throw new Error(`--dest ${dest}: no ${basename(mark)}; expected a folder the copy phase created`);
+};
 const MiB = 1024 * 1024;
 
 async function pool<T>(items: T[], width: number, work: (item: T) => Promise<void>): Promise<void> {
@@ -59,6 +89,7 @@ async function measure(root: string) {
 }
 
 async function copyPhase(): Promise<void> {
+  await claim();
   await rm(copy, { recursive: true, force: true });
   const started = performance.now();
   const files: string[] = [];
@@ -212,7 +243,8 @@ async function runPhase(): Promise<void> {
 }
 
 if (phase === 'copy' || phase === 'all') await copyPhase();
+if (phase !== 'copy') owned();
 if (phase === 'run' || phase === 'all') await runPhase();
 if (phase === 'rewinds') await rewindPhase();
 // Only what this bench wrote goes: the destination may hold other work.
-if (phase === 'clean' || phase === 'all') { await rm(copy, { recursive: true, force: true }); await rm(rewinds, { recursive: true, force: true }); }
+if (phase === 'clean' || phase === 'all') { await rm(copy, { recursive: true, force: true }); await rm(rewinds, { recursive: true, force: true }); await rm(mark, { force: true }); }
