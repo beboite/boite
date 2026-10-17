@@ -19,6 +19,20 @@ const EXIT_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 20_000;
 const POLL_MS = 100;
 const WAIT_DIAGNOSTIC_TIMEOUT_MS = 250;
+/** What a page that left an evaluate hanging is doing: frames drawn in a second, fonts and animations still pending. */
+const HUNG_PAGE = `new Promise((resolve) => {
+  let frames = 0;
+  const tick = () => { frames += 1; requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+  setTimeout(() => resolve({
+    framesInOneSecond: frames,
+    visibility: document.visibilityState,
+    fonts: document.fonts.status,
+    loadingFonts: [...document.fonts].filter((f) => f.status === 'loading').map((f) => f.family + ' ' + f.weight),
+    animations: document.getAnimations().filter((a) => a.playState !== 'finished').slice(0, 8)
+      .map((a) => (a.animationName ?? a.transitionProperty ?? a.id) + ' ' + a.playState + ' .' + String(a.effect?.target?.className ?? '?').split(' ')[0]),
+  }), 1000);
+})`;
 
 /**
  * Candidates in order; `BOITE_E2E_BROWSER` overrides all of them. Helium comes
@@ -338,12 +352,22 @@ export class BrowserPage {
   /** Untyped expressions return a by-value JavaScript result; callers can name a narrower shape. */
   evaluate(expression: string, timeoutMs?: number): Promise<string | number | boolean | object | null | undefined>;
   evaluate<T>(expression: string, timeoutMs?: number): Promise<T>;
-  async evaluate<T>(expression: string, timeoutMs = CALL_TIMEOUT_MS): Promise<T> {
+  async evaluate<T>(expression: string, timeoutMs?: number): Promise<T> {
     const raw = (await this.send('Runtime.evaluate', {
       expression,
       returnByValue: true,
       awaitPromise: true,
-    }, timeoutMs)) as {
+    }, timeoutMs ?? CALL_TIMEOUT_MS).catch(async (error: unknown) => {
+      // A direct call that hangs says what the page was waiting on: a promise
+      // that never settles (fonts, an animation) or a page that stopped drawing.
+      if (timeoutMs !== undefined || !(error instanceof Error) || !error.message.includes('timed out')) throw error;
+      const state = await this.send('Runtime.evaluate', { expression: HUNG_PAGE, returnByValue: true, awaitPromise: true }, 3_000)
+        .then((result) => JSON.stringify((result as { result?: { value?: unknown } }).result?.value))
+        .catch(() => 'the page did not answer either: its main thread is busy');
+      throw new Error(`${error.message}
+Page: ${state}
+In flight: ${JSON.stringify(this.#inFlight())}`);
+    })) as {
       result?: { value?: unknown };
       exceptionDetails?: {
         text?: string;
