@@ -35,10 +35,10 @@ self.addEventListener('install', (event) => {
       if (!shell.ok) throw new Error('the app shell could not be cached');
       const html = await shell.clone().text();
       // Only what the document itself loads: a `src` or `href`. The locale map
-      // in an inline script names every catalogue, and a device reading English
-      // has no use for the French one; a French device stores it on first use.
+      // in an inline script names every catalogue, and a device has no use for
+      // the ones it does not speak; it stores its own on first use.
       const assets = [...new Set([...html.matchAll(/(?:src|href)="\.?(\/assets\/[^"]+)"/g)].map((found) => found[1]))];
-      await cache.addAll([...assets, MANIFEST, '/icons/icon-192.png', '/fonts/Inter-latin.woff2', '/fonts/GeistMono-Variable.woff2']);
+      await cache.addAll([...assets, MANIFEST, '/icons/icon-192.png', '/fonts/Inter-latin.woff2', '/fonts/GeistMono-latin.woff2']);
       await cache.put(SHELL, shell);
       await self.skipWaiting();
     })(),
