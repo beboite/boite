@@ -60,40 +60,48 @@ real('a page nobody drives or watches sleeps, and meets the next command or view
   const { harness, owner, agent, threadId } = browserFixture;
   harness.core.browser.sleepAfterMs = 300;
   const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/animated') } });
+  const browser = harness.core.browser;
+  // Whether the core keeps the tab awake is its own state; how fast a runner's
+  // Chrome then runs the page is not (macOS runners stalled awake pages 2 s).
+  const asleepWithin = async (ms: number) => {
+    for (const end = Date.now() + ms; !browser.asleep(tabId!) && Date.now() < end;) await Bun.sleep(50);
+    return browser.asleep(tabId!);
+  };
+  const awakeFor = async (ms: number, every: () => Promise<unknown> = async () => {}) => {
+    for (const end = Date.now() + ms; Date.now() < end;) {
+      await every();
+      if (browser.asleep(tabId!)) return false;
+      await Bun.sleep(100);
+    }
+    return true;
+  };
   await evaluate('gaps()');
-  await Bun.sleep(1500);
-  // Frozen for over a second: no animation frame and no timer ran, and the command found the page as it was.
+  expect(await asleepWithin(30_000)).toBe(true);
+  await Bun.sleep(1000);
+  // Frozen for a second: no animation frame and no timer ran, and the command found the page as it was.
   const [frameGap, tickGap] = await evaluate('gaps()') as [number, number];
   expect(frameGap).toBeGreaterThan(800);
   expect(tickGap).toBeGreaterThan(800);
   expect(await evaluate('document.visibilityState + " " + document.hasFocus()')).toBe('visible true');
   // Asleep again, a viewer's first frame wakes it and its screencast keeps it awake past the wait.
-  await Bun.sleep(1500);
+  expect(await asleepWithin(30_000)).toBe(true);
+  await Bun.sleep(1000);
   await owner.call('threads.subscribe', { threadId });
   await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 300, quality: 40 });
-  const resumed = await evaluate('gaps()') as [number, number];
-  expect(resumed[0]).toBeGreaterThan(800);
-  for (const end = Date.now() + 1500; Date.now() < end;) {
-    await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 300, quality: 40 }).catch(() => {});
-    await Bun.sleep(150);
-  }
-  // A frozen page runs no timer; a slow runner may still skip frames while it captures.
-  const watched = await evaluate('gaps()') as [number, number];
-  expect(watched[1]).toBeLessThan(500);
-  expect(watched[0]).toBeLessThan(1000);
+  expect(browser.asleep(tabId!)).toBe(false);
+  expect((await evaluate('gaps()') as [number, number])[0]).toBeGreaterThan(800);
+  expect(await awakeFor(1500, () => owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 300, quality: 40 }).catch(() => {}))).toBe(true);
+  // Each frame is a use; past the last one, the viewer's screencast holds the tab, for its 3 s idle time at least.
+  expect(await awakeFor(1500)).toBe(true);
   // Once the viewer leaves it sleeps again; a client that shows the tab's own
   // page asks for no frames, and one `browser.remoteWatch` keeps it awake.
   // The screencast stops up to twice its idle time after the last frame; a loaded runner takes longer.
-  for (const end = Date.now() + 30_000; !harness.core.browser.asleep(tabId!) && Date.now() < end;) await Bun.sleep(100);
-  expect(harness.core.browser.asleep(tabId!)).toBe(true);
+  expect(await asleepWithin(30_000)).toBe(true);
   await Bun.sleep(1000);
   expect(await owner.call('browser.remoteWatch', { threadId, tabId: tabId! })).toEqual({ ok: true });
   expect((await evaluate('gaps()') as [number, number])[0]).toBeGreaterThan(800);
-  // Frozen within this wait, the page would stop for 2 s or more.
-  await Bun.sleep(2500);
-  const shown = await evaluate('gaps()') as [number, number];
-  expect(shown[1]).toBeLessThan(500);
-  expect(shown[0]).toBeLessThan(1000);
+  // Without the lease it would sleep within this wait, as it did above.
+  expect(await awakeFor(2000)).toBe(true);
 }, 150_000);
 
 real('boite browse opens its page as a new tab of the conversation browser, not in a panel of its own', async () => {
