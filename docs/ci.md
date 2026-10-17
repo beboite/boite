@@ -150,12 +150,22 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 596,500 |
-| UI files, excluding `.br` and `.gz` copies | 5,037,000 |
+| UI entry chunk | 596,700 |
+| UI files, excluding `.br` and `.gz` copies | 5,038,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,391,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,395,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-17, sending message pictures as file tickets with a 320 px
+thumbnail copy, on `origin/main` at `b611c01f`, measures 596,578 UI entry
+bytes, 5,037,588 UI bytes and 4,394,594 core JavaScript bytes with `measure()`
+from `scripts/ci/budgets.ts` after fresh `bun run build:ui` and `bun run
+build:core` on Windows, against 595,295, 5,036,764 and 4,390,768 for that main
+built the same way. The store's ticket and relay choice adds 1,283 entry bytes
+and 824 UI bytes; the byte tickets, the thumbnail copy and its fallbacks add
+3,826 core bytes, none of them in `main.js`. The entry, UI and core limits
+rise to 596,700, 5,038,000 and 4,395,000.
 
 On 2026-10-17, PR #566 merged with `origin/main` at `b6ae659a`, which brings
 the thread links and agent mail direction (PR #562), measures 595,205 entry
