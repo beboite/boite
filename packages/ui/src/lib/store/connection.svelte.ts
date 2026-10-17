@@ -153,12 +153,15 @@ export class Connection {
         // looked at on (`&copies=<n>` n more for the reading cache), `&heavy=1` the forty messages and 11.5 MiB of tool calls
         // a long agent session leaves, `&principal=session` answers as a paired
         // phone, so the screens a device is refused can be walked without pairing one,
-        // and `&missing=<method>,...` answers those methods like an older machine.
+        // `&missing=<method>,...` answers those methods like an older machine,
+        // and `&load=<n>` adds n threads that stream without end (`&loadtick=<ms>`).
         s.attach(
           new FakeClient({
             long: params.get('long') === '1',
             ...(params.get('copies') ? { longCopies: Number(params.get('copies')) } : {}),
             heavy: params.get('heavy') === '1',
+            ...(params.get('load') ? { load: Number(params.get('load')) } : {}),
+            ...(params.get('loadtick') ? { loadTickMs: Number(params.get('loadtick')) } : {}),
             delegationDemo: params.get('team') === '1',
             agentsDemo: params.get('agents') === '1',
             watchDemo: params.get('watch') === '1',

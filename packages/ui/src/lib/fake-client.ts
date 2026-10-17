@@ -63,6 +63,7 @@ import { closeSideQuestions } from './fake-client/side-questions';
 import { holdAfterRestart } from './fake-client/recovery';
 import { journalInspectionMethods } from './fake-client/journal-inspection';
 import { forkReturnMethods } from './fake-client/fork-return';
+import { startLoad } from './fake-client/load';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -92,6 +93,7 @@ export class FakeClient implements ObservableClient {
   #mergedPrSweep: Promise<number> | null = null;
   #doneSweep: Promise<void> | null = null;
   #transportGeneration = 0;
+  #stopLoad: () => void = () => undefined;
 
   constructor(options: FakeClientOptions = {}) {
     const ctx = new FakeContext(options);
@@ -130,6 +132,7 @@ export class FakeClient implements ObservableClient {
       ctx.usageSeeded = false;
       ctx.scheduler = { ...ctx.scheduler, running: [], queued: [] };
     }
+    if (options.load) this.#stopLoad = startLoad(ctx, options.load, options.loadTickMs);
     // After a first launch has cleared the threads, so no record names one that is gone.
     seedDiagnostics(ctx);
   }
@@ -232,6 +235,7 @@ export class FakeClient implements ObservableClient {
   close(): void {
     const ctx = this.#ctx;
     closeSideQuestions(ctx);
+    this.#stopLoad();
     ctx.agents.close();
     unregisterCore(ctx);
     for (const thread of ctx.threads.values()) pauseActivity(ctx, thread);
