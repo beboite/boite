@@ -5,7 +5,7 @@
   import { mobileOverlay } from '../lib/mobile-history';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import CoordinationPanel from './CoordinationPanel.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
 
   let { store, threadId, onclose }: { store: Store; threadId: string; onclose: () => void } = $props();
   let dialog: HTMLDialogElement;
@@ -46,7 +46,7 @@
     <h2 id="coordination-title">{strings.coordination.heading}</h2>
     <button type="button" class="ghost icon" aria-label={strings.common.close} data-testid="coordination-close" onclick={onclose}><X size={16} /></button>
   </header>
-  <div class="settings"><CoordinationPanel {store} {threadId} expanded /></div>
+  <div class="settings"><Deferred part={parts.CoordinationPanel}>{#snippet children(CoordinationPanel)}<CoordinationPanel {store} {threadId} expanded />{/snippet}</Deferred></div>
 </dialog>
 
 <style>

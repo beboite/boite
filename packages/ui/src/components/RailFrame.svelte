@@ -9,7 +9,7 @@
   import { controlMenu } from '../lib/controls';
   import LimitsGlance from './LimitsGlance.svelte';
   import WhipButton from './WhipButton.svelte';
-  import UpdatesNotice from './UpdatesNotice.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import ResizeHandle from './ResizeHandle.svelte';
 
   /**
@@ -118,7 +118,7 @@
     {@render lead?.()}
     <span class="grow"></span>
     {@render foot?.()}
-    <UpdatesNotice />
+    <Deferred part={parts.UpdatesNotice}>{#snippet children(UpdatesNotice)}<UpdatesNotice />{/snippet}</Deferred>
     {#if work.shows('sidebar.limits')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>

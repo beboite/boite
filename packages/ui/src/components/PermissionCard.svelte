@@ -4,7 +4,7 @@
   import { json } from '../lib/format';
   import { strings } from '../lib/strings';
   import { describeTool, permissionSentence } from '../lib/tool-summary';
-  import DiffView from './DiffView.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
 
   let {
     toolName,
@@ -70,7 +70,8 @@
       <pre class="mono subject" data-testid="permission-subject">{subjectBlock}</pre>
     {/if}
     {#if described.change}
-      <DiffView path={described.change.path} oldText={described.change.oldText} newText={described.change.newText} doc={described.change} />
+      {@const change = described.change}
+      <Deferred part={parts.DiffView}>{#snippet children(DiffView)}<DiffView path={change.path} oldText={change.oldText} newText={change.newText} doc={change} />{/snippet}</Deferred>
     {/if}
     {#if request?.description && request.description !== subjectBlock}
       <p class="muted description">{request.description}</p>

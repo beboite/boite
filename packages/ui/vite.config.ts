@@ -9,6 +9,7 @@ import { tooNewForFloor } from './src/lib/browser-floor.ts';
 import { localePreloadScript } from './src/lib/locale-preload.ts';
 import { colorsBootScript } from './src/lib/theme-colors.ts';
 import { lucideGlyph } from './icon-plugin.ts';
+import { completeCatalogues } from './catalogue-plugin.ts';
 import { prepaintMinify } from './prepaint.ts';
 import { releaseVersion } from './release-version.ts';
 
@@ -82,37 +83,52 @@ function browserFloor(): Plugin {
 /**
  * The fake client and its seeded fixtures are for the dev server and the tests.
  * Its three imports sit behind `import.meta.env.DEV`, but Rolldown splits the
- * chunk before it folds those branches away, so a release build still wrote it,
- * unreferenced, beside the app. This drops that orphan before compression, and
- * fails the build if a shipped chunk still reaches it. The e2e's fake bundle
+ * graph before it folds those branches away: the fake client's helpers (the
+ * `boite view` kit among them) landed in shared startup chunks. A release
+ * build therefore resolves those imports to an empty module before the graph
+ * is built, drops the empty chunk it may leave, and fails if a shipped chunk
+ * still holds a fake-client module. The e2e's fake bundle
  * (`tests/e2e/lib/warm.ts`) defines DEV as true and keeps it.
  */
+const NO_FAKE_CLIENT = '\0boite-no-fake-client';
+
 function dropFakeClient(): Plugin {
   let dev = false;
   return {
     name: 'boite-drop-fake-client',
     apply: 'build',
+    enforce: 'pre',
     configResolved(config) {
       // A build under NODE_ENV=test (bun test runs one in tests/e2e/ui.test.ts) is a dev build too.
       dev = config.define?.['import.meta.env.DEV'] === 'true' || config.env.DEV === true;
     },
+    resolveId(source) {
+      return !dev && /(?:^|\/)fake-client$/.test(source) ? NO_FAKE_CLIENT : null;
+    },
+    load(id) {
+      return id === NO_FAKE_CLIENT ? 'export {};' : null;
+    },
     generateBundle(_options, bundle) {
       if (dev) return;
-      const fake = Object.values(bundle).filter((file) => file.type === 'chunk' && /[\\/]src[\\/]lib[\\/]fake-client\.ts$/.test(file.facadeModuleId ?? ''));
-      for (const chunk of fake) {
-        const users = Object.values(bundle).filter((file) => file !== chunk && (file.type === 'chunk' ? file.code : String(file.source)).includes(chunk.fileName.replace(/^assets\//, '')));
-        if (users.length) this.error(`${users.map((file) => file.fileName).join(', ')} reaches the dev-only fake client (${chunk.fileName}); guard the import with import.meta.env.DEV`);
-        delete bundle[chunk.fileName];
+      for (const file of Object.values(bundle)) {
+        if (file.type !== 'chunk') continue;
+        if (file.facadeModuleId === NO_FAKE_CLIENT) {
+          delete bundle[file.fileName];
+          continue;
+        }
+        const fake = Object.keys(file.modules).find((id) => /[\\/]src[\\/]lib[\\/]fake-client(?:\.ts$|[\\/])/.test(id));
+        if (fake) this.error(`${file.fileName} carries the dev-only fake client (${fake}); import it as a dynamic import('./fake-client') behind import.meta.env.DEV`);
       }
     },
   };
 }
 
 /**
- * Each language but English is a chunk of its own (`src/lib/i18n.svelte.ts`).
- * index.html gets a small inline script that preloads the one the device
- * speaks (`src/lib/locale-preload.ts`), so the boot finds it already on its way.
- * A build where the French catalogue is no chunk of its own fails here.
+ * Each language, English included, is a chunk of its own
+ * (`src/lib/i18n.svelte.ts`). index.html gets a small inline script that
+ * preloads the one the device speaks (`src/lib/locale-preload.ts`), so the
+ * boot finds it already on its way. A build where a catalogue is no chunk of
+ * its own fails here.
  */
 function localePreload(): Plugin {
   return {
@@ -124,9 +140,11 @@ function localePreload(): Plugin {
         const chunks: Record<string, string> = {};
         for (const file of Object.values(context.bundle ?? {})) {
           const code = file.type === 'chunk' ? /[\\/]src[\\/]lib[\\/]strings\.([a-z]{2})\.ts$/.exec(file.facadeModuleId ?? '')?.[1] : undefined;
-          if (code && code !== 'en') chunks[code] = `./${file.fileName}`;
+          if (code) chunks[code] = `./${file.fileName}`;
         }
-        if (!chunks['fr']) throw new Error('src/lib/strings.fr.ts is not a chunk of its own: i18n.svelte.ts must import it dynamically');
+        for (const code of ['en', 'fr']) {
+          if (!chunks[code]) throw new Error(`src/lib/strings.${code}.ts is not a chunk of its own: i18n.svelte.ts must import it dynamically`);
+        }
         return [{ tag: 'script', children: localePreloadScript(chunks), injectTo: 'head' }];
       },
     },
@@ -135,10 +153,17 @@ function localePreload(): Plugin {
 
 
 export default defineConfig({
-  plugins: [lucideGlyph(), svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), prepaintMinify(), precompress()],
+  plugins: [lucideGlyph(), completeCatalogues(), svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), prepaintMinify(), precompress()],
   base: './',
   define: { __BOITE_VERSION__: JSON.stringify(releaseVersion()) },
   // AudioWorklet modules must be same-origin files, never data URLs under the shell CSP.
-  build: { outDir: 'dist', emptyOutDir: true, target: 'es2022', assetsInlineLimit: (file) => file.endsWith('speech-worklet.js') ? false : undefined },
+  build: {
+    outDir: 'dist', emptyOutDir: true, target: 'es2022', assetsInlineLimit: (file) => file.endsWith('speech-worklet.js') ? false : undefined,
+    // The core speaks HTTP/1.1, so a browser fetches six files at a time: the
+    // modules the boot shares with a lazy chunk (Svelte, the store, Lucide
+    // icons) are one chunk rather than dozens of small ones. A module only the
+    // boot uses stays in the entry, and one no boot module imports stays lazy.
+    rolldownOptions: { output: { codeSplitting: { groups: [{ name: 'boot', tags: ['$initial'], minShareCount: 2 }] } } }
+  },
   server: { port: 5173, strictPort: true }
 });

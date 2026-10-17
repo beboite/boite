@@ -6,7 +6,6 @@
   import { watchAgentBrowser } from './lib/agent-browser-watch';
   import { watchDevices } from './lib/device-watch';
   import { browserProfiles } from './lib/browser-profiles.svelte';
-  import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
   import ChatView from './components/ChatView.svelte';
@@ -36,10 +35,11 @@
   import type { Store } from './lib/store.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { prefetchAllowed, prefetchNames, warmPages, whenIdle } from './lib/prefetch';
+  import { parts, prefetchParts } from './lib/deferred-parts';
+  import { voice } from './lib/voice-prefs.svelte';
   import { startTheme } from './lib/theme';
   import { appName, appUpdater } from './lib/app-update.svelte';
   import { reportDesktopUpdates } from './lib/desktop-update.svelte';
-  import MobileNavigation from './components/MobileNavigation.svelte';
   import MobileConnect from './components/MobileConnect.svelte';
   import { attentionCount, syncAppBadge } from './lib/badge';
   import { startViewport } from './lib/viewport';
@@ -55,9 +55,31 @@
   import ThreadPreparation from './components/ThreadPreparation.svelte';
 
   let store = $derived(workspace.active);
-  // The machine the window opened on may still give way to one that answers: until then nothing of it is drawn.
-  const booted = $derived(store.booted && !(workspace.waiting && store === workspace.primary));
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  // The phone's navigation is drawn only outside the shell, which never parses
+  // it: there its chunk starts with the app, and the boot screen waits for it,
+  // so the first frame has it. A failed fetch (offline, cold cache) lets the app
+  // draw without it and is tried again once the core answers.
+  let MobileNavigation = $state.raw<typeof import('./components/MobileNavigation.svelte').default>();
+  let mobileNavigationMissing = $state(false);
+  let mobileNavigationLoading = false;
+  function loadMobileNavigation(): void {
+    if (inShell || MobileNavigation || mobileNavigationLoading) return;
+    mobileNavigationLoading = true;
+    void import('./components/MobileNavigation.svelte').then(
+      (module) => { MobileNavigation = module.default; },
+      () => { mobileNavigationMissing = true; }
+    ).finally(() => { mobileNavigationLoading = false; });
+  }
+  loadMobileNavigation();
+  $effect(() => {
+    if (store.connection === 'ready') untrack(loadMobileNavigation);
+  });
+  // The microphone sits in the composer's first frame: its chunk starts with the app too.
+  if (voice.current.enabled) void parts.Dictation.load().catch(() => undefined);
+  // The machine the window opened on may still give way to one that answers: until then nothing of it is drawn.
+  const booted = $derived(store.booted && !(workspace.waiting && store === workspace.primary)
+    && (inShell || MobileNavigation !== undefined || mobileNavigationMissing));
   // A page the agent opens brings its browser forward in the panel, on every client (lib/agent-browser-watch.ts).
   $effect(() => {
     const threadId = store.openThread?.id;
@@ -92,7 +114,8 @@
     ImportDialog: () => import('./components/ImportDialog.svelte'),
     ConnectFlow: () => import('./components/ConnectFlow.svelte'),
     Onboarding: () => import('./components/Onboarding.svelte'),
-    // xterm.js and its stylesheet: only once a terminal is asked for.
+    // The drawer, then xterm.js and its stylesheet: only once a terminal is asked for.
+    TerminalDrawer: () => import('./components/TerminalDrawer.svelte'),
     TerminalView: () => import('./components/TerminalView.svelte'),
     PluginUpdateNotice: () => import('./components/PluginUpdateNotice.svelte')
   };
@@ -126,7 +149,7 @@
   // link that can spare the bytes (lib/prefetch.ts). The plugin update notice reads its own list, so it loads on any link.
   $effect(() => {
     if (!store.booted) return;
-    return whenIdle(() => { if (!prefetchAllowed()) return need('PluginUpdateNotice'); needAll(); warmPages(store, experimentOn('resident-agents')); });
+    return whenIdle(() => { if (!prefetchAllowed()) return need('PluginUpdateNotice'); needAll(); prefetchParts(); warmPages(store, experimentOn('resident-agents')); });
   });
   let WhipOverlay = $state<typeof import('./components/WhipOverlay.svelte').default>();
   $effect(() => {
@@ -167,7 +190,10 @@
   });
 
   $effect(() => {
-    if (terminalShown) need('TerminalView');
+    if (terminalShown) {
+      need('TerminalDrawer');
+      need('TerminalView');
+    }
   });
 
   // A drawer left open before a reload or a reconnect opens again, with its tabs and splits.
@@ -330,7 +356,8 @@
     else panelSlot.hide();
   });
   $effect(() => {
-    if (terminalShown) terminalSlot.show();
+    // The drawer opens once its chunk is here, so its opening animation plays whole.
+    if (terminalShown && deferred.TerminalDrawer) terminalSlot.show();
     else {
       // The drawer goes inert as it leaves, which drops the focus on `<body>`:
       // the keyboard goes back to the composer first.
@@ -501,7 +528,7 @@
 {/if}
 
 <div class="app" class:shell={inShell} class:ready={booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
-  {#if !inShell && booted}<MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />{/if}
+  {#if !inShell && booted && MobileNavigation}<MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />{/if}
   <TitleBar {store} />
 
   <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
@@ -547,7 +574,8 @@
             <ChatView {store} />
           {/key}
         </div>
-        {#if terminalSlot.shown && store.openThread}
+        {#if terminalSlot.shown && store.openThread && deferred.TerminalDrawer}
+          {@const TerminalDrawer = deferred.TerminalDrawer}
           {#key store}
             {#key store.openThread.id}
               <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd}

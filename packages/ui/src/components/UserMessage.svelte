@@ -14,7 +14,7 @@
   import { THUMB_HEIGHT } from '../lib/message-window';
   import MessageActions from './MessageActions.svelte';
   import MoveMarker from './MoveMarker.svelte';
-  import ImageViewer from './ImageViewer.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
 
   /**
    * A prompt in the timeline: its bubble, the pictures and files it was sent
@@ -201,7 +201,7 @@
     </div>
   {/if}
 </div>
-{#if viewing}<ImageViewer items={viewing.items} index={viewing.index} onclose={() => viewing = null} />{/if}
+{#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer}>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={() => viewing = null} />{/snippet}</Deferred>{/if}
 <div class="receipts" class:agent={!!startedBy} class:settled={!!turn && progress.responded(message.turnId)} data-testid="message-receipts">
   <MessageActions text={copyText} at={message.createdAt} {edit} />
   <span class="tick" data-testid="receipt-accepted" class:received={!!turn} title={strings.chat.accepted} aria-label={strings.chat.accepted}><Check size={12} /></span>
