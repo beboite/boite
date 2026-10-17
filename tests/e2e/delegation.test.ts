@@ -43,8 +43,6 @@ test('inspect and stop a real delegated thread from the panel, which launches no
   await page.waitFor('!!document.querySelector("[data-testid=delegation-member]")');
   expect(await page.evaluate('document.querySelector("[data-testid=delegation-member-route]").title')).toContain('Echo · Echo');
   expect(await page.evaluate('!!document.querySelector("[data-testid=delegation-active] [data-testid=delegation-member]")')).toBe(true);
-  await page.click('[data-testid="delegation-member"]');
-  await page.waitFor('!!document.querySelector("[data-testid=delegation-detail]")');
   expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-surface] :is(textarea, input)").length')).toBe(0);
   await page.click('[data-testid="delegation-stop-all"]');
   await page.waitFor('!document.querySelector("[data-testid=agent-dock]")');
@@ -57,21 +55,23 @@ test('inspect and stop a real delegated thread from the panel, which launches no
   await page.screenshot(join(import.meta.dir, '.artifacts/delegation-desktop.png'));
 }, 40_000);
 
-test('the phone can open the same team and inspect its retained result', async () => {
+test('the phone opens a subagent in the chat, under its parent\'s title', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.click('[data-testid="panel-close"]');
   await page.click('[data-testid="delegation-activity"]');
   await page.waitFor('!!document.querySelector("[data-testid=delegation-member]")');
+  const childId = await page.evaluate('document.querySelector("[data-testid=delegation-member]").dataset.agentId') as string;
   await page.click('[data-testid="delegation-member"]');
-  await page.waitFor('document.querySelector("[data-testid=delegation-surface]")?.getBoundingClientRect().width > 200');
+  await page.waitFor(`document.querySelector("[data-testid=thread-header]") && document.querySelector("[data-testid=delegation-back-parent]")`);
+  expect(await page.evaluate('!!document.querySelector("[data-testid=delegation-surface]")')).toBe(false);
+  // The task shows as the chat's first message, the way any conversation reads.
+  await page.waitFor('document.querySelector("[data-testid=timeline]")?.textContent.includes("Review parser boundaries")');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-  // The task now shows only as the transcript's first message, which loads after the click.
-  await page.waitFor('document.querySelector("[data-testid=delegation-surface]")?.textContent.includes("Review parser boundaries")');
   await page.waitFor('document.getAnimations().every(animation => animation.playState !== "running" || animation.effect?.getTiming().iterations === Infinity)');
   await page.screenshot(join(import.meta.dir, '.artifacts/delegation-phone.png'));
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 500, deviceScaleFactor: 1, mobile: true });
-  await page.waitFor('innerHeight === 500');
-  expect(await page.evaluate('document.querySelector("[data-testid=delegation-open-thread]").getBoundingClientRect().bottom <= innerHeight')).toBe(true);
+  await page.click('[data-testid="delegation-back-parent"]');
+  await page.waitFor(`!document.querySelector("[data-testid=delegation-back-parent]") && !!document.querySelector("[data-testid=delegation-activity]")`);
+  expect(childId).not.toBe(threadId);
   expect(page.errors()).toEqual([]);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 }, 15_000);
