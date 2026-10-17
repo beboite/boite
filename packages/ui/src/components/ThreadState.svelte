@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Bot, CircleAlert, CloudOff, GitPullRequest, LoaderCircle, Radar } from '@lucide/svelte';
-  import type { ThreadSummary } from '@boite/contracts';
+  import { pullRequestWatchWaits, type ThreadSummary } from '@boite/contracts';
   import { backgroundLabel } from '../lib/background';
   import { secondClock } from '../lib/clock.svelte';
   import { ago, elapsed, exactTime } from '../lib/format';
@@ -24,12 +24,15 @@
   /** A delegated agent's wait on its own background work: what it waits for, or what ended without waking it. */
   let wait = $derived(thread.backgroundWait ?? null);
   /** The states that count time: the turn, its sub-agents, or the work it left running. */
-  let live = $derived(kind === 'working' || kind === 'delegating' || kind === 'monitoring' || kind === 'background');
+  let live = $derived(kind === 'working' || kind === 'delegating' || kind === 'monitoring' || kind === 'background' || kind === 'watching');
+  /** The pull requests the row still waits on: their checks run. */
+  let watches = $derived((thread.pullRequestWatches ?? []).filter(pullRequestWatchWaits));
   /** What was under way when the machine went away is only its last known state. */
   let stale = $derived(away && (live || kind === 'queued'));
   /**
    * Working and monitoring count from the user's request, so a pause to watch
-   * CI and the turn that resumes after it do not reset the clock. A shell left
+   * CI and the turn that resumes after it do not reset the clock; watching a
+   * pull request counts the same way, from its watch on an older core. A shell left
    * running counts from its own start: it may outlive many requests. A request
    * never starts after the turn that carries it on.
    */
@@ -37,6 +40,7 @@
     stale ? null
     : kind === 'working' ? earliest(thread.requestSince, thread.runningSince)
     : kind === 'monitoring' ? thread.requestSince ?? thread.backgroundWork?.since ?? null
+    : kind === 'watching' ? thread.requestSince ?? (watches.length ? Math.min(...watches.map(watch => watch.since)) : null)
     : kind === 'delegating' ? subagents?.since ?? null
     : live ? thread.backgroundWork?.since ?? (wait?.state === 'waiting' ? wait.since : null) : null);
   /** Counting time reads the second clock, only while the agent works: the list's clock ticks far slower. */
@@ -55,9 +59,8 @@
       return `${head}\n${what}`;
     }
     if (kind === 'watching') {
-      const watches = thread.pullRequestWatches ?? [];
       const head = watches.length === 1 ? strings.sidebar.state.watching : fill(strings.sidebar.state.watchingMany, { count: String(watches.length) });
-      return `${head}\n${watches.map(watch => `#${watch.number}`).join(', ')}`;
+      return `${head}\n${watches.map(watch => `#${watch.number}`).join(', ')}${spent === null ? '' : `\n${spent}`}`;
     }
     if (kind === 'interrupted' && wait?.state === 'interrupted') {
       return `${strings.sidebar.state.interrupted}\n${fill(strings.sidebar.state.interruptedBy, { what: wait.for, reason: strings.sidebar.state.interruption[wait.reason] })}`;
@@ -91,7 +94,7 @@
     {:else if kind === 'delegating'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label" data-testid="thread-state-text">{spent ?? strings.sidebar.state.delegating}</span>
     {:else if kind === 'monitoring'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.monitoring}</span>
     {:else if kind === 'background'}<span class="dot pulse" aria-hidden="true"></span><span class="ui-label">{spent ?? strings.sidebar.state.background}</span>
-    {:else if kind === 'watching'}<GitPullRequest size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{(thread.pullRequestWatches ?? []).map(watch => `#${watch.number}`).join(' ')}</span>
+    {:else if kind === 'watching'}<GitPullRequest size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.watching}</span>
     {:else if kind === 'interrupted'}<CircleAlert size={11} aria-hidden="true" /><span class="ui-label">{strings.sidebar.state.interrupted}</span>
     {:else}<span class="ui-label">{label}</span>{/if}
     {#if chip}<span class="agents" class:asking={chip.asking} data-testid="thread-subagents" data-count={chip.shown} role="img" title={chip.label} aria-label={chip.label}><Bot size={11} aria-hidden="true" /><span class="ui-label">{chip.shown}</span></span>{/if}

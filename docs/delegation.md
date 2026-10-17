@@ -168,10 +168,10 @@ delivered in batches of up to four. Unread steering messages expire after 15 min
 Team messages are limited to 100 per hour; terminal results have a separate
 delivery path and stay available. They wake an idle parent or join its next
 prompt when live steering is unavailable.
-Only the selected child's transcript is subscribed to in the panel; inactive
-children contribute summaries instead of a stream per agent. After a
-reconnect, the panel asks for the selected child's messages from its oldest
-unfinished turn and reads the team and coordination views again, since events
+The panel lists children by their summaries and streams none of them. Clicking
+a child opens its conversation in the chat like any thread; its header reads
+"parent title / child title" and the parent's title goes back to it. After a
+reconnect, the panel reads the team and coordination views again, since events
 sent while the socket was down reach no client.
 
 ### Stop, pause and resume

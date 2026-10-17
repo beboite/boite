@@ -1,4 +1,4 @@
-import type { ThreadStatus, ThreadSummary, WorkflowStatus, WorkflowStepStatus } from '@boite/contracts';
+import { pullRequestWatchWaits, type ThreadStatus, type ThreadSummary, type WorkflowStatus, type WorkflowStepStatus } from '@boite/contracts';
 import { strings } from './strings';
 
 /**
@@ -6,7 +6,7 @@ import { strings } from './strings';
  * user, failed, finished something not read yet, waits for a slot, ended its
  * turn waiting on the agents it delegated to, or ended it with work still
  * running in the background (a monitor, a shell), or watching a pull request
- * that will wake it. A delegated agent whose
+ * whose checks still run. A delegated agent whose
  * background work ended without waking it is `interrupted`. Null for a thread
  * at rest the user has seen, which shows when it was last used.
  */
@@ -61,8 +61,8 @@ export function threadState(thread: StateFields, delegated: Delegated = 0): Thre
       if (kinds.length > 0) return kinds.every(kind => kind === 'monitor') ? 'monitoring' : 'background';
       // The work ended a moment ago and its wake turn has not started yet.
       if (wait?.state === 'waiting') return 'background';
-      // A pull request it watches will wake it: not done yet, read or not.
-      if ((thread.pullRequestWatches?.length ?? 0) > 0) return 'watching';
+      // A pull request whose checks still run will wake it: not done yet, read or not.
+      if (thread.pullRequestWatches?.some(pullRequestWatchWaits)) return 'watching';
       return thread.unread ? 'done' : null;
     }
   }

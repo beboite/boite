@@ -150,7 +150,7 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 596,300 |
+| UI entry chunk | 596,500 |
 | UI files, excluding `.br` and `.gz` copies | 5,019,500 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,367,000 |
@@ -158,19 +158,23 @@ The tested installer becomes the release artifact.
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-17, subagent counts, their questions in the parent and agent-side
-resume (PR #567) merged with `origin/main` at `7c7327ab` measure a 595,950-byte
-UI entry chunk and 4,365,820 core JavaScript bytes on Windows CI, against
-593,177 and about 4,355,000 for that main on the same runner. The parent row's
-subagent chip, the children's questions and permissions in the parent's dock
-and the reads that keep them add 2,773 entry bytes; pause provenance,
-`delegation.resume`, the restart cut that continues children and steps, and
-the workflow adoption of a resumed step add about 10,800 core bytes, none of
-them in `main.js`. The review fixes on top (quoted assignments before a
-command, the pause a settings save keeps, an expired handoff's cut children,
-one continuation per stopped turn) add 92 entry and 624 core bytes, measured
-with `measure()` from `scripts/ci/budgets.ts` before and after them on a local
-Windows build. The entry and core limits rise to 596,300 and 4,367,000; main
-already stood 177 bytes over the 593,000 entry limit.
+resume (PR #567) merged with `origin/main` at `acb17c0a` measure a 596,444-byte
+UI entry chunk, 5,019,411 UI bytes and 4,366,674 core JavaScript bytes with
+`measure()` from `scripts/ci/budgets.ts` after fresh builds on Windows, against
+593,610, 5,014,115 and 4,355,255 for that main on the same machine. The parent
+row's subagent chip, the children's questions and permissions in the parent's
+dock and the reads that keep them add 2,834 entry bytes; pause provenance,
+`delegation.resume`, the restart cut that continues children and steps, the
+workflow adoption of a resumed step and one continuation per stopped turn add
+11,419 core bytes, none of them in `main.js`. The entry and core limits rise
+to 596,500 and 4,367,000; that main already stood 110 bytes over its 593,500
+entry limit.
+
+On 2026-10-17, Windows CI measured a 593,177-byte UI entry chunk for
+`origin/main` at `7c7327ab`, already over its 593,000 limit after PRs #558 to
+#560. The PR watch state (PR #564) adds 236 bytes there, 593,413 in total, and
+201 bytes in a fresh Linux `bun run build:ui` (538,541 to 538,742). The entry
+limit becomes 593,500; the other limits stay unchanged.
 
 On 2026-10-16, the server update recovery (PR #552) on `origin/main` at
 `08c11d82` measures 4,353,036 core JavaScript bytes after a fresh `bun run

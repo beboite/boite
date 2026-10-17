@@ -182,10 +182,11 @@ with more steps than fit turns the run into a plain list of phases. A card
 shows the step's status, its model, `done/total` and a segmented bar for a
 fan-out, and its elapsed time.
 
-Clicking a step opens its detail: dependencies, condition, each execution, its
-structured output and its conversation streaming live in the height left
-below. "Open conversation" jumps to the step's own thread. The arrow in the run's
-header goes back to the list. Templates are saved, listed and started from the
+Clicking a step run by one subagent opens that subagent's conversation in the
+chat, under a "parent / step" header. A step with several executions, or none
+started yet, opens its detail: dependencies, condition, each execution and its
+structured output, with "Open conversation" for the execution picked. The arrow
+in the run's header goes back to the list. Templates are saved, listed and started from the
 CLI only.
 
 Captures: [the graph on the desktop](images/workflow-desktop.png) · [a step's

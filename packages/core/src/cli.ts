@@ -609,6 +609,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       print(shown.map(reading => `${reading.key} ${JSON.stringify(reading.value)} ${reading.page}#${reading.section}${reading.sensitive ? ' (changed from Settings only)' : ''}`), action === undefined ? readings : shown[0]);
     },
     ask: async () => {
+      // An agent once ran `boite ask help` for this text and drew a card reading "help".
+      if (rest.length === 1 && rest[0] === 'help') { print([USAGE], { help: USAGE }); return; }
       const text = want(0, 'a question');
       const options = rest.slice(1);
       const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}) });
