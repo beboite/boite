@@ -9,7 +9,8 @@ import type { HeldBytes } from '../workdir.ts';
  * asking; a new ticket is a new address. Pictures need no range.
  */
 export function heldBytes(held: HeldBytes): Response {
-  return new Response(held.data, {
+  // Bytes from SQLite or a Buffer, both backed by an ArrayBuffer.
+  return new Response(held.data as Uint8Array<ArrayBuffer>, {
     headers: {
       'content-type': held.mime,
       'cache-control': 'private, max-age=31536000, immutable',
