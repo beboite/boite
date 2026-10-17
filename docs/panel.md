@@ -68,6 +68,12 @@ unsaved file drafts. A machine that has not connected keeps its own layouts.
 [Automatic merged-PR archive](machines.md#merged-pr-conversations) documents
 the archive conditions.
 
+A conversation whose panel nobody opened or closed yet shows it open on its
+launcher, at the panel's width, when the window is at least 1200 px wide
+(`PANEL_AUTO_OPEN`); narrower, where the panel would lie over the chat, it waits
+to be asked for. Closing it is remembered per conversation, and a surface an
+agent opens replaces the launcher. Closing the last tab shuts the panel.
+
 A panel with no tab yet opens on the surface the device starts with, Files or
 Changes, or on its launcher. The tour's first question sets it and Settings,
 Appearance, Workspace changes it ([onboarding.md](onboarding.md)). Settings,

@@ -7,7 +7,9 @@ let server: { close(): Promise<void> };
 let page: BrowserPage;
 let url: string;
 async function capture(name: string) {
-  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  // A panel still sliding in when its conversation is left is no longer drawn, and its
+  // `finished` never settles: settleAnimations skips what is not drawn.
+  await page.settleAnimations();
   await page.screenshot(join(import.meta.dir, '.artifacts', name));
 }
 beforeAll(async () => {
@@ -134,7 +136,7 @@ test.each(['glass', 'grain'])('pointer clicks open and select models with %s', a
   await page.evaluate(material === 'glass' ? `document.documentElement.dataset.glass = 'acrylic'` : `document.documentElement.dataset.theme = 'grain'`);
   async function pointerClick(selector: string) {
     await page.waitFor(`document.querySelector(${JSON.stringify(selector)})`);
-    await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+    await page.settleAnimations();
     const point = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
     await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
     await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
