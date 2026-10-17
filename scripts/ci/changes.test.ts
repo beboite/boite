@@ -102,6 +102,16 @@ test('main pushes run affected tests while warming the extra portable architectu
   expect(plan(affectedChecks(['README.md']), 'warm')).toMatchObject({ ...none, e2e: false });
 });
 
+test('pull requests run the core suite without the Intel Mac; main, releases and manual runs keep it', () => {
+  const all = affectedChecks(['packages/core/src/main.ts']);
+  const runners = (mode: 'pr' | 'warm' | 'full') => JSON.parse(plan(all, mode).coreRunners).map((runner: { os: string }) => runner.os);
+  expect(runners('pr')).toEqual(['ubuntu-24.04', 'ubuntu-24.04-arm', 'windows-2025', 'macos-15']);
+  for (const mode of ['warm', 'full'] as const) expect(runners(mode)).toEqual([...runners('pr'), 'macos-15-intel']);
+  // The job names stay the ones the matrix had: `Core tests (macOS x64)`.
+  expect(JSON.parse(plan(all, 'full').coreRunners).map((runner: { name: string }) => runner.name))
+    .toEqual(['Linux x64', 'Linux arm64', 'Windows x64', 'macOS arm64', 'macOS x64']);
+});
+
 test('a main push compares with the last main commit whose CI passed, skipping cancelled and failed runs', () => {
   const head = 'h'.repeat(40);
   const [green, older] = ['g', 'o'].map((letter) => letter.repeat(40));

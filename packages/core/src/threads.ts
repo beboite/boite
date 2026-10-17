@@ -57,6 +57,7 @@ import { markQueuedStopped } from './threads/turn-settlement.ts';
 import { ThreadFocus } from './threads/focus.ts';
 import { ProgressState } from './threads/progress.ts';
 import { eraseIncognito } from './threads/incognito.ts';
+import { removeTranscripts, threadSessions, type NativeSession } from './threads/transcript-purge.ts';
 import { ThreadCreation } from './threads/creation.ts';
 import { accountRemoved, followAgent } from './threads/account-fallback.ts';
 
@@ -113,6 +114,8 @@ export class ThreadStore {
   /** Turns a restart hands to the next core (`threads/handoff.ts`). */
   readonly handoff: RestartHandoff;
   private readonly removing = new Set<ThreadId>();
+  /** The last purge's removal of native transcripts (`threads/transcript-purge.ts`), which tests wait for. */
+  transcriptPurge: Promise<string[]> = Promise.resolve([]);
 
   constructor(private readonly core: Core) {
     this.runner = new TurnRunner(core, this);
@@ -517,8 +520,13 @@ export class ThreadStore {
   purgeDeleted(): void {
     const days = this.core.settings.get().threadDeletionRetentionDays ?? DEFAULT_THREAD_DELETION_RETENTION_DAYS;
     if (days === 0) return;
-    if (this.core.journal.purgeDeletedThreads(Date.now() - days * 86_400_000) > 0) {
+    let sessions: NativeSession[] = [];
+    const purged = this.core.journal.purgeDeletedThreads(Date.now() - days * 86_400_000, ids => {
+      sessions = threadSessions(this.core.journal.db, ids);
+    });
+    if (purged > 0) {
       this.core.bus.emit('thread.deletionsUpdated', {});
+      this.transcriptPurge = removeTranscripts(this.core, sessions);
     }
   }
 

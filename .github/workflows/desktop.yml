@@ -2,7 +2,8 @@ name: desktop
 
 # The desktop builds: the Windows installer and every portable package, each
 # built once, tested where it was built and uploaded for publication. ci.yml
-# runs them with the shell's Rust tests; the nightly, whose commit already
+# runs them with the shell's Rust tests (on Windows a job of their own beside
+# the installer build); the nightly, whose commit already
 # passed CI, keeps only what proves the shipped files: installer regressions,
 # native shell E2E and the installed-package smoke tests.
 
@@ -60,6 +61,34 @@ env:
   CARGO_BUILD_JOBS: 8
 
 jobs:
+  # The test build turns on `tauri/test` and leaves out `custom-protocol`, so
+  # it shares only the dependencies below Tauri with the installer build and
+  # needs neither the UI nor the staged core: in the installer job it ran
+  # 97 to 102 s after a 221 s build. It restores that build's cache and saves
+  # none, which the installer job owns.
+  windows-rust:
+    name: Windows x64 Rust tests
+    if: inputs.rust-tests
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: apps/shell/src-tauri -> target
+          shared-key: desktop-release-v1
+          save-if: false
+      - name: Shell Rust tests
+        run: bun run test:shell --release
+
   windows:
     name: Windows x64
     runs-on: windows-2025
@@ -113,9 +142,6 @@ jobs:
         env:
           BOITE_CI_INSTALLER_REQUIRED: '1'
         run: bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts scripts/ci/stop-core.test.ts
-      - name: Shell Rust tests
-        if: inputs.rust-tests
-        run: bun run test:shell --release
       - name: Native shell end-to-end tests
         if: inputs.native-e2e
         env:

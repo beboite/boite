@@ -548,7 +548,10 @@ when the core advertises `chunkedAnswers`.
 - A spawn of a bare name (`gh`, git when its lookup found no real binary)
   reuses the remembered PATH lookup (`bun bench/spawn-lookup.ts`).
 - On Windows new processes inside 100 ms share one audio-session walk, and
-  the jobs Worker drops the global job's copy of every start and exit.
+  the jobs Worker drops the global job's copy of every start and exit. A new
+  audio session is reported by Core Audio, so with no traced session the walk
+  runs every 30 seconds instead of every second
+  ([the audio mute](trace.md#the-audio-mute), `bun bench/guard-cpu.ts`).
 - A project names its icon by version or stack id only. The image, up to
   256 KB, is a `projects.icon` call made once per project and version, when a
   tile first draws it; a list never carries it ([project icons](project-icons.md)).

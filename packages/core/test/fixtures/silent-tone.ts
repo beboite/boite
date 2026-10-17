@@ -7,6 +7,9 @@
  * device is then held open a moment longer so the mute has a session to act on
  * for the whole of the test's window.
  *
+ * An optional first argument waits that many milliseconds before the device is
+ * opened: a process that starts its audio late.
+ *
  * It prints its pid and exits 0. Nothing here is audible, so `bun test` runs it.
  */
 import { dlopen, FFIType, ptr } from 'bun:ffi';
@@ -58,6 +61,9 @@ formatView.setUint32(8, SAMPLE_RATE * blockAlign, true);
 formatView.setUint16(12, blockAlign, true);
 formatView.setUint16(14, BITS, true);
 formatView.setUint16(16, 0, true);
+
+const delayMs = Number(process.argv[2] ?? 0);
+if (delayMs > 0) await Bun.sleep(delayMs);
 
 const handleOut = new BigUint64Array(1);
 const opened = winmm.waveOutOpen(ptr(handleOut), WAVE_MAPPER, ptr(format), 0n, 0n, CALLBACK_NULL);
