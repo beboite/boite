@@ -4699,11 +4699,14 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * `data` is then empty, `url` is the path (`/file/<ticket>`) to resolve
    * against the origin the client reached the core by, `mimeType` is always
    * set and `bytes` is the size. The route answers it with immutable caching,
-   * since the bytes of a message's part never change, and the same ticket
+   * since the bytes of a message's part never change, or `no-store` for an
+   * incognito conversation, which leaves nothing behind. The same ticket
    * comes back for the same part and copy while it lives, so the HTTP cache
-   * keeps it. A client that cannot fetch that address (the desktop shell
-   * through a relay, whose policy only admits `/file/` at a machine's own
-   * address) leaves `ticket` out and gets base64, as an older core answers.
+   * keeps it, and each load renews it for `FILE_TICKET_TTL_MS`. A copy the
+   * core could not keep comes as base64 even with `ticket`. A client that
+   * cannot fetch that address (the desktop shell through a relay, whose
+   * policy only admits `/file/` at a machine's own address) leaves `ticket`
+   * out and gets base64, as an older core answers.
    * Measured on 2026-10-17 with `bun run bench/media-wire.ts --browser`: ten
    * 1920 by 1080 screenshots opened on a thread cost 1,762 KB as base64 large
    * copies and 86 KB as ticketed thumbnails on loopback, and Chromium went from

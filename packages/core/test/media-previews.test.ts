@@ -299,6 +299,74 @@ describe('deferred pictures', () => {
     seed(threadId);
     // A 320 by 180 PNG of noise: no copy is lighter, so the original comes.
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_shot', partIndex: 1, display: true, thumb: true })).toEqual({ data: SHOT });
+
+    // A thumbnail kept as not lighter than its source sends that source: the kept large copy,
+    // or the original when no large copy is kept, without making one.
+    const journal = harness.core.journal;
+    const rows = () => journal.db.query('SELECT part_index AS part FROM media_displays WHERE message_id = ? ORDER BY part_index').all('msg_tall') as { part: number }[];
+    journal.db.query('INSERT INTO media_displays (message_id, part_index, thread_id, data) VALUES (?, ?, ?, ?)').run('msg_tall', -3, threadId, new Uint8Array(0));
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_tall', partIndex: 1, display: true, thumb: true })).toEqual({ data: TALL });
+    expect(rows()).toEqual([{ part: -3 }]);
+    journal.db.query('INSERT INTO media_displays (message_id, part_index, thread_id, data) VALUES (?, ?, ?, ?)').run('msg_tall', 1, threadId, new Uint8Array([7, 7]));
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_tall', partIndex: 1, display: true, thumb: true })).toEqual({ data: Buffer.from([7, 7]).toString('base64'), mimeType: 'image/webp' });
+  });
+
+  test("an incognito conversation's pictures come with no-store, so no browser cache outlives it", async () => {
+    const client = await harness.connect();
+    const drafts = await client.call('projects.drafts', {});
+    const accountId = (await client.call('accounts.list', {})).find((account) => account.providerId === 'echo')!.id;
+    const thread = await client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, incognito: true });
+    harness.core.journal.putMessage({ id: 'msg_secret', threadId: thread.id, turnId: 'trn_seed', role: 'user', state: 'complete', createdAt: 3_001, parts: [{ type: 'image', mimeType: 'image/png', data: SCREEN, alt: null }] });
+    const asked = { threadId: thread.id, messageId: 'msg_secret', partIndex: 0, ticket: true };
+    for (const answer of [
+      await client.call('messages.attachment', { ...asked, display: true, thumb: true }),
+      await client.call('messages.attachment', { ...asked, display: true }),
+      await client.call('messages.attachment', asked),
+    ]) {
+      const served = await fetch(`${harness.url}${answer.url}`);
+      expect(served.status).toBe(200);
+      expect(served.headers.get('cache-control')).toBe('no-store');
+    }
+  });
+
+  test('a copy the journal cannot keep comes as base64 rather than as an address that would not load', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    harness.core.journal.putMessage({ id: 'msg_screen', threadId, turnId: 'trn_seed', role: 'user', state: 'complete', createdAt: 3_001, parts: [{ type: 'image', mimeType: 'image/png', data: SCREEN, alt: null }] });
+    // A full disk, as SQLite reports it.
+    harness.core.journal.db.exec("CREATE TRIGGER full_disk BEFORE INSERT ON media_displays BEGIN SELECT RAISE(FAIL, 'database or disk is full'); END");
+    for (const thumb of [true, false]) {
+      const answer = await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0, display: true, thumb, ticket: true });
+      expect(answer.url).toBeUndefined();
+      expect(answer.mimeType).toBe('image/webp');
+      expect(await new Bun.Image(Buffer.from(answer.data, 'base64')).metadata()).toMatchObject({ format: 'webp', width: thumb ? 320 : 1280 });
+    }
+  });
+
+  test('a fork keeps the copies of the pictures it copies, so it never makes them again', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('turns.start', { threadId, prompt: 'look', attachments: [{ kind: 'image', mimeType: 'image/png', data: SCREEN, name: 'screen.png' }] });
+    await waitFor(() => harness.core.journal.getThread(threadId)?.status === 'idle' && harness.core.journal.listMessages(threadId).length >= 2);
+    const [prompt, reply] = harness.core.journal.listMessages(threadId);
+    const partIndex = prompt!.parts.findIndex((part) => part.type === 'image');
+    await client.call('messages.attachment', { threadId, messageId: prompt!.id, partIndex, display: true });
+    await client.call('messages.attachment', { threadId, messageId: prompt!.id, partIndex, display: true, thumb: true });
+
+    const fork = await client.call('threads.fork', { threadId, messageId: reply!.id });
+    const copied = harness.core.journal.listMessages(fork.id)[0]!;
+    const made = Bun.Image.prototype.webp;
+    let encodes = 0;
+    Bun.Image.prototype.webp = function (...args) { encodes += 1; return made.apply(this, args); };
+    try {
+      await client.call('messages.attachment', { threadId: fork.id, messageId: copied.id, partIndex, display: true });
+      await client.call('messages.attachment', { threadId: fork.id, messageId: copied.id, partIndex, display: true, thumb: true });
+    } finally {
+      Bun.Image.prototype.webp = made;
+    }
+    expect(encodes).toBe(0);
+    const slots = harness.core.journal.db.query('SELECT part_index AS part FROM media_displays WHERE message_id = ? AND thread_id = ? ORDER BY part_index').all(copied.id, fork.id);
+    expect(slots).toEqual([{ part: -2 - partIndex }, { part: partIndex }]);
   });
 
   test('a light page still opens, sized and without blurs, when the blurs cannot be read', async () => {

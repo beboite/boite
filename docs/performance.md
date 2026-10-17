@@ -462,13 +462,19 @@ when the core advertises `chunkedAnswers`.
   pixels on a 2x screen and takes it, a 3x phone or a panorama takes the
   1,280 px copy. Pictures in an answer and the viewer keep the larger copy and
   the original.
-- Copies and originals come as `ticket` addresses on the core's file route
-  rather than base64 in a JSON frame: the `<img>` loads `/file/<ticket>`
-  itself, with `immutable` caching, and the same part keeps the same ticket
-  while it lives, so the browser cache answers a scroll back. A ticket that no
-  longer loads (an expired ticket, a restarted core) is asked again once. The
-  desktop shell through another member's relay keeps base64: its policy
-  admits `/file/` only at a machine's own address.
+- The copies the timeline draws come as `ticket` addresses on the core's
+  file route rather than base64 in a JSON frame: the `<img>` loads
+  `/file/<ticket>` itself, with `immutable` caching, and the same part keeps
+  the same ticket while it lives, so the browser cache answers a scroll back.
+  Each load renews the ticket, so it dies ten minutes after its last use; one
+  that no longer loads (an expired ticket, a restarted core) is asked again
+  once. An incognito conversation's tickets answer `no-store` instead, so no
+  disk cache outlives it, and a copy the journal could not keep comes as
+  base64, since the route would have nothing to read. The desktop shell
+  through another member's relay keeps base64: its policy admits `/file/`
+  only at a machine's own address. The core also answers an original by
+  ticket, but the viewer, a download and an edit still fetch it as base64:
+  they hand its bytes to the part.
   `bun run bench/media-wire.ts --browser` on 2026-10-17, ten 1920 by 1080
   PNG screenshots of 1.77 MB, medians of 5:
 

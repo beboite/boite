@@ -487,6 +487,8 @@ export interface HeldBytes {
   data: Uint8Array;
   mime: string;
   name?: string;
+  /** Kept by no cache: a picture of an incognito conversation, which leaves nothing behind. */
+  noStore?: true;
 }
 
 interface BytesTicket {
@@ -559,11 +561,13 @@ export class FileTickets {
     return ticket;
   }
 
-  /** What a bytes ticket opens, or null when it is not one, has expired or its bytes are gone. */
+  /** What a bytes ticket opens, renewing it, or null when it is not one, has expired or its bytes are gone. */
   bytes(ticket: string, now = Date.now()): HeldBytes | null {
     this.sweep(now);
     const entry = this.bytesHeld.get(ticket);
     if (entry === undefined) return null;
+    // A picture still drawn keeps its address: a ticket lives ten minutes past its last use.
+    entry.expiresAt = now + FILE_TICKET_TTL_MS;
     const found = entry.read();
     if (found === null) this.dropBytes(ticket, entry);
     return found;

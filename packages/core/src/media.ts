@@ -87,7 +87,7 @@ export class MediaPreviews {
   private readonly running = new Map<string, Job>();
   private queuedChars = 0;
   /** WebP copies being made, one promise per picture however many clients ask. */
-  private readonly displays = new Map<string, Promise<Uint8Array>>();
+  private readonly displays = new Map<string, Promise<{ data: Uint8Array; kept: boolean }>>();
   private displaying = 0;
   private readonly displayTurns: (() => void)[] = [];
 
@@ -168,10 +168,12 @@ export class MediaPreviews {
    * the large copy, which a thumbnail is made from when it is kept. The
    * answer is the copy's bytes, or empty when the source is what to send: a
    * picture Bun cannot convert, or one whose copy would not be lighter.
+   * `kept` is false when the journal could not keep it (a full disk, a
+   * message that left its thread): only these bytes hold it then.
    */
-  async display(threadId: string, messageId: string, partIndex: number, size: DisplaySize, source: string | Uint8Array): Promise<Uint8Array> {
+  async display(threadId: string, messageId: string, partIndex: number, size: DisplaySize, source: string | Uint8Array): Promise<{ data: Uint8Array; kept: boolean }> {
     const kept = this.kept(threadId, messageId, partIndex, size);
-    if (kept !== null) return kept;
+    if (kept !== null) return { data: kept, kept: true };
     const key = `${messageId}\0${partIndex}\0${size}`;
     let made = this.displays.get(key);
     if (made === undefined) {
@@ -179,12 +181,18 @@ export class MediaPreviews {
       made = this.displayTurn(() => makeDisplay(source, size)).then(copy => {
         // The source wins when it is already as light: a small PNG icon, a WebP sent as one.
         const light = copy !== null && copy.length < sourceBytes ? copy : new Uint8Array(0);
+        let kept = false;
         try {
-          if (!this.core.journal.isClosed()) putMediaDisplay(this.core.journal.db, threadId, messageId, slotOf(partIndex, size), light);
+          if (!this.core.journal.isClosed()) {
+            putMediaDisplay(this.core.journal.db, threadId, messageId, slotOf(partIndex, size), light);
+            // Nothing is written for a message that left its thread meanwhile.
+            kept = this.core.journal.db.query('SELECT 1 FROM media_displays WHERE message_id = ? AND part_index = ? AND thread_id = ?')
+              .get(messageId, slotOf(partIndex, size), threadId) !== null;
+          }
         } catch (error) {
           this.core.log('warn', `${size} copy of message ${messageId} part ${partIndex} was not kept: ${messageOf(error)}`);
         }
-        return light;
+        return { data: light, kept };
       }).finally(() => this.displays.delete(key));
       this.displays.set(key, made);
     }
