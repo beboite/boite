@@ -122,18 +122,23 @@ export class Models {
   /**
    * Writes the probed models to `localStorage` at most once a
    * `MODEL_CACHE_WRITE_MS`, the state at the end of the burst; leaving the
-   * page writes what waits at once. Every probe used to serialize providers,
+   * page or detaching the store writes what waits at once. Every probe used to serialize providers,
    * accounts and all the lists on the main thread.
    */
   saveModels(): void {
-    this.#saveKey = this.#modelCacheKey();
+    const key = this.#modelCacheKey();
+    // Another machine's cache is written before this one waits.
+    if (this.#saveTimer !== null && key !== this.#saveKey) this.flushModels();
+    this.#saveKey = key;
     if (this.#saveTimer !== null) return;
     this.#saveTimer = setTimeout(() => this.flushModels(), MODEL_CACHE_WRITE_MS);
     if (this.#onPageHide === null && typeof window !== 'undefined') {
-      this.#onPageHide = () => this.flushModels();
+      this.#onPageHide = this.#flush;
       window.addEventListener('pagehide', this.#onPageHide);
     }
   }
+
+  #flush = () => this.flushModels();
 
   /** The write `saveModels` holds, now. */
   flushModels(): void {

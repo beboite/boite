@@ -1,4 +1,5 @@
 import { createWithPreparation, mergeCreationSnapshot } from './thread-creation';
+import { messageCopies, RowIndex, threadCopies } from './thread-lookup';
 import type {
   Message,
   MessageId,
@@ -38,14 +39,7 @@ function summaryOf(thread: Thread): ThreadSummary {
 /** The thread list, the open thread and its subscription, and what one thread's lifecycle asks of the core. */
 export class Threads {
   threads = $state<ThreadSummary[]>([]);
-  /**
-   * The rows by id, for what an event looks up: a load sample is one `get`
-   * instead of a `find` through the `$state` proxy over every row. Built again
-   * when the list is replaced or grew behind it (`rowOf`).
-   */
-  #rowIndex = new Map<ThreadId, ThreadSummary>();
-  #indexedRows: ThreadSummary[] | null = null;
-  #indexedLength = 0;
+  #rowIndex = new RowIndex();
   /**
    * The open thread holds the window that is loaded, not the whole history:
    * `threads.get` gives the last page and `loadOlder` prepends what is above it.
@@ -806,32 +800,13 @@ export class Threads {
   }
 
   /** The row of `threadId` the list holds, through the id index. */
-  rowOf(threadId: ThreadId): ThreadSummary | undefined {
-    const rows = this.threads;
-    if (rows !== this.#indexedRows || rows.length !== this.#indexedLength) {
-      this.#rowIndex.clear();
-      for (const row of rows) this.#rowIndex.set(row.id, row);
-      this.#indexedRows = rows;
-      this.#indexedLength = rows.length;
-    }
-    const row = this.#rowIndex.get(threadId);
-    return row?.id === threadId ? row : undefined;
-  }
+  rowOf(threadId: ThreadId): ThreadSummary | undefined { return this.#rowIndex.of(this.threads, threadId); }
 
   upsertThread(summary: ThreadSummary): void {
     this.ctx.threadReads.change(summary.id, summary);
     const row = this.rowOf(summary.id);
-    if (row) {
-      patchRow(row, keepArchived(row, summary));
-      return;
-    }
-    const rows = this.threads;
-    rows.push(summary);
-    // The index follows the push instead of being built again.
-    if (rows === this.#indexedRows && rows.length === this.#indexedLength + 1) {
-      this.#rowIndex.set(summary.id, rows[rows.length - 1]!);
-      this.#indexedLength = rows.length;
-    }
+    if (row) patchRow(row, keepArchived(row, summary));
+    else this.#rowIndex.push(this.threads, summary);
   }
 
   /** Drops reading state; automatic archives can retain unsent input for restoration. */
@@ -859,28 +834,12 @@ export class Threads {
     if (left?.archived && left.id !== next) this.forgetThread(left.id, left.archiveReason?.type === 'pr-merged');
   }
 
-  /**
-   * Every copy of thread `threadId` this client holds, each once: the open
-   * thread, the delegated one and pages a press preloaded. Usually one or
-   * none, so no Set and no array of every candidate is built per delta.
-   */
   threadSnapshots(threadId: ThreadId): Thread[] {
-    const held: Thread[] = [];
-    const open = this.openThread;
-    if (open?.id === threadId) held.push(open);
-    const delegated = this.ctx.store.delegationThread;
-    if (delegated?.id === threadId && delegated !== open) held.push(delegated);
-    for (const page of this.preloads.pages()) if (page?.id === threadId && !held.includes(page)) held.push(page);
-    return held;
+    return threadCopies(threadId, this.openThread, this.ctx.store.delegationThread, this.preloads.pages());
   }
 
   messages(threadId: ThreadId, messageId: string): Message[] {
-    const messages: Message[] = [];
-    for (const thread of this.threadSnapshots(threadId)) {
-      const message = thread.messages[lastIndexById(thread.messages, messageId)];
-      if (message && !messages.includes(message)) messages.push(message);
-    }
-    return messages;
+    return messageCopies(this.threadSnapshots(threadId), messageId);
   }
 
   invalidateSync(threadId: ThreadId): void {

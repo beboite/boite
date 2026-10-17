@@ -1091,9 +1091,10 @@ test('a picture tile draws a small thumbnail, the preview the bytes by URL, both
     async convertToBlob(options: ImageEncodeOptions) { return new Blob(['thumb'], { type: options.type }); }
   }
   const native = { createObjectURL: URL.createObjectURL, revokeObjectURL: URL.revokeObjectURL };
+  const drawing = { createImageBitmap: globalThis.createImageBitmap, OffscreenCanvas: globalThis.OffscreenCanvas };
   Object.assign(URL, { createObjectURL: created, revokeObjectURL: revoked });
-  vi.stubGlobal('createImageBitmap', decoded);
-  vi.stubGlobal('OffscreenCanvas', Canvas);
+  // Assigned rather than stubbed: unstubbing would also take the setup's ResizeObserver away.
+  Object.assign(globalThis, { createImageBitmap: decoded, OffscreenCanvas: Canvas });
   try {
     paste(pngFile());
     await waitFor(() => document.querySelector('[data-testid=composer-attachment] img') !== null);
@@ -1113,7 +1114,7 @@ test('a picture tile draws a small thumbnail, the preview the bytes by URL, both
     await waitFor(() => document.querySelector('[data-testid=composer-attachments]') === null);
     expect(revoked.mock.calls.map(([url]) => url).sort()).toEqual(['blob:test/1-image/webp', 'blob:test/2-image/png']);
   } finally {
-    vi.unstubAllGlobals();
+    Object.assign(globalThis, drawing);
     Object.assign(URL, native);
   }
 });
