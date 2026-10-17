@@ -668,6 +668,11 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
   try {
     parsed = parse(argv);
     if (parsed.positional.length === 0 || parsed.positional[0] === 'help') throw new Usage('');
+    // `boite ask help` once drew a card reading "help": a lone `help` after a
+    // command asks for this text. workflow has a help page of its own.
+    if (parsed.positional.length === 2 && parsed.positional[1] === 'help' && parsed.positional[0] !== 'workflow') {
+      throw new Usage('');
+    }
   } catch (error) {
     if (error instanceof Usage) {
       io.err((error.message.length === 0 ? USAGE : `${error.message}\n${USAGE}`) + '\n');
