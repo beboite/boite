@@ -88,15 +88,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
-# What ships. Fat LTO over one codegen unit lets the optimizer see across
-# crates: 16,665,088 bytes of boite-shell.exe instead of 20,631,552, and thin
-# LTO's 17,369,088 (2026-10-17, docs/releasing.md). The cost is a serial final
-# step, about 9 minutes per shell change instead of 1.5, so desktop.yml keeps
-# Cargo's defaults on runs that publish nothing; a local iteration can do the
-# same with CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16.
-# `panic` stays "unwind": update commands run under `catch_unwind`. Symbols are
-# not stripped: on Windows they live in the PDB beside the build, which the hang
-# dumps need, and elsewhere a panic's backtrace reads them.
-[profile.release]
-lto = "fat"
-codegen-units = 1
+# No release profile here: local builds keep Cargo's defaults, about 1.5
+# minutes per shell change. A publishing run in desktop.yml sets fat LTO over
+# one codegen unit through CARGO_PROFILE_RELEASE_*, which takes the executable
+# from 20.6 MB to 16.7 MB for about 9 minutes per build (docs/releasing.md).
+# `panic` stays "unwind" either way: update commands run under `catch_unwind`.

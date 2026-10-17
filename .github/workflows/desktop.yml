@@ -58,11 +58,6 @@ permissions:
 
 env:
   CARGO_BUILD_JOBS: 8
-  # The shell's release profile (Cargo.toml) is what ships: fat LTO over one
-  # codegen unit, about 7 more minutes per build. A run that publishes nothing
-  # builds and tests with Cargo's defaults, as before that profile.
-  CARGO_PROFILE_RELEASE_LTO: ${{ inputs.sign-updates && 'fat' || 'false' }}
-  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ inputs.sign-updates && '1' || '16' }}
 
 jobs:
   windows:
@@ -74,6 +69,15 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      # What ships is built with fat LTO over one codegen unit: a smaller shell
+      # for about 7 more minutes per build. Other runs keep Cargo's release
+      # defaults, as local builds do (docs/releasing.md).
+      - name: Optimize the shipped shell
+        if: inputs.sign-updates
+        shell: bash
+        run: |
+          echo "CARGO_PROFILE_RELEASE_LTO=fat" >> "$GITHUB_ENV"
+          echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           toolchain: stable
@@ -152,6 +156,15 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      # What ships is built with fat LTO over one codegen unit: a smaller shell
+      # for about 7 more minutes per build. Other runs keep Cargo's release
+      # defaults, as local builds do (docs/releasing.md).
+      - name: Optimize the shipped shell
+        if: inputs.sign-updates
+        shell: bash
+        run: |
+          echo "CARGO_PROFILE_RELEASE_LTO=fat" >> "$GITHUB_ENV"
+          echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1" >> "$GITHUB_ENV"
       - name: Install Linux shell dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11 xdg-utils

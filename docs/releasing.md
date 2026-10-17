@@ -97,10 +97,21 @@ to the app attaches the previous APK under its original name.
   `BOITE_TARGET=x86_64-apple-darwin` builds the Intel core, sidecar and bundle
   instead, as CI does.
 
-The shell's release profile in `apps/shell/src-tauri/Cargo.toml` uses
-fat LTO over one codegen unit and keeps `panic = "unwind"`, which the update
-commands' `catch_unwind` needs. It strips nothing: the Windows symbols stay in
-the PDB beside the build, which a hang dump needs to name the frames.
+A published shell is built with fat LTO over one codegen unit:
+`desktop.yml` sets `CARGO_PROFILE_RELEASE_LTO=fat` and
+`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1` when `sign-updates` is on. Local
+builds and pull requests keep Cargo's release defaults, since that final step
+is serial ([CI](ci.md#build-cost)). `panic` stays `unwind`, which the update
+commands' `catch_unwind` needs, and nothing is stripped: the Windows symbols
+stay in the PDB beside the build, which a hang dump needs to name the frames.
+To reproduce the shipped executable locally:
+
+```powershell
+$env:CARGO_PROFILE_RELEASE_LTO = 'fat'
+$env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = '1'
+bun run --cwd apps/shell tauri build --no-bundle
+```
+
 Measured on 2026-10-17 with `bun run --cwd apps/shell tauri build --no-bundle`
 on the same base:
 
@@ -110,9 +121,7 @@ on the same base:
 | thin LTO, filtered UI | 17,369,088 | 0 |
 | fat LTO, filtered UI | 16,665,088 | 0 |
 
-A publishing run builds with it; a pull request keeps Cargo's defaults
-([CI](ci.md#build-cost)). For a local iteration set
-`CARGO_PROFILE_RELEASE_LTO=false` and `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`.
+The thin and fat rows were built with those variables (`thin` for the first).
 
 The shell passes Tauri's resource directory to the core through `BOITE_UI_DIR`,
 so the installed core can serve the phone UI from the macOS application bundle
