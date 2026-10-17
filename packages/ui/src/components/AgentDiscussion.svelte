@@ -94,7 +94,8 @@
     const target = `${discussion.key}:${letterId ?? ''}`;
     const size = discussion.entries.length;
     const found = letterId !== undefined && discussion.entries.some(entry => entry.letter.id === letterId);
-    if (!list || landed === target) return;
+    // Landed on it and still on it; a letter opened since (a pruned one at the end) makes it new again.
+    if (!list || (opened === target && landed === target)) return;
     if (opened !== target) {
       opened = target;
       seen = size;

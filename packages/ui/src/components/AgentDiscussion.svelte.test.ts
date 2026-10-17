@@ -97,3 +97,31 @@ test('a discussion opened on a letter that is gone lands on its end', async () =
   await tick();
   expect(top).toBe(900);
 });
+
+test('a letter landed on, then a gone one at the end, then the first again lands on the first again', async () => {
+  // The messages tab keeps one mounted discussion while timeline clicks change its letter.
+  const store = { coordination: { self, config: { mode: 'brief', resources: '', remote: true, paused: false },
+    messages: [letter('first', 0, true), letter('last', 1, false)], sent: 0, sendLimit: null, wakes: 0, wakeLimit: null },
+    delegation: null, threads: [], projects: [] } as unknown as Store;
+  const [discussion] = discussionsOf(agentMailFor(store, self.threadId), store);
+  const props = $state({ store, discussion: discussion!, letterId: 'first' as string | undefined, onback: () => {} });
+  let top = 0;
+  const geometry = (list: HTMLElement) => {
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => 900 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => { top = value; } });
+  };
+  component = mount(AgentDiscussion, { target: document.body, props });
+  geometry(document.querySelector<HTMLElement>('[data-testid=agent-discussion-letters]')!);
+  flushSync();
+  await tick();
+  // jsdom puts every row at 0: landing on a letter scrolls 48 above it.
+  expect(top).toBe(-48);
+  props.letterId = 'pruned';
+  flushSync();
+  await tick();
+  expect(top).toBe(900);
+  props.letterId = 'first';
+  flushSync();
+  await tick();
+  expect(top).toBe(852);
+});
