@@ -1146,6 +1146,39 @@ progress messages the CLI sends (`thinking_tokens`, `api_retry`, `status`,
 [trace](trace.md)); `prompt_suggestion` and `rate_limit_event` stay unused by
 the timeline.
 
+## Claude's MCP servers on demand
+
+Claude Code starts every stdio server of the user's `mcpServers` with each
+session, called or not. A Claude turn hands the CLI each of those servers as a
+Streamable HTTP entry under the core's `/mcp/lazy/<registration>/<name>`
+instead (`packages/core/src/mcp/lazy.ts`). The entry carries
+`Authorization: Bearer ${BOITE_AGENT_TOKEN}`: the CLI expands the variable from
+its environment, so the token never reaches its command line. A token of
+another thread gets 404, a wrong one 401.
+
+The servers come from the `.claude.json` the CLI reads (`CLAUDE_CONFIG_DIR`,
+else the home directory), without the ones its project lists under
+`disabledMcpServers`. HTTP and SSE servers stay the CLI's own. A passed entry
+replaces the config's server of the same name, so the CLI starts none of them.
+
+The first session of a server starts it for the handshake and saves what it
+answered (`initialize` result and the tools, prompts, resources and templates
+lists) in the journal setting `mcp-manifest:<fingerprint>`, keyed by command,
+arguments and environment. Later sessions with the same MCP protocol version
+get the handshake, the lists, `ping` and `logging/setLevel` from that manifest
+without a process. The first other request starts the real server under the
+thread, in the thread's folder, with the CLI's environment plus the server's
+own and the agent variables, then forwards it. The server stays for the rest of
+the session. Its own requests (roots, sampling, elicitation) reach the CLI on
+its GET stream, or on its newest open POST stream when there is none. Once a
+server is live, the core reads its lists again and saves them; when its tools
+differ from what the session was given, the session gets
+`notifications/tools/list_changed`.
+
+The turn's end releases the registration: the core closes each server's stdin
+and kills it after 3 seconds. Set `BOITE_LAZY_MCP=0` in the core's environment
+to give the CLI the servers as configured.
+
 ## Stdio transport failures
 
 Codex, Muse and pi use `drivers/stdio.ts` for request lifetime and newline

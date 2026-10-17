@@ -41,6 +41,27 @@ bun bench/core-idle.ts 10
 The audit records samples, workload limits and remaining candidates, including
 queue admission, WebSocket fan-out and retained tool bodies in the browser.
 
+### MCP servers per Claude session
+
+On 2026-10-17 a Windows machine ran 20 Claude sessions with three stdio MCP
+servers in the user's config. Each session started all three: 4 processes and
+64 MB private for a Blender bridge, 2 and 22 MB for an SSH bridge, 4 and
+138 MB for a code search. That is about 10 processes and 220 MB per session,
+for tools most sessions never called. With
+[MCP servers on demand](providers.md#claudes-mcp-servers-on-demand), a session
+whose servers answered once before starts none of them; it lists the same 54
+tools and starts one server on the first call to it. Measured with the real
+CLI 2.1.302 and the real servers against a test core:
+
+| Run | Server processes under the CLI | Started by the core | MCP tools at `init` |
+| --- | --- | --- | --- |
+| Servers as configured | 3 trees | 0 | 0 (all `pending`) |
+| On demand, first session | 0 | 3 | 54 (all `connected`) |
+| On demand, later session | 0 | 0 | 54 (all `connected`) |
+
+The servers are also connected when the session's `init` arrives, so their
+tools are there on the first turn.
+
 ## Long threads in the journal
 
 Measured on 2026-10-05 with `bench/rpc-actions.ts --journal` on a copy of a

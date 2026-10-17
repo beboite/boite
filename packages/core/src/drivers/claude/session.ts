@@ -13,6 +13,7 @@ import type { ClaudeTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
 import { CONTEXT_ENV, CONTEXT_GUIDES_ENV } from '../../context-mode.ts';
 import { noteClaudeMessage } from './diagnostics.ts';
+import { userStdioServers, type LazyServerEntry } from '../../mcp/lazy.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 /** Claude Code's own subagent and workflow tools; `Task` is the older name of `Agent`. */
@@ -476,8 +477,9 @@ export class ClaudeSession {
   // -- the query ------------------------------------------------------------
 
   private async run(first?: ClaudeTurn): Promise<void> {
+    const lazy = this.lazyServers(this.ctx);
     try {
-      const options = this.options(this.ctx);
+      const options = this.options(this.ctx, lazy?.entries ?? null);
       const queryFn = await this.deps.loadQuery();
       // Loading the SDK is the first await of the session, so a stop can land here.
       if (!first?.isStopped && !this.closing) {
@@ -498,7 +500,38 @@ export class ClaudeSession {
       this.finish(null);
     } catch (error) {
       this.finish(messageOf(error));
+    } finally {
+      // The CLI is gone: the servers it started through the core go too.
+      lazy?.release();
     }
+  }
+
+  /**
+   * The user's stdio MCP servers, reached through the core so that each
+   * starts on its first call instead of with the CLI. None for a context mode
+   * that starts without MCP, and the servers as configured when the core
+   * cannot take them over.
+   */
+  private lazyServers(ctx: SessionContext): ReturnType<NonNullable<SessionContext['lazyMcp']>> {
+    const mode = ctx.thread.contextMode ?? null;
+    if (ctx.lazyMcp === undefined || (mode !== null && !mode.mcp)) return null;
+    try {
+      const servers = userStdioServers(ctx.accountEnv.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR, ctx.thread.cwd);
+      return ctx.lazyMcp(this.cliEnv(ctx), servers);
+    } catch (error) {
+      ctx.log('warn', `claude: MCP servers start with the CLI: ${messageOf(error)}`);
+      return null;
+    }
+  }
+
+  private cliEnv(ctx: SessionContext): Record<string, string | undefined> {
+    const mode = ctx.thread.contextMode ?? null;
+    return mode === null ? agentEnv(ctx.accountEnv) : {
+      ...agentEnv(ctx.accountEnv),
+      [CONTEXT_ENV]: mode.label,
+      [CONTEXT_GUIDES_ENV]: mode.guides ? undefined : '0',
+      CLAUDE_CODE_DISABLE_CLAUDE_MDS: mode.instructions ? undefined : '1',
+    };
   }
 
   /** `replayed` is an adopted message handed to the turn that opened for it: already diagnosed when it came. */
@@ -758,7 +791,7 @@ export class ClaudeSession {
     this.timers.add(timer);
   }
 
-  private options(ctx: SessionContext): Options {
+  private options(ctx: SessionContext, lazyMcp: Record<string, LazyServerEntry> | null = null): Options {
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {
@@ -800,6 +833,8 @@ export class ClaudeSession {
       // A context mode: what the conversation starts without (docs/context-modes.md).
       ...(mode?.tools ? { tools: [...mode.tools] } : {}),
       ...(mode && !mode.mcp ? { strictMcpConfig: true, mcpServers: {} } : {}),
+      // A server given here replaces the user's own of the same name, which then never starts.
+      ...(lazyMcp !== null ? { mcpServers: lazyMcp } : {}),
       settings: {
         fastMode: setup.fastMode,
         // Memory belongs to the user's brain and Boite's own notes, not to a
@@ -816,12 +851,7 @@ export class ClaudeSession {
       // model thinks stays the CLI's call (effort, `alwaysThinkingEnabled`).
       extraArgs: { [THINKING_DISPLAY_FLAG]: 'summarized' },
       abortController: this.abortController,
-      env: mode === null ? agentEnv(ctx.accountEnv) : {
-        ...agentEnv(ctx.accountEnv),
-        [CONTEXT_ENV]: mode.label,
-        [CONTEXT_GUIDES_ENV]: mode.guides ? undefined : '0',
-        CLAUDE_CODE_DISABLE_CLAUDE_MDS: mode.instructions ? undefined : '1',
-      },
+      env: this.cliEnv(ctx),
       canUseTool: this.gate.canUseTool,
       hooks: {
         PreToolUse: [{ hooks: [this.gate.preToolUse] }],
