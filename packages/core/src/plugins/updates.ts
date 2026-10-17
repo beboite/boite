@@ -11,10 +11,11 @@
  * Installing it stays the owner's click, through the same download, digest
  * check and desktop-app stop and restart as any install.
  *
- * Checks run a minute after the core starts, every six hours after, and when
- * the owner asks. A read that fails waits 15 minutes, then twice as long each
- * time, up to six hours. Only installed plugins are read by themselves: a core
- * whose owner never installed one sends nothing.
+ * Checks run a minute after the core starts, every six hours after, when the
+ * owner asks, and before an install of the plugin downloads. A read that fails
+ * waits 15 minutes, then twice as long each time, up to six hours. Only
+ * installed plugins are read by themselves: a core whose owner never installed
+ * one sends nothing.
  */
 
 import { PLUGIN_MANIFEST_FILE } from '@boite/contracts';

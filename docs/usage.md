@@ -127,7 +127,7 @@ quota views update the label immediately while retaining their cached windows.
 | Grok | Credit percentage or legacy credit amounts from the selected CLI login's billing endpoint |
 | OpenCode Go | Rolling, weekly and monthly limits from its Go usage API, using its own saved API login or the default account's `OPENCODE_API_KEY`. OpenCode 2 accounts read the key from their own database |
 | Antigravity | The managed server's sign-in under `GEMINI_HOME` (`antigravity-acp/acp_token.json`): its refresh token is traded for an access token, held in memory until a minute before it expires, then the Cloud Code `retrieveUserQuotaSummary` buckets (5 hours, weekly, per model group), or per-model `fetchAvailableModels` quotas for an account with no summary. Nothing is spawned |
-| Antigravity CLI | Opt-in `agy -p /usage --output-format json` in a temporary directory, with version, output and timeout checks; no model prompt |
+| Antigravity CLI | `agy -p /usage --output-format json` in a temporary directory, with version, output and timeout checks; no model prompt. The row `quota:antigravity-cli` belongs to the `antigravity-cli` provider, so switching the managed Antigravity server off leaves it alone. With no saved choice it is monitored once agy is found, and off otherwise |
 
 Quota readers live in `packages/core/src/quotas.ts`, `quota-readers.ts` and
 `antigravity-quota.ts`, with Claude's fallback under `drivers/claude/quota.ts`. Successful snapshots cache for

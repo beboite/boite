@@ -126,7 +126,7 @@ test('an installed gateway runs on loopback without the owner token, and the loc
   await expect(owner.call('subscriptionProxy.move', { ids: ['x'], target: 'plugin' })).rejects.toThrow('start the Douane plugin first');
 }, 30_000);
 
-test('a crash starts it again; Stop keeps it off across core starts; uninstall keeps its data', async () => {
+test('a crash starts it again; a core start runs it only while it starts with Boite; uninstall keeps its data', async () => {
   const { owner } = await core();
   const crash = join(harness!.dataDir, 'crash-once');
   writeFileSync(crash, '');
@@ -139,14 +139,21 @@ test('a crash starts it again; Stop keeps it off across core starts; uninstall k
   await gatewayIs(owner, 'running', 'running again');
   expect(live()).toBe(1);
 
+  // Off, the running gateway stays; Stop then holds across a core start.
+  const off = await owner.call('plugins.autostart', { id: 'douane', autostart: false });
+  expect(off.gateway).toMatchObject({ status: 'running', autostart: false });
   const stopped = await owner.call('plugins.gateway', { id: 'douane', action: 'stop' });
-  expect(stopped.gateway).toMatchObject({ status: 'stopped', enabled: false });
+  expect(stopped.gateway).toMatchObject({ status: 'stopped', enabled: false, autostart: false });
   await until(live, (count) => count === 0, 'no gateway process left');
-  // What a core start does: an owner's Stop holds.
   harness!.core.plugins.startApps();
   await Bun.sleep(200);
   expect((await state(owner)).gateway?.status).toBe('stopped');
-  expect((await owner.call('plugins.gateway', { id: 'douane', action: 'start' })).gateway).toMatchObject({ status: 'running', enabled: true });
+
+  // On, the next core start runs it, the earlier Stop or not.
+  expect((await owner.call('plugins.autostart', { id: 'douane', autostart: true })).gateway).toMatchObject({ status: 'stopped', autostart: true });
+  harness!.core.plugins.startApps();
+  await gatewayIs(owner, 'running', 'started with the core');
+  expect((await state(owner)).gateway).toMatchObject({ enabled: false, autostart: true });
 
   await owner.call('plugins.uninstall', { id: 'douane' });
   await until(live, (count) => count === 0, 'no gateway process left');
