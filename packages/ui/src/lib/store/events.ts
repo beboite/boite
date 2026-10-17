@@ -1,4 +1,4 @@
-import { lastAgentText, requestExcerpt, type ProviderInstallState, type RpcEventName, type ThreadId, type TurnId } from '@boite/contracts';
+import { TRACE_LIMIT, lastAgentText, requestExcerpt, type ProviderInstallState, type RpcEventName, type ThreadId, type TurnId } from '@boite/contracts';
 import type { Client, EventHandler } from '../client';
 import { noteThisComputer } from '../device';
 import { noteQuestionAsked } from '../question-reply.svelte';
@@ -254,12 +254,15 @@ export function listen(ctx: StoreContext, client: Client): void {
     requests.resolveQuestion(questionId);
   });
 
+  // An agent's shell loop starts and ends dozens of processes a second. Only
+  // the trace surface draws them, and it reads `trace.get` whenever it shows,
+  // so the rows wait for it; it keeps what that call returns at most.
   on('process.started', (record) => {
-    if (s.openThread?.id !== record.threadId) return;
-    s.trace = [record, ...s.trace.filter((p) => !sameProcess(p, record))];
+    if (s.openThread?.id !== record.threadId || !s.traceWatched) return;
+    s.trace = [record, ...s.trace.filter((p) => !sameProcess(p, record))].slice(0, TRACE_LIMIT);
   });
   on('process.exited', (record) => {
-    if (s.openThread?.id !== record.threadId) return;
+    if (s.openThread?.id !== record.threadId || !s.traceWatched) return;
     s.trace = s.trace.map((p) => (sameProcess(p, record) ? record : p));
   });
 

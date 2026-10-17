@@ -45,6 +45,7 @@ import type { Engine, Tab } from './browser/types.ts';
 import { SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
 import { screenTurns, takeTurn } from './browser/frames.ts';
 import { automate, awaitDocument, documentToken, PAGE_ACTIONS } from './browser/automation.ts';
+import { sleepState, TabSleep } from './browser/sleep.ts';
 
 /** The process scope of the agent browser's own processes, in the trace and the registry. */
 export const BROWSER_SCOPE = 'system:browser';
@@ -82,6 +83,8 @@ export class AgentBrowser {
   readonly #probes = new PageProbes<Engine>(() => this.#engines.launch(PRIVATE_BROWSER_PROFILE, false), engine => this.#engines.lost(engine), message => this.#core.log('warn', message));
   #off: Array<() => void> = [];
   #watching = false;
+  /** A tab nobody drives or watches is frozen until its next use (`browser/sleep.ts`). */
+  readonly #sleep = new TabSleep<Tab>(tab => this.#held(tab), tab => this.#core.journal.runningTurn(tab.threadId) !== null);
 
   constructor(core: Core, private findBrowser = findChromium) {
     this.#core = core;
@@ -93,7 +96,19 @@ export class AgentBrowser {
       evaluate: (tab, expression, timeoutMs) => this.#evaluate(tab, expression, timeoutMs),
       send: (tab, method, params) => this.#send(tab, method, params),
       screen: (tab, run, strict) => this.#screen(tab, run, strict),
+      use: (tab, run) => this.#sleep.use(tab, run),
     });
+  }
+
+  /** How long a tab nobody drives or watches stays awake; tests shorten it. */
+  get sleepAfterMs(): number { return this.#sleep.afterMs; }
+  set sleepAfterMs(ms: number) { this.#sleep.afterMs = ms; }
+  /** Whether the tab's page is frozen now; a test waits on it rather than on a guess of the time. */
+  asleep(tabId: string): boolean { return this.#tabs.get(tabId)?.sleep.asleep ?? false; }
+
+  /** What keeps a tab awake with no command running: a viewer, a recording. Its conversation's running turn does too, for a while (`sleep.ts`). */
+  #held(tab: Tab): boolean {
+    return !!tab.recorder?.running || this.#remote.watching(tab.id);
   }
 
   /**
@@ -108,8 +123,17 @@ export class AgentBrowser {
     void this.#pruneProfiles(this.#core.settings.get());
     this.#off.push(this.#core.bus.onCommitted((name, payload) => {
       if (name === 'turn.finished' && (payload as Turn).startedAt) void this.#discardRunning((payload as Turn).threadId);
+      // The agent's turn keeps its pages running, as they ran when it last looked.
+      if (name === 'turn.started') this.#wakeThread((payload as Turn).threadId);
       if (name === 'settings.updated') void this.#pruneProfiles(payload as Settings);
     }));
+  }
+
+  #wakeThread(threadId: ThreadId): void {
+    for (const id of this.#threads.get(threadId)?.order ?? []) {
+      const tab = this.#tabs.get(id);
+      if (tab) void this.#sleep.use(tab, async () => {}).catch(() => {});
+    }
   }
 
   // ---------- conversations and their tabs ----------
@@ -177,7 +201,7 @@ export class AgentBrowser {
     const tab: Tab = {
       id: `browser:${crypto.randomUUID()}`, threadId, engine, targetId, sessionId, url, title: '',
       preset: null, orientation: 'portrait', colorScheme: 'system', diagnostics: [], dropped: 0, history: [], requests: new Map(),
-      recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], acting: false,
+      recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], acting: false, sleep: sleepState(),
       page: {
         send: (method, params = {}, timeoutMs) => engine.cdp.send(method, params, sessionId, timeoutMs),
         dialogs: [], dialogPolicy: { accept: true, text: null },
@@ -202,6 +226,7 @@ export class AgentBrowser {
     await engine.cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }, sessionId).catch(() => {});
     this.#tabs.set(tab.id, tab);
     engine.tabs.add(tab.id); clearTimeout(engine.idle);
+    this.#sleep.schedule(tab);
     const state = this.#thread(threadId);
     state.order.push(tab.id); state.active = tab.id;
     this.#changed(threadId, true);
@@ -258,6 +283,7 @@ export class AgentBrowser {
     const tab = this.#tabs.get(id);
     if (!tab) return;
     this.#tabs.delete(id);
+    this.#sleep.drop(tab);
     for (const off of tab.off) off();
     void tab.recorder?.dispose();
     tab.engine.tabs.delete(id);
@@ -275,6 +301,8 @@ export class AgentBrowser {
   async #closeTab(tab: Tab): Promise<void> {
     // While the page is still there: what it signed in to is on disk before anything can end the browser.
     await this.#engines.saveCookies(tab.engine);
+    // A frozen page runs nothing, its unload handlers included.
+    await this.#sleep.wake(tab).catch(() => {});
     await tab.engine.cdp.send('Target.closeTarget', { targetId: tab.targetId }).catch(() => {});
     this.#drop(tab.id);
   }
@@ -339,10 +367,10 @@ export class AgentBrowser {
     return this.#command(tab, action, () => this.#act(tab, action));
   }
 
-  /** An agent command on a tab: recorded, and the dialogs it raises are its own. */
+  /** An agent command on a tab: on an awake page, recorded, and the dialogs it raises are its own. */
   async #command<T>(tab: Tab, action: BrowserAction, run: () => Promise<T>): Promise<T> {
     tab.acting = true;
-    try { return await this.#track(tab, action, run); }
+    try { return await this.#sleep.use(tab, () => this.#track(tab, action, run)); }
     finally { tab.acting = false; }
   }
 
@@ -551,6 +579,10 @@ export class AgentBrowser {
 
   remoteFrame(params: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame | RemoteBrowserUnchanged> {
     return this.#remote.remoteFrame(params, connection);
+  }
+
+  remoteWatch(params: RpcParams<'browser.remoteWatch'>, connection: Connection): Promise<{ ok: true }> {
+    return this.#remote.remoteWatch(params, connection);
   }
 
   remoteInput(params: RpcParams<'browser.remoteInput'>, connection: Connection): Promise<{ ok: true }> {

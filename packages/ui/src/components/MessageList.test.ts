@@ -163,6 +163,7 @@ const store = {
   messagesBefore: null,
   loadingOlder: false,
   loadOlder: async () => 0,
+  releaseOlder: () => 0,
   workflowsOf: () => []
 } as unknown as Store;
 
@@ -486,6 +487,7 @@ function pagedStore(overrides: Partial<Record<string, unknown>> = {}): {
       paged['loadingOlder'] = true;
       return new Promise<number>(() => {});
     },
+    releaseOlder: () => 0,
     workflowsOf: () => [],
     ...overrides
   };

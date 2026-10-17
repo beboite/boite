@@ -16,6 +16,12 @@ class ContextMenuStore {
    * it, else what had the focus. Not reactive, the menu reads it once on close.
    */
   returnTo: HTMLElement | null = null;
+  /**
+   * What the menu points at: the element it was opened on. Only a scroll that
+   * moves it takes the menu away; a timeline following a stream elsewhere does
+   * not. Null when nothing is known, and then any scroll closes it.
+   */
+  anchor: Node | null = null;
 
   /** Opens at the pointer, or at the element's corner when the menu key opened it. */
   open(event: MouseEvent, items: MenuItem[], onpick: (id: string) => void): void {
@@ -30,7 +36,8 @@ class ContextMenuStore {
     }
     const opener = event.currentTarget;
     this.returnTo = opener instanceof HTMLButtonElement ? opener : focusedElement();
-    this.#last = { at: { x, y }, returnTo: this.returnTo };
+    this.anchor = opener instanceof Node ? opener : event.target instanceof Node ? event.target : null;
+    this.#last = { at: { x, y }, returnTo: this.returnTo, anchor: this.anchor };
     this.current = { x, y, items, onpick };
   }
 
@@ -39,17 +46,18 @@ class ContextMenuStore {
    * first one (the project picker of "Move to project"), placed where the
    * first stood, handing the keyboard back to `returnTo` when it closes.
    */
-  show(at: { x: number; y: number }, items: MenuItem[], onpick: (id: string) => void, returnTo: HTMLElement | null): void {
+  show(at: { x: number; y: number }, items: MenuItem[], onpick: (id: string) => void, returnTo: HTMLElement | null, anchor: Node | null = returnTo): void {
     this.returnTo = returnTo;
+    this.anchor = anchor;
     this.current = { x: at.x, y: at.y, items, onpick };
   }
 
   /** A second menu where the last one opened, from a pick of that one; the keyboard goes back to the same opener. */
   follow(items: MenuItem[], onpick: (id: string) => void): void {
-    this.show(this.#last.at, items, onpick, this.#last.returnTo);
+    this.show(this.#last.at, items, onpick, this.#last.returnTo, this.#last.anchor);
   }
 
-  #last: { at: { x: number; y: number }; returnTo: HTMLElement | null } = { at: { x: 0, y: 0 }, returnTo: null };
+  #last: { at: { x: number; y: number }; returnTo: HTMLElement | null; anchor: Node | null } = { at: { x: 0, y: 0 }, returnTo: null, anchor: null };
 
   close(): void {
     this.current = null;

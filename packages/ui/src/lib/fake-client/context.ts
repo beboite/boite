@@ -101,6 +101,12 @@ export interface FakeClientOptions {
   longCopies?: number;
   /** Seeds one thread of forty messages and 11.5 MiB of tool calls, what `?fake=1&heavy=1` opens the list on. */
   heavy?: boolean;
+  /** Seeds this many more threads at work, their load sampled every second: what `?fake=1&working=16` shows. */
+  working?: number;
+  /** Seeds this many threads that work without end, what `?fake=1&load=16` streams (`load.ts`). */
+  load?: number;
+  /** Milliseconds between two ticks of that load, 100 unless `&loadtick=<ms>` says otherwise. */
+  loadTickMs?: number;
   /** A fresh machine with no agents, accounts or projects, for the setup flow. */
   uninstalled?: boolean;
   /** Adds a deterministic active team for visual checks on `?fake=1&team=1`. */

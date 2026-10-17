@@ -421,7 +421,7 @@
   .entry.blocked { border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-live) 6%, transparent); }
   .entry.blocked .activity-row > :global(svg:first-child) { color: var(--color-live); }
   .blocker { display: flex; align-items: center; gap: 8px; min-height: var(--control); padding: 0 4px 4px 13px; }
-  .waiting-dot { flex: none; width: 6px; height: 6px; margin-inline: 5px; border-radius: var(--radius-full); background: var(--color-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 22%, transparent); animation: pulse 1.8s ease-in-out infinite; }
+  .waiting-dot { flex: none; width: 6px; height: 6px; margin-inline: 5px; border-radius: var(--radius-full); background: var(--color-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 22%, transparent); animation: pulse 1.8s var(--loop-ease-in-out-54) infinite var(--loops); }
   .blocker p { flex: 1; min-width: 0; margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
   .ask { font-weight: 600; color: var(--color-foreground); }
   .hint { color: var(--color-muted-foreground); }
@@ -460,7 +460,7 @@
   [data-verdict='partial'] { --verdict: var(--color-live); }
   [data-verdict='fail'], [data-verdict='missing'] { --verdict: var(--color-danger); }
   [data-verdict='running'] { --verdict: var(--color-accent); }
-  .verdict[data-verdict='running']::before { animation: pulse 1.8s ease-in-out infinite; }
+  .verdict[data-verdict='running']::before { animation: pulse 1.8s var(--loop-ease-in-out-54) infinite var(--loops); }
   .verdict-name { color: var(--verdict); font-weight: 600; }
   .open-review { margin-top: 4px; padding-inline: 6px; color: var(--color-accent); }
   .error { color: var(--color-danger); margin: 2px 8px 6px; overflow-wrap: anywhere; }

@@ -147,7 +147,7 @@
   details p { line-height: 1.5; }
   summary { cursor: pointer; }
   code { display: block; overflow-wrap: anywhere; }
-  :global(.spinning) { animation: spin 1s linear infinite; }
+  :global(.spinning) { animation: spin 1s linear infinite var(--loops); }
   @media (max-width: 720px) {
     .update-row { flex-wrap: wrap; }
     button, .metadata .release { min-height: var(--touch-target); }

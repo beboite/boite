@@ -230,8 +230,11 @@ export class Workspace {
     remote.machineId = 'http://builder.test';
     remote.visible = false;
     // `?desktopUpdate=<phase>` makes it a Windows PC whose desktop app reports an update.
-    const desktopApp = new URLSearchParams(window.location.search).get('desktopUpdate') !== null;
-    remote.attach(new FakeClient({ coreId: 'fake-builder', coreName: 'Builder', publicUrl: 'https://builder.test', desktopApp }));
+    const params = new URLSearchParams(window.location.search);
+    const desktopApp = params.get('desktopUpdate') !== null;
+    // `&load=<n>` streams on this machine too: a second machine at work feeds its own store.
+    const load = params.get('load') ? { load: Number(params.get('load')), ...(params.get('loadtick') ? { loadTickMs: Number(params.get('loadtick')) } : {}) } : {};
+    remote.attach(new FakeClient({ coreId: 'fake-builder', coreName: 'Builder', publicUrl: 'https://builder.test', desktopApp, ...load }));
     await remote.connect();
     if (!this.#current(lifecycle)) {
       remote.client?.close();

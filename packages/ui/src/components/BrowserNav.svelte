@@ -50,8 +50,8 @@
   .omnibox > :global(input) { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--color-foreground); font-size: var(--text-sm); text-overflow: ellipsis; outline: none; }
   .site { display: flex; align-items: center; flex: none; align-self: stretch; padding: 0 6px 0 10px; line-height: 0; cursor: text; }
   .omnibox.secure .site { color: var(--color-foreground); opacity: .7; }
-  .nav :global(.spin) { animation: spin 1s linear infinite; }
-  .loading { position: absolute; top: 39px; left: 0; height: 2px; width: 40%; z-index: 2; background: var(--color-accent); animation: loading-slide 1.1s var(--ease-out-quint) infinite; }
+  .nav :global(.spin) { animation: spin 1s steps(60) infinite var(--loops); }
+  .loading { position: absolute; top: 39px; left: 0; height: 2px; width: 40%; z-index: 2; background: var(--color-accent); animation: loading-slide 1.1s var(--loop-ease-out-quint-66) infinite var(--loops); }
   @media (prefers-reduced-motion: reduce) { .nav :global(.spin), .loading { animation: none; } }
   /* A finger gets a taller bar, and a field large enough that the phone does not zoom on it. */
   @media (max-width: 720px), (pointer: coarse) { .omnibox > :global(input) { font-size: var(--text-md); } }

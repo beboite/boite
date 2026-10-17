@@ -43,6 +43,8 @@
   import MobileConnect from './components/MobileConnect.svelte';
   import { attentionCount, syncAppBadge } from './lib/badge';
   import { startViewport } from './lib/viewport';
+  import { watchRest } from './lib/at-rest';
+  import { watchLoopPhase } from './lib/loop-phase';
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
   import { appPage } from './lib/app-origin';
@@ -187,6 +189,8 @@
 
   onMount(() => {
     const stopViewport = startViewport();
+    const stopRest = watchRest();
+    const stopLoopPhase = watchLoopPhase();
     const stopInstall = listenForInstall();
     const stopAutoLink = agentAutoLink.start();
     // Another machine of the group reads this computer's app updates from its core.
@@ -226,6 +230,8 @@
     navigator.serviceWorker?.addEventListener('message', notification);
     return () => {
       stopViewport();
+      stopRest();
+      stopLoopPhase();
       stopAutoLink();
       stopDesktopReport();
       stopInstall();
@@ -494,7 +500,7 @@
   <ThreadPreparation {store} visible={documentVisible && (inShell || mobileScreen === 'chat')} />
 {/if}
 
-<div class="app" class:shell={inShell} class:ready={booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting style:--typing-state={documentVisible ? 'running' : 'paused'} bind:this={appRoot}>
+<div class="app" class:shell={inShell} class:ready={booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
   {#if !inShell && booted}<MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />{/if}
   <TitleBar {store} />
 

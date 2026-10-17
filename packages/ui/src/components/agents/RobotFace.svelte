@@ -248,12 +248,12 @@
 
   /* A blink at rest, a glance while working, a hop while it waits on the user. */
   .eyes { transform-box: fill-box; transform-origin: center; }
-  [data-state='idle'] .eyes { animation: robot-blink 4.6s infinite; }
-  [data-state='working'] .eyes { animation: robot-glance 2.4s ease-in-out infinite; }
-  [data-state='working'] .led { animation: pulse 1.2s ease-in-out infinite; }
-  [data-state='waiting'] .whole { animation: robot-hop 1.8s ease-in-out infinite; }
+  [data-state='idle'] .eyes { animation: robot-blink 4.6s infinite var(--loops); }
+  [data-state='working'] .eyes { animation: robot-glance 2.4s ease-in-out infinite var(--loops); }
+  [data-state='working'] .led { animation: pulse 1.2s ease-in-out infinite var(--loops); }
+  [data-state='waiting'] .whole { animation: robot-hop 1.8s ease-in-out infinite var(--loops); }
   /* A jelly at work squishes on the spot. */
-  [data-family='jelly'][data-state='working'] .whole { transform-origin: 32px 62px; animation: robot-squish 0.9s ease-in-out infinite; }
+  [data-family='jelly'][data-state='working'] .whole { transform-origin: 32px 62px; animation: robot-squish 0.9s ease-in-out infinite var(--loops); }
   @keyframes robot-squish { 0%, 100% { transform: scale(1, 1); } 40% { transform: scale(1.07, 0.93); } 70% { transform: scale(0.96, 1.04); } }
   @keyframes robot-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.12); } }
   @keyframes robot-glance { 0%, 20% { transform: translateX(0); } 30%, 50% { transform: translateX(-2.2px); } 60%, 80% { transform: translateX(2.2px); } 90%, 100% { transform: translateX(0); } }

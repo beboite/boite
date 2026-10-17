@@ -1,4 +1,5 @@
 import { startupMethods, resetStartup } from './fake-client/startup';
+import { seedWorking } from './fake-client/working-seed';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
   RPC_CHUNK_BYTES,
@@ -7,6 +8,7 @@ import {
   type CoreLogContext,
   type HookRun,
   type MemoryEvent,
+  type ProcessRecord,
   type Principal,
   type RpcEventName,
   type RpcEvents,
@@ -64,6 +66,7 @@ import { closeSideQuestions } from './fake-client/side-questions';
 import { holdAfterRestart } from './fake-client/recovery';
 import { journalInspectionMethods } from './fake-client/journal-inspection';
 import { forkReturnMethods } from './fake-client/fork-return';
+import { startLoad } from './fake-client/load';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -93,6 +96,8 @@ export class FakeClient implements ObservableClient {
   #mergedPrSweep: Promise<number> | null = null;
   #doneSweep: Promise<void> | null = null;
   #transportGeneration = 0;
+  readonly #stopWorking: () => void;
+  #stopLoad: () => void = () => undefined;
 
   constructor(options: FakeClientOptions = {}) {
     const ctx = new FakeContext(options);
@@ -106,6 +111,7 @@ export class FakeClient implements ObservableClient {
     if (options.agentsDemo) seedAgentsDemo(ctx);
     if (options.subagentsDemo) seedSubagentsDemo(ctx);
     seedRetry(ctx);
+    this.#stopWorking = seedWorking(ctx, options.working ?? 0);
     if (options.watchDemo) {
       const at = Date.now();
       const watch = (number: number) => ({ url: `https://github.com/beboite/boite/pull/${number}`, repository: 'beboite/boite', number, since: at - 600_000 });
@@ -132,6 +138,7 @@ export class FakeClient implements ObservableClient {
       ctx.usageSeeded = false;
       ctx.scheduler = { ...ctx.scheduler, running: [], queued: [] };
     }
+    if (options.load) this.#stopLoad = startLoad(ctx, options.load, options.loadTickMs);
     // After a first launch has cleared the threads, so no record names one that is gone.
     seedDiagnostics(ctx);
   }
@@ -233,7 +240,9 @@ export class FakeClient implements ObservableClient {
 
   close(): void {
     const ctx = this.#ctx;
+    this.#stopWorking();
     closeSideQuestions(ctx);
+    this.#stopLoad();
     ctx.agents.close();
     unregisterCore(ctx);
     for (const thread of ctx.threads.values()) pauseActivity(ctx, thread);
@@ -339,6 +348,11 @@ export class FakeClient implements ObservableClient {
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */
   emitCoreLog(level: RpcEvents['core.log']['level'], message: string, context: CoreLogContext = {}): void {
     this.#ctx.emit('core.log', { level, message, at: this.#ctx.now(), ...context });
+  }
+
+  /** A traced process starting, or ending once `exitedAt` is set, as the core's `procs.ts` announces it to the thread's subscribers. */
+  traceProcess(record: ProcessRecord): void {
+    this.#ctx.emitToThread(record.threadId, record.exitedAt === null ? 'process.started' : 'process.exited', structuredClone(record));
   }
 
   emitMemory(event: MemoryEvent): void {

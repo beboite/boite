@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeCoreLogText, RpcErrorCode, type ProcessRecord, type RpcEvents, type Turn } from '@boite/contracts';
 import { Bus } from '../src/bus.ts';
-import { DiagnosticLogs, LOG_FILE_COUNT, LOG_MESSAGE_CHARS, redactLogText } from '../src/logs.ts';
+import { DiagnosticLogs, LOG_FILE_COUNT, LOG_MESSAGE_CHARS, redactLogText, SHORT_PROCESS_MS } from '../src/logs.ts';
 import { runCli } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -106,7 +106,7 @@ describe('bounded persistent diagnostics', () => {
       bus.emit('message.delta', { threadId: turn.threadId, messageId: 'msg_test', partIndex: 0, text: 'private streamed text' });
       bus.afterCommit(() => {
         bus.emit('turn.finished', { ...turn, status: 'error', finishedAt: 4, error: 'private provider result' });
-        bus.emit('process.exited', { ...proc, exitedAt: 5, exitCode: 0 });
+        bus.emit('process.exited', { ...proc, exitedAt: proc.startedAt + SHORT_PROCESS_MS, exitCode: 0 });
       });
       const records = await logs.query({ threadId: turn.threadId });
       expect(records.map(record => record.event)).toEqual(['process.exited', 'turn.finished', 'process.started', 'turn.started', 'turn.queued']);
@@ -117,6 +117,35 @@ describe('bounded persistent diagnostics', () => {
       expect(records[0]?.data).toMatchObject({ pid: 123, exe: 'provider', exitCode: 0 });
       expect(records[1]?.durationMs).toBe(2);
     } finally { bus.dispose(); await logs.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  test('short clean processes count in one batch per turn; crashed, unknown and running ones keep their own records', async () => {
+    const directory = temporary();
+    const logs = new DiagnosticLogs(directory);
+    const bus = new Bus(); logs.attach(bus);
+    try {
+      bus.afterCommit(() => bus.emit('turn.started', turn));
+      const quick = (pid: number, exe: string, exitCode: number | null = 0) => {
+        const started = { ...proc, pid, exe, startedAt: 10_000 + pid };
+        bus.afterCommit(() => { bus.emit('process.started', started); bus.emit('process.exited', { ...started, exitedAt: started.startedAt + 30, exitCode, cpuMs: 5 }); });
+      };
+      quick(1, '/usr/bin/bash.exe');
+      quick(2, '/usr/bin/bash.exe');
+      quick(3, 'C:\\Git\\usr\\bin\\sed.exe');
+      quick(4, '/usr/bin/bash.exe', 0xC0000005);
+      // An exit whose status the OS did not give: the batch could not say how it ended.
+      quick(6, '/usr/bin/git.exe', null);
+      bus.afterCommit(() => bus.emit('process.started', { ...proc, pid: 5, exe: '/bin/cargo', startedAt: 10_005 }));
+    } finally { bus.dispose(); await logs.close(); }
+    // Closing writes what was still gathering.
+    const reader = new DiagnosticLogs(directory);
+    try {
+      const records = (await reader.query({ threadId: turn.threadId })).filter(record => record.source === 'processes');
+      expect(records.map(record => `${record.event} ${record.data?.pid ?? ''}`).sort()).toEqual(['process.batch ', 'process.exited 4', 'process.exited 6', 'process.started 4', 'process.started 5', 'process.started 6']);
+      const batch = records.find(record => record.event === 'process.batch')!;
+      expect(batch).toMatchObject({ level: 'debug', turnId: turn.id, at: 10_001, durationMs: 32, message: '3 short processes ran: bash.exe 2, sed.exe 1', data: { count: 3, cpuMs: 15, exes: 'bash.exe 2, sed.exe 1' } });
+      expect(records.find(record => record.event === 'process.exited' && record.data?.pid === 4)?.level).toBe('warn');
+    } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
   });
 
   test('initialization and append failures report once, cannot recurse or interrupt app work, and still permit recent queries', async () => {

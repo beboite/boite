@@ -56,6 +56,54 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
   expect(((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
 }, 150_000);
 
+real('a page nobody drives or watches sleeps, and meets the next command or viewer awake and focused', async () => {
+  const { harness, owner, agent, threadId } = browserFixture;
+  harness.core.browser.sleepAfterMs = 300;
+  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/animated') } });
+  const browser = harness.core.browser;
+  // Whether the core keeps the tab awake is its own state; how fast a runner's
+  // Chrome then runs the page is not (macOS runners stalled awake pages 2 s).
+  const asleepWithin = async (ms: number) => {
+    for (const end = Date.now() + ms; !browser.asleep(tabId!) && Date.now() < end;) await Bun.sleep(50);
+    return browser.asleep(tabId!);
+  };
+  const awakeFor = async (ms: number, every: () => Promise<unknown> = async () => {}) => {
+    for (const end = Date.now() + ms; Date.now() < end;) {
+      await every();
+      if (browser.asleep(tabId!)) return false;
+      await Bun.sleep(100);
+    }
+    return true;
+  };
+  await evaluate('gaps()');
+  expect(await asleepWithin(30_000)).toBe(true);
+  await Bun.sleep(1000);
+  // Frozen for a second: no animation frame and no timer ran, and the command found the page as it was.
+  const [frameGap, tickGap] = await evaluate('gaps()') as [number, number];
+  expect(frameGap).toBeGreaterThan(800);
+  expect(tickGap).toBeGreaterThan(800);
+  expect(await evaluate('document.visibilityState + " " + document.hasFocus()')).toBe('visible true');
+  // Asleep again, a viewer's first frame wakes it and its screencast keeps it awake past the wait.
+  expect(await asleepWithin(30_000)).toBe(true);
+  await Bun.sleep(1000);
+  await owner.call('threads.subscribe', { threadId });
+  await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 300, quality: 40 });
+  expect(browser.asleep(tabId!)).toBe(false);
+  expect((await evaluate('gaps()') as [number, number])[0]).toBeGreaterThan(800);
+  expect(await awakeFor(1500, () => owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 300, quality: 40 }).catch(() => {}))).toBe(true);
+  // Each frame is a use; past the last one, the viewer's screencast holds the tab, for its 3 s idle time at least.
+  expect(await awakeFor(1500)).toBe(true);
+  // Once the viewer leaves it sleeps again; a client that shows the tab's own
+  // page asks for no frames, and one `browser.remoteWatch` keeps it awake.
+  // The screencast stops up to twice its idle time after the last frame; a loaded runner takes longer.
+  expect(await asleepWithin(30_000)).toBe(true);
+  await Bun.sleep(1000);
+  expect(await owner.call('browser.remoteWatch', { threadId, tabId: tabId! })).toEqual({ ok: true });
+  expect((await evaluate('gaps()') as [number, number])[0]).toBeGreaterThan(800);
+  // Without the lease it would sleep within this wait, as it did above.
+  expect(await awakeFor(2000)).toBe(true);
+}, 150_000);
+
 real('boite browse opens its page as a new tab of the conversation browser, not in a panel of its own', async () => {
   const { owner, agent, threadId } = browserFixture;
   const mine = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });

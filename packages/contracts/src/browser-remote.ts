@@ -54,6 +54,12 @@ export const REMOTE_URL_MAX = 4096;
 export const REMOTE_TEXT_MAX = 20000;
 /** Keys one `press` carries: what a fast typist queues while a request is in flight. */
 export const REMOTE_PRESS_MAX = 64;
+/**
+ * How long one `browser.remoteWatch` keeps a tab awake: a client showing the
+ * tab's own page asks again well within it, every `REMOTE_WATCH_EVERY_MS`.
+ */
+export const REMOTE_WATCH_MS = 15_000;
+export const REMOTE_WATCH_EVERY_MS = 5_000;
 /** The longest selection a viewer copies; a longer one is cut there and marked. */
 export const REMOTE_SELECTION_MAX = 100_000;
 /** What `browser.remoteSelection` answers: the page's selected text, never a password field's. */

@@ -41,6 +41,27 @@ bun bench/core-idle.ts 10
 The audit records samples, workload limits and remaining candidates, including
 queue admission, WebSocket fan-out and retained tool bodies in the browser.
 
+### MCP servers per Claude session
+
+On 2026-10-17 a Windows machine ran 20 Claude sessions with three stdio MCP
+servers in the user's config. Each session started all three: 4 processes and
+64 MB private for a Blender bridge, 2 and 22 MB for an SSH bridge, 4 and
+138 MB for a code search. That is about 10 processes and 220 MB per session,
+for tools most sessions never called. With
+[MCP servers on demand](providers.md#claudes-mcp-servers-on-demand), a session
+whose servers answered once before starts none of them; it lists the same 54
+tools and starts one server on the first call to it. Measured with the real
+CLI 2.1.302 and the real servers against a test core:
+
+| Run | Server processes under the CLI | Started by the core | MCP tools at `init` |
+| --- | --- | --- | --- |
+| Servers as configured | 3 trees | 0 | 0 (all `pending`) |
+| On demand, first session | 0 | 3 | 54 (all `connected`) |
+| On demand, later session | 0 | 0 | 54 (all `connected`) |
+
+The servers are also connected when the session's `init` arrives, so their
+tools are there on the first turn.
+
 ## Long threads in the journal
 
 Measured on 2026-10-05 with `bench/rpc-actions.ts --journal` on a copy of a
@@ -504,6 +525,11 @@ when the core advertises `chunkedAnswers`.
 - A streamed delta, part or turn looks up its message or turn from the end of
   the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.
+  `process.started` and `process.exited`, about 180 a second under sixteen
+  agents, are dropped until it is, and the list keeps the newest
+  `TRACE_LIMIT` (200) rows, what `trace.get` returns. The old handler copied a
+  list that only grew: 0.6 ms a start and exit after 10 minutes, 11 ms after
+  an hour, past a core at that rate (plain arrays in Bun, 2026-10-17).
 - Sidebar cards ask for their pull request when they mount or change branch,
   then on one timer per connection: every 15 seconds while the thread works,
   every 60 seconds at rest, above the core's 15-second cache of a repository's
@@ -728,7 +754,9 @@ listener; the `pre-setup` phase record times the process start to `setup`.
 
 On Windows the main page drops to WebView2's low memory level while the window
 waits in the tray, from a close or a login start, and returns to normal before
-it shows. Browser surfaces and a minimized window keep the normal level.
+it shows. A minimized window keeps the normal level for the main page. A
+hidden page the user browses drops to the low level and is suspended
+([browser tabs nobody uses](#browser-tabs-nobody-uses)).
 
 The window is built hidden. It appears once the page has painted and either the
 core answered or two seconds passed, so a fast start shows no empty frame and a
@@ -743,9 +771,11 @@ limits expensive work while streaming, typing and scrolling:
 - Window-wide scrims use `--color-scrim`; backdrop blur stays on bounded
   floating surfaces such as the composer, activity panel and notifications.
 - Endless animations use opacity or transforms, apart from the small repainting
-  boxes named in `render-cost.test.ts`; the running group's shimmer moves in 30
-  steps a sweep, so it repaints 30 times in 2.2 s instead of every frame. Outer
-  app containers avoid `:has()`.
+  boxes named in `render-cost.test.ts`; the running group's shimmer moves in 33
+  steps a sweep, so it repaints 15 times a second instead of every frame. They
+  pause with the window at rest, and those on screen while agents work step on
+  a shared 60 Hz grid ("What the UI costs at rest"). Outer app containers avoid
+  `:has()`.
 - A closed fold's body skips its content once the close transition has run
   (`content-visibility: hidden`), so a group opened once no longer weighs on
   every layout of its row.
@@ -819,6 +849,104 @@ The [frame report](../bench/results/2026-09-30-ui-frames.md) and
 [typing/scroll report](../bench/results/2026-09-30-typing-and-scroll.md) retain
 2026-09-30 measurements and the streaming-fixture correction. They use software
 compositing and mobile emulation, with uncontrolled background load.
+
+## What the UI costs at rest
+
+A loop on screen, a spinner of a few pixels included, keeps the compositor
+drawing on every refresh of the monitor. Sixteen working threads put one on
+every row of the list: the GPU process near half a core with the window in
+front, and as much with Boite left visible beside a game.
+
+- `lib/at-rest.ts` marks `<html data-at-rest>` while the page is hidden,
+  another application is in front of its window, or nobody has touched the PC
+  for two minutes, and every endless animation reads its play state from
+  `var(--loops)`, paused there. In the shell the answer comes from
+  `user_presence` (the window in front and the system's last input, polled
+  every 5 s) and the shell's `window://focus` event, since the webview's own
+  focus moves to a browser surface of the same window. Any input on the page,
+  or the window brought to front, plays them again at once. A tour picture is
+  the exception: it plays while seen (`.agents/DESIGN.md`, 2026-10-16).
+- The loops on screen while agents work turn in `steps()` or ease down a
+  `--loop-*` staircase of `app.css`, one step a 60th of a second, and
+  `lib/loop-phase.ts` starts each on the same 60 Hz grid of the document
+  timeline, when it starts and when it resumes: together they make 60 frames a
+  second, not one a refresh of a 144 Hz monitor or of headless Chrome.
+- `render-cost.test.ts` rejects an endless animation that ignores
+  `var(--loops)` and a working-state loop off the 60 Hz grid.
+
+`bun bench/ui-at-rest.ts --runs 2`, 2026-10-17, headless Chrome on ANGLE
+Direct3D 11 (RTX 5080), `?fake=1&working=16`, 6 s windows, CPU per wall
+second of the renderer and GPU processes, the base being `7c7327ab` with this
+change's fake client:
+
+| Scenario | Renderer ms/s | GPU ms/s | Frames/s |
+| --- | --- | --- | --- |
+| Nothing working | 3 to 4, then 3 to 4 | 3 to 5, then 3 to 4 | 1.8, then 1.8 |
+| 16 working, in front | 136, then 75 | 414 to 436, then 135 to 143 | 352 to 357, then 63 |
+| 16 working, another application in front | 124 to 126, then 12 to 40 | 376 to 387, then 7 to 8 | 353 to 359, then 2.8 |
+| 16 working, phone list | 108 to 110, then 60 to 84 | 88 to 374, then 110 to 122 | 345 to 360, then 61 |
+| 16 working, one answer streaming | 439, then 435 to 457 | 458, then 440 to 454 | 357, then 331 to 345 |
+
+Renderer and GPU together drop 62 % with the window in front and 93 % behind
+another application. A streaming answer still draws on every frame: the fake
+agent writes a token every 16 ms, about 2,000 characters a second, and its
+layout, not the loops, sets the cost. Headless Chrome follows no monitor, so
+its frame rate stands for a fast one; at 60 Hz the staircases save little in
+front and the rest still saves the whole cost. Not measured in WebView2.
+[Report](../bench/results/2026-10-17-ui-at-rest.md).
+
+## What a long day holds
+
+The desktop page of a machine with many agents at work stays open for days,
+often minimized. `bench/ui-heap.ts` plays that stream on the fake client
+(`?fake=1&load=<n>`, `lib/fake-client/load.ts`): each busy thread types two
+deltas and starts one short-lived process per tick, sends its row and load
+every ten ticks, a tool call with a 16 KiB output every thirty, a new turn
+every three hundred. `&machines=1` gives the second machine the same load in
+its own store. The bench samples the JS heap with garbage collected twice, the
+DOM, the listeners and the renderer's private bytes, and `--core` plays echo
+agents on a real core instead.
+
+What the UI held without bound:
+
+- The open thread's live end. Messages arriving on the subscribed thread were
+  appended for as long as it stayed open, while a thread left keeps 4 MiB in
+  the reading cache. Now, while the list follows the bottom,
+  `store/live-end.ts` weighs the live end each time a message arrives (never
+  on a delta) and, past twice the reading cache's per-thread bound (8 MiB or
+  2,000 messages), keeps the newest 4 MiB or 1,000 messages with their turns
+  and sets `messagesBefore` to the first one kept: scrolling up reads the rest
+  again from the core. The heights and rises the list measured for the rows
+  that left go with them.
+- The trace panel's process rows, about 850 bytes of heap each, at one row per
+  process the open thread starts. The client now keeps at most `TRACE_LIMIT`
+  (200) of them, and none while the trace view is closed.
+
+Not growing: thread rows, delegation refreshes, Tauri IPC callbacks and the
+module caches (Markdown, highlighting, measured heights, media sizes) stay
+flat, as does the DOM of a visible list. A hidden page runs no frame callback
+and no `ResizeObserver`, so a long answer streamed while minimized mounts its
+rows until the window comes back.
+
+`bun bench/ui-heap.ts --bundle <dir> --machines --load 4 --tick 25 --switch 0 --minutes 9 --sample 60`,
+2026-10-17, Windows 11, headless Chrome on the GPU, same bundle with the bound
+turned off for the first column:
+
+| minute | heap before, MiB | messages held | heap after, MiB | messages held | trace rows |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 51.3 | 22 | 51.3 | 22 | 5 |
+| 3 | 53.6 | 68 | 54.6 | 68 | 7,165 |
+| 4 | 58.2 | 84 | 56.4 | 38 | 9,553 |
+| 6 | 64.1 | 114 | 59.4 | 44 | 14,250 |
+| 9 | 72.4 | 150 | 64.9 | 30 | 20,092 |
+
+The heap still rises 1.5 MiB a minute in the after column: the trace rows,
+about 16 MiB at minute 9. Without them the heap after the change stays between
+48 and 49 MiB from minute 3 on, while before it rises from 48 to 57 MiB. With
+the trace bound beside it, so no trace row while the trace view is closed, the
+same command on a prebuilt `--bundle` measures 51.3 MiB at minute 0, then 45.3
+to 47.2 MiB from minute 1 to 9 (46.8 at minute 9), 28 to 68 messages held and
+140 to 146 MiB private in the renderer.
 
 ## Browser tools and review bundle size
 
@@ -929,6 +1057,37 @@ only when the page draws, and a viewer naming the frame it shows gets
 of base64 and the core's Chrome from 8 % to 0 % of a core; on a moving page the
 trip lost about 72 ms at the same four frames a second and the same Chrome CPU
 ([results](../bench/results/2026-10-15-perf-browser.md)).
+
+## Browser tabs nobody uses
+
+The agent browser runs every tab as shown, focused and unthrottled, so a page
+left open runs at full speed with nobody on it. On 2026-10-17 one renderer of
+M2's agent browser had run 16 hours at 38 % of a core, and on the Windows
+desktop two renderers of the shell used 0.4 and 0.25 of a core with nobody
+looking; a hidden native tab of another conversation ran 30 minutes at 1.5
+cores and grew to 14 GB. A tab of the agent browser now sleeps 30 seconds
+after its last use once no viewer or recording holds it and no running turn
+used it in the last 5 minutes, and a
+hidden native page of the desktop is suspended with its memory level low
+([the agent's browser](browser.md#a-tab-nobody-uses-sleeps)).
+
+`bun bench/browser-sleep.ts` opens a page that draws a canvas every animation
+frame and runs a timer every 10 ms in a scratch core's browser, as an agent
+would, and reads the CPU of that browser's processes for 20 s while the tab is
+still within its wait, then 20 s after it. On Windows 11 (headless Edge,
+Bun 1.4.2) on 2026-10-17:
+
+| Tab             | Renderer | GPU process | Other browser processes | Next command |
+| --------------- | -------- | ----------- | ----------------------- | ------------ |
+| Awake (before)  | 19.1 %   | 22.7 %      | 4.1 %                   | 3 ms         |
+| Asleep (after)  | 0.2 %    | 0.1 %       | 2.7 %                   | 59 ms        |
+
+Percentages are of one core. The first command on a sleeping tab pays the
+wake, two DevTools round trips and the page's first frames. The same freeze
+through `Page.setWebLifecycleState` alone, with focus emulation left on,
+changed nothing: the page drew 1,095 animation frames in the 10 s it was
+frozen (`Emulation.setFocusEmulationEnabled` keeps it shown). The desktop's `TrySuspend` was not measured in the app; it is
+covered by a unit test of which pages it applies to.
 
 ## Browser recordings
 
@@ -1045,12 +1204,15 @@ bun bench/ui-frames.ts --ui <other checkout>/packages/ui --cpu 4 --size 1920x108
 bun bench/ui-frames.ts --trace --only "typing,long thread scroll"   # layouts per window, and how many a script forced
 bun bench/ui-frames.ts --runs 5 --only "heavy thread scroll,heavy thread flick,heavy thread jumps,heavy scroll while streaming"
 bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited on the machine's GPU, never a software renderer
+bun bench/ui-at-rest.ts --runs 2                                   # renderer and GPU CPU, frames, with 16 threads at work, in front or behind
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
 bun bench/claude-turn-heap.ts                  # heap a scripted Claude turn leaves; STEER=1 IMAGE_MIB=0 for a follow-up cut
 bun bench/codex-live-output.ts                 # redraws and characters of one running Codex command's live output
 bun bench/provider-list.ts                     # time per providers list() and summary(); ONLY=1 under strace -c
 bun run bench/continuation.ts 100 1024 25 1100            # history a fresh session carries: messages, tool KiB, files, file KiB
 bun run bench/queue-admission.ts 1024 16                  # one scheduler pass over held child turns: turns, teams
+bun bench/ui-heap.ts --machines --load 4 --tick 25 --switch 0 --minutes 9   # heap, DOM and private bytes of a page left open on busy agents
+bun bench/process-log-replay.ts <logs directory>          # process records a log directory holds, and what this store writes of them
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts
