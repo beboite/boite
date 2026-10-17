@@ -414,7 +414,7 @@
     .profile.named :global(.trigger) { padding: 0 6px; }
   }
   .zoom { flex: none; font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
-  .chrome :global(.spin) { animation: spin 1s linear infinite; }
+  .chrome :global(.spin) { animation: spin 1s steps(60) infinite var(--loops); }
   @media (prefers-reduced-motion: reduce) { .chrome :global(.spin) { animation: none; } }
   @media (hover: none) { .external { opacity: 1; } }
 </style>

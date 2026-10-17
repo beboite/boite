@@ -2066,6 +2066,12 @@ export interface ProcessRecord {
   ioBytes: number | null;
 }
 
+/**
+ * The most recent processes `trace.get` returns when no limit is given, and
+ * all a client keeps of a thread's trace as `process.*` events arrive.
+ */
+export const TRACE_LIMIT = 200;
+
 /** A thread with at least one process running now; what exited stays in `trace.get`. */
 export interface ThreadResources {
   threadId: ThreadId;

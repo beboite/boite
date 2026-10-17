@@ -401,7 +401,7 @@
 
   .track { width: 100%; height: 4px; border-radius: 999px; background: var(--color-hover); overflow: hidden; }
   .bar { display: block; height: 100%; background: var(--color-accent); transition: width var(--dur-2) var(--ease-out-quint); }
-  .bar.indeterminate { width: 30% !important; animation: slide 1.2s var(--ease-out-quint) infinite; }
+  .bar.indeterminate { width: 30% !important; animation: slide 1.2s var(--ease-out-quint) infinite var(--loops); }
   @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(330%); } }
 
   @media (max-width: 720px) {

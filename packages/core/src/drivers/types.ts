@@ -24,6 +24,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 import type { SpawnedChild, SpawnedProcess, SpawnOptions } from '../procs.ts';
+import type { LazyServerEntry, StdioServer } from '../mcp/lazy.ts';
 
 /**
  * The only way a driver writes anything. It journals and emits in one call, so
@@ -197,6 +198,14 @@ export interface TurnContext {
   /** Release the launch priority once the native session has initialized. */
   finishStartup?(): void;
   /**
+   * The user's stdio MCP servers for a CLI the driver starts, reached through
+   * the core and started on their first call (`mcp/lazy.ts`): the entries
+   * that replace them, by name, and the release to call once that CLI exited.
+   * `env` is the CLI's own environment. Null when the core gives sessions the
+   * servers as configured.
+   */
+  lazyMcp?(env: Record<string, string | undefined>, servers: Map<string, StdioServer>): { entries: Record<string, LazyServerEntry>; release(): void } | null;
+  /**
    * Terminates every process this thread launched, grandchildren included,
    * through the registry that traced them. For a driver whose only stop is the
    * process itself: the agent's own tools die with it instead of outliving it.
@@ -208,7 +217,7 @@ export interface TurnContext {
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
   'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
-  'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota'>;
+  'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota' | 'lazyMcp'>;
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
 /** Scalars only: never a prompt, a tool input or output, a command line or a token. */

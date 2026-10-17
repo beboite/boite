@@ -11,6 +11,7 @@ import { mayReceiveEvent } from './access.ts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
 import { JOIN_ROUTE } from './group.ts';
+import { LAZY_MCP_ROUTE } from './mcp/lazy.ts';
 import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts';
 import type { Connection } from './router.ts';
 import type { EventFrames, SocketData } from './server/connection.ts';
@@ -566,6 +567,12 @@ export function startServer(options: ServerOptions): RunningServer {
       if (url.pathname === SHUTDOWN_PATH) return shutdownResponse(core, request);
       if (url.pathname === IDLE_SHUTDOWN_PATH) return shutdownResponse(core, request, 'idle');
       if (url.pathname === HANDOFF_SHUTDOWN_PATH) return shutdownResponse(core, request, 'handoff');
+
+      // An agent session's MCP servers, behind its thread's token (mcp/lazy.ts).
+      if (url.pathname.startsWith(LAZY_MCP_ROUTE)) {
+        if (core.stopping) return new Response('core stopping', { status: 503 });
+        return core.lazyMcp.http(request, url.pathname.slice(LAZY_MCP_ROUTE.length));
+      }
 
       if (url.pathname.startsWith(`${FILE_ROUTE}/`)) {
         if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });

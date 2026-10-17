@@ -26,6 +26,7 @@ import type { Core } from '../core.ts';
 import type { EmitSink, PermissionTicket, ToolPatch, QuestionAsk, QuestionTicket, SessionContext, TurnContext } from '../drivers/types.ts';
 import { newId } from '../ids.ts';
 import type { SpawnedChild, SpawnOptions } from '../procs.ts';
+import { LazyMcp } from '../mcp/lazy.ts';
 import { noteStderr } from '../drivers/stderr-tail.ts';
 import { watchProviderProcess } from './provider-process-log.ts';
 import type { ThreadStore } from '../threads.ts';
@@ -107,6 +108,7 @@ export class TurnContexts {
       backgroundFinished: (id, state) => this.threads.agentState.finishBackground(threadId, id, backgroundOwner, state),
       spawnChild: this.leasedSpawnChild(threadId, provider, { resume: thread.sessionId !== null }),
       finishStartup: () => this.core.procs.finishStartup(threadId),
+      lazyMcp: this.lazyMcpFor(thread),
     };
   }
 
@@ -407,9 +409,19 @@ export class TurnContexts {
       },
       spawnChild: this.leasedSpawnChild(threadId, provider, { resume: thread.sessionId !== null, turnId: turn.id }),
       finishStartup: () => this.core.procs.finishStartup(threadId),
+      lazyMcp: this.lazyMcpFor(thread),
       killTree: () => {
         this.core.procs.killTree(threadId);
       },
+    };
+  }
+
+  /** The thread's MCP servers through the core, unless `BOITE_LAZY_MCP=0` turned that off. */
+  private lazyMcpFor(thread: ThreadSummary): NonNullable<SessionContext['lazyMcp']> {
+    return (env, servers) => {
+      if (!LazyMcp.enabled() || servers.size === 0) return null;
+      const { id, entries } = this.core.lazyMcp.register(thread.id, thread.cwd, env, servers);
+      return { entries, release: () => this.core.lazyMcp.release(id) };
     };
   }
 

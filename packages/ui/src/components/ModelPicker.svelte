@@ -731,7 +731,7 @@
     margin: 0 8px;
     border-radius: var(--radius-sm);
     background: var(--color-hover);
-    animation: breathe calc(var(--dur-whip) * 3) var(--ease-out-quint) infinite alternate;
+    animation: breathe calc(var(--dur-whip) * 3) var(--ease-out-quint) infinite alternate var(--loops);
   }
   .skeleton:nth-child(2) { margin-right: 25%; }
   .skeleton:nth-child(3) { margin-right: 40%; }

@@ -31,7 +31,7 @@
   .mark.running {
     background: var(--color-accent);
     border-color: var(--color-accent);
-    animation: pulse 1.6s ease-in-out infinite;
+    animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops);
   }
   .mark.waiting {
     border-color: var(--color-live);

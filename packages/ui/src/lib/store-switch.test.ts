@@ -343,3 +343,26 @@ test('a return to a visit kept as plain data repaints the tail that came while a
   expect(store.openThread!.messages[0]).toBe(first);
   expect(store.openThread!.messages.some(message => message.parts.some(part => part.type === 'text' && part.text === 'while you were away'))).toBe(true);
 });
+
+test('a live end past its bound lets its oldest messages go and reads them again from the cursor', async ({ ready }) => {
+  const { store } = await ready({ delayMs: 0, long: true });
+  await store.open('t-long');
+  await store.loadOlder();
+  const thread = store.openThread!;
+  expect(thread.messages).toHaveLength(160);
+  // A day of output: every held message weighs 256 KiB, 40 MiB in all.
+  const text = 'x'.repeat(128 * 1024);
+  for (const message of thread.messages) message.parts = [{ type: 'text', text }];
+  const newest = thread.messages.at(-1)!.id;
+  expect(store.releaseOlder('t-long')).toBe(144);
+  expect(store.openThread!.messages).toHaveLength(16);
+  expect(store.openThread!.messages.at(-1)!.id).toBe(newest);
+  expect(store.messagesBefore).toBe(store.openThread!.messages[0]!.id);
+  // Weighed once per message count: a delta weighs nothing.
+  expect(store.releaseOlder('t-long')).toBe(0);
+  const first = store.openThread!.messages[0]!.id;
+  expect(await store.loadOlder()).toBeGreaterThan(0);
+  const messages = store.openThread!.messages;
+  expect(messages.findIndex(message => message.id === first)).toBeGreaterThan(0);
+  expect(new Set(messages.map(message => message.id)).size).toBe(messages.length);
+});

@@ -210,7 +210,7 @@
     height: 7px;
     border-radius: 50%;
     background: var(--color-success);
-    animation: pulse 2s var(--ease-out-quint) infinite;
+    animation: pulse 2s var(--ease-out-quint) infinite var(--loops);
   }
 
   @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }

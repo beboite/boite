@@ -118,6 +118,16 @@ page paints above every menu, so while an open menu or dialog overlaps the
 slot the page is parked and a still capture shows in its place. A layer marked
 `aria-hidden`, such as the edge scrollbars' full-window popover, does not count.
 
+On Windows a hidden page also sleeps: hiding a WebView2 stops its painting,
+not its timers and animations, so the shell calls `TrySuspend` right after it
+hides a page the user browses (`platform::suspend`). WebView2 wakes the page
+by itself when it is shown again or navigated, and every other call still
+reaches it asleep. A page WebView2 will not suspend, one playing audio for
+instance, keeps running and is logged at debug level. The Boite UI itself is
+never suspended, and neither is an agent's page: those wait off screen, shown,
+and sleep through the core ([the agent's browser](browser.md#a-tab-nobody-uses-sleeps)).
+The Linux and macOS shells have no such call.
+
 ### Browser profiles
 
 A browser tab opens in a profile and keeps it. Each profile has its own cookies,

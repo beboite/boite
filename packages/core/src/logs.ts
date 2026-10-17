@@ -18,6 +18,14 @@ const UNPERSISTED_RECORDS = 4096;
 const FLUSH_MS = 250;
 /** How far ahead of the core a record's time may be: clients' times are kept within 10 minutes. */
 const CLOCK_SKEW_MS = 10 * 60_000;
+/** A process that exits cleanly this soon after its start is counted in a batch, not written on its own. */
+export const SHORT_PROCESS_MS = 2000;
+/** How long a turn's batch of short processes gathers before it is written. */
+export const PROCESS_BATCH_MS = 10_000;
+const SWEEP_MS = 1000;
+
+/** The short processes of one turn, written as one `process.batch` record. */
+interface ProcessBatch { threadId: string; turnId: string | undefined; openedAt: number; firstAt: number; lastAt: number; count: number; cpuMs: number; exes: Map<string, number> }
 
 /** Only explicit diagnostic metadata can cross this boundary. Never pass a payload. */
 export type LogContext = Pick<CoreLogRecord, 'source' | 'event' | 'threadId' | 'turnId' | 'requestId'> & {
@@ -63,6 +71,9 @@ export class DiagnosticLogs {
   private queued = new Set<string>();
   private readonly activeTurns = new Map<string, { turnId: string; startedAt: number }>();
   private readonly processTurns = new Map<string, string>();
+  private readonly heldStarts = new Map<string, { proc: RpcEvents['process.started']; turnId: string | undefined; heldAt: number }>();
+  private readonly batches = new Map<string, ProcessBatch>();
+  private sweeper: ReturnType<typeof setInterval> | null = null;
 
   constructor(dataDir: string, private readonly secrets: readonly string[] = [], private readonly report: (message: string) => void = message => console.error(message), private readonly fileBytes = LOG_FILE_BYTES) {
     this.directory = join(dataDir, 'logs');
@@ -200,26 +211,88 @@ export class DiagnosticLogs {
     } else if (name === 'turn.started' || name === 'turn.finished') {
       this.observeTurn(name, payload as RpcEvents['turn.started']);
     } else if (name === 'process.started' || name === 'process.exited') {
-      const proc = payload as RpcEvents['process.started'];
-      const key = `${proc.threadId}:${proc.pid}`;
-      const turnId = this.processTurns.get(key) ?? this.activeTurns.get(proc.threadId)?.turnId;
-      if (name === 'process.started' && turnId !== undefined) this.processTurns.set(key, turnId);
-      if (name === 'process.exited') this.processTurns.delete(key);
-      const exe = executableName(proc.exe);
-      const lifetime = proc.exitedAt !== null && proc.exitedAt !== undefined ? proc.exitedAt - proc.startedAt : undefined;
-      const data: LogData = { pid: proc.pid, ...(proc.parentPid === null ? {} : { parentPid: proc.parentPid }), ...(exe ? { exe } : {}) };
-      if (name === 'process.exited') {
-        if (proc.cpuMs !== null && proc.cpuMs !== undefined) data.cpuMs = proc.cpuMs;
-        if (proc.peakMemoryBytes !== null && proc.peakMemoryBytes !== undefined) data.peakMemoryMb = Math.round(proc.peakMemoryBytes / 1048576);
-        data.exitCode = proc.exitCode;
-      }
-      // An agent's own commands exit 1 all the time (grep with no match, a failing test): that is work,
-      // not a fault. A signal or a Windows status code (above 255, such as 0xC0000005) is a crash.
-      const failed = name === 'process.exited' && proc.exitCode !== null && (proc.exitCode < 0 || proc.exitCode > 255);
-      this.record(failed ? 'warn' : 'debug', name === 'process.started' ? `Process ${exe ?? 'unknown'} started, pid ${proc.pid}` : `Process ${exe ?? 'unknown'} exited, pid ${proc.pid}, code ${proc.exitCode ?? 'unknown'}`,
-        { source: 'processes', event: name, threadId: proc.threadId, turnId, data, ...(name === 'process.exited' && lifetime !== undefined ? { durationMs: lifetime } : {}) },
-        (name === 'process.started' ? proc.startedAt : proc.exitedAt) ?? Date.now());
+      this.observeProcess(name, payload as RpcEvents['process.started']);
     }
+  }
+
+  /**
+   * A start waits up to `SHORT_PROCESS_MS` for its exit. A clean exit within
+   * that time joins its turn's batch instead of two records: on 2026-10-17,
+   * about 20 agents wrote 89 process records a second (shell helpers, `sed`,
+   * `git`), and the eight files held six minutes (docs/trace.md).
+   */
+  private observeProcess(name: 'process.started' | 'process.exited', proc: RpcEvents['process.started']): void {
+    const key = `${proc.threadId}:${proc.pid}`;
+    const turnId = this.processTurns.get(key) ?? this.activeTurns.get(proc.threadId)?.turnId;
+    if (name === 'process.started') {
+      if (turnId !== undefined) this.processTurns.set(key, turnId);
+      this.heldStarts.set(key, { proc, turnId, heldAt: Date.now() });
+      this.sweepLater();
+      return;
+    }
+    this.processTurns.delete(key);
+    const held = this.heldStarts.get(key);
+    this.heldStarts.delete(key);
+    const lifetime = proc.exitedAt !== null && proc.exitedAt !== undefined ? proc.exitedAt - proc.startedAt : undefined;
+    // A batch says nothing of how each process ended: an exit with no status the OS gave keeps its records.
+    if (held && proc.exitCode !== null && !crashed(proc.exitCode) && lifetime !== undefined && lifetime < SHORT_PROCESS_MS) { this.count(proc, turnId); return; }
+    if (held) this.writeProcess('process.started', held.proc, held.turnId);
+    this.writeProcess('process.exited', proc, turnId);
+  }
+
+  private writeProcess(name: 'process.started' | 'process.exited', proc: RpcEvents['process.started'], turnId: string | undefined): void {
+    const exe = executableName(proc.exe);
+    const lifetime = proc.exitedAt !== null && proc.exitedAt !== undefined ? proc.exitedAt - proc.startedAt : undefined;
+    const data: LogData = { pid: proc.pid, ...(proc.parentPid === null ? {} : { parentPid: proc.parentPid }), ...(exe ? { exe } : {}) };
+    if (name === 'process.exited') {
+      if (proc.cpuMs !== null && proc.cpuMs !== undefined) data.cpuMs = proc.cpuMs;
+      if (proc.peakMemoryBytes !== null && proc.peakMemoryBytes !== undefined) data.peakMemoryMb = Math.round(proc.peakMemoryBytes / 1048576);
+      data.exitCode = proc.exitCode;
+    }
+    const failed = name === 'process.exited' && crashed(proc.exitCode);
+    this.record(failed ? 'warn' : 'debug', name === 'process.started' ? `Process ${exe ?? 'unknown'} started, pid ${proc.pid}` : `Process ${exe ?? 'unknown'} exited, pid ${proc.pid}, code ${proc.exitCode ?? 'unknown'}`,
+      { source: 'processes', event: name, threadId: proc.threadId, turnId, data, ...(name === 'process.exited' && lifetime !== undefined ? { durationMs: lifetime } : {}) },
+      (name === 'process.started' ? proc.startedAt : proc.exitedAt) ?? Date.now());
+  }
+
+  private count(proc: RpcEvents['process.started'], turnId: string | undefined): void {
+    const key = `${proc.threadId}:${turnId ?? ''}`;
+    let batch = this.batches.get(key);
+    if (!batch) {
+      batch = { threadId: proc.threadId, turnId, openedAt: Date.now(), firstAt: proc.startedAt, lastAt: proc.startedAt, count: 0, cpuMs: 0, exes: new Map() };
+      this.batches.set(key, batch);
+    }
+    const exe = executableName(proc.exe) ?? 'unknown';
+    batch.count += 1;
+    batch.firstAt = Math.min(batch.firstAt, proc.startedAt);
+    batch.lastAt = Math.max(batch.lastAt, proc.exitedAt ?? proc.startedAt);
+    batch.cpuMs += proc.cpuMs ?? 0;
+    batch.exes.set(exe, (batch.exes.get(exe) ?? 0) + 1);
+  }
+
+  /** Writes the starts that waited `SHORT_PROCESS_MS` and the batches that gathered `PROCESS_BATCH_MS`, or all of them. */
+  private sweep(all = false): void {
+    const now = Date.now();
+    for (const [key, held] of this.heldStarts) {
+      if (!all && now - held.heldAt < SHORT_PROCESS_MS) continue;
+      this.heldStarts.delete(key);
+      this.writeProcess('process.started', held.proc, held.turnId);
+    }
+    for (const [key, batch] of this.batches) {
+      if (!all && now - batch.openedAt < PROCESS_BATCH_MS) continue;
+      this.batches.delete(key);
+      const exes = [...batch.exes].sort((a, b) => b[1] - a[1]).map(([exe, count]) => `${exe} ${count}`).join(', ');
+      this.record('debug', `${batch.count} short ${batch.count === 1 ? 'process' : 'processes'} ran: ${exes}`,
+        { source: 'processes', event: 'process.batch', threadId: batch.threadId, turnId: batch.turnId, durationMs: batch.lastAt - batch.firstAt, data: { count: batch.count, cpuMs: batch.cpuMs, exes } },
+        batch.firstAt);
+    }
+    if (this.heldStarts.size === 0 && this.batches.size === 0 && this.sweeper !== null) { clearInterval(this.sweeper); this.sweeper = null; }
+  }
+
+  private sweepLater(): void {
+    if (this.sweeper !== null) return;
+    this.sweeper = setInterval(() => this.sweep(), SWEEP_MS);
+    this.sweeper.unref();
   }
 
   private observeTurn(name: 'turn.started' | 'turn.finished', turn: RpcEvents['turn.started']): void {
@@ -395,10 +468,19 @@ export class DiagnosticLogs {
 
   async close(): Promise<void> {
     this.unsubscribe?.();
+    this.sweep(true);
     await this.flush();
     await this.ready;
     this.closed = true;
   }
+}
+
+/**
+ * An agent's own commands exit 1 all the time (grep with no match, a failing test): that is work,
+ * not a fault. A signal or a Windows status code (above 255, such as 0xC0000005) is a crash.
+ */
+function crashed(exitCode: number | null): boolean {
+  return exitCode !== null && (exitCode < 0 || exitCode > 255);
 }
 
 /** The agent frozen for this turn, which a later model switch does not rewrite. */

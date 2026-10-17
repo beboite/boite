@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
-import { INITIAL_PAGE_BYTES, PROTOCOL_VERSION, RpcErrorCode, type Thread, type ThreadStatus } from '@boite/contracts';
+import { INITIAL_PAGE_BYTES, PROTOCOL_VERSION, RpcErrorCode, TRACE_LIMIT, type ProcessRecord, type Thread, type ThreadStatus } from '@boite/contracts';
 import { RpcFailure, WsClient, droppedFailure, type SocketLike } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
@@ -685,6 +685,39 @@ test.for(['return-to-thread', 'newer-read'])('trace ignores an older response af
     const current = [...store.trace]; released.resolve(); await reading;
     expect(store.trace).toEqual(current); expect(store.trace.some(record => record.pid === 999999)).toBe(false);
   } finally { released.resolve(); spy.mockRestore(); }
+});
+
+test('process events wait for the trace surface, which keeps the latest the core would return', async ({ store, client }) => {
+  await store.open('t-trace');
+  const record = (pid: number, exitedAt: number | null = null): ProcessRecord => ({
+    pid, parentPid: null, threadId: 't-trace', exe: 'bash.exe', commandLine: null, startedAt: pid, exitedAt, exitCode: exitedAt === null ? null : 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null,
+  });
+  // An agent's shell loop: hundreds of processes a minute, and no surface drawing them.
+  const before = store.trace;
+  for (let pid = 1; pid <= 300; pid += 1) { client.traceProcess(record(pid)); client.traceProcess(record(pid, pid + 1)); }
+  expect(store.trace).toBe(before);
+  store.traceWatched = true;
+  try {
+    for (let pid = 1; pid <= TRACE_LIMIT + 50; pid += 1) client.traceProcess(record(pid));
+    client.traceProcess(record(TRACE_LIMIT + 50, 999));
+    expect(store.trace).toHaveLength(TRACE_LIMIT);
+    expect(store.trace[0]).toMatchObject({ pid: TRACE_LIMIT + 50, exitedAt: 999 });
+    expect(store.trace.at(-1)?.pid).toBe(51);
+    // Events that land while the core's list is on its way stay ahead of it, within the same bound.
+    const gate = deferred<void>(), call = client.call.bind(client);
+    const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+      if (method !== 'trace.get') return call(method, params);
+      await gate.promise;
+      return Array.from({ length: TRACE_LIMIT }, (_, at) => record(1000 + at)) as never;
+    });
+    try {
+      const reading = store.refreshTrace();
+      for (let pid = 2000; pid < 2000 + TRACE_LIMIT; pid += 1) client.traceProcess(record(pid));
+      gate.resolve(); await reading;
+      expect(store.trace).toHaveLength(TRACE_LIMIT);
+      expect(store.trace[0]?.pid).toBe(2000 + TRACE_LIMIT - 1);
+    } finally { gate.resolve(); spy.mockRestore(); }
+  } finally { store.traceWatched = false; }
 });
 
 test('an older page cannot release a newer thread paging guard or duplicate its cursor request', async () => {

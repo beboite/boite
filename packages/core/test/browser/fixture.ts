@@ -52,6 +52,8 @@ export function createBrowserFixture() {
       if (path === '/popup') return new Response('<title>Popup</title>popup', { headers: { 'content-type': 'text/html' } });
       // Draws `hz` times a second, like a video or an animation slower than the screen.
       if (path === '/ticking') return new Response(`<title>Ticking</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},${1000 / Number(new URL(request.url).searchParams.get('hz') ?? 10)})</script>`, { headers: { 'content-type': 'text/html' } });
+      // Animates every frame and every 16 ms; `gaps()` returns the longest pause of each since it was last called, the one still running included: a read right after a wake can run before the next frame.
+      if (path === '/animated') return new Response('<title>Animated</title><script>let last=performance.now(),gap=0,tick=Date.now(),tickGap=0;function draw(t){gap=Math.max(gap,t-last);last=t;requestAnimationFrame(draw)}requestAnimationFrame(draw);setInterval(()=>{const now=Date.now();tickGap=Math.max(tickGap,now-tick);tick=now},16);window.gaps=()=>{const r=[Math.round(Math.max(gap,performance.now()-last)),Math.max(tickGap,Date.now()-tick)];gap=0;tickGap=0;return r}</script>', { headers: { 'content-type': 'text/html' } });
       if (path === '/moving') return new Response('<title>Moving</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},16)</script>', { headers: { 'content-type': 'text/html' } });
       return new Response('missing', { status: 404 });
     } });
@@ -62,17 +64,26 @@ export function createBrowserFixture() {
   let harness: TestCore, owner: CoreClient, agent: CoreClient, threadId: string;
   let opened: { harness?: TestCore; owner?: CoreClient; agent?: CoreClient } = {};
   const hosts = new Set<() => Promise<void>>();
+  /** The causes of the calls that failed unexpectedly: a client only gets "Something went wrong". */
+  let failures: string[] = [];
   beforeEach(async () => {
     later.release();
     later = laterGate();
     opened = {};
+    failures = [];
     opened.harness = harness = await startTestCore();
+    const record = harness.core.logs.record.bind(harness.core.logs);
+    harness.core.logs.record = (level, message, context = {}, at) => {
+      if (context.event === 'rpc.failed') failures.push(message);
+      record(level, message, context, at);
+    };
     opened.owner = owner = await harness.connect();
     ({ threadId } = await echoThread(harness, owner));
     opened.agent = agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
   });
   afterEach(async () => {
     later.release();
+    for (const failure of failures) console.error(`core: ${failure}`);
     const errors: unknown[] = [];
     for (const close of hosts) {
       try { await close(); } catch (error) { errors.push(error); }

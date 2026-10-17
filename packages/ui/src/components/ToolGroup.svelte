@@ -190,14 +190,15 @@
     text-align: left;
   }
 
-  /* A light passing over the words while a call runs. It moves in 30 steps a
-     sweep: the text clipped gradient repaints on each step, not on every frame. */
+  /* A light passing over the words while a call runs. It moves in 33 steps a
+     sweep, one every fourth tick of the loops' 60 Hz grid (app.css): the text
+     clipped gradient repaints on each step, not on every frame. */
   .label.shimmer {
     background: linear-gradient(90deg, var(--color-muted-foreground) 35%, var(--color-foreground) 50%, var(--color-muted-foreground) 65%) 0 0 / 300% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    animation: shimmer 2.2s steps(30) infinite;
+    animation: shimmer 2.2s steps(33) infinite var(--loops);
   }
 
   @keyframes shimmer {
@@ -218,7 +219,7 @@
     height: 6px;
     border-radius: 50%;
     background: var(--color-accent);
-    animation: pulse 1.6s var(--ease-out-quint) infinite;
+    animation: pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops);
   }
 
   .spinner {
@@ -228,7 +229,7 @@
     border-radius: 50%;
     border: 1.5px solid var(--color-edge);
     border-top-color: var(--color-live);
-    animation: spin 0.9s linear infinite;
+    animation: spin 0.9s steps(54) infinite var(--loops);
   }
 
   /* The calls hang off a hairline under the summary's glyph. */

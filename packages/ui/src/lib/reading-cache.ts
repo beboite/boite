@@ -34,12 +34,19 @@ function partChars(part: MessagePart): number {
   }
 }
 
+/** The characters a message holds in its parts. */
+export function messageChars(message: Message): number {
+  let chars = 0;
+  for (const part of message.parts) chars += partChars(part);
+  return chars;
+}
+
 /** Stops at the per-thread bound; cache accounting never serializes whole messages. */
 export function readingCacheBytes(messages: readonly Message[]): number {
   if (messages.length > READING_CACHE_MESSAGES) return READING_CACHE_BYTES + 1;
   let chars = 0;
   for (const message of messages) {
-    for (const part of message.parts) chars += partChars(part);
+    chars += messageChars(message);
     if (chars * 2 > READING_CACHE_BYTES) return READING_CACHE_BYTES + 1;
   }
   return chars * 2;

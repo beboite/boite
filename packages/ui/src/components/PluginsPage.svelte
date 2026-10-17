@@ -569,7 +569,7 @@
   .dot.bad { background: var(--color-danger); }
 
   .act { display: flex; align-items: center; gap: 4px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
-  .spinning :global(svg) { animation: spin 0.9s linear infinite; }
+  .spinning :global(svg) { animation: spin 0.9s linear infinite var(--loops); }
   @keyframes spin { to { transform: rotate(360deg); } }
   .act.end { justify-content: flex-end; }
   .gateway-act { justify-content: flex-start; }

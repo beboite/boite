@@ -87,6 +87,9 @@ exit reconciliation because the port may report only the empty-job event.
 
 `process.started` and `process.exited` carry the available PID, parent PID,
 executable, command line, timestamps, exit code, CPU time, peak memory and I/O.
+The UI applies them only while the trace surface is on screen, which reads
+`trace.get` when it appears, and keeps the newest `TRACE_LIMIT` (200) rows,
+as many as `trace.get` returns without a `limit`.
 
 ## What a client sees
 
@@ -181,6 +184,16 @@ about a thread also names its agent, `providerId`, `model` and
 `[thr_child claude/claude-opus-5-5 <thr_parent]` on every line. Turn records
 carry the queue wait, the duration, the token counts and the effort; process
 records the program's file name, pid, exit code, CPU time and peak memory.
+A start waits up to 2 seconds for its exit before it is written. A process
+that exits cleanly within that time gets no record of its own: its turn's
+`process.batch` record, written every 10 seconds, counts those processes by
+program with their CPU time (`3 short processes ran: bash.exe 2, sed.exe 1`).
+A crash (a signal or a Windows status code) and an exit whose status the OS
+did not give keep both records. On 2026-10-17, with about 20 agents at work,
+the eight core files held 32,749 process records over 368 seconds, 89 a second
+and 2.45 MB a minute. `bun bench/process-log-replay.ts <logs directory>` plays
+them through this store, which writes 1,013 records, 2.8 a second and 0.06 MB
+a minute.
 
 The sink redacts configured credentials and recognized sensitive fields before
 bounding messages to 4,096 characters, metadata to 200 and `data` strings to

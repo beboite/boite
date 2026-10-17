@@ -5,6 +5,7 @@ import type { BrowserIdentity } from './chromium.ts';
 import type { TabRecorder } from './recorder.ts';
 import type { PageInfo, ScreenTurns } from './frames.ts';
 import type { AgentPage } from './automation.ts';
+import type { SleepState } from './sleep.ts';
 
 /** One Chromium process: a profile folder, or a throwaway one for private tabs. */
 export interface Engine {
@@ -55,4 +56,6 @@ export interface Tab {
   /** An agent command is running: the dialogs it raises follow `page.dialogPolicy`. */
   acting: boolean;
   page: AgentPage;
+  /** Frozen while nobody drives or watches it (`sleep.ts`). */
+  sleep: SleepState;
 }

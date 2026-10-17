@@ -136,7 +136,7 @@
   .track { height: 3px; margin-top: 8px; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-surface-3); }
   .track span { display: block; height: 100%; border-radius: inherit; background: var(--color-foreground); transition: width var(--dur-2) var(--ease-out-quint); }
   .track.indeterminate span { opacity: 0.4; }
-  .actions :global(.spinning) { animation: spin 1s linear infinite; }
+  .actions :global(.spinning) { animation: spin 1s linear infinite var(--loops); }
   @media (prefers-reduced-motion: reduce) { .actions :global(.spinning) { animation: none; } }
   :global(html[data-motion='reduced']) .actions :global(.spinning) { animation: none; }
 </style>

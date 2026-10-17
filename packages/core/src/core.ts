@@ -43,6 +43,7 @@ import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
 import { AgentBrowser, BROWSER_SCOPE } from './browser.ts';
 import { MobileDevices } from './devices/control.ts';
+import { LazyMcp } from './mcp/lazy.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
@@ -188,6 +189,8 @@ export class Core {
   readonly browser = new AgentBrowser(this);
   /** Simulators and emulators open in conversations' Device panels. */
   readonly devices = new MobileDevices(this);
+  /** The user's stdio MCP servers, started when a conversation first calls one (`mcp/lazy.ts`). */
+  readonly lazyMcp = new LazyMcp(this);
 
   /**
    * The server tells the core what it alone can know. The default answers no
@@ -501,6 +504,7 @@ export class Core {
     const closingAt = performance.now();
     await this.browser.close();
     this.devices.stop();
+    this.lazyMcp.close();
     this.artifactPreviews.stop();
     this.threads.sideQuestions.close();
     await this.mergedPrArchive.close();

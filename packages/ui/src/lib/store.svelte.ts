@@ -13,6 +13,7 @@ import { StoreContext } from './store/context';
 import type { Delegation } from './store/delegation.svelte';
 import { listen } from './store/events';
 import { loadAttachments } from './store/reading-pages.svelte';
+import { releaseOlder } from './store/live-end';
 import type { Imports } from './store/imports.svelte';
 import type { Layout } from './store/layout.svelte';
 import type { Models } from './store/models.svelte';
@@ -542,6 +543,7 @@ export class Store {
   loadRange(from: number, limit: number, landing?: () => void) { return this.#ctx.positions.loadRange(from, limit, landing); }
   loadAttachments(threadId: ThreadId, message: Message) { return loadAttachments(this.#ctx, threadId, message); }
   loadOlder(...args: Parameters<Threads['loadOlder']>) { return this.#ctx.threads.loadOlder(...args); }
+  releaseOlder(threadId: ThreadId) { return releaseOlder(this.#ctx, threadId); }
   createThread(...args: Parameters<Threads['createThread']>) { return this.#ctx.threads.createThread(...args); }
   update(...args: Parameters<Threads['update']>) { return this.#ctx.threads.update(...args); }
   recoverTurn(...args: Parameters<Threads['recoverTurn']>) { return this.#ctx.threads.recoverTurn(...args); }
