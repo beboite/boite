@@ -6,7 +6,7 @@ import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { CodeCheckpoints, IDLE_THREAD_MS, KEEP_TURNS } from '../src/threads/code-checkpoints.ts';
 import { restoreFiles, sharedBlob, snapshot } from '../src/threads/checkpoint-files.ts';
-import { BLOB_BYTE_LIMIT, decodeBlob } from '../src/threads/checkpoint-store.ts';
+import { BLOB_BYTE_LIMIT, decodeBlob, decodeManifest } from '../src/threads/checkpoint-store.ts';
 import { git } from '../src/git/read.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -575,6 +575,9 @@ test('a stored frame never decodes past the 16 MiB file limit, and a raw frame n
   expect(await decodeBlob(frame, createHash('sha256').update(large).digest('hex'))).toBeNull();
   // An older core's blob of a `.zst` file: its raw bytes match the name.
   expect(await decodeBlob(frame, createHash('sha256').update(frame).digest('hex'))).toBe(frame);
+  // A manifest frame is bounded the same way.
+  const huge = Buffer.from(Bun.zstdCompressSync(Buffer.alloc(65 * 1024 * 1024, 0x20)));
+  await expect(decodeManifest(huge)).rejects.toMatchObject({ code: 'ERR_BUFFER_TOO_LARGE' });
 });
 
 test('the background pass counts manifests against its tick budget and stops when a snapshot starts', async () => {
@@ -648,6 +651,11 @@ test(`checkpoints are kept for the newest ${KEEP_TURNS} turns, and none for a th
   await client.call('threads.archive', { threadId, archived: true });
   await checkpoints.maintain(Date.now() + 6 * 86_400_000);
   expect((await readdir(folder)).filter(name => name.endsWith('.json'))).toHaveLength(KEEP_TURNS);
+  // Restored: kept whatever the old archive date.
+  await client.call('threads.archive', { threadId, archived: false });
+  await checkpoints.maintain(Date.now() + IDLE_THREAD_MS + 60_000);
+  expect((await readdir(folder)).filter(name => name.endsWith('.json'))).toHaveLength(KEEP_TURNS);
+  await client.call('threads.archive', { threadId, archived: true });
   await checkpoints.maintain(Date.now() + IDLE_THREAD_MS + 60_000);
   await expect(stat(folder)).rejects.toMatchObject({ code: 'ENOENT' });
 });

@@ -17,6 +17,8 @@ const KEEP_RATIO = 0.9;
 const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
 /** No file over this size gets a checkpoint, so no blob decodes past it. */
 export const BLOB_BYTE_LIMIT = 16 * 1024 * 1024;
+/** A manifest lists at most 20,000 files, a few MiB of JSON; this leaves room for long paths. */
+const MANIFEST_BYTE_LIMIT = 64 * 1024 * 1024;
 const inflate = promisify(zstdDecompress);
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -54,9 +56,12 @@ export async function encodeManifest(value: unknown): Promise<Buffer> {
   return Buffer.from(await Bun.zstdCompress(Buffer.from(JSON.stringify(value)), { level: ZSTD_LEVEL }));
 }
 
-/** A manifest written either way: a zstd frame, or the plain JSON of older cores. */
+/**
+ * A manifest written either way: a zstd frame, or the plain JSON of older
+ * cores. A frame decodes to at most `MANIFEST_BYTE_LIMIT` bytes.
+ */
 export async function decodeManifest<T>(stored: Buffer): Promise<T> {
-  const text = framed(stored) ? Buffer.from(await Bun.zstdDecompress(stored)).toString('utf8') : stored.toString('utf8');
+  const text = framed(stored) ? (await inflate(stored, { maxOutputLength: MANIFEST_BYTE_LIMIT })).toString('utf8') : stored.toString('utf8');
   return JSON.parse(text) as T;
 }
 

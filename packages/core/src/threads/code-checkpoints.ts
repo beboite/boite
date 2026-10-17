@@ -273,7 +273,8 @@ export class CodeCheckpoints {
     return this.trim(threadId, async () => {
       const thread = this.core.journal.isClosed() ? null : this.core.journal.getThread(threadId);
       if (!thread) return;
-      const since = thread.doneAt ?? (thread.archived ? thread.archivedAt ?? thread.updatedAt : null);
+      // Restoring clears `doneAt`; the archived flag is still the one that counts.
+      const since = thread.archived ? thread.doneAt ?? thread.archivedAt ?? thread.updatedAt : null;
       if (since != null && now - since > IDLE_THREAD_MS) {
         await rm(this.folder(threadId), { recursive: true, force: true });
         this.forget(this.objects(threadId));
