@@ -30,6 +30,17 @@
     selectedId = null;
   });
 
+  /**
+   * A step run by one subagent opens its conversation in the chat; a step with
+   * several items, or none started, opens its detail here.
+   */
+  function pick(id: string): void {
+    const instances = run.nodes.find(entry => entry.id === id)?.instances ?? [];
+    const threadId = instances.length === 1 ? instances[0]!.threadId : null;
+    if (threadId) void store.open(threadId);
+    else selectedId = id;
+  }
+
   async function stop(): Promise<void> {
     const ok = await confirm.ask({ title: fill(strings.workflow.stopTitle, { name: run.name }), body: strings.workflow.stopBody, confirmLabel: strings.workflow.stop, cancelLabel: strings.common.cancel, danger: true });
     if (ok) await store.controlWorkflow(run, 'stop');
@@ -72,7 +83,7 @@
     {#if node}
       <WorkflowDetail {store} {run} {node} {profiles} onback={() => (selectedId = null)} />
     {:else}
-      <WorkflowGraph {run} {profiles} {selectedId} onselect={(id) => (selectedId = id)} />
+      <WorkflowGraph {run} {profiles} {selectedId} onselect={pick} />
     {/if}
   </div>
 </section>

@@ -6,8 +6,9 @@
  * the contract an app answers.
  *
  * Whether the owner wants the app running is `enabled`, kept in `app.json`
- * beside `installed.json`. An update keeps that directory, so the choice
- * survives it; an uninstall deletes it, so a new install starts enabled.
+ * beside `installed.json`, and whether it starts with the core is
+ * `autostart`, beside it. An update keeps that directory, so both choices
+ * survive it; an uninstall deletes it, so a new install starts with both on.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -47,6 +48,35 @@ const realClock: AppClock = {
   setTimeout: (run, ms) => setTimeout(run, ms),
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
+
+/** What `app.json` and `gateway.json` hold: whether it runs now, and whether it starts with the core. */
+export interface RunChoice {
+  enabled: boolean;
+  autostart: boolean;
+}
+
+/**
+ * The choices in `file`. No file is a first install: both on. A file from
+ * before `autostart` existed starts with the core when it was left enabled,
+ * which is what that core did.
+ */
+export function readRunChoice(file: string): RunChoice {
+  if (!existsSync(file)) return { enabled: true, autostart: true };
+  try {
+    const data = JSON.parse(readFileSync(file, 'utf8')) as { enabled?: unknown; autostart?: unknown };
+    const enabled = data.enabled !== false;
+    return { enabled, autostart: typeof data.autostart === 'boolean' ? data.autostart : enabled };
+  } catch {
+    return { enabled: true, autostart: true };
+  }
+}
+
+/** Changes one choice and keeps the other, through a temporary file. */
+export async function writeRunChoice(file: string, change: Partial<RunChoice>): Promise<void> {
+  const next = { ...readRunChoice(file), ...change };
+  await writeFile(`${file}.part`, JSON.stringify(next), 'utf8');
+  await rename(`${file}.part`, file);
+}
 
 /** Why this machine cannot show the app's window, or null when it can. */
 export function desktopProblem(env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): string | null {
@@ -112,31 +142,30 @@ export class PluginApps {
 
   /** Whether the owner wants the app running. A plugin directory with no `app.json` is a first install: yes. */
   enabled(dir: string): boolean {
-    const file = join(dir, APP_FILE);
-    if (!existsSync(file)) return true;
-    try {
-      const data = JSON.parse(readFileSync(file, 'utf8')) as { enabled?: unknown };
-      return data.enabled !== false;
-    } catch {
-      return true;
-    }
+    return readRunChoice(join(dir, APP_FILE)).enabled;
   }
 
   private async setEnabled(dir: string, enabled: boolean): Promise<void> {
-    const file = join(dir, APP_FILE);
-    await writeFile(`${file}.part`, JSON.stringify({ enabled }), 'utf8');
-    await rename(`${file}.part`, file);
+    await writeRunChoice(join(dir, APP_FILE), { enabled });
+  }
+
+  /** `plugins.autostart`: whether the core starts the app when it starts. Running or not, the app stays as it is. */
+  setAutostart(id: string, dir: string, autostart: boolean): Promise<void> {
+    return this.serial(id, async () => {
+      await writeRunChoice(join(dir, APP_FILE), { autostart });
+      this.host.changed(id);
+    });
   }
 
   state(id: string, dir: string): PluginAppState {
     const entry = this.entries.get(id);
     const problem = this.desktop();
-    const enabled = this.enabled(dir);
+    const { enabled, autostart } = readRunChoice(join(dir, APP_FILE));
     if (problem !== null && entry?.running == null) {
-      return { enabled, status: 'unavailable', pid: null, exitCode: entry?.exitCode ?? null, error: problem, startedAt: null };
+      return { enabled, autostart, status: 'unavailable', pid: null, exitCode: entry?.exitCode ?? null, error: problem, startedAt: null };
     }
-    if (entry === undefined || entry.status === 'unavailable') return { enabled, status: 'stopped', pid: null, exitCode: entry?.exitCode ?? null, error: null, startedAt: null };
-    return { enabled, status: entry.status, pid: entry.pid, exitCode: entry.exitCode, error: entry.error, startedAt: entry.startedAt };
+    if (entry === undefined || entry.status === 'unavailable') return { enabled, autostart, status: 'stopped', pid: null, exitCode: entry?.exitCode ?? null, error: null, startedAt: null };
+    return { enabled, autostart, status: entry.status, pid: entry.pid, exitCode: entry.exitCode, error: entry.error, startedAt: entry.startedAt };
   }
 
   /** Starts the app unless it runs already, the core is closing or this machine has no desktop. */
@@ -255,12 +284,13 @@ export class PluginApps {
   }
 
   /**
-   * At core start and after an install: launches the app if the owner left it
-   * enabled. One the core already runs, or is waiting to start again after a
-   * crash, is left as it is: its crash count stands.
+   * At core start, launches the app if it starts with the core; after an
+   * install, if the owner left it enabled. One the core already runs, or is
+   * waiting to start again after a crash, is left as it is: its crash count stands.
    */
-  resume(id: string, dir: string): void {
-    if (!this.enabled(dir)) return;
+  resume(id: string, dir: string, atStart = false): void {
+    const choice = readRunChoice(join(dir, APP_FILE));
+    if (!(atStart ? choice.autostart : choice.enabled)) return;
     const entry = this.entry(id);
     if (entry.running !== null || entry.relaunch !== null) return;
     entry.crashes = [];

@@ -61,10 +61,11 @@ test('an agent starts a light child with rules through the CLI, and the list and
   await page.waitFor(settledAnimations);
   await page.screenshot(join(import.meta.dir, '.artifacts/context-mode-subagents-desktop.png'));
 
-  // Its own conversation carries the same badge in the header.
+  // A row opens the subagent in the chat, whose header reads "parent / subagent" and carries the same badge.
   await page.evaluate(`[...document.querySelectorAll('[data-testid=delegation-member]')].find(row => row.textContent.includes('Light-count')).click()`);
-  await page.click('[data-testid="delegation-open-thread"]');
   await page.waitFor('!!document.querySelector("[data-testid=thread-context-mode]")');
+  expect(await page.text('[data-testid=delegation-back-parent]')).toBe('Benchmark the parser');
+  expect(await page.text('[data-testid=thread-title]')).toBe('Light-count');
   expect(await page.evaluate('document.querySelector("[data-testid=thread-context-mode]").dataset.mode')).toBe('light');
   expect(await page.evaluate('document.querySelector("[data-testid=thread-context-mode]").title')).toContain(`Its rules: ${RULES}`);
   await page.waitFor(settledAnimations);

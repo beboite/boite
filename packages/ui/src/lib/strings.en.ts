@@ -256,7 +256,7 @@ export const strings = {
     contexts: 'Conversation contexts', memories: 'Memories', toEveryone: 'Everyone',
     missionMembers: 'Agents on this mission', dangerZone: 'Stop the engine', dangerHint: 'Stops every agent on this core and disconnects its clients.',
     stopEngine: 'Stop this core', stopEngineBody: 'Stops all work on this core and disconnects its clients. Started work will need review before resuming. Reopen Boite on the host to start the core again.',
-    createAgent: 'Create an agent', noAgents: 'No agents yet', more: 'More', noMatch: 'Nothing matches',
+    createAgent: 'Create an agent', noAgents: 'No agents yet', noAgentsOn: 'No agents on {machine} yet', more: 'More', noMatch: 'Nothing matches',
     noMessagesYet: 'No messages yet', noMissions: 'No missions yet', previewFrom: '{name}: {text}', unread: '{count} unread',
     backToChat: 'Back to the conversation', backTo: 'Back to {name}', editRoles: 'Edit roles', startChat: 'Start the conversation',
     asks: '{name} asks you',
@@ -1271,6 +1271,14 @@ export const strings = {
     defaultLong: 'Edits and runs commands in this folder without asking, asks to go beyond it'
   },
 
+  /** agy asks nothing in print mode: what its mode does not allow, it refuses by itself. */
+  permissionModeAgy: {
+    default: 'agy settings',
+    defaultLong: 'Follows agy\'s own permission setting and refuses what it would ask about',
+    acceptEditsLong: 'Edits files without asking, refuses commands that need approval',
+    draft: "with agy's own permission settings"
+  },
+
   thread: {
     recoveryTitle: 'Prompt saved before restart',
     recoveryBody: 'This prompt has not been sent to the agent. Resume it with its saved model and account, or remove it from the queue.',
@@ -1617,8 +1625,6 @@ export const strings = {
     parent: 'Parent thread',
     activeOne: '1 active subagent',
     activeMany: '{count} active subagents',
-    loadingTranscript: 'Loading the selected conversation',
-    noTranscript: 'This subagent has not written anything yet.',
     configure: 'Settings',
     enabled: 'Let this conversation start subagents',
     enabledHint: 'The agent can hand parts of a task to other agents. Each one works in its own conversation and reports back here.',
@@ -1633,9 +1639,7 @@ export const strings = {
     removeProfile: 'Remove this model',
     pause: 'Pause subagents',
     resume: 'Resume subagents',
-    openThread: 'Open conversation',
     backToTeam: 'Back to the subagents',
-    stop: 'Stop',
     stopAll: 'Stop all',
     send: 'Send to the subagent',
     startedOne: 'Started 1 subagent',
@@ -1680,7 +1684,6 @@ export const strings = {
     result: 'Result',
     output: 'Output',
     items: 'Executions',
-    conversation: 'Conversation',
     openThread: 'Open conversation',
     back: 'Back to the graph',
     close: 'Close details',
@@ -2730,6 +2733,7 @@ export const strings = {
     appStart: 'Start',
     appStop: 'Stop',
     appRestart: 'Restart',
+    startWithBoite: 'Start with Boite',
     /** A gateway plugin: run in the background on a loopback port, for the subscription proxy. */
     gateway: 'Gateway',
     gatewayRunning: '{version} on 127.0.0.1:{port}',

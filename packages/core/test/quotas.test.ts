@@ -297,6 +297,27 @@ test('the standalone Antigravity source is opt-in, persists and never borrows an
   expect((await restored.list()).find((row) => row.accountId === 'quota:antigravity-cli')?.status).toBe('disabled');
 });
 
+test('the agy quota source belongs to the Antigravity CLI and is read by default once agy is found', async () => {
+  harness = await startTestCore();
+  const read = async () => [{ id: 'session', label: '5 hours', usedPercent: 30, resetsAt: null }];
+  const providers = harness.core.providers;
+  const summary = providers.summary.bind(providers);
+  const found = spyOn(providers, 'summary').mockImplementation((id) => {
+    const row = summary(id);
+    return row && id === 'antigravity-cli' ? { ...row, available: true } : row;
+  });
+  try {
+    // The managed server switched off says nothing about the user's agy.
+    providers.setSwitch('antigravity', false);
+    const row = (await new QuotaStore(harness.core, read).list()).find((row) => row.accountId === 'quota:antigravity-cli');
+    expect(row).toMatchObject({ providerId: 'antigravity-cli', enabled: true, status: 'ready' });
+    // A choice the user made still wins over the default.
+    const store = new QuotaStore(harness.core, read);
+    await store.configure('quota:antigravity-cli', false);
+    expect((await store.list()).find((row) => row.accountId === 'quota:antigravity-cli')?.status).toBe('disabled');
+  } finally { found.mockRestore(); }
+});
+
 test('a Codex session reading merges into the last full read and stands as a fresh one', async () => {
   harness = await startTestCore();
   const account = harness.core.accounts.add({ providerId: 'codex', label: 'Codex' });

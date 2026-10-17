@@ -5,7 +5,7 @@
   import { entrust } from '../lib/thread-entrust';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, GitPullRequest, Network, PanelRight, Search, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
+  import { ChevronDown, FolderInput, GitBranch, GitPullRequest, Network, PanelRight, Search, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { pendingLine } from '../lib/thread-move.svelte';
@@ -117,12 +117,21 @@
   }
   /** The agent this thread was entrusted to, if any. */
   let carrier = $derived(thread ? agentDirectory(store).entrustmentOf(thread.id) : null);
+  /** A subagent's header starts with the conversation that started it: "parent / subagent". */
+  let parentTitle = $derived(thread?.parentThreadId ? store.threads.find(entry => entry.id === thread!.parentThreadId)?.title ?? strings.delegation.parent : null);
   /** The agent the owner entrusted this thread's project to, when the thread itself is not entrusted. */
   let resident = $derived(thread ? residentOfThread(store, thread) : null);
 </script>
 
 <div class="thread-header" data-testid="thread-header" data-status={thread?.status}>
       {#if thread}
+        {#if thread.parentThreadId}
+          {@const parentId = thread.parentThreadId}
+          <button type="button" class="ghost crumb" data-testid="delegation-back-parent" data-preload-thread={parentId} title={strings.delegation.parent} onclick={() => void store.open(parentId)}>
+            <span class="ui-label">{parentTitle}</span>
+          </button>
+          <span class="crumb-sep" aria-hidden="true">/</span>
+        {/if}
         {#if renaming}
           <input
             class="rename"
@@ -193,12 +202,6 @@
         <span class="context-chip"><ContextModeBadge mode={thread.contextMode} testid="thread-context-mode" /></span>
       {/if}
 
-      {#if thread?.parentThreadId}
-        <button type="button" class="chip parent" data-testid="delegation-back-parent" data-preload-thread={thread!.parentThreadId} onclick={() => void store.open(thread!.parentThreadId!)}>
-          <ArrowLeft size={13} strokeWidth={1.75} />
-          <span class="ui-label">{strings.delegation.parent}</span>
-        </button>
-      {/if}
       {#if carrier}
         <!-- The agent this thread was entrusted to: its menu opens the agent or takes the thread back. -->
         <button type="button" class="chip entrusted" title={fill(strings.agents.entrustedTo, { name: carrier.agent.name })} data-testid="thread-entrusted-chip"
@@ -340,7 +343,21 @@
     flex: none;
     padding: 0 10px 0 8px;
   }
-  .parent { gap: 4px; cursor: pointer; }
+  /* The parent's title, muted, then a slash: the subagent's own title reads last, in full weight. */
+  .crumb {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 30%;
+    height: var(--control);
+    padding: 0 6px;
+    margin-left: -6px;
+    color: var(--color-muted-foreground);
+    font-weight: 500;
+  }
+  .crumb > .ui-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .crumb:hover { color: var(--color-foreground); }
+  .crumb-sep { flex: none; margin: 0 -4px; color: var(--color-subtle); }
+  .crumb-sep + .title { margin-left: 0; }
   .incognito { gap: 4px; flex: none; }
   .context-chip { display: contents; }
 
@@ -388,5 +405,8 @@
     .title-menu :global(.trigger) { min-width: 0; max-width: 100%; min-height: var(--touch-target); font-weight: 600; color: var(--color-foreground); }
     .title-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .title-menu :global(.trigger svg) { flex: none; color: var(--color-muted-foreground); }
+    .crumb { min-height: var(--touch-target); }
+    .crumb-sep { margin: 0; }
+    .crumb-sep ~ .title-menu { margin-left: 0; }
   }
 </style>

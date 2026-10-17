@@ -29,7 +29,7 @@
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
   import { TimelineRows, rowEstimate, rowIndexOf, seam, type TimelineRow } from '../lib/timeline-rows';
-  import { GapRows, NO_GAPS, RangeAsk, gapHeight, loadKeepingReader, wantedRange } from '../lib/history-gaps';
+  import { GapRows, NO_GAPS, READ_AHEAD, RangeAsk, gapHeight, loadKeepingReader, wantedRange } from '../lib/history-gaps';
   import TimelineGap from './TimelineGap.svelte';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
@@ -511,7 +511,8 @@
         rememberAnchor();
         const anchor = anchors.current;
         onMeasured(batch);
-        void tick().then(() => restoreAnchor(anchor));
+        // A row growing below moves no scroll position: the gap a later notch down is measured against grows with it.
+        void tick().then(() => { restoreAnchor(anchor); if (box.scrollTop === scrollTop) scrolledGap = box.scrollHeight - box.scrollTop - box.clientHeight; });
       });
     });
     boxes = observer;
@@ -527,13 +528,15 @@
 
   function atBottom(box: HTMLDivElement): boolean { return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
 
-  let scrolledHeight = 0;
+  let scrolledHeight = 0, scrolledGap = 0;
   function onscroll() {
     const box = viewport;
     if (!box) return;
     const height = box.scrollHeight;
     const resized = height !== scrolledHeight;
     scrolledHeight = height;
+    // The browser keeping the text in place as a row above grows moves the list down, never nearer its bottom.
+    const distance = height - box.scrollTop - box.clientHeight, closer = distance < scrolledGap - 1; scrolledGap = distance;
     // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
     if (hold.held && box.scrollTop < scrollTop - 1) leftBottom = true;
     const moved = edge.moved(box);
@@ -544,15 +547,15 @@
     if (navigationTarget || promptTarget) return;
     // Read the anchor after the render, before another navigation can restore it.
     void tick().then(rememberAnchor);
-    const distance = height - box.scrollTop - box.clientHeight;
     if (glide.active) {
       if (distance > 1) return;
       endGlide(false);
     }
     // A busy phone delivers the touchstart after its scroll: a rise off the bottom is the reader too.
     if (rose && pinned && distance > 1) leftBottom = true;
-    // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom.
-    if (descended && atBottom(box)) leftBottom = false;
+    // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom. Moved down
+    // as far from it, by a row growing above after a small notch up, the list took it back and bounced each notch.
+    if (descended && closer && atBottom(box)) leftBottom = false;
     // A card shrinking can clamp scrollTop before new output grows the list again.
     pinned = !cutBelow && !leftBottom && (atBottom(box) || (pinned && resized && !hold.held));
     if (anchors.restoring) pinned = false;
@@ -590,9 +593,9 @@
 
   /** The page above the window, its height put back into the scroll position (`pullOlder`), on a core that pages by cursor alone. */
   const loadAbove = (box: HTMLElement) => positional ? undefined : pullOlder(store, box, LOAD_AT, rows[0]?.id, head => totals(rows)[Math.max(0, head ? rows.findIndex(row => row.id === head) : rows.length)] ?? 0, () => { scrollTop = box.scrollTop; }, id => anchors.nodes.get(id));
-  // On a core that places pages, the gap within a screen of the view is read where it is looked at (lib/history-gaps.ts).
-  const asked = new RangeAsk();
-  $effect(() => { void [measured, store.loadingRange, rows, viewHeight, pinned, scrollTop]; return asked.soon(() => { if (!gapped.gaps.length || store.loadingRange || glide.active || lifting) return null; const total = totals(rows), reach = Math.max(LOAD_AT, viewHeight), top = pinned ? (total[rows.length] ?? 0) - viewHeight : scrollTop;
+  // On a core that places pages, the gap within a screen of the bottom, or `READ_AHEAD` screens of a reader above it, is read before it shows (lib/history-gaps.ts).
+  const asked = new RangeAsk(); onDestroy(() => asked.stop());
+  $effect(() => { void [measured, store.loadingRange, rows, viewHeight, pinned, scrollTop]; asked.soon(() => { if (!gapped.gaps.length || store.loadingRange || glide.active || lifting) return null; const total = totals(rows), reach = Math.max(LOAD_AT, viewHeight * (pinned ? 1 : READ_AHEAD)), top = pinned ? (total[rows.length] ?? 0) - viewHeight : scrollTop;
     return { top, range: wantedRange(total, gapped.gaps, top - reach, top + viewHeight + reach, MESSAGE_PAGE) }; }, (from, limit) =>
       // A page landing above the reader can weigh more than its gap: the row at the top of the view stays where it was.
       loadKeepingReader(landing => store.loadRange(from, limit, landing), () => pinned ? undefined : viewport, tick, top => { scrollTop = top; })); });

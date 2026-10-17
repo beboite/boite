@@ -27,7 +27,7 @@ export function gatewayCommands(executable: string): string[] {
 
 /** A gateway the fake runs, as the core reports it once it answered `/health`. */
 export function runningGateway(version: string | null, pid: number, startedAt: number): NonNullable<PluginState['gateway']> {
-  return { enabled: true, status: 'running', port: 8787, version, pid, exitCode: null, error: null, startedAt, dataDir: `${DATA_DIR}\\douane` };
+  return { enabled: true, autostart: true, status: 'running', port: 8787, version, pid, exitCode: null, error: null, startedAt, dataDir: `${DATA_DIR}\\douane` };
 }
 
 /** What the fake update sources publish: a check finds these when they differ from what is installed. */
@@ -54,7 +54,7 @@ export function fakePlugins(): PluginState[] {
       homepage: 'https://github.com/beboite/bots', version: '0.1.9', availableVersion: '0.1.9', status: 'installed', source: null,
       artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.9/bots-x86_64-pc-windows-msvc.exe', sha256: 'b21ad5a3d248f8653808944021e4b84293eb0653abb1b65a76a265aaa3de5820' },
       commands: appCommands('bots', 'bots'), pools: [],
-      app: { enabled: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') },
+      app: { enabled: true, autostart: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') },
       updates: {
         source: { url: 'https://github.com/beboite/bots', ref: 'main' }, checking: false,
         checkedAt: Date.parse('2026-10-10T08:01:00Z'), nextCheckAt: Date.parse('2026-10-10T14:01:00Z'),

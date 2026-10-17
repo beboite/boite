@@ -17,7 +17,12 @@ import { GatewayQuotas } from './subscription-proxy-quotas.ts';
 
 export { claudeUsageAgent, codexQuotaWindows } from './quota-details.ts';
 
-const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity', label: 'Antigravity CLI', isolationDir: null, status: 'unknown', identity: null, createdAt: 0 };
+/**
+ * The agy login's limits, read through the `antigravity-cli` provider's own
+ * program. It belongs to that provider: turning the managed Antigravity server
+ * off must not hide it, and it is read by default once agy is found.
+ */
+const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity-cli', label: 'Antigravity CLI', isolationDir: null, status: 'unknown', identity: null, createdAt: 0 };
 
 const CACHE_MS = 60_000;
 const RETRY_MS = 300_000;
@@ -212,8 +217,12 @@ export class QuotaStore {
     const provider = this.core.providers.get(account.providerId);
     const proxied = provider && activeSubscriptionProxy(this.core, provider);
     // A provider turned off is never read: its accounts stand as they would with no reader.
-    const supported = !proxied && this.core.providers.summary(account.providerId)?.enabled !== false && (this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode', OPENCODE_V2].includes(account.providerId) || account.id === ANTIGRAVITY_QUOTA_ID || readsAntigravitySignIn(provider));
-    const enabled = account.id === ANTIGRAVITY_QUOTA_ID ? preferences[account.id] === true : preferences[account.id] !== false;
+    const summary = this.core.providers.summary(account.providerId);
+    const cli = account.id === ANTIGRAVITY_QUOTA_ID;
+    const supported = !proxied && summary?.enabled !== false && (this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode', OPENCODE_V2].includes(account.providerId) || cli || readsAntigravitySignIn(provider));
+    // The CLI source exists on every machine: with no choice saved, it is read only where agy was found.
+    const stored = preferences[account.id];
+    const enabled = typeof stored === 'boolean' ? stored : cli ? summary?.available === true : true;
     return { accountId: account.id, providerId: account.providerId, providerName: isOpenCode(account.providerId) ? 'OpenCode Go' : this.core.providers.get(account.providerId)?.name ?? account.providerId,
       label: account.label, enabled, status: !supported ? 'unsupported' : !enabled ? 'disabled' : 'unavailable', windows: [], checkedAt: null, error: null };
   }

@@ -257,7 +257,7 @@ export const fr: Translation = {
     contexts: 'Contextes de conversation', memories: 'Souvenirs', toEveryone: 'Tout le monde',
     missionMembers: 'Agents de cette mission', dangerZone: 'Arrêter le moteur', dangerHint: 'Arrête tous les agents de ce moteur et déconnecte ses clients.',
     stopEngine: 'Arrêter ce moteur', stopEngineBody: 'Arrête les travaux et déconnecte les clients. Les exécutions commencées demanderont une vérification avant reprise. Rouvrez Boite sur la machine hôte pour redémarrer le moteur.',
-    createAgent: 'Créer un agent', noAgents: 'Aucun agent pour l’instant', more: 'Plus', noMatch: 'Aucun résultat',
+    createAgent: 'Créer un agent', noAgents: 'Aucun agent pour l’instant', noAgentsOn: 'Aucun agent sur {machine} pour l’instant', more: 'Plus', noMatch: 'Aucun résultat',
     noMessagesYet: 'Aucun message pour l’instant', noMissions: 'Aucune mission pour l’instant', previewFrom: '{name} : {text}', unread: '{count} non lus',
     backToChat: 'Retour à la discussion', backTo: 'Retour à {name}', editRoles: 'Modifier les rôles', startChat: 'Démarrer la discussion',
     asks: '{name} vous demande',
@@ -1221,6 +1221,13 @@ export const fr: Translation = {
     defaultLong: 'Modifie et lance des commandes dans ce dossier sans demander, demande pour aller au-delà'
   },
 
+  permissionModeAgy: {
+    default: 'Réglages agy',
+    defaultLong: 'Suit le réglage de permissions d\'agy et refuse ce qu\'il demanderait',
+    acceptEditsLong: 'Modifie les fichiers sans demander, refuse les commandes qui demandent une autorisation',
+    draft: 'avec les réglages de permissions d\'agy'
+  },
+
   thread: {
     recoveryTitle: 'Message conservé avant le redémarrage',
     recoveryBody: "Ce message n'a pas été envoyé à l'agent. Reprenez-le avec son modèle et son compte enregistrés, ou retirez-le de la file.",
@@ -1523,8 +1530,6 @@ export const fr: Translation = {
     parent: 'Fil principal',
     activeOne: '1 sous-agent actif',
     activeMany: '{count} sous-agents actifs',
-    loadingTranscript: 'Chargement de la conversation sélectionnée',
-    noTranscript: "Ce sous-agent n'a encore rien écrit.",
     configure: 'Réglages',
     enabled: 'Autoriser cette conversation à lancer des sous-agents',
     enabledHint: "L'agent peut confier des parties d'une tâche à d'autres agents. Chacun travaille dans sa propre conversation et rend compte ici.",
@@ -1539,9 +1544,7 @@ export const fr: Translation = {
     removeProfile: 'Retirer ce modèle',
     pause: 'Mettre les sous-agents en pause',
     resume: 'Reprendre les sous-agents',
-    openThread: 'Ouvrir la conversation',
     backToTeam: 'Retour aux sous-agents',
-    stop: 'Arrêter',
     stopAll: 'Tout arrêter',
     send: 'Envoyer au sous-agent',
     startedOne: '1 sous-agent lancé',
@@ -1583,7 +1586,6 @@ export const fr: Translation = {
     result: 'Résultat',
     output: 'Sortie',
     items: 'Exécutions',
-    conversation: 'Conversation',
     openThread: 'Ouvrir la conversation',
     back: 'Retour au graphe',
     close: 'Fermer le détail',
@@ -2598,6 +2600,7 @@ export const fr: Translation = {
     appStart: 'Lancer',
     appStop: 'Arrêter',
     appRestart: 'Redémarrer',
+    startWithBoite: 'Démarrer avec Boite',
     gateway: 'Passerelle',
     gatewayRunning: '{version} sur 127.0.0.1:{port}',
     gatewayStarting: 'Démarrage',

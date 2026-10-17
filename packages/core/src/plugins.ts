@@ -50,6 +50,8 @@ const DOWNLOAD_MAX_BYTES = 64 * 1024 * 1024;
 /** A download that receives nothing for this long stops; one still receiving goes on, up to the ceiling. */
 const DOWNLOAD_IDLE_MS = 30_000;
 const DOWNLOAD_CEILING_MS = 30 * 60_000;
+/** How long an install waits on its update source before taking the newest version it already knows. */
+const INSTALL_SOURCE_WAIT_MS = 15_000;
 const RUN_MAX_BYTES = 4 * 1024 * 1024;
 const RUN_TIMEOUT_MS = 60_000;
 const PREVIEW_TTL_MS = 10 * 60_000;
@@ -387,8 +389,19 @@ export class PluginStore {
     if (this.jobs.has(id)) return this.state(id);
     const recommended = this.recommendedManifest(id);
     if (recommended !== null) {
-      const disk = this.onDisk(id);
-      return this.start(id, this.recommendedTarget(id, disk.kind === 'installed' ? disk.installed : null) ?? recommended, null, 'recommended');
+      const target = () => {
+        const disk = this.onDisk(id);
+        return this.recommendedTarget(id, disk.kind === 'installed' ? disk.installed : null) ?? recommended;
+      };
+      // The pinned entry can be releases behind its source, and the periodic
+      // checks read only installed plugins: the source is read first, so a
+      // first install brings the latest release rather than the pinned one.
+      const latest = this.updateSources[id] === undefined ? undefined : async (signal: AbortSignal) => {
+        const aborted = new Promise<void>((done) => signal.addEventListener('abort', () => done(), { once: true }));
+        await Promise.race([this.updates.check([id]), Bun.sleep(INSTALL_SOURCE_WAIT_MS), aborted]);
+        return target();
+      };
+      return this.start(id, target(), null, 'recommended', latest);
     }
     const pending = this.pending.get(id);
     if (pending !== undefined) return this.start(id, pending.manifest, pending.source, 'url');
@@ -398,7 +411,8 @@ export class PluginStore {
     throw refused(`${id} has no manifest to reinstall from. Remove it, then add it again from its URL.`);
   }
 
-  private start(id: string, manifest: PluginManifest, source: PluginSource | null, origin: Origin): PluginState {
+  /** `latest`, when given, may swap `manifest` for a newer one before the download starts. */
+  private start(id: string, manifest: PluginManifest, source: PluginSource | null, origin: Origin, latest?: (signal: AbortSignal) => Promise<PluginManifest>): PluginState {
     if (this.closing) throw refused('Boite is shutting down.');
     if (this.busy(id)) throw refused('Wait for the current plugin operation before installing.');
     const artifact = artifactFor(manifest);
@@ -409,7 +423,12 @@ export class PluginStore {
     const controller = new AbortController();
     const job: Job = { controller, progress: 0, promise: Promise.resolve(), relaunch: false };
     this.jobs.set(id, job);
-    job.promise = this.download(id, manifest, source, origin, artifact, job)
+    job.promise = (latest === undefined ? Promise.resolve(manifest) : latest(controller.signal))
+      .then((target) => {
+        const found = target === manifest ? artifact : artifactFor(target);
+        if (found === null) throw new Error(`${id} ${target.version} has no binary for ${platformKey()}`);
+        return this.download(id, target, source, origin, found, job);
+      })
       .then(() => { this.pending.delete(id); job.relaunch = true; })
       .catch(async (error: unknown) => {
         if (!controller.signal.aborted) this.failures.set(id, messageOf(error));
@@ -758,22 +777,22 @@ export class PluginStore {
     }
   }
 
-  /** Starts the plugin's desktop app if it provides one, is installed and enabled. */
-  private resumeApp(id: string): void {
+  /** Starts the plugin's desktop app and gateway it provides: at core start those that start with it, after an install those left enabled. */
+  private resumeApp(id: string, atStart = false): void {
     if (this.closing) return;
     try {
       const disk = this.onDisk(id);
-      if (disk.kind === 'installed' && providesApp(disk.installed.manifest)) this.apps.resume(id, this.directory(id));
-      if (disk.kind === 'installed' && providesGateway(disk.installed.manifest)) this.gateways.resume(id, this.directory(id));
+      if (disk.kind === 'installed' && providesApp(disk.installed.manifest)) this.apps.resume(id, this.directory(id), atStart);
+      if (disk.kind === 'installed' && providesGateway(disk.installed.manifest)) this.gateways.resume(id, this.directory(id), atStart);
     } catch (error) {
       this.core.log('warn', `plugin ${id} app did not start: ${messageOf(error)}`);
     }
   }
 
   /**
-   * At core start: every installed desktop app the owner left enabled. One
-   * plugin the store cannot read is logged by `resumeApp` and skipped; the
-   * others still start.
+   * At core start: every installed desktop app and gateway that starts with
+   * the core. One plugin the store cannot read is logged by `resumeApp` and
+   * skipped; the others still start.
    */
   startApps(): void {
     let ids: string[];
@@ -783,7 +802,20 @@ export class PluginStore {
       this.core.log('warn', `desktop apps did not start: ${messageOf(error)}`);
       return;
     }
-    for (const id of ids) if (!this.jobs.has(id)) this.resumeApp(id);
+    for (const id of ids) if (!this.jobs.has(id)) this.resumeApp(id, true);
+  }
+
+  /** `plugins.autostart`: whether the plugin's desktop app and gateway start when the core starts. */
+  async autostart(params: RpcParams<'plugins.autostart'>): Promise<PluginState> {
+    const id = this.known(params.id);
+    if (typeof params.autostart !== 'boolean') throw invalidParams('autostart must be true or false', { field: 'autostart', expected: 'true or false' });
+    const installed = this.usable(id);
+    const app = providesApp(installed.manifest);
+    const gateway = providesGateway(installed.manifest);
+    if (!app && !gateway) throw refused(`${id} provides no desktop app or gateway to start with Boite.`);
+    if (app) await this.apps.setAutostart(id, this.directory(id), params.autostart);
+    if (gateway) await this.gateways.setAutostart(id, this.directory(id), params.autostart);
+    return this.state(id);
   }
 
   /** `plugins.app`: start, stop or restart a desktop-app plugin. */
