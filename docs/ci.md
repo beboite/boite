@@ -150,20 +150,21 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 484,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,712,000 |
+| UI entry chunk | 485,800 |
+| UI files, excluding `.br` and `.gz` copies | 4,727,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,391,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-18, the lean boot on PR #566's head `1c168fd6` measures 483,801
-entry bytes and 4,707,299 UI bytes after a fresh `bun run build:ui` on
-Windows, against 594,958 and 5,026,229 for `1c168fd6` built the same way:
+On 2026-10-18, the lean boot on `origin/main` at `b611c01f` measures 484,682
+entry bytes and 4,723,056 UI bytes after a fresh `bun run build:ui` on
+Windows, against 595,295 and 5,036,764 for `b611c01f` built the same way:
 English left the entry for a chunk of its own, nine components the first frame
 does not draw load lazily, the fake client resolves to an empty module, Geist
 ships as latin, latin-ext and rest subsets and the onboarding clip is
-re-encoded at 15 fps. The limits fall to 484,500 and 4,712,000; the core
+re-encoded at 15 fps; a notice and a retry cover a catalogue or a lazy part
+that fails to load. The limits fall to 485,800 and 4,727,000; the core
 limits stay. [Performance](performance.md#static-files) has the boot files.
 
 On 2026-10-17, PR #566 merged with `origin/main` at `b6ae659a`, which brings

@@ -648,30 +648,58 @@ files at a time. Geist and Geist Mono ship as latin, latin-ext and rest
 subsets with their weight axis; the mono latin cut carries the arrows and box
 drawing a terminal draws.
 
-On 2026-10-18 on Windows, `bun run build:ui` of `1c168fd6` and of this
-change, the files `index.html` names plus the device's catalogue, gzip at
-level 9 and brotli at 11:
+A part whose chunk has not landed says it is loading, one whose chunk failed
+offers a retry, and every failed part asks again when the browser is back
+online (`components/Deferred.svelte`). Chromium keeps a failed `import()` for
+the life of the page, so a retry that fails at once loads a fresh page when
+the core answers (`lib/retry-load.ts`, `tests/e2e/chunk-retry.test.ts`). A change waiting for permission cannot
+be allowed before its diff shows. When no catalogue loads at all, the page
+draws a notice with a retry in place of the app (`lib/boot-failure.ts`), and
+the service worker precaches the catalogue of the language the page last
+spoke, so an installed phone still opens offline.
+
+On 2026-10-18 on Windows, `bun run build:ui` of `b611c01f` and of this
+change. The static rows count what `index.html` names plus the device's
+catalogue, gzip at level 9 and brotli at 11:
 
 | Measure | Before | After |
 | --- | ---: | ---: |
-| Entry chunk | 594,958 | 483,801 |
-| UI files, excluding `.br` and `.gz` | 5,026,229 | 4,707,299 |
-| Boot files, English device | 65 | 6 |
-| Boot raw, English | 1,587,262 | 1,367,851 |
-| Boot gzip, English | 480,577 | 401,218 |
-| Boot brotli, English | 403,084 | 332,900 |
-| Boot files, French device | 66 | 6 |
-| Boot raw, French | 1,737,518 | 1,388,003 |
-| Boot gzip, French | 530,399 | 406,698 |
-| Boot brotli, French | 445,627 | 337,950 |
+| Entry chunk | 595,295 | 484,682 |
+| UI files, excluding `.br` and `.gz` | 5,036,764 | 4,723,056 |
+| Files `index.html` names, English device | 65 | 6 |
+| Their raw bytes, English | 1,597,482 | 1,381,747 |
+| Their gzip bytes, English | 482,282 | 405,875 |
+| Their brotli bytes, English | 405,523 | 336,131 |
+| Files `index.html` names, French device | 66 | 6 |
+| Their raw bytes, French | 1,748,228 | 1,401,950 |
+| Their gzip bytes, French | 532,196 | 411,337 |
+| Their brotli bytes, French | 448,185 | 341,227 |
 
-`bun run bench/bandwidth.ts --rtt 150 --only page --locale en|fr`, three
-runs each on the same day and machine, medians: a cold page load (html,
-scripts, styles, the default fonts, manifest and worker) went from 576,490
-bytes in 2,032 ms to 460,785 bytes in 493 ms on an English device, and from
-619,254 bytes in 2,051 ms to 465,835 bytes in 469 ms on a French one. A warm
-reload stays at 306 to 310 ms. The idle prefetch grows from 555,493 to 600,268
-bytes, what the boot no longer carries.
+The page fetches more than that before it is usable. The cold boot to
+`.app.ready` was measured on the same day with a real core (`tests/e2e/lib/core.ts`)
+serving each build and a fresh headless Chromium profile per run, the request
+graph read from the page's Resource Timing up to the frame where `.app.ready`
+appears: five runs per row, medians, transferred bytes as the browser counts
+them (headers included). The slow link is 150 ms of latency, 1.6 Mbit/s down
+and 750 kbit/s up (`Network.emulateNetworkConditions`).
+
+| Cold boot to ready, slow link | Before | After |
+| --- | ---: | ---: |
+| English: time | 3,963 ms | 3,006 ms |
+| English: requests | 72 | 19 |
+| English: bytes | 586,774 | 480,634 |
+| French: time | 4,171 ms | 3,028 ms |
+| French: requests | 73 | 19 |
+| French: bytes | 629,736 | 485,730 |
+
+Of the 19 requests after the change, 9 are scripts: the entry, the runtime,
+the `boot` chunk, the catalogue, the phone navigation the boot screen waits
+for outside the shell with a module it shares, the dictation button with its
+recorder, and the interaction experiments; the rest are styles, the two
+fonts, the manifest and the icons. The slow link's runs vary by under 260 ms.
+Without throttling both builds reach ready in 148 to 547 ms on this machine,
+a spread wider than any difference between them, and the idle prefetch starts
+before the ready frame and adds four requests.
 
 The service worker still asks the core for the app shell first, but waits
 2.5 s at most before serving the cached one; the late answer is stored for the
