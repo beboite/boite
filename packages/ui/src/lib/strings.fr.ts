@@ -2598,6 +2598,7 @@ export const fr: Translation = {
     appStart: 'Lancer',
     appStop: 'Arrêter',
     appRestart: 'Redémarrer',
+    startWithBoite: 'Démarrer avec Boite',
     gateway: 'Passerelle',
     gatewayRunning: '{version} sur 127.0.0.1:{port}',
     gatewayStarting: 'Démarrage',
