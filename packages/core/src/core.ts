@@ -513,6 +513,7 @@ export class Core {
     this.threads.titles.close();
     this.threads.autoCompact.close();
     this.threads.limitResumes.close();
+    await this.threads.codeCheckpoints.close();
     await this.agentRuntime.close();
     this.workforce.close();
     this.#stopping = true;
