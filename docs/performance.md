@@ -83,6 +83,23 @@ and peak core RSS over the bench from 1,023 MiB to 370 MiB. The first start
 after the upgrade migrates once (7.9 s there), and the move of older inline
 values held the event loop for up to 2.1 s on its largest row.
 
+Schema 36 compresses `part_blobs` values with zstd, moves tool outputs of
+4 KiB and more out of the message row, stores each process command line once
+in `command_lines`, cuts every thread past 2,500 trace rows back to what it
+keeps, and stops writing `message.part` and `artifact.published` events
+([architecture](architecture.md)). Measured on 2026-10-17 with
+`bun bench/journal-compact.ts --journal <copy> --runs 3` on a copy of a
+4,176 MiB schema 35 journal ([results](../bench/results/2026-10-17-journal-compact.md)):
+after the background passes, `VACUUM INTO` writes 2,143 MiB. `processes` went
+from 1,149 to 423 MiB, `events` from 748 to 208 MiB, `part_blobs` from 1,864
+to 1,452 MiB and `messages` from 393 to 238 MiB. The core does not vacuum: the
+freed pages are reused by later writes. The passes did 207 s of work in
+bounded ticks 250 ms apart, the longest 2.8 s on a machine at 73 % CPU from
+other work. A page with tool previews reads a compressed output's preview
+column and decompresses nothing; a full read of a thread decompresses its
+values, which made it slower on the two smaller of the five largest threads
+(79 to 260 ms on 41 MiB).
+
 A fresh session (model switch, resume after an update) carries the opening
 12,000 and the latest 64,000 characters of the thread. `continuationInput`
 reads only the stored parts of the rest, without their `part_blobs` values,

@@ -91,13 +91,16 @@ statement keeps its last bound values alive. An append to
 `events(id, thread_id, ts, type, version, payload)` and its projection changes
 commit in one transaction. Events have versions but are not replayed to rebuild
 the tables. Retention runs one minute after startup and daily, deleting events
-older than 30 days in batches of 5,000 while retaining the latest agents revision.
+older than 30 days in batches of 5,000 while retaining the latest agents revision,
+then runs `PRAGMA optimize`. Each open runs `PRAGMA optimize=0x10002`.
 Project removal explicitly clears thread-keyed tables; foreign keys are disabled.
 A newer journal schema is refused before writing, with the file and both versions.
 
-`message.started`, `message.part` and `artifact.published` events keep only the
-first 1,024 characters of each string: the message row holds the content, and
-nothing reads those events back. The types that are read back (`question.asked`,
+`message.part` and `artifact.published` events are not written: the message row
+holds the content and nothing reads them back. Those already stored, from
+before schema 36, are kept 3 days; retention walks them forward from the
+`events:trail-pruned-through` setting. `message.started` keeps only the first
+1,024 characters of each string. The types that are read back (`question.asked`,
 `question.answered`, `thread.memory`) keep their whole payload and have partial
 indexes, so startup and a thread open no longer scan the events table.
 
@@ -106,17 +109,34 @@ The blur a deferred picture is drawn with before its bytes arrive is a
 timeline draws is a `media_displays` row, both with no event: they are made
 again from the message when missing ([performance](performance.md)).
 
-A tool output, tool input text, file or image of 32 KiB or more is stored in
-`part_blobs`, one row per value, and its part in the message row names it under
-`$blob`. Journal reads put the values back. A page asked with `compactTools`
-reads only the first 1,024 characters of a finished tool's output, and sends
-them only for a call that failed or was refused; its resume proof hashes a
-digest of the whole value. A streaming message stores only the
+A tool output of 4 KiB or more, and a tool input text, file or image of 32 KiB
+or more, is stored in `part_blobs`, one row per value, and its part in the
+message row names it under `$blob`. A value is stored as zstd (`codec` 1) when
+that saves at least 5 %, else as text (`codec` 0); `chars` holds its length in
+characters, and a compressed tool output keeps its first 1,024 characters as
+text in `preview`. Journal reads put the values back. A page asked with
+`compactTools` reads whole a finished tool's output of up to 16 KiB; past that
+it reads only `preview` (or the first 1,024 characters of a text value), and
+sends them only for a call that failed or was refused; its resume proof hashes
+a digest of the whole value. A streaming message stores only the
 parts that changed since its last committed write, and a value whose digest
 matches the stored one is not written again. Rows written before schema
-31 kept their values inline; three minutes after startup the core moves them
-one message per tick, pauses while a message streams, and records the last
-rowid done in the `part-blobs:moved-through` setting.
+31 kept their values inline, and before schema 36 kept tool outputs under
+32 KiB inline and every `part_blobs` value as text. Three minutes after startup
+the core brings them to the current shape, one bounded batch per tick 250 ms
+apart (`journal/retention.ts`): it moves values one message per tick, then
+outputs and recodes `part_blobs` rows about 2 MiB per tick, pauses while a
+message streams, and records where each pass stopped in a setting
+(`part-blobs:moved-through`, `part-blobs:outputs-moved-through`,
+`part-blobs:recoded-through`). A finished pass is never scanned again. The
+core never runs `VACUUM`: the pages these passes free are reused by later
+writes, and the file shrinks only through a manual `VACUUM`.
+
+A process trace row names its command line through `command_lines`, which holds
+each distinct line once, found by an xxHash64 digest. Schema 36 moves the lines
+of older rows there 2,000 rows per tick. The same background passes then cut
+every thread's trace to what it keeps, one thread per tick and again daily, and
+a daily pass deletes the lines no row names any more ([trace](trace.md)).
 
 `native_agent_messages` names the messages holding an Agent, Task or subagent
 call, or a `nativeAgents` list, so `delegation.get` parses those messages only.

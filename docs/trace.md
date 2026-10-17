@@ -30,11 +30,13 @@ copying it into the operational event journal. A thread keeps its newest 2,000
 rows, every live row and the rows a process agent card reads (the agent CLI and
 its parent, `native-agents.ts`). Older rows are deleted when a finished turn's
 sweep runs, when the registry forgets an idle thread, and every 500 exits of a
-thread that never goes idle (`journal/processes.ts`). The rest stays until
+thread that never goes idle (`journal/processes.ts`). The background passes of
+the journal also cut, one thread per tick and again daily, every thread holding
+more than 500 rows past what it keeps, idle or not, so a thread that never runs
+again does not keep its whole trace. A row names its command line through
+`command_lines`, which holds each distinct line once. The rest stays until
 thread/project removal. Synthetic operations without a real thread lose their
 rows when the registry forgets them, 30 seconds after the last process exits.
-Existing rows from older cores are pruned the first time their thread runs a
-process again.
 
 The shell has a separate native boundary under
 `apps/shell/src-tauri/src/platform/` for core ownership, launch flags, data paths,
