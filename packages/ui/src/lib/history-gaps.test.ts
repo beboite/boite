@@ -63,8 +63,9 @@ describe('history gaps', () => {
     ask.soon(() => view, load);
     await frame();
     expect(load).toHaveBeenCalledTimes(2);
-    // Cancelled before its frame, by the effect running again.
-    ask.soon(() => ({ top: 80, range: { from: 0, limit: 120 } }), load)();
+    // Dropped before its frame, with the list.
+    ask.soon(() => ({ top: 80, range: { from: 0, limit: 120 } }), load);
+    ask.stop();
     await frame();
     expect(load).toHaveBeenCalledTimes(2);
   });

@@ -150,12 +150,18 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 594,800 |
+| UI entry chunk | 595,200 |
 | UI files, excluding `.br` and `.gz` copies | 5,028,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,379,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-17, Windows CI measured a 593,177-byte UI entry chunk for
+`origin/main` at `7c7327ab`, already over its 593,000 limit after PRs #558 to
+#560. The PR watch state (PR #564) adds 236 bytes there, 593,413 in total, and
+201 bytes in a fresh Linux `bun run build:ui` (538,541 to 538,742). The entry
+limit becomes 593,500; the other limits stay unchanged.
 
 On 2026-10-17, pausing the UI's loops at rest and stepping them on a 60 Hz
 grid measures 594,479 entry bytes and 5,020,875 UI bytes after a fresh `bun run
@@ -169,6 +175,12 @@ reading cache's bound measures 594,696 entry bytes and 5,022,260 UI bytes after
 a fresh `bun run build:ui` on Windows, against 594,479 and 5,020,875 before it.
 `store/live-end.ts` and the list's pruning of the heights it measured add 217
 entry bytes; the entry limit rises to 594,800 and the UI limit stays.
+
+On 2026-10-17, PR #566 merged with `origin/main` at `acb17c0a`, which brings
+the PR watch state (PR #564) and the unread history reading (PR #565),
+measures 595,104 entry bytes, 5,023,979 UI bytes and 4,378,787 core JavaScript
+bytes after fresh `bun run build:ui` and `bun run build:core` on Windows. The
+entry limit rises to 595,200; the other limits stay.
 
 On 2026-10-17, the MCP servers started on demand, the frozen idle browser tabs
 and the batched process records of PR #566 measure 4,378,383 core JavaScript
