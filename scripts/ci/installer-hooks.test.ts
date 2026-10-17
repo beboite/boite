@@ -9,7 +9,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { installerPrerequisites } from './installer-prerequisites.ts';
 
 const ROOT = resolve(import.meta.dir, '../..');
@@ -164,6 +164,11 @@ describe.skipIf(!ready)('installer hooks', () => {
       rmSync(join(data, 'boite2', 'core.json'), { force: true });
       copyFileSync(process.execPath, join(install, 'boite-core.exe'));
       copyFileSync(process.execPath, join(install, shellName));
+      // A previous build's hashed chunks, and files of the user's beside them.
+      for (const [path, text] of [...STALE, ...KEPT]) {
+        mkdirSync(dirname(join(install, path)), { recursive: true });
+        writeFileSync(join(install, path), text);
+      }
       const restarted = join(install, 'restarted.txt');
       const core = Bun.spawn([join(install, 'boite-core.exe'), join(base, 'fake-core.ts'), '--data-dir', join(data, 'boite2')], {
         stdout: 'ignore', stderr: 'ignore', windowsHide: true,
@@ -181,6 +186,14 @@ describe.skipIf(!ready)('installer hooks', () => {
       started.push(shell.pid);
       await Bun.sleep(500);
       return { install, core, shell, restarted };
+    }
+    // Whether the bundle directories are still there, and the user's files untouched.
+    function bundles(install: string) {
+      return {
+        core: existsSync(join(install, 'core')),
+        ui: existsSync(join(install, 'ui')),
+        kept: KEPT.every(([path, text]) => existsSync(join(install, path)) && readFileSync(join(install, path), 'utf8') === text),
+      };
     }
     function restartedPids(file: string): number[] {
       if (!existsSync(file)) return [];
@@ -207,6 +220,7 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(restartedPids(installed.restarted)).toEqual([]);
     expect(existsSync(join(installed.install, 'write-failed'))).toBe(false);
     expect(readFileSync(join(installed.install, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
+    expect(bundles(installed.install)).toEqual({ core: false, ui: false, kept: true });
 
     const removed = await running('uninstall');
     expect(await run([join(base, 'uninstall.exe'), '/S', `_?=${removed.install}`])).toBe(0);
@@ -215,6 +229,7 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(await exited(removed.core)).toBe(0);
     expect(restartedPids(removed.restarted)).toEqual([]);
     expect(existsSync(join(removed.install, 'boite-core.exe'))).toBe(false);
+    expect(bundles(removed.install)).toEqual({ core: false, ui: false, kept: true });
 
     const busy = await running('busy');
     writeFileSync(join(data, 'boite2', 'busy'), '');
@@ -222,6 +237,8 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(await run([join(base, 'setup.exe'), '/S', `/D=${busy.install}`])).not.toBe(0);
     expect(busy.core.exitCode).toBeNull();
     expect(Bun.hash(readFileSync(join(busy.install, 'boite-core.exe')))).toBe(before);
+    // Refused before anything was removed: a working core still loads its chunks.
+    expect(bundles(busy.install)).toEqual({ core: true, ui: true, kept: true });
     expect(restartedPids(busy.restarted)).toEqual([]);
 
     // An install made before a rename (Boite Dev's boite-shell.exe): the
@@ -241,6 +258,11 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(other.exitCode).toBeNull();
   }, 180_000);
 });
+
+/** What an earlier build left in the install's two bundle directories. */
+const STALE = [['core/main-0ld0ld0l.js', 'old chunk'], ['ui/assets/index-0ld0ld0l.js', 'old asset'], ['ui/index.html', 'old page']] as const;
+/** Beside them, outside those directories: nothing the hooks may delete. */
+const KEPT = [['notes.txt', 'mine'], ['core-notes/notes.txt', 'mine too'], ['uikit/notes.txt', 'mine as well']] as const;
 
 /** Writes core.json into its --data-dir and leaves on an authorised POST /shutdown. */
 const FAKE_CORE = `

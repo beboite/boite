@@ -151,8 +151,21 @@
   Pop $0
 !macroend
 
+; The core bundle and the UI carry a hash in every file name, and the template
+; only copies files and deletes the ones this build lists: each update used to
+; leave the previous build's chunks beside the new ones, and an uninstall left
+; them all. Only these two directories are emptied, and only once the core of
+; this install has stopped, since it loads chunks from `core` lazily. An empty
+; $INSTDIR would turn the paths into the root of the current drive.
+!macro BOITE_CLEAR_BUNDLES
+  StrCmp $INSTDIR "" +3
+    RMDir /r "$INSTDIR\core"
+    RMDir /r "$INSTDIR\ui"
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro BOITE_STOP_CORE 1
+  !insertmacro BOITE_CLEAR_BUNDLES
 !macroend
 
 ; A login entry the shell registered (src/platform/login.rs) under the
@@ -171,6 +184,10 @@
   ${EndIf}
 !macroend
 
+; Here rather than after the template's deletions, which end with `RMDir
+; "$INSTDIR"`: that only removes an empty directory. A core that would not stop
+; was moved aside above and goes with its install.
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro BOITE_STOP_CORE 0
+  !insertmacro BOITE_CLEAR_BUNDLES
 !macroend
