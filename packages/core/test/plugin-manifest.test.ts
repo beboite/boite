@@ -123,18 +123,18 @@ describe('the recommended list', () => {
     expect(recommendedPlugins().map((manifest) => manifest.id)).toEqual(['bots', 'douane']);
   });
 
-  test('Bots is a desktop app, from its v0.1.9 release assets and digests', () => {
+  test('Bots is a desktop app, from its v0.1.16 release assets and digests', () => {
     const bots = recommendedPlugins().find((manifest) => manifest.id === 'bots')!;
-    expect(bots.version).toBe('0.1.9');
+    expect(bots.version).toBe('0.1.16');
     expect(bots.executable).toBe('bots');
     expect(bots.provides).toEqual({ desktopApp: {} });
     expect(bots.artifacts['win32-x64']).toEqual({
-      url: 'https://github.com/beboite/bots/releases/download/v0.1.9/bots-x86_64-pc-windows-msvc.exe',
-      sha256: 'b21ad5a3d248f8653808944021e4b84293eb0653abb1b65a76a265aaa3de5820',
+      url: 'https://github.com/beboite/bots/releases/download/v0.1.16/bots-x86_64-pc-windows-msvc.exe',
+      sha256: '2d04730442c180197d289e839ce537000b5b50d03ea73f82340e21d11aecab35',
     });
-    expect(bots.artifacts['linux-arm64']?.sha256).toBe('d360f186de4acdd5c10584bc3f973098cc40fdeef637de80a6ceb12b18005dcd');
+    expect(bots.artifacts['linux-arm64']?.sha256).toBe('66b3ed9dd2434eded78aff427d4c85936ef497ca54f0084b5aed766c443d17e9');
     expect(Object.keys(bots.artifacts)).toHaveLength(6);
-    for (const artifact of Object.values(bots.artifacts)) expect(artifact?.url).toMatch(/^https:\/\/github\.com\/beboite\/bots\/releases\/download\/v0\.1\.9\/bots-/);
+    for (const artifact of Object.values(bots.artifacts)) expect(artifact?.url).toMatch(/^https:\/\/github\.com\/beboite\/bots\/releases\/download\/v0\.1\.16\/bots-/);
   });
 
   test('Bots and Douane find their newer releases on their own repositories', () => {

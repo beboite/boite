@@ -48,11 +48,16 @@
     return a.origin === 'url' ? a.id.localeCompare(b.id) : 0;
   }
 
-  /** A URL plugin that comes back not installed is gone: its uninstall or its first install's cancel. */
+  /**
+   * A URL plugin that comes back not installed is gone: its uninstall or its first install's cancel.
+   * A known plugin keeps its place, so a row does not jump under the pointer after Stop or a switch.
+   */
   function put(next: PluginState) {
     const rest = plugins.filter((plugin) => plugin.id !== next.id);
     if (next.version === null) delete pools[next.id];
-    plugins = next.origin === 'url' && next.status === 'not-installed' ? rest : [...rest, next].sort(order);
+    if (next.origin === 'url' && next.status === 'not-installed') plugins = rest;
+    else if (rest.length < plugins.length) plugins = plugins.map((plugin) => plugin.id === next.id ? next : plugin);
+    else plugins = [...rest, next].sort(order);
   }
 
   async function loadPools(id: string, refresh = false) {
@@ -171,13 +176,28 @@
     }
   }
 
+  /** Whether the plugin's desktop app and gateway start with Boite; nothing running changes. */
+  async function setAutostart(plugin: PluginState, autostart: boolean) {
+    const client = store.client;
+    if (!client) return;
+    busy[plugin.id] = true;
+    try {
+      put(await client.call('plugins.autostart', { id: plugin.id, autostart }));
+      delete errors[plugin.id];
+    } catch (cause) {
+      errors[plugin.id] = messageOf(cause);
+    } finally {
+      busy[plugin.id] = false;
+    }
+  }
+
   function gatewayLine(gateway: PluginGatewayState): string {
     switch (gateway.status) {
       case 'running': return fill(t.gatewayRunning, { version: gateway.version ?? '', port: String(gateway.port) }).trim();
       case 'starting': return t.gatewayStarting;
       case 'updating': return t.gatewayUpdating;
       case 'crashed': return t.gatewayCrashed;
-      default: return gateway.enabled ? t.appStopped : t.appOff;
+      default: return gateway.enabled || gateway.autostart ? t.appStopped : t.appOff;
     }
   }
 
@@ -193,7 +213,7 @@
       case 'starting': return t.appStarting;
       case 'crashed': return app.exitCode === null ? t.appCrashedSignal : fill(t.appCrashed, { code: String(app.exitCode) });
       case 'unavailable': return t.appUnavailable;
-      default: return app.enabled ? t.appStopped : t.appOff;
+      default: return app.enabled || app.autostart ? t.appStopped : t.appOff;
     }
   }
 
@@ -265,6 +285,17 @@
       <dt>{t.refusedExpected}</dt><dd>{rejected.expected}</dd>
     </dl>
   </div>
+{/snippet}
+
+{#snippet autostartSwitch(plugin: PluginState, on: boolean | undefined)}
+  <!-- A core older than plugins.autostart sends no `autostart`: nothing to switch there. -->
+  {#if on !== undefined}
+    <label class="autostart">
+      <input type="checkbox" role="switch" checked={on} disabled={busy[plugin.id] === true} data-testid="plugin-autostart" data-plugin={plugin.id}
+        onchange={(event) => { event.currentTarget.checked = on; void setAutostart(plugin, !on); }} />
+      <span class="ui-label">{t.startWithBoite}</span>
+    </label>
+  {/if}
 {/snippet}
 
 {#snippet row(plugin: PluginState)}
@@ -348,6 +379,7 @@
             {/if}
           </div>
         </div>
+        {@render autostartSwitch(plugin, app.autostart)}
         {#if app.error}<p class={app.status === 'crashed' ? 'bad' : 'hint'} data-testid="plugin-app-error">{app.error}</p>{/if}
       </div>
     {/if}
@@ -371,6 +403,7 @@
             {/if}
           </div>
         </div>
+        {#if !plugin.app}{@render autostartSwitch(plugin, gateway.autostart)}{/if}
         {#if gateway.error}<p class={gateway.status === 'crashed' ? 'bad' : 'hint'} data-testid="plugin-gateway-error">{gateway.error}</p>{/if}
         {#if gateway.status === 'running' && (dashboard || plugin.id === 'douane')}
           <div class="act gateway-act">
@@ -567,6 +600,7 @@
   /* The desktop app's own strip: one line of what it is doing, and the buttons that change it. */
   .desktop-app { display: grid; gap: 6px; padding: 6px 6px 6px 12px; border-radius: var(--radius-md); background: var(--color-surface-2); }
   .app-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .autostart { --switch-width: 32px; --switch-height: 20px; display: flex; align-items: center; gap: 8px; width: fit-content; font-size: var(--text-sm); color: var(--color-muted-foreground); cursor: pointer; }
   .app-name { color: var(--color-foreground); font-weight: 500; }
   .pools-head .section-label { display: flex; align-items: center; gap: 6px; }
   .pools-head, .pool-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

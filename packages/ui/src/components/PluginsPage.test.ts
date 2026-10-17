@@ -78,7 +78,8 @@ test('a running desktop app can be stopped, then started again, its state follow
 
   appButton('bots', 'stop')!.click();
   await vi.waitFor(() => expect(app('bots')?.getAttribute('data-app-status')).toBe('stopped'));
-  expect(app('bots')?.textContent).toContain('Stopped · starts again only when you start it');
+  // It still starts with Boite, so the line says no more than stopped.
+  expect(app('bots')?.textContent).not.toContain('starts again only when you start it');
   expect(appButton('bots', 'stop')).toBeNull();
 
   appButton('bots', 'start')!.click();
@@ -86,6 +87,33 @@ test('a running desktop app can be stopped, then started again, its state follow
   appButton('bots', 'restart')!.click();
   await vi.waitFor(() => expect(appButton('bots', 'restart')?.disabled).toBe(false));
   expect(app('bots')?.getAttribute('data-app-status')).toBe('running');
+});
+
+const autostart = (id: string) => row(id)?.querySelector<HTMLInputElement>('[data-testid="plugin-autostart"]') ?? null;
+
+test('Start with Boite switches the app and the gateway apart from what runs now, and an older core shows no switch', async () => {
+  await open();
+  expect(autostart('bots')?.checked).toBe(true);
+  expect(autostart('bots')?.closest('label')?.textContent).toContain('Start with Boite');
+  autostart('bots')!.click();
+  await vi.waitFor(() => expect(autostart('bots')?.checked).toBe(false));
+  // The row stays where it was under the pointer.
+  expect([...document.querySelectorAll('[data-testid="plugins-installed"] [data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin')).slice(0, 2)).toEqual(['bots', 'douane']);
+  // What runs now is left alone.
+  expect(app('bots')?.getAttribute('data-app-status')).toBe('running');
+  appButton('bots', 'stop')!.click();
+  await vi.waitFor(() => expect(app('bots')?.textContent).toContain('Stopped · starts again only when you start it'));
+
+  // Douane has the same switch on its gateway.
+  expect(autostart('douane')?.checked).toBe(true);
+  autostart('douane')!.click();
+  await vi.waitFor(() => expect(autostart('douane')?.checked).toBe(false));
+  expect(row('douane')?.querySelector('[data-testid="plugin-gateway"]')?.getAttribute('data-gateway-status')).toBe('running');
+
+  unmount(mounted!); mounted = undefined; client?.close(); document.body.innerHTML = '';
+  await open((rows) => { for (const plugin of rows) { if (plugin.app) delete plugin.app.autostart; if (plugin.gateway) delete plugin.gateway.autostart; } });
+  expect(autostart('bots')).toBeNull();
+  expect(autostart('douane')).toBeNull();
 });
 
 test('a crashed desktop app shows its exit code and why, and one with no desktop cannot start', async () => {
@@ -227,7 +255,9 @@ test('Douane\'s row shows its gateway on loopback, stops and starts it, and its 
 
   q('[data-testid="plugin-gateway-stop"]')!.click();
   await vi.waitFor(() => expect(strip()?.dataset.gatewayStatus).toBe('stopped'));
-  expect(q('[data-testid="plugin-gateway-state"]')?.textContent).toContain('starts again only when you start it');
+  // It starts with Boite, so a stop holds only until then and the line says stopped.
+  expect(q('[data-testid="plugin-gateway-state"]')?.textContent).toContain('Stopped');
+  expect(q('[data-testid="plugin-gateway-state"]')?.textContent).not.toContain('starts again only when you start it');
   q('[data-testid="plugin-gateway-start"]')!.click();
   await vi.waitFor(() => expect(strip()?.dataset.gatewayStatus).toBe('running'));
 

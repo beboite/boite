@@ -48,7 +48,7 @@ test('the chat card opens the run top to bottom, an arrow per dependency, in the
   await capture('workflow-rows-wide.png');
   await page.evaluate(`document.querySelectorAll('${id('workflow-node')}')[1].click()`);
   await page.waitFor(`document.querySelectorAll('${id('workflow-instance')}').length === 3`);
-  await page.waitFor(`document.querySelector('${id('workflow-output')}') || document.querySelector('.transcript')`);
+  await page.waitFor(`document.querySelector('${id('workflow-output')}') || document.querySelector('${id('workflow-open-thread')}')`);
   await capture('workflow-step.png');
   await page.click(id('workflow-back'));
   expect(page.errors()).toEqual([]);

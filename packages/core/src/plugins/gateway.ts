@@ -6,19 +6,19 @@
  * outside the plugin directory, so an uninstall keeps its sign-ins.
  * docs/plugins.md, Gateways, describes the contract.
  *
- * Whether the owner wants it running is `enabled`, kept in `gateway.json`
- * beside `installed.json`, as `app.json` is for a desktop app.
+ * Whether the owner wants it running is `enabled`, and whether it starts with
+ * the core is `autostart`, both kept in `gateway.json` beside `installed.json`,
+ * as `app.json` is for a desktop app.
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AGENT_ENV } from '@boite/contracts';
 import type { PluginGatewayState } from '@boite/contracts';
 import { stripAnsi } from '../ansi.ts';
 import { messageOf } from '../errors.ts';
 import type { SpawnedProcess } from '../procs.ts';
-import { CRASH_WINDOW_MS, RELAUNCH_DELAYS_MS, type AppClock } from './apps.ts';
+import { CRASH_WINDOW_MS, RELAUNCH_DELAYS_MS, readRunChoice, writeRunChoice, type AppClock } from './apps.ts';
 
 const GATEWAY_FILE = 'gateway.json';
 /** Douane's own default port, taken when it is free. */
@@ -161,22 +161,27 @@ export class PluginGateways {
 
   /** Whether the owner wants it running. A plugin directory with no `gateway.json` is a first install: yes. */
   enabled(pluginDir: string): boolean {
-    const file = join(pluginDir, GATEWAY_FILE);
-    if (!existsSync(file)) return true;
-    try { return (JSON.parse(readFileSync(file, 'utf8')) as { enabled?: unknown }).enabled !== false; }
-    catch { return true; }
+    return readRunChoice(join(pluginDir, GATEWAY_FILE)).enabled;
   }
 
   private async setEnabled(pluginDir: string, enabled: boolean): Promise<void> {
-    const file = join(pluginDir, GATEWAY_FILE);
-    await writeFile(`${file}.part`, JSON.stringify({ enabled }), 'utf8');
-    await rename(`${file}.part`, file);
+    await writeRunChoice(join(pluginDir, GATEWAY_FILE), { enabled });
+  }
+
+  /** `plugins.autostart`: whether the core starts the gateway when it starts. Running or not, it stays as it is. */
+  setAutostart(id: string, pluginDir: string, autostart: boolean): Promise<void> {
+    return this.serial(id, async () => {
+      await writeRunChoice(join(pluginDir, GATEWAY_FILE), { autostart });
+      this.host.changed(id);
+    });
   }
 
   state(id: string, pluginDir: string): PluginGatewayState {
     const entry = this.entries.get(id);
+    const { enabled, autostart } = readRunChoice(join(pluginDir, GATEWAY_FILE));
     return {
-      enabled: this.enabled(pluginDir),
+      enabled,
+      autostart,
       status: entry?.status ?? 'stopped',
       port: this.port(id),
       version: entry?.running ? entry.version : null,
@@ -403,9 +408,10 @@ export class PluginGateways {
     return run;
   }
 
-  /** At core start and after an install: launches the gateway if the owner left it enabled. */
-  resume(id: string, pluginDir: string): void {
-    if (!this.enabled(pluginDir)) return;
+  /** At core start, launches the gateway if it starts with the core; after an install, if the owner left it enabled. */
+  resume(id: string, pluginDir: string, atStart = false): void {
+    const choice = readRunChoice(join(pluginDir, GATEWAY_FILE));
+    if (!(atStart ? choice.autostart : choice.enabled)) return;
     const entry = this.entry(id);
     if (entry.running !== null || entry.relaunch !== null) return;
     entry.crashes = [];

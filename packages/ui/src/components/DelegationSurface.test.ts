@@ -122,12 +122,13 @@ test('one list holds the workflow runs and the subagents, and a run opens its gr
     instances[0]!.click();
     await settle();
     expect(document.querySelector('[data-testid=workflow-output]')?.textContent).toContain('"bugs"');
-    expect(store.delegationSelectedAgentId).toBe(run.nodes[1]!.instances[0]!.threadId);
+    // The item's conversation is one click away, in the chat: the panel draws none.
+    expect(document.querySelector('[data-testid=workflow-open-thread]')?.getAttribute('data-preload-thread')).toBe(run.nodes[1]!.instances[0]!.threadId);
+    expect(store.delegationSelectedAgentId).toBeNull();
 
     document.querySelector<HTMLButtonElement>('[data-testid=workflow-back]')!.click();
     await settle();
     expect(document.querySelector('[data-testid=workflow-graph]')).not.toBeNull();
-    expect(store.delegationSelectedAgentId).toBeNull();
 
     document.querySelector<HTMLButtonElement>('[data-testid=workflow-pause]')!.click();
     await settle();
@@ -140,6 +141,31 @@ test('one list holds the workflow runs and the subagents, and a run opens its gr
     await unmount(shown.component);
     await render(shown);
     expect(document.querySelectorAll('[data-testid=delegation-run]')).toHaveLength(1);
+  } finally {
+    await close(shown);
+  }
+});
+
+test('a subagent and a step run by one subagent open in the chat, not in the panel', async () => {
+  const shown = await show({ delayMs: 0, delegationDemo: true });
+  const { store } = shown;
+  try {
+    document.querySelector<HTMLButtonElement>('[data-agent-id=t-team-done]')!.click();
+    await settle();
+    expect(store.openThread?.id).toBe('t-team-done');
+    expect(store.openThread?.parentThreadId).toBe('t-trace');
+    expect(document.querySelector('[data-testid=delegation-detail], [data-testid=delegation-transcript]')).toBeNull();
+
+    await store.open('t-trace');
+    const run = store.workflowsOf('t-trace')[0]!;
+    const single = run.nodes.find(node => node.instances.length === 1 && node.instances[0]!.threadId)!;
+    expect(single).toBeDefined();
+    store.panel.update(store.panel.active!.id, { runId: run.id });
+    await render(shown);
+    document.querySelector<HTMLButtonElement>(`[data-testid=workflow-node][data-node-id=${single.id}]`)!.click();
+    await settle();
+    expect(store.openThread?.id).toBe(single.instances[0]!.threadId);
+    expect(document.querySelector('[data-testid=workflow-detail]')).toBeNull();
   } finally {
     await close(shown);
   }
