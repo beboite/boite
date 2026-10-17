@@ -207,6 +207,12 @@ describe('usage', () => {
     expect(help.code).toBe(0);
     expect(help.err).toContain('usage: boite');
     expect(help.out).toBe('');
+    // A lone help after a command is the same request, never a question titled "help".
+    const ask = await boite(['ask', 'help']);
+    expect(ask.code).toBe(0);
+    expect(ask.out).toContain('usage: boite');
+    const client = await harness.connect();
+    expect(await client.call('questions.list', { threadId })).toEqual([]);
   });
 
   test('outside a thread it says which variable is missing', async () => {
