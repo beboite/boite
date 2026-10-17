@@ -99,7 +99,7 @@
       {@const thinkingLive = message.state === 'streaming' && lastAt === message.parts.length - 1 && tail?.type === 'thinking' && tail.finishedAt == null}
       {#if activityShown(activity, thinkingLive)}
       <div class="part" data-kind={activity.every((part) => part.type === 'thinking') ? 'thinking' : 'tool'}>
-        <ToolGroup parts={activity} {thinkingLive} {isBackground}
+        <ToolGroup parts={activity} {thinkingLive} {isBackground} {store} {threadId}
           loadOutput={toolId => store.loadToolOutput(threadId, message.id, toolId)} />
       </div>
       {/if}

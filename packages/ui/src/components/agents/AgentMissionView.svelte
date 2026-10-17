@@ -13,7 +13,8 @@
   let artifacts = $derived(view.snapshot?.artifacts.filter(a => a.missionId === mission.id) ?? []);
   const finished = $derived(mission.status === 'done' || mission.status === 'cancelled');
   const unfinished = $derived(tasks.some(t => !['done', 'cancelled'].includes(t.status)) || !!view.snapshot?.work.some(w => w.scope.kind === 'mission' && w.scope.id === mission.id && !['done', 'cancelled'].includes(w.status)));
-  const followThread = (event: MouseEvent) => workspace.followThreadLink(event, view.store, undefined);
+  // A mission starts from no thread, so no contact list names a far core: only a connected machine listing the id opens.
+  const followThread =(event: MouseEvent) => workspace.followThreadLink(event, view.store, undefined);
   const nameOf = (id: string) => view.snapshot?.profiles.find(a => a.id === id)?.name ?? id;
   async function addTask() {
     const task = await view.call('agents.task.save', { value: { missionId: mission.id, title, instructions, dependsOn: dependencies, assigneeId: null, status: 'open', generation: 0, leaseUntil: null, workspace: null, result: null } });
