@@ -89,10 +89,10 @@ mod tests {
     }
 }
 
-/// Asks WebView2 to trim the main page's memory while it waits in the tray
-/// (`low`), and to hold it normally again before it is shown. Scripts keep
-/// running at the low level, so the page still raises toasts and keeps its
-/// connection. A runtime too old for `ICoreWebView2_19` keeps the normal level.
+/// Asks WebView2 to trim a page's memory while it is out of sight (`low`):
+/// the main page in the tray, a hidden page the user browses. It holds the
+/// normal level again before it is shown. Scripts keep running at the low
+/// level, so the main page still raises toasts and keeps its connection. A runtime too old for `ICoreWebView2_19` keeps the normal level.
 pub(crate) fn memory_level<R: tauri::Runtime>(webview: &tauri::Webview<R>, low: bool) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
@@ -112,5 +112,35 @@ pub(crate) fn memory_level<R: tauri::Runtime>(webview: &tauri::Webview<R>, low: 
     if let Err(error) = queued {
         crate::shell_log::debug("webview", "shell.webview.memory-level",
             format!("the page's memory level stays as it was, not {name}: {error}"), serde_json::json!({ "level": name }));
+    }
+}
+
+/// Puts a hidden page to sleep, as a sleeping tab: its timers and animations
+/// stop and its renderer uses no CPU. The caller lowers its memory level too. WebView2 refuses a visible webview, and
+/// wakes the page by itself when it is shown again or navigated; every other
+/// call still reaches it asleep. A page that cannot sleep (one playing audio,
+/// for instance) keeps running, which is logged.
+pub(crate) fn suspend<R: tauri::Runtime>(webview: &tauri::Webview<R>) {
+    use webview2_com::{Microsoft::Web::WebView2::Win32::ICoreWebView2_3, TrySuspendCompletedHandler};
+    use windows::core::Interface;
+    let label = webview.label().to_owned();
+    let queued = webview.with_webview(move |platform| {
+        let failed = label.clone();
+        let handler = TrySuspendCompletedHandler::create(Box::new(move |result, slept| {
+            if result.is_err() || !slept {
+                crate::shell_log::debug("webview", "shell.webview.suspend",
+                    format!("the hidden page {label} keeps running: WebView2 did not suspend it ({result:?})"), serde_json::json!({ "label": label }));
+            }
+            Ok(())
+        }));
+        let asked = unsafe { platform.controller().CoreWebView2().and_then(|view| view.cast::<ICoreWebView2_3>()).and_then(|view| view.TrySuspend(&handler)) };
+        if let Err(error) = asked {
+            // Shown again before this ran: a visible webview is not suspended.
+            crate::shell_log::debug("webview", "shell.webview.suspend",
+                format!("the hidden page {failed} keeps running: {error}"), serde_json::json!({ "label": failed }));
+        }
+    });
+    if let Err(error) = queued {
+        crate::shell_log::debug("webview", "shell.webview.suspend", format!("the hidden page could not be suspended: {error}"), serde_json::json!({}));
     }
 }
