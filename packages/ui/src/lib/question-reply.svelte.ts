@@ -81,6 +81,12 @@ export function releaseWaiting(store: Store): void {
  * the dock shows. None while the composer edits a sent message: Send replaces
  * that message, and a card's Answer must not take the recalled text. A question
  * that arrived while the user wrote is left out until it is released.
+ *
+ * Only the open thread's own questions are ever the target. A sub-agent's
+ * question docked in its parent is answered from its card or in its own
+ * conversation: while the dock shows one, the composer falls back to no
+ * other docked question either, so text typed under a child's card is an
+ * ordinary message and never answers a question the user cannot see.
  */
 export function replyTarget(store: Store): QuestionRequest | null {
   const thread = store.openThread?.id;
@@ -88,10 +94,11 @@ export function replyTarget(store: Store): QuestionRequest | null {
   const held = repliesOf(store);
   const open = store.pendingQuestions.filter((question) =>
     question.threadId === thread && question.allowText && !held.ignored[question.id] && (!held.waiting[question.id] || question.id === held.chosen));
+  const dockedElsewhere = held.docked !== null && store.pendingQuestions.some((question) => question.id === held.docked && question.threadId !== thread);
   return open.find((question) => question.id === held.chosen)
     ?? open.find((question) => question.async !== true)
     ?? open.find((question) => question.id === held.docked)
-    ?? open[0]
+    ?? (dockedElsewhere ? null : open[0])
     ?? null;
 }
 

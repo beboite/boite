@@ -113,8 +113,20 @@ One button above the composer shows the number of active subagents and running
 workflows, with elapsed time since the oldest active start. It appears for a
 running workflow even before a child starts. Click it to open the team overview,
 then select an agent or workflow to inspect its progress. The panel keeps
-completed results after the button disappears. Open a child's conversation to
-answer permission and question cards.
+completed results after the button disappears.
+
+A parent's row in the sidebar, the Recent list and the phone's list carries a
+chip with the number of its subagents at work, in every state of the parent.
+When a child asks the user something or waits on a permission, the chip takes
+the waiting colour and the parent reads Needs you, unless the parent itself
+failed. The parent's question dock shows each such child's question, "Asked by"
+its title, with its options and an Open button that goes to the child's
+conversation; a permission gets a row with the tool it asks for and Open, since
+it is approved in the child's conversation only. Text typed in the parent's
+composer never answers a child's question: it stays a message to the parent,
+and a written answer goes through Open. The core sends a child's `question.*`
+and `permission.*` events to the windows that have its parent open, and the
+dock reads the children's open cards when the parent opens.
 
 Messages carry the authenticated sender and appear as forwarded messages.
 Claude receives them at a tool boundary; Codex, Muse, pi and Grok can accept
@@ -140,7 +152,9 @@ and the rule that results come back as messages. Later turns carry it again
 when the request is about handing work out (delegation, subagents, parallel
 work, a workflow) or the team is paused. A child receives one line naming its
 parent and how to report a blocker. Persistent agents keep their own setting, which starts off. Only the
-owner can configure profiles, turn delegation off or resume a paused team. A paired phone can inspect and stop an enabled team.
+owner can configure profiles or turn delegation off; the parent agent resumes
+the pauses listed under [Stop, pause and resume](#stop-pause-and-resume). A
+paired phone can inspect and stop an enabled team.
 
 Boite imposes no quota on the number of children, their concurrent turns, total
 turns or turn duration. Previously saved quotas are ignored. Each conversation
@@ -160,14 +174,41 @@ a child opens its conversation in the chat like any thread; its header reads
 reconnect, the panel reads the team and coordination views again, since events
 sent while the socket was down reach no client.
 
+### Stop, pause and resume
+
 Stop all pauses the team and cancels queued and running children. Stopping or
 archiving the parent does the same. A parent turn that fails or that the system
 cuts (a provider error, an agent update) pauses nothing: the children keep
 working, and their results reach the parent at its next prompt. A team with
-no child is never paused that way: there is nothing to stop. A core restart
+no child is never paused that way: there is nothing to stop. An unsuccessful
+child is not retried by Boite.
+
+An update or a restart from the app cuts each running child at its next tool
+boundary without a result: the parent hears nothing, the team stays as it was,
+and the next core starts the child again on the same task, told that Boite
+restarted ([restart handoff](restart-handoff.md)). After a crash, the core
 pauses only a team with a message still to deliver or a child turn it cut
-short. Resume is an owner action, and it hands over the mail the team held at
-once. An unsuccessful child is not retried by Boite.
+short; a handoff older than an hour pauses the teams of the children it cut.
+
+A pause records who set it (`pausedBy`, `pausedAt`), and that decides whether
+the parent agent may lift it with `boite delegate resume`:
+
+| Paused by | `pausedBy` | The parent agent resumes |
+| --- | --- | --- |
+| Its own `delegate stop` | `agent` | at any time |
+| A crash of the core, or a handoff past its hour | `restart` | at any time |
+| The owner's Stop, or archiving | `stop` | once the owner wrote to the conversation again |
+| The owner's Pause in Subagents > Settings | `owner` | never |
+
+A pause saved before origins existed reads as the owner's. A refused resume
+says which pause holds and who lifts it, and so do a refused spawn and the guide
+of a paused team. The owner resumes any of them. Resume hands over the mail the
+team held at once, sends each child whose last turn stopped, failed or was
+interrupted
+a message to continue from where it stopped, and resumes the team's
+[workflow](workflows.md) runs that a pause held, under the same rules. A child
+is continued once per stopped turn: a second resume sends nothing, whoever
+asks, unless a Stop rejected that continuation before it reached the child.
 
 ## Workflows
 
@@ -191,6 +232,8 @@ boite delegate send <child-thread-id> "Focus on malformed inputs."
 boite delegate result <child-thread-id> <turn-id>
 boite delegate stop <child-thread-id>
 boite delegate stop
+boite delegate resume <child-thread-id>
+boite delegate resume
 ```
 
 `--model` takes `provider/model`, a bare model id (the parent's provider wins a
@@ -236,8 +279,9 @@ child waits on reads `approval`.
 When that background work ends without waking the agent (the task failed and
 nothing answered it, or the agent process, Boite or the PC stopped), the child
 is `interrupted`: its row says what ended and why, the parent gets one message
-saying so, and `boite delegate send <thread-id> "<instruction>"` (or Resume in
-the Subagents panel) starts its next turn. A task that ends is given 30 seconds
+saying so, and `boite delegate resume <thread-id>` (or Resume in the Subagents
+panel) continues it, while `boite delegate send <thread-id> "<instruction>"`
+steers it. A task that ends is given 30 seconds
 to wake the agent; after that a failed or vanished task counts as interrupted
 and a completed one as done. Work that ended with its agent process counts at
 once.

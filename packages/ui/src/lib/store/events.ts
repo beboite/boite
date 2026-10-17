@@ -10,6 +10,7 @@ import { rightPanel } from '../right-panel.svelte';
 import { undo } from '../undo.svelte';
 import { lastIndexById, patchFields, patchLoad } from '../thread-rows';
 import { strings } from '../strings';
+import { needsUser } from '../thread-state';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
 import { lightPage } from './reading-pages.svelte';
@@ -77,6 +78,8 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('terminal.exited', ({ id }) => ctx.terminals.shellEnded(id));
   on('thread.created', (summary) => threads.upsertThread(summary));
   on('thread.updated', (summary) => {
+    const held = threads.threads.find(t => t.id === summary.id);
+    const turnedToUser = needsUser(summary) && !(held && needsUser(held));
     threads.upsertThread(summary);
     ctx.delegation.patchThread(summary);
     const open = s.openThread;
@@ -84,6 +87,8 @@ export function listen(ctx: StoreContext, client: Client): void {
     // Archived from another client: nothing here can show it again.
     else if (summary.archived) threads.forgetThread(summary.id, summary.archiveReason?.type === 'pr-merged');
     if (s.delegationThread?.id === summary.id) patchFields(s.delegationThread, summary);
+    // A sub-agent of the open thread now asks: its parent's dock reads what it asks.
+    if (turnedToUser && open && summary.parentThreadId === open.id) requests.readChildren(client, open.id, summary.id);
   });
   // A load sample alone: every copy of the row this client holds takes the new load and nothing else.
   on('thread.load', ({ threadId, load }) => {

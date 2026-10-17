@@ -26,7 +26,7 @@ export function workingThreads(stores: readonly Store[]): WorkCount {
       if (project.archived) continue;
       for (const thread of store.threadsOf(project.id)) {
         if (thread.archived) continue;
-        const asks = threadState(thread, store.subagents(thread.id)?.count ?? 0) === 'waiting';
+        const asks = threadState(thread, store.subagents(thread.id)) === 'waiting';
         if (asks || workingThread(store, thread)) count++;
         waiting ||= asks;
       }

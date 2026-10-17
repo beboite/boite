@@ -27,6 +27,7 @@ import { hookMethods, recordHookRun } from './fake-client/hooks';
 import { logMethods, seedDiagnostics } from './fake-client/logs';
 import { coordinationMethods, registerCore, trusts, unregisterCore } from './fake-client/coordination';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
+import { seedSubagentsDemo } from './fake-client/subagents-demo';
 import { seedAgentsDemo } from './fake-client/agents-demo';
 import { agentSettingMethods } from './fake-client/agent-settings';
 import type { AgentSettingMethod } from './fake-agents';
@@ -103,6 +104,7 @@ export class FakeClient implements ObservableClient {
     seed(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
     if (options.agentsDemo) seedAgentsDemo(ctx);
+    if (options.subagentsDemo) seedSubagentsDemo(ctx);
     seedRetry(ctx);
     if (options.watchDemo) {
       const at = Date.now();
