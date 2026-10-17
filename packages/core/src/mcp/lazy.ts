@@ -218,6 +218,11 @@ function failure(id: Id | null | undefined, code: number, message: string): Mess
   return { jsonrpc: '2.0', id: id ?? null, error: { code, message } };
 }
 
+/** Why a server did not start, as the session's client reads it: the error's message, never its stack. */
+function startFailure(session: Session, error: unknown): string {
+  return error instanceof Error && error.message ? error.message : `the MCP server ${session.name} did not start`;
+}
+
 function isRequest(message: Message): boolean { return typeof message.method === 'string' && message.id !== undefined && message.id !== null; }
 function isNotification(message: Message): boolean { return typeof message.method === 'string' && (message.id === undefined || message.id === null); }
 
@@ -370,7 +375,7 @@ export class LazyMcp {
       return json({ jsonrpc: '2.0', id: message.id, result: upstream.initialize }, 200, headers);
     } catch (error) {
       this.#end(session);
-      return json(failure(message.id, -32603, error instanceof Error ? error.message : String(error)), 200);
+      return json(failure(message.id, -32603, startFailure(session, error)), 200);
     }
   }
 
@@ -412,7 +417,7 @@ export class LazyMcp {
 
   async #forward(session: Session, message: Message, stream: EventStream): Promise<void> {
     try { await this.#ensure(session); } catch (error) {
-      stream.send(failure(message.id, -32603, error instanceof Error ? error.message : String(error)));
+      stream.send(failure(message.id, -32603, startFailure(session, error)));
       stream.settle();
       return;
     }
