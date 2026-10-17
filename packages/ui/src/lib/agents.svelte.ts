@@ -152,6 +152,20 @@ export function liveThreads(snapshot: AgentsSnapshot, threads: readonly ThreadSu
   return live;
 }
 
+/** A machine's conversations and the threads its agents work in, read from its view and its threads. */
+export function chatsOf(view: AgentsView): { chats: AgentChat[]; live: Map<string, ThreadSummary> } {
+  const snapshot = view.snapshot;
+  if (!snapshot) return { chats: [], live: new Map() };
+  const threads = view.store.threads;
+  return { chats: agentChats(snapshot, view.seen.messages, view.readAt, attentionOf(snapshot, threads)), live: liveThreads(snapshot, threads) };
+}
+
+/**
+ * The machine the agents list is narrowed to, null for every machine. It lives
+ * outside the page, which is drawn again for each machine it opens on.
+ */
+export const agentsFilter = $state<{ machine: string | null }>({ machine: null });
+
 export { avatarText, tintOf } from './robots';
 
 /** A message as a one-line preview: markdown marks out, every run of blanks one space. */

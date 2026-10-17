@@ -257,7 +257,7 @@ export const fr: Translation = {
     contexts: 'Contextes de conversation', memories: 'Souvenirs', toEveryone: 'Tout le monde',
     missionMembers: 'Agents de cette mission', dangerZone: 'Arrêter le moteur', dangerHint: 'Arrête tous les agents de ce moteur et déconnecte ses clients.',
     stopEngine: 'Arrêter ce moteur', stopEngineBody: 'Arrête les travaux et déconnecte les clients. Les exécutions commencées demanderont une vérification avant reprise. Rouvrez Boite sur la machine hôte pour redémarrer le moteur.',
-    createAgent: 'Créer un agent', noAgents: 'Aucun agent pour l’instant', more: 'Plus', noMatch: 'Aucun résultat',
+    createAgent: 'Créer un agent', noAgents: 'Aucun agent pour l’instant', noAgentsOn: 'Aucun agent sur {machine} pour l’instant', more: 'Plus', noMatch: 'Aucun résultat',
     noMessagesYet: 'Aucun message pour l’instant', noMissions: 'Aucune mission pour l’instant', previewFrom: '{name} : {text}', unread: '{count} non lus',
     backToChat: 'Retour à la discussion', backTo: 'Retour à {name}', editRoles: 'Modifier les rôles', startChat: 'Démarrer la discussion',
     asks: '{name} vous demande',
