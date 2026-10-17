@@ -34,6 +34,9 @@
 ; installer.nsi runs CheckIfAppIsRunning only without this.
 !define BOITE_HOOKS_CLOSE_SHELL
 
+; .onInstFailed below is read here, at file level.
+!include LogicLib.nsh
+
 ; Runs stop-shell.ps1 with ACTION (find or stop) and pops its exit code in $0.
 !macro BOITE_SHELL_SCRIPT ACTION
   System::Call 'Kernel32::SetEnvironmentVariable(t "BOITE_SHELL_ACTION", t "${ACTION}") i'
@@ -163,24 +166,44 @@
     RMDir /r "$INSTDIR\ui"
 !macroend
 
-; Set when this run moved the previous build's two directories aside.
-Var BoiteBundlesAside
+; Set when this run moved that directory aside, and only then: what an
+; interrupted run left behind is never taken for the current build.
+Var BoiteCoreAside
+Var BoiteUiAside
 
 ; An install moves the two directories aside rather than deleting them: a copy
 ; that fails halfway (a full disk) puts them back in .onInstFailed, so the
 ; previous core still finds its chunks; a completed install deletes them. A
-; directory that cannot be moved (a file held open) stays and the new build is
-; copied into it, as before this hook. What an interrupted run left aside goes
-; first.
-!macro BOITE_SET_BUNDLES_ASIDE
-  StrCmp $INSTDIR "" +7
-    RMDir /r "$INSTDIR\core.previous"
-    RMDir /r "$INSTDIR\ui.previous"
-    Rename "$INSTDIR\core" "$INSTDIR\core.previous"
-    Rename "$INSTDIR\ui" "$INSTDIR\ui.previous"
-    StrCpy $BoiteBundlesAside "1"
-    ; A first install has nothing to move: no error flag for the template.
+; directory that cannot be moved (a file held open, or a leftover from an
+; interrupted run that cannot be deleted) stays, and the new build is copied
+; into it as before this hook. Only these directories: the template still
+; overwrites boite-core.exe, the Workers and the shell in place.
+!macro BOITE_SET_ASIDE NAME FLAG
+  StrCpy ${FLAG} ""
+  RMDir /r "$INSTDIR\${NAME}.previous"
+  ${IfNot} ${FileExists} "$INSTDIR\${NAME}.previous\*.*"
+  ${AndIf} ${FileExists} "$INSTDIR\${NAME}\*.*"
     ClearErrors
+    Rename "$INSTDIR\${NAME}" "$INSTDIR\${NAME}.previous"
+    ${IfNot} ${Errors}
+      StrCpy ${FLAG} "1"
+    ${EndIf}
+  ${EndIf}
+  ClearErrors
+!macroend
+
+!macro BOITE_RESTORE_ASIDE NAME FLAG
+  ${If} ${FLAG} == "1"
+    RMDir /r "$INSTDIR\${NAME}"
+    Rename "$INSTDIR\${NAME}.previous" "$INSTDIR\${NAME}"
+  ${EndIf}
+!macroend
+
+!macro BOITE_SET_BUNDLES_ASIDE
+  ${If} $INSTDIR != ""
+    !insertmacro BOITE_SET_ASIDE core $BoiteCoreAside
+    !insertmacro BOITE_SET_ASIDE ui $BoiteUiAside
+  ${EndIf}
 !macroend
 
 !macro BOITE_DROP_BUNDLES_ASIDE
@@ -192,15 +215,10 @@ Var BoiteBundlesAside
 ; NSIS calls it when the install aborts or a file cannot be written. A refused
 ; install (a busy core) aborts before anything was moved aside.
 Function .onInstFailed
-  StrCmp $BoiteBundlesAside "1" 0 boite_restore_done
-  StrCmp $INSTDIR "" boite_restore_done
-  IfFileExists "$INSTDIR\core.previous\*.*" 0 +3
-    RMDir /r "$INSTDIR\core"
-    Rename "$INSTDIR\core.previous" "$INSTDIR\core"
-  IfFileExists "$INSTDIR\ui.previous\*.*" 0 +3
-    RMDir /r "$INSTDIR\ui"
-    Rename "$INSTDIR\ui.previous" "$INSTDIR\ui"
-  boite_restore_done:
+  ${If} $INSTDIR != ""
+    !insertmacro BOITE_RESTORE_ASIDE core $BoiteCoreAside
+    !insertmacro BOITE_RESTORE_ASIDE ui $BoiteUiAside
+  ${EndIf}
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL

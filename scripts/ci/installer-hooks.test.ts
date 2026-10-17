@@ -127,13 +127,16 @@ describe.skipIf(!ready)('installer hooks', () => {
       '  !ifndef BOITE_HOOKS_CLOSE_SHELL',
       '    !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
       '  !endif',
+      // A copy that fails halfway through the chunks, which the template
+      // writes before boite-core.exe (a full disk): the install aborts.
+      '  IfFileExists "$INSTDIR\\fail-copy" 0 +4',
+      '    CreateDirectory "$INSTDIR\\core"',
+      `    File "/oname=core\\main-n3wn3wn3.js" "${join(base, 'new-core.txt')}"`,
+      '    Abort',
       '  ClearErrors',
       `  File "/oname=boite-core.exe" "${join(base, 'new-core.txt')}"`,
       '  IfErrors 0 +2',
       '    FileOpen $0 "$INSTDIR\\write-failed" w',
-      // A copy that fails halfway, a full disk: the template's install aborts.
-      '  IfFileExists "$INSTDIR\\fail-copy" 0 +2',
-      '    Abort',
       `  WriteUninstaller "${join(base, 'uninstall.exe')}"`,
       '  !insertmacro NSIS_HOOK_POSTINSTALL',
       'SectionEnd',
@@ -269,10 +272,13 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(bundles(busy.install)).toEqual({ core: true, ui: true, kept: true, aside: false });
     expect(restartedPids(busy.restarted)).toEqual([]);
 
-    // A copy that fails halfway, once the core stopped and the previous build
-    // was moved aside: its chunks come back where that core loads them.
+    // A copy that fails halfway through the chunks, once the core stopped and
+    // the previous build was moved aside: its chunks come back where that
+    // core, never overwritten, loads them, and the new build's partial
+    // directory goes.
     rmSync(join(data, 'boite2', 'busy'), { force: true });
     const failed = await running('failed');
+    const failedCore = Bun.hash(readFileSync(join(failed.install, 'boite-core.exe')));
     writeFileSync(join(failed.install, 'fail-copy'), '');
     expect(await run([join(base, 'setup.exe'), '/S', `/D=${failed.install}`])).not.toBe(0);
     expect(await exited(failed.shell)).not.toBe('still running');
@@ -280,6 +286,37 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(restartedPids(failed.restarted)).toEqual([]);
     expect(bundles(failed.install)).toEqual({ core: true, ui: true, kept: true, aside: false });
     for (const [path, text] of STALE) expect(readFileSync(join(failed.install, path), 'utf8')).toBe(text);
+    expect(existsSync(join(failed.install, 'core', 'main-n3wn3wn3.js'))).toBe(false);
+    expect(Bun.hash(readFileSync(join(failed.install, 'boite-core.exe')))).toBe(failedCore);
+
+    // An interrupted run left core.previous, and a scanner holds a file in it
+    // without delete sharing: that leftover cannot go, so this run leaves core
+    // where it is, and a failed copy must not put the leftover in its place.
+    const leftover = await running('leftover');
+    const interrupted = join(leftover.install, 'core.previous', 'main-1nt3rrup.js');
+    mkdirSync(dirname(interrupted), { recursive: true });
+    writeFileSync(interrupted, 'interrupted run');
+    const holdingLeftover = join(base, 'holding-leftover.txt');
+    const release = join(base, 'release-leftover.txt');
+    const leftoverHolder = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+      `$f = [IO.File]::Open('${interrupted}', 'Open', 'Read', 'Read'); Set-Content '${holdingLeftover}' 'held';`
+        + ` while (-not (Test-Path '${release}')) { Start-Sleep -Milliseconds 50 }; $f.Close()`], {
+      stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+    });
+    started.push(leftoverHolder.pid);
+    for (const deadline = Date.now() + 20_000; !existsSync(holdingLeftover);) {
+      if (Date.now() > deadline) throw new Error('the holder never opened the leftover');
+      await Bun.sleep(50);
+    }
+    writeFileSync(join(leftover.install, 'fail-copy'), '');
+    expect(await run([join(base, 'setup.exe'), '/S', `/D=${leftover.install}`])).not.toBe(0);
+    writeFileSync(release, '');
+    expect(await exited(leftoverHolder)).toBe(0);
+    expect(await exited(leftover.shell)).not.toBe('still running');
+    expect(await exited(leftover.core)).toBe(0);
+    expect(restartedPids(leftover.restarted)).toEqual([]);
+    for (const [path, text] of STALE) expect(readFileSync(join(leftover.install, path), 'utf8')).toBe(text);
+    expect(existsSync(join(leftover.install, 'core', 'main-1nt3rrup.js'))).toBe(false);
 
     // An install made before a rename (Boite Dev's boite-shell.exe): the
     // shell still runs under the name that install registered.
@@ -294,7 +331,7 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(await exited(renamed.core)).toBe(0);
     expect(restartedPids(renamed.restarted)).toEqual([]);
 
-    // Five installs and uninstalls later, the shell run from elsewhere still runs.
+    // Six installs and uninstalls later, the shell run from elsewhere still runs.
     expect(other.exitCode).toBeNull();
   }, 180_000);
 });
