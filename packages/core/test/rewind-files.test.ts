@@ -658,4 +658,5 @@ test(`checkpoints are kept for the newest ${KEEP_TURNS} turns, and none for a th
   await client.call('threads.archive', { threadId, archived: true });
   await checkpoints.maintain(Date.now() + IDLE_THREAD_MS + 60_000);
   await expect(stat(folder)).rejects.toMatchObject({ code: 'ENOENT' });
-});
+// 51 real turns took 5.2 s on a loaded Windows machine, past Bun's default 5 s.
+}, 20000);
