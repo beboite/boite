@@ -95,7 +95,9 @@ export function registerModules(core: Core): void {
     return core.delegation.spawn(params);
   });
   core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));
-  core.router.register('delegation.stop', params => ({ stopped: core.delegation.stop(params.threadId, params.agentId) }));
+  // The agent's own stop leaves a pause it may lift; the owner's, one only the owner's next message releases.
+  core.router.register('delegation.stop', (params, ctx) => ({ stopped: core.delegation.stop(params.threadId, params.agentId, ctx.connection.identity.principal === 'agent' ? 'agent' : 'stop') }));
+  core.router.register('delegation.resume', (params, ctx) => core.delegation.resume(params.threadId, params.agentId, ctx.connection.identity.principal));
   registerWorkflowMethods(core, probe);
   registerUpdateMethods(core);
   registerAccountMethods(core);

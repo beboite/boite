@@ -154,3 +154,29 @@ test('delegate wait and delegate send say what the child asks and that the answe
     expect(await ticket).toEqual({ optionIds: ['n'] });
   } finally { await s.stop(); }
 });
+
+test('a child question reaches the windows that have its parent open, and no other', async () => {
+  const s = await setup();
+  const parentWindow = await s.h.connect(), otherWindow = await s.h.connect();
+  try {
+    const { threadId: otherId } = await echoThread(s.h, s.client);
+    await parentWindow.call('threads.subscribe', { threadId: s.threadId });
+    await otherWindow.call('threads.subscribe', { threadId: otherId });
+    const seen: string[] = [];
+    otherWindow.onAny(name => { if (name.startsWith('question.')) seen.push(name); });
+    // Before: only a window subscribed to the child, which no sidebar row opens, heard of it.
+    const asked = parentWindow.next('question.asked');
+    const ticket = s.ask({ text: 'Keep the old index?' });
+    expect(await asked).toMatchObject({ id: ticket.questionId, threadId: s.childId });
+    const answered = parentWindow.next('question.answered');
+    await parentWindow.call('questions.answer', { threadId: s.childId, questionId: ticket.questionId, optionIds: [], text: 'no' });
+    expect(await answered).toMatchObject({ threadId: s.childId, questionId: ticket.questionId });
+    expect(await ticket).toEqual({ optionIds: [], text: 'no' });
+    await otherWindow.call('settings.get', {});
+    expect(seen).toEqual([]);
+  } finally {
+    parentWindow.close();
+    otherWindow.close();
+    await s.stop();
+  }
+});

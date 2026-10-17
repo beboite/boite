@@ -4,7 +4,7 @@ import {
   resolvePath, shapeMismatch, workflowLevels,
 } from '@boite/contracts';
 import type {
-  DelegationConfig, Principal, RpcParams, ThreadSummary, Turn, Usage, WorkflowInstance, WorkflowNode, WorkflowPlan, WorkflowRun,
+  DelegationConfig, PauseOrigin, Principal, RpcParams, ThreadSummary, Turn, Usage, WorkflowInstance, WorkflowNode, WorkflowPlan, WorkflowRun,
   WorkflowShape, WorkflowStepPlan, WorkflowStepStatus, WorkflowTemplate,
 } from '@boite/contracts';
 import type { Core } from './core.ts';
@@ -15,6 +15,7 @@ import { assertDriverRunnable } from './drivers/index.ts';
 import type { ChildRoute } from './delegation/routes.ts';
 import { worktreeLine } from './delegation/messages.ts';
 import { WorkflowLog } from './workflow-log.ts';
+import { pauseHold } from './delegation/pauses.ts';
 import { listTemplates, removeTemplate, saveTemplate } from './workflows/templates.ts';
 import { planError, text } from './workflows/validation.ts';
 
@@ -32,6 +33,7 @@ const BUSY = ['queued', 'running', 'waiting'];
 const ended = (status: WorkflowStepStatus) => status === 'done' || status === 'failed' || status === 'skipped' || status === 'stopped';
 const broken = (status: WorkflowStepStatus) => status === 'failed' || status === 'stopped';
 const NOT_STARTED = 'Not started: another step of the run failed';
+const INTERRUPTED = 'Interrupted by a core restart';
 
 function clip(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, Math.max(0, max - 40))}\n[Truncated; the step's conversation has the rest.]` : value;
@@ -69,19 +71,22 @@ export class Workflows {
     this.log = new WorkflowLog(core);
     for (const row of core.journal.db.query('SELECT * FROM workflow_steps').all() as StepRow[]) this.stepOf.set(row.thread_id, { runId: row.run_id, key: row.step_key });
     for (const run of this.runsWhere("status IN ('done', 'failed', 'paused') AND json_extract(data, '$.delivered') = 0")) this.trackDelivery(run);
-    // A restart never resumes paid work by itself; the turns it interrupted fail on their own.
     // An interrupted step waits on its own thread, so a resume runs it again with the interruption in its prompt.
+    // After a handoff, the run goes on once the server listens (`resumeAfterRestart`), as its conversation does.
+    // A core that died resumes no paid work by itself: the run waits for its agent or its owner.
+    const handedOver = core.threads.handoff.handedOver;
     for (const run of this.runsWhere("status IN ('running', 'paused')")) {
       let interrupted = false;
       for (const node of run.nodes) for (const inst of node.instances) {
-        if (inst.status === 'running') Object.assign(inst, { status: 'waiting', error: 'Interrupted by a core restart', finishedAt: null }), interrupted = true;
+        if (inst.status === 'running') Object.assign(inst, { status: 'waiting', error: INTERRUPTED, finishedAt: null }), interrupted = true;
       }
-      if (run.status === 'running') this.save({ ...run, status: 'paused', error: 'The core restarted. Resume to continue.' });
+      if (run.status === 'running' && !handedOver) this.save({ ...run, status: 'paused', error: 'The core restarted. Resume to continue.', pausedBy: 'restart', pausedAt: Date.now() });
       else if (interrupted) this.save(run);
     }
     this.off = core.bus.onAny((name, payload) => {
       if (this.closed) return;
       if (name === 'turn.finished') this.turnFinished(payload as Turn);
+      else if (name === 'turn.started') this.adopt(payload as Turn);
       else if (name === 'delegation.changed') this.redeliver((payload as { threadId: string }).threadId);
       else if (name === 'thread.updated') {
         const thread = payload as ThreadSummary;
@@ -309,7 +314,8 @@ export class Workflows {
     if (this.settleNodes(run)) this.save(run);
     const config = this.core.delegation.config(run.rootThreadId);
     if (config.enabled && config.paused) {
-      this.save({ ...run, status: 'paused', error: 'Subagents are paused for this thread. Resume to continue.' });
+      // Held by the team, the run takes its pause: whoever may lift that one may resume this run.
+      this.save({ ...run, status: 'paused', error: 'Subagents are paused for this thread. Resume to continue.', pausedBy: config.pausedBy ?? 'owner', pausedAt: config.pausedAt ?? Date.now() });
       return;
     }
     // Open every step whose dependencies ended; a skip can open the next one.
@@ -515,11 +521,18 @@ export class Workflows {
       if (pending.length) setTimeout(() => { for (const run of pending) this.deliver(run.id); }, 0).unref?.();
       return;
     }
-    let correction = false;
+    let correction = false, cut = false;
     this.mutate(entry.runId, run => {
       const inst = this.instance(run, entry.key);
       // A retry past an archived conversation runs in a new one: the old one speaks for nothing.
       if (!inst || inst.status !== 'running' || inst.threadId !== turn.threadId) return false;
+      // A restart handoff stopped it on purpose: the step waits, and the next core runs it again.
+      // A Stop of the run or its conversation recorded the run stopped before stopping the turn.
+      if (turn.status === 'stopped' && this.core.threads.handoff.active && (run.status === 'running' || run.status === 'paused')) {
+        Object.assign(inst, { status: 'waiting', error: INTERRUPTED, finishedAt: null });
+        cut = true;
+        return;
+      }
       const step = run.plan.steps.find(s => s.id === entry.key.split('#')[0])!;
       const now = Date.now();
       if (turn.status === 'done') {
@@ -542,6 +555,8 @@ export class Workflows {
         Object.assign(inst, { status: 'stopped', error: 'Stopped', finishedAt: now });
       } else Object.assign(inst, { status: 'failed', error: turn.error ?? 'The turn failed', finishedAt: now });
     });
+    // Its worktree stays for the next attempt, and nothing new launches while the core stops.
+    if (cut) return;
     // A step in a worktree of its own ends once that worktree is kept or removed, so the summary names what to merge.
     const settling = this.core.delegation.worktrees.settle(turn.threadId);
     const next = () => {
@@ -563,6 +578,39 @@ export class Workflows {
       return;
     }
     next();
+  }
+
+  /**
+   * A turn started in a step's conversation that the run did not launch: the
+   * user or the parent agent sent the step back to work after a stop, a
+   * failure or a restart. The run takes that turn as the step's attempt, so
+   * its answer counts, instead of leaving the step failed beside it. A step
+   * that finished, or a run that was stopped or finished, is left alone.
+   */
+  private adopt(turn: Turn): void {
+    const entry = this.stepOf.get(turn.threadId);
+    if (!entry) return;
+    let adopted = false;
+    this.mutate(entry.runId, run => {
+      if (run.status !== 'running' && run.status !== 'paused' && run.status !== 'failed') return false;
+      const node = run.nodes.find(n => n.instances.some(i => i.key === entry.key));
+      const inst = node?.instances.find(i => i.key === entry.key);
+      if (!node || !inst || inst.threadId !== turn.threadId) return false;
+      // Waiting with its thread set and no correction: cut by a restart, not yet launched again.
+      const cut = inst.status === 'waiting' && !inst.outputCorrection && inst.error === INTERRUPTED;
+      if (!cut && (!broken(inst.status) || inst.error === NOT_STARTED)) return false;
+      const now = Date.now();
+      Object.assign(inst, { status: 'running', error: null, result: null, output: null, finishedAt: null, startedAt: inst.startedAt ?? now });
+      Object.assign(node, { status: 'running', error: null, finishedAt: null });
+      // The steps that never started because this one failed wait for it again.
+      for (const other of run.nodes) for (const waiting of other.instances) {
+        if (waiting.status === 'stopped' && waiting.error === NOT_STARTED) Object.assign(waiting, { status: 'waiting', error: null, finishedAt: null });
+      }
+      for (const other of run.nodes) if (other !== node && broken(other.status) && other.instances.some(i => i.status === 'waiting')) Object.assign(other, { status: 'running', error: null, finishedAt: null });
+      if (run.status === 'failed') Object.assign(run, { status: 'running', error: null, finishedAt: null, delivered: false, deliveryError: null });
+      adopted = true;
+    });
+    if (adopted) this.core.log('info', `workflow ${entry.runId}: step ${entry.key} took turn ${turn.id}, started in its conversation`);
   }
 
   private later(run: () => void): void {
@@ -655,13 +703,13 @@ export class Workflows {
     switch (params.action) {
       case 'pause':
         if (run.status !== 'running') throw refused(`the run is ${run.status}, not running`);
-        this.save({ ...run, status: 'paused', error: null });
+        this.save({ ...run, status: 'paused', error: null, pausedBy: principal === 'agent' ? 'agent' : 'owner', pausedAt: now });
         break;
       case 'resume': {
         if (run.status !== 'paused') throw refused(`the run is ${run.status}, not paused`);
-        if (principal !== 'owner') throw refused('resuming a workflow is an owner action');
+        this.mayResume(run, principal);
         this.resumeTeam(run.rootThreadId, principal);
-        this.save({ ...run, status: 'running', error: null });
+        this.save(this.running(run));
         break;
       }
       case 'stop':
@@ -671,8 +719,8 @@ export class Workflows {
       case 'retry': {
         if (principal === 'session') throw refused('retrying a workflow step is an owner action');
         if (run.status === 'done') throw refused('the run finished; start it again instead');
-        // A retry leaves the run running: on a paused run that is a resume, which stays the owner's.
-        if (run.status === 'paused' && principal !== 'owner') throw refused('the run is paused; the owner resumes it');
+        // A retry leaves the run running: on a paused run that is a resume.
+        if (run.status === 'paused') this.mayResume(run, principal);
         const nodes = params.stepId === undefined ? run.nodes.filter(n => broken(n.status) || n.instances.some(i => broken(i.status))) : run.nodes.filter(n => n.id === params.stepId);
         if (params.stepId !== undefined && !nodes.length) throw invalidParams(`stepId: no step ${params.stepId} in this run`);
         for (const node of run.nodes) {
@@ -694,7 +742,7 @@ export class Workflows {
         const holding = run.nodes.filter(node => broken(node.status) || node.instances.some(i => broken(i.status))).map(node => node.id);
         if (holding.length) throw refused(`the run stays stopped while ${holding.join(', ')} ${holding.length === 1 ? 'has' : 'have'} failed; retry ${holding.length === 1 ? 'that step' : 'those steps'} too, or retry the whole run without naming a step`);
         this.resumeTeam(run.rootThreadId, principal);
-        this.save({ ...run, status: 'running', error: null, finishedAt: null, delivered: false, updatedAt: now });
+        this.save({ ...this.running(run), finishedAt: null, delivered: false, updatedAt: now });
         break;
       }
       default:
@@ -704,12 +752,47 @@ export class Workflows {
     return this.view(this.load(run.id)!);
   }
 
-  /** An owner resume also resumes the team the steps run in; an agent cannot. */
+  /** The run going again, with no pause left on it. */
+  private running(run: WorkflowRun): WorkflowRun {
+    const { pausedBy: _by, pausedAt: _at, ...rest } = run;
+    return { ...rest, status: 'running', error: null };
+  }
+
+  /** The owner resumes any run; a session none; an agent the pauses `pauseHold` lets it lift. */
+  private mayResume(run: WorkflowRun, principal: Principal): void {
+    if (principal === 'owner') return;
+    if (principal === 'session') throw refused('resuming a workflow is an owner action');
+    const hold = pauseHold(this.core, run.rootThreadId, { by: run.pausedBy, at: run.pausedAt }, 'run');
+    if (hold) throw refused(hold);
+  }
+
+  /** Resuming a run resumes the team its steps run in, when the caller may lift that pause too. */
   private resumeTeam(rootId: string, principal: Principal): void {
     const config = this.core.delegation.config(rootId);
     if (!config.enabled || !config.paused) return;
-    if (principal !== 'owner') throw refused('subagents are paused for this thread; the owner resumes them');
-    this.core.delegation.configure(rootId, { ...config, paused: false });
+    this.core.delegation.unpause(rootId, principal);
+  }
+
+  /** `boite delegate resume`: the root's paused runs this caller may resume and owns; the others stay as they are. */
+  resumePaused(rootId: string, principal: Principal): string[] {
+    const resumed: string[] = [];
+    for (const run of this.runsWhere("root_id = ? AND status = 'paused'", rootId)) {
+      try {
+        this.control({ threadId: rootId, runId: run.id, action: 'resume' }, principal);
+        resumed.push(run.id);
+      } catch (error) {
+        this.core.log('info', `workflow ${run.id} stays paused: ${messageOf(error)}`);
+      }
+    }
+    return resumed;
+  }
+
+  /** Once the server listens after a restart handoff: the runs it left running launch their cut steps again. */
+  resumeAfterRestart(): number {
+    if (this.closed || this.core.journal.isClosed()) return 0;
+    const runs = this.runsWhere("status = 'running'");
+    for (const run of runs) this.advance(run.id);
+    return runs.length;
   }
 
   private stop(run: WorkflowRun, reason: string): void {

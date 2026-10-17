@@ -46,10 +46,21 @@ deleted or non-runnable threads are excluded; failed admission logs its reason.
 This protects admission identity, not exactly-once execution of arbitrary shell
 side effects. The agent must inspect what completed before relying on it.
 
-Delegated and workflow children, resident-agent sessions, compactions and
-coordination wakes are excluded. Their own runtimes require explicit resume
-when recovery pauses them. See [delegation](delegation.md),
-[workflows](workflows.md) and [persistent agents](agents.md).
+Delegated and workflow children are cut the same way but never counted as
+finished: a cut child sends its parent no result and a cut workflow step waits
+again with "Interrupted by a core restart", its run still running. Once the
+next core listens, each cut child gets the continuation above with its task
+from the parent, and each run launches its waiting steps again. A child the
+owner stopped, steered or archived meanwhile, or whose team was paused, stays
+as it is. After a crash, recovery
+pauses the team and the runs instead, marked as held by a restart: the parent
+agent resumes them with `boite delegate resume`
+([delegation](delegation.md#stop-pause-and-resume),
+[workflows](workflows.md#failure-stop-and-restart)).
+
+Resident-agent sessions, compactions and coordination wakes are excluded. Their
+own runtimes require explicit resume when recovery pauses them. See
+[persistent agents](agents.md).
 Native processes and terminals follow the ordinary [shutdown limits](trace.md#linux-and-macos).
 
 ## What starts it

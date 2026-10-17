@@ -144,6 +144,8 @@ ${CONTROL_HELP}
                                  steer or reuse a subagent, or ask the parent;
                                  to a subagent that asks something, the answer
   delegate stop [thread-id]      stop one subagent, or all of them
+  delegate resume [thread-id]    continue stopped subagents, or one, and the
+                                 workflows a pause or a restart held
   delegate wait [thread-id]      block until children finish or one asks something
                                  (--timeout <s>, default 600, max 3600); only with
                                  nothing else to do

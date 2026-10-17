@@ -4,7 +4,7 @@
  * its model and reasoning, its time, then the one next step that makes sense.
  */
 import { CONVERSATION_PROFILE_ID, speedName } from '@boite/contracts';
-import type { DelegatedAgent, DelegationModelChoice, DelegationView, RpcParams, WorkflowRun } from '@boite/contracts';
+import type { DelegatedAgent, DelegationModelChoice, DelegationView, PauseOrigin, RpcParams, WorkflowRun } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
 import { needLine, worktreeLine } from './delegation/messages.ts';
@@ -26,7 +26,7 @@ export interface DelegateOptions {
   context?: Record<string, unknown>;
 }
 
-export const DELEGATE_ACTIONS = 'models, spawn, list, send, stop, wait, result or profiles';
+export const DELEGATE_ACTIONS = 'models, spawn, list, send, stop, resume, wait, result or profiles';
 const ACTIVE = new Set(['queued', 'running', 'waiting']);
 const PROFILE_ID = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -90,12 +90,16 @@ function runRow(run: WorkflowRun, now: number): string {
   return `${run.id} workflow ${run.status} ${elapsed((run.finishedAt ?? now) - run.createdAt)} steps=${done}/${total}${failed ? ` failed=${failed}` : ''} ${JSON.stringify(run.name)}`;
 }
 
+const PAUSED_BY: Record<PauseOrigin, string> = {
+  owner: 'by the owner', stop: "by the owner's Stop", agent: 'by you (boite delegate resume)', restart: 'by a restart (boite delegate resume)',
+};
+
 function teamLine(view: DelegationView, runs: WorkflowRun[]): string {
   const states = view.agents.map(stateOf);
   const count = (state: string) => states.filter(s => s === state).length;
   // `waiting` here is a wait on background work, counted apart; a permission request reads `approval`.
   const running = states.filter(s => s === 'queued' || s === 'running' || s === 'approval' || s === 'question').length + runs.filter(r => r.status === 'running').length;
-  const delegation = !view.config.enabled ? 'off' : view.config.paused ? 'paused by the owner' : 'on';
+  const delegation = !view.config.enabled ? 'off' : view.config.paused ? `paused ${PAUSED_BY[view.config.pausedBy ?? 'owner']}` : 'on';
   return `subagents: ${delegation}; ${running} running, ${count('waiting')} waiting, ${count('done')} done, ${count('failed')} failed, ${count('stopped')} stopped${count('interrupted') ? `, ${count('interrupted')} interrupted` : ''}${runs.length ? `; ${runs.length} workflow${runs.length > 1 ? 's' : ''}` : ''}`;
 }
 
@@ -207,7 +211,16 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
     }
     case 'stop': {
       const result = await client.call('delegation.stop', { threadId, ...(rest[1] ? { agentId: rest[1] } : {}) });
-      print([`stopped: ${result.stopped}`, ...(rest[1] || result.stopped === 0 ? [] : ['The team is paused until the owner resumes it in Subagents > Settings.'])], result);
+      print([`stopped: ${result.stopped}`, ...(rest[1] || result.stopped === 0 ? [] : ['The team is paused; boite delegate resume continues it.'])], result);
+      return;
+    }
+    case 'resume': {
+      const result = await client.call('delegation.resume', { threadId, ...(rest[1] ? { agentId: rest[1] } : {}) });
+      print([
+        ...(result.unpaused ? ['The team is no longer paused.'] : []),
+        result.agents.length ? `continued: ${result.agents.join(', ')}` : 'No stopped subagent to continue.',
+        ...(result.runs.length ? [`workflows resumed: ${result.runs.join(', ')}`] : []),
+      ], result);
       return;
     }
     default:

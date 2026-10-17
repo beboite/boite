@@ -1,4 +1,4 @@
-import type { DelegationWorktree, ProjectId, ProviderId, ThreadId, Timestamp, Usage } from './index';
+import type { DelegationWorktree, PauseOrigin, ProjectId, ProviderId, ThreadId, Timestamp, Usage } from './index';
 import type { ContextPreset, ContextRequest } from './context-mode';
 
 /**
@@ -130,6 +130,9 @@ export interface WorkflowRun {
   limits: WorkflowLimits;
   /** Why the run stopped, failed or paused by itself. */
   error: string | null;
+  /** Who paused it, while paused: a step held by a paused team takes the team's. Absent on older runs, read as the owner's. */
+  pausedBy?: PauseOrigin;
+  pausedAt?: Timestamp;
   launchedBy: 'agent' | 'user';
   templateId: string | null;
   /** Whether the final summary reached the root thread as a turn. */
@@ -165,7 +168,11 @@ export interface WorkflowsRpcMethods {
   'workflows.start': { params: { threadId: ThreadId; plan: WorkflowPlan; requestId: string; templateId?: string }; result: WorkflowRun };
   /** Adds steps to a running or paused run. */
   'workflows.extend': { params: { threadId: ThreadId; runId: string; steps: WorkflowStepPlan[]; requestId: string }; result: WorkflowRun };
-  /** `retry` needs `stepId` and restarts its failed or stopped executions. */
+  /**
+   * `retry` restarts the failed or stopped executions, of `stepId` only when
+   * named. An agent resumes, or retries on a paused run, only a pause it may
+   * lift (`PauseOrigin`).
+   */
   'workflows.control': { params: { threadId: ThreadId; runId: string; action: 'pause' | 'resume' | 'stop' | 'retry'; stepId?: string }; result: WorkflowRun };
   /** Called from a step's own thread: records its structured output, refused with the mismatch. */
   'workflows.output': { params: { threadId: ThreadId; value: unknown }; result: { runId: string; step: string } };

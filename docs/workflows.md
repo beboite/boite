@@ -129,15 +129,36 @@ stops its runs too. A parent turn that ends in an error or is cut by the system
 their summary reaches it when they end. A team that is
 merely disabled holds nothing: only a paused one does. Pause launches nothing new, but
 the steps already running still finish, and a paused run whose every step ended
-is done. A core restart never resumes paid work by itself: running runs pause,
-and each interrupted execution waits on its own thread. Resume runs it again
-with "Interrupted by a core restart" in its prompt.
+is done.
 
-Resume is an owner action. An agent pauses, stops, retries and extends only the
-runs it started, and retries none while the run is paused. An agent saves new
-templates but never replaces one already saved under that name. A paired phone
-can follow a run and stop it; Pause is not offered there, since only the owner
-resumes.
+An update or a restart from the app hands the run over: each running step is
+cut at its next tool boundary and waits again with "Interrupted by a core
+restart", the run stays running, and the next core runs those steps again with
+that line in their prompt ([restart handoff](restart-handoff.md)). After a
+crash, nothing resumes paid work by itself: running runs pause, marked as held
+by a restart, and each interrupted execution waits on its own thread. Resume
+runs it again with the same line in its prompt.
+
+A step sent back to work in its own conversation still counts for its run. When
+the owner stops a step, the run fails with it; a turn started later in that
+step's conversation, by the owner or a letter, takes the step back: the run
+runs again, the "Not started" executions wait again, and the step's answer
+feeds the steps after it as if it had never stopped.
+
+A pause records who set it (`pausedBy`), and that decides who lifts it:
+
+| Paused by | The agent that started the run resumes or retries it |
+| --- | --- |
+| The agent itself | at any time |
+| A restart | at any time |
+| The owner's Pause | once the owner wrote to the conversation again |
+| The team's pause in Subagents > Settings | never; the run takes the team's origin |
+
+`boite delegate resume` resumes every run a pause held that the agent may lift,
+with the team. The owner resumes any of them. An agent pauses, stops, retries
+and extends only the runs it started. An agent saves new templates but never
+replaces one already saved under that name. A paired phone can follow a run and
+stop it; Pause is not offered there, since a phone resumes nothing.
 
 The summary reaches the conversation once it is idle. When the run ends during
 one of its turns, delivery waits for that turn to finish.
