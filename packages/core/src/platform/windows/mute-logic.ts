@@ -1,7 +1,7 @@
 /**
  * What the audio mute decides, with no COM in sight.
  *
- * The guard Worker owns the endpoint and the poll; this class owns the rule.
+ * The guard Worker owns the endpoint and when to walk it; this class owns the rule.
  * Everything native it needs is behind the `listSessions` function it is given,
  * so `test/guard.test.ts` proves every decision on a fake and nothing is ever
  * audible in a test run.
@@ -48,6 +48,8 @@ export class MuteLogic {
   #lastWalk = Number.NEGATIVE_INFINITY;
   /** A pid came inside the batch gap and waits for the walk at its end. */
   #pending = false;
+  /** The last walk found a session of a traced pid, muted by this class or not. */
+  #tracedSessions = false;
 
   constructor(
     /** One walk. A session it could not read goes to `skipped` and the walk goes on. */
@@ -63,6 +65,19 @@ export class MuteLogic {
     this.#pids.set(pid, threadId);
     // A process that opens its session in its first milliseconds would otherwise
     // play until the next poll. Inside a burst it waits for the batch walk.
+    this.#walkSoon();
+  }
+
+  /**
+   * The endpoint said a session opened or the devices changed. With a traced
+   * pid that is a walk now, or at the end of the batch gap; with none, nothing.
+   */
+  wake(): void {
+    if (!this.#enabled || this.#pids.size === 0) return;
+    this.#walkSoon();
+  }
+
+  #walkSoon(): void {
     if (this.now() - this.#lastWalk >= MUTE_BATCH_MS) this.tick();
     else this.#pending = true;
   }
@@ -86,11 +101,28 @@ export class MuteLogic {
     this.#enabled = enabled;
     // Turning it off gives the user their sound back at once, not at the next exit.
     if (!enabled) this.releaseAll();
+    // A session opened while it was off sent its only notice then: walk for it now.
+    else this.wake();
   }
 
   /** Every pid with a session this class is holding muted. */
   mutedPids(): number[] {
     return [...this.#held.keys()];
+  }
+
+  /** When the last walk ran, on `now`'s clock; -Infinity before the first. */
+  walkedAt(): number {
+    return this.#lastWalk;
+  }
+
+  /**
+   * True when the last walk saw a session of a traced pid. Core Audio says when
+   * a session opens, never when its mute changes, so while one exists the
+   * Worker keeps walking every second: an agent that unmutes itself, or a
+   * session that opened muted and was unmuted, is muted again within a second.
+   */
+  hasTracedSessions(): boolean {
+    return this.#tracedSessions && this.#enabled && this.#pids.size > 0;
   }
 
   /** Everything muted or failed since the last drain. */
@@ -118,8 +150,10 @@ export class MuteLogic {
       return;
     }
 
+    let traced = false;
     for (const session of sessions) {
       const threadId = this.#pids.get(session.pid);
+      if (threadId !== undefined) traced = true;
       if (threadId === undefined || session.getMute() !== false) {
         session.release();
         continue;
@@ -133,6 +167,7 @@ export class MuteLogic {
       else held.push(session);
       this.events.push({ kind: 'session-muted', threadId, pid: session.pid });
     }
+    this.#tracedSessions = traced;
   }
 
   /** Unmute and release everything held: the Worker is stopping. */

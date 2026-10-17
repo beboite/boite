@@ -4,12 +4,12 @@
  * that takes the foreground is sent to the bottom without activation, and the
  * window the user was on gets the focus back.
  *
- * The audio mute rides the same thread and the same pid set. There is no
- * notification to hook for it: registering `IAudioSessionNotification` would
- * need an MTA thread and a JS COM object, so the sessions of the default render
- * endpoint are polled every second and right after a new pid (one walk per
- * 100 ms burst of them), and a session of a traced pid is muted until that pid
- * exits.
+ * The audio mute rides the same thread and the same pid set. The sessions of
+ * the default render endpoint are walked right after a new pid (one walk per
+ * 100 ms burst of them) and whenever Core Audio says a session opened or the
+ * devices changed (`AudioSessions.watch`), and a session of a traced pid is
+ * muted until that pid exits. A walk every half minute catches a notice that
+ * never came; an endpoint that refused to notify is walked every second.
  *
  * It lives in a Worker because the hook is delivered on the thread that
  * installed it and only while that thread pumps messages: the main thread must
@@ -68,11 +68,18 @@ const QS_ALLINPUT = 0x04ff;
 const MSG_SIZE = 64;
 const TITLE_CHARS = 256;
 /**
- * How long between two walks of the audio sessions. A session that opens and
- * closes inside one interval can play a burst; anything shorter is a COM walk
- * every few hundred milliseconds for a case that barely exists.
+ * How long between two walks of an endpoint that does not notify. A session
+ * that opens and closes inside one interval can play a burst; anything shorter
+ * is a COM walk every few hundred milliseconds for a case that barely exists.
  */
 const AUDIO_INTERVAL_MS = 1000;
+/**
+ * How long between two walks of an endpoint that notifies. One walk is 0.6 to
+ * 0.9 ms of CPU with 5 sessions and 2.0 to 2.3 ms with 20, plus 3 to 6 ms of
+ * round trips to the audio service (2026-10-17, `audio-walk-bench.ts`), so the
+ * one-second clock only stays where Core Audio cannot tell.
+ */
+const AUDIO_FALLBACK_MS = 30_000;
 
 const scope = globalThis as unknown as {
   onmessage: ((event: { data: unknown }) => void) | null;
@@ -151,9 +158,13 @@ let mute: MuteLogic | null = null;
  * The default render endpoint, opened on the first walk and reopened after a
  * failure, after the user switched output device, and every half minute on a
  * machine that had none. A walk that throws is what puts the reason in a single
- * `audio-failed`.
+ * `audio-failed`. Its notices arrive between two pump ticks, on this thread.
  */
-const endpoint = new AudioEndpoint(openSessions);
+const endpoint = new AudioEndpoint(openSessions, Date.now, () => {
+  if (mute === null) return;
+  mute.wake();
+  for (const muted of mute.takeEvents()) send(muted);
+});
 /** True once COM refused this thread: the audio half stays off for the Worker's life. */
 let comFailed = false;
 /** True between a `CoInitializeEx` that took and its matching `CoUninitialize`. */
@@ -243,7 +254,6 @@ scope.onmessage = (event: { data: unknown }): void => {
    * `while` loop on purpose: the pump has to give the JS event loop its turn or
    * `pid-add`, `pid-remove` and `set` would never reach this thread.
    */
-  let nextWalk = 0;
   const tick = (): void => {
     if (Atomics.load(stop, 0) !== 0) {
       if (hook !== 0n) {
@@ -263,13 +273,13 @@ scope.onmessage = (event: { data: unknown }): void => {
       u32.DispatchMessageW(messagePtr);
     }
     // The wait above returns early on any message, so the walk is on the clock
-    // rather than on a count of turns. A pid that came inside a burst gets its
-    // walk at the end of the burst's gap.
-    const now = Date.now();
-    if (now >= nextWalk || audio.pendingWalkIn() === 0) {
-      nextWalk = now + AUDIO_INTERVAL_MS;
-      audio.tick();
-    }
+    // rather than on a count of turns. A pid or a notice that came inside a
+    // burst gets its walk at the end of the burst's gap. The one-second clock
+    // runs while a traced process has a session, whose mute Core Audio never
+    // reports, or when the endpoint does not notify; it counts from the last
+    // walk, whatever started it.
+    const interval = endpoint.watching && !audio.hasTracedSessions() ? AUDIO_FALLBACK_MS : AUDIO_INTERVAL_MS;
+    if (Date.now() - audio.walkedAt() >= interval || audio.pendingWalkIn() === 0) audio.tick();
     for (const pushed of guard.takeEvents()) send(pushed);
     for (const muted of audio.takeEvents()) send(muted);
     setTimeout(tick, 0);
