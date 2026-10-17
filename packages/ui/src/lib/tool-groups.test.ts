@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import type { MessagePart } from '@boite/contracts';
 import { MessageRuns } from './memory-timeline';
-import { activityShown, agentSummary, liveLabel, partRuns, programOf, runSpan, runSummary, thinkingShown, ThoughtTitleScan, thoughtTitle, toolLine, unwrapCommand, type ToolPart } from './tool-groups';
+import { activityShown, agentSummary, commandOf, liveLabel, partRuns, programOf, runSpan, runSummary, thinkingShown, ThoughtTitleScan, thoughtTitle, toolLine, unwrapCommand, type ToolPart } from './tool-groups';
 
 function tool(name: string, input: unknown, extra: Partial<ToolPart> = {}): ToolPart {
   return { type: 'tool', toolId: `${name}-${JSON.stringify(input)}`, name, input, output: 'ok', status: 'done', ...extra };
@@ -114,7 +114,17 @@ test('a call reads as its command, or as a sentence in the tense it is in', () =
   expect(toolLine(tool('Read', { file_path: 'packages/ui/src/app.css' }))).toMatchObject({ text: 'Read app.css', mono: false, title: 'packages/ui/src/app.css' });
   expect(toolLine(tool('Read', { file_path: 'a/b.ts' }, { status: 'running' })).text).toBe('Reading b.ts');
   expect(toolLine(tool('mcp__boite__whereami', {})).text).toBe('mcp__boite__whereami');
-  expect(liveLabel(tool('Bash', { command: 'cd x && cargo build' }, { status: 'running' }))).toBe('Running cargo');
+  expect(liveLabel(tool('Bash', { command: 'cd x && cargo build' }, { status: 'running' }))).toBe('Running cargo build');
+});
+
+test('a running command says what it is for, else the program and its subcommands', () => {
+  // The agent's own words while the command runs, not the bare name of the CLI it calls.
+  const described = tool('Bash', { command: 'boite agents send thr_1 "redo the titled assets"', description: 'Ask the media step to redo the titled assets\nsecond line' }, { status: 'running' });
+  expect(liveLabel(described)).toBe('Ask the media step to redo the titled assets');
+  expect(liveLabel(tool('Bash', { command: 'boite agents send thr_1 "redo it"' }, { status: 'running' }))).toBe('Running boite agents send');
+  expect(liveLabel(tool('PowerShell', { command: 'git -C D:/x status', description: '  ' }, { status: 'running' }))).toBe('Running git');
+  expect(commandOf('FOO=1 bun run check --watch')).toBe('bun run check');
+  expect(commandOf('cat package.json')).toBe('cat');
 });
 
 test('calls fold into runs that text, a question or a produced document breaks', () => {
@@ -202,7 +212,7 @@ test('empty reasoning under a second is not drawn; words, a live clock or a whol
 test('command inputs using cmd keep their family and live program label', () => {
   const part = tool('exec_command', { cmd: 'pwsh -NoProfile -Command "git status --short"' });
   expect(runSummary([part])).toBe('Ran 1 command');
-  expect(liveLabel(part)).toBe('Running git');
+  expect(liveLabel(part)).toBe('Running git status');
   expect(toolLine(part).text).toBe('git status --short');
 });
 

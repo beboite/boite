@@ -885,8 +885,11 @@ Calls and reasoning with no answer text between them fold into one line,
 "Ran 6 commands" with the run's duration, that opens on its steps in order.
 When every call of the run carries the agent's own `summary` (Claude's
 `tool_use_summary`), the line reads those instead: "Read rules.md and data.txt
-· Found N=2 with a prime search". While a step runs the line names it ("Running
-git", or the thought being written) and its clock ticks. A reasoning step reads
+· Found N=2 with a prime search". While a step runs the line names it and its
+clock ticks: a command reads as what the agent said it is for (the first line
+of the call's `description`, Claude's Bash), else as its program and up to two
+subcommand words ("Running gh repo create", `commandOf`), never the program
+alone; a thought reads as the thought being written. A reasoning step reads
 as its last bold heading (Codex) or the first sentence of its last paragraph
 (Claude's summary, a raw chain of thought), and as "Thinking" while it has no
 words (`thoughtTitle` in `lib/tool-groups.ts`; a live step keeps a

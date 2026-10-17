@@ -198,7 +198,7 @@ test('tool activity folds unsuccessful calls and keeps their details accessible 
   expect(await page.evaluate(`document.querySelector('${id('tool-group-toggle')}').getAttribute('aria-label')`)).toContain('4 unsuccessful calls');
   expect(await page.evaluate(`document.querySelectorAll('${id('tool-error-preview')}').length`)).toBe(0);
   expect(await page.evaluate(`document.querySelector('${id('question-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
-  expect(await page.evaluate(`document.querySelector('${id('tool-card')}[data-status=running] .line').textContent`)).toBe('Running gh');
+  expect(await page.evaluate(`document.querySelector('${id('tool-card')}[data-status=running] .line').textContent`)).toBe('Running gh repo create');
   expect(await page.evaluate(`document.querySelector('${id('turn-summary')}') === null`)).toBe(true);
   for (const width of [1300,390]) {
     await page.send('Emulation.setDeviceMetricsOverride', {width,height:850,deviceScaleFactor:1,mobile:width<720});
