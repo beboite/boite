@@ -19,7 +19,7 @@ RUN if [ -n "$BOITE_VERSION" ]; then bun -e 'const v=process.env.BOITE_VERSION; 
 ARG BOITE_RELEASE_TELEMETRY=
 RUN bun run build:ui && bun run build:core
 
-FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS agents
+FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS agents
 COPY docker/agents/package.json docker/agents/package-lock.json /opt/agents/
 # npm installs both x64 OpenCode builds (185 MB each), and its postinstall picks
 # one by the build host's CPU, which always has AVX2. Keep the baseline build,
@@ -31,7 +31,7 @@ RUN cd /opt/agents && npm ci --omit=dev && npm cache clean --force \
        fi \
     && node_modules/.bin/opencode --version
 
-FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS runtime
+FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS runtime
 ARG BOITE_CHANNEL=stable
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git ripgrep tini bash \
