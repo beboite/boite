@@ -160,9 +160,17 @@ test('a hosted tab shown natively keeps telling the core it is watched, while th
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     await vi.advanceTimersByTimeAsync(REMOTE_WATCH_EVERY_MS * 2); await settle();
     expect(watches().length).toBe(shown + 2);
-    await unmount(app); app = undefined;
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    // A new tab's draft covers the page: nobody sees it, so it may sleep.
+    query('agent-browser-new')!.click(); await settle();
+    expect(query('agent-browser-native')).toBeNull();
+    const drafted = watches().length;
     await vi.advanceTimersByTimeAsync(REMOTE_WATCH_EVERY_MS * 2); await settle();
-    expect(watches().length).toBe(shown + 2);
+    expect(watches().length).toBe(drafted);
+    query('agent-browser-draft-close')!.click(); await settle();
+    expect(watches().length).toBe(drafted + 1);
+    await unmount(app); app = undefined;
+    await vi.advanceTimersByTimeAsync(REMOTE_WATCH_EVERY_MS * 2); await settle();
+    expect(watches().length).toBe(drafted + 1);
   } finally { store.localCore = false; agentHost.active = false; }
 });

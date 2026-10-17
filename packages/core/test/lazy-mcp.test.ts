@@ -62,7 +62,7 @@ test('a session gets its servers from what they answered before, and starts one 
   const cwd = join(harness.dataDir, 'work');
   mkdirSync(cwd, { recursive: true });
   const startsFile = join(harness.dataDir, 'starts.txt');
-  const server: StdioServer = { command: process.execPath, args: [FIXTURE], env: { LAZY_MCP_STARTS: startsFile, LAZY_MCP_OWN: 'own' } };
+  const server: StdioServer = { command: process.execPath, args: [FIXTURE], env: { LAZY_MCP_STARTS: startsFile, LAZY_MCP_OWN: 'own', LAZY_MCP_INIT_DELAY_MS: '300' } };
   const servers = new Map([['fixture', server]]);
   const lazy = harness.core.lazyMcp;
 
@@ -95,7 +95,13 @@ test('a session gets its servers from what they answered before, and starts one 
   expect(lazy.running()).toBe(0);
 
   // The first call starts it under the thread, in the session's folder, with its own variables.
-  const called = await post(url, token, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'echo', arguments: { said: 'hi' } } }, session);
+  const calling = post(url, token, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'echo', arguments: { said: 'hi' } } }, session);
+  // A call that comes during the server's handshake waits for its end, and the server is not started twice.
+  await waitFor(() => starts(startsFile) === 2, 5000);
+  const during = await post(url, token, { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'echo', arguments: { said: 'during' } } }, session);
+  expect(during.messages[0]!.error).toBeUndefined();
+  expect(JSON.parse(during.messages[0]!.result.content[0].text).arguments).toEqual({ said: 'during' });
+  const called = await calling;
   expect(called.messages).toHaveLength(1);
   expect(called.messages[0]!.id).toBe(3);
   // The server reads its folder resolved: a temporary folder on macOS is under /private/var.
@@ -123,7 +129,7 @@ test('a session gets its servers from what they answered before, and starts one 
   expect((await post(url, token, { jsonrpc: '2.0', id: 7, method: 'ping' }, session)).status).toBe(404);
 });
 
-test('only the stdio servers of the user config are taken, without the ones the project turned off', () => {
+test('only the stdio servers of the user config are taken, without the ones the project turned off or the CLI expands', () => {
   const dir = join(harness.dataDir, 'claude-config');
   mkdirSync(dir, { recursive: true });
   const cwd = join(harness.dataDir, 'project');
@@ -134,6 +140,8 @@ test('only the stdio servers of the user config are taken, without the ones the 
       remote: { type: 'http', url: 'https://example.com/mcp' },
       off: { command: 'off' },
       broken: { type: 'stdio' },
+      expanded: { command: 'tool', args: ['--key', '${KEY}'] },
+      expandedEnv: { command: 'tool', env: { TOKEN: '${TOKEN:-none}' } },
     },
     projects: { [resolve(cwd)]: { disabledMcpServers: ['off'] } },
   }));

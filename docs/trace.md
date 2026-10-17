@@ -188,9 +188,12 @@ A start waits up to 2 seconds for its exit before it is written. A process
 that exits cleanly within that time gets no record of its own: its turn's
 `process.batch` record, written every 10 seconds, counts those processes by
 program with their CPU time (`3 short processes ran: bash.exe 2, sed.exe 1`).
-A crash (a signal or a Windows status code) keeps both records. On 2026-10-17,
-20 agents ran 90 processes a second, which filled the eight core files in four
-minutes.
+A crash (a signal or a Windows status code) and an exit whose status the OS
+did not give keep both records. On 2026-10-17, with about 20 agents at work,
+the eight core files held 32,749 process records over 368 seconds, 89 a second
+and 2.45 MB a minute. `bun bench/process-log-replay.ts <logs directory>` plays
+them through this store, which writes 1,013 records, 2.8 a second and 0.06 MB
+a minute.
 
 The sink redacts configured credentials and recognized sensitive fields before
 bounding messages to 4,096 characters, metadata to 200 and `data` strings to

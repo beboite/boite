@@ -14,6 +14,7 @@ import type {
   ThreadResources,
   Todo
 } from '@boite/contracts';
+import { TRACE_LIMIT } from '@boite/contracts';
 import { untrack } from 'svelte';
 import { strings } from '../strings';
 import { coreHref } from '../endpoint';
@@ -105,7 +106,8 @@ export class Workbench {
       const snapshot = await client.call('trace.get', { threadId: open.id });
       if (!current()) return;
       const changed = this.trace.filter(record => baseline.find(previous => sameProcess(previous, record)) !== record);
-      this.trace = [...changed, ...snapshot.filter(record => !changed.some(newer => sameProcess(newer, record)))];
+      // Events that came during the read stay ahead of it, within the same bound.
+      this.trace = [...changed, ...snapshot.filter(record => !changed.some(newer => sameProcess(newer, record)))].slice(0, TRACE_LIMIT);
     } catch (error) {
       if (current()) this.ctx.fail(error);
     }

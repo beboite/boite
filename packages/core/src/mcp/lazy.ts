@@ -172,6 +172,8 @@ export function userStdioServers(configDir: string | undefined, cwd: string): Ma
     if (typeof entry.command !== 'string' || entry.command.length === 0) continue;
     const args = Array.isArray(entry.args) && entry.args.every((arg) => typeof arg === 'string') ? entry.args as string[] : [];
     const env = isRecord(entry.env) ? Object.fromEntries(Object.entries(entry.env).filter((pair): pair is [string, string] => typeof pair[1] === 'string')) : {};
+    // The CLI expands `${VAR}` in a server's command, arguments and environment: such a server stays with it.
+    if ([entry.command, ...args, ...Object.values(env)].some((value) => value.includes('${'))) continue;
     servers.set(name, { command: entry.command, args, env });
   }
   return servers;
@@ -426,7 +428,8 @@ export class LazyMcp {
     this.#send(session, { ...message, id: internal });
   }
 
-  #live(session: Session): boolean { return session.upstream !== null && !session.upstream.exited; }
+  /** A server is live once its handshake ended: a call that comes during it waits for `starting`. */
+  #live(session: Session): boolean { return session.upstream !== null && !session.upstream.exited && session.upstream.initialize !== null; }
 
   #ensure(session: Session): Promise<Upstream> {
     if (this.#live(session)) return Promise.resolve(session.upstream!);
@@ -463,6 +466,8 @@ export class LazyMcp {
     const gone = (): void => {
       if (upstream.exited) return;
       upstream.exited = true;
+      // A server that failed its start and was replaced leaves its successor's calls alone.
+      if (session.upstream !== null && session.upstream !== upstream) return;
       const reason = `the MCP server ${session.name} exited${upstream.stderr.trim() ? `: ${upstream.stderr.trim().slice(-500)}` : ''}`;
       for (const [internal, waiting] of session.pending) {
         session.pending.delete(internal);

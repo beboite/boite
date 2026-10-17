@@ -37,9 +37,10 @@
   const nativeTab = $derived(native ? watched?.tabId ?? null : null);
 
   // The core keeps a tab awake while a viewer watches it (docs/browser.md):
-  // shown natively, the page tells it so while the window is visible.
+  // shown natively, the page tells it so while the window is visible. A new
+  // tab's draft covers the page, which may then sleep.
   $effect(() => {
-    const client = store.client, tabId = nativeTab, id = threadId;
+    const client = store.client, tabId = drafted ? null : nativeTab, id = threadId;
     if (!client || !tabId || store.connection !== 'ready') return;
     const tell = () => { if (document.visibilityState === 'visible') void client.call('browser.remoteWatch', { threadId: id, tabId }).catch(() => {}); };
     tell();

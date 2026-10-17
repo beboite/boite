@@ -274,7 +274,8 @@ async function main(): Promise<void> {
     chrome.kill();
     await chrome.exited;
     server.stop(true);
-    rmSync(profile, { recursive: true, force: true });
+    // Chrome's helpers can hold the profile a moment after it exits on Windows.
+    rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
     if (own) rmSync(bundle, { recursive: true, force: true });
   }
 }

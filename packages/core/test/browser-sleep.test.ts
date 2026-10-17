@@ -89,6 +89,32 @@ test('a freeze that fails is tried again after the wait', async () => {
   sleep.drop(tab);
 });
 
+// A wake can time out too: the tab must stay asleep, or the next command
+// would skip the wake and drive a page still frozen.
+test('a wake that fails leaves the tab asleep, and the next use wakes it', async () => {
+  const { tab, calls } = fakeTab();
+  const sleep = new TabSleep<Sleeper>(() => false, () => false, 20);
+  sleep.schedule(tab);
+  await until(() => tab.sleep.asleep);
+  const send = tab.page.send;
+  let failures = 1;
+  tab.page.send = async (method, params, timeoutMs) => {
+    if (method === 'Emulation.setFocusEmulationEnabled' && failures > 0) { failures--; throw new Error('timed out'); }
+    return send(method, params, timeoutMs);
+  };
+  await expect(sleep.use(tab, async () => { calls.push('first'); })).rejects.toThrow('timed out');
+  expect(tab.sleep.asleep).toBe(true);
+  await sleep.use(tab, async () => { calls.push('second'); });
+  expect(tab.sleep.asleep).toBe(false);
+  expect(calls.slice(2)).toEqual([
+    'Page.setWebLifecycleState {"state":"active"}',
+    'Page.setWebLifecycleState {"state":"active"}',
+    'Emulation.setFocusEmulationEnabled {"enabled":true}',
+    'second',
+  ]);
+  sleep.drop(tab);
+});
+
 // A turn that runs for half an hour without touching its tab must not keep
 // it awake throughout: the turn holds it only for a while after its last use,
 // and the next command wakes it.

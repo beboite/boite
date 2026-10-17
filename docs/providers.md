@@ -1175,8 +1175,11 @@ server is live, the core reads its lists again and saves them; when its tools
 differ from what the session was given, the session gets
 `notifications/tools/list_changed`.
 
-The turn's end releases the registration: the core closes each server's stdin
-and kills it after 3 seconds. Set `BOITE_LAZY_MCP=0` in the core's environment
+The CLI's end releases the registration, not the turn's: a warm or viewed
+session keeps its CLI across turns, and the servers it started with it. The
+core then closes each server's stdin and kills it after 3 seconds. A server
+whose command, arguments or environment hold a `${...}` reference stays with
+the CLI, which expands it. Set `BOITE_LAZY_MCP=0` in the core's environment
 to give the CLI the servers as configured.
 
 ## Stdio transport failures

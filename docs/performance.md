@@ -1212,6 +1212,7 @@ bun bench/provider-list.ts                     # time per providers list() and s
 bun run bench/continuation.ts 100 1024 25 1100            # history a fresh session carries: messages, tool KiB, files, file KiB
 bun run bench/queue-admission.ts 1024 16                  # one scheduler pass over held child turns: turns, teams
 bun bench/ui-heap.ts --machines --load 4 --tick 25 --switch 0 --minutes 9   # heap, DOM and private bytes of a page left open on busy agents
+bun bench/process-log-replay.ts <logs directory>          # process records a log directory holds, and what this store writes of them
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts

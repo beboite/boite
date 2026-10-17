@@ -218,8 +218,8 @@ export class DiagnosticLogs {
   /**
    * A start waits up to `SHORT_PROCESS_MS` for its exit. A clean exit within
    * that time joins its turn's batch instead of two records: on 2026-10-17,
-   * 20 agents ran 90 processes a second (shell helpers, `sed`, `git`), which
-   * filled the eight files in four minutes.
+   * about 20 agents wrote 89 process records a second (shell helpers, `sed`,
+   * `git`), and the eight files held six minutes (docs/trace.md).
    */
   private observeProcess(name: 'process.started' | 'process.exited', proc: RpcEvents['process.started']): void {
     const key = `${proc.threadId}:${proc.pid}`;
@@ -234,7 +234,8 @@ export class DiagnosticLogs {
     const held = this.heldStarts.get(key);
     this.heldStarts.delete(key);
     const lifetime = proc.exitedAt !== null && proc.exitedAt !== undefined ? proc.exitedAt - proc.startedAt : undefined;
-    if (held && !crashed(proc.exitCode) && lifetime !== undefined && lifetime < SHORT_PROCESS_MS) { this.count(proc, turnId); return; }
+    // A batch says nothing of how each process ended: an exit with no status the OS gave keeps its records.
+    if (held && proc.exitCode !== null && !crashed(proc.exitCode) && lifetime !== undefined && lifetime < SHORT_PROCESS_MS) { this.count(proc, turnId); return; }
     if (held) this.writeProcess('process.started', held.proc, held.turnId);
     this.writeProcess('process.exited', proc, turnId);
   }

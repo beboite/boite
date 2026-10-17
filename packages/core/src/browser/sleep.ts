@@ -67,13 +67,14 @@ export class TabSleep<T extends Sleeper> {
   /**
    * The page as it was before it slept. Frozen, a page is also hidden, and
    * focus emulation shows it again, so it goes back on after the page is active.
+   * A wake that fails leaves the tab asleep, so the next use tries it again.
    */
   wake(tab: T): Promise<void> {
     return this.#queue(tab, async () => {
       if (!tab.sleep.asleep) return;
-      tab.sleep.asleep = false;
       await tab.page.send('Page.setWebLifecycleState', { state: 'active' }, STEP_MS);
       await tab.page.send('Emulation.setFocusEmulationEnabled', { enabled: true }, STEP_MS);
+      tab.sleep.asleep = false;
     });
   }
 

@@ -703,6 +703,20 @@ test('process events wait for the trace surface, which keeps the latest the core
     expect(store.trace).toHaveLength(TRACE_LIMIT);
     expect(store.trace[0]).toMatchObject({ pid: TRACE_LIMIT + 50, exitedAt: 999 });
     expect(store.trace.at(-1)?.pid).toBe(51);
+    // Events that land while the core's list is on its way stay ahead of it, within the same bound.
+    const gate = deferred<void>(), call = client.call.bind(client);
+    const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+      if (method !== 'trace.get') return call(method, params);
+      await gate.promise;
+      return Array.from({ length: TRACE_LIMIT }, (_, at) => record(1000 + at)) as never;
+    });
+    try {
+      const reading = store.refreshTrace();
+      for (let pid = 2000; pid < 2000 + TRACE_LIMIT; pid += 1) client.traceProcess(record(pid));
+      gate.resolve(); await reading;
+      expect(store.trace).toHaveLength(TRACE_LIMIT);
+      expect(store.trace[0]?.pid).toBe(2000 + TRACE_LIMIT - 1);
+    } finally { gate.resolve(); spy.mockRestore(); }
   } finally { store.traceWatched = false; }
 });
 
