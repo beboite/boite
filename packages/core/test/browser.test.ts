@@ -83,8 +83,10 @@ real('a page nobody drives or watches sleeps, and meets the next command or view
   expect(watched[0]).toBeLessThan(1000);
   // Once the viewer leaves it sleeps again; a client that shows the tab's own
   // page asks for no frames, and one `browser.remoteWatch` keeps it awake.
-  // The screencast stops up to twice its idle time after the last frame.
-  await Bun.sleep(7500);
+  // The screencast stops up to twice its idle time after the last frame; a loaded runner takes longer.
+  for (const end = Date.now() + 30_000; !harness.core.browser.asleep(tabId!) && Date.now() < end;) await Bun.sleep(100);
+  expect(harness.core.browser.asleep(tabId!)).toBe(true);
+  await Bun.sleep(1000);
   expect(await owner.call('browser.remoteWatch', { threadId, tabId: tabId! })).toEqual({ ok: true });
   expect((await evaluate('gaps()') as [number, number])[0]).toBeGreaterThan(800);
   // Frozen within this wait, the page would stop for 2 s or more.

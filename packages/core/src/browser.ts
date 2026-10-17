@@ -103,6 +103,8 @@ export class AgentBrowser {
   /** How long a tab nobody drives or watches stays awake; tests shorten it. */
   get sleepAfterMs(): number { return this.#sleep.afterMs; }
   set sleepAfterMs(ms: number) { this.#sleep.afterMs = ms; }
+  /** Whether the tab's page is frozen now; a test waits on it rather than on a guess of the time. */
+  asleep(tabId: string): boolean { return this.#tabs.get(tabId)?.sleep.asleep ?? false; }
 
   /** What keeps a tab awake with no command running: a viewer, a recording. Its conversation's running turn does too, for a while (`sleep.ts`). */
   #held(tab: Tab): boolean {

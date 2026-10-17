@@ -67,6 +67,28 @@ test('a tab sleeps only once nothing uses or holds it, and a dropped tab never d
   expect(calls.slice(2)).toEqual(['Page.setWebLifecycleState {"state":"active"}', 'Emulation.setFocusEmulationEnabled {"enabled":true}']);
 });
 
+// A freeze can time out on a loaded machine: the tab must try again after the
+// wait instead of running until something next uses it.
+test('a freeze that fails is tried again after the wait', async () => {
+  const { tab, calls } = fakeTab();
+  const send = tab.page.send;
+  let failures = 1;
+  tab.page.send = async (method, params, timeoutMs) => {
+    if (method === 'Page.setWebLifecycleState' && failures > 0) { failures--; throw new Error('timed out'); }
+    return send(method, params, timeoutMs);
+  };
+  const sleep = new TabSleep<Sleeper>(() => false, () => false, 20);
+  sleep.schedule(tab);
+  await until(() => tab.sleep.asleep);
+  expect(calls).toEqual([
+    'Emulation.setFocusEmulationEnabled {"enabled":false}',
+    'Emulation.setFocusEmulationEnabled {"enabled":true}',
+    'Emulation.setFocusEmulationEnabled {"enabled":false}',
+    'Page.setWebLifecycleState {"state":"frozen"}',
+  ]);
+  sleep.drop(tab);
+});
+
 // A turn that runs for half an hour without touching its tab must not keep
 // it awake throughout: the turn holds it only for a while after its last use,
 // and the next command wakes it.

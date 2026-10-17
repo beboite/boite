@@ -122,8 +122,10 @@ export class TabSleep<T extends Sleeper> {
         await tab.page.send('Page.setWebLifecycleState', { state: 'frozen' }, STEP_MS);
         tab.sleep.asleep = true;
       } catch {
-        // A page that cannot freeze stays as it was; one that is gone is dropped by its tab.
+        // A page that cannot freeze stays as it was and tries again after the wait; one that is gone is dropped by its tab.
         await tab.page.send('Emulation.setFocusEmulationEnabled', { enabled: true }, STEP_MS).catch(() => {});
+        tab.sleep.heldAt = Date.now();
+        this.schedule(tab);
       }
     });
   }

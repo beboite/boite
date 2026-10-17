@@ -155,7 +155,7 @@ starts a turn, so the agent's pages run while it works, as they did when it
 last looked. Freezing and waking take turns per tab: a command that arrives
 while the page is being frozen waits for the freeze, wakes the page and only
 then runs, and the page is visible and focused again when it does. A tab
-closed while asleep is woken first. A page asleep keeps its state; its timers
+closed while asleep is woken first, and a freeze that fails is tried again after the wait. A page asleep keeps its state; its timers
 resume where they stopped, and a page that reads the clock sees the time pass.
 
 A tab the desktop app hosts gets the same calls through the relay: `Page` and
