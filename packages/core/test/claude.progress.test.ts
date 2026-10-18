@@ -17,6 +17,15 @@ test('a silent Claude compaction is observable before the turn answers', async (
   await Bun.sleep(20);
   const thread = await client.call('threads.get', { threadId });
   expect(thread.progress).toMatchObject({ turnId: turn.id, phase: 'compacting', detail: null });
+  // The phase keeps its start across repeated events and restarts on the next phase.
+  const since = thread.progress!.since!;
+  await Bun.sleep(5);
+  harness.core.threads.progress.report(threadId, turn.id, 'compacting');
+  const repeated = harness.core.threads.progress.get(threadId)!;
+  expect(repeated.since).toBe(since);
+  expect(repeated.at).toBeGreaterThan(since);
+  harness.core.threads.progress.report(threadId, turn.id, 'working');
+  expect(harness.core.threads.progress.get(threadId)!.since).toBeGreaterThan(since);
   expect(thread.messages.filter(message => message.role === 'assistant')).toHaveLength(0);
   queries[0]!.emit(success('sess-progress'));
   await finished;

@@ -20,7 +20,8 @@ export class ProgressState {
   begin(threadId: ThreadId, turnId: TurnId): void {
     const old = this.latest.get(threadId);
     if (old) this.running.delete(old.turnId);
-    this.latest.set(threadId, { turnId, phase: 'starting', detail: null, at: Date.now() });
+    const at = Date.now();
+    this.latest.set(threadId, { turnId, phase: 'starting', detail: null, at, since: at });
     this.published.delete(threadId);
     // A turn starts queued and turns running in a later write; one already running is read once here.
     if (this.core.journal.getTurn(turnId)?.status === 'running') this.running.add(turnId);
@@ -37,7 +38,9 @@ export class ProgressState {
     if (old?.turnId !== turnId || !this.running.has(turnId)) return;
     const at = Date.now();
     const short = detail?.replace(/\s+/g, ' ').trim().slice(0, 300) || null;
-    this.latest.set(threadId, { turnId, phase, detail: short, at, providerAt: at });
+    // A compaction mid-turn shows how long it has run, so a repeated phase keeps its start.
+    const since = old.phase === phase ? old.since ?? old.at : at;
+    this.latest.set(threadId, { turnId, phase, detail: short, at, since, providerAt: at });
     if (old.phase === phase && old.detail === short && at - (this.published.get(threadId) ?? 0) < 1000) return;
     const thread = this.core.journal.getThread(threadId);
     if (!thread) return;
