@@ -4,7 +4,7 @@
   import { json } from '../lib/format';
   import { strings } from '../lib/strings';
   import { describeTool, permissionSentence } from '../lib/tool-summary';
-  import DiffView from './DiffView.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
 
   let {
     toolName,
@@ -26,7 +26,7 @@
   let sending = $state<'allow' | 'deny' | null>(null);
 
   async function choose(choice: 'allow' | 'deny'): Promise<void> {
-    if (sending !== null || decision !== null) return;
+    if (sending !== null || decision !== null || (choice === 'allow' && previewMissing)) return;
     sending = choice;
     if ((await answer(choice)) === false) sending = null;
   }
@@ -44,6 +44,9 @@
       ? described.subject
       : ''
   );
+  // A change is approved on what it shows: Allow waits for the diff's chunk, which says
+  // it is loading or offers a retry meanwhile (Deferred.svelte). Deny never waits.
+  let previewMissing = $derived(described.change !== null && parts.DiffView.current === undefined);
 </script>
 
 <div
@@ -70,7 +73,8 @@
       <pre class="mono subject" data-testid="permission-subject">{subjectBlock}</pre>
     {/if}
     {#if described.change}
-      <DiffView path={described.change.path} oldText={described.change.oldText} newText={described.change.newText} doc={described.change} />
+      {@const change = described.change}
+      <Deferred part={parts.DiffView}>{#snippet children(DiffView)}<DiffView path={change.path} oldText={change.oldText} newText={change.newText} doc={change} />{/snippet}</Deferred>
     {/if}
     {#if request?.description && request.description !== subjectBlock}
       <p class="muted description">{request.description}</p>
@@ -86,7 +90,7 @@
 
   {#if decision === null}
     <div class="actions" aria-busy={sending !== null}>
-      <button type="button" class="primary" data-testid="permission-allow" disabled={sending !== null} onclick={() => void choose('allow')}>
+      <button type="button" class="primary" data-testid="permission-allow" disabled={sending !== null || previewMissing} onclick={() => void choose('allow')}>
         <span class="ui-label">{strings.chat.allow}</span>
       </button>
       <button type="button" class="danger" data-testid="permission-deny" disabled={sending !== null} onclick={() => void choose('deny')}>

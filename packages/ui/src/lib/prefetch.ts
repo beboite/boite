@@ -20,10 +20,10 @@ export function prefetchAllowed(link = (globalThis.navigator as (Navigator & { c
 
 /**
  * What is worth fetching ahead: the tour only for a device that has not seen
- * it, the terminal only for the owner, since a paired device cannot open one.
+ * it, the terminal and its drawer only for the owner, since a paired device cannot open one.
  */
 export function prefetchNames<Name extends string>(names: Name[], device: { tourSeen: boolean; owner: boolean }): Name[] {
-  return names.filter((name) => !(name === 'Onboarding' && device.tourSeen) && !(name === 'TerminalView' && !device.owner));
+  return names.filter((name) => !(name === 'Onboarding' && device.tourSeen) && !((name === 'TerminalView' || name === 'TerminalDrawer') && !device.owner));
 }
 
 /**

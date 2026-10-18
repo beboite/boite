@@ -46,7 +46,7 @@
         // compete with the entry chunk. A wide one opens an untouched
         // conversation's panel on its launcher, whose key hints are mono
         // (PANEL_AUTO_OPEN in lib/right-panel.svelte.ts): its mono face is preloaded too.
-        var faces = { geist: 'Geist-Variable', inter: 'Inter-latin', plex: 'IBMPlexSans-latin', atkinson: 'AtkinsonHyperlegibleNext-latin', figtree: 'Figtree-latin', source: 'SourceSans3-latin', dm: 'DMSans-latin', system: '' };
+        var faces = { geist: 'Geist-latin', inter: 'Inter-latin', plex: 'IBMPlexSans-latin', atkinson: 'AtkinsonHyperlegibleNext-latin', figtree: 'Figtree-latin', source: 'SourceSans3-latin', dm: 'DMSans-latin', system: '' };
         var face = localStorage.getItem('boite.font');
         if (face === null || !Object.prototype.hasOwnProperty.call(faces, face)) face = 'inter';
         if (face !== 'inter') document.documentElement.dataset.font = face;
@@ -62,7 +62,7 @@
           document.head.appendChild(preload);
         };
         if (faces[face]) preloadFont(faces[face]);
-        if (mono !== 'system' && window.matchMedia && matchMedia('(min-width: 1200px)').matches) preloadFont(mono === 'jetbrains' ? 'JetBrainsMono-latin' : 'GeistMono-Variable');
+        if (mono !== 'system' && window.matchMedia && matchMedia('(min-width: 1200px)').matches) preloadFont(mono === 'jetbrains' ? 'JetBrainsMono-latin' : 'GeistMono-latin');
         var accent = localStorage.getItem('boite.accent-hue');
         if (accent !== null && Number.isFinite(Number(accent)) && Number(accent) >= 0 && Number(accent) <= 360) document.documentElement.style.setProperty('--accent-hue', accent);
         var stored = localStorage.getItem('boite.theme');

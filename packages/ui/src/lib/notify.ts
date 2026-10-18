@@ -111,6 +111,22 @@ export async function storeNotificationWords(words: Record<NotificationLabel, st
   } catch { /* A push then shows the core's English body. */ }
 }
 
+/** Where `sw.js` reads the page's language when it installs, to store that catalogue with the shell. */
+export const WORKER_LOCALE_PATH = '/locale';
+
+/**
+ * Leaves the language this page speaks beside the words. The next worker
+ * precaches that catalogue, so an offline open of a new build still has one;
+ * before the first write it goes by the device's languages.
+ */
+export async function storeWorkerLocale(locale: string): Promise<void> {
+  try {
+    if (typeof caches === 'undefined') return;
+    const cache = await caches.open(NOTIFICATION_WORDS_CACHE);
+    await cache.put(WORKER_LOCALE_PATH, new Response(locale, { headers: { 'content-type': 'text/plain' } }));
+  } catch { /* The worker then goes by the device's languages. */ }
+}
+
 /**
  * Whether this page's own core pushes the same notice to this device. The
  * service worker must show every push on iOS, so the page is the one that
