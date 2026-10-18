@@ -12,7 +12,7 @@ import { boundedBody } from '../coordination-wire.ts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from '../errors.ts';
 import { openResponse, pack, seal, SEALED, sealResponse, unpack, type Sealing } from '../group/seal.ts';
-import { checkCard, decodeInvite, tokenHash, type ContactCard } from './invite.ts';
+import { checkCard, decodeInvite, tokenHash, type ContactCard, type Invitation } from './invite.ts';
 import type { ContactStore } from './store.ts';
 
 export const CONTACT_JOIN_ROUTE = '/contacts/join';
@@ -27,7 +27,16 @@ export async function joinContact(store: ContactStore, core: Core, link: string)
   if (invite.coreId === self.coreId) throw invalidParams('link: this invitation is this core\'s own', { field: 'link' });
   if (store.has(invite.coreId)) throw refused('link: already a contact; remove it first to link again');
   if (core.coordination.trusted().some(peer => peer.coreId === invite.coreId)) throw refused('link: that core is already one of your machines');
-  if (store.list().length >= store.maxContacts) throw refused(`at most ${store.maxContacts} contacts; remove one first`);
+  const release = store.reserve(invite.coreId);
+  try {
+    return await spendInvite(store, core, invite, self);
+  } finally {
+    release();
+  }
+}
+
+/** Accepts the share, spends the token and keeps the host, while the join holds its slot. */
+async function spendInvite(store: ContactStore, core: Core, invite: Invitation, self: ContactCard): Promise<Contact> {
   if (invite.share !== null && store.tailscale.hasKey()) {
     try { await store.tailscale.acceptShare(invite.share); } catch (error) {
       core.log('warn', `contacts: the Tailscale share of ${invite.machine} was not accepted: ${messageOf(error)}`, { source: 'contacts' });
@@ -115,7 +124,8 @@ export async function joinRequest(store: ContactStore, core: Core, request: Requ
       // This core joined the guest's own invitation meanwhile: one relationship stays.
       store.reciprocal(card.coreId, existing.url);
     } else {
-      if (store.list().length >= store.maxContacts) throw refused(`this core has ${store.maxContacts} contacts already`);
+      // Outgoing joins in flight hold their slots: this guest cannot take one of them.
+      if (store.occupied(card.coreId) >= store.maxContacts) throw refused(`this core has ${store.maxContacts} contacts already`);
       store.store(card, 'host');
     }
     store.arm();

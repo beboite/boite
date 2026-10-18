@@ -184,20 +184,20 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 495,100 |
 | UI files, excluding `.br` and `.gz` copies | 4,942,100 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,545,900 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,546,700 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-18, contacts (PR #602) merged with `origin/main` at `80c2da06`
-measure 494,915 entry bytes, 4,941,535 UI bytes and 4,545,327 core JavaScript
+measure 494,915 entry bytes, 4,941,535 UI bytes and 4,546,167 core JavaScript
 bytes with `measure()` after fresh `bun run build:ui` and `bun run build:core`
 on Windows, against the 491,872, 4,867,996 and 4,477,807 recorded below for
 that main. The Home surface loads on first open: its chunk is 36,618 bytes of
 JavaScript and 21,882 of CSS, and its strings sit in the catalogue chunks. The
 entry grows 3,043 bytes for the Home switch, the remote chip and the lazy
 loader's wiring. The contact store, join, link, concierge and Tailscale client
-add 67,520 core bytes. The entry, UI and core JavaScript limits rise to
-495,100, 4,942,100 and 4,545,900; the `main.js` limit stays.
+add 68,360 core bytes. The entry, UI and core JavaScript limits rise to
+495,100, 4,942,100 and 4,546,700; the `main.js` limit stays.
 
 On 2026-10-18, keeping the prompt cache warm (PR #594) merged with
 `origin/main` at `3a19eb57` measures 491,872 entry bytes, 4,867,996 UI bytes

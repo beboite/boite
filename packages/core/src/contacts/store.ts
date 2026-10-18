@@ -88,6 +88,8 @@ export class ContactStore {
   private readonly flushing = new Set<string>();
   private readonly deciding = new Set<string>();
   private readonly pending = new Set<Promise<unknown>>();
+  /** Cores this one is joining right now: each holds a contact slot until its join ends. */
+  private readonly joining = new Set<string>();
   private peerCache: CoordinationPeer[] | null = null;
   private tailscaleCache: { at: number; value: ContactTailscale } | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -107,6 +109,16 @@ export class ContactStore {
   list(): StoredContact[] { return (this.core.journal.getSetting(CONTACTS) as StoredContact[] | undefined) ?? []; }
   find(coreId: string | null | undefined): StoredContact | undefined { return coreId ? this.list().find(contact => contact.coreId === coreId) : undefined; }
   has(coreId: string | null | undefined): boolean { return this.find(coreId) !== undefined; }
+  /** Stored contacts plus the slots outgoing joins hold, without the one `coreId` would fill itself. */
+  occupied(coreId?: string): number { return this.list().length + this.joining.size - (coreId !== undefined && this.joining.has(coreId) ? 1 : 0); }
+
+  /** Holds a slot for an outgoing join, so joins in flight never exceed the cap together; the caller releases it. */
+  reserve(coreId: string): () => void {
+    if (this.joining.has(coreId)) throw refused('link: this core is already joining that contact');
+    if (this.occupied() >= this.maxContacts) throw refused(`at most ${this.maxContacts} contacts; remove one first`);
+    this.joining.add(coreId);
+    return () => { this.joining.delete(coreId); };
+  }
 
   private save(contacts: StoredContact[]): void {
     this.core.journal.setSetting(CONTACTS, contacts);

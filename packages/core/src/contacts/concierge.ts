@@ -9,7 +9,7 @@
  */
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ContactRequest, DelegationConfig, ThreadSummary } from '@boite/contracts';
+import { AGENT_ENV, type ContactRequest, type DelegationConfig, type ThreadSummary } from '@boite/contracts';
 import { assertDriverRunnable, getDriver } from '../drivers/index.ts';
 import type { Core } from '../core.ts';
 import { newId } from '../ids.ts';
@@ -93,7 +93,7 @@ export class Concierge {
       cwd, branch: null, permissionMode: 'plan', status: 'idle', unread: false, archived: false, pinned: false,
       sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, createdAt: now, updatedAt: now,
     };
-    // Its processes are traced under their own id and stopped with it; no agent token reaches them.
+    // Its processes are traced under their own id and stopped with it; no Boite token reaches them.
     const procId = `concierge:${thread.id}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('the concierge did not answer within 3 minutes')), TIMEOUT_MS);
@@ -106,7 +106,7 @@ export class Concierge {
       answer = await driver.sideQuestion({
         thread, provider, question: prompt, prompt, accountEnv: this.core.accounts.accountEnv(account, provider), signal: controller.signal,
         spawnChild: (cmd, args, opts) => {
-          const child = this.core.procs.spawnChild(procId, cmd, args, opts);
+          const child = this.core.procs.spawnChild(procId, cmd, args, { ...opts, env: withoutBoiteCredentials(opts?.env ?? process.env) });
           // The install stays in place while the child runs.
           installs.acquire(provider.id);
           let released = false;
@@ -134,4 +134,20 @@ export class Concierge {
     for (const run of this.runs) run.abort(new Error('the core is stopping'));
     this.runs.clear();
   }
+}
+
+/**
+ * The concierge's environment without a Boite credential or identity: a core
+ * started from an agent inherits that agent's token, and a tool-free process
+ * has no use for the owner's. Provider sign-in variables stay.
+ */
+export function withoutBoiteCredentials(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  const agent = new Set<string>(Object.values(AGENT_ENV));
+  const clean: Record<string, string | undefined> = {};
+  for (const [name, value] of Object.entries(env)) {
+    const upper = name.toUpperCase();
+    if (agent.has(upper) || upper.startsWith('BOITE_AGENT_') || upper === 'BOITE_TOKEN' || upper === 'BOITE_PLUGIN_ID') continue;
+    clean[name] = value;
+  }
+  return clean;
 }

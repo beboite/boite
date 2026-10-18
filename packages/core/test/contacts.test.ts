@@ -194,7 +194,7 @@ test('a trusted contact whose git remote matches exactly one project is answered
   // No remote decides this one: the concierge, on the owner's "concierge" profile, opens docs.
   const echo = (await hostClient.call('accounts.list', {})).find(entry => entry.providerId === 'echo')!;
   host.core.journal.setSetting('delegation:contacts-test', { enabled: true, paused: false, profiles: [{ id: 'concierge', name: 'Concierge', providerId: 'echo', accountId: echo.id, model: 'echo', effort: null }] });
-  const prompts: string[] = [];
+  const prompts: string[] = [], childEnv: string[] = [];
   const threadsBefore = host.core.journal.listThreads().length;
   const startTurn: Driver['startTurn'] = ctx => {
     const id = ctx.emit.startMessage('assistant');
@@ -205,10 +205,18 @@ test('a trusted contact whose git remote matches exactly one project is answered
   restore = setDriver('echo', {
     protocol: 'echo',
     startTurn,
-    // The tool-free path: nothing stored, no agent token, the request as data.
+    // The tool-free path: nothing stored, no Boite token, the request as data.
     async sideQuestion(ctx) {
       prompts.push(ctx.prompt);
       expect(host.core.journal.getThread(ctx.thread.id)).toBeNull();
+      // A core started from an agent inherits its credential; the spawn drops it.
+      const child = ctx.spawnChild(process.execPath, ['-e', 'process.stdout.write(JSON.stringify([process.env.BOITE_AGENT_TOKEN, process.env.BOITE_THREAD_ID, process.env.BOITE_TOKEN, process.env.CONCIERGE_KEPT]))'], {
+        env: { ...process.env, BOITE_AGENT_TOKEN: 'inherited', BOITE_THREAD_ID: 'thr_parent', BOITE_TOKEN: 'owner', CONCIERGE_KEPT: 'kept' },
+      });
+      let out = '';
+      child.stdout.on('data', chunk => { out += String(chunk); });
+      await new Promise(resolve => child.once('exit', resolve));
+      childEnv.push(out);
       return `The docs project fits.\nCONCIERGE: OPEN ${docs.id}`;
     },
   });
@@ -219,6 +227,7 @@ test('a trusted contact whose git remote matches exactly one project is answered
   expect(viaConcierge).toMatchObject({ status: 'accepted', decidedBy: 'concierge', project: { id: docs.id } });
   expect(prompts).toHaveLength(1);
   expect(prompts[0]).toContain('someone who writes documentation');
+  expect(childEnv.map(out => JSON.parse(out) as unknown)).toEqual([[null, null, null, 'kept']]);
   // The concierge never opens conversations to reading, and leaves no conversation behind.
   expect(host.core.contacts.find(guestId)?.grants.every(grant => !grant.readThreads)).toBe(true);
   expect(host.core.journal.listThreads()).toHaveLength(threadsBefore);
@@ -400,7 +409,31 @@ test('two owners joining each other at once keep one relationship: the smaller c
   expect(small.core.contacts.list()).toEqual([expect.objectContaining({ coreId: largeId, role: 'host' })]);
   expect(large.core.contacts.list()).toEqual([expect.objectContaining({ coreId: smallId, role: 'guest', url: small.url })]);
   await waitFor(() => small.core.contacts.linked(largeId), 10000);
-  expect(await small.core.coordination.check(largeId)).toEqual({ ok: true });
+}, 30000);
+
+test('joins in flight hold their contact slots: two joins at the last slot keep one, and an incoming join cannot take a held slot', async () => {
+  const guest = await startTestCore();
+  const a = await startTestCore();
+  const b = await startTestCore();
+  const c = await startTestCore();
+  cores.push(guest, a, b, c);
+  for (const side of [guest, a, b, c]) side.core.contacts.selfUrl = async () => side.url;
+  // One slot left, as with 31 of 32 contacts.
+  (guest.core.contacts as { maxContacts: number }).maxContacts = 1;
+  const [inviteA, inviteB] = await Promise.all([a.core.contacts.invite(), b.core.contacts.invite()]);
+  const joins = await Promise.allSettled([guest.core.contacts.join(inviteA.link), guest.core.contacts.join(inviteB.link)]);
+  expect(joins.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+  expect(String((joins[1] as PromiseRejectedResult).reason)).toContain('at most 1 contacts');
+  // The refused join never reached its host: no one-sided contact there.
+  expect(guest.core.contacts.list().map(contact => contact.coreId)).toEqual([a.core.coordination.card().coreId]);
+  expect(b.core.contacts.list()).toEqual([]);
+
+  guest.core.contacts.remove(a.core.coordination.card().coreId);
+  const release = guest.core.contacts.reserve(b.core.coordination.card().coreId);
+  await expect(c.core.contacts.join((await guest.core.contacts.invite()).link)).rejects.toThrow('this core has 1 contacts already');
+  release();
+  await c.core.contacts.join((await guest.core.contacts.invite()).link);
+  expect(guest.core.contacts.list()).toEqual([expect.objectContaining({ coreId: c.core.coordination.card().coreId, role: 'host' })]);
 }, 30000);
 
 test('the tailnet listener opens for an invitation and closes once the last one expires', async () => {

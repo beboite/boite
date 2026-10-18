@@ -102,8 +102,10 @@ a reason. A contact marked trusted is answered without the owner:
    minutes or ends without a verdict, the request waits for the owner.
 
 The concierge runs on the driver's side-question path: no tools, no MCP
-servers, hooks or settings, no agent token, nothing persisted, in an empty
-folder under the data directory. A request cannot make it read a file. A
+servers, hooks or settings, nothing persisted, in an empty folder under the
+data directory. Its processes get no Boite token or thread id, not even one the
+core inherited from an agent that started it. A request cannot make it read a
+file. A
 profile on a protocol without that path (pi, Codex, ACP) never runs it: the
 request waits for the owner and the log says why. It creates no thread; the
 decided request shows its verdict and reason. It never grants `readThreads`.
@@ -154,7 +156,9 @@ Tailscale share is the owner's, in the admin console.
 ## Limits
 
 At most 32 contacts and 16 open invitations, 32 requests waiting per contact
-and direction, and the last 50 decided requests kept. The tailnet address is
+and direction, and the last 50 decided requests kept. A join in flight holds a
+contact slot until it ends, so joins at once never pass the cap together and
+an incoming join cannot take a held slot. The tailnet address is
 read when the core starts or joins a group: a core outside any group that
 gets on Tailscale later listens there after a restart.
 
