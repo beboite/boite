@@ -4345,6 +4345,14 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** One directory of the working directory, `path` relative to it or empty for the root. Directories first. */
   'files.list': { params: { threadId: ThreadId; path?: string }; result: FileEntry[] };
   'files.read': { params: { threadId: ThreadId; path: string }; result: FileContent };
+  /**
+   * The files a chat link names in the working directory. A path there as
+   * written answers itself. Otherwise an agent named a file by the tail of its
+   * path (`core.md` for `.local/core.md`): the answer is the shallowest files
+   * whose relative path ends with it, `/` separators, `.git`, `.boite` and
+   * `node_modules` left out. Empty when none does. Owner only.
+   */
+  'files.locate': { params: { threadId: ThreadId; path: string }; result: string[] };
   /** The editor's save. Owner only: the agent has its own hands on the disk. */
   'files.write': { params: { threadId: ThreadId; path: string; text: string }; result: { bytes: number; modifiedAt: Timestamp } };
 

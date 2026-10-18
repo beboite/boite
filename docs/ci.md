@@ -182,20 +182,29 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 492,200 |
-| UI files, excluding `.br` and `.gz` copies | 4,868,600 |
+| UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,479,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,480,200 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-18, the rewind beside a working turn (PR #599) merged with
-`origin/main` at `80c2da06` measures 491,894 entry bytes, 4,868,332 UI bytes
-and 4,478,381 core JavaScript bytes with `measure()` after fresh
-`bun run build:ui` and `bun run build:core` on Linux, against 491,872,
-4,867,996 and 4,477,807 recorded below for that main: the `overlap` check that
+`origin/main` at `e22bb094` measures 492,112 entry bytes, 4,869,389 UI bytes
+and 4,479,673 core JavaScript bytes with `measure()` after fresh
+`bun run build:ui` and `bun run build:core` on Linux, against 492,112,
+4,869,093 and 4,479,099 recorded below for PR #595: the `overlap` check that
 asks git which nested files the outer snapshot lists, and the busy answer, add
-574 core bytes; its warning sentences 336 UI bytes. The core JavaScript limit
-rises to 4,479,000; the others stay.
+574 core bytes; its warning sentences 296 UI bytes. The core JavaScript limit
+rises to 4,480,200; the others stay.
+
+On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
+492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes
+with `measure()` after fresh `bun run build:ui` and `bun run build:core` on
+Windows, against 491,872, 4,867,996 and 4,477,807 recorded below for PR #594:
+`files.locate` (the walk that finds a chat link named by the tail of its path)
+adds 1,292 core bytes, and the link's lookup in `Prose.svelte` with its store
+call and strings adds 240 entry and 1,097 UI bytes. The UI and core JavaScript
+limits rise to 4,869,600 and 4,479,600; the other limits stay.
 
 On 2026-10-18, keeping the prompt cache warm (PR #594) merged with
 `origin/main` at `3a19eb57` measures 491,872 entry bytes, 4,867,996 UI bytes
