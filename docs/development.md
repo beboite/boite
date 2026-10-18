@@ -196,8 +196,13 @@ minutes per pass. A worktree qualifies when all of these hold:
   or deleted at least an hour ago, and none has a live process or terminal. An
   archive written by an older core counts from `updatedAt`.
 - With no thread standing there, the branch starts with `boite/` (or HEAD is
-  detached), no draft reservation names the folder, and git created it at least
-  an hour ago (the `.git` file's date).
+  detached), no draft reservation names the folder, and git last wrote to it at
+  least an hour ago: the newest of the `.git` file and the HEAD, index and HEAD
+  log in its admin folder. PR lookups run git with `GIT_OPTIONAL_LOCKS=0`, so
+  the cleanup's own reads do not move those dates.
+- No live, non-archived thread linked an open pull request whose head is the
+  worktree's branch. A delegated worker often runs from another folder and
+  makes its worktree with `git worktree add`; its `boite pr link` keeps it.
 - `git status` lists nothing, untracked files included. Ignored files such as
   dependencies and build output leave with the folder.
 - HEAD is on another local branch or remote-tracking ref, or a merged, non-fork
