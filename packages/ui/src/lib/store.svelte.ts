@@ -1,5 +1,5 @@
 import { startDiagnosticsReport } from './diagnostics-report';
-import { RpcErrorCode, type AgentShape, type Message, type PermissionMode, type ProjectId, type ProviderId, type ThreadId } from '@boite/contracts';
+import { RpcErrorCode, type AgentShape, type Message, type MessageId, type PermissionMode, type ProjectId, type ProviderId, type ThreadId } from '@boite/contracts';
 import type { Client } from './client';
 import { RpcFailure, wasClosed } from './rpc-error';
 import { readModelDefaults } from './model-defaults';
@@ -543,7 +543,7 @@ export class Store {
   /** Where `messages` of `threadId` sit in it and what is missing between them (`lib/store/message-positions`). */
   messagePlacement(threadId: string, messages: readonly Message[]) { return this.#ctx.positions.placement(threadId, messages); }
   get loadingRange() { return this.#ctx.positions.loading; }
-  loadRange(from: number, limit: number, landing?: () => void) { return this.#ctx.positions.loadRange(from, limit, landing); }
+  loadRange(from: number, limit: number, landing?: () => void, below?: MessageId) { return this.#ctx.positions.loadRange(from, limit, landing, below); }
   loadAttachments(threadId: ThreadId, message: Message) { return loadAttachments(this.#ctx, threadId, message); }
   loadOlder(...args: Parameters<Threads['loadOlder']>) { return this.#ctx.threads.loadOlder(...args); }
   releaseOlder(threadId: ThreadId) { return releaseOlder(this.#ctx, threadId); }

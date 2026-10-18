@@ -82,12 +82,15 @@ export class MessagePositions {
 
   /**
    * The messages from position `from` on, at most `limit` and a reading page's
-   * bytes, laid into the open thread where they belong. One page is in flight
-   * at a time; a page that lands after the reader left is dropped. `landing`
-   * runs right before the messages go in, for the timeline to note where the
-   * reader is. Returns how many messages landed.
+   * bytes, laid into the open thread where they belong. With `below`, the held
+   * message at `from + limit`, the page is read up from it instead, so a page
+   * cut short by its bytes keeps the messages next to it, where a reader
+   * scrolling up is. One page is in flight at a time; a page that lands after
+   * the reader left is dropped. `landing` runs once the messages are in, before
+   * they are drawn, for the timeline to note where the reader is and hold its
+   * rows there. Returns how many messages landed.
    */
-  async loadRange(from: number, limit: number, landing?: () => void): Promise<number> {
+  async loadRange(from: number, limit: number, landing?: () => void, below?: MessageId): Promise<number> {
     const client = this.ctx.client;
     const open = this.ctx.threads.openThread;
     if (!client || !open || this.loading) return 0;
@@ -98,12 +101,13 @@ export class MessagePositions {
     const current = () => generation === this.#generation && this.ctx.currentNavigation(client, navigation);
     this.loading = true;
     try {
-      const page = await client.call('messages.list', { threadId: open.id, from, limit, maxBytes: READING_PAGE_BYTES, ...lightPage(this.ctx) });
+      const page = await client.call('messages.list', { threadId: open.id, ...(below === undefined ? { from } : { before: below }), limit, maxBytes: READING_PAGE_BYTES, ...lightPage(this.ctx) });
       const still = this.ctx.threads.openThread;
       if (!current() || !still || still.id !== open.id || still.messages !== window) return 0;
-      landing?.();
-      this.note(open.id, page.messages, page.offset ?? from);
-      return this.place(still, page.messages, page.turns ?? []);
+      this.note(open.id, page.messages, page.offset ?? (below === undefined ? from : from + limit - page.messages.length));
+      const added = this.place(still, page.messages, page.turns ?? []);
+      if (added) landing?.();
+      return added;
     } catch (error) {
       if (current()) this.ctx.fail(error);
       return 0;

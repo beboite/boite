@@ -184,17 +184,23 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 490,500 |
 | UI files, excluding `.br` and `.gz` copies | 4,855,400 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,423,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,445,500 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-18, the server update rollback merged with `origin/main` at
-`a791c298` measures 4,422,945 core JavaScript bytes with `measure()` after fresh
-`bun run build:ui` and `bun run build:core` on Windows, against 4,416,556 for
-that main's core built the same way. The rollback record, the maintenance lock
-shared with the core's startup and the restore it finishes there add 6,389
-bytes; `main.js` shrinks by 1,705 as the data lock moves to its own module. The
-core limit rises to 4,423,000; the other limits stay.
+`616c9856` measures 4,445,294 core JavaScript bytes with `measure()` after fresh
+`bun run build:ui` and `bun run build:core` on Windows, against 4,437,160 for
+that main's core built the same way. The rollback record, the kernel lock a
+restore holds and the restore a start finishes add 8,134 bytes; `main.js`
+shrinks by 1,669 as the data lock moves to its own module. The core limit rises
+to 4,445,500; the other limits stay.
+
+On 2026-10-18, agent browser downloads (PR #585) on `origin/main` at
+`ee9f9ac8` measure 4,436,753 core JavaScript bytes on the Windows CI runner.
+Fresh `bun run build:core` on Linux gives 4,436,794 for the branch against
+4,417,268 for that main: the quarantine, its CLI commands and their help add
+19,526 bytes. The core JavaScript limit rises to 4,437,500; the others stay.
 
 On 2026-10-18, the tool summaries setting on `origin/main` at `150d7bb6`
 measures 489,501 entry bytes, 4,854,418 UI bytes and 4,413,357 core
