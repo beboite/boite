@@ -90,6 +90,14 @@ parts never edit the same file. A new block is a new part: a file in
 `strings/en/` and in every translation's folder, spread by each index;
 `scripts/ci/translations.ts` fails when one of them is missing.
 
+A branch cut before the split still edits the single `strings.en.ts` and
+`strings.fr.ts`, so merging main conflicts on both. Once `git merge origin/main`
+stops, run `bun scripts/migrate/split-catalogues.ts`: it splits the merge base
+and the branch versions with the codemod that made the split, replays each
+part's change onto main's part with `git merge-file`, adds a part the branch
+created to both indexes and stages the result. A part both sides changed on the
+same lines keeps conflict markers and is listed; resolve it like any conflict.
+
 English alone is enough to merge and to ship a nightly. A sentence French has
 not got shows in English, key by key, never per screen, and a dotted path never
 reaches the screen. A release is refused until every language has every
