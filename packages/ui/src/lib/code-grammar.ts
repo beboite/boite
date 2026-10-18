@@ -30,17 +30,21 @@ const LOADERS = {
   makefile: () => import('highlight.js/lib/languages/makefile')
 };
 export type Language = keyof typeof LOADERS;
+/** Looked up by name in a Map: a name the worker was sent never reaches `__proto__` or `constructor`. */
+const LOADER_OF = new Map<string, (typeof LOADERS)[Language]>(Object.entries(LOADERS));
 
 /** True for a grammar this module can load. */
 export function knownLanguage(language: string): language is Language {
-  return Object.hasOwn(LOADERS, language);
+  return LOADER_OF.has(language);
 }
 
 const loaded = new Map<Language, Promise<void>>();
 async function load(language: Language): Promise<void> {
+  const loader = LOADER_OF.get(language);
+  if (loader === undefined) throw new Error(`unknown grammar ${JSON.stringify(language)}`);
   let pending = loaded.get(language);
   if (!pending) {
-    pending = Promise.all([import('highlight.js/lib/core'), LOADERS[language]()]).then(([{ default: highlighter }, { default: grammar }]) => {
+    pending = Promise.all([import('highlight.js/lib/core'), loader()]).then(([{ default: highlighter }, { default: grammar }]) => {
       highlighter.registerLanguage(language, grammar);
     });
     loaded.set(language, pending);

@@ -63,18 +63,23 @@ export function parseConEmuCwd(data: string): string | null {
 
 /** Longer than this, an OSC is not a mark or a directory: it is skipped to its end. */
 const MAX_OSC = 4096;
-const OSC_END = /[\x07\x1b]/g;
+/** Outside a sequence: ESC, or the C1 OSC introducer. */
+const OSC_START = /[\x1b\x9d]/g;
+/** Inside one: the C0 controls and the C1 string terminator. */
+const OSC_CONTROL = /[\x00-\x1f\x9c]/g;
 
 /**
- * The OSC sequences in a shell's raw output, for a session whose xterm is
- * released: each `<code>;<data>` goes to `onOsc` once its BEL or ST arrives,
- * a sequence split across chunks included. Everything else is skipped.
+ * The OSC sequences in a shell's raw output, read as xterm.js 6 reads them
+ * (`EscapeSequenceParser`), so a session can follow its marks while its xterm
+ * is released: each `<code>;<data>` goes to `onOsc` when BEL, ESC (ST's first
+ * byte or any other escape) or C1 ST ends it, a sequence split across chunks
+ * included. CAN and SUB cancel it; other C0 controls inside it are dropped.
  */
 export class OscScanner {
   /** What came after `ESC ]` so far, or null outside a sequence. */
   #data: string | null = null;
   #skip = false;
-  /** The last chunk ended on an ESC. */
+  /** The last character was an ESC: a `]` after it opens a sequence. */
   #escape = false;
 
   constructor(private readonly onOsc: (code: number, data: string) => void) {}
@@ -84,31 +89,24 @@ export class OscScanner {
     while (at < chunk.length) {
       if (this.#escape) {
         this.#escape = false;
-        const next = chunk[at];
-        if (this.#data !== null && next === '\\') {
+        if (chunk[at] === ']') {
           at++;
-          this.#end();
-          continue;
-        }
-        // Any other escape ends an open sequence unfinished, as xterm does.
-        this.#data = null;
-        if (next === ']') {
-          at++;
-          this.#data = '';
-          this.#skip = false;
+          this.#open();
         }
         continue;
       }
       if (this.#data === null) {
-        const start = chunk.indexOf('\x1b', at);
-        if (start === -1) return;
-        at = start + 1;
-        this.#escape = true;
+        OSC_START.lastIndex = at;
+        const start = OSC_START.exec(chunk);
+        if (start === null) return;
+        at = start.index + 1;
+        if (chunk[start.index] === '\x1b') this.#escape = true;
+        else this.#open();
         continue;
       }
-      OSC_END.lastIndex = at;
-      const end = OSC_END.exec(chunk);
-      const stop = end === null ? chunk.length : end.index;
+      OSC_CONTROL.lastIndex = at;
+      const control = OSC_CONTROL.exec(chunk);
+      const stop = control === null ? chunk.length : control.index;
       if (!this.#skip) {
         this.#data += chunk.slice(at, stop);
         if (this.#data.length > MAX_OSC) {
@@ -116,11 +114,23 @@ export class OscScanner {
           this.#skip = true;
         }
       }
-      if (end === null) return;
+      if (control === null) return;
       at = stop + 1;
-      if (chunk[stop] === '\x07') this.#end();
-      else this.#escape = true;
+      const code = chunk.charCodeAt(stop);
+      if (code === 0x18 || code === 0x1a) {
+        this.#data = null;
+        this.#skip = false;
+      } else if (code === 0x07 || code === 0x9c || code === 0x1b) {
+        this.#end();
+        // ST is ESC then `\`: the backslash is an escape of its own, and adds nothing.
+        if (code === 0x1b) this.#escape = true;
+      }
     }
+  }
+
+  #open(): void {
+    this.#data = '';
+    this.#skip = false;
   }
 
   #end(): void {

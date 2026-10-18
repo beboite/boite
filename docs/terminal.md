@@ -131,7 +131,10 @@ scrollback is the snapshot's 256 KiB rather than 10,000 lines, and its selection
 and find matches start over. The shell's exit is still heard while released,
 and so are its marks and directory reports: the session reads the OSC 133, 633,
 7 and 9;9 sequences from the raw output (`OscScanner` in `terminal-marks.ts`),
-so a hidden tab's dot turns red or stops spinning when its command ends.
+so a hidden tab's dot turns red or stops spinning when its command ends. The
+scanner reads every chunk from the start, ending a sequence where xterm.js 6
+does, and speaks only while no xterm does, so a sequence the release cuts in
+two still counts.
 
 Reloading, opening another window or reconnecting replays the 256 KiB snapshot.
 Truncation prefers a nearby line boundary. Output arriving before the response is

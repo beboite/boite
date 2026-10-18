@@ -32,10 +32,26 @@ describe('terminal marks', () => {
     // A sequence cut inside its body, one cut between ESC and `]`, one ended by ST cut between ESC and `\`.
     for (const chunk of ['out\x1b]133;C\x07build\x1b]13', '3;D;2\x07\x1b', ']633;P;Cwd=/srv\x1b', '\\\x1b[0m\x1b]7;file:///tmp\x07']) scanner.feed(chunk);
     expect(seen).toEqual([[133, 'C'], [133, 'D;2'], [633, 'P;Cwd=/srv'], [7, 'file:///tmp']]);
-    // A CSI ends nothing it is not in; an escape inside a sequence drops it; a giant one is skipped whole.
+    // As xterm.js 6: any escape inside a sequence ends it with what it holds, CAN cancels
+    // it, other C0 controls in it are dropped, C1 ST ends it, and a giant one is skipped whole.
     seen.length = 0;
-    scanner.feed('\x1b]133;A\x1b[2J\x1b]8;;' + 'x'.repeat(5000) + '\x07\x1b]133;B\x07');
-    expect(seen).toEqual([[133, 'B']]);
+    scanner.feed('\x1b]133;A\x1b[2J\x1b]7;file:///x\x18\x1b]133;D;\r\n3\x9c\x1b]8;;' + 'x'.repeat(5000) + '\x07\x1b]133;B\x07');
+    expect(seen).toEqual([[133, 'A'], [133, 'D;3'], [133, 'B']]);
+  });
+
+  test('a Windows path in a directory report arrives whole wherever the output is cut', () => {
+    const reports = ['\x1b]633;P;Cwd=C:\\Users\\me\x07', '\x1b]9;9;"C:\\Users\\me"\x1b\\'];
+    for (const report of reports) {
+      for (let cut = 0; cut <= report.length; cut++) {
+        const seen: [number, string][] = [];
+        const scanner = new OscScanner((code, data) => seen.push([code, data]));
+        scanner.feed(report.slice(0, cut));
+        scanner.feed(report.slice(cut));
+        const [code, data] = seen[0] ?? [];
+        expect(seen.length, `${JSON.stringify(report)} cut at ${cut}`).toBe(1);
+        expect(code === 633 ? parseCwdProperty(data!) : parseConEmuCwd(data!)).toBe('C:\\Users\\me');
+      }
+    }
   });
 
   test('the keys that empty a line suit PSReadLine on Windows, readline elsewhere, and cmd', () => {

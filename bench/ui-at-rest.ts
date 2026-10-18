@@ -79,7 +79,11 @@ const GL_COUNTER = `(() => {
     return context;
   };
 })()`;
-const SETUP = `window.__long = []; try { new PerformanceObserver((list) => { for (const e of list.getEntries()) window.__long.push(e.duration); }).observe({ type: 'longtask', buffered: true }); } catch {} try { localStorage.setItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}, ${JSON.stringify(JSON.stringify({ version: ONBOARDING_VERSION, at: 0 }))}); } catch {}`;
+/** A JavaScript string literal of `value`, safe to splice into page code: no `<`, `>`, `/` or line separator survives raw. */
+function literal(value: string): string {
+  return JSON.stringify(value).replace(/[<>/\u2028\u2029]/g, (char) => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'));
+}
+const SETUP = `window.__long = []; try { new PerformanceObserver((list) => { for (const e of list.getEntries()) window.__long.push(e.duration); }).observe({ type: 'longtask', buffered: true }); } catch {} try { localStorage.setItem(${literal(ONBOARDING_STORAGE_KEY)}, ${literal(JSON.stringify({ version: ONBOARDING_VERSION, at: 0 }))}); } catch {}`;
 
 /** One DevTools connection: the browser's, or a page's. */
 class Session {

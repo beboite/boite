@@ -202,8 +202,12 @@ export class TerminalSession {
   #screenCleanups: (() => void)[] = [];
   #releaseTimer: ReturnType<typeof setTimeout> | null = null;
   #listening = false;
-  /** Reads the shell's marks and directory while the xterm is released, so a hidden tab's dot stays true. */
-  #scanner: OscScanner | null = null;
+  /**
+   * Reads the shell's marks and directory from all its output, and speaks only
+   * while the xterm is released, so a hidden tab's dot stays true. Fed for the
+   * session's life, it holds a sequence cut by the release.
+   */
+  readonly #scanner = new OscScanner((code, data) => this.#report(code, data));
   /** Where the last command is for the scanner: at its prompt, running, or neither. */
   #phase: 'idle' | 'prompt' | 'running' = 'idle';
   #marks: CommandMark[] = [];
@@ -300,7 +304,6 @@ export class TerminalSession {
     this.#frame = null;
     const last = this.#marks.at(-1);
     this.#phase = last === undefined ? 'idle' : last.status === 'running' ? 'running' : last.ran ? 'idle' : 'prompt';
-    this.#scanner = new OscScanner((code, data) => this.#report(code, data));
     this.#disposeScreen();
     this.element.replaceChildren();
     this.#loading = null;
@@ -469,7 +472,6 @@ export class TerminalSession {
       term.unicode.activeVersion = '11';
     }
     this.#term = term;
-    this.#scanner = null;
     this.#fit = fit;
     if (searchModule !== null) {
       const search = new searchModule.SearchAddon({ highlightLimit: 2000 });
@@ -504,7 +506,7 @@ export class TerminalSession {
       this.#listening = true;
       // Released, the screen parses nothing: the session reads the marks itself.
       this.#cleanups.push(client.on('terminal.output', (event) => {
-        if (event.id === this.id) this.#scanner?.feed(event.data);
+        if (event.id === this.id) this.#scanner.feed(event.data);
       }));
       this.#cleanups.push(client.on('terminal.exited', (event) => {
         if (event.id !== this.id) return;
@@ -569,8 +571,9 @@ export class TerminalSession {
     this.#screenCleanups.push(() => { prompt.dispose(); properties.dispose(); fileUrl.dispose(); conemu.dispose(); });
   }
 
-  /** One OSC of a released screen: what `#listenToShell` reads, without the lines. */
+  /** One OSC of a released screen: what `#listenToShell` reads, without the lines. A live xterm reads its own. */
   #report(code: number, data: string): void {
+    if (this.#term !== null) return;
     if (code === 133) {
       const mark = parsePromptMark(data);
       if (mark?.kind === 'prompt') {

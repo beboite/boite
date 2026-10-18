@@ -182,7 +182,7 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 599,800 |
-| UI files, excluding `.br` and `.gz` copies | 5,160,500 |
+| UI files, excluding `.br` and `.gz` copies | 5,161,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,417,000 |
 
@@ -203,8 +203,9 @@ other 7,736 UI bytes, 2,904 of them in the entry; core JavaScript measures
 (message pictures as file tickets, the lean install), the tree measures
 599,526 entry bytes, 5,160,249 UI bytes and 4,412,366 core JavaScript bytes
 after fresh builds the same way, 1,327 entry bytes more than before the merge,
-close to the 1,283 that main's ticket and relay choice measured. The entry and UI limits rise to 599,800 and
-5,160,500; the core limits stay.
+close to the 1,283 that main's ticket and relay choice measured. Reading the
+terminal's sequences as xterm.js 6 ends them brings the UI to 5,160,535. The
+entry and UI limits rise to 599,800 and 5,161,000; the core limits stay.
 
 On 2026-10-18, removing a purged or erased thread's Claude transcripts and
 muting new audio sessions on Core Audio's notice, rebased on `b611c01f`,

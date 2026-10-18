@@ -350,6 +350,15 @@ export class FakeClient implements ObservableClient {
     this.#ctx.emit('core.log', { level, message, at: this.#ctx.now(), ...context });
   }
 
+  /** Output a shell writes by itself, cut where the caller wants: a sequence split across two events. */
+  emitTerminalOutput(id: string, data: string): void {
+    const shell = this.#ctx.terminals.get(id);
+    if (!shell) return;
+    shell.output += data;
+    shell.sequence = (shell.sequence ?? 0) + 1;
+    this.#ctx.emit('terminal.output', { id, data, sequence: shell.sequence });
+  }
+
   /** A traced process starting, or ending once `exitedAt` is set, as the core's `procs.ts` announces it to the thread's subscribers. */
   traceProcess(record: ProcessRecord): void {
     this.#ctx.emitToThread(record.threadId, record.exitedAt === null ? 'process.started' : 'process.exited', structuredClone(record));

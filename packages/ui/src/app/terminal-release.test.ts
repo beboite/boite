@@ -1,4 +1,5 @@
 import { expect, vi } from 'vitest';
+import type { FakeClient } from '../lib/fake-client';
 import { store } from '../lib/store.svelte';
 import { HIDDEN_RELEASE_MS } from '../lib/terminal-session.svelte';
 import { query, test, waitFor } from '../test/app';
@@ -63,8 +64,14 @@ test('a hidden terminal gives its WebGL context back at once and its xterm after
   expect(query('[data-testid=terminal] .terminal-screen')).toBe(element);
   expect(contexts).toEqual({ made: 3, disposed: 2, lost: 2 });
 
-  // A released tab still hears its shell: a command that ends badly turns its dot red unselected.
+  // A released tab still hears its shell, a mark cut by the release included:
+  // the command's end turns its dot red unselected, the next one clears it.
   const first = `terminal:${threadId}`;
+  const shell = store.client as FakeClient;
+  const firstTab = () => [...document.querySelectorAll('[data-testid=terminal-tab]')].find((tab) => !tab.classList.contains('selected'));
+  const dot = () => firstTab()?.querySelector('[data-testid=terminal-status]')?.classList;
+  shell.emitTerminalOutput(first, '\x1b]133;C\x07build\r\n\x1b]133;D;');
+  await waitFor(() => store.terminalScreen(first)?.running === true);
   timers.mockClear();
   store.newTerminal(threadId);
   await waitFor(() => document.querySelectorAll('[data-testid=terminal-tab]').length === 2 && store.terminalLayout(threadId)?.active !== first);
@@ -72,11 +79,13 @@ test('a hidden terminal gives its WebGL context back at once and its xterm after
   expect(releaseFirst).toBeTypeOf('function');
   releaseFirst!();
   expect(element.childElementCount).toBe(0);
-  const firstTab = () => [...document.querySelectorAll('[data-testid=terminal-tab]')].find((tab) => !tab.classList.contains('selected'));
-  expect(firstTab()?.querySelector('[data-testid=terminal-status]')).toBeNull();
-  store.writeTerminal(first, 'fail-build\r');
-  await waitFor(() => firstTab()?.querySelector('[data-testid=terminal-status]')?.classList.contains('failed') === true);
+  expect(dot()?.contains('running')).toBe(true);
+  shell.emitTerminalOutput(first, '1\x07\x1b]133;A\x07PS C:\work> \x1b]133;B\x07');
+  await waitFor(() => dot()?.contains('failed') === true);
   expect(store.terminalScreen(first)?.lastExit).toBe(1);
+  store.writeTerminal(first, 'git status\r');
+  await waitFor(() => store.terminalScreen(first)?.lastExit === 0);
+  expect(dot()).toBeUndefined();
   expect(store.terminalLayout(threadId)?.active).not.toBe(first);
   expect(element.childElementCount).toBe(0);
   timers.mockRestore();
