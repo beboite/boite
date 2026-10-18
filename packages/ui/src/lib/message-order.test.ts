@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Message } from '@boite/contracts';
-import { filesLast, publishedFile } from './message-order';
+import { filesLast, keepaliveRun, publishedFile, quietKeepalives } from './message-order';
 import { placeViews } from './inline-view';
 
 function message(id: string, turnId: string, kind: 'text' | 'file' | 'artifact' | 'view' = 'text', role: Message['role'] = 'assistant'): Message {
@@ -30,4 +30,20 @@ test('a running turn shows each file where it came, and a user upload or a page 
   expect(filesLast(timeline, [{ id: 'a', status: 'running' }])).toBe(timeline);
   expect(publishedFile(message('upload', 'a', 'file', 'user'))).toBe(false);
   expect(publishedFile(message('page', 'a', 'view'))).toBe(false);
+});
+
+test('each cache ping is its opening line, and pings in a row leave one line that counts them', () => {
+  const turn = (id: string, ping = false) => ({ id, ...(ping ? { execution: { operation: 'keepalive' as const } } : {}) }) as Parameters<typeof keepaliveRun>[0][number];
+  const turns = [turn('a'), turn('p1', true), turn('p2', true), turn('b'), turn('p3', true)];
+  const timeline = [
+    message('u1', 'a', 'text', 'user'), message('a1', 'a'),
+    message('s1', 'p1', 'text', 'system'), message('o1', 'p1'),
+    message('s2', 'p2', 'text', 'system'), message('o2', 'p2'),
+    message('u2', 'b', 'text', 'user'),
+    message('s3', 'p3', 'text', 'system'), message('o3', 'p3'),
+  ];
+  expect(quietKeepalives(timeline, turns).map(row => row.id)).toEqual(['u1', 'a1', 's2', 'u2', 's3']);
+  expect([keepaliveRun(turns, 'p2'), keepaliveRun(turns, 'p3'), keepaliveRun(turns, 'a')]).toEqual([2, 1, 1]);
+  // No ping: the same array.
+  expect(quietKeepalives(timeline, [turn('a')])).toBe(timeline);
 });

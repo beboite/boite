@@ -1474,6 +1474,10 @@ export const strings = {
     movePendingHide: 'Hide what the agent will be told',
     /** A line of the timeline: the agent moved its own thread with `boite thread move`. */
     movedByAgent: 'Moved by the agent to {project}',
+    /** A line of the timeline: Boite pinged the cached prompt while the thread waits on its agents. */
+    keepalive: 'Prompt cache kept warm',
+    keepaliveMany: 'Prompt cache kept warm {count} times',
+    keepaliveRunning: 'Keeping the prompt cache warm',
     /** Above the first prompt of a thread another thread's agent started with `boite thread new`. */
     startedByAgent: 'Started by the agent of {title} in {project}',
     /** Above the first prompt of a thread another agent started: the prompt is that agent's, not the user's. */
@@ -2340,6 +2344,11 @@ export const strings = {
     experiments: {
       intro: 'These are unfinished and can change or disappear.'
     },
+    cacheKeepalive: 'Keep the prompt cache warm',
+    cacheKeepaliveHint: 'While a conversation waits on its agents or workflows, Boite sends a one-word turn shortly before the provider drops its cached prompt, so their result is read at the cached price. Each ping counts as usage. A ping that misses the cache stops it.',
+    cacheKeepaliveHours: 'For at most',
+    cacheKeepaliveHoursHint: 'Counted from the end of the conversation\'s last turn. Pings also stop when the agents finish, when you write or stop, and after as many pings as one cache miss would cost.',
+    cacheKeepaliveUnit: 'hours',
     material: 'Window material',
     workspace: 'Workspace',
     startIn: 'The app opens on',

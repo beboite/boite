@@ -16,8 +16,12 @@ warnings when changing execution settings.
 readTokens, model, accountId }` or null, stored in `threads.prompt_cache`.
 `packages/core/src/prompt-cache.ts` owns documented mappings and record assembly.
 
-- `at` is the turn's completion time. Boite has no upstream cache timestamp;
-  request and response latency can skew the countdown.
+- `at` is the time of the turn's last main-loop API request when the driver
+  reports it as `TurnResult.cacheAt`: Claude and pi record the start of each
+  assistant message. Otherwise, as with Codex and OpenCode, `at` is the turn's
+  completion time. Boite has no upstream cache timestamp. A request time is
+  read when its first stream event arrives, so it lands late by that latency;
+  a completion time lands late by the whole answer.
 - `ttlSeconds` is the reported lifetime or the implementation's documented
   estimate. Optional `maxSeconds` describes a longer retention possibility;
   the UI says "maybe still warm" between those values.
@@ -101,6 +105,102 @@ mapping uses the default ephemeral lifetime; its OpenAI mapping uses the model
 family. A gateway or another vendor receives no documented mapping.
 Source snapshot: [OpenCode
 transforms](https://github.com/anomalyco/opencode/blob/2406400f0aeb07b36d0495af4e05aaca49159832/packages/opencode/src/provider/transform.ts).
+
+## Keeping the cache warm
+
+Settings > Experiments > Keep the prompt cache warm is off by default. Turned on, it
+stores `cacheKeepalive: { hours }` in the core settings, `hours` being a whole
+number from 1 to 24 (default 12, `CACHE_KEEPALIVE_HOURS` in
+`packages/contracts/src/settings-validation.ts`); null turns it off.
+`packages/core/src/threads/cache-keepalive.ts` owns the behaviour.
+
+A thread that waits on its agents often idles past its cache lifetime, and the
+result that wakes it then writes the whole prefix again. While the setting is
+on, a short automatic turn, a ping, reads the cached prefix shortly before it
+lapses, which restarts its lifetime.
+
+### When a thread pings
+
+A wait starts when a real turn of the thread ends `done`. Each ping is planned
+from the thread's `promptCache` and checked again when its timer fires. A ping
+goes when all of these hold:
+
+- the thread is the user's conversation: not archived, not a delegated agent,
+  not a resident agent, and it has a session to resume;
+- one of its delegated agents is queued, running or waiting, or one of its
+  workflows runs;
+- its `promptCache` was written by the thread's current model and account, and
+  its last turn ran with the thread's current effort and speed;
+- the time is `at + ttlSeconds - 2 min`. The margin is `CACHE_KEEPALIVE.marginMs`,
+  next to `AUTO_COMPACT` in `packages/core/src/threads/auto-compact.ts`;
+- the thread is idle, and nothing else is about to open a turn there: no turn
+  handle, steering, pending wake, deferred answer, active goal or loop, and no
+  letter in its delegation inbox. Otherwise the ping looks again five seconds
+  later (`CACHE_KEEPALIVE.retryMs`).
+
+A ping sends `KEEPALIVE_PROMPT`, a fixed request to answer the single word
+`ok` without tools. It resumes the thread's session with the same model,
+effort, speed, account, permission mode and tools, so the request prefix
+matches. The prompt carries no memory, letters or guide, so nothing new comes
+before it. The word "ultrathink" stays on Claude prompts, because another thinking
+budget would miss the cached messages. The turn has `operation: 'keepalive'`
+and `automatic: true`; its opening message is a system message labelled
+`Prompt cache kept warm`, shown as one quiet line. A ping does not mark the
+thread unread or failed, does not notify, pauses no delegation and plans no
+compaction.
+
+### What ends a wait
+
+The core reads the usage after each ping. A hit sets a new `promptCache.at`,
+and the next ping is planned from it. A miss ends the wait and is logged. A
+ping misses when less than half of the tokens it sent were read from the cache
+(`missOf`). On Anthropic a miss writes the prefix again; on OpenAI it bills the
+prefix as fresh input. A ping without usage, stopped or failed, also ends the
+wait.
+
+A wait also ends, logged as `cache-keepalive.ended` with its reason, when:
+
+- no agent or workflow is left to wait for;
+- a user message, a wake or a result opens a real turn. When that turn ends with
+  agents still working, it starts a new wait with a new count;
+- the user stops or archives the thread, or turns the setting off;
+- the next ping would fall more than `hours` after the end of the last real turn;
+- the wait reached its break-even cap. `KEEPALIVE_PING_CAP` in
+  `packages/core/src/prompt-cache.ts` keeps it, with sources: 20 pings for a
+  one-hour Anthropic cache (2x write, 0.1x read), 12 for a five-minute one
+  (1.25x write), and 10 for OpenAI (0.1x cached input). A lifetime outside
+  that table is never kept warm.
+
+Each ping is logged as `cache-keepalive.ping`.
+
+A result always wins. When a delegated agent's result or a workflow's result
+comes in during a ping, the ping is stopped and the wait ends. The result is
+then delivered on the `turn.finished` that follows, as for any busy thread.
+
+### Douane and other routers
+
+A ping helps only if it reaches the cache that the thread's last request
+wrote. Boite cannot see how a subscription proxy such as Douane routes a
+request, and has not checked that Douane keeps a session on the same
+upstream account. If a proxy moves a ping elsewhere, its usage shows a miss,
+and the wait ends after that one ping.
+
+### Limits
+
+- The thread shows as running during a ping. A user message sent then waits
+  for the ping to finish. Stop during a ping is the usual Stop, which also
+  stops the thread's agents.
+- Turning the setting on while a thread already waits arms nothing until its
+  next real turn ends.
+- A ping cancels a compaction armed for the cache's expiry
+  ([automatic compaction](context.md)). The next real turn plans one again.
+  A ping that a usage limit refuses ends the wait, and the thread does not
+  resume by itself.
+- The clock comes from Claude and pi request times. Elsewhere it comes from
+  the turn's end, which lands later, so the two-minute margin also absorbs
+  that delay.
+- A ping adds a short exchange to the conversation and costs a cache read of
+  the whole prefix.
 
 ### Unmapped providers
 

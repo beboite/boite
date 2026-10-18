@@ -44,3 +44,29 @@ export function filesLast(timeline: Message[], turns: readonly Pick<Turn, 'id' |
   });
   return placed;
 }
+
+const pinging = (turn: Pick<Turn, 'execution'> | undefined) => turn?.execution?.operation === 'keepalive';
+
+/**
+ * `timeline` with each of Boite's cache pings as one line: its opening
+ * message stands for it and its one-word answer is left out. A ping followed
+ * by another one leaves the line to the last of them, which
+ * `keepaliveRun` counts. The same array comes back when there is no ping.
+ */
+export function quietKeepalives(timeline: Message[], turns: readonly Pick<Turn, 'id' | 'execution'>[]): Message[] {
+  const merged = new Set<string>(), pings = new Set<string>();
+  turns.forEach((turn, index) => {
+    if (!pinging(turn)) return;
+    pings.add(turn.id);
+    if (pinging(turns[index + 1])) merged.add(turn.id);
+  });
+  if (pings.size === 0) return timeline;
+  return timeline.filter((message) => !pings.has(message.turnId) || (message.role === 'system' && !merged.has(message.turnId)));
+}
+
+/** How many pings in a row end with this one: the count its line says. */
+export function keepaliveRun(turns: readonly Pick<Turn, 'id' | 'execution'>[], turnId: string): number {
+  let index = turns.findIndex((turn) => turn.id === turnId), count = 0;
+  while (index >= 0 && pinging(turns[index])) { count += 1; index -= 1; }
+  return Math.max(count, 1);
+}

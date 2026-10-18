@@ -646,6 +646,11 @@ export class PiSession {
       case 'tool_execution_update':
         turn.ctx.reportProgress?.('tool', textOf(message['toolName']) || null);
         break;
+      case 'message_start': {
+        const started = message['message'] as { role?: unknown } | undefined;
+        if (started?.role === 'assistant') turn.requestAt = Date.now();
+        break;
+      }
       case 'message_end': {
         const assistant = message['message'] as PiAssistantMessage | undefined;
         if (assistant === undefined || assistant.role !== 'assistant') break;
@@ -683,9 +688,9 @@ export class PiSession {
         turn.settleRun();
         break;
       default:
-        // agent_start, agent_end, turn_start, turn_end, message_start, the
-        // tool_execution_update, bash and queue families: the contract has no
-        // part for them, so they are dropped.
+        // agent_start, agent_end, turn_start, turn_end, the user's own
+        // message_start, the tool_execution_update, bash and queue families:
+        // the contract has no part for them, so they are dropped.
         break;
     }
   }
