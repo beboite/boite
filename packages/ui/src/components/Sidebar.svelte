@@ -2,7 +2,7 @@
   import { tick, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import WindowList from './WindowList.svelte';
-  import { ChevronRight, Ellipsis, FolderX, GripVertical, LoaderCircle, Plus } from '@lucide/svelte';
+  import { ChevronRight, Ellipsis, FolderX, GripVertical, LoaderCircle, FolderPlus } from '@lucide/svelte';
   import type { Project, ThreadId } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -225,16 +225,23 @@
               ondragstart={(event) => event.preventDefault()}
               aria-expanded={!collapsed}
               title={multi ? `${project.path} · ${machine.label}` : project.path}
-              onclick={() => owner.toggleProject(project.id)}
+              onclick={() => projectThreadView.toggleProject(entry, lists, draftsHere.length)}
             >
-              {#if projectView.order === 'manual'}<GripVertical size={12} />{/if}<span class="fold-caret" class:open={!collapsed} aria-hidden="true"><ChevronRight size={12} /></span><ProjectTile {project} store={owner}
-              /><span class="name ui-label" class:gone={project.missing === true}>{projectName(project)}</span
+              {#if projectView.order === 'manual'}<GripVertical size={12} />{/if}<span class="mark"><ProjectTile {project} store={owner} /><span class="fold-caret" class:open={!collapsed} aria-hidden="true"><ChevronRight size={16} /></span></span
+              >{#if multi}<span class="host" data-testid="project-host" class:offline={owner.connection !== 'ready'}
+                title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} size={14} /></span>{/if}<span class="name ui-label" class:gone={project.missing === true}>{projectName(project)}</span
               >{#if project.missing === true}<span class="missing" data-testid="project-missing" title={strings.sidebar.projectMissing} aria-label={strings.sidebar.projectMissing}><FolderX size={13} aria-hidden="true" /></span>{/if}{#if rollup}{@const label = fill(rollup.count === 1 ? strings.sidebar.rollupOne : strings.sidebar.rollupMany, { count: String(rollup.count), state: strings.sidebar.state[rollup.kind] })}<span
                   class="rollup {rollup.kind}" data-testid="project-rollup" data-state={rollup.kind} title={label} aria-label={label}
                   >{#if rollup.kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{:else}<span class="dot" aria-hidden="true"></span>{/if}{#if rollup.count > 1}<span class="ui-label">{rollup.count}</span>{/if}</span
-                >{/if}{#if multi}<span class="host" data-testid="project-host" class:offline={owner.connection !== 'ready'}
-                  title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
+                >{/if}
             </button>
+            <button
+              class="ghost small icon project-actions"
+              data-testid="project-menu"
+              title={strings.sidebar.projectMenu}
+              aria-label={strings.sidebar.projectMenu}
+              onclick={(e) => openProjectMenu(e, machine, project)}><Ellipsis size={15} /></button
+            >
             {#each residentsOf(owner, project.id).slice(0, 2) as resident (resident.id)}
               <!-- An agent the owner entrusted this project to: its robot, and the way to its conversation. -->
               <button type="button" class="ghost icon small resident-mark" title={fill(strings.resident.lookedAfterBy, { name: resident.name })} aria-label={fill(strings.resident.lookedAfterBy, { name: resident.name })}
@@ -243,13 +250,6 @@
               </button>
             {/each}
             <ProjectThreadCounters {entry} working={lists.working.length} {controls} {collapsed} {away} />
-            <button
-              class="ghost small icon project-actions"
-              data-testid="project-menu"
-              title={strings.sidebar.projectMenu}
-              aria-label={strings.sidebar.projectMenu}
-              onclick={(e) => openProjectMenu(e, machine, project)}><Ellipsis size={15} /></button
-            >
           </div>
           <div class="disclosure-fold" class:open={!collapsed} inert={collapsed}>
             <div>
@@ -259,7 +259,6 @@
               </WindowList>
               <div id="{controls}-working" hidden={!workingOpen || lists.working.length === 0} data-testid="project-working">
                 {#if workingOpen && lists.working.length > 0}
-                  <GroupLabel kind="working" count={lists.working.length} />
                   <WindowList items={lists.working} keyOf={thread => JSON.stringify([machine.id, thread.id])} {scrollRoot} active={!collapsed} estimate={34} measurements={measurements(JSON.stringify([machine.id, project.id, 'working']))}>
                     {#snippet row(thread)}<ThreadCard {machine} {project} {thread} {now} showProject={false} showMachine={false} showDone />{/snippet}
                   </WindowList>
@@ -293,7 +292,7 @@
     {#if store.owner && work.shows('sidebar.add-project')}
       <button class="ghost icon" data-testid="add-project" bind:this={projectButton} onclick={addProject}
         title={strings.sidebar.addProject} aria-label={strings.sidebar.addProject}
-        oncontextmenu={(event) => controlMenu(event, store, 'sidebar.add-project')}><Plus size={16} /></button>
+        oncontextmenu={(event) => controlMenu(event, store, 'sidebar.add-project')}><FolderPlus size={16} /></button>
     {/if}
   {/snippet}
 </RailFrame>
@@ -374,10 +373,10 @@
   .toggle {
     flex: 1;
     min-width: 0;
-    height: var(--row);
+    height: var(--control-lg);
     padding: 0 4px;
     justify-content: flex-start;
-    gap: 4px;
+    gap: 6px;
   }
   .name {
     flex: 1;
@@ -387,6 +386,7 @@
     text-align: left;
     white-space: nowrap;
     font-weight: 600;
+    color: var(--color-foreground);
   }
   /* Its folder left the disk: the name steps back and a mark says why. */
   .name.gone { color: var(--color-muted-foreground); }
@@ -412,21 +412,57 @@
   @media (prefers-reduced-motion: reduce) { .rollup .dot, .rollup :global(.spinner) { animation: none; } }
   :global(html[data-motion='reduced']) .rollup .dot,
   :global(html[data-motion='reduced']) .rollup :global(.spinner) { animation: none; }
+  /* The project's mark and its fold chevron share one slot: the mark gives way
+     to the chevron while a pointer or the keyboard is on the header. */
+  .mark {
+    display: grid;
+    flex: none;
+    place-items: center;
+  }
+  .mark > :global(*) {
+    grid-area: 1 / 1;
+    transition:
+      opacity var(--dur-2) var(--ease-out-quint),
+      transform var(--dur-2) var(--ease-out-quint);
+  }
+  .mark .fold-caret {
+    opacity: 0;
+    color: var(--color-muted-foreground);
+  }
+  @media (hover: hover) {
+    .head:hover .mark > :global([data-testid='project-tile']) { opacity: 0; }
+    .head:hover .mark .fold-caret { opacity: 1; }
+  }
+  .toggle:focus-visible .mark > :global([data-testid='project-tile']) { opacity: 0; }
+  .toggle:focus-visible .mark .fold-caret { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .mark > :global(*) { transition: none; }
+  }
   .host {
     display: flex;
-    color: var(--color-subtle);
+    flex: none;
+    color: var(--color-muted-foreground);
   }
   /* The rows under it carry no machine icon, so the header says the machine is unreachable. */
   .host.offline {
     color: var(--color-danger);
   }
   .resident-mark { flex: none; width: var(--control-sm); height: var(--control-sm); padding: 0; }
+  /* The menu takes no width at rest: it lands over the end of the header, which
+     makes room for it, so the counters never move. */
   .project-actions {
+    position: relative;
+    z-index: 1;
+    margin-left: calc(-2px - var(--control-sm));
     opacity: 0;
   }
   .head:hover .project-actions,
   .head:focus-within .project-actions {
     opacity: 1;
+  }
+  .head:hover .toggle,
+  .head:focus-within .toggle {
+    padding-right: calc(var(--control-sm) + 4px);
   }
   .none {
     padding: 4px 10px;
@@ -442,6 +478,9 @@
   @media (max-width: 720px) {
     .project-actions {
       opacity: 1;
+    }
+    .toggle {
+      padding-right: calc(var(--control-sm) + 4px);
     }
   }
 </style>

@@ -182,19 +182,26 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 490,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,858,500 |
+| UI files, excluding `.br` and `.gz` copies | 4,860,100 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,448,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-18, the server update rollback merged with `origin/main` at
-`36ef9a81` measures 4,447,509 core JavaScript bytes with `measure()` after a
+`feccdfcd` measures 4,447,509 core JavaScript bytes with `measure()` after a
 fresh `bun run build:core` on Windows, against the 4,438,396 recorded below for
 PR #590. The rollback record, the kernel lock a restore holds, the data lock it
 keeps through the swap, its flushed completion mark and the restore a start
 finishes add 9,113 bytes; `main.js` shrinks by 1,669 as the data lock moves to
 its own module. The core limit rises to 4,448,000; the other limits stay.
+
+On 2026-10-18, the lighter sidebar project headers (PR #592) merged with
+`origin/main` at `36ef9a81` measure 4,859,521 UI bytes with `measure()` after
+a fresh `bun run build:ui` on Linux, against 4,857,911 for that main: the
+header's shared tile and chevron slot, the menu that reserves no width and
+the counter pills add 1,628 bytes to `index.css`, the entry chunk 18 fewer.
+The UI limit rises to 4,860,100; the others stay.
 
 On 2026-10-18, Claude's agent totals and the usage cache split (PR #590)
 merged with `origin/main` at `3a91f49f` measure 490,193 entry bytes,
