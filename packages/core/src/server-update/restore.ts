@@ -1,6 +1,6 @@
 import { closeSync, cpSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { lockDataDir } from '../data-lock.ts';
+import { lockDataDir, releaseOwnLock } from '../data-lock.ts';
 
 /**
  * Data-directory entries the snapshot leaves out. A release migrates the
@@ -65,22 +65,31 @@ function syncDirectory(directory: string): void {
   try { fsyncSync(handle); } catch { /* Not every filesystem syncs a directory. */ } finally { closeSync(handle); }
 }
 
+function writeDurably(file: string, text: string): void {
+  const handle = openSync(file, 'w', 0o600);
+  try { writeSync(handle, text); fsyncSync(handle); } finally { closeSync(handle); }
+}
+
 /** Publishes the record whole or not at all: a valid one in place stays as it is. */
 function publishRecord(dataDir: string, record: RestoreRecord): void {
   const current = readRecord(dataDir);
   if (current && current !== 'unreadable' && current.id === record.id && current.snapshot === record.snapshot) return;
   const file = rollbackRecord(dataDir);
   const partial = `${file}.${process.pid}.partial`;
-  const handle = openSync(partial, 'w', 0o600);
-  try { writeSync(handle, JSON.stringify(record)); fsyncSync(handle); } finally { closeSync(handle); }
+  writeDurably(partial, JSON.stringify(record));
   renameSync(partial, file);
   syncDirectory(dirname(file));
 }
 
-/** Throws while a live core holds the data directory, which must not move under it. */
-function ensureNoCore(dataDir: string, lockData: (dataDir: string) => () => void): void {
-  if (existsSync(dataDir)) lockData(dataDir)();
-}
+/**
+ * Written in the restored copy just before it takes the data directory's
+ * name, with the operation's id: the one positive sign that a swap is
+ * complete. It stays in the data directory; the next rollback overwrites it.
+ */
+const RESTORED = 'server-update-restored';
+const restoredBy = (directory: string): string | null => {
+  try { return readFileSync(join(directory, RESTORED), 'utf8'); } catch { return null; }
+};
 
 /**
  * Renames `source` to `target`. Across filesystems, which the update reserved
@@ -119,12 +128,13 @@ function swapRestored(dataDir: string, id: string, moves: RestoreMoves): void {
   const restored = `${dataDir}.restore-${id}`;
   const failed = `${dataDir}.failed-${id}`;
   if (existsSync(dataDir)) {
-    // The rejected data already moved aside: what is in place now came later, a start in between made it.
-    if (existsSync(failed)) setAside(dataDir, dataDir, moves);
-    else {
-      for (const name of UNSAVED_DATA) if (existsSync(join(dataDir, name)) && !existsSync(join(restored, name))) moves.rename(join(dataDir, name), join(restored, name));
-      moves.rename(dataDir, failed);
+    for (const name of UNSAVED_DATA) if (existsSync(join(dataDir, name)) && !existsSync(join(restored, name))) moves.rename(join(dataDir, name), join(restored, name));
+    // The name is taken, by rejected data moved aside earlier or by an older folder: this one goes aside under its own.
+    if (existsSync(failed)) {
+      releaseOwnLock(dataDir);
+      setAside(dataDir, dataDir, moves);
     }
+    else moves.rename(dataDir, failed);
   }
   moves.rename(restored, dataDir);
   syncDirectory(dirname(dataDir));
@@ -135,20 +145,34 @@ function swapRestored(dataDir: string, id: string, moves: RestoreMoves): void {
  * directory, swaps it in and sets every other restore aside. It resumes from
  * what the disk shows and throws, record kept, when it cannot finish; the
  * data in place is then the rejected version's and nothing may open it.
+ *
+ * It holds the data directory's core lock from its first look to its last
+ * move, and puts its lock in the restored copy before that copy takes the
+ * name, so no core starting meanwhile locks a directory that then moves away.
+ * The lock left on the data directory is this process's; the caller keeps it
+ * or calls `releaseOwnLock`.
  */
 function restoreRecorded(dataDir: string, record: RestoreRecord, moves: RestoreMoves, lockData: (dataDir: string) => () => void): void {
   const restored = `${dataDir}.restore-${record.id}`;
   const failed = `${dataDir}.failed-${record.id}`;
-  ensureNoCore(dataDir, lockData);
-  // A file in its place is no restore: set aside, the snapshot is moved again if it is still there.
-  if (existsSync(restored) && !statSync(restored).isDirectory()) setAside(dataDir, restored, moves);
-  const swapped = !existsSync(restored) && existsSync(failed) && existsSync(dataDir);
-  if (!swapped) {
-    if (!existsSync(restored)) {
-      if (!existsSync(record.snapshot)) throw new Error(`the snapshot ${record.snapshot} the rollback needs is missing`);
-      moveTree(record.snapshot, restored, moves);
+  try {
+    // Throws while a live core holds the data, which must not move under it.
+    if (existsSync(dataDir)) lockData(dataDir);
+    if (restoredBy(dataDir) !== record.id) {
+      // A file in its place is no restore: set aside, and the snapshot is moved again.
+      if (existsSync(restored) && !statSync(restored).isDirectory()) setAside(dataDir, restored, moves);
+      if (!existsSync(restored)) {
+        if (!existsSync(record.snapshot)) throw new Error(`the snapshot ${record.snapshot} the rollback needs is missing`);
+        moveTree(record.snapshot, restored, moves);
+      }
+      writeDurably(join(restored, RESTORED), record.id);
+      lockData(restored);
+      swapRestored(dataDir, record.id, moves);
+      releaseOwnLock(failed);
     }
-    swapRestored(dataDir, record.id, moves);
+  } catch (error) {
+    for (const directory of [dataDir, restored, failed]) releaseOwnLock(directory);
+    throw error;
   }
   // No other restore beside the data may replay over this one, whatever its name.
   const prefix = `${basename(dataDir)}.restore-`;
@@ -175,10 +199,11 @@ export function restoreSnapshot(dataDir: string, record: RestoreRecord, moves: R
   withMaintenance(dataDir, lock, () => {
     const current = readRecord(dataDir);
     // The record goes only once the swap is complete.
-    if (current === null && !existsSync(record.snapshot)) return;
+    if (current === null && (restoredBy(dataDir) === record.id || !existsSync(record.snapshot))) return;
     if (current && current !== 'unreadable' && current.id !== record.id) throw new Error(`the rollback of update ${current.id} recorded in ${rollbackRecord(dataDir)} is not finished`);
     publishRecord(dataDir, record);
     restoreRecorded(dataDir, record, moves, lockData);
+    releaseOwnLock(dataDir);
   });
   try { discard(record.snapshot, moves); } catch { /* The next update's cleanup deletes what is left of the backup. */ }
 }
@@ -197,11 +222,13 @@ const writeNote = (dataDir: string, error: string) =>
 export function openDataDir(dataDir: string, prepare: (dataDir: string) => void, lock: FileLock,
   lockData: (dataDir: string) => () => void = lockDataDir, moves: RestoreMoves = realMoves): () => void {
   const file = rollbackRecord(dataDir);
-  if (!existsSync(file)) {
+  for (let attempt = 0; attempt < 3 && !existsSync(file); attempt++) {
     prepare(dataDir);
+    const directory = statSync(dataDir).ino;
     const release = lockData(dataDir);
-    // A rollback records itself before it moves anything: one that began meanwhile is finished below.
-    if (!existsSync(file)) return release;
+    // A rollback records itself before it moves anything, and holds the data lock while it does: one that
+    // began meanwhile is finished below. The directory locked must still be the one at the path.
+    if (!existsSync(file) && statSync(dataDir).ino === directory) return release;
     release();
   }
   return withMaintenance(dataDir, lock, () => {
@@ -213,6 +240,7 @@ export function openDataDir(dataDir: string, prepare: (dataDir: string) => void,
     if (record === 'unreadable') {
       throw new Error(`the server update rollback record ${file} cannot be read, and the data in place may be the rejected version's. Put the previous data at ${dataDir} (a complete ${dataDir}.restore-<id> or the data folder of the .boite-backup-<id> beside the installation), then delete the record`);
     }
+    // The data lock the restore leaves is this start's own.
     try { restoreRecorded(dataDir, record, moves, lockData); }
     catch (error) {
       throw new Error(`the server update rollback recorded in ${file} could not put the previous data back (${(error as Error).message}); the server stays stopped and the next start tries again`);
@@ -220,6 +248,6 @@ export function openDataDir(dataDir: string, prepare: (dataDir: string) => void,
     try { discard(record.snapshot, moves); } catch { /* The next update's cleanup deletes what is left of the backup. */ }
     prepare(dataDir);
     writeNote(dataDir, 'Server update failed and its rollback was cut off; the previous data was put back when the server started.');
-    return lockData(dataDir);
+    return () => releaseOwnLock(dataDir);
   });
 }

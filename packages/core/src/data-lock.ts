@@ -1,4 +1,4 @@
-import { closeSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { uptime } from 'node:os';
 import { join } from 'node:path';
 import { processPlatform } from './platform/index.ts';
@@ -68,20 +68,21 @@ export function takeLock(file: string, busy: (holder: number) => string, clock: 
   const startedAt = clock.startedAt ?? processPlatform.startedAt;
   const bootedAt = clock.bootedAt ?? (() => Date.now() - uptime() * 1000);
   const startKey = clock.startKey ?? (pid => processPlatform.startKey?.(pid) ?? null);
-  const release = (): void => {
-    try {
-      rmSync(file, { force: true });
-    } catch {
-      // The directory may be gone already; nothing left to release.
-    }
-  };
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const handle = openSync(file, 'wx');
       const key = startKey(process.pid);
       writeFileSync(handle, `${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }) }, null, 2)}\n`, 'utf8');
+      const { ino } = fstatSync(handle);
       closeSync(handle);
-      return release;
+      // Only the file this call made: its directory may have moved away, and another lock taken its path.
+      return () => {
+        try {
+          if (statSync(file).ino === ino) rmSync(file, { force: true });
+        } catch {
+          // The directory may be gone already; nothing left to release.
+        }
+      };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       let holder: number | null = null;
@@ -100,6 +101,16 @@ export function takeLock(file: string, busy: (holder: number) => string, clock: 
     }
   }
   throw new Error(`could not take the lock ${file}: it keeps coming back`);
+}
+
+/** Removes the core lock in `directory` if this process wrote it, wherever the directory has moved since. */
+export function releaseOwnLock(directory: string): void {
+  const file = join(directory, 'core.lock');
+  try {
+    if ((JSON.parse(readFileSync(file, 'utf8')) as { pid?: unknown }).pid === process.pid) rmSync(file, { force: true });
+  } catch {
+    // No lock there, or not one this process can read: not this process's.
+  }
 }
 
 /**

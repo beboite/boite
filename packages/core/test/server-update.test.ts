@@ -8,7 +8,7 @@ import { Database } from 'bun:sqlite';
 import { downloadPayload, verifyPayload, unpackPayload } from '../src/server-update/release.ts';
 import { applyServerUpdate, clearStaleUpdates, recoverServerUpdate, UNSAVED_DATA, type UpdateDisk } from '../src/server-update/apply.ts';
 import { linuxServerUpdates, unitWord } from '../src/platform/linux-server-update.ts';
-import { openDataDir, type FileLock, type RestoreMoves } from '../src/server-update/restore.ts';
+import { openDataDir, restoreSnapshot, type FileLock, type RestoreMoves } from '../src/server-update/restore.ts';
 import type { ServerUpdatePlan, ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { echoThread, holdAccountTurns, startTestCore, waitFor } from './harness.ts';
 import { lockDataDir } from '../src/main.ts';
@@ -531,20 +531,75 @@ test('a recorded restore that fails to go in keeps the server closed and its rec
 
 test('a recorded restore that is no directory is set aside and redone from the snapshot, or the start is refused', async () => {
   const f = await updateFixture();
+  const rejected = (id: string) => { mkdirSync(`${f.data}.failed-${id}`); writeFileSync(join(`${f.data}.failed-${id}`, 'pairing.json'), 'earlier rejected pairing'); };
   try {
+    // A rejected-data folder already there too: setting the file aside must not read as a finished swap.
     cutRollback(f, false);
+    rejected(f.id);
     writeFileSync(`${f.data}.restore-${f.id}`, 'not a directory');
     open(f)();
     f.expectPrevious();
     expect(readFileSync(`${f.data}.unused-restore-${f.id}`, 'utf8')).toBe('not a directory');
+    expect(readFileSync(join(`${f.data}.unused-data`, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    expect(readFileSync(join(`${f.data}.failed-${f.id}`, 'pairing.json'), 'utf8')).toBe('earlier rejected pairing');
     // Without the snapshot, the data in place stays the rejected version's: nothing opens it.
     const next = uuid('2');
     rmSync(cutRollback(f, false, next).snapshot, { recursive: true, force: true });
+    rejected(next);
     writeFileSync(`${f.data}.restore-${next}`, 'not a directory');
     expect(() => open(f)).toThrow('is missing');
     expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    const journal = new Database(join(f.data, 'journal.db'));
+    expect(journal.query('SELECT * FROM saved').all()).toEqual([{ message: 'conversation', newer_schema: null }]); journal.close();
     expect(existsSync(`${f.data}.rollback.json`)).toBe(true);
   } finally { f.stop(); }
+});
+
+test('a core that starts while a rollback restores never holds a directory the rollback moves away', async () => {
+  const f = await updateFixture();
+  const { snapshot } = cutRollback(f, false);
+  // The record a rollback publishes comes after this start's first look.
+  rmSync(`${f.data}.rollback.json`);
+  const signal = (name: string) => join(f.root, `signal-${name}`);
+  const waitSync = (names: string[]) => {
+    const deadline = Date.now() + 10_000;
+    while (!names.some(name => existsSync(signal(name)))) {
+      if (Date.now() > deadline) throw new Error(`no ${names.join(' or ')} signal`);
+      Bun.sleepSync(10);
+    }
+  };
+  // A starting core in another process: it pauses once prepared, and again once it holds the data lock.
+  const script = `
+    const { existsSync, mkdirSync, writeFileSync } = await import('node:fs');
+    const { openDataDir } = await import(${JSON.stringify(join(import.meta.dir, '../src/server-update/restore.ts'))});
+    const { lockDataDir } = await import(${JSON.stringify(join(import.meta.dir, '../src/data-lock.ts'))});
+    const signal = (name) => ${JSON.stringify(f.root)} + '/signal-' + name;
+    const wait = (name) => { const deadline = Date.now() + 10000; while (!existsSync(signal(name)) && Date.now() < deadline) Bun.sleepSync(10); };
+    let result;
+    try {
+      openDataDir(${JSON.stringify(f.data)}, (dir) => { mkdirSync(dir, { recursive: true }); writeFileSync(signal('prepared'), ''); wait('go'); },
+        () => { throw new Error('took the maintenance lock'); },
+        (dir) => { const release = lockDataDir(dir); writeFileSync(signal('locked'), ''); wait('finished'); return release; });
+      result = 'admitted';
+    } catch (error) { result = error.message; }
+    writeFileSync(signal('result'), result);
+    setInterval(() => {}, 1000);`;
+  const child = Bun.spawn([process.execPath, '-e', script], { stdout: 'ignore', stderr: 'inherit', windowsHide: true });
+  try {
+    waitSync(['prepared']);
+    // The rollback's first move lets the start go on and waits until it has its data lock or has given up.
+    const moves: RestoreMoves = { copy: () => { throw new Error('no copy here'); }, rename: (source, target) => {
+      if (source === snapshot) { writeFileSync(signal('go'), ''); waitSync(['locked', 'result']); }
+      renameSync(source, target);
+    } };
+    restoreSnapshot(f.data, { id: f.id, snapshot }, moves, f.lock);
+    writeFileSync(signal('finished'), '');
+    waitSync(['result']);
+    expect(readFileSync(signal('result'), 'utf8')).toContain('another core is already running');
+    f.expectPrevious();
+    // Nobody holds the data now: the next core takes it.
+    lockDataDir(f.data)();
+  } finally { child.kill(); await child.exited; f.stop(); }
 });
 
 test('a start never opens a fresh data directory beside a restore whose record it cannot read', async () => {

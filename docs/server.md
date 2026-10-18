@@ -242,22 +242,35 @@ as it is when a retry finds it valid. It is removed only once the swap is
 complete and flushed. A power cut in between leaves no recovery running, and
 the service starts the previous version at boot. A start that finds the record
 takes `<data>.maintenance.lock`, a kernel `flock` the job and its recovery hold
-while they restore, so neither moves the data under the other, and the kernel
-drops it with a killed holder. With no live core on the data, it finishes that
-operation's restore before it opens anything: it uses the `<data>.restore-<id>`
-the record names, never the newest one on disk, keeps the rejected data as
-`<data>.failed-<id>` and reports the interrupted rollback in its update status.
-After a completed swap, every other `<data>.restore-*` beside the data
-directory is renamed to `<data>.unused-restore-*`, so no later start replays an
-older copy. A recorded restore that is a file rather than a directory is set
-aside the same way and moved again from the snapshot. Whatever else stops the
-restore (a failed rename or copy, a missing snapshot, a record it cannot
-read) refuses the start and keeps the record, the restored copy and the data
-as they are: the data in place may be the rejected version's, and the previous
-core must not open it. The next start tries again. A start that finds no
-record reads nothing more and writes nothing outside the data directory, so
-the server image, whose data directory is a mount point in an unwritable `/`,
-and a first start that creates the data directory's parents work as before.
+while they restore, so neither moves the data under the other. The restore
+starts no process while it holds it, so the kernel drops it with a killed
+holder. Whoever restores also holds the data directory's `core.lock` from its
+first look to its last move, and refuses while a live core holds it. It puts
+its own `core.lock` in the restored copy before that copy takes the data
+directory's name, so a core starting meanwhile finds the data taken, never a
+directory about to move away. It finishes that operation's restore before
+anything opens the data: it uses the `<data>.restore-<id>` the record names,
+never the newest one on disk, keeps the rejected data as `<data>.failed-<id>`
+(or `<data>.unused-data` when that name is taken) and reports the interrupted
+rollback in its update status. The swap counts as complete only when the data
+directory holds `server-update-restored` with the operation's id, written into
+the restored copy just before it takes the name; a missing folder never passes
+for one. After a completed swap, every other `<data>.restore-*` beside the
+data directory is renamed to `<data>.unused-restore-*`, so no later start
+replays an older copy. A recorded restore that is a file rather than a
+directory is set aside the same way and moved again from the snapshot.
+Whatever else stops the restore (a failed rename or copy, a missing snapshot,
+a record it cannot read) refuses the start and keeps the record, the restored
+copy and the data as they are: the data in place may be the rejected
+version's, and the previous core must not open it. The next start tries again.
+A start that finds no record writes nothing outside the data directory, so the
+server image, whose data directory is a mount point in an unwritable `/`, and
+a first start that creates the data directory's parents work as before. It
+takes `core.lock`, then admits itself only if the record is still absent and
+the data directory is still the one it locked (same inode); otherwise it
+releases and looks again, and after three tries it takes the maintenance
+lock as a start with a record does. A core lock is only removed by the process
+that wrote it.
 
 From a terminal on the server, the same owner actions need no thread:
 
