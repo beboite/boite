@@ -79,6 +79,7 @@ export class AutoContinues {
   private started = false;
   private cached: Record_ | null = null;
   private cut: boolean | undefined;
+  private heldRuns: Set<string> | undefined;
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {
     core.bus.onAny((name, payload) => {
@@ -158,7 +159,7 @@ export class AutoContinues {
       if (this.plan(turn.threadId, turn, 'crash', prompt, AUTO_CONTINUE.startDelayMs)) resumed.add(turn.threadId);
     }
     if (!cut) return;
-    const held = new Set([...interrupted, ...this.core.delegation.heldByRestart, ...this.core.workflows.heldByRestart]);
+    const held = new Set([...interrupted, ...this.core.delegation.heldByRestart, ...this.runsHeldByRestart()]);
     for (const threadId of held) {
       if (resumed.has(threadId) || this.planned(threadId)) continue;
       const thread = this.core.journal.getThread(threadId);
@@ -410,10 +411,18 @@ export class AutoContinues {
   private withHeldWork(threadId: ThreadId, prompt: string, alone = false): string {
     const held: string[] = [];
     if (this.core.delegation.heldByRestart.has(threadId)) held.push('your subagent team');
-    if (this.core.workflows.heldByRestart.has(threadId)) held.push('your workflow runs');
+    if (this.runsHeldByRestart().has(threadId)) held.push('your workflow runs');
     if (held.length === 0) return prompt;
     const note = `Boite stopped unexpectedly and has started again; it paused ${held.join(' and ')} meanwhile. Run \`boite delegate resume\` to let them go on once you checked where they stand.`;
     return alone ? `${note} ${CARRY_ON}` : `${prompt}\n\n${note}`;
+  }
+
+  /** Conversations whose workflow runs this core paused at its start because the previous one died (`workflows.ts`). */
+  private runsHeldByRestart(): Set<string> {
+    this.heldRuns ??= new Set((this.core.journal.db.query(
+      "SELECT root_id FROM workflow_runs WHERE status = 'paused' AND json_extract(data, '$.pausedBy') = 'restart' AND json_extract(data, '$.pausedAt') >= ?",
+    ).all(this.core.startedAt) as { root_id: string }[]).map(row => row.root_id));
+    return this.heldRuns;
   }
 
   private lastTurn(threadId: ThreadId): Turn | null {

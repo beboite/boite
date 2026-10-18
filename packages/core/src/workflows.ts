@@ -55,8 +55,6 @@ function describe(value: unknown): string {
  */
 export class Workflows {
   private readonly stepOf = new Map<string, { runId: string; key: string }>();
-  /** Conversations whose runs this start paused after a crash: nothing else tells their agent (`threads/auto-continue.ts`). */
-  readonly heldByRestart = new Set<string>();
   /**
    * Runs that ended or paused with their result not handed over yet, by root. A team
    * event or a root's own turn end looks for held results only in a root listed here,
@@ -83,10 +81,8 @@ export class Workflows {
       for (const node of run.nodes) for (const inst of node.instances) {
         if (inst.status === 'running') Object.assign(inst, { status: 'waiting', error: INTERRUPTED, finishedAt: null }), interrupted = true;
       }
-      if (run.status === 'running' && !handedOver) {
-        this.save({ ...run, status: 'paused', error: 'The core restarted. Resume to continue.', pausedBy: 'restart', pausedAt: Date.now() });
-        this.heldByRestart.add(run.rootThreadId);
-      } else if (interrupted) this.save(run);
+      if (run.status === 'running' && !handedOver) this.save({ ...run, status: 'paused', error: 'The core restarted. Resume to continue.', pausedBy: 'restart', pausedAt: Date.now() });
+      else if (interrupted) this.save(run);
     }
     this.off = core.bus.onAny((name, payload) => {
       if (this.closed) return;
