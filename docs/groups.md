@@ -528,8 +528,13 @@ At start, a key the group brought for a plain HTTP address is not sent before
 the machines paired by hand have been asked, each on a short connection of its
 own, what their group lists (`GroupLinks.vet`). A key whose address no longer
 stands is forgotten unsent, whether the window would open on that machine, a
-`?core=` link names it or would fall back on it, or it is one of the others. They get three seconds: when none of that group
-answers, the machine that vouched being off, the key is used as it was left.
+`?core=` link names it or would fall back on it, or it is one of the others. A
+machine that opens no socket within three seconds is taken for off. One whose
+socket opened is on, and its answer is waited for up to fifteen seconds from
+the question: a machine that starts slowly still has its say, and giving up on
+it sooner would send the key to an address it may no longer give. When none of
+that group answers in that time, the machine that vouched being off or silent,
+the key is used as it was left.
 Someone able to keep those machines silent still gets it sent to the old
 address, where it is worth nothing once the member has given that address up.
 
