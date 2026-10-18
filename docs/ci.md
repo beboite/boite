@@ -375,6 +375,13 @@ Windows, against 5,037,724 for those two files at that main, 1,607 more; the
 entry chunk stays at 596,622. The UI limit rises to 5,040,000; the other
 limits stay.
 
+On 2026-10-18, Plugins opening on this PC with a list mounted per machine and
+the project menu back at the right end of the sidebar header (PR #606) merged
+with `origin/main` at `e22bb094` measure 4,869,757 UI bytes after a fresh
+`bun run build:ui` on Linux, against 4,869,093 for that main: the machine menu
+and `PluginsMachine.svelte` add 664 bytes. The UI limit rises to 4,869,800;
+the other limits stay.
+
 On 2026-10-17, PR #566 merged with `origin/main` at `b6ae659a`, which brings
 the thread links and agent mail direction (PR #562), measures 595,205 entry
 bytes, 5,036,527 UI bytes and 4,390,768 core JavaScript bytes after fresh
