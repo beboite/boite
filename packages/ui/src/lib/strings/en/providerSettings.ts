@@ -1,0 +1,51 @@
+export const strings = {
+  providerSettings: {
+    heading: 'Providers',
+    intro: 'An agent already signed in on this computer is picked up on its own.',
+    step: {
+      installing: 'Installing',
+      install: 'Not installed',
+      repair: 'Installed files are missing',
+      manual: 'Not installed',
+      'signing-in': 'Signing in',
+      'sign-in': 'Not signed in',
+      external: 'Not signed in',
+      ready: 'Ready'
+    },
+    accountsCount: '{count} accounts',
+    thenSignIn: 'Sign-in starts when the download finishes.',
+    manualHint: '{provider} comes with its own installer. Run it, then come back: Boite finds it on its own.',
+    externalHint: '{provider} signs in from its own app. Sign in there, then check again.',
+    setup: 'Install guide',
+    refresh: 'Check again',
+    details: 'Details',
+    isolated: 'Boite account',
+    default: 'Your command-line login',
+    reconnect: 'Sign in again',
+    check: 'Check connection',
+    connectionOk: 'Connected',
+    checking: 'Checking connection',
+    accountName: 'Account name',
+    revealEmail: 'Reveal email',
+    deviceHint: 'Enter this code on the sign-in page. Boite waits for you to finish.',
+    addAccount: 'Add another account',
+    useCli: 'Use my command-line login',
+    executable: 'Runs from',
+    accounts: 'Accounts',
+    installation: 'Installation',
+    managedCopy: "Boite's copy",
+    addHeading: 'Add a provider',
+    offHeading: 'Turned off',
+    off: 'Turned off',
+    experimental: 'Experimental',
+    /** The switch's accessible name: `{provider}` is the provider's own name. */
+    enable: 'Use {provider}',
+    enableHint: 'Off, Boite starts nothing of this provider and no list offers it. Its accounts and conversations are kept.',
+    /** A thread whose provider is off: the composer's chip and the sentence behind it. */
+    threadOff: '{provider} is turned off. Turn it on in Settings > Providers to continue this conversation.',
+    defaultModel: 'Default model',
+    autoUpdate: 'Automatic updates',
+    checkUpdates: 'Check for updates',
+    updating: 'Updating'
+  }
+} as const;

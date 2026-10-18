@@ -51,7 +51,7 @@ prerequisites, adjacent runtime files and shell E2E coverage.
   webview of that window.
 - UI colors, radii and durations come from `app.css`, strings from
   `lib/strings.ts`, which serves them in the language the app speaks. Write
-  English in `lib/strings.en.ts` and mirror it in every translation
+  English in `lib/strings/en/<part>.ts` and mirror it in the same part of every translation
   ([docs/language.md](docs/language.md)). No native `<select>`,
   `window.confirm` or hard-coded hex.
 - Each connected machine owns its client and Store. Route actions through the
