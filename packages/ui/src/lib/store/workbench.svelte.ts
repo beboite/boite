@@ -160,6 +160,20 @@ export class Workbench {
     }
   }
 
+  /** The files a chat link names in the thread's directory: `files.locate`. */
+  async locateFile(threadId: ThreadId, path: string): Promise<FileAnswer<string[]>> {
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    if (!client) return { ok: false, error: strings.errors.noEndpoint };
+    try {
+      const value = await client.call('files.locate', { threadId, path });
+      if (!this.ctx.currentClient(client, clientGeneration)) return { ok: false, error: strings.errors.noEndpoint };
+      return { ok: true, value };
+    } catch (error) {
+      return { ok: false, error: this.ctx.reason(error) };
+    }
+  }
+
   async readFile(threadId: ThreadId, path: string): Promise<FileAnswer<FileContent>> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
