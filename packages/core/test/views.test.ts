@@ -25,6 +25,11 @@ async function start(withBrowser: boolean): Promise<void> {
   savedBrowser = process.env.BOITE_BROWSER;
   if (withBrowser) delete process.env.BOITE_BROWSER; else process.env.BOITE_BROWSER = join(import.meta.dir, 'no-such-browser');
   harness = await startTestCore(); client = await harness.connect();
+  // Every check starts a browser of its own, and a loaded Windows runner took past the 20-second limit to start one:
+  // the page then goes out unchecked and a refusal this file expects never comes (2026-10-13, twice). These tests
+  // are about what a check finds, so they give it a minute; the product keeps its limit.
+  const probe = harness.core.browser.probe.bind(harness.core.browser);
+  harness.core.browser.probe = (url, widths) => probe(url, widths, 60_000);
   ({ threadId } = await echoThread(harness, client));
   agent = await connect(harness.url, harness.core.agents.tokenFor(threadId));
   await client.call('turns.start', { threadId, prompt: 'Explain it with a drawing' });
@@ -312,7 +317,7 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   const kept = readdirSync(join(harness.dataDir, 'artifacts'));
   expect(kept.filter(name => !name.endsWith('.gz')).length).toBe(5);
   expect(kept.filter(name => name.endsWith('.gz')).sort()).toEqual(kept.filter(name => !name.endsWith('.gz')).map(name => `${name}.gz`).sort());
-}, 90_000);
+}, 180_000);
 
 /** The gated test runs with the machine's browser: the core started without one is replaced. */
 async function restartWithBrowser(): Promise<void> {
