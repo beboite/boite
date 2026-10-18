@@ -194,6 +194,10 @@ export function compactionSteps(journal: Journal): ((now: number) => Promise<Ste
   // on the 4.2 GB journal, so a batch grown on warm pages stays under 100 ms.
   const trace: Record<TracePhase, Pace> = { find: rowPace(), scan: new Pace(200, 50, 400), delete: new Pace(250, 50, 500), sweep: rowPace() };
   const prune = new TracePrune(journal.db, trace.find.size);
+  // A tick waits while the checkpoints catch up with the WAL, so that the
+  // passes never make this thread copy its frames (`WalCheckpoints.behind`).
+  const unlessBehind = (step: (now: number) => Promise<Step>) => (now: number): Promise<Step> =>
+    journal.checkpoints?.behind === true ? Promise.resolve('more') : step(now);
   return [
     // Values of 32 KiB and more of rows written before `part_blobs`, one row per tick.
     () => rowPass(journal, ONE_TIME_PASSES[0], after => moveInlineValues(journal.db, after, isOpen)),
@@ -211,7 +215,7 @@ export function compactionSteps(journal: Journal): ((now: number) => Promise<Ste
     () => intern.run(size => rowPass(journal, ONE_TIME_PASSES[3], after => internOldCommandLines(journal.db, after, size))),
     // Free pages back to the disk, once the journal is in incremental auto-vacuum.
     () => vacuum.run(pages => freePages(journal, pages)),
-  ];
+  ].map(unlessBehind);
 }
 
 /**

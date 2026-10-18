@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { Journal } from '../src/journal.ts';
+import { compactionSteps, ONE_TIME_PASSES } from '../src/journal/retention.ts';
 import type { WalCheckpointOptions } from '../src/journal/wal-checkpoints.ts';
 
 let dir: string;
@@ -85,4 +86,24 @@ test('without a Worker the main thread checkpoints and the owner hears it once',
   expect(target.checkpoints!.ran.main).toBeGreaterThan(1);
   expect(walBytes()).toBeLessThan(1024 * 1024);
   expect(errors).toEqual(['journal checkpoint worker unavailable, checkpointing on the main thread: no Worker here']);
+});
+
+test('the compaction passes wait while the WAL is past twice its limit, and go on once it is checkpointed', async () => {
+  const target = open();
+  // The WAL file shrinks back to this limit when it restarts, as the real 4 MiB limit does.
+  target.db.exec(`PRAGMA journal_size_limit = ${256 * 1024}`);
+  for (let n = 0; n < 6; n++) write(target, n);
+  expect(walBytes()).toBeGreaterThan(2 * 256 * 1024);
+  expect(target.checkpoints!.behind).toBe(true);
+  const [first] = compactionSteps(target);
+  expect(await first!(Date.now())).toBe('more');
+  // The tick wrote nothing: the pass has not started.
+  expect(target.getSetting(ONE_TIME_PASSES[0])).toBeUndefined();
+  target.checkpoints!.tick();
+  await settle(target);
+  // The next write restarts the checkpointed WAL.
+  target.setSetting('test:restart', 1);
+  expect(target.checkpoints!.behind).toBe(false);
+  while (await first!(Date.now()) === 'more');
+  expect(target.getSetting(ONE_TIME_PASSES[0])).toBe(Number.MAX_SAFE_INTEGER);
 });

@@ -193,8 +193,13 @@ try {
   const steps = compactionSteps(journal);
   const stepTicks: Ticks[] = steps.map(() => ({ blocks: [], total: 0 }));
   const now = Date.now();
+  // Ticks skipped while the WAL waited on its checkpoints, and checkpoints this thread ran.
+  const mainCheckpoints = () => journal.checkpoints?.ran.main ?? 0;
+  const mainBefore = mainCheckpoints();
+  let waited = 0;
   at = performance.now();
   for (let index = 0; index < steps.length;) {
+    if (journal.checkpoints?.behind === true) waited++;
     const tick = await blocked(() => steps[index]!(now));
     const stat = stepTicks[index]!;
     stat.blocks.push(tick.block); stat.total += tick.ms;
@@ -220,6 +225,7 @@ try {
   stepTicks.forEach((stat, index) => console.log(tickRow(STEP_NAMES[index]!, stat)));
   console.log(tickRow('event retention', events));
   console.log(tickRow('statistics after the prune', optimize));
+  console.log(`\n${waited} ticks waited on the WAL checkpoints; ${mainCheckpoints() - mainBefore} checkpoints ran on the main thread`);
 
   const readsAfter = reads(journal, threads.map(thread => thread.id));
   const same = threads.every(thread => readsAfter.get(thread.id)!.digest === readsBefore.get(thread.id)!.digest);

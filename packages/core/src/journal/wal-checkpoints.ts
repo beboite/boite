@@ -128,6 +128,15 @@ export class WalCheckpoints {
     return Atomics.load(this.state, 0) !== 0;
   }
 
+  /**
+   * True while the WAL is past twice its limit: the checkpoints have not caught
+   * up with the writes. A background pass then skips its tick, so that its
+   * writes never take the WAL to `BEHIND`, where this thread copies it.
+   */
+  get behind(): boolean {
+    return this.walBytes() > this.limitBytes * 2;
+  }
+
   /** Looks for writes since the last tick and asks for the checkpoint they call for. */
   tick(): void {
     if (this.stopped) return;
