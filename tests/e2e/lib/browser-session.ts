@@ -36,7 +36,7 @@ export async function startBrowserSession(executable: string, title = 'Boite · 
     const project = await client.call('projects.add', { path: projectDir, name: 'Boite · nouveautés à valider' });
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title });
-    page = await BrowserPage.attach(port, '', () => describeShell(dataDir, shell.pid));
+    page = await BrowserPage.attach(port, '', failure => describeShell(dataDir, shell.pid, failure));
     await page.waitFor("typeof window.__TAURI_INTERNALS__?.invoke === 'function'");
     await page.evaluate(`localStorage.setItem('boite.onboarding', JSON.stringify({version:6,at:Date.now()})); localStorage.setItem('boite.locale', 'fr'); localStorage.setItem('boite.experiments', ${JSON.stringify(JSON.stringify(experiments))}); location.reload();`);
     await page.waitFor("document.querySelector('[data-testid=thread-row]')");

@@ -46,7 +46,7 @@ test.skip('browser profiles keep their own cookies across a restart until one is
       try { const state = JSON.parse(readFileSync(join(dataDir, 'core.json'), 'utf8')); client = await connect(`http://127.0.0.1:${state.port}`, state.token); } catch { await Bun.sleep(100); }
     }
     if (!client) throw new Error('core did not start');
-    page = await BrowserPage.attach(port, '', () => describeShell(dataDir, shell!.pid));
+    page = await BrowserPage.attach(port, '', failure => describeShell(dataDir, shell!.pid, failure));
     await page.waitFor("typeof window.__TAURI_INTERNALS__?.invoke === 'function'");
   };
   const openThread = async (threadId: string) => {

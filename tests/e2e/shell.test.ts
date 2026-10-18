@@ -304,7 +304,7 @@ const TAURI_READY = "typeof window.__TAURI_INTERNALS__?.invoke === 'function'";
  * with its own log and process tree, so the run says where WebView2 stopped.
  */
 function attachShell(port: number, ownDataDir: string, pid: number, urlIncludes = ''): Promise<BrowserPage> {
-  return BrowserPage.attach(port, urlIncludes, () => describeShell(ownDataDir, pid));
+  return BrowserPage.attach(port, urlIncludes, failure => describeShell(ownDataDir, pid, failure));
 }
 
 shellTest('a resident core finishes agent work after shell exit, is adopted, and stops explicitly', async () => {
@@ -1096,7 +1096,7 @@ shellTest('native preview references attach to the composer and highlight from s
       if (!url && Date.now() > deadline) throw new Error('the preview page never opened');
       if (!url) await Bun.sleep(POLL_MS);
     }
-    child = await BrowserPage.attach(debugPort, url);
+    child = await attachShell(debugPort, dataDir, shellPid, url);
     await child.waitFor(`document.querySelector('#native-preview-target')`);
     await page.click(testid('preview-annotate'));
     await child.waitFor(`typeof window.__boiteStopPreviewPick === 'function'`);
@@ -1127,7 +1127,7 @@ shellTest('native preview references attach to the composer and highlight from s
     // then highlights its element in the newly created child webview.
     await page.click(`[data-role="user"] ${testid('preview-reference')}`);
     await waitForTargets(url, 1, 20_000);
-    child = await BrowserPage.attach(debugPort, url);
+    child = await attachShell(debugPort, dataDir, shellPid, url);
     await child.waitFor(`document.querySelector('[data-boite-preview-highlight]')`);
     expect(await child.evaluate('location.href')).toBe(url);
     await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-sent.png'));

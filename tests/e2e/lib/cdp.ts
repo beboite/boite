@@ -22,6 +22,8 @@ const POLL_MS = 100;
 const MAX_POLL_ANSWERS = 12;
 /** How long the failure probe gives the debugging port, for TCP and then HTTP. */
 const PROBE_TIMEOUT_MS = 5_000;
+/** How long a failed attach waits for its launcher's diagnosis. */
+const DIAGNOSIS_TIMEOUT_MS = 20_000;
 const WAIT_DIAGNOSTIC_TIMEOUT_MS = 250;
 /** What a page that left an evaluate hanging is doing: frames drawn in a second, fonts and animations still pending. */
 const HUNG_PAGE = `new Promise((resolve) => {
@@ -305,29 +307,33 @@ export class BrowserPage {
 
   /**
    * Drives a page that something else launched, such as the shell's WebView2
-   * started with `--remote-debugging-port`. Closing it kills nothing. When no
-   * page shows up, `diagnose` says what the launcher left behind (the shell's
-   * own log, its process tree) and its text joins the error.
+   * started with `--remote-debugging-port`. Closing it kills nothing. When the
+   * attach fails, `diagnose` gets the failure and says what the launcher left
+   * behind (the shell's own log, its process tree); its text, given at most
+   * `DIAGNOSIS_TIMEOUT_MS`, joins the error.
    */
-  static async attach(port: number, urlIncludes = '', diagnose?: () => string | Promise<string>): Promise<BrowserPage> {
-    let target: TargetInfo;
+  static async attach(port: number, urlIncludes = '', diagnose?: (failure: string) => string | Promise<string>): Promise<BrowserPage> {
+    let page: BrowserPage | undefined;
     try {
-      target = await waitForPageTarget(port, urlIncludes);
+      page = new BrowserPage(await openSocket(await waitForPageTarget(port, urlIncludes)), null, null);
+      return await page.#prepareAttached();
     } catch (error) {
+      await page?.close().catch(() => undefined);
       if (diagnose === undefined) throw error;
-      const details = await Promise.resolve().then(diagnose)
-        .catch((failure: unknown) => `the diagnosis failed: ${failure instanceof Error ? failure.message : String(failure)}`);
-      throw new Error(`${error instanceof Error ? error.message : String(error)}\n${details}`, { cause: error });
+      const failure = error instanceof Error ? error.message : String(error);
+      throw new Error(`${failure}\n${await diagnosis(() => diagnose(failure))}`, { cause: error });
     }
-    const socket = await openSocket(target);
-    const page = new BrowserPage(socket, null, null);
-    await page.send('Page.enable', {});
-    await page.send('Runtime.enable', {});
+  }
+
+  /** Readies an attached page: domains on, the tour recorded as seen. */
+  async #prepareAttached(): Promise<BrowserPage> {
+    await this.send('Page.enable', {});
+    await this.send('Runtime.enable', {});
     // The page booted before we got here, on a profile as new as the data
     // directory it sits in: it read "never seen" already. Record the tour and
     // boot it again, once, so every later reload finds the record too.
-    await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
-    const unseen = await page.evaluate<boolean>(
+    await this.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
+    const unseen = await this.evaluate<boolean>(
       `(() => { try { return localStorage.getItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}) === null; } catch { return false; } })()`,
     );
     if (unseen) {
@@ -335,10 +341,10 @@ export class BrowserPage {
       // calm preset, `WORK_STORAGE_KEY` in `lib/work-prefs.svelte.ts`). Forget
       // it: with the tour seen, the reload settles it as a working setup, as
       // every page `launch` drives does.
-      await page.evaluate(`(() => { try { localStorage.removeItem('boite.work'); } catch {} })()`);
-      await page.reload();
+      await this.evaluate(`(() => { try { localStorage.removeItem('boite.work'); } catch {} })()`);
+      await this.reload();
     }
-    return page;
+    return this;
   }
 
   /** The one place raw devtools JSON is handled. */
@@ -645,9 +651,27 @@ async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subproce
     if (Date.now() > deadline) {
       const history = [...answers].map(([answer, { count, first, last: end }]) =>
         `${count}x ${(first / 1000).toFixed(1)}-${(end / 1000).toFixed(1)} s: ${answer}`).join('\n  ');
-      throw new Error(`the browser never exposed a page: ${last}\nPolls of port ${port}:\n  ${history}\nPort ${port} now: ${await probeDebuggingPort(port)}`);
+      // A launched browser is retried at once; only an attach, whose browser
+      // nobody here can restart, spends the probe.
+      const now = proc === undefined ? `\nPort ${port} now: ${await probeDebuggingPort(port)}` : '';
+      throw new Error(`the browser never exposed a page: ${last}\nPolls of port ${port}:\n  ${history}${now}`);
     }
     await Bun.sleep(POLL_MS);
+  }
+}
+
+/** A launcher's diagnosis, bounded so that it never hides the failure it explains. */
+async function diagnosis(diagnose: () => string | Promise<string>): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<string>((resolve) => {
+    timer = setTimeout(() => resolve(`the diagnosis gave nothing within ${DIAGNOSIS_TIMEOUT_MS} ms`), DIAGNOSIS_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([Promise.resolve().then(diagnose), late]);
+  } catch (failure) {
+    return `the diagnosis failed: ${failure instanceof Error ? failure.message : String(failure)}`;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -657,11 +681,17 @@ async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subproce
  * the connection and never replies, as one whose UI thread is stuck would:
  * the probe connects first, then gives `/json/list` longer to answer.
  */
-async function probeDebuggingPort(port: number): Promise<string> {
+export async function probeDebuggingPort(port: number): Promise<string> {
   const tcp = await new Promise<string>((resolve) => {
     const socket = createConnection({ host: '127.0.0.1', port });
-    const done = (text: string) => { socket.destroy(); resolve(text); };
-    socket.setTimeout(PROBE_TIMEOUT_MS, () => done(`no TCP answer within ${PROBE_TIMEOUT_MS} ms`));
+    const timer = setTimeout(() => done(`no TCP answer within ${PROBE_TIMEOUT_MS} ms`), PROBE_TIMEOUT_MS);
+    function done(text: string) {
+      clearTimeout(timer);
+      socket.removeAllListeners();
+      socket.on('error', () => undefined);
+      socket.destroy();
+      resolve(text);
+    }
     socket.once('connect', () => done('accepts TCP'));
     socket.once('error', (error: NodeJS.ErrnoException) => done(`TCP ${error.code ?? error.message}`));
   });
