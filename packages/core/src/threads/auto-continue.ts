@@ -121,6 +121,9 @@ export class AutoContinues {
   resumesCrashed(turn: Turn): boolean {
     const thread = this.core.journal.getThread(turn.threadId);
     if (thread === null || !this.eligible(thread, turn) || !this.previousRunCut()) return false;
+    // As `plan` decides: a turn already resumed, or a row out of resumes, gets none.
+    const entry = this.load()[turn.threadId];
+    if (entry !== undefined && (entry.handled === turn.id || entry.streak >= AUTO_CONTINUE.delaysMs.length)) return false;
     this.crashed.push(turn);
     return true;
   }
@@ -132,6 +135,12 @@ export class AutoContinues {
    * workflow runs it cut with no turn running.
    */
   start(interrupted: Iterable<ThreadId> = []): void {
+    try { this.startPlans(interrupted); }
+    // What the crash held is news only to the prompts of this start: a later one must not repeat it.
+    finally { this.heldTeams = new Set(); this.heldRuns = new Set(); }
+  }
+
+  private startPlans(interrupted: Iterable<ThreadId>): void {
     this.started = true;
     const cut = this.previousRunCut();
     this.core.journal.deleteSetting(STOPPED_KEY);

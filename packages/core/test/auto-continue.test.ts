@@ -352,6 +352,21 @@ test('a crash that cut background work of an idle thread resumes it once the nex
   } finally { await next.stop(); }
 });
 
+test('a crash that cuts a turn out of resumes says the turn stopped, and resumes nothing', async () => {
+  const { h, threadId, turnId } = await crashMidTurn('third try at the migration');
+  const db = new Database(join(h.dataDir, 'journal.db'));
+  db.query('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('auto-continues', JSON.stringify({ [threadId]: { streak: AUTO_CONTINUE.delaysMs.length } }));
+  db.close();
+  const asked = scripted(done);
+  const next = await restart(h);
+  try {
+    await Bun.sleep(150);
+    expect(next.core.journal.getTurn(turnId)).toMatchObject({ status: 'error', error: CRASH_WHILE_RUNNING });
+    expect(next.core.threads.get(threadId).turns).toHaveLength(1);
+    expect(asked).toHaveLength(0);
+  } finally { await next.stop(); }
+});
+
 test('a crash that paused the subagent team of an answered thread wakes its agent to resume the team', async () => {
   const h = await startTestCore();
   scripted(done);
@@ -363,13 +378,22 @@ test('a crash that paused the subagent team of an answered thread wakes its agen
   h.core.journal.setSetting(`delegation:${threadId}`, { ...h.core.delegation.config(threadId), enabled: true, paused: true, pausedBy: 'restart', pausedAt: Date.now() + 60_000 });
   client.close();
   await crash(h);
-  const asked = scripted(done);
+  let resumed: TurnContext | null = null;
+  const task = { id: 'bg-4', kind: 'shell' as const, description: 'bun run e2e', toolId: null, startedAt: Date.now() };
+  const asked = scripted(ctx => { resumed = ctx; ctx.background?.([task]); return done; }, done);
   const next = await restart(h);
   try {
-    await waitFor(() => next.core.threads.get(threadId).turns.length === 2 && next.core.threads.get(threadId).turns[1]!.status === 'done');
+    await waitFor(() => next.core.threads.get(threadId).turns.length === 2 && next.core.threads.get(threadId).turns[1]!.status === 'done' && next.core.threads.require(threadId).status === 'idle');
     expect(asked[0]!.prompt).toContain('it paused your subagent team meanwhile');
     expect(asked[0]!.prompt).toContain('boite delegate resume');
-  } finally { await next.stop(); }
+    // A later resume is not about the crash any more.
+    resumed!.backgroundFinished?.('bg-4', 'error');
+    setSystemTime(new Date(Date.now() + 31_000));
+    next.core.bus.emit('thread.background', { threadId, tasks: [] });
+    await waitFor(() => next.core.threads.get(threadId).turns.length === 3 && next.core.threads.get(threadId).turns[2]!.status === 'done');
+    expect(asked[1]!.prompt).toContain('bun run e2e');
+    expect(asked[1]!.prompt).not.toContain('paused your subagent team');
+  } finally { setSystemTime(); await next.stop(); }
 });
 
 test('a resume planned before a crash survives it and goes out from the next core', async () => {

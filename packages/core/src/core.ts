@@ -340,6 +340,8 @@ export class Core {
     attachResourceLog(this);
     this.scheduler = new Scheduler(this);
     this.threads = new ThreadStore(this);
+    // Read before any recovery writes, the team and workflow ones included: whether the previous core died at work within the hour.
+    this.threads.autoContinue.previousRunCut();
     this.drafts = new DraftPreparations(this);
     this.attachmentUploads = new AttachmentUploads(this.dataDir);
     this.quotas = new QuotaStore(this);
@@ -390,8 +392,6 @@ export class Core {
     this.#stopDoneRetention = scheduleDoneRetention(this);
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
-    // Read before recovery writes anything: whether the previous core died at work within the hour.
-    this.threads.autoContinue.previousRunCut();
     const interrupted = this.threads.agentState.backgroundHistory.interruptLive();
     const recovered = this.threads.recoverStuckTurns();
     // After recovery: a thread a usage limit stopped resumes at its window's reset, across restarts.
