@@ -86,17 +86,21 @@ export function linkedCore(): string | null {
  * (`member`, since `?core=` is a pairing link's address of a core). Taken off
  * at once, so a reload during the boot does not jump there again.
  */
-export function takeNotificationTarget(): { thread: string | null; member: string | null } {
+export function takeNotificationTarget(): { thread: string | null; member: string | null; key: string | null } {
   const query = new URLSearchParams(window.location.search);
   const thread = query.get('thread');
   const member = query.get('member');
-  if (thread !== null || member !== null) {
+  const key = query.get('key');
+  if (thread !== null || member !== null || key !== null) {
     const url = new URL(window.location.href);
     url.searchParams.delete('thread');
     url.searchParams.delete('member');
+    url.searchParams.delete('key');
     window.history.replaceState(window.history.state, '', url);
   }
-  return { thread: thread || null, member: thread && member !== null && /^[0-9a-f]{64}$/.test(member) ? member : null };
+  const memberId = thread && member !== null && /^[0-9a-f]{64}$/.test(member) ? member : null;
+  // `key` is a page notice's machine and thread (`openNotification`), for a machine with no group id.
+  return { thread: thread || null, member: memberId, key: thread && memberId === null && key && key.length <= 600 ? key : null };
 }
 
 /**

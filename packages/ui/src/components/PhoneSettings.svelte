@@ -9,7 +9,7 @@
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { installApp, installed, PUSH_ENABLED_KEY, worker } from '../lib/pwa';
-  import { pushKinds, sameKinds } from '../lib/notify';
+  import { pushKinds, readPushHome, sameKinds, writePushHome } from '../lib/notify';
   import { parseGroupRelayUrl } from '@boite/contracts';
   import { servesThisPage } from '../lib/endpoint';
   import { appPage } from '../lib/app-origin';
@@ -46,9 +46,15 @@
       if (!live) return;
       key = result.publicKey;
       subscribed = result.subscribed;
-      if (!subscribed) localStorage.removeItem(PUSH_ENABLED_KEY);
-      // A choice made while this core was out of reach, or a subscription older than kinds: the device's choice wins.
-      else if (!sameKinds(result.kinds ?? [], pushKinds())) void store.client?.call('push.kinds', { kinds: pushKinds() }).catch(() => undefined);
+      const here = store.endpointUrl ?? '';
+      const home = readPushHome();
+      // Another machine holding this device's subscription says nothing of it here.
+      if (!subscribed) { if (home === null || home === here) { localStorage.removeItem(PUSH_ENABLED_KEY); writePushHome(false); } }
+      else {
+        writePushHome(here);
+        // A choice made while this core was out of reach, or a subscription older than kinds: the device's choice wins.
+        if (!sameKinds(result.kinds ?? [], pushKinds())) void store.client?.call('push.kinds', { kinds: pushKinds() }).catch(() => undefined);
+      }
     }).catch(reason => { if (live) error = String(reason); });
     return () => { live = false; };
   });
@@ -74,6 +80,7 @@
       await store.client.call('push.subscribe', { endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth }, kinds: pushKinds() });
       subscribed = true;
       localStorage.setItem(PUSH_ENABLED_KEY, 'on');
+      writePushHome(store.endpointUrl);
       message = strings.phone.enabled;
     } catch (reason) { error = errorText(reason); }
     finally { busy = false; }
@@ -85,6 +92,7 @@
       await store.client.call('push.unsubscribe', {});
       subscribed = false;
       localStorage.removeItem(PUSH_ENABLED_KEY);
+      writePushHome(false);
       const registration = await navigator.serviceWorker.getRegistration('/');
       await (await registration?.pushManager.getSubscription())?.unsubscribe();
     } catch (reason) { error = errorText(reason); }

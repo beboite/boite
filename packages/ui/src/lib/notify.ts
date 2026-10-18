@@ -18,6 +18,7 @@
  */
 
 import { NOTIFICATION_KINDS, notifiesOnFinish, threadBusy, type NotificationKind, type NotificationLabel, type ThreadSummary, type Turn } from '@boite/contracts';
+import type { Client } from './client';
 import { PUSH_ENABLED_KEY } from './pwa';
 import { strings } from './strings';
 
@@ -184,6 +185,46 @@ export async function pushCovers(origin: string | undefined, viaGroup = false): 
     return Boolean(await registration?.pushManager?.getSubscription());
   } catch {
     return false;
+  }
+}
+
+/**
+ * The machine holding this device's push subscription, by its address in this
+ * page (`''` for the core serving it): the one the Phone app settings enabled
+ * push on. Its kinds change there, whichever machine is shown.
+ */
+export const PUSH_HOME_STORAGE_KEY = 'boite.web-push.home';
+
+/** The push home's address, or null before one was recorded (a subscription older than this record). */
+export function readPushHome(): string | null {
+  try {
+    return window.localStorage.getItem(PUSH_HOME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function writePushHome(endpointUrl: string | null | false): void {
+  try {
+    if (endpointUrl === false) window.localStorage.removeItem(PUSH_HOME_STORAGE_KEY);
+    else window.localStorage.setItem(PUSH_HOME_STORAGE_KEY, endpointUrl ?? '');
+  } catch {
+    /* the next status read records it again */
+  }
+}
+
+let pushHomeOf: ((home: string) => Pick<Client, 'call'> | null) | null = null;
+
+/** The workspace finds the push home's connection among its machines; it imports the store, so it hands this in. */
+export function setPushHomeClient(resolve: ((home: string) => Pick<Client, 'call'> | null) | null): void {
+  pushHomeOf = resolve;
+}
+
+export function pushHomeClient(home: string): Pick<Client, 'call'> | null {
+  try {
+    return pushHomeOf?.(home) ?? null;
+  } catch {
+    return null;
   }
 }
 

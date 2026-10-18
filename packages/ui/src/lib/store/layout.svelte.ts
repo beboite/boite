@@ -4,7 +4,9 @@ import { servesThisPage } from '../endpoint';
 import {
   notificationCore,
   pushCovers,
+  pushHomeClient,
   pushKinds,
+  readPushHome,
   readNotificationKinds,
   readNotifications,
   requestNotificationPermission,
@@ -24,13 +26,16 @@ import { strings } from '../strings';
 import type { Page, SettingsTab } from '../store.svelte';
 import type { StoreContext } from './context';
 
+/** The kinds are this device's whichever machine is shown: one state every Store's Layout reads. */
+const deviceKinds = $state({ list: readNotificationKinds() });
+
 /** What the window shows around the chat: the page, the sidebar, the palette, the panel, the toasts. */
 export class Layout {
   projectPickerOpen = $state(false);
   /** Toasts for threads the user is not looking at, per machine. */
   notifications = $state(readNotifications());
   /** The kinds of toast and push this device keeps, under that switch. */
-  notificationKinds = $state(readNotificationKinds());
+  get notificationKinds(): NotifyKind[] { return deviceKinds.list; }
   /** The command palette, `Ctrl+K`. */
   paletteOpen = $state(false);
   /** Set by the palette's Rename: the chat header opens its title field and clears it. */
@@ -180,26 +185,32 @@ export class Layout {
   setNotificationKind(kind: NotifyKind, on: boolean): void {
     const kinds = readNotificationKinds().filter((k) => k !== kind);
     writeNotificationKinds(on ? [...kinds, kind] : kinds);
-    this.notificationKinds = readNotificationKinds();
+    deviceKinds.list = readNotificationKinds();
     this.syncPushKinds();
   }
 
   /**
-   * The core sends this device's pushes, so it hears the device's choice. Only
-   * the core that holds the subscription: the one serving this page, or the
-   * machine the phone app shows. The phone's settings screen checks it again
-   * when it reads `push.status`.
+   * The core sends this device's pushes, so it hears the device's choice: the
+   * push home, the machine holding the subscription, whichever one is shown.
+   * A subscription older than that record goes by the shown machine when it
+   * may hold it. The phone's settings screen checks again on `push.status`.
    */
   private syncPushKinds(): void {
-    const s = this.ctx.store;
     try {
       if (localStorage.getItem(PUSH_ENABLED_KEY) !== 'on') return;
     } catch {
       return;
     }
+    const home = readPushHome();
+    const client = home !== null ? pushHomeClient(home) : this.mayHoldPush() ? this.ctx.store.client : null;
+    void client?.call('push.kinds', { kinds: pushKinds() }).catch(() => undefined);
+  }
+
+  /** The shown machine is one this page subscribes on: the one serving it, or any on the phone app's page. */
+  private mayHoldPush(): boolean {
+    const s = this.ctx.store;
     const relay = s.endpointUrl === null ? null : parseGroupRelayUrl(s.endpointUrl);
-    if (relay !== null && servesThisPage(relay.member)) return;
-    if (!appPage() && s.endpointUrl && !servesThisPage(s.endpointUrl)) return;
-    void s.client?.call('push.kinds', { kinds: pushKinds() }).catch(() => undefined);
+    if (relay !== null && servesThisPage(relay.member)) return false;
+    return appPage() || !s.endpointUrl || servesThisPage(s.endpointUrl);
   }
 }

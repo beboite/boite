@@ -22,7 +22,7 @@ import { threadAddress } from './chat-links';
 import { onReveal, reveal } from './reveal';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
 import { GroupLinks } from './group-links.svelte';
-import { setNotificationCore } from './notify';
+import { setNotificationCore, setPushHomeClient } from './notify';
 import { appPage } from './app-origin';
 import { bootWorkspace, byHand, hostOf, primaryMachine } from './workspace-boot';
 
@@ -613,7 +613,13 @@ export class Workspace {
   }
 
   /** The boot, on the thread a notification tapped with no window open named, on whichever machine it is. */
-  async bootAt(tapped: { thread: string | null; member: string | null }): Promise<void> {
+  async bootAt(tapped: { thread: string | null; member: string | null; key?: string | null }): Promise<void> {
+    // A page notice about a machine with no group id: this window's own key names the machine.
+    if (tapped.key) {
+      await this.boot(null);
+      await this.openNotification(tapped.key);
+      return;
+    }
     await this.boot(tapped.member === null ? tapped.thread : null);
     if (tapped.member !== null && tapped.thread !== null) await this.openMemberThread(tapped.member, tapped.thread);
   }
@@ -727,6 +733,8 @@ setNotificationCore((store) => {
   const machine = workspace.machines.find((entry) => entry.store === store);
   return machine === undefined ? undefined : GroupLinks.coreOf(machine);
 });
+// Kinds changed while another machine is shown still reach the one holding the subscription.
+setPushHomeClient((home) => workspace.machines.find((machine) => (machine.store.endpointUrl ?? '') === home)?.store.client ?? null);
 
 // A desktop app's `ui.reveal`, answered by whichever machine's Store received it.
 onReveal((from, target) => reveal(workspace, from, target));

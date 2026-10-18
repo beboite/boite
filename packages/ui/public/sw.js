@@ -209,6 +209,8 @@ self.addEventListener('notificationclick', (event) => {
   const url = new URL('/', self.location.origin);
   if (typeof threadId === 'string') url.searchParams.set('thread', threadId);
   if (typeof threadId === 'string' && typeof core === 'string') url.searchParams.set('member', core);
+  // Opened with no window, or one refusing focus: the boot reads the machine from the key (`takeNotificationTarget`).
+  else if (typeof threadId === 'string' && key !== null) url.searchParams.set('key', key);
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const existing = windows.find(client => new URL(client.url).origin === url.origin);

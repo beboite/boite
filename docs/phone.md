@@ -568,7 +568,8 @@ for this page's own core, `thread-<core>-<id>` with `{threadId, core}` for a
 machine of the group (`GroupLinks.coreOf`, handed to `lib/notify.ts` by the
 workspace), so a later push replaces it and a tap opens the thread there. A
 machine with no group id gets a `key` in the data, which the open window reads
-through `openNotification`. Only a page without a worker builds the
+through `openNotification`, and which the worker puts in the address it opens
+(`?thread=<id>&key=<key>`) when no window is open or one refuses focus. Only a page without a worker builds the
 notification itself.
 
 Routine turn notifications wait while someone watches their conversation.
@@ -625,7 +626,10 @@ turned off under `boite.notifications.muted`, so a kind added later starts on.
 Local toasts read it (`shouldNotify` in `lib/notify.ts`). For Web Push the core
 sends, so a subscribed device hands it over: `push.subscribe` takes `kinds`,
 `push.kinds` changes them without subscribing again, `push.status` returns
-them, and the switch off sends an empty list. A subscription stored without
+them, and the switch off sends an empty list. The page records which machine
+holds the subscription (`boite.web-push.home`, its address in this page), so a
+change made while another machine is shown still goes there; the kinds are one
+state for every machine of the window. A subscription stored without
 kinds gets every kind. Every push carries its `kind` beside the `label`; a push
 forwarded through the group carries it too, and the device's home machine
 filters it by that subscription's kinds. The test notification has no kind and
