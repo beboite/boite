@@ -4690,10 +4690,31 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * a picture the core cannot convert or one its copy would not shrink, and any
    * other file, come as they are, without `mimeType`. An older core ignores
    * `display` the same way.
+   *
+   * `thumb` with `display` asks for the copy a thumbnail draws: at most
+   * `DISPLAY_THUMB_MAX` pixels, WebP at quality 75, made once and kept like
+   * the larger one. An older core ignores it and sends the larger copy.
+   *
+   * `ticket` asks for the bytes as a `FILE_ROUTE` path instead of base64:
+   * `data` is then empty, `url` is the path (`/file/<ticket>`) to resolve
+   * against the origin the client reached the core by, `mimeType` is always
+   * set and `bytes` is the size. The route answers it with immutable caching,
+   * since the bytes of a message's part never change, or `no-store` for an
+   * incognito conversation, which leaves nothing behind. The same ticket
+   * comes back for the same part and copy while it lives, so the HTTP cache
+   * keeps it, and each load renews it for `FILE_TICKET_TTL_MS`. A copy the
+   * core could not keep comes as base64 even with `ticket`. A client that
+   * cannot fetch that address (the desktop shell through a relay, whose
+   * policy only admits `/file/` at a machine's own address) leaves `ticket`
+   * out and gets base64, as an older core answers.
+   * Measured on 2026-10-17 with `bun run bench/media-wire.ts --browser`: ten
+   * 1920 by 1080 screenshots opened on a thread cost 1,762 KB as base64 large
+   * copies and 86 KB as ticketed thumbnails on loopback, and Chromium went from
+   * the answers to decoded pictures in 93 ms and 12 ms.
    */
   'messages.attachment': {
-    params: { threadId: ThreadId; messageId: MessageId; partIndex: number; display?: boolean };
-    result: { data: string; mimeType?: string };
+    params: { threadId: ThreadId; messageId: MessageId; partIndex: number; display?: boolean; thumb?: boolean; ticket?: boolean };
+    result: { data: string; mimeType?: string; url?: string; bytes?: number };
   };
   'threads.update': {
     params: {
@@ -5254,6 +5275,12 @@ export { resumeAnchor, snapshotOptionsProblem } from './thread-sync.ts';
 export { IMAGE_INLINE_CHARS, previewFileData, previewImageData, type ImagePreviews } from './file-preview.ts';
 /** The longer side, in pixels, of the copy `messages.attachment` sends with `display`. */
 export const DISPLAY_IMAGE_MAX = 1280;
+/**
+ * The longer side of the copy `messages.attachment` sends with `display` and
+ * `thumb`: a prompt's thumbnail is 88 px tall and at most 1.8 times as wide,
+ * so 320 px stays sharp on a 2x screen with 16 times fewer pixels than 1,280.
+ */
+export const DISPLAY_THUMB_MAX = 320;
 export { imageSize } from './image-size.ts';
 export {
   VIEW_ROUTE, VIEW_MAX_BYTES, VIEW_WIDTH, VIEW_NARROW_WIDTH, VIEW_BLEED, VIEW_NARROW_BELOW, VIEW_MIN_HEIGHT, VIEW_MAX_HEIGHT, VIEW_DEFAULT_HEIGHT, VIEW_TITLE_MAX,

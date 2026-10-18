@@ -203,7 +203,10 @@ unreachable or older core without idle admission aborts installation before
 files are replaced. An admitted core that has not exited after 15 seconds also
 aborts installation. Explicit uninstall still requests ordinary shutdown and
 ends any core of that install left after 15 seconds. Boite Dev's core runs
-another file and is left alone. The stop script opens no window.
+another file and is left alone. The stop script opens no window. Once the core
+is stopped, the install hook removes the install's `core/` and `ui/`
+directories before the copy, and the uninstall hook removes them as well, so
+no earlier build's hashed chunks remain ([releasing](releasing.md#what-the-installer-holds)).
 `scripts/ci/installer-hooks.test.ts` builds the
 hooks into the generated installer script and runs them over a shell that
 restarts its core; it needs a Windows `build:shell` first. Local runs skip without fixtures;

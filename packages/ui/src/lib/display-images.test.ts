@@ -32,3 +32,29 @@ test('another machine never answers with a picture the previous one sent', async
     for (const client of clients) client.close();
   }
 });
+
+test('a copy comes as a file route address at the machine it was asked of, by size, and as base64 through a relay in the shell', async () => {
+  const call = vi.fn(async (_method: string, params: { thumb?: boolean; ticket?: boolean }) => params.ticket ? { data: '', url: `/file/${params.thumb ? 'small' : 'large'}`, mimeType: 'image/webp', bytes: 9 } : { data: 'UklG', mimeType: 'image/webp' });
+  const store = { endpointUrl: 'http://192.168.1.5:7777' };
+  const images = new DisplayImages({ client: { call }, store } as unknown as StoreContext);
+  expect(await images.load('t-1', 'm-1', 0, 'image/png', true)).toBe('http://192.168.1.5:7777/file/small');
+  expect(call).toHaveBeenLastCalledWith('messages.attachment', { threadId: 't-1', messageId: 'm-1', partIndex: 0, display: true, thumb: true, ticket: true });
+  expect(await images.load('t-1', 'm-1', 0, 'image/png')).toBe('http://192.168.1.5:7777/file/large');
+  expect(await images.load('t-1', 'm-1', 0, 'image/png', true)).toBe('http://192.168.1.5:7777/file/small');
+  expect(call).toHaveBeenCalledTimes(2);
+  // An address that stopped loading is asked again.
+  images.forget('t-1', 'm-1', 0, true);
+  await images.load('t-1', 'm-1', 0, 'image/png', true);
+  expect(call).toHaveBeenCalledTimes(3);
+
+  // The shell admits `/file/` only at a machine's own address: through a relay it asks for base64.
+  store.endpointUrl = `http://192.168.1.5:7777/group/relay/${'a'.repeat(64)}`;
+  window.__TAURI_INTERNALS__ = {} as never;
+  try {
+    images.clear();
+    expect(await images.load('t-1', 'm-1', 0, 'image/png', true)).toBe('data:image/webp;base64,UklG');
+    expect(call).toHaveBeenLastCalledWith('messages.attachment', { threadId: 't-1', messageId: 'm-1', partIndex: 0, display: true, thumb: true });
+  } finally {
+    delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  }
+});

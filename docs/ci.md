@@ -160,16 +160,39 @@ regressions set `BOITE_CI_INSTALLER_REQUIRED=1`, so missing NSIS or generated
 fixtures fail rather than skip. Unsupported local runs keep intentional skips.
 The tested installer becomes the release artifact.
 
+The shipped shell uses fat LTO over one codegen unit. Its final step is serial:
+on 2026-10-17, recompiling only the shell crate took 8 min 57 s with fat LTO and
+10 min 18 s with thin LTO on the shared 8-thread development machine, against
+1 min 32 s with Cargo's defaults (`bun run --cwd apps/shell tauri build
+--no-bundle`). `Cargo.toml` therefore keeps Cargo's release defaults, and
+`desktop.yml` sets `CARGO_PROFILE_RELEASE_LTO=fat` and
+`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1` only on the steps that build a shipped
+shell (the Windows installer, the Debian package, the macOS bundle) and only
+when `sign-updates` is on: the nightly and a release. Other steps and runs set
+`false` and `16`, Cargo's defaults, so `test:shell --release` keeps them even in
+a release run. Both desktop jobs get 60 minutes instead of 35 when publishing.
+The cache is saved from `main`, so a publishing run also
+compiles its dependencies with LTO, an estimated 7 to 8 minutes more per
+platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
+2026-10-17, four alternating local runs of the old and new command, median
+5.4 s against 3.4 s, and a 105 MB write less.
+
 `scripts/ci/budgets.ts` reads [budgets.json](../scripts/ci/budgets.json):
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 486,500 |
+| UI entry chunk | 487,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,727,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,413,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,417,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the lean boot merged with `origin/main` at `2be13d45`
+(message pictures as file tickets and the media wire) measures 486,005 entry
+bytes, 4,725,790 UI bytes and 4,412,394 core JavaScript bytes after fresh
+`bun run build:ui` and `bun run build:core` on Windows. The entry limit rises
+to 487,000, about a kilobyte above it; the other limits stay.
 
 On 2026-10-18, the lean boot merged with `origin/main` at `57d41e70`, which
 refreshes the UI dependencies, measures 485,472 entry bytes, 4,724,812 UI
@@ -201,6 +224,23 @@ background adoption pass and 50-turn retention in `checkpoint-store.ts` and
 `origin/main` at `0990d9ab` measures 4,412,886 core JavaScript bytes after a
 fresh `bun run build:core` on Windows, against 4,400,530 for that main, 12,356
 more. The core JavaScript limit rises to 4,413,000; the other limits stay.
+
+On 2026-10-17, sending message pictures as file tickets with a 320 px
+thumbnail copy, on `origin/main` at `b611c01f`, measures 596,578 UI entry
+bytes, 5,037,588 UI bytes and 4,394,594 core JavaScript bytes with `measure()`
+from `scripts/ci/budgets.ts` after fresh `bun run build:ui` and `bun run
+build:core` on Windows, against 595,295, 5,036,764 and 4,390,768 for that main
+built the same way. The store's ticket and relay choice adds 1,283 entry bytes
+and 824 UI bytes; the byte tickets, the thumbnail copy and its fallbacks add
+3,826 core bytes, none of them in `main.js`. The entry, UI and core limits
+rise to 596,700, 5,038,000 and 4,395,000.
+
+On 2026-10-18, message pictures as file tickets merged with `origin/main` at
+`10f16a25` (the transcript purge and the checkpoint store) measure 596,578 UI
+entry bytes, 5,037,588 UI bytes and 4,416,712 core JavaScript bytes after fresh
+`bun run build:ui` and `bun run build:core` on Windows, against 4,412,886 core
+bytes for that main: the same 3,826. The core JavaScript limit rises to
+4,417,000; the entry and UI limits stay at 596,700 and 5,038,000.
 
 On 2026-10-17, PR #566 merged with `origin/main` at `b6ae659a`, which brings
 the thread links and agent mail direction (PR #562), measures 595,205 entry

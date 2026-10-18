@@ -92,7 +92,9 @@ jobs:
   windows:
     name: Windows x64
     runs-on: windows-2025
-    timeout-minutes: 35
+    # A published build compiles the shell and its dependencies with fat LTO,
+    # which the cache saved from pull-request settings does not hold.
+    timeout-minutes: ${{ inputs.sign-updates && 60 || 35 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -113,6 +115,11 @@ jobs:
         run: bun scripts/ci/nightly-build.ts
       - name: Build installer once
         env:
+          # A published shell is built with fat LTO over one codegen unit, about
+          # 7 more minutes; only this step, so the Rust tests keep Cargo's
+          # defaults. `false` and `16` are those defaults (docs/releasing.md).
+          CARGO_PROFILE_RELEASE_LTO: ${{ inputs.sign-updates && 'fat' || 'false' }}
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ inputs.sign-updates && '1' || '16' }}
           BUILD_CHANNEL: ${{ inputs.channel }}
           BOITE_SIGN_UPDATES: ${{ inputs.sign-updates && '1' || '0' }}
           # Only a published installer reports to the analytics relay; a pull
@@ -164,7 +171,9 @@ jobs:
       matrix:
         platform: ${{ fromJSON(inputs.platforms) }}
     runs-on: ${{ matrix.platform.runner }}
-    timeout-minutes: 35
+    # A published build compiles the shell and its dependencies with fat LTO,
+    # which the cache saved from pull-request settings does not hold.
+    timeout-minutes: ${{ inputs.sign-updates && 60 || 35 }}
     env:
       # A cross build: compile.ts, stage-sidecar.ts, tauri.ts and desktop-bundles.ts all read it.
       BOITE_TARGET: ${{ matrix.platform.target || '' }}
@@ -229,6 +238,9 @@ jobs:
       - name: Build and test installed Linux package
         if: runner.os == 'Linux'
         env:
+          # Fat LTO for a published shell, as in the Windows job.
+          CARGO_PROFILE_RELEASE_LTO: ${{ inputs.sign-updates && 'fat' || 'false' }}
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ inputs.sign-updates && '1' || '16' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
         run: |
           export TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:-${THROWAWAY_UPDATER_KEY:-}}"
@@ -263,6 +275,9 @@ jobs:
       - name: Build and test macOS application bundle
         if: runner.os == 'macOS'
         env:
+          # Fat LTO for a published shell, as in the Windows job.
+          CARGO_PROFILE_RELEASE_LTO: ${{ inputs.sign-updates && 'fat' || 'false' }}
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ inputs.sign-updates && '1' || '16' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           DEVELOPER_ID_CERTIFICATE: ${{ inputs.sign-updates && secrets.APPLE_CERTIFICATE || '' }}
           DEVELOPER_ID_PASSWORD: ${{ inputs.sign-updates && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}

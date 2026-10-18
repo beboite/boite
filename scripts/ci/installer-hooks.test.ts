@@ -9,7 +9,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { installerPrerequisites } from './installer-prerequisites.ts';
 
 const ROOT = resolve(import.meta.dir, '../..');
@@ -111,6 +111,7 @@ describe.skipIf(!ready)('installer hooks', () => {
       '!define INSTALLMODE "currentUser"',
       `!define UNINSTKEY "${UNINSTKEY}"`,
       'Var PassiveMode',
+      'Var OldMainBinaryName',
       `OutFile "${join(base, 'setup.exe')}"`,
       'RequestExecutionLevel user',
       'SilentInstall silent',
@@ -126,11 +127,18 @@ describe.skipIf(!ready)('installer hooks', () => {
       '  !ifndef BOITE_HOOKS_CLOSE_SHELL',
       '    !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
       '  !endif',
+      // A copy that fails halfway through the chunks, which the template
+      // writes before boite-core.exe (a full disk): the install aborts.
+      '  IfFileExists "$INSTDIR\\fail-copy" 0 +4',
+      '    CreateDirectory "$INSTDIR\\core"',
+      `    File "/oname=core\\main-n3wn3wn3.js" "${join(base, 'new-core.txt')}"`,
+      '    Abort',
       '  ClearErrors',
       `  File "/oname=boite-core.exe" "${join(base, 'new-core.txt')}"`,
       '  IfErrors 0 +2',
       '    FileOpen $0 "$INSTDIR\\write-failed" w',
       `  WriteUninstaller "${join(base, 'uninstall.exe')}"`,
+      '  !insertmacro NSIS_HOOK_POSTINSTALL',
       'SectionEnd',
       'Section Uninstall',
       '  !insertmacro NSIS_HOOK_PREUNINSTALL',
@@ -139,6 +147,12 @@ describe.skipIf(!ready)('installer hooks', () => {
       '    !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
       '  !endif',
       '  Delete "$INSTDIR\\boite-core.exe"',
+      // The rest of the template's uninstall: shortcuts, registry, uninstaller.
+      '  Sleep 2000',
+      // Where the template inserts it, after its own deletions.
+      '  !ifmacrodef NSIS_HOOK_POSTUNINSTALL',
+      '    !insertmacro NSIS_HOOK_POSTUNINSTALL',
+      '  !endif',
       'SectionEnd',
     ].join('\r\n');
     writeFileSync(join(base, 'hooktest.nsi'), script);
@@ -164,6 +178,11 @@ describe.skipIf(!ready)('installer hooks', () => {
       rmSync(join(data, 'boite2', 'core.json'), { force: true });
       copyFileSync(process.execPath, join(install, 'boite-core.exe'));
       copyFileSync(process.execPath, join(install, shellName));
+      // A previous build's hashed chunks, and files of the user's beside them.
+      for (const [path, text] of [...STALE, ...KEPT]) {
+        mkdirSync(dirname(join(install, path)), { recursive: true });
+        writeFileSync(join(install, path), text);
+      }
       const restarted = join(install, 'restarted.txt');
       const core = Bun.spawn([join(install, 'boite-core.exe'), join(base, 'fake-core.ts'), '--data-dir', join(data, 'boite2')], {
         stdout: 'ignore', stderr: 'ignore', windowsHide: true,
@@ -181,6 +200,16 @@ describe.skipIf(!ready)('installer hooks', () => {
       started.push(shell.pid);
       await Bun.sleep(500);
       return { install, core, shell, restarted };
+    }
+    // Whether the bundle directories are still there, the user's files
+    // untouched and nothing left aside.
+    function bundles(install: string) {
+      return {
+        core: existsSync(join(install, 'core')),
+        ui: existsSync(join(install, 'ui')),
+        kept: KEPT.every(([path, text]) => existsSync(join(install, path)) && readFileSync(join(install, path), 'utf8') === text),
+        aside: existsSync(join(install, 'core.previous')) || existsSync(join(install, 'ui.previous')),
+      };
     }
     function restartedPids(file: string): number[] {
       if (!existsSync(file)) return [];
@@ -207,14 +236,31 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(restartedPids(installed.restarted)).toEqual([]);
     expect(existsSync(join(installed.install, 'write-failed'))).toBe(false);
     expect(readFileSync(join(installed.install, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
+    expect(bundles(installed.install)).toEqual({ core: false, ui: false, kept: true, aside: false });
 
     const removed = await running('uninstall');
+    // A scanner or an editor holding a chunk, without delete sharing, through
+    // the hooks' first pass; it lets go once the template's deletions ran.
+    const held = join(removed.install, STALE[0][0]);
+    const holding = join(base, 'holding.txt');
+    const holder = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+      `$f = [IO.File]::Open('${held}', 'Open', 'Read', 'Read'); Set-Content '${holding}' 'held';`
+        + ` while (Test-Path '${join(removed.install, 'boite-core.exe')}') { Start-Sleep -Milliseconds 50 }; $f.Close()`], {
+      stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+    });
+    started.push(holder.pid);
+    for (const deadline = Date.now() + 20_000; !existsSync(holding);) {
+      if (Date.now() > deadline) throw new Error('the holder never opened its file');
+      await Bun.sleep(50);
+    }
     expect(await run([join(base, 'uninstall.exe'), '/S', `_?=${removed.install}`])).toBe(0);
+    expect(await exited(holder)).toBe(0);
     // Ended by the installer, whatever code that leaves.
     expect(await exited(removed.shell)).not.toBe('still running');
     expect(await exited(removed.core)).toBe(0);
     expect(restartedPids(removed.restarted)).toEqual([]);
     expect(existsSync(join(removed.install, 'boite-core.exe'))).toBe(false);
+    expect(bundles(removed.install)).toEqual({ core: false, ui: false, kept: true, aside: false });
 
     const busy = await running('busy');
     writeFileSync(join(data, 'boite2', 'busy'), '');
@@ -222,7 +268,55 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(await run([join(base, 'setup.exe'), '/S', `/D=${busy.install}`])).not.toBe(0);
     expect(busy.core.exitCode).toBeNull();
     expect(Bun.hash(readFileSync(join(busy.install, 'boite-core.exe')))).toBe(before);
+    // Refused before anything was removed: a working core still loads its chunks.
+    expect(bundles(busy.install)).toEqual({ core: true, ui: true, kept: true, aside: false });
     expect(restartedPids(busy.restarted)).toEqual([]);
+
+    // A copy that fails halfway through the chunks, once the core stopped and
+    // the previous build was moved aside: its chunks come back where that
+    // core, never overwritten, loads them, and the new build's partial
+    // directory goes.
+    rmSync(join(data, 'boite2', 'busy'), { force: true });
+    const failed = await running('failed');
+    const failedCore = Bun.hash(readFileSync(join(failed.install, 'boite-core.exe')));
+    writeFileSync(join(failed.install, 'fail-copy'), '');
+    expect(await run([join(base, 'setup.exe'), '/S', `/D=${failed.install}`])).not.toBe(0);
+    expect(await exited(failed.shell)).not.toBe('still running');
+    expect(await exited(failed.core)).toBe(0);
+    expect(restartedPids(failed.restarted)).toEqual([]);
+    expect(bundles(failed.install)).toEqual({ core: true, ui: true, kept: true, aside: false });
+    for (const [path, text] of STALE) expect(readFileSync(join(failed.install, path), 'utf8')).toBe(text);
+    expect(existsSync(join(failed.install, 'core', 'main-n3wn3wn3.js'))).toBe(false);
+    expect(Bun.hash(readFileSync(join(failed.install, 'boite-core.exe')))).toBe(failedCore);
+
+    // An interrupted run left core.previous, and a scanner holds a file in it
+    // without delete sharing: that leftover cannot go, so this run leaves core
+    // where it is, and a failed copy must not put the leftover in its place.
+    const leftover = await running('leftover');
+    const interrupted = join(leftover.install, 'core.previous', 'main-1nt3rrup.js');
+    mkdirSync(dirname(interrupted), { recursive: true });
+    writeFileSync(interrupted, 'interrupted run');
+    const holdingLeftover = join(base, 'holding-leftover.txt');
+    const release = join(base, 'release-leftover.txt');
+    const leftoverHolder = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+      `$f = [IO.File]::Open('${interrupted}', 'Open', 'Read', 'Read'); Set-Content '${holdingLeftover}' 'held';`
+        + ` while (-not (Test-Path '${release}')) { Start-Sleep -Milliseconds 50 }; $f.Close()`], {
+      stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+    });
+    started.push(leftoverHolder.pid);
+    for (const deadline = Date.now() + 20_000; !existsSync(holdingLeftover);) {
+      if (Date.now() > deadline) throw new Error('the holder never opened the leftover');
+      await Bun.sleep(50);
+    }
+    writeFileSync(join(leftover.install, 'fail-copy'), '');
+    expect(await run([join(base, 'setup.exe'), '/S', `/D=${leftover.install}`])).not.toBe(0);
+    writeFileSync(release, '');
+    expect(await exited(leftoverHolder)).toBe(0);
+    expect(await exited(leftover.shell)).not.toBe('still running');
+    expect(await exited(leftover.core)).toBe(0);
+    expect(restartedPids(leftover.restarted)).toEqual([]);
+    for (const [path, text] of STALE) expect(readFileSync(join(leftover.install, path), 'utf8')).toBe(text);
+    expect(existsSync(join(leftover.install, 'core', 'main-1nt3rrup.js'))).toBe(false);
 
     // An install made before a rename (Boite Dev's boite-shell.exe): the
     // shell still runs under the name that install registered.
@@ -237,10 +331,15 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(await exited(renamed.core)).toBe(0);
     expect(restartedPids(renamed.restarted)).toEqual([]);
 
-    // Four installs and uninstalls later, the shell run from elsewhere still runs.
+    // Six installs and uninstalls later, the shell run from elsewhere still runs.
     expect(other.exitCode).toBeNull();
   }, 180_000);
 });
+
+/** What an earlier build left in the install's two bundle directories. */
+const STALE = [['core/main-0ld0ld0l.js', 'old chunk'], ['ui/assets/index-0ld0ld0l.js', 'old asset'], ['ui/index.html', 'old page']] as const;
+/** Beside them, outside those directories: nothing the hooks may delete. */
+const KEPT = [['notes.txt', 'mine'], ['core-notes/notes.txt', 'mine too'], ['uikit/notes.txt', 'mine as well']] as const;
 
 /** Writes core.json into its --data-dir and leaves on an authorised POST /shutdown. */
 const FAKE_CORE = `

@@ -82,6 +82,7 @@
   let copy = $state('');
   let copyShown = $state(false);
   let copyAsked = false;
+  let copyRetried = false;
   /** Near the screen, a deferred picture fetches its light copy; the original waits for a click. */
   function near(): void {
     if (!waiting || copy || copyAsked) return;
@@ -91,6 +92,16 @@
       copyAsked = false;
       if (!disposed) error = reason instanceof Error ? reason.message : strings.artifacts.failed;
     });
+  }
+
+  /** A copy's address that stopped loading (a ticket the core forgot) is asked for again, once. */
+  function copyFailed(): void {
+    if (copyRetried || copy.startsWith('data:') || !store || !threadId || !messageId || partIndex === undefined) return;
+    copyRetried = true;
+    store.forgetDisplayImage(threadId, messageId, partIndex);
+    copy = '';
+    copyAsked = false;
+    near();
   }
 
   /** The viewer shows the original: a picture drawn from its copy fetches it first, then opens in the same box. */
@@ -260,7 +271,7 @@
       <button type="button" class="shot boxed" style:width={boxWidth} style:aspect-ratio={boxRatio} use:onView={near} onclick={() => void openOriginal()} disabled={loading}
         title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} aria-busy={loading} data-testid="artifact-open-original">
         {#if file?.type === 'file' && file.preview && !copyShown}<img class="blur" src={file.preview} alt="" aria-hidden="true" data-testid="artifact-blur" />{/if}
-        {#if copy}<img src={copy} alt={name} decoding="async" onload={() => copyShown = true} data-testid="artifact-copy" />{/if}
+        {#if copy}<img src={copy} alt={name} decoding="async" onload={() => copyShown = true} onerror={copyFailed} data-testid="artifact-copy" />{/if}
         <span class="enlarge"><Maximize2 size={16} /></span>
       </button>
     </div>

@@ -34,6 +34,9 @@
 ; installer.nsi runs CheckIfAppIsRunning only without this.
 !define BOITE_HOOKS_CLOSE_SHELL
 
+; .onInstFailed below is read here, at file level.
+!include LogicLib.nsh
+
 ; Runs stop-shell.ps1 with ACTION (find or stop) and pops its exit code in $0.
 !macro BOITE_SHELL_SCRIPT ACTION
   System::Call 'Kernel32::SetEnvironmentVariable(t "BOITE_SHELL_ACTION", t "${ACTION}") i'
@@ -151,8 +154,76 @@
   Pop $0
 !macroend
 
+; The core bundle and the UI carry a hash in every file name, and the template
+; only copies files and deletes the ones this build lists: each update used to
+; leave the previous build's chunks beside the new ones, and an uninstall left
+; them all. Only these two directories are emptied, and only once the core of
+; this install has stopped, since it loads chunks from `core` lazily. An empty
+; $INSTDIR would turn the paths into the root of the current drive.
+!macro BOITE_CLEAR_BUNDLES
+  StrCmp $INSTDIR "" +3
+    RMDir /r "$INSTDIR\core"
+    RMDir /r "$INSTDIR\ui"
+!macroend
+
+; Set when this run moved that directory aside, and only then: what an
+; interrupted run left behind is never taken for the current build.
+Var BoiteCoreAside
+Var BoiteUiAside
+
+; An install moves the two directories aside rather than deleting them: a copy
+; that fails halfway (a full disk) puts them back in .onInstFailed, so the
+; previous core still finds its chunks; a completed install deletes them. A
+; directory that cannot be moved (a file held open, or a leftover from an
+; interrupted run that cannot be deleted) stays, and the new build is copied
+; into it as before this hook. Only these directories: the template still
+; overwrites boite-core.exe, the Workers and the shell in place.
+!macro BOITE_SET_ASIDE NAME FLAG
+  StrCpy ${FLAG} ""
+  RMDir /r "$INSTDIR\${NAME}.previous"
+  ${IfNot} ${FileExists} "$INSTDIR\${NAME}.previous\*.*"
+  ${AndIf} ${FileExists} "$INSTDIR\${NAME}\*.*"
+    ClearErrors
+    Rename "$INSTDIR\${NAME}" "$INSTDIR\${NAME}.previous"
+    ${IfNot} ${Errors}
+      StrCpy ${FLAG} "1"
+    ${EndIf}
+  ${EndIf}
+  ClearErrors
+!macroend
+
+!macro BOITE_RESTORE_ASIDE NAME FLAG
+  ${If} ${FLAG} == "1"
+    RMDir /r "$INSTDIR\${NAME}"
+    Rename "$INSTDIR\${NAME}.previous" "$INSTDIR\${NAME}"
+  ${EndIf}
+!macroend
+
+!macro BOITE_SET_BUNDLES_ASIDE
+  ${If} $INSTDIR != ""
+    !insertmacro BOITE_SET_ASIDE core $BoiteCoreAside
+    !insertmacro BOITE_SET_ASIDE ui $BoiteUiAside
+  ${EndIf}
+!macroend
+
+!macro BOITE_DROP_BUNDLES_ASIDE
+  StrCmp $INSTDIR "" +3
+    RMDir /r /REBOOTOK "$INSTDIR\core.previous"
+    RMDir /r /REBOOTOK "$INSTDIR\ui.previous"
+!macroend
+
+; NSIS calls it when the install aborts or a file cannot be written. A refused
+; install (a busy core) aborts before anything was moved aside.
+Function .onInstFailed
+  ${If} $INSTDIR != ""
+    !insertmacro BOITE_RESTORE_ASIDE core $BoiteCoreAside
+    !insertmacro BOITE_RESTORE_ASIDE ui $BoiteUiAside
+  ${EndIf}
+FunctionEnd
+
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro BOITE_STOP_CORE 1
+  !insertmacro BOITE_SET_BUNDLES_ASIDE
 !macroend
 
 ; A login entry the shell registered (src/platform/login.rs) under the
@@ -160,6 +231,7 @@
 ; it to this build's name. $OldMainBinaryName is the template's: it reads the
 ; previous install's name before it records this build's.
 !macro NSIS_HOOK_POSTINSTALL
+  !insertmacro BOITE_DROP_BUNDLES_ASIDE
   ${If} $OldMainBinaryName != ""
   ${AndIf} $OldMainBinaryName != "${MAINBINARYNAME}.exe"
     Push $0
@@ -171,6 +243,23 @@
   ${EndIf}
 !macroend
 
+; Before the template's deletions, so its final `RMDir "$INSTDIR"`, which only
+; removes an empty directory, finds the two directories gone. A core that would
+; not stop was moved aside above and goes with its install.
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro BOITE_STOP_CORE 0
+  !insertmacro BOITE_CLEAR_BUNDLES
+!macroend
+
+; And again after them: `RMDir /r` skips a file someone still holds open (a
+; scanner, an editor) without failing the uninstall, and that file kept `core`
+; or `ui`, and so the install directory, alive. What is still held now goes at
+; the next restart where Windows allows it; the directory goes once empty.
+!macro NSIS_HOOK_POSTUNINSTALL
+  StrCmp $INSTDIR "" +6
+    RMDir /r /REBOOTOK "$INSTDIR\core"
+    RMDir /r /REBOOTOK "$INSTDIR\ui"
+    RMDir /r /REBOOTOK "$INSTDIR\core.previous"
+    RMDir /r /REBOOTOK "$INSTDIR\ui.previous"
+    RMDir "$INSTDIR"
 !macroend
