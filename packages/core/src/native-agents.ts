@@ -2,6 +2,7 @@ import { collectNativeAgents, collectProcessAgents, type BackgroundTask, type Me
 import type { Journal } from './journal.ts';
 import { nativeAgentPartSql } from './journal/native-agent-parts.ts';
 import { hydratePart } from './journal/part-blobs.ts';
+import { PROCESS_COLUMNS, PROCESS_FROM } from './journal/processes.ts';
 import { toProcess, type ProcessRow } from './journal/rows.ts';
 
 interface Entry {
@@ -43,12 +44,12 @@ export function nativeAgents(journal: Journal, threadId: string, background: Bac
   entries.sort((left, right) => left.messageOrder - right.messageOrder || left.partIndex - right.partIndex);
   // Read CLI candidates and their parents, rather than every shell, build and
   // browser command line in a long conversation. Running children have no age limit.
-  const candidates = journal.db.query(`SELECT * FROM processes WHERE thread_id = ?
-    AND (lower(exe) LIKE '%claude%' OR lower(exe) LIKE '%codex%' OR lower(exe) LIKE '%opencode%'
-      OR lower(exe) LIKE '%pi%' OR lower(exe) LIKE '%grok%' OR lower(exe) LIKE '%agy%'
-      OR lower(exe) LIKE '%node%' OR lower(exe) LIKE '%bun%')`).all(threadId) as ProcessRow[];
-  const parents = journal.db.query(`SELECT * FROM processes WHERE thread_id = ?
-    AND pid IN (SELECT value FROM json_each(?))`).all(threadId, JSON.stringify(candidates.map(row => row.parent_pid))) as ProcessRow[];
+  const candidates = journal.db.query(`SELECT ${PROCESS_COLUMNS} FROM ${PROCESS_FROM} WHERE p.thread_id = ?
+    AND (lower(p.exe) LIKE '%claude%' OR lower(p.exe) LIKE '%codex%' OR lower(p.exe) LIKE '%opencode%'
+      OR lower(p.exe) LIKE '%pi%' OR lower(p.exe) LIKE '%grok%' OR lower(p.exe) LIKE '%agy%'
+      OR lower(p.exe) LIKE '%node%' OR lower(p.exe) LIKE '%bun%')`).all(threadId) as ProcessRow[];
+  const parents = journal.db.query(`SELECT ${PROCESS_COLUMNS} FROM ${PROCESS_FROM} WHERE p.thread_id = ?
+    AND p.pid IN (SELECT value FROM json_each(?))`).all(threadId, JSON.stringify(candidates.map(row => row.parent_pid))) as ProcessRow[];
   const processes = new Map([...parents, ...candidates].map(row => [row.pid, toProcess(row)]));
   return [...collectNativeAgents(entries, background), ...collectProcessAgents([...processes.values()], live)];
 }
