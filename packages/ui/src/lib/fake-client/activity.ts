@@ -92,7 +92,7 @@ function scheduleActivity(ctx: FakeContext, threadId: string, delay = 0): void {
       return;
     }
     // A check of the last turn decides what the next turn hears, or whether a claim goes back.
-    if (kind === 'goal' && checking(thread)) return;
+    if (kind === 'goal' && checking(ctx, thread)) return;
     if (kind === 'goal' && thread.activity?.goal?.review?.phase === 'reviewing') { startReview(ctx, thread); return; }
     const review = kind === 'goal' ? thread.activity?.goal?.review : undefined;
     try {

@@ -333,7 +333,8 @@ import { workspace } from '../lib/workspace.svelte';
       {:else if tab === 'plugins'}
         <PluginsPage {store} />
       {:else if tab === 'experiments'}
-        <ExperimentsPage {store} />
+        <!-- Only the owner sets the machine's checklist model, as on the phone. -->
+        <ExperimentsPage store={store.owner ? store : undefined} />
       {:else if tab === 'diagnostics'}
         <DiagnosticsPage {store} {onopenthread} />
       {:else}

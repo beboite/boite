@@ -956,6 +956,22 @@ test('a fake reviewed goal keeps a checklist and sends a claim back while items 
   expect((await client.call('threads.get', { threadId: goal.checklist!.threadId! })).parentThreadId).toBe(threadId);
 });
 
+test('a message sent while the fake tracker still writes the first list waits for it, as the core runs its passes', async ({ createClient }) => {
+  vi.useFakeTimers();
+  const client = await createClient({ delayMs: 1 });
+  const { id: threadId } = await newThread(client);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Rename the empty state and add a test', review: true } });
+  // The claim's check waits behind the first list, so the thread is free for a message before either ran.
+  const free = async () => { const thread = await client.call('threads.get', { threadId }); return thread.status === 'idle' && thread.activity?.goal?.review?.phase === 'reviewing' && thread.activity.goal.checklist?.items.length === 0; };
+  for (let i = 0; i < 100 && !(await free()); i++) await vi.advanceTimersByTimeAsync(5);
+  expect(await free()).toBe(true);
+  await client.call('turns.start', { threadId, prompt: 'Also update the docs' });
+  await vi.runAllTimersAsync();
+  const goal = (await client.call('threads.get', { threadId })).activity!.goal!;
+  expect(goal.checklist!.items.map(item => [item.text, item.added ?? false])).toEqual([['Rename the empty state', false], ['Add a test', false], ['Also update the docs', true]]);
+  expect(goal.status).toBe('complete');
+});
+
 test('a task list set after the fake claim, before its review starts, still gets a verdict', async ({ createClient }) => {
   vi.useFakeTimers();
   const client = await createClient({ delayMs: 1 });
