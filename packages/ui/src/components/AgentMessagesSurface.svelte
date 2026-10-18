@@ -40,7 +40,8 @@
    * the open row closes it, the way back from a wide panel.
    */
   function choose(peer: string): void {
-    const closing = peer === surface.peer;
+    // A stored peer that names no discussion is not open: its row opens it on the first click.
+    const closing = peer === current?.key;
     open(closing ? undefined : peer);
     if (!closing) void tick().then(() => rows?.parentElement?.querySelector<HTMLElement>('[data-testid=agent-discussion-heading]')?.focus());
   }
