@@ -38,6 +38,7 @@ import { ThreadBranching } from './threads/branching.ts';
 import { CodeCheckpoints } from './threads/code-checkpoints.ts';
 import { ThreadCards } from './threads/cards.ts';
 import { AUTO_COMPACT_LABEL, AutoCompaction } from './threads/auto-compact.ts';
+import { CacheKeepalive } from './threads/cache-keepalive.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { ThreadSpawns } from './threads/spawn.ts';
@@ -108,6 +109,8 @@ export class ThreadStore {
   readonly spawns: ThreadSpawns;
   /** The `autoCompact` setting: compactions the core opens between turns. */
   readonly autoCompact: AutoCompaction;
+  /** The `cacheKeepalive` setting: pings that keep a waiting thread's prompt cache warm. */
+  readonly cacheKeepalive: CacheKeepalive;
   /** Threads a usage limit stopped, resumed once its window resets (`threads/limit-resume.ts`). */
   readonly limitResumes: LimitResumes;
   private readonly recovery: ThreadRecovery;
@@ -133,6 +136,7 @@ export class ThreadStore {
     this.moves = new ThreadMove(core, this);
     this.spawns = new ThreadSpawns(core, this);
     this.autoCompact = new AutoCompaction(core, this);
+    this.cacheKeepalive = new CacheKeepalive(core, this);
     this.limitResumes = new LimitResumes(core, this);
     this.recovery = new ThreadRecovery(core);
     this.handoff = new RestartHandoff(core, this);
@@ -618,12 +622,13 @@ export class ThreadStore {
     checkAttachments(attachments, provider);
 
     // A compaction with a label is the core's own (`threads/auto-compact.ts`): Boite speaks, not the user.
-    const automatic = operation === 'compact' && displayText !== undefined;
+    // So is every keepalive (`threads/cache-keepalive.ts`).
+    const automatic = (operation === 'compact' && displayText !== undefined) || operation === 'keepalive';
     const now = Date.now();
-    // The first message after a move carries the note to the agent. A compact
-    // or a slash command goes to the agent as the command alone, so the note
-    // waits for the next real message.
-    const moved = operation === 'compact' || prompt.trimStart().startsWith('/') ? null : pendingMove(this.core, threadId);
+    // The first message after a move carries the note to the agent. A compact,
+    // a keepalive or a slash command goes to the agent as the command alone, so
+    // the note waits for the next real message.
+    const moved = operation === 'compact' || operation === 'keepalive' || prompt.trimStart().startsWith('/') ? null : pendingMove(this.core, threadId);
     const turn: Turn = {
       id: newId('trn_'),
       threadId,
@@ -682,8 +687,8 @@ export class ThreadStore {
       })();
       // Nothing in memory consumes the wake or resumes the agent until the prompt exists on disk.
       accepted.reservation?.();
-      // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first.
-      if (operation !== 'background') this.deferred.pendingWakes.delete(threadId);
+      // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first; a keepalive leaves it for the next.
+      if (operation !== 'background' && operation !== 'keepalive') this.deferred.pendingWakes.delete(threadId);
       accepted.dismissal?.();
       // His own message puts the agent back to work, so a pause left by Stop or a restart ends with it.
       if (!activity && !operation && !startedBy) this.core.coordination.resumeForUser(threadId);
@@ -691,6 +696,7 @@ export class ThreadStore {
       if (!activity && !operation && !startedBy && !nativeCommandPrompt(prompt)) this.core.activity.userMessage(threadId, prompt);
     });
     this.autoCompact.cancel(threadId);
+    this.cacheKeepalive.cancel(threadId);
     this.core.scheduler.enqueue(turn, thread.accountId);
     return turn;
   }
@@ -708,6 +714,7 @@ export class ThreadStore {
   stopTurn(threadId: ThreadId): boolean {
     this.require(threadId);
     this.handoff.forget(threadId);
+    this.cacheKeepalive.forget(threadId);
     // Stop on a thread waiting for a usage limit to reset means: do not resume it.
     const plannedResume = this.limitResumes.cancel(threadId, 'the thread was stopped');
     this.core.coordination.pause(threadId);
@@ -738,13 +745,14 @@ export class ThreadStore {
     return this.core.journal.queuedTurn(threadId, 'coordination') === null ? false : this.core.scheduler.stop(threadId);
   }
 
-  canSteer(threadId: string): boolean { return typeof this.runner.handles.get(threadId)?.steer === 'function'; }
+  /** A keepalive takes no steering: what would steer it waits for the turn after it, and a result stops it. */
+  canSteer(threadId: string): boolean { return typeof this.runner.handles.get(threadId)?.steer === 'function' && !this.cacheKeepalive.pinging(threadId); }
 
   async steer(threadId: string, text: string): Promise<boolean> {
     const handle = this.runner.handles.get(threadId);
     if (!handle?.steer || this.runner.steering.has(threadId)) return false;
     const turn = this.core.journal.runningTurn(threadId);
-    if (!turn) return false;
+    if (!turn || turn.execution?.operation === 'keepalive') return false;
     this.runner.steering.add(threadId);
     try {
       const submitted = await handle.steer(text);

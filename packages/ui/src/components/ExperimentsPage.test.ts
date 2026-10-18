@@ -86,10 +86,11 @@ test('a click on a row name flips its switch, the "i" beside it only opens the t
   expect(window.localStorage.getItem(EXPERIMENTS_STORAGE_KEY)).toBe('["theme-grain"]');
 });
 
-test('a page without the owner\'s store shows the reviewed goals switch but no checklist model', async () => {
-  // Settings pass no store to a paired device that does not own the machine: its save would be refused.
+test('a paired device sees the reviewed goals switch but no checklist model', async () => {
+  // Only the owner may save the machine's settings: a paired device's pick would be refused.
   window.localStorage.setItem(EXPERIMENTS_STORAGE_KEY, '["goal2"]');
-  running = mount(ExperimentsPage, { target: document.body });
+  const store = { owner: false, settings: { goalTracker: null }, providers: [], accountsOf: () => [], modelsOf: () => [], saveSettings: async () => true } as unknown as Store;
+  running = mount(ExperimentsPage, { target: document.body, props: { store } });
   flushSync();
   await tick();
   expect(query<HTMLInputElement>('[data-testid=experiment-goal2]').checked).toBe(true);
@@ -97,7 +98,7 @@ test('a page without the owner\'s store shows the reviewed goals switch but no c
 });
 
 test('the reviewed goals switch shows its checklist model only while it is on', async () => {
-  const store = { settings: { goalTracker: null }, providers: [], accountsOf: () => [], modelsOf: () => [], saveSettings: async () => true } as unknown as Store;
+  const store = { owner: true, settings: { goalTracker: null }, providers: [], accountsOf: () => [], modelsOf: () => [], saveSettings: async () => true } as unknown as Store;
   running = mount(ExperimentsPage, { target: document.body, props: { store } });
   flushSync();
   await tick();

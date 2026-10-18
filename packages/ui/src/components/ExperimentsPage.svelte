@@ -1,13 +1,14 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import CacheKeepaliveSettings from './CacheKeepaliveSettings.svelte';
   import GoalTrackerSetting from './GoalTrackerSetting.svelte';
-  import type { Store } from '../lib/store.svelte';
   import { untrack } from 'svelte';
   import { EXPERIMENT_IDS, readExperiments, setExperiment, type ExperimentId } from '../lib/experiments';
   import { experimentCopy } from '../lib/experiment-copy';
   import { strings } from '../lib/strings';
+  import type { Store } from '../lib/store.svelte';
 
-  /** The machine the page's core settings belong to: the `/goal2` checklist model is one of them. */
+  /** The switches of this device; with a store, the core's experiments below them. */
   let { store }: { store?: Store } = $props();
   const uid = $props.id();
 
@@ -42,9 +43,12 @@
           onchange={(event) => toggle(id, event.currentTarget.checked)}
         />
       </label>
-      {#if id === 'goal2' && enabled.includes(id) && store?.settings}
+      <!-- Only the owner sets the machine's checklist model: a paired device's save would be refused. -->
+      {#if id === 'goal2' && enabled.includes(id) && store?.settings && store.owner}
         <GoalTrackerSetting {store} />
       {/if}
     {/each}
   </section>
+
+  {#if store}<CacheKeepaliveSettings {store} />{/if}
 </div>

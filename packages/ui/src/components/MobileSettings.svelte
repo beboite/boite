@@ -170,8 +170,7 @@
       {:else if page === 'resources' && store.owner}
         <ResourcesPage {store} />
       {:else if page === 'experiments'}
-        <!-- Only the owner sets the machine's checklist model. -->
-        <ExperimentsPage store={store.owner ? store : undefined} />
+        <ExperimentsPage {store} />
       {:else if page === 'diagnostics' && store.owner}
         <DiagnosticsPage {store} {onopenthread} />
       {:else if page === 'worktrees'}

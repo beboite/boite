@@ -181,10 +181,10 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 493,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,876,500 |
+| UI entry chunk | 495,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,884,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,494,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,502,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -203,6 +203,21 @@ JavaScript bytes on Linux. The three
 limits rise to 493,500, 4,875,500 and 4,494,500. Moving the list from the goal
 bar into the Tasks panel's own section brings the UI to 493,213 entry bytes
 and 4,876,183 UI bytes; the UI limit rises to 4,876,500.
+Merged again with `origin/main` at `80c2da06`, after keeping the prompt cache
+warm (#594), it measures 494,834 entry bytes,
+4,883,819 UI bytes and 4,501,712 core JavaScript bytes on Linux; the
+three limits rise to 495,000, 4,884,000 and 4,502,000.
+
+On 2026-10-18, keeping the prompt cache warm (PR #594) merged with
+`origin/main` at `3a19eb57` measures 491,872 entry bytes, 4,867,996 UI bytes
+and 4,477,807 core JavaScript bytes with `measure()` after fresh
+`bun run build:ui` and `bun run build:core` on Windows, against 490,436,
+4,860,909 and 4,470,119 recorded below for that main on the same machine.
+Measured on its own against `95862236`, the settings card adds 3,897 bytes to
+the settings chunk, the quiet ping line and its message grouping 1,539 to the
+entry chunk, the sentences 1,523; the keepalive scheduler, its guards and the
+request clock add 7,732 core bytes. The entry, UI and core JavaScript limits
+rise to 492,200, 4,868,600 and 4,478,300; `main.js` stays.
 
 On 2026-10-18, the journal compaction (schema 37: zstd values, per-thread
 command lines, the paced background passes in `journal/retention.ts` and

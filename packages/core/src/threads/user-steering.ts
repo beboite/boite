@@ -16,7 +16,7 @@ export function userSteeringUnavailable(core: Core, threads: ThreadStore, thread
   if (thread.agentSessionId) return 'agent-session';
   const handle = threads.runner.handles.get(threadId);
   if (thread.status !== 'running' || !turn || turn.threadId !== threadId || turn.status !== 'running') return 'not-running';
-  if (turn.execution?.operation === 'compact' || threads.runner.steering.has(threadId)) return 'busy';
+  if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive' || threads.runner.steering.has(threadId)) return 'busy';
   if (!handle?.steerUser && !handle?.steer) return 'unsupported';
   if ((turn.execution?.selectionVersion ?? 0) !== (thread.selectionVersion ?? 0)) return 'selection-changed';
   if (threads.listPermissions(threadId).length || threads.listQuestions(threadId).some(question => !question.async)) return 'awaiting-input';

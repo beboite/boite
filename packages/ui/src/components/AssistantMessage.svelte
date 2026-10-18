@@ -22,6 +22,8 @@
   import { chatPrefs } from '../lib/chat-prefs.svelte';
   import { shownText as shownTextOf } from '../lib/timeline-rows';
   import MemoryRow from './MemoryRow.svelte';
+  import KeepaliveMarker from './KeepaliveMarker.svelte';
+  import { keepaliveRun } from '../lib/message-order';
 
   /**
    * An assistant or system message in the timeline: the model that wrote it,
@@ -60,13 +62,15 @@
   }
 
   const execution = $derived(store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution);
+  /** Boite's ping of the prompt cache: one line in place of its message (`quietKeepalives`). */
+  const ping = $derived(execution?.operation === 'keepalive' ? store.openThread?.turns.find((turn) => turn.id === message.turnId) : undefined);
   const compacting = $derived(execution?.operation === 'compact' ||
     store.openThread?.progress?.turnId === message.turnId && store.openThread.progress.phase === 'compacting');
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
   const end = $derived(to ?? message.parts.length);
   // A run over the same parts stays the same object, so a new part does not redraw the groups above it.
   const runList = new MessageRuns();
-  const runs = $derived(runList.build(message.parts, memoryEvents, from, end, chatPrefs.groupChanges));
+  const runs = $derived(ping ? [] : runList.build(message.parts, memoryEvents, from, end, chatPrefs.groupChanges));
   const toolRunning = $derived(message.parts.some(part => part.type === 'tool' && part.status === 'running') ||
     latestInTurn && store.openThread?.messages.some(current => current.turnId === message.turnId && current.role === 'assistant' && current.parts.some(part => part.type === 'tool' && part.status === 'running')));
   const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
@@ -85,7 +89,9 @@
     {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : providerName(store, execution.providerId)}
   </div>
 {/if}
-{#if message.role === 'system' && from === 0}
+{#if ping}
+  {#if from === 0}<KeepaliveMarker turn={ping} count={keepaliveRun(store.openThread?.turns ?? [], ping.id)} />{/if}
+{:else if message.role === 'system' && from === 0}
   <div class="system-attribution" data-testid="message-system">{strings.chat.system}</div>
 {/if}
 <div class="parts">

@@ -1,4 +1,4 @@
-import type { Message, Turn } from '@boite/contracts';
+import { queueOrder, type Message, type Turn } from '@boite/contracts';
 import { viewPart } from './inline-view';
 
 /**
@@ -43,4 +43,34 @@ export function filesLast(timeline: Message[], turns: readonly Pick<Turn, 'id' |
     placed.push(message, ...(held.get(index) ?? []));
   });
   return placed;
+}
+
+const pinging = (turn: Pick<Turn, 'execution'> | undefined) => turn?.execution?.operation === 'keepalive';
+type Pinged = Pick<Turn, 'id' | 'queuedAt' | 'execution'>;
+/** The turns in the order they were queued, whatever order a store merge left them in. */
+const queued = (turns: readonly Pinged[]) => [...turns].sort(queueOrder);
+
+/**
+ * `timeline` with each of Boite's cache pings as one line: its opening
+ * message stands for it and its one-word answer is left out. A ping followed
+ * by another one leaves the line to the last of them, which
+ * `keepaliveRun` counts. The same array comes back when there is no ping.
+ */
+export function quietKeepalives(timeline: Message[], turns: readonly Pinged[]): Message[] {
+  if (!turns.some(pinging)) return timeline;
+  const merged = new Set<string>(), pings = new Set<string>();
+  queued(turns).forEach((turn, index, ordered) => {
+    if (!pinging(turn)) return;
+    pings.add(turn.id);
+    if (pinging(ordered[index + 1])) merged.add(turn.id);
+  });
+  return timeline.filter((message) => !pings.has(message.turnId) || (message.role === 'system' && !merged.has(message.turnId)));
+}
+
+/** How many pings in a row end with this one: the count its line says. */
+export function keepaliveRun(turns: readonly Pinged[], turnId: string): number {
+  const ordered = queued(turns);
+  let index = ordered.findIndex((turn) => turn.id === turnId), count = 0;
+  while (index >= 0 && pinging(ordered[index])) { count += 1; index -= 1; }
+  return Math.max(count, 1);
 }
