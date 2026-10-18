@@ -97,9 +97,8 @@ function proxy(core: RunningCore): ReturnType<typeof Bun.serve> {
 }
 
 async function capture(page: BrowserPage, name: string): Promise<void> {
-  await page.evaluate(
-    `Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`
-  );
+  // An animation whose element left the screen never settles its `finished`: settleAnimations skips what is not drawn and names what still runs.
+  await page.settleAnimations();
   await page.screenshot(join(import.meta.dir, '.artifacts', name));
 }
 
