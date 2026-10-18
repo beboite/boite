@@ -35,6 +35,8 @@ const KEY = 'auto-continues';
 const STOPPED_KEY = 'auto-continue-stopped';
 /** An error is quoted to the agent up to this many characters. */
 const ERROR_QUOTE = 600;
+/** How long a resume waits for a cache ping it stopped to end. */
+const PING_YIELD_MS = 1_000;
 
 interface Plan {
   reason: StopReason;
@@ -80,6 +82,7 @@ export class AutoContinues {
   private cached: Record_ | null = null;
   private cut: boolean | undefined;
   private heldRuns: Set<string> | undefined;
+  private heldTeams: Set<string> | undefined;
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {
     core.bus.onAny((name, payload) => {
@@ -159,7 +162,7 @@ export class AutoContinues {
       if (this.plan(turn.threadId, turn, 'crash', prompt, AUTO_CONTINUE.startDelayMs)) resumed.add(turn.threadId);
     }
     if (!cut) return;
-    const held = new Set([...interrupted, ...this.core.delegation.heldByRestart, ...this.runsHeldByRestart()]);
+    const held = new Set([...interrupted, ...this.teamsHeldByRestart(), ...this.runsHeldByRestart()]);
     for (const threadId of held) {
       if (resumed.has(threadId) || this.planned(threadId)) continue;
       const thread = this.core.journal.getThread(threadId);
@@ -236,12 +239,12 @@ export class AutoContinues {
   /**
    * Conversations of the user's only: a delegated agent answers its parent,
    * which hears of its failure, and a persistent agent its runtime. A
-   * compaction or a coordination wake is not worth repeating.
+   * compaction, a coordination wake or a cache ping is not worth repeating.
    */
   private eligible(thread: ThreadSummary, turn: Turn): boolean {
     if (thread.archived || thread.parentThreadId || thread.agentSessionId) return false;
     const operation = turn.execution?.operation;
-    return operation !== 'compact' && operation !== 'coordination';
+    return operation !== 'compact' && operation !== 'coordination' && operation !== 'keepalive';
   }
 
   /**
@@ -309,6 +312,11 @@ export class AutoContinues {
     const entry = record[threadId];
     const plan = entry?.plan;
     if (entry === undefined || plan === undefined || plan.dispatching) return;
+    // A cache ping holds the thread only to keep it warm: it gives way, and the resume goes once it stopped.
+    if (this.threads.cacheKeepalive.yieldTo(threadId)) {
+      this.arm(threadId, PING_YIELD_MS);
+      return;
+    }
     const refusal = this.refusal(threadId, plan);
     if (refusal !== null) {
       this.cancel(threadId, refusal);
@@ -350,6 +358,8 @@ export class AutoContinues {
 
   /** A turn of the user's, or any other, opened on the thread: the resume is no longer the next thing. */
   private turnStarted(turn: Turn): void {
+    // A cache ping answers nothing (`cache-keepalive.ts`).
+    if (turn.execution?.operation === 'keepalive') return;
     const entry = this.load()[turn.threadId];
     if (entry === undefined) return;
     if (entry.plan !== undefined && !entry.plan.dispatching) this.cancel(turn.threadId, 'the thread was answered since');
@@ -410,11 +420,22 @@ export class AutoContinues {
    */
   private withHeldWork(threadId: ThreadId, prompt: string, alone = false): string {
     const held: string[] = [];
-    if (this.core.delegation.heldByRestart.has(threadId)) held.push('your subagent team');
+    if (this.teamsHeldByRestart().has(threadId)) held.push('your subagent team');
     if (this.runsHeldByRestart().has(threadId)) held.push('your workflow runs');
     if (held.length === 0) return prompt;
     const note = `Boite stopped unexpectedly and has started again; it paused ${held.join(' and ')} meanwhile. Run \`boite delegate resume\` to let them go on once you checked where they stand.`;
     return alone ? `${note} ${CARRY_ON}` : `${prompt}\n\n${note}`;
+  }
+
+  /** Conversations whose subagent team this core paused at its start because the previous one died (`delegation.ts`). */
+  private teamsHeldByRestart(): Set<string> {
+    this.heldTeams ??= new Set((this.core.journal.db.query("SELECT key FROM settings WHERE key LIKE 'delegation:%'").all() as { key: string }[])
+      .map(row => row.key.slice('delegation:'.length))
+      .filter(rootId => {
+        const config = this.core.delegation.config(rootId);
+        return config.paused && config.pausedBy === 'restart' && (config.pausedAt ?? 0) >= this.core.startedAt;
+      }));
+    return this.heldTeams;
   }
 
   /** Conversations whose workflow runs this core paused at its start because the previous one died (`workflows.ts`). */
@@ -425,9 +446,14 @@ export class AutoContinues {
     return this.heldRuns;
   }
 
+  /** The thread's latest turn that is not a cache ping. */
   private lastTurn(threadId: ThreadId): Turn | null {
-    const row = this.core.journal.db.query('SELECT id FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1').get(threadId) as { id: string } | null;
-    return row ? this.core.journal.getTurn(row.id) : null;
+    const rows = this.core.journal.db.query('SELECT id FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 50').all(threadId) as { id: string }[];
+    for (const row of rows) {
+      const turn = this.core.journal.getTurn(row.id);
+      if (turn !== null && turn.execution?.operation !== 'keepalive') return turn;
+    }
+    return null;
   }
 
   /** A copy of the record: read from the journal once, then kept, since every thread row asks for it. */

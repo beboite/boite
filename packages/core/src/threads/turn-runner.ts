@@ -180,13 +180,17 @@ export class TurnRunner {
     await this.threads.moves.applyWaiting(threadId);
     // A thread an agent started answers it before a failure pauses its coordination.
     await this.threads.spawns.finished(finished);
-    if (result.status !== 'done') this.core.coordination.pause(threadId);
+    // A keepalive that failed or gave way to a result pauses nothing: the thread was only waiting.
+    const keepalive = queued.execution?.operation === 'keepalive';
+    if (result.status !== 'done' && !keepalive) this.core.coordination.pause(threadId);
     // A spent subscription window: the thread may resume by itself once it resets (`threads/limit-resume.ts`).
-    if (result.status === 'error' && result.refusal?.kind === 'usage-limit' && !next.archived) this.threads.limitResumes.turnFailed(next, finished, result.refusal.resetsAt);
+    if (result.status === 'error' && result.refusal?.kind === 'usage-limit' && !next.archived && !keepalive) this.threads.limitResumes.turnFailed(next, finished, result.refusal.resetsAt);
     // Any other stop before the answer resumes by itself, twice in a row at most (`threads/auto-continue.ts`).
     this.threads.autoContinue.turnFinished(next, finished, result);
     if (result.status === 'done' && sameSession && !queued.execution?.operation) this.threads.titles.autoRefine(threadId);
-    if (sameSession) this.threads.autoCompact.turnFinished(next, finished);
+    // Compaction plans from the conversation's own turns; a keepalive is not one.
+    if (sameSession && !keepalive) this.threads.autoCompact.turnFinished(next, finished);
+    if (sameSession) this.threads.cacheKeepalive.turnFinished(next, finished);
     const woke = this.threads.deferred.pendingWakes.get(threadId);
     if (woke !== undefined) {
       this.threads.deferred.pendingWakes.delete(threadId);

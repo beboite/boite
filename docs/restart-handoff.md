@@ -97,7 +97,8 @@ Each plan sits in the journal setting `auto-continues`, so a restart arms it
 again; one caught while dispatching is dropped. The row shows it as `retry`
 (`kind: 'auto-continue'`) with Do not resume. When it fires it is dropped
 instead if the thread was archived, answered or is busy, a card waits for the
-user, or the user paused its team. Two resumes in a row that stop again end
+user, or the user paused its team. A cache ping in the way stops and lets it go.
+Two resumes in a row that stop again end
 the row: the third stop stays on the thread and notifies like any failure. The
 user's next message, or a turn of another kind that answers, starts a new row;
 a resume that answers but leaves background work that dies again does not.
@@ -135,8 +136,9 @@ owner cancellation, expiry, pre-listen replacement loss, durable admission,
 partial recovery, repeated restart and reentrant Stop.
 `coordination-lifecycle.test.ts` covers acknowledgement waits released by close
 and late resolve/reject callbacks. `auto-continue.test.ts` covers each
-automatic resume trigger, the two-resume limit, cancellation, a crash older
-than an hour, a deliberate stop and a plan carried across a crash. These use deterministic fixtures and reopened
+automatic resume trigger, a team a crash held, the two-resume limit,
+cancellation, a cache ping in the way, a crash older than an hour, a
+deliberate stop and a plan carried across a crash. These use deterministic fixtures and reopened
 temporary journals; they do not prove physical power-loss recovery or provider
 side-effect replay. `apps/shell/src-tauri/src/update_stop.rs` covers the shell
 request and older-core fallback.

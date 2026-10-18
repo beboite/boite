@@ -97,6 +97,13 @@ describe('promptCacheOf', () => {
     expect(promptCacheOf({ status: 'stopped', sessionId: 's', usage: null, promptCache: { ttlSeconds: 300, source: 'reported' } }, thread, 1)).toBeNull();
   });
 
+  test('the clock starts at the last main-loop request the driver saw, never after the turn ended', () => {
+    const result = { status: 'done', sessionId: 's', usage: usage(0), promptCache: { ttlSeconds: 300, source: 'reported' } } as const;
+    expect(promptCacheOf({ ...result, cacheAt: 900 }, thread, 1000)?.at).toBe(900);
+    expect(promptCacheOf({ ...result, cacheAt: 1200 }, thread, 1000)?.at).toBe(1000);
+    expect(promptCacheOf({ ...result, cacheAt: Number.NaN }, thread, 1000)?.at).toBe(1000);
+  });
+
   test('drops a lifetime that is not a whole positive number of seconds', () => {
     expect(promptCacheOf({ status: 'done', sessionId: 's', usage: usage(0), promptCache: { ttlSeconds: 0, source: 'reported' } }, thread, 1)).toBeNull();
     expect(promptCacheOf({ status: 'done', sessionId: 's', usage: usage(0), promptCache: { ttlSeconds: Number.NaN, source: 'reported' } }, thread, 1)).toBeNull();

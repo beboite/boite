@@ -38,8 +38,6 @@ function teamState(thread: ThreadSummary): string {
 export class Delegation {
   readonly waits: DelegationWaits;
   readonly worktrees: ChildWorktrees;
-  /** Conversations whose team this start paused after a crash: nothing else tells their agent (`threads/auto-continue.ts`). */
-  readonly heldByRestart = new Set<string>();
   private closed = false;
   private readonly delivering = new Set<string>();
   private readonly jobs = new Set<Promise<void>>();
@@ -72,10 +70,7 @@ export class Delegation {
     for (const thread of core.journal.listThreadsIn(pending)) {
       if (thread.parentThreadId) continue;
       const config = this.config(thread.id);
-      if (config.enabled && !config.paused) {
-        this.pause(thread.id, 'restart');
-        this.heldByRestart.add(thread.id);
-      }
+      if (config.enabled && !config.paused) this.pause(thread.id, 'restart');
     }
     this.off = core.bus.onCommitted((name, payload) => {
       if (this.closed) return;
@@ -549,10 +544,17 @@ export class Delegation {
       if (letter.error === `Awaiting provider turn ${turnId}`) this.update(letter, success ? 'delivered' : 'uncertain', success ? null : 'Provider turn did not complete; not retried automatically');
     }
   }
+  /** Whether results wait in the thread's inbox, about to open its next turn. */
+  hasMail(threadId: string): boolean {
+    return this.inbox(threadId).length > 0;
+  }
   private async deliver(threadId: string): Promise<void> {
     if (this.delivering.has(threadId) || this.closed) return;
     const thread = this.core.journal.getThread(threadId);
-    if (!thread || thread.archived || ['queued', 'waiting'].includes(thread.status) || (thread.status === 'error' && (!thread.parentThreadId || this.stopped.has(threadId)))) return;
+    if (!thread || thread.archived) return;
+    // A cache keepalive in the way stops, and its `turn.finished` brings the result back here (`threads/cache-keepalive.ts`).
+    if ((thread.status === 'queued' || thread.status === 'running') && this.inbox(threadId).length > 0 && this.core.threads.cacheKeepalive.yieldTo(threadId)) return;
+    if (['queued', 'waiting'].includes(thread.status) || (thread.status === 'error' && (!thread.parentThreadId || this.stopped.has(threadId)))) return;
     const letters = this.inbox(threadId);
     if (!letters.length) return;
     this.delivering.add(threadId);

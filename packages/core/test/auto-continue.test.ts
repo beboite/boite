@@ -99,6 +99,40 @@ test('two resumes in a row that fail again end the row: the last failure stays f
   } finally { await h.stop(); }
 });
 
+test('a cache ping neither cancels a planned resume nor holds it back: it gives way', async () => {
+  const h = await startTestCore();
+  AUTO_CONTINUE.delaysMs = [300, 300];
+  let pinged = false;
+  const asked: TurnContext[] = [];
+  restores.push(setDriver('echo', {
+    protocol: 'echo',
+    startTurn(ctx) {
+      asked.push(ctx);
+      if (asked.length === 1) return { stop() {}, done: Promise.resolve(failed()) };
+      if (asked.length === 2) {
+        // The ping runs until the resume stops it.
+        const ping = Promise.withResolvers<TurnResult>();
+        pinged = true;
+        return { stop() { ping.resolve({ status: 'stopped', sessionId: 'native', usage: null }); }, done: ping.promise };
+      }
+      return { stop() {}, done: Promise.resolve(done) };
+    },
+  }));
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    await client.call('turns.start', { threadId, prompt: 'port the shader' });
+    await waitFor(() => turns(h, threadId)[0]?.status === 'error');
+    h.core.threads.startTurn(threadId, 'ping', [], undefined, 'keepalive');
+    await waitFor(() => pinged);
+    expect(h.core.threads.list({ includeArchived: true }).find(thread => thread.id === threadId)?.retry?.kind).toBe('auto-continue');
+    await waitFor(() => turns(h, threadId).length === 3 && turns(h, threadId)[2]!.status === 'done');
+    expect(turns(h, threadId)[1]!.status).toBe('stopped');
+    expect(turns(h, threadId)[2]!.execution?.operation).toBe('resume');
+    expect(asked[2]!.prompt).toContain('ended on an error');
+  } finally { await h.stop(); }
+});
+
 test('a stopped turn, an answered turn and a spent usage window resume nothing', async () => {
   const h = await startTestCore();
   let release: ((result: TurnResult) => void) | null = null;
@@ -315,6 +349,26 @@ test('a crash that cut background work of an idle thread resumes it once the nex
     await waitFor(() => next.core.threads.get(threadId).turns.length === 2 && next.core.threads.get(threadId).turns[1]!.status === 'done');
     expect(asked[0]!.prompt).toContain('bun run test');
     expect(asked[0]!.prompt).toContain('Boite or the PC restarted');
+  } finally { await next.stop(); }
+});
+
+test('a crash that paused the subagent team of an answered thread wakes its agent to resume the team', async () => {
+  const h = await startTestCore();
+  scripted(done);
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  await client.call('turns.start', { threadId, prompt: 'split the port across two agents' });
+  await waitFor(() => turns(h, threadId)[0]?.status === 'done' && h.core.threads.require(threadId).status === 'idle');
+  // As the next core's start pauses a team the crash cut (`delegation.ts`), dated after that start.
+  h.core.journal.setSetting(`delegation:${threadId}`, { ...h.core.delegation.config(threadId), enabled: true, paused: true, pausedBy: 'restart', pausedAt: Date.now() + 60_000 });
+  client.close();
+  await crash(h);
+  const asked = scripted(done);
+  const next = await restart(h);
+  try {
+    await waitFor(() => next.core.threads.get(threadId).turns.length === 2 && next.core.threads.get(threadId).turns[1]!.status === 'done');
+    expect(asked[0]!.prompt).toContain('it paused your subagent team meanwhile');
+    expect(asked[0]!.prompt).toContain('boite delegate resume');
   } finally { await next.stop(); }
 });
 
