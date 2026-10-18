@@ -17,7 +17,8 @@ describe('history gaps', () => {
     const gaps = new Map([['m-40', { from: 0, count: 40 }], ['m-90', { from: 42, count: 48 }]]);
     const placed = withGaps(rows, held, gaps);
     expect(placed.rows.map((row) => row.id)).toEqual(['gap:0:40', 'm-40', 'm-41', 'gap:42:48', 'workflow:run', 'm-90']);
-    expect(placed.gaps).toEqual([{ index: 0, from: 0, count: 40 }, { index: 3, from: 42, count: 48 }]);
+    expect(placed.gaps).toEqual([{ index: 0, from: 0, count: 40, below: 'm-40' }, { index: 3, from: 42, count: 48, below: 'm-90' }]);
+    expect(placed.rows[0]!.gap).toEqual({ from: 0, count: 40 });
     // Indices of the rows before the gaps went in, after.
     expect([0, 1, 2, 3].map(placed.at)).toEqual([1, 2, 4, 5]);
     // No gap, the very same rows.
@@ -26,10 +27,10 @@ describe('history gaps', () => {
 
   test('the page asked for is the stretch on screen, or the one beside what is held', () => {
     const total = [0, gapHeight(280)];
-    const gaps = [{ index: 0, from: 0, count: 280 }];
+    const gaps = [{ index: 0, from: 0, count: 280, below: 'm-280' }];
     const bottom = gapHeight(280);
-    // Scrolling up into the gap: the page right above the first message held.
-    expect(wantedRange(total, gaps, bottom - 500, bottom + 1_000, 120)).toEqual({ from: 160, limit: 120 });
+    // Scrolling up into the gap: the page right above the first message held, read up from it.
+    expect(wantedRange(total, gaps, bottom - 500, bottom + 1_000, 120)).toEqual({ from: 160, limit: 120, below: 'm-280' });
     // Dragged to the top: the thread's first page.
     expect(wantedRange(total, gaps, -800, 1_800, 120)).toEqual({ from: 0, limit: 120 });
     // Dropped in the middle: the stretch on screen.
@@ -39,8 +40,10 @@ describe('history gaps', () => {
     expect(asked.from + asked.limit).toBeGreaterThanOrEqual(140 + 12);
     // Away from every gap: nothing.
     expect(wantedRange(total, gaps, bottom + 2_000, bottom + 3_000, 120)).toBeNull();
-    // A gap shorter than a page is asked for whole.
-    expect(wantedRange([0, gapHeight(30)], [{ index: 0, from: 5, count: 30 }], 0, 500, 120)).toEqual({ from: 5, limit: 30 });
+    // A gap shorter than a page is asked for whole, from the edge nearer the band's middle.
+    const short = [{ index: 1, from: 5, count: 30, below: 'm-35' }];
+    expect(wantedRange([0, 400, 400 + gapHeight(30)], short, 0, 500, 120)).toEqual({ from: 5, limit: 30 });
+    expect(wantedRange([0, 400, 400 + gapHeight(30)], short, 400 + gapHeight(30) - 500, 400 + gapHeight(30) + 900, 120)).toEqual({ from: 5, limit: 30, below: 'm-35' });
   });
 
   test('a range is asked a frame later with the view as it is then, once per place the reader stands', async () => {
@@ -113,11 +116,19 @@ describe('history gaps', () => {
     row.getBoundingClientRect = () => ({ top: rowTop, bottom: rowTop + 80 }) as DOMRect;
     expect(rowOnScreen(view)).toEqual({ id: 'm-2', offset: 20 });
     const moved = vi.fn();
+    const hold = vi.fn();
     // The rows drawn above it pushed it 340 px down, and nothing anchored it: the view follows.
-    expect(await loadKeepingReader(async (landing) => { landing(); rowTop = 360; return 3; }, () => view, async () => {}, moved)).toBe(3);
+    expect(await loadKeepingReader(async (landing) => { landing(); rowTop = 360; return 3; }, () => view, hold, async () => {}, moved)).toBe(3);
     expect(view.scrollTop).toBe(340);
+    expect(moved).toHaveBeenLastCalledWith(340);
     // Anchored by the browser already: nothing moves.
-    expect(await loadKeepingReader(async (landing) => { landing(); return 3; }, () => view, async () => {}, moved)).toBe(3);
-    expect(moved).toHaveBeenCalledTimes(1);
+    expect(await loadKeepingReader(async (landing) => { landing(); return 3; }, () => view, hold, async () => {}, moved)).toBe(3);
+    expect(view.scrollTop).toBe(340);
+    // The window was held on the row as each page went in, before it was drawn.
+    expect(hold).toHaveBeenCalledTimes(2);
+    expect(hold).toHaveBeenNthCalledWith(1, { id: 'm-2', offset: 20 });
+    // The list keeps to its bottom: no row to hold.
+    expect(await loadKeepingReader(async (landing) => { landing(); return 3; }, () => undefined, hold, async () => {}, moved)).toBe(3);
+    expect(hold).toHaveBeenCalledTimes(2);
   });
 });
