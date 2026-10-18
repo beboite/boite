@@ -190,18 +190,28 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 492,200 |
+| UI entry chunk | 492,300 |
 | UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,480,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,494,400 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-19, PR #616 measures 4,479,917 core JavaScript bytes with the
-same rule after a fresh `bun run build:core` on Windows, against 4,479,099 for
-`origin/main` at `ea79290b`: the wait for a new process's command line
-(`whenCommandLineReads`) adds 818 bytes. The core JavaScript limit rises to
-4,480,000; the other limits stay.
+On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
+4,494,324 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,493,506 for that main: the wait
+for a new process's command line (`whenCommandLineReads`) adds 818 bytes. The
+core JavaScript limit rises to 4,494,400; the other limits stay.
+
+On 2026-10-18, automatic resumes (PR #603) merged with `origin/main` at
+`e22bb094` measure 492,249 entry bytes, 4,869,493 UI bytes and 4,493,171 core
+JavaScript bytes with `measure()` after fresh `bun run build:ui` and
+`bun run build:core` on Windows, against 492,112, 4,869,093 and 4,479,099
+recorded below for PR #595: `threads/auto-continue.ts` (the plans, their
+journal record, the crash and background triggers and their prompts) adds
+14,072 core bytes, and the banner's resume wording adds 137 entry and 400 UI
+bytes. The entry and core JavaScript limits rise to 492,300 and 4,493,700; the
+other limits stay.
 
 On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
 492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes
