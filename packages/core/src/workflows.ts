@@ -70,7 +70,8 @@ export class Workflows {
   constructor(private readonly core: Core) {
     this.log = new WorkflowLog(core);
     for (const row of core.journal.db.query('SELECT * FROM workflow_steps').all() as StepRow[]) this.stepOf.set(row.thread_id, { runId: row.run_id, key: row.step_key });
-    for (const run of this.runsWhere("status IN ('done', 'failed', 'paused') AND json_extract(data, '$.delivered') = 0")) this.trackDelivery(run);
+    // A running one may hold a failure its root was not told yet: its root's next turn end tells it.
+    for (const run of this.runsWhere("status IN ('done', 'failed', 'paused', 'running') AND json_extract(data, '$.delivered') = 0")) this.trackDelivery(run);
     // An interrupted step waits on its own thread, so a resume runs it again with the interruption in its prompt.
     // After a handoff, the run goes on once the server listens (`resumeAfterRestart`), as its conversation does.
     // A core that died resumes no paid work by itself: the run waits for its agent or its owner.
