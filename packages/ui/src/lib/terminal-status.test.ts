@@ -79,6 +79,19 @@ describe('ShellStatusReader', () => {
     flood(cwd.status);
     cwd.status.seed('\x1b]633;P;Cwd=/new/', 10);
     expect(cwd.seen.cwd).toBe('/new/dir');
+
+    // A sequence drops C0 controls without counting them against MAX_OSC.
+    const controls = reader();
+    controls.status.read(`${'\r'.repeat(4097)}1\x07`, 11);
+    flood(controls.status);
+    controls.status.seed(`${RUNNING}\x1b]133;D;`, 10);
+    expect(controls.seen).toMatchObject({ running: true, exits: [1] });
+
+    const lines = reader();
+    lines.status.read(`${'\n'.repeat(4097)}dir\x07`, 11);
+    flood(lines.status);
+    lines.status.seed('\x1b]633;P;Cwd=/new/', 10);
+    expect(lines.seen.cwd).toBe('/new/dir');
   });
 
   it('ends a sequence that output leaving the buffer left open with the output still in it', () => {

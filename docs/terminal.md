@@ -140,9 +140,11 @@ parses what is newer than the snapshot as its continuation, so a sequence the
 snapshot leaves open still ends. Output that leaves that buffer is kept as
 what it changes: the phase it leads to from each phase it could start from,
 the last command's status and the newest directory, each with its sequence.
-It also keeps its first 4,097 characters: when all of it follows the snapshot
-and the snapshot leaves a sequence open, they end that sequence on the
-snapshot's parser before the summary applies. After the seed each event is read as it arrives, once. xterm parses later than
+It also keeps how it starts, as the rest of a sequence: the characters
+`OscScanner` counts there (C0 controls are dropped uncounted) up to the first
+that ends it, at most `MAX_OSC` + 1. When all of it follows the snapshot and
+the snapshot leaves a sequence open, they end that sequence on the snapshot's
+parser before the summary applies. After the seed each event is read as it arrives, once. xterm parses later than
 the output arrives, so a mark it had only queued when the tab was released
 still counts; its own handlers draw the dots on the lines and nothing else.
 

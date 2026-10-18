@@ -41,19 +41,22 @@ interface Overflow {
   newest: number | undefined;
   unsequenced: boolean;
   /**
-   * The first characters that left the buffer, enough to end a sequence the
-   * snapshot leaves open or to run past `MAX_OSC`, which the overflow's own
-   * parser, started on them, read as text.
+   * How the output that left the buffer starts, as the rest of a sequence the
+   * snapshot may leave open, which the overflow's own parser read as text: the
+   * characters `OscScanner` counts in a sequence, up to the first that ends
+   * it, or until they run past `MAX_OSC`.
    */
   lead: string;
-  /** Characters that left the buffer, `lead` included. */
-  chars: number;
+  /** `lead` holds that end, or ran past `MAX_OSC`: the output after it is not in it. */
+  leadEnded: boolean;
   phases: Record<Phase, { phase: Phase; exit?: { sequence: number | undefined; code: number | null } }>;
   cwd?: { sequence: number | undefined; path: string };
 }
 
 /** What ends a sequence in progress (`OscScanner`): BEL, ESC, C1 ST, CAN and SUB. */
 const OSC_END = /[\x07\x1b\x9c\x18\x1a]/;
+/** The other C0 controls, which a sequence drops without counting them. */
+const OSC_DROPPED = /[\x00-\x1f]/g;
 
 export interface ShellStatus {
   running(running: boolean): void;
@@ -132,13 +135,8 @@ export class ShellStatusReader {
    */
   #stitch(overflow: Overflow, follows: boolean): boolean {
     if (!follows || !this.#scanner.open) return false;
-    const end = overflow.lead.search(OSC_END);
-    if (end >= 0) {
-      this.#scanner.feed(overflow.lead.slice(0, end + 1));
-      return false;
-    }
     this.#scanner.feed(overflow.lead);
-    return overflow.chars === overflow.lead.length;
+    return !overflow.leadEnded;
   }
 
   #keep(data: string, sequence: number | undefined): void {
@@ -159,14 +157,18 @@ export class ShellStatusReader {
       newest: undefined,
       unsequenced: false,
       lead: '',
-      chars: 0,
+      leadEnded: false,
       phases: { idle: { phase: 'idle' }, prompt: { phase: 'prompt' }, running: { phase: 'running' } }
     };
     overflow.reading = sequence;
     if (sequence === undefined) overflow.unsequenced = true;
     else overflow.newest = Math.max(overflow.newest ?? sequence, sequence);
-    if (overflow.lead.length <= MAX_OSC) overflow.lead += data.slice(0, MAX_OSC + 1 - overflow.lead.length);
-    overflow.chars += data.length;
+    if (!overflow.leadEnded) {
+      const end = data.search(OSC_END);
+      overflow.lead += (end >= 0 ? data.slice(0, end) : data).replace(OSC_DROPPED, '').slice(0, MAX_OSC + 1 - overflow.lead.length);
+      if (end >= 0 && overflow.lead.length <= MAX_OSC) overflow.lead += data[end];
+      overflow.leadEnded = end >= 0 || overflow.lead.length > MAX_OSC;
+    }
     overflow.scanner.feed(data);
   }
 

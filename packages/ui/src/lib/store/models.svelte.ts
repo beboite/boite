@@ -117,8 +117,12 @@ export class Models {
   #modelCacheKey(): string { return 'boite.models.v1:' + JSON.stringify([this.ctx.store.endpointUrl, this.ctx.store.core?.dataDir]); }
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
   #saveKey = '';
-  /** The lists the held write's models were probed under: a later list belongs to a later write. */
-  #saveLists: { providers: unknown; accounts: unknown } | null = null;
+  /**
+   * The lists the held write's models were probed under, and their JSON: read
+   * at the flush, they could already say what a later `accounts.list` wrote
+   * into the same rows (`retainRows`).
+   */
+  #saveLists: { providers: unknown; accounts: unknown; json: string } | null = null;
   #onPageHide: (() => void) | null = null;
 
   /**
@@ -131,10 +135,13 @@ export class Models {
   saveModels(): void {
     const key = this.#modelCacheKey();
     const { providers, accounts } = this.ctx.store;
+    const changed = key !== this.#saveKey || providers !== this.#saveLists?.providers || accounts !== this.#saveLists?.accounts;
     // Another machine's cache, or models probed under other lists, is written before this one waits.
-    if (this.#saveTimer !== null && (key !== this.#saveKey || providers !== this.#saveLists?.providers || accounts !== this.#saveLists?.accounts)) this.flushModels();
+    if (this.#saveTimer !== null && changed) this.flushModels();
     this.#saveKey = key;
-    this.#saveLists = { providers, accounts };
+    if (this.#saveLists === null || changed) {
+      this.#saveLists = { providers, accounts, json: `"providers":${JSON.stringify(providers)},"accounts":${JSON.stringify(accounts)}` };
+    }
     if (this.#saveTimer !== null) return;
     this.#saveTimer = setTimeout(() => this.flushModels(), MODEL_CACHE_WRITE_MS);
     if (this.#onPageHide === null && typeof window !== 'undefined') {
@@ -154,9 +161,10 @@ export class Models {
       window.removeEventListener('pagehide', this.#onPageHide);
       this.#onPageHide = null;
     }
-    const lists = this.#saveLists ?? this.ctx.store;
+    const lists = this.#saveLists;
     this.#saveLists = null;
-    try { localStorage.setItem(this.#saveKey, JSON.stringify({ providers: lists.providers, accounts: lists.accounts, models: this.probedModels })); }
+    if (lists === null) return;
+    try { localStorage.setItem(this.#saveKey, `{${lists.json},"models":${JSON.stringify(this.probedModels)}}`); }
     catch { /* Storage unavailable: keep the in-memory cache. */ }
   }
 
