@@ -4,6 +4,8 @@
  * keeps the state; everything here takes text in and gives values out.
  */
 
+import { createHash } from 'node:crypto';
+
 type Row = Record<string, unknown>;
 const row = (value: unknown): Row => value && typeof value === 'object' && !Array.isArray(value) ? value as Row : {};
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
@@ -47,6 +49,20 @@ export interface Fingerprint {
   remarks: string;
 }
 
+/** Who merged or closed the pull request, read once when it stops being open. */
+export const CLOSER_QUERY = `query($owner:String!,$name:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){pullRequest(number:$number){
+state mergedBy{login} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{actor{login}}}}
+}}}`;
+
+/** The account that ended the pull request, empty when GitHub names none, and whether it is the agent's own. */
+export function parseCloser(raw: string): { state: Fingerprint['state']; by: string; own: boolean } {
+  const data = graphqlData(raw);
+  const pr = pullRequestOf(data);
+  const state = prState(pr.state);
+  const by = state === 'MERGED' ? text(row(pr.mergedBy).login, 100) : text(row(row(list(row(pr.timelineItems).nodes)[0]).actor).login, 100);
+  return { state, by, own: by !== '' && by.toLowerCase() === text(row(data.viewer).login, 100).toLowerCase() };
+}
+
 function graphqlData(raw: string): Row {
   if (raw.length > 4 * 1024 * 1024) throw new Error('GitHub answer exceeds 4 MB');
   const value = row(JSON.parse(raw));
@@ -85,7 +101,11 @@ export function parseFingerprint(raw: string): Fingerprint {
 }
 
 export type CheckStatus = 'pending' | 'passed' | 'failed';
-export interface WatchCheck { name: string; status: CheckStatus; conclusion: string; required: boolean; url: string }
+export interface WatchCheck {
+  name: string; status: CheckStatus; conclusion: string; required: boolean; url: string;
+  /** A commit status a service posted rather than a CI job: one may stay pending as long as it likes. */
+  context: boolean;
+}
 export interface WatchDetail {
   state: Fingerprint['state'];
   head: string;
@@ -128,7 +148,7 @@ export function parseDetail(raw: string): WatchDetail {
       at = status === 'pending' ? '9999' : text(node.createdAt, 50);
     } else continue;
     if (!name) continue;
-    const check: WatchCheck = { name, status, conclusion, required: node.isRequired === true, url };
+    const check: WatchCheck = { name, status, conclusion, required: node.isRequired === true, url, context: node.__typename === 'StatusContext' };
     const held = runs.get(name);
     if (!held || at > held.at) runs.set(name, { check: { ...check, required: check.required || held?.check.required === true }, at });
     else if (check.required) held.check.required = true;
@@ -196,31 +216,74 @@ export function parseRemarks(kind: RemarkKind, raw: string): { remarks: Remark[]
 /** What the agent was last told about one pull request. */
 export interface WatchMemory {
   head: string | null;
+  /** The failures told on this head and still failing. */
   failed: string[];
-  /** The checks that made "passed" when it was told; empty while not passed. */
+  /** The checks that made "passed" when it was told; empty until it is, and again once one of them fails. */
   passed: string[];
   conflicting: boolean;
   remarksThrough: string;
   remarkIds: string[];
+  /** `id#hash` of the newest body read for each remark, told or not, newest last. Absent from watches saved before it. */
+  bodies?: string[];
 }
 
 export type WatchChange =
   | { kind: 'failed'; head: string; checks: Pick<WatchCheck, 'name' | 'conclusion' | 'url'>[] }
   | { kind: 'passed'; head: string; count: number; required: boolean }
   | { kind: 'remarks'; remarks: Pick<Remark, 'id' | 'author' | 'body' | 'url' | 'path' | 'state'>[] }
-  | { kind: 'conflict'; base: string };
+  | { kind: 'conflict'; base: string }
+  | { kind: 'closed'; state: 'MERGED' | 'CLOSED'; by: string };
 
 export function initialMemory(since: number): WatchMemory {
-  return { head: null, failed: [], passed: [], conflicting: false, remarksThrough: new Date(since).toISOString(), remarkIds: [] };
+  return { head: null, failed: [], passed: [], conflicting: false, remarksThrough: new Date(since).toISOString(), remarkIds: [], bodies: [] };
+}
+
+/** Remark bodies remembered per watch: past it, the oldest go and only the time cursor stands. */
+const BODIES = 300;
+/** A bot saying it will not review now: its quota, its rate limit, a skipped review. */
+const NOTICE = /review limit reached|rate limit (?:exceeded|reached)|used all (?:the )?free|usage limit reached|##\s*review skipped/i;
+/** The summary a review bot keeps rewriting in place: CodeRabbit's walkthrough, mtsu-patrol's summary. */
+const SUMMARY_MARK = /<!--\s*(?:this is an auto-generated comment: summarize by coderabbit\.ai|mtsu-patrol:summary)\s*-->/i;
+
+/** The findings a bot's review or summary says it posted, or null when it names no count. */
+function findings(body: string): number | null {
+  const posted = /actionable comments posted:\s*\**\s*(\d+)/i.exec(body);
+  const outside = /outside diff range comments\s*\((\d+)\)/i.exec(body);
+  if (posted || outside) return Number(posted?.[1] ?? 0) + Number(outside?.[1] ?? 0);
+  if (/\*\*no comments posted\*\*/i.test(body)) return 0;
+  if (/\*\*comments posted\*\*/i.test(body)) return 1;
+  return null;
+}
+
+/** What an edit must change to be another remark: markup comments and spacing are not it. */
+const bodyKey = (remark: Remark) => `${remark.id}#${createHash('sha256').update(remark.body.replaceAll(/<!--[\s\S]*?-->/g, ' ').replaceAll(/\s+/g, ' ').trim()).digest('hex').slice(0, 16)}`;
+
+/**
+ * Whether a remark someone else wrote asks something of the agent. A person's
+ * always does; their edits never reach here. A bot's does when it is a new
+ * comment, an inline thread or a reply in one, or a review or summary that
+ * names findings; its rewrite of a remark does only when that is a summary
+ * naming findings. A notice of a review it will not make never does.
+ */
+export function actionable(remark: Remark, edited: boolean): boolean {
+  if (!remark.bot) return true;
+  if (NOTICE.test(remark.body)) return false;
+  const count = findings(remark.body);
+  if (remark.kind === 'review') return remark.state === 'CHANGES_REQUESTED' || (count === null ? remark.body.trim() !== '' : count > 0);
+  if (edited || SUMMARY_MARK.test(remark.body)) return count !== null && count > 0;
+  return true;
 }
 
 /**
- * Compares what GitHub shows with what the agent was told. A check is
- * reported as soon as it fails. "Passed" is reported once every check the
- * base branch requires finished without failing (every check where none is
- * required), and again when a new check joins that set already passed. A
- * remark counts when someone other than the agent's own account wrote it, or
- * a bot rewrote it. `remarks` null leaves remarks for a later read.
+ * Compares what GitHub shows with what the agent was told. The first check
+ * to fail on a head is told at once; failures after it wait for the head's CI
+ * jobs to settle and go out as its verdict. "Passed" is told once per head,
+ * when every check the base branch requires passed (every CI job where none is
+ * required) and no CI job still runs; again when a new required check joins
+ * that set, or after one of it failed. A remark counts when someone other than
+ * the agent's own account wrote it, it asks something of the agent
+ * (`actionable`) and its body was not read before. `remarks` null leaves
+ * remarks for a later read.
  */
 export function evaluate(memory: WatchMemory, detail: WatchDetail, remarks: Remark[] | null): { changes: WatchChange[]; next: WatchMemory } {
   const changes: WatchChange[] = [];
@@ -228,31 +291,50 @@ export function evaluate(memory: WatchMemory, detail: WatchDetail, remarks: Rema
   let failed = moved ? [] : memory.failed;
   let passed = moved ? [] : memory.passed;
   if (detail.checks.length > 0) {
+    // Commit statuses count as CI only where no job runs: a review bot's may stay pending for good.
+    const jobs = detail.checks.some(check => !check.context) ? detail.checks.filter(check => !check.context) : detail.checks;
+    const running = jobs.some(check => check.status === 'pending');
     const failing = detail.checks.filter(check => check.status === 'failed');
-    const fresh = failing.filter(check => !failed.includes(check.name));
-    if (fresh.length) changes.push({ kind: 'failed', head: detail.head, checks: fresh.map(({ name, conclusion, url }) => ({ name, conclusion, url })) });
     // A check that runs again leaves the list, so failing again is news again.
-    failed = failing.map(check => check.name);
+    failed = failed.filter(name => failing.some(check => check.name === name));
+    const fresh = failing.filter(check => !failed.includes(check.name));
+    if (fresh.length && (!failed.length || !running)) {
+      changes.push({ kind: 'failed', head: detail.head, checks: fresh.map(({ name, conclusion, url }) => ({ name, conclusion, url })) });
+      failed = failing.map(check => check.name);
+    }
     const required = detail.checks.filter(check => check.required);
-    const gate = required.length ? required : detail.checks;
+    const gate = required.length ? required : jobs;
     const names = gate.map(check => check.name);
-    const passedNow = gate.every(check => check.status === 'passed');
+    const passedNow = !running && gate.every(check => check.status === 'passed');
     // A required check created and finished between two reads is never seen running.
-    if (passedNow && names.some(name => !passed.includes(name))) changes.push({ kind: 'passed', head: detail.head, count: gate.length, required: required.length > 0 });
-    passed = passedNow ? names : [];
+    if (passedNow && (!passed.length || (required.length > 0 && names.some(name => !passed.includes(name))))) {
+      changes.push({ kind: 'passed', head: detail.head, count: gate.length, required: required.length > 0 });
+    }
+    // A rerun that only runs keeps what was told; one that fails makes the next pass news.
+    passed = passedNow ? names : gate.some(check => check.status === 'failed') ? [] : passed;
   }
 
   const through = Date.parse(memory.remarksThrough);
   const own = detail.viewer.toLowerCase();
   const activeAt = (remark: Remark) => Date.parse(remark.editedAt ?? remark.createdAt);
+  const bodies = new Map((memory.bodies ?? []).map(entry => [entry.slice(0, entry.lastIndexOf('#')), entry]));
   // GitHub times are per second: remarks at the boundary are told apart by id.
-  const fresh = (remarks ?? []).filter(remark => {
+  const read = (remarks ?? []).filter(remark => {
     const at = activeAt(remark);
     return Number.isFinite(at) && (at > through || (at === through && !memory.remarkIds.includes(remark.id))) && (remark.bot || remark.author.toLowerCase() !== own);
   }).sort((a, b) => activeAt(a) - activeAt(b));
+  const fresh = read.filter(remark => {
+    const key = bodyKey(remark), held = bodies.get(remark.id);
+    bodies.delete(remark.id);
+    bodies.set(remark.id, key);
+    if (held === key) return false;
+    const created = Date.parse(remark.createdAt);
+    const edited = remark.editedAt !== null && (held !== undefined || created < through || (created === through && memory.remarkIds.includes(remark.id)));
+    return actionable(remark, edited);
+  });
   if (fresh.length) changes.push({ kind: 'remarks', remarks: fresh.map(({ id, author, body, url, path, state }) => ({ id, author, body, url, path, state })) });
-  const latest = Math.max(through, ...fresh.map(activeAt));
-  const atLatest = fresh.filter(remark => activeAt(remark) === latest).map(remark => remark.id);
+  const latest = Math.max(through, ...read.map(activeAt));
+  const atLatest = read.filter(remark => activeAt(remark) === latest).map(remark => remark.id);
 
   if (detail.mergeable === 'CONFLICTING' && !memory.conflicting) changes.push({ kind: 'conflict', base: detail.base });
   // UNKNOWN is GitHub still computing after a push; only a clean answer clears a conflict.
@@ -263,6 +345,7 @@ export function evaluate(memory: WatchMemory, detail: WatchDetail, remarks: Rema
       head: detail.head, failed, passed, conflicting,
       remarksThrough: latest === through ? memory.remarksThrough : new Date(latest).toISOString(),
       remarkIds: latest === through ? [...memory.remarkIds, ...atLatest] : atLatest,
+      bodies: [...bodies.values()].slice(-BODIES),
     },
   };
 }
@@ -316,10 +399,12 @@ function changeLines(change: WatchChange): string[] {
       })];
     case 'conflict':
       return [`- The branch now conflicts with ${change.base}.`];
+    case 'closed':
+      return [`- ${change.by || 'Someone'} ${change.state === 'MERGED' ? 'merged' : 'closed'} the pull request; its watch ended.`];
   }
 }
 
-const SUMMARY: Record<WatchChange['kind'], string> = { failed: 'checks failed', passed: 'checks passed', remarks: 'new comments', conflict: 'merge conflict' };
+const SUMMARY: Record<WatchChange['kind'], string> = { failed: 'checks failed', passed: 'checks passed', remarks: 'new comments', conflict: 'merge conflict', closed: 'closed' };
 
 /** The message that wakes the agent, and the short line the conversation shows for it. */
 export function wakeMessage(updates: { number: number; url: string; changes: WatchChange[] }[]): { text: string; label: string } {
@@ -330,7 +415,7 @@ export function wakeMessage(updates: { number: number; url: string; changes: Wat
     '',
     'Look into each item and act on it as your task requires, then end your turn: Boite keeps watching and wakes you on the next change, so do not poll. `boite pr unwatch <url>` stops a watch.',
   ].join('\n');
-  const label = updates.map(update => `#${update.number}: ${update.changes.map(change => SUMMARY[change.kind]).join(', ')}`).join('; ');
+  const label = updates.map(update => `#${update.number}: ${update.changes.map(change => change.kind === 'closed' ? change.state.toLowerCase() : SUMMARY[change.kind]).join(', ')}`).join('; ');
   return { text, label: `Pull request update, ${label}` };
 }
 

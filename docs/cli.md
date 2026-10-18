@@ -198,14 +198,24 @@ it. `boite pr unwatch [<url|number>]` stops one watch, or all of them.
 The core (`packages/core/src/pull-request-watch.ts`) wakes the conversation
 with one message, a `pull-request` turn, when:
 
-- a check fails, each failure once; a rerun that fails again counts again;
-- every check the base branch requires finished without failing (every check
-  when none is required), including a required check that appears already
-  passed, and never while another run of the same check on that commit still
-  goes;
+- the first check of a head fails; failures after it on that head wait until
+  no CI job runs and go out together as its verdict; a rerun that fails again
+  counts again;
+- every check the base branch requires passed and no CI job still runs (every
+  job when none is required), once per head; again when a required check
+  appears already passed or after one of them failed. A commit status such as
+  CodeRabbit's holds nothing while it stays pending, unless the base branch
+  requires it or commit statuses are the only checks;
 - someone other than the account `gh` signs in as posts a comment, a review or
-  an inline review comment, replies included, or a bot rewrites one;
-- the branch starts to conflict with its base.
+  an inline review comment, replies included. From a bot, a review counts
+  when it names findings (`Actionable comments posted` above zero, outside
+  diff comments, changes requested), and its summary (CodeRabbit's
+  walkthrough, mtsu-patrol's) only when rewritten to name findings. A bot's
+  other rewrites, an empty review and a notice that it will not review (quota,
+  rate limit, review skipped) wake nothing. A body already read, its HTML
+  comments and spacing aside, never wakes twice;
+- the branch starts to conflict with its base;
+- someone other than that account merges or closes the pull request.
 
 The message names each change with its link. A change waits 20 seconds for
 the rest of its burst and for a running turn to end, then everything waiting
