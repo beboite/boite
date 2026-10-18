@@ -3,6 +3,7 @@ import type { MessageId, MessagePart, ToolDocument, ToolStatus, Usage } from '@b
 import type { PromptCacheLife, ToolPatch, TurnContext, TurnRefusal, TurnResult } from '../types.ts';
 import { isoTime } from './diagnostics.ts';
 import {
+  agentTotalsOf,
   apiErrorReason,
   apiErrorStatusOf,
   cacheLifeOf,
@@ -105,7 +106,9 @@ export class ClaudeTurn {
    */
   private lastEntry: string | null = null;
   private usage: Usage | null = null;
-  private costBefore = 0;
+  private costBefore: number | null = 0;
+  /** The CLI's running totals as its result for this turn left them. */
+  private agentTotals: { costUsd: number; tokens: number } | null = null;
   /** What the last API request of the turn carried, the context meter's reading. */
   private contextTokens: number | null = null;
   /** The lifetime of the last cache write the main loop made in this turn. */
@@ -175,13 +178,14 @@ export class ClaudeTurn {
       ...(this.sessionLost ? { sessionLost: true } : {}),
       ...(this.status === 'error' && this.refusal ? { refusal: this.refusal } : {}),
       ...(this.sessionId !== null && this.lastEntry !== null ? { checkpoint: { sessionId: this.sessionId, entry: this.lastEntry } } : {}),
+      ...(this.agentTotals !== null ? { agentTotals: this.agentTotals } : {}),
     });
   }
 
   // -- messages -------------------------------------------------------------
 
   /** What the CLI process had already charged to earlier turns when this one's result arrived. */
-  noteCostBefore(costUsd: number): void {
+  noteCostBefore(costUsd: number | null): void {
     this.costBefore = costUsd;
   }
 
@@ -413,6 +417,7 @@ export class ClaudeTurn {
 
   private handleResult(message: SDKResultMessage): void {
     this.usage = mapUsage(message, this.costBefore);
+    this.agentTotals = agentTotalsOf(message);
     if (this.contextTokens !== null) {
       this.ctx.context({ tokens: this.contextTokens, window: contextWindowOf(message, this.ctx.thread.model) });
     }

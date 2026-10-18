@@ -582,9 +582,10 @@ export class ClaudeSession {
     // turn is told what was already charged before it reads the result. A cold
     // process that resumed a session starts from that session's restored total.
     if (message.type === 'result') {
-      if (this.carried !== null) this.costSoFar = restoredCost(message, this.carried);
+      const restored = this.carried === null ? this.costSoFar : restoredCost(message, this.carried);
+      if (restored !== null) this.costSoFar = restored;
       this.carried = null;
-      turn.noteCostBefore(this.costSoFar);
+      turn.noteCostBefore(restored);
     }
     turn.handle(message);
     // One result per user message: that is the end of this turn, not of the CLI.

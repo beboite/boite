@@ -269,9 +269,23 @@ describe('claude driver', () => {
     const threadId = await claudeThread(client);
 
     // Each turn uses 26 tokens. The second process restores the session (52 tokens held, 0.25 + 0.05);
-    // the third has lost it and counts from zero.
+    // the third has lost it and counts from zero. The fourth restores only what the third saved
+    // (0.07 + 0.04), less than the session's turns add up to; the fifth restores the fourth's totals
+    // and makes no request. The sixth reports zeroed totals, as a startup error does, and the seventh
+    // still restores the fifth's (0.11 + 0.02). The eighth gets an older save back (52 tokens restored
+    // where the last total held 78), so its own share is unknown.
     const held = (tokens: number) => ({ 'claude-test': { inputTokens: tokens, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0, contextWindow: 0, maxOutputTokens: 0 } });
-    const results = [{ total_cost_usd: 0.25, modelUsage: held(26) }, { total_cost_usd: 0.3, modelUsage: held(52) }, { total_cost_usd: 0.07, modelUsage: held(26) }];
+    const idle = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    const results = [
+      { total_cost_usd: 0.25, modelUsage: held(26) },
+      { total_cost_usd: 0.3, modelUsage: held(52) },
+      { total_cost_usd: 0.07, modelUsage: held(26) },
+      { total_cost_usd: 0.11, modelUsage: held(52) },
+      { total_cost_usd: 0.11, modelUsage: held(52), usage: idle },
+      { total_cost_usd: 0, modelUsage: {}, usage: idle },
+      { total_cost_usd: 0.13, modelUsage: held(78) },
+      { total_cost_usd: 0.14, modelUsage: held(78) },
+    ];
     let turn = 0;
     scripted(() => undefined, (fake) => {
       fake.emit(init('sess-resumed'));
@@ -279,16 +293,21 @@ describe('claude driver', () => {
     });
 
     const costs: (number | null)[] = [];
-    for (const prompt of ['first', 'second', 'third']) {
+    for (const prompt of ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth']) {
       const finished = client.next('turn.finished', (finishedTurn) => finishedTurn.threadId === threadId, 10000);
       await client.call('turns.start', { threadId, prompt });
       costs.push((await finished).usage?.costUsdEquivalent ?? null);
     }
 
-    expect(queries).toHaveLength(3);
+    expect(queries).toHaveLength(8);
     expect(costs[0]).toBeCloseTo(0.25, 10);
     expect(costs[1]).toBeCloseTo(0.05, 10);
     expect(costs[2]).toBeCloseTo(0.07, 10);
+    expect(costs[3]).toBeCloseTo(0.04, 10);
+    expect(costs[4]).toBeCloseTo(0, 10);
+    expect(costs[5]).toBeCloseTo(0, 10);
+    expect(costs[6]).toBeCloseTo(0.02, 10);
+    expect(costs[7]).toBeNull();
   });
 
   test('a resumed CLI that restored less than the journal holds leaves the turn unpriced instead of charging the session again', async () => {

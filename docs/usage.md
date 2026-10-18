@@ -329,12 +329,19 @@ the journal's larger sum made the next resume do the same, so a long thread
 grew to several times what its tokens cost.
 
 Claude's `total_cost_usd` is a running total: it grows across the turns of a
-warm process, and a process that resumes a session restores it. The driver
-charges each turn the difference, reading the earlier turns of the session from
-the journal, and takes the total as it stands when the CLI started from zero.
-A resumed total below what the journal already charged means the CLI restored
-less than the journal holds: the turn's share is unknown, so it records no
-cost and the usage page prices its tokens.
+warm process, and a process that resumes a session restores the total its
+transcript saved when the session's last process ended. That save holds only
+what that process counted, so after a process that started from zero it is less
+than the sum of the session's turns. Each turn records the CLI's totals as its
+result left them (`Turn.agentTotals`: the cost and the tokens of `modelUsage`),
+and a cold turn, or a later attempt of the same turn, measures from the last of
+them: when the result's `modelUsage` holds those tokens on top of its own, the
+turn is charged the difference; when it holds less than half of them, the CLI
+started from zero and the turn is charged the whole total. Anything between, or
+a total below the saved one, means an older save came back: the turn's share is
+unknown, so it records no cost and the usage page prices its tokens. A result
+with zeroed totals, as a startup error reports, records none. Turns recorded
+before `agentTotals` fall back to the sum of the session's turns.
 The ACP `usage_update` cost is the session's running total in the same way,
 and each turn is charged what it added. The driver measures from the last
 total the same process reported, in an earlier turn, between turns or while a
@@ -447,8 +454,9 @@ added on top, and the uninstalled mode (`?fake=1&uninstalled=1`) starts empty.
 - `packages/core/test/pricing.test.ts`: model id matching, the cache write
   rates, missing rates and the price list's coverage.
 - `packages/core/test/claude.session.test.ts`: the warm running total, a
-  resumed CLI with and without its totals, and one that restored less than the
-  journal holds.
+  resumed CLI with and without its totals, one that restored only its last
+  process's save, a zeroed startup result, an older save, and one that restored
+  less than the journal holds.
 - `packages/ui/src/lib/usage.test.ts`: day edges, axis steps, the fixed colour
   order, unused and custom providers, reporting coverage, provider-scoped model
   names, prefixed models sharing a row, the price notes, the summaries and the

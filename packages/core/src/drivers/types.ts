@@ -117,8 +117,9 @@ export interface TurnContext {
    */
   continuation?(): { prompt: string; attachments: ImageAttachment[] };
   /**
-   * What the finished turns of this agent session already used, for an agent
-   * whose running totals survive a resume. Absent or zero on a fresh session.
+   * What this agent session already used, for an agent whose running totals
+   * survive a resume: the last `Turn.agentTotals` the session recorded, else
+   * the sum of its finished turns. Absent or zero on a fresh session.
    */
   sessionBefore?: { costUsd: number; tokens: number };
   /** The isolation environment of this account, empty for the provider's own login. */
@@ -253,6 +254,8 @@ export interface TurnResult {
    * entry (`Turn.checkpoint`). Absent when the driver has none.
    */
   checkpoint?: { sessionId: string; entry: string };
+  /** The agent's running totals as this turn ended (`Turn.agentTotals`). Absent when the driver has none. */
+  agentTotals?: { costUsd: number; tokens: number };
   /**
    * The provider refused the turn for availability, not for a fault of the
    * request, and said so unambiguously: `capacity` when the model is at
