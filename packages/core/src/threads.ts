@@ -690,8 +690,9 @@ export class ThreadStore {
       // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first; a keepalive leaves it for the next.
       if (operation !== 'background' && operation !== 'keepalive') this.deferred.pendingWakes.delete(threadId);
       accepted.dismissal?.();
-      // His own message puts the agent back to work, so a pause left by Stop or a restart ends with it.
-      if (!activity && !operation && !startedBy) this.core.coordination.resumeForUser(threadId);
+      // His own message, a resume or a parent's message to its subagent puts the agent back to work,
+      // so a pause the core left on Stop, a failure or a restart ends with it; the owner's stays.
+      if (!activity && !startedBy && (!operation || operation === 'resume' || (operation === 'delegation' && thread.parentThreadId))) this.core.coordination.resumeForUser(threadId);
     });
     this.autoCompact.cancel(threadId);
     this.cacheKeepalive.cancel(threadId);
