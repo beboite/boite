@@ -21,6 +21,7 @@ import {
 } from './job-limits.ts';
 import {
   commandLineOf,
+  consoleHost,
   cpuMsOf,
   createdAtOfPid,
   creationIdentityOf,
@@ -76,13 +77,6 @@ const INSPECT_ACCESS = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_TER
 
 const EVENTS_NOTE =
   'every process a thread launches, direct or not, is in its Job Object; exact start and exit events';
-
-/**
- * Windows puts a console host in the job as soon as a child's output is piped.
- * It is the OS attaching a console, not something the thread asked for, so it
- * stays out of the trace and out of the load.
- */
-const CONSOLE_HOSTS = new Set(['conhost.exe', 'openconsole.exe']);
 
 function loadKernel32() {
   return dlopen('kernel32.dll', {
@@ -756,8 +750,9 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
     sink?.started(threadId, pid, { exe: 'unknown', commandLine: null, parentPid: null });
     return;
   }
-  const exe = imageNameOf(api, handle) ?? 'unknown';
-  if (CONSOLE_HOSTS.has(baseName(exe))) {
+  const exe = imageNameOf(api, handle);
+  const commandLine = commandLineOf(api, handle);
+  if (consoleHost(exe, commandLine)) {
     ignored.add(pid);
     api.close(handle);
     return;
@@ -765,16 +760,11 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
   const identity = creationIdentityOf(api, handle);
   tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });
   sink?.started(threadId, pid, {
-    exe,
-    commandLine: commandLineOf(api, handle),
+    exe: exe ?? 'unknown',
+    commandLine,
     parentPid: parentPidOf(api, handle),
     ...identity,
   });
-}
-
-function baseName(path: string): string {
-  const cut = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
-  return (cut === -1 ? path : path.slice(cut + 1)).toLowerCase();
 }
 
 function onProcessExited(threadId: string, pid: number): void {
