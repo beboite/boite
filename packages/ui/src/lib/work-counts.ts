@@ -42,7 +42,10 @@ export function workingThreads(stores: readonly Store[]): ThreadWork {
       for (const child of children.get(parent) ?? []) {
         if (seen.has(child.id)) continue;
         seen.add(child.id);
-        if (threadBusy(child) || needsUser(child)) subagents++;
+        const asks = needsUser(child);
+        if (asks || threadBusy(child)) subagents++;
+        // A grandchild's question never reaches its grandparent's row state: the badge reads it here.
+        waiting ||= asks;
         descend(child.id);
       }
     };

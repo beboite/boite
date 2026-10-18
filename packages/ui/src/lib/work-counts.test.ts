@@ -48,6 +48,9 @@ test('the delegated agents under a listed thread add to the count, at any depth,
   // A child asking the user counts as at work and turns the badge to the waiting colour.
   store.threads = store.threads.map(thread => thread.id === 'c-3' ? { ...thread, openQuestions: 1 } : thread);
   expect(workingThreads([store])).toEqual({ count: 5, subagents: 4, waiting: true });
+  // A grandchild asking turns the badge too, though only its own parent's row reads Needs you.
+  store.threads = store.threads.map(thread => thread.id === 'c-3' ? { ...thread, openQuestions: 0 } : thread.id === 'g-1' ? { ...thread, status: 'waiting' } : thread);
+  expect(workingThreads([store])).toEqual({ count: 4, subagents: 3, waiting: true });
 });
 
 test('an entrusted thread mid-turn counts once among the agents at work', async () => {
