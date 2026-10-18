@@ -200,7 +200,8 @@ export function compactionSteps(journal: Journal): ((now: number) => Promise<Ste
   const trace: Record<TracePhase, Pace> = { find: rowPace(), scan: new Pace(200, 50, 400), delete: new Pace(250, 50, 500), sweep: rowPace() };
   const prune = new TracePrune(journal.db, trace.find.size);
   // A tick waits while the checkpoints catch up with the WAL, so that the
-  // passes never make this thread copy its frames (`WalCheckpoints.behind`).
+  // passes rarely make this thread copy its frames (`WalCheckpoints.behind`):
+  // the check runs before a tick, so only that tick's writes can cross it.
   const unlessBehind = (step: (now: number) => Promise<Step>) => (now: number): Promise<Step> =>
     journal.checkpoints?.behind === true ? Promise.resolve('more') : step(now);
   const steps: ((now: number) => Promise<Step>)[] = [

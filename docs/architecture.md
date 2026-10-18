@@ -139,9 +139,11 @@ tick took, aiming at 40 ms, and compresses on Bun's thread pool
 (`Bun.zstdCompress`) before a write guarded on the row it read, so a write
 made meanwhile wins, and a row is written only under the id and thread it was
 read with. A tick is skipped while the WAL is over twice its 4 MiB limit, so
-the passes never get the WAL far enough behind that the main thread
-checkpoints it; the idle truncation empties it with no further write, on the
-Worker or on the main thread without one.
+the passes give the checkpoints room before the WAL reaches 16 MiB, where the
+main thread checkpoints it. The check comes before a tick, not during it: a
+tick that writes more than the room left, such as one value larger than its
+byte budget, can still cross that mark. The idle truncation empties the WAL
+with no further write, on the Worker or on the main thread without one.
 
 Space goes back to the disk once. When every one-time pass has finished and
 the trace was cut once, the next core start checks the journal before opening

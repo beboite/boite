@@ -131,7 +131,8 @@ export class WalCheckpoints {
   /**
    * True while the WAL is past twice its limit: the checkpoints have not caught
    * up with the writes. A background pass then skips its tick, so that its
-   * writes never take the WAL to `BEHIND`, where this thread copies it.
+   * writes keep the WAL short of `BEHIND`, where this thread copies it; a tick
+   * that starts under the mark and writes more than the room left crosses it.
    */
   get behind(): boolean {
     return this.walBytes() > this.limitBytes * 2;
