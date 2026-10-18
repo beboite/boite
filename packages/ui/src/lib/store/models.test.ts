@@ -56,6 +56,18 @@ test('a restore compares the lists without serializing them, and keeps a cache o
   expect(other.probedModels).toEqual({});
 });
 
+test('a held write keeps the accounts its models were probed under when the list changes', () => {
+  const store = { providers, accounts, endpointUrl: 'ws://127.0.0.1:1', core: { dataDir: 'D:/data' } };
+  const cache = new Models({ store } as unknown as StoreContext);
+  cache.probedModels = { 'claude::acc-1': [{ id: 'opus', name: 'Opus' }] };
+  cache.saveModels();
+  // accounts.list lands with a renamed account, then restores the cache.
+  store.accounts = [{ ...accounts[0]!, label: 'Renamed' }];
+  cache.restoreModels();
+  const stored = JSON.parse(localStorage.getItem(localStorage.key(0)!)!);
+  expect(stored.accounts[0].label).toBe('Main');
+});
+
 test('sameJson reads like JSON: undefined fields are absent, key order is free', () => {
   expect(sameJson({ a: 1, b: undefined, c: [1, undefined] }, { c: [1, null], a: 1 })).toBe(true);
   expect(sameJson({ a: 1 }, { a: 1, b: 2 })).toBe(false);

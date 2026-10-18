@@ -117,19 +117,24 @@ export class Models {
   #modelCacheKey(): string { return 'boite.models.v1:' + JSON.stringify([this.ctx.store.endpointUrl, this.ctx.store.core?.dataDir]); }
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
   #saveKey = '';
+  /** The lists the held write's models were probed under: a later list belongs to a later write. */
+  #saveLists: { providers: unknown; accounts: unknown } | null = null;
   #onPageHide: (() => void) | null = null;
 
   /**
    * Writes the probed models to `localStorage` at most once a
    * `MODEL_CACHE_WRITE_MS`, the state at the end of the burst; leaving the
    * page or detaching the store writes what waits at once. Every probe used to serialize providers,
-   * accounts and all the lists on the main thread.
+   * accounts and all the lists on the main thread. The write carries the
+   * providers and accounts of the moment it was asked for, not of the flush.
    */
   saveModels(): void {
     const key = this.#modelCacheKey();
-    // Another machine's cache is written before this one waits.
-    if (this.#saveTimer !== null && key !== this.#saveKey) this.flushModels();
+    const { providers, accounts } = this.ctx.store;
+    // Another machine's cache, or models probed under other lists, is written before this one waits.
+    if (this.#saveTimer !== null && (key !== this.#saveKey || providers !== this.#saveLists?.providers || accounts !== this.#saveLists?.accounts)) this.flushModels();
     this.#saveKey = key;
+    this.#saveLists = { providers, accounts };
     if (this.#saveTimer !== null) return;
     this.#saveTimer = setTimeout(() => this.flushModels(), MODEL_CACHE_WRITE_MS);
     if (this.#onPageHide === null && typeof window !== 'undefined') {
@@ -149,8 +154,9 @@ export class Models {
       window.removeEventListener('pagehide', this.#onPageHide);
       this.#onPageHide = null;
     }
-    const s = this.ctx.store;
-    try { localStorage.setItem(this.#saveKey, JSON.stringify({ providers: s.providers, accounts: s.accounts, models: this.probedModels })); }
+    const lists = this.#saveLists ?? this.ctx.store;
+    this.#saveLists = null;
+    try { localStorage.setItem(this.#saveKey, JSON.stringify({ providers: lists.providers, accounts: lists.accounts, models: this.probedModels })); }
     catch { /* Storage unavailable: keep the in-memory cache. */ }
   }
 
