@@ -556,11 +556,20 @@ group sent through this one carries that machine's id: the worker opens
 once the group has connected it.
 
 An event makes one notification on a device. iOS shows every push and does not
-let a tag replace a notification the page shows, so a page whose own core
-pushes to it stays quiet: `pushCovers` in `lib/notify.ts` requires the page's
-push switch, the granted permission and a live browser subscription. A device
-without push, and a page's notices about another machine, keep the local
-notification, through the service worker and the per-thread tag a push would use.
+let a tag replace a notification the page shows, so a page stays quiet when a
+push brings the same notice: its own core pushes to it, or the notice is about
+a member of the group, which forwards it to the device's push home.
+`pushCovers` in `lib/notify.ts` requires the page's push switch, the granted
+permission and a live browser subscription. Otherwise the page shows the
+notice through the service worker whenever one is registered, since Android
+Chrome refuses `new Notification` on a page and the phone app's page serves no
+machine. It uses the tag and data a push about that thread would: `thread-<id>`
+for this page's own core, `thread-<core>-<id>` with `{threadId, core}` for a
+machine of the group (`GroupLinks.coreOf`, handed to `lib/notify.ts` by the
+workspace), so a later push replaces it and a tap opens the thread there. A
+machine with no group id gets a `key` in the data, which the open window reads
+through `openNotification`. Only a page without a worker builds the
+notification itself.
 
 Routine turn notifications wait while someone watches their conversation.
 Questions and permission requests notify immediately, including asynchronous

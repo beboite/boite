@@ -112,6 +112,12 @@ export interface Toast {
   origin?: string;
   /** Unqualified ID for the same-origin service worker's click handler. */
   coreThreadId?: string;
+  /**
+   * The machine's id in the group (`GroupLinks.coreOf`), for a machine that
+   * does not serve this page: the worker's notice then carries the tag and
+   * data a push of that machine would, so a tap opens it there.
+   */
+  core?: string;
   /** The thread a click on the toast opens. */
   threadId: string;
 }
@@ -164,18 +170,36 @@ export async function storeWorkerLocale(locale: string): Promise<void> {
 }
 
 /**
- * Whether this page's own core pushes the same notice to this device. The
- * service worker must show every push on iOS, so the page is the one that
- * stays quiet: showing both doubled each notice on an iPhone, tag or not.
+ * Whether a push brings the same notice to this device: its own core pushes
+ * to it, or `viaGroup`, the notice is about a member of the group, which
+ * forwards it to this device's push home. The service worker must show every
+ * push on iOS, so the page is the one that stays quiet: showing both doubled
+ * each notice on an iPhone, tag or not.
  */
-export async function pushCovers(origin: string | undefined): Promise<boolean> {
+export async function pushCovers(origin: string | undefined, viaGroup = false): Promise<boolean> {
   try {
-    if (origin === undefined || origin !== location.origin || !navigator.serviceWorker) return false;
+    if (!navigator.serviceWorker || (!viaGroup && (origin === undefined || origin !== location.origin))) return false;
     if (localStorage.getItem(PUSH_ENABLED_KEY) !== 'on' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
     const registration = await navigator.serviceWorker.getRegistration();
     return Boolean(await registration?.pushManager?.getSubscription());
   } catch {
     return false;
+  }
+}
+
+let coreOfStore: ((store: object) => string | undefined) | null = null;
+
+/** The workspace says which group member a machine's store is (`GroupLinks.coreOf`); it imports the store, so it hands this in. */
+export function setNotificationCore(resolve: ((store: object) => string | undefined) | null): void {
+  coreOfStore = resolve;
+}
+
+/** The group id of the machine whose store raised a toast, when the workspace knows it. */
+export function notificationCore(store: object): string | undefined {
+  try {
+    return coreOfStore?.(store);
+  } catch {
+    return undefined;
   }
 }
 
@@ -221,15 +245,23 @@ async function webSender(toast: Toast): Promise<void> {
   if (typeof Notification === 'undefined') return;
   if (Notification.permission === 'default') await Notification.requestPermission();
   if (Notification.permission !== 'granted') return;
-  // A device without push: the same worker and tag a push would use.
-  if (toast.origin === location.origin && toast.coreThreadId && navigator.serviceWorker) {
+  // Through the worker whenever there is one: Android refuses `new Notification`
+  // on a page, and the phone app's page serves no machine. The tag and data are
+  // the ones a push about that thread uses (`sw.js`), so a later push replaces
+  // this notice and a tap opens the thread where it is.
+  if (toast.coreThreadId && navigator.serviceWorker) {
     try {
       const registration = await navigator.serviceWorker.getRegistration();
       if (registration) {
+        const id = toast.coreThreadId;
+        const own = toast.origin === location.origin;
+        const core = own ? undefined : toast.core;
         await registration.showNotification(toast.title, {
-          body: toast.body, tag: `thread-${toast.coreThreadId}`,
+          body: toast.body,
+          tag: core ? `thread-${core}-${id}` : own ? `thread-${id}` : `thread-${toast.threadId}`,
           icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
-          data: { threadId: toast.coreThreadId }
+          // A machine with no group id: the window opens it by this window's own key for the thread.
+          data: core ? { threadId: id, core } : own ? { threadId: id } : { threadId: id, key: toast.threadId }
         });
         return;
       }

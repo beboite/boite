@@ -204,6 +204,8 @@ self.addEventListener('notificationclick', (event) => {
   const threadId = event.notification.data?.threadId;
   // Read as the push handler wrote it: a machine id, or nothing.
   const core = /^[0-9a-f]{64}$/.test(String(event.notification.data?.core ?? '')) ? event.notification.data.core : null;
+  // A page's notice about a machine with no group id: the open window finds the thread by its own key for it.
+  const key = typeof event.notification.data?.key === 'string' && event.notification.data.key.length <= 600 ? event.notification.data.key : null;
   const url = new URL('/', self.location.origin);
   if (typeof threadId === 'string') url.searchParams.set('thread', threadId);
   if (typeof threadId === 'string' && typeof core === 'string') url.searchParams.set('member', core);
@@ -211,7 +213,7 @@ self.addEventListener('notificationclick', (event) => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const existing = windows.find(client => new URL(client.url).origin === url.origin);
     if (existing) {
-      existing.postMessage({ type: 'boite.open-thread', threadId: typeof threadId === 'string' ? threadId : null, ...(typeof core === 'string' ? { core } : {}) });
+      existing.postMessage({ type: 'boite.open-thread', threadId: typeof threadId === 'string' ? threadId : null, ...(typeof core === 'string' ? { core } : key !== null ? { key } : {}) });
       // iOS can refuse to focus a suspended home-screen app; opening the URL then reaches the thread.
       try { await existing.focus(); } catch { await self.clients.openWindow(url.href); }
     } else await self.clients.openWindow(url.href);

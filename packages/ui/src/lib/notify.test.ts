@@ -148,6 +148,15 @@ describe('pushCovers', () => {
     device(null);
     expect(await pushCovers(location.origin)).toBe(false);
   });
+
+  test('a notice about a member of the group stays quiet when this device has push: the member forwards it to the push home', async () => {
+    device({ endpoint: 'https://web.push.apple.com/x' });
+    localStorage.setItem('boite.web-push', 'on');
+    expect(await pushCovers('https://remote.test', true)).toBe(true);
+    expect(await pushCovers(undefined, true)).toBe(true);
+    device(null);
+    expect(await pushCovers('https://remote.test', true)).toBe(false);
+  });
 });
 
 describe('sendNotification', () => {
@@ -168,6 +177,23 @@ describe('sendNotification', () => {
       await sendNotification({ title: 'Done', body: 'Finished', threadId: 't-1', coreThreadId: 't-1', origin: location.origin });
       expect(browserNotification).toHaveBeenCalledOnce();
     } finally { localStorage.removeItem('boite.web-push'); vi.unstubAllGlobals(); }
+  });
+
+  test('a notice about a machine of another origin goes through the worker with that machine\'s push tag, never the page constructor Android refuses', async () => {
+    const showNotification = vi.fn().mockResolvedValue(undefined);
+    const browserNotification = vi.fn(function () { throw new TypeError('Illegal constructor'); });
+    Object.assign(browserNotification, { permission: 'granted' });
+    vi.stubGlobal('Notification', browserNotification);
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistration: vi.fn().mockResolvedValue({ showNotification }) } });
+    const core = 'c'.repeat(64);
+    try {
+      await sendNotification({ title: 'Which branch?', body: 'Needs you', threadId: '["m2","t-1"]', coreThreadId: 't-1', origin: 'https://remote.test', core });
+      expect(showNotification).toHaveBeenCalledWith('Which branch?', expect.objectContaining({ tag: `thread-${core}-t-1`, data: { threadId: 't-1', core } }));
+      // No group id known: still the worker, and the window opens it by its own key.
+      await sendNotification({ title: 'Which branch?', body: 'Needs you', threadId: '["m3","t-2"]', coreThreadId: 't-2', origin: 'https://other.test' });
+      expect(showNotification).toHaveBeenLastCalledWith('Which branch?', expect.objectContaining({ tag: 'thread-["m3","t-2"]', data: { threadId: 't-2', key: '["m3","t-2"]' } }));
+      expect(browserNotification).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
   });
 
   test('goes through the sender handed in, and swallows what it throws', async () => {

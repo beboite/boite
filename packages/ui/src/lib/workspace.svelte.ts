@@ -22,6 +22,7 @@ import { threadAddress } from './chat-links';
 import { onReveal, reveal } from './reveal';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
 import { GroupLinks } from './group-links.svelte';
+import { setNotificationCore } from './notify';
 import { appPage } from './app-origin';
 import { bootWorkspace, byHand, hostOf, primaryMachine } from './workspace-boot';
 
@@ -721,6 +722,11 @@ export class Workspace {
 }
 
 export const workspace = new Workspace();
+// A toast about a machine this page does not serve names that machine as its pushes do.
+setNotificationCore((store) => {
+  const machine = workspace.machines.find((entry) => entry.store === store);
+  return machine === undefined ? undefined : GroupLinks.coreOf(machine);
+});
 
 // A desktop app's `ui.reveal`, answered by whichever machine's Store received it.
 onReveal((from, target) => reveal(workspace, from, target));

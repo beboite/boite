@@ -2,6 +2,7 @@ import { parseGroupRelayUrl, type ThreadId } from '@boite/contracts';
 import { appPage } from '../app-origin';
 import { servesThisPage } from '../endpoint';
 import {
+  notificationCore,
   pushCovers,
   pushKinds,
   readNotificationKinds,
@@ -156,10 +157,12 @@ export class Layout {
     const origin = s.endpointUrl ? new URL(s.endpointUrl).origin : undefined;
     const key = s.threadKey(threadId);
     void (async () => {
-      // The core's push already brings this one to the device.
-      if (await pushCovers(origin)) return;
+      // A machine this page does not serve: its id in the group, which its pushes and a tap name.
+      const core = origin !== undefined && origin !== location.origin ? notificationCore(s) : undefined;
+      // A push already brings this one to the device: this page's core, or a member forwarding to the device's push home.
+      if (await pushCovers(origin, core !== undefined && s.group !== null)) return;
       const body = typeof detail === 'function' ? await detail().catch(() => null) : detail;
-      await sendNotification({ ...toastFor(kind, key, title, body), coreThreadId: threadId, origin });
+      await sendNotification({ ...toastFor(kind, key, title, body), coreThreadId: threadId, origin, ...(core === undefined ? {} : { core }) });
     })();
   }
 
