@@ -113,6 +113,9 @@ test('a bot wakes the agent for findings only: quota notices, summaries, empty c
     remark('15', patrol, at, { body: PATROL_SUMMARY(true, '7723c1b') }),
     remark('16', 'dependabot[bot]', at, { body: 'Looks like rustls is up-to-date now, so this is no longer needed.' }),
     remark('17', 'reviewer', at, { kind: 'review', id: 'review:17', body: '', state: 'APPROVED' }),
+    // A finding about rate limits is a finding, inline or in a comment that is not a notice heading.
+    remark('18', rabbit, at, { kind: 'review-comment', id: 'review-comment:18', body: '**🎯 Functional Correctness** | **🟡 Minor**\n\n## Rate limit exceeded is retried forever\n\n`rateLimited` matches "rate limit exceeded" and never gives up.', path: 'packages/core/src/pull-request-watch.ts' }),
+    remark('19', 'dependabot[bot]', at, { body: 'GitHub answered "rate limit exceeded" while fetching the changelog; the update is still opened.' }),
   ];
   const dropped = [
     remark('20', rabbit, at, { body: QUOTA }),

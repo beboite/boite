@@ -243,8 +243,8 @@ export function initialMemory(since: number): WatchMemory {
 
 /** Remark bodies remembered per watch: past it, the oldest go and only the time cursor stands. */
 const BODIES = 300;
-/** A bot saying it will not review now: its quota, its rate limit, a skipped review. */
-const NOTICE = /review limit reached|rate limit (?:exceeded|reached)|used all (?:the )?free|usage limit reached|##\s*review skipped/i;
+/** A bot's comment saying it will not review now: a heading naming its quota, its rate limit or a skipped review. */
+const NOTICE = /^[>\s]*#{1,6}\s*(?:review limit reached|rate limit (?:exceeded|reached)|usage limit reached|review skipped)\b|you(?:'|’)ve used all (?:the )?free/im;
 /** The summary a review bot keeps rewriting in place: CodeRabbit's walkthrough, mtsu-patrol's summary. */
 const SUMMARY_MARK = /<!--\s*(?:this is an auto-generated comment: summarize by coderabbit\.ai|mtsu-patrol:summary)\s*-->/i;
 
@@ -280,7 +280,7 @@ const agrees = (body: string) => { const said = prose(body); return ACK.test(sai
  */
 export function actionable(remark: Remark, edited: boolean): boolean {
   if (!remark.bot) return true;
-  if (NOTICE.test(remark.body)) return false;
+  if (remark.kind === 'comment' && NOTICE.test(remark.body)) return false;
   const count = findings(remark.body);
   if (remark.kind === 'review') return remark.state === 'CHANGES_REQUESTED' || (count === null ? remark.body.trim() !== '' : count > 0);
   if (edited || SUMMARY_MARK.test(remark.body)) return count !== null && count > 0;
