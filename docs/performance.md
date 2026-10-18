@@ -404,15 +404,20 @@ when the core advertises `chunkedAnswers`.
   every stretch it does not hold as one row worth 80 px per missing message,
   so the scrollbar spans the whole thread from the first 40 messages on and a
   drag to the top lands on the first one. A frame after the view moves, the
-  stretch within a screen of it is read with `messages.list` `from`, 120
-  messages and 256 KiB at most: the thread's first page for a drag to the top,
-  the page right above the first message held for a scroll up, never the pages
-  in between. A page replaces rows worth what its messages weigh before they
-  are measured, so it moves nothing on screen; a wheel up 15,000 px of a
-  400-message thread on 2026-10-16 moved the message being read by no more
-  than 2 px per step while pages landed. A glide to the latest page asks for
-  nothing on its way down. A core without positions keeps the cursor paging
-  above (`lib/history-gaps.ts`).
+  stretch within a screen of it is read with `messages.list`, 120 messages and
+  256 KiB at most: `from` 0 for a drag to the top, `before` the first message
+  held for a scroll up, so a page its bytes cut short keeps the messages next
+  to the reader, never the pages in between. Read with `from` instead, a page
+  of long answers held the far end of its range and left the reader under a
+  gap that took six more pages to close. A message cut in rows weighs more
+  than the 80 px its gap counted, thousands of pixels for a page of long
+  answers: as the page goes in, the window is put on the row at the top of
+  the view, then that row is put back where it was on screen. Without the
+  first step the row left the rows drawn and the view stayed where the rows
+  above had pushed it: on 2026-10-18, a wheel up a 2,571-message thread moved
+  the reader 20 messages up the thread in one frame, onto the skeleton. A
+  glide to the latest page asks for nothing on its way down. A core without
+  positions keeps the cursor paging above (`lib/history-gaps.ts`).
 - A history page sends a successful call's output only up to 256 characters
   (`TOOL_OUTPUT_FOLDED_CHARS`): its folded card draws none of it. A longer one
   arrives empty with `outputDeferred`, and opening the card fetches it. A

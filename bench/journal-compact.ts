@@ -1,5 +1,5 @@
 /**
- * What the journal compaction (schema 36) does to a real journal: sizes per
+ * What the journal compaction (schema 37) does to a real journal: sizes per
  * table before and after the background passes, the passes' own cost, what a
  * `VACUUM INTO` gives back, and the page and full reads of the largest
  * threads before and after.
@@ -99,7 +99,7 @@ function sizes(db: Database): Map<string, { pages: number; rows: number; column:
     entry.pages += row.bytes;
     out.set(table, entry);
   }
-  // `preview` exists from schema 36 on; a column missing from the file counts 0.
+  // `preview` exists from schema 37 on; a column missing from the file counts 0.
   const columns: Record<string, string[]> = {
     part_blobs: ['data', 'preview'], messages: ['parts'], processes: ['command_line'], events: ['payload'], command_lines: ['text'],
   };

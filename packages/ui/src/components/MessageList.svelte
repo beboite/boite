@@ -596,9 +596,9 @@
   // On a core that places pages, the gap within a screen of the bottom, or `READ_AHEAD` screens of a reader above it, is read before it shows (lib/history-gaps.ts).
   const asked = new RangeAsk(); onDestroy(() => asked.stop());
   $effect(() => { void [measured, store.loadingRange, rows, viewHeight, pinned, scrollTop]; asked.soon(() => { if (!gapped.gaps.length || store.loadingRange || glide.active || lifting) return null; const total = totals(rows), reach = Math.max(LOAD_AT, viewHeight * (pinned ? 1 : READ_AHEAD)), top = pinned ? (total[rows.length] ?? 0) - viewHeight : scrollTop;
-    return { top, range: wantedRange(total, gapped.gaps, top - reach, top + viewHeight + reach, MESSAGE_PAGE) }; }, (from, limit) =>
-      // A page landing above the reader can weigh more than its gap: the row at the top of the view stays where it was.
-      loadKeepingReader(landing => store.loadRange(from, limit, landing), () => pinned ? undefined : viewport, tick, top => { scrollTop = top; })); });
+    return { top, range: wantedRange(total, gapped.gaps, top - reach, top + viewHeight + reach, MESSAGE_PAGE) }; }, ({ from, limit, below }) =>
+      // A page landing above the reader can weigh more than its gap: the row at the top of the view stays where it was, drawn.
+      loadKeepingReader(landing => store.loadRange(from, limit, landing, below), () => pinned ? undefined : viewport, kept => { const total = totals(rows), at = slots.indexOf(rows, kept.id); if (at >= 0) scrollTop = Math.max(0, (total[at] ?? 0) - kept.offset); }, tick, top => { scrollTop = top; })); });
   // A list too short to scroll asks for the pages beside it, again after each lands (`fillShort`).
   $effect(() => { void rows.length; void viewHeight; fillShort(viewport, store.openThread?.id === threadId, () => !!(navigationTarget || promptTarget), LOAD_AT, box => { loadAbove(box); pullNewer(store, box, LOAD_AT); }); });
 

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { TOOL_OUTPUT_PREVIEW_CHARS, previewToolOutputs, type Message, type MessagePart } from '@boite/contracts';
 import { Journal } from '../src/journal.ts';
 import { BLOB_MIN_CHARS, moveInlineOutputs, moveInlineValues, previewDigests, recodePartBlobs } from '../src/journal/part-blobs.ts';
-import { compactAll, schema35Journal } from './fixtures/journal-schema35.ts';
+import { compactAll, schema36Journal } from './fixtures/journal-schema36.ts';
 
 let dir: string, journal: Journal;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'boite-part-blobs-')); journal = new Journal(join(dir, 'journal.db')); });
@@ -133,7 +133,7 @@ test('values are stored compressed or as text, and every read path gives them ba
     expect(journal.messagePart(id, 1)?.part).toEqual(image);
   };
   everyRead('msg_a');
-  // A value stored as text, as before schema 36, reads the same everywhere.
+  // A value stored as text, as before schema 37, reads the same everywhere.
   for (const [index, value] of [[0, screenshot(0)], [1, screenshot(9)], [2, screenshot(1)]] as const) {
     journal.db.query('UPDATE part_blobs SET data = ?, codec = 0, preview = NULL, chars = NULL WHERE message_id = ? AND part_index = ?').run(value, 'msg_a', index);
   }
@@ -158,10 +158,10 @@ test('a tool output moves out from 4 KiB, and a page reads it whole up to the in
   expect(previewToolOutputs([page])).toEqual(previewToolOutputs([{ ...page, parts: [small, medium, large] }]));
 });
 
-test('a schema 35 journal reads the same before and after the background passes, which compress and move its values', async () => {
+test('a schema 36 journal reads the same before and after the background passes, which compress and move its values', async () => {
   journal.close();
   const file = join(dir, 'old.db');
-  const old = schema35Journal(file);
+  const old = schema36Journal(file);
   const big = read(0), medium = toolPart('medium output line\n'.repeat(300)), large = toolPart('large output line\n'.repeat(1_200));
   // The values of 32 KiB and more in part_blobs as text, smaller outputs inline.
   old.query("INSERT INTO part_blobs (message_id, part_index, field, thread_id, data, digest) VALUES ('old_a', 0, 'output', 'thr_a', ?, ?)")
@@ -172,7 +172,7 @@ test('a schema 35 journal reads the same before and after the background passes,
   old.close();
 
   journal = new Journal(file);
-  expect(journal.schema).toEqual({ from: 35, to: 36 });
+  expect(journal.schema).toEqual({ from: 36, to: 37 });
   const before = journal.listMessages('thr_a');
   const pageBefore = journal.listMessagePage('thr_a', { limit: 10, toolPreviews: true }).messages;
   const proofBefore = previewDigests.get(pageBefore[0]!.parts[0]!);

@@ -3,12 +3,12 @@ import { Journal } from '../../src/journal.ts';
 import { compactionSteps, compactOnce } from '../../src/journal/retention.ts';
 
 /**
- * A journal file as a schema 35 core left it: no codec, preview or length on
+ * A journal file as a schema 36 core left it: no codec, preview or length on
  * `part_blobs`, no `command_lines`, command lines in the trace rows. Made from
- * a current one by dropping what schema 36 added, so opening it with
+ * a current one by dropping what schema 37 added, so opening it with
  * `Journal` runs the real migration.
  */
-export function schema35Journal(file: string): Database {
+export function schema36Journal(file: string): Database {
   new Journal(file).close();
   const db = new Database(file);
   db.exec(`ALTER TABLE processes DROP COLUMN command_id;
@@ -16,7 +16,7 @@ export function schema35Journal(file: string): Database {
     ALTER TABLE part_blobs DROP COLUMN codec;
     ALTER TABLE part_blobs DROP COLUMN preview;
     ALTER TABLE part_blobs DROP COLUMN chars;
-    PRAGMA user_version = 35;`);
+    PRAGMA user_version = 36;`);
   return db;
 }
 

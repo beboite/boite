@@ -168,7 +168,7 @@ interface BlobRow { partIndex: number; field: string; data: string | Uint8Array;
 export function hydrate(db: Database, message: Message, toolPreviews = false): Message {
   if (!message.parts.some(part => part !== null && typeof part === 'object' && MARK in part)) return message;
   const full = db.query('SELECT part_index AS partIndex, field, data, digest, codec, 0 AS cut FROM part_blobs WHERE message_id = ?');
-  // `chars` is null on rows from before schema 36, all of them past the inline size.
+  // `chars` is null on rows from before schema 37, all of them past the inline size.
   const preview = db.query(`SELECT part_index AS partIndex, field, digest,
       CASE WHEN field = 'output' AND (chars IS NULL OR chars > ${TOOL_OUTPUT_INLINE_CHARS}) THEN 1 ELSE 0 END AS cut,
       CASE WHEN field = 'output' AND (chars IS NULL OR chars > ${TOOL_OUTPUT_INLINE_CHARS})
@@ -292,7 +292,7 @@ async function moveRows(db: Database, rows: MessageRow[], isOpen: (messageId: st
 
 /**
  * Moves the inline tool outputs of `TOOL_OUTPUT_BLOB_MIN_CHARS` up to
- * `BLOB_MIN_CHARS` out of rows written before schema 36, from the first row
+ * `BLOB_MIN_CHARS` out of rows written before schema 37, from the first row
  * after `afterRowid`, reading about `budget` bytes of rows. A message still
  * held open stops the pass with -1, as `moveInlineValues` does.
  */

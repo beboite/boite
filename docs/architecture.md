@@ -101,7 +101,7 @@ A newer journal schema is refused before writing, with the file and both version
 
 `message.part` and `artifact.published` events are not written: the message row
 holds the content and nothing reads them back. Those already stored, from
-before schema 36, are kept 3 days; retention walks them forward from the
+before schema 37, are kept 3 days; retention walks them forward from the
 `events:trail-pruned-through` setting. Event ids are rowids that SQLite hands
 out again once the newest events are deleted, so every deletion of events
 brings that cursor back to the last id in the same transaction. `message.started` keeps only the first
@@ -127,7 +127,7 @@ sends them only for a call that failed or was refused; its resume proof hashes
 a digest of the whole value. A streaming message stores only the
 parts that changed since its last committed write, and a value whose digest
 matches the stored one is not written again. Rows written before schema
-31 kept their values inline, and before schema 36 kept tool outputs under
+31 kept their values inline, and before schema 37 kept tool outputs under
 32 KiB inline and every `part_blobs` value as text. Three minutes after startup
 the core brings them to the current shape in ticks 250 ms apart
 (`journal/retention.ts`): it moves values one message per tick, then outputs

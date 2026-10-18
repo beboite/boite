@@ -108,21 +108,46 @@ function stringify(value: unknown): string {
 }
 
 /**
- * A resumed CLI restores the session's running totals when it still holds them,
- * and `total_cost_usd` then includes the earlier turns. Its per-model token
- * counts are restored with it, so they exceed this turn's own by what those
- * turns used; a CLI that started from zero shows no such gap.
+ * A resumed CLI restores the running totals its transcript saved when its last
+ * process ended, and `total_cost_usd` then includes the earlier turns. Its
+ * per-model token counts are restored with it, so they exceed this turn's own
+ * by what was restored; a CLI that started from zero shows no such gap.
+ * `before` is what the session's last process reported (`Turn.agentTotals`),
+ * or the sum of its turns when they predate that. Returns the part of the
+ * total that earlier turns already account for, or null when an older save
+ * came back: what it restored is unknown, so this turn's own share is too.
  */
-export function restoredCost(result: SDKResultMessage, before: { costUsd: number; tokens: number }): number {
-  if (before.costUsd <= 0 || before.tokens <= 0) return 0;
-  const held = Object.values(result.modelUsage ?? {}).reduce((sum, model) => sum + model.inputTokens + model.outputTokens + model.cacheReadInputTokens + model.cacheCreationInputTokens, 0);
+export function restoredCost(result: SDKResultMessage, before: { costUsd: number; tokens: number }): number | null {
+  const total = typeof result.total_cost_usd === 'number' ? result.total_cost_usd : 0;
+  if (before.costUsd <= 0 || before.tokens <= 0 || total <= 0) return 0;
   const own = mapUsage(result, 0);
   const turn = own.inputTokens + own.outputTokens + own.cacheReadTokens + own.cacheWriteTokens;
-  return held - turn >= before.tokens / 2 ? before.costUsd : 0;
+  const restored = heldTokens(result) - turn;
+  if (restored >= before.tokens && total >= before.costUsd) return before.costUsd;
+  return restored < before.tokens / 2 ? 0 : null;
 }
 
-/** `costBefore` is what the same CLI process already charged to earlier turns of a warm query. */
-export function mapUsage(result: SDKResultMessage, costBefore: number): Usage {
+/** Every token of the result's `modelUsage`: the CLI's running count, restored totals included. */
+function heldTokens(result: SDKResultMessage): number {
+  return Object.values(result.modelUsage ?? {}).reduce((sum, model) => sum + model.inputTokens + model.outputTokens + model.cacheReadInputTokens + model.cacheCreationInputTokens, 0);
+}
+
+/**
+ * The CLI's running totals as this result left them, what a later resume
+ * restores. None from a result with nothing counted: a startup error reports
+ * zeroed totals that say nothing about what the session's transcript holds.
+ */
+export function agentTotalsOf(result: SDKResultMessage): { costUsd: number; tokens: number } | null {
+  if (typeof result.total_cost_usd !== 'number') return null;
+  const tokens = heldTokens(result);
+  return result.total_cost_usd > 0 || tokens > 0 ? { costUsd: result.total_cost_usd, tokens } : null;
+}
+
+/**
+ * `costBefore` is what the same CLI process already charged to earlier turns
+ * of a warm query, null when that is unknown and so is this turn's cost.
+ */
+export function mapUsage(result: SDKResultMessage, costBefore: number | null): Usage {
   const total = typeof result.total_cost_usd === 'number' ? result.total_cost_usd : null;
   const usage = result.usage as
     | {
@@ -141,7 +166,7 @@ export function mapUsage(result: SDKResultMessage, costBefore: number): Usage {
     // the CLI restored less than the journal holds. Charging the whole total
     // would count the restored turns again, and the journal's sum, read back
     // as `costBefore` on the next resume, would grow with every cold start.
-    costUsdEquivalent: total === null || total < costBefore ? null : total - costBefore,
+    costUsdEquivalent: total === null || costBefore === null || total < costBefore ? null : total - costBefore,
   };
 }
 

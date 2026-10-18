@@ -11,7 +11,7 @@ bun bench/journal-compact.ts --journal <copy of a schema 35 journal.db> --runs 3
 The source is a copy of a schema 35 journal in daily use since 2026-09 (8,191
 messages, 1.6 million trace rows). The bench copies it with `VACUUM INTO` and
 starts on the copy the way the core does: the start VACUUM check, the real
-`Journal` (migration to schema 36), then the statistics ticks. It runs every
+`Journal` (migration to schema 37), then the statistics ticks. It runs every
 step of `compactionSteps` and the event retention in ticks 250 ms apart, as
 the core schedules them, and starts twice more: the first start runs
 `vacuumAtStart`, the second must find nothing to do. Reads are the median of
@@ -83,7 +83,7 @@ largest value. The statistics after the prune are one `ANALYZE` on the main
 thread, 497 ms. 6,593 ticks waited on the
 WAL checkpoints, and no checkpoint ran on the main thread.
 
-The first start on the copy, migration to schema 36 included, opened the
+The first start on the copy, migration to schema 37 included, opened the
 journal in 44 ms, then spent 383 ms in 24 statistics ticks (the longest
 324 ms). After the VACUUM, the journal opens in 8.6 ms with no statistics
 tick. Peak RSS of the bench was 1,536 MiB, held by the full reads below.

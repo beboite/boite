@@ -1594,6 +1594,22 @@ describe('Store', () => {
     expect(store.loadingRange).toBe(false);
   });
 
+  test('a page read up from a held message keeps the messages next to it when its bytes run out', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0, long: true });
+    store.attach(client);
+    await store.connect();
+    await store.open('t-long');
+    // Long answers: a reading page holds one message.
+    const call = client.call.bind(client);
+    vi.spyOn(client, 'call').mockImplementation(((method: string, params: Record<string, unknown>) => call(method as never, (method === 'messages.list' ? { ...params, maxBytes: 1 } : params) as never)) as typeof client.call);
+    const landed = vi.fn();
+    // Read from 240 on, the page held 240, eight screens above a reader scrolling up from 360.
+    expect(await store.loadRange(240, 120, landed, 'm-long-360')).toBe(1);
+    expect(store.openThread!.messages[0]?.id).toBe('m-long-359');
+    expect([...store.messagePlacement('t-long', store.openThread!.messages).gaps]).toEqual([['m-long-359', { from: 0, count: 359 }]]);
+    expect(landed).toHaveBeenCalledTimes(1);
+  });
+
   test('a rewind elsewhere of a message inside a missing stretch reads the thread again', async ({ createStore }) => {
     const { client, store } = createStore({ delayMs: 0, long: true });
     store.attach(client);

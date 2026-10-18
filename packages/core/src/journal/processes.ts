@@ -10,7 +10,7 @@ export const PROCESS_ROWS_SLACK = 500;
 
 /**
  * The columns of a `processes` row as `ProcessRow` reads them, with the
- * command line taken from `command_lines` (schema 36) or, on a row written
+ * command line taken from `command_lines` (schema 37) or, on a row written
  * before, from the row itself. Use with `PROCESS_FROM`.
  */
 export const PROCESS_COLUMNS = `p.thread_id, p.pid, p.parent_pid, p.exe, COALESCE(p.command_line, c.text) AS command_line, p.started_at,
@@ -235,7 +235,7 @@ export class TracePrune {
 }
 
 /**
- * Moves the command lines of rows written before schema 36 into
+ * Moves the command lines of rows written before schema 37 into
  * `command_lines`, at most `limit` rows after `afterRowid`. Returns the last
  * rowid done, or null once none is left.
  */

@@ -1370,6 +1370,15 @@ export interface Turn {
    * finished before it was recorded.
    */
   checkpoint?: { sessionId: string; entry: string } | null;
+  /**
+   * The agent's own running totals when this turn ended, for an agent that
+   * saves them with its session and restores them on resume (Claude: the
+   * result's `total_cost_usd` and the tokens of its `modelUsage`). The next
+   * process that resumes the session starts from the last of them, not from
+   * the sum of the session's turns. Absent on other drivers and on turns
+   * finished before it was recorded.
+   */
+  agentTotals?: { costUsd: number; tokens: number } | null;
 }
 
 /**

@@ -2176,6 +2176,8 @@ export const strings = {
     coverage: 'Tokens {reported}/{turns} turns · Cost {priced}/{turns}',
     partialCost: '{count} turns have no price and are left out of the estimate.',
     rates: 'Public API rates of {model}, per million tokens: input {input}, output {output}, cache read {cacheRead}, cache write {cacheWrite}.',
+    cacheSplit: 'Cache: {read} read, {write} written.',
+    cacheSplitCost: 'Cache: {read} read ({readCost}), {write} written ({writeCost}).',
     reportedCost: 'No public rate matches this model, so the cost is the one its agent reported.',
     noRates: 'No public rate matches this model and its agent reported no cost.',
     olderCore: 'The machine that ran these turns has a Boite older than public API rates, so only a cost its agent reported shows here. Update it in Settings, Machines and updates to price them.',

@@ -47,7 +47,8 @@ test('a mode applied after lost-session recovery updates the current execution s
   } finally { await h.stop(); restore(); }
 });
 
-test.each([false, true])('restart coalesces mode changes and respects Stop=%s', async stop => {
+// With `totals`, the stopped attempt reports the agent's running totals, which the restart resumes from.
+test.each([[false, false], [true, false], [false, true]])('restart coalesces mode changes and respects Stop=%s (agent totals %s)', async (stop, totals) => {
   const h = await startTestCore();
   const attempts: TurnContext[] = [];
   const stopped = Promise.withResolvers<TurnResult>();
@@ -76,7 +77,7 @@ test.each([false, true])('restart coalesces mode changes and respects Stop=%s', 
     if (stop) await client.call('turns.stop', { threadId });
     stopped.resolve({ status: 'stopped', sessionId: 'native-session', usage: {
       inputTokens: 2, outputTokens: 3, cacheReadTokens: 1, cacheWriteTokens: 0, costUsdEquivalent: 0.1,
-    } });
+    }, ...(totals ? { agentTotals: { costUsd: 0.9, tokens: 40 } } : {}) });
     await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt !== null);
     const saved = h.core.journal.getTurn(turn.id)!;
     expect(attempts).toHaveLength(stop ? 1 : 2);
@@ -87,7 +88,8 @@ test.each([false, true])('restart coalesces mode changes and respects Stop=%s', 
       expect(attempts[1]!.thread.permissionMode).toBe('default');
       expect(attempts[1]!.sessionId).toBe('native-session');
       expect(attempts[1]!.prompt).toContain('Do not repeat completed work');
-      expect(attempts[1]!.sessionBefore).toEqual({ costUsd: 0.1, tokens: 6 });
+      expect(attempts[1]!.sessionBefore).toEqual(totals ? { costUsd: 0.9, tokens: 40 } : { costUsd: 0.1, tokens: 6 });
+      expect(saved.agentTotals).toEqual(totals ? { costUsd: 0.9, tokens: 40 } : undefined);
       expect(saved.usage).toMatchObject({ inputTokens: 7, outputTokens: 10, cacheReadTokens: 1 });
       expect(saved.usage!.costUsdEquivalent).toBeCloseTo(0.3);
     }

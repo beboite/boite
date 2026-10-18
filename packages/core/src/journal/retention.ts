@@ -206,9 +206,9 @@ export function compactionSteps(journal: Journal): ((now: number) => Promise<Ste
   const steps: ((now: number) => Promise<Step>)[] = [
     // Values of 32 KiB and more of rows written before `part_blobs`, one row per tick.
     () => rowPass(journal, ONE_TIME_PASSES[0], after => moveInlineValues(journal.db, after, isOpen)),
-    // Tool outputs of 4 to 32 KiB of rows written before schema 36.
+    // Tool outputs of 4 to 32 KiB of rows written before schema 37.
     () => outputs.run(size => rowPass(journal, ONE_TIME_PASSES[1], after => moveInlineOutputs(journal.db, after, size, isOpen))),
-    // `part_blobs` rows stored as text before schema 36.
+    // `part_blobs` rows stored as text before schema 37.
     () => recode.run(size => rowPass(journal, ONE_TIME_PASSES[2], after => recodePartBlobs(journal.db, after, size, () => journal.isClosed()))),
     // Every thread's trace cut to what it keeps, then once a day; before the
     // command lines move, so the lines of the rows it deletes are never written.
@@ -216,7 +216,7 @@ export function compactionSteps(journal: Journal): ((now: number) => Promise<Ste
       prune.limit = size;
       return dailyPass(journal, now, PRUNED_AT, PRUNED_THROUGH, after => prune.step((after as string | undefined) ?? ''));
     }),
-    // Command lines of trace rows written before schema 36.
+    // Command lines of trace rows written before schema 37.
     () => intern.run(size => rowPass(journal, ONE_TIME_PASSES[3], after => internOldCommandLines(journal.db, after, size))),
     // Free pages back to the disk, once the journal is in incremental auto-vacuum.
     () => vacuum.run(pages => freePages(journal, pages)),

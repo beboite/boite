@@ -139,9 +139,10 @@ export function seedLongThread(dataDir: string, threadId: string): { messages: n
 /**
  * A core whose journal holds the long thread and a short one beside it: the
  * core is started, the two threads made, the core stopped, the journal
- * seeded, and the core started again on the same data directory.
+ * seeded, and the core started again on the same data directory. `seed`
+ * writes another long thread than `seedLongThread`.
  */
-export async function startCoreWithLongThread(options: StartCoreOptions = {}, projectPath?: string): Promise<{ core: RunningCore; long: string; short: string; messages: number; bytes: number }> {
+export async function startCoreWithLongThread(options: StartCoreOptions = {}, projectPath?: string, seed: (dataDir: string, threadId: string) => { messages: number; bytes: number } = seedLongThread): Promise<{ core: RunningCore; long: string; short: string; messages: number; bytes: number }> {
   const first = await startCore(options);
   let long: string;
   let short: string;
@@ -164,7 +165,7 @@ export async function startCoreWithLongThread(options: StartCoreOptions = {}, pr
   await first.stop({ keepDataDir: true });
   // A failed start removes its data directory, fixture and all: give the stopped core's lock time to go first.
   await Bun.sleep(1_000);
-  const seeded = seedLongThread(first.dataDir, long);
+  const seeded = seed(first.dataDir, long);
   await Bun.sleep(1_500);
   const core = await startCore({ ...options, dataDir: first.dataDir });
   return { core, long, short, ...seeded };

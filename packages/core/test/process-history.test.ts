@@ -13,7 +13,7 @@ import { nativeAgents } from '../src/native-agents.ts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
-import { compactAll, schema35Journal } from './fixtures/journal-schema35.ts';
+import { compactAll, schema36Journal } from './fixtures/journal-schema36.ts';
 
 const FORGET_MS = 40;
 const EXIT = { exitCode: 0, cpuMs: 5, peakMemoryBytes: 1024, ioBytes: null };
@@ -255,10 +255,10 @@ test('a thread keeps its newest 2,000 trace rows, its live rows and the rows its
   expect(rows().slice(0, 3)).toEqual([2, 3, 110]);
 });
 
-test('a schema 35 trace has its command lines stored once and every thread over the limit pruned in the background, agent cards kept', async () => {
+test('a schema 36 trace has its command lines stored once and every thread over the limit pruned in the background, agent cards kept', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'boite-trace-'));
   const file = join(dir, 'journal.db');
-  const old = schema35Journal(file);
+  const old = schema36Journal(file);
   const insert = old.query(`INSERT INTO processes (thread_id, pid, parent_pid, exe, command_line, started_at, exited_at, exit_code, cpu_ms, peak_memory_bytes, io_bytes)
     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 5, 1024, NULL)`);
   old.transaction(() => {
