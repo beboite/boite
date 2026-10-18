@@ -182,11 +182,17 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 490,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,855,400 |
+| UI files, excluding `.br` and `.gz` copies | 4,857,800 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,437,500 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the boot notice that tells a lost chunk from an old browser,
+on `origin/main` at `5055522c`, measures 4,856,869 UI bytes with `measure()`
+after a fresh `bun run build:ui` on Windows, against 4,854,887 for main at
+`ee9f9ac8`: its sentences, retry button and feature probe add 1,982 bytes to
+`index.html`. The UI limit rises to 4,857,800; the other limits stay.
 
 On 2026-10-18, agent browser downloads (PR #585) on `origin/main` at
 `ee9f9ac8` measure 4,436,753 core JavaScript bytes on the Windows CI runner.

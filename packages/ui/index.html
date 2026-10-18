@@ -89,23 +89,57 @@
         }
       } catch (e) {}
     </script>
-    <!-- A browser under the floor (Safari 15.4, Chrome 111: docs/phone.md) fails to
-         parse the app and never runs main.ts, which sets the flag first. It says so
-         instead of staying blank. The catalogues never loaded, so the sentence is
-         here once per language of LOCALES; src/lib/boot-notice.test.ts checks that. -->
+    <!-- main.ts sets the flag first; a page that loaded without it never ran the app.
+         A browser under the floor (Safari 15.4, Chrome 111: docs/phone.md) fails to
+         parse it, and says so. A browser that has what the floor has failed before
+         the entry ran, most often on a chunk lost on the way (offline, a dropped
+         connection), sometimes on a module that threw: it offers to load again, and
+         does so by itself once the browser is back online. The catalogues never loaded,
+         so each sentence is here once per language of LOCALES;
+         src/lib/boot-notice.test.ts checks that. -->
     <script>
       window.addEventListener('load', function () {
         var app = document.getElementById('app');
         if (window.__boiteBooted || !app || app.childElementCount > 0) return;
+        // Safari 15.4 and Chrome 111 are the first to have all four.
+        var floor = false;
+        try {
+          floor =
+            typeof Array.prototype.at === 'function' &&
+            typeof Object.hasOwn === 'function' &&
+            typeof structuredClone === 'function' &&
+            CSS.supports('color', 'oklch(0 0 0)');
+        } catch (e) {}
         var notices = {
-          en: 'Boite cannot start in this browser. It needs Safari 15.4 (iOS 15.4) or Chrome 111, or a newer version.',
-          fr: 'Boite ne peut pas démarrer dans ce navigateur. Il faut Safari 15.4 (iOS 15.4) ou Chrome 111, ou une version plus récente.'
+          en: {
+            old: 'Boite cannot start in this browser. It needs Safari 15.4 (iOS 15.4) or Chrome 111, or a newer version.',
+            lost: 'Boite could not load. Check the connection, then try again.',
+            retry: 'Try again'
+          },
+          fr: {
+            old: 'Boite ne peut pas démarrer dans ce navigateur. Il faut Safari 15.4 (iOS 15.4) ou Chrome 111, ou une version plus récente.',
+            lost: "Boite n'a pas pu se charger. Vérifiez la connexion, puis réessayez.",
+            retry: 'Réessayer'
+          }
         };
         var language = (navigator.language || '').toLowerCase().split('-')[0];
-        var note = document.createElement('p');
+        var text = Object.prototype.hasOwnProperty.call(notices, language) ? notices[language] : notices.en;
+        var note = document.createElement('div');
         note.setAttribute('role', 'alert');
         note.style.cssText = 'margin:0;padding:32px 24px;max-width:520px;font:15px/1.5 system-ui,-apple-system,sans-serif';
-        note.textContent = Object.prototype.hasOwnProperty.call(notices, language) ? notices[language] : notices.en;
+        var line = document.createElement('p');
+        line.style.margin = '0';
+        line.textContent = floor ? text.lost : text.old;
+        note.appendChild(line);
+        if (floor) {
+          var again = document.createElement('button');
+          again.type = 'button';
+          again.textContent = text.retry;
+          again.style.cssText = 'margin-top:16px;padding:8px 16px;font:inherit;color:inherit;background:none;border:1px solid currentColor;border-radius:8px;cursor:pointer';
+          again.addEventListener('click', function () { location.reload(); });
+          note.appendChild(again);
+          window.addEventListener('online', function () { location.reload(); });
+        }
         app.appendChild(note);
       });
     </script>
