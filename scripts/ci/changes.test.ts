@@ -79,6 +79,9 @@ test('runtime, build inputs and unknown files require the complete suite', () =>
 
 test('pull requests, main pushes and forced runs pick their mode', () => {
   expect(ciMode('pull_request', false)).toBe('pr');
+  expect(ciMode('pull_request', false, true)).toBe('draft');
+  expect(ciMode('pull_request', true, true)).toBe('full');
+  expect(ciMode('push', false, true)).toBe('warm');
   expect(ciMode('push', false)).toBe('warm');
   expect(ciMode('push', true)).toBe('full');
   expect(ciMode('workflow_dispatch', false)).toBe('full');
@@ -100,6 +103,17 @@ test('main pushes run affected tests while warming the extra portable architectu
   expect(full).toMatchObject({ core: true, e2e: true });
   expect(JSON.parse(full.portable)).toHaveLength(4);
   expect(plan(affectedChecks(['README.md']), 'warm')).toMatchObject({ ...none, e2e: false });
+});
+
+test('a draft runs only the Linux checks and leaves the rest to the ready pull request', () => {
+  const all = affectedChecks(['packages/core/src/main.ts']);
+  const draft = plan(all, 'draft');
+  expect(draft).toMatchObject({ core: true, web: true, desktop: false, e2e: false, server: false, android: false, stress: false });
+  expect(JSON.parse(draft.coreRunners)).toEqual([{ os: 'ubuntu-24.04', name: 'Linux x64' }]);
+  // Focused checks still stand in for absent full suites.
+  expect(plan(affectedChecks(['tests/e2e/ui.test.ts']), 'draft')).toMatchObject({ e2eTypes: true, desktop: false, e2e: false });
+  expect(plan(affectedChecks(['telemetry/src/index.ts']), 'draft')).toMatchObject({ web: true, telemetry: true });
+  expect(plan(affectedChecks(['README.md']), 'draft')).toMatchObject({ ...none, e2e: false });
 });
 
 test('pull requests run the core suite without the Intel Mac; main, releases and manual runs keep it', () => {
@@ -131,7 +145,7 @@ test('focused checks are covered by the full core and web jobs when both apply',
 const python = Bun.which(process.platform === 'win32' ? 'python' : 'python3');
 test.skipIf(!python)('the actual required gate rejects failed, cancelled and unexpected job skips', () => {
   const workflow = readFileSync(join(import.meta.dir, '../../.github/workflows/ci.yml'), 'utf8');
-  expect(workflow).toContain('name: CI required');
+  expect(workflow).toContain("name: ${{ github.event.pull_request.draft == true && 'CI draft' || 'CI required' }}");
   const match = /          python3 - <<'PY'\n([\s\S]+?)          PY/.exec(workflow);
   if (!match) throw new Error('ci.yml: missing required gate Python script');
   const script = match[1]!.replace(/^ {10}/gm, '');
