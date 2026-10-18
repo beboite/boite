@@ -526,8 +526,9 @@ export class ClaudeSession {
 
   private cliEnv(ctx: SessionContext): Record<string, string | undefined> {
     const mode = ctx.thread.contextMode ?? null;
-    return mode === null ? agentEnv(ctx.accountEnv) : {
-      ...agentEnv(ctx.accountEnv),
+    const env = agentEnv(ctx.accountEnv, ctx.toolSummaries === true);
+    return mode === null ? env : {
+      ...env,
       [CONTEXT_ENV]: mode.label,
       [CONTEXT_GUIDES_ENV]: mode.guides ? undefined : '0',
       CLAUDE_CODE_DISABLE_CLAUDE_MDS: mode.instructions ? undefined : '1',

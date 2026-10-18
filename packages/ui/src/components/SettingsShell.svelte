@@ -132,6 +132,7 @@ import { workspace } from '../lib/workspace.svelte';
     ['general', 'conversations', strings.settings.notifications],
     ['general', 'conversations', strings.settings.asyncQuestions],
     ['general', 'conversations', strings.settings.shortAnswers],
+    ['general', 'conversations', strings.settings.toolSummaries],
     ['general', 'conversations', strings.settings.titleModel],
     ['general', 'conversations', strings.features.chatArtifacts.title],
     ...(browserBridge.paints ? [['general', 'browser-profiles', strings.browserProfiles.heading]] as [SettingsTab, string, string][] : []),

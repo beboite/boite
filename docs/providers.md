@@ -1114,7 +1114,7 @@ on 2026-10-14 with Claude Code 2.1.299 and Codex 0.162.1:
 
 | Provider | Reasoning text | Batch summaries |
 | --- | --- | --- |
-| Claude | A summary per thinking block: the driver passes `--thinking-display summarized` through `extraArgs` | `tool_use_summary` with `CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES=1`, kept as each call's `summary` |
+| Claude | A summary per thinking block: the driver passes `--thinking-display summarized` through `extraArgs` | `tool_use_summary` with `CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES=1`, kept as each call's `summary`; off unless `Settings.toolSummaries` |
 | Codex | Summary deltas, a bold heading then a paragraph; `auto` and `detailed` gave the same shape | none |
 | ACP (Grok, OpenCode), pi | What the agent streams as thought chunks | none |
 
@@ -1137,8 +1137,10 @@ thinking block before a call is reasoning, and a model before 5.1 (the model
 of the stream's `message_start`, else the thread's) writes its updates as text,
 so its consecutive thinking blocks share one part as before.
 
-Each tool summary is one request the CLI sends to Haiku after a batch of calls
-finished (`source=tool_use_summary_generation` in its debug log), on the
+Tool summaries are off by default: the driver sets the variable only when the
+owner turns on Settings > General > Tool summaries (`Settings.toolSummaries`),
+read when a Claude process starts. Each tool summary is one request the CLI
+sends to Haiku after a batch of calls finished (`source=tool_use_summary_generation` in its debug log), on the
 thread's account. It names the calls it covers, so it can arrive while the next
 batch already runs; a call of an earlier turn is not redrawn. The other
 progress messages the CLI sends (`thinking_tokens`, `api_retry`, `status`,

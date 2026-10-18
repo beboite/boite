@@ -91,7 +91,7 @@ export interface AutoCompact {
 }
 
 const NUMERIC_KEYS = ['warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetPercent', 'memoryReserveMb'] as const;
-const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'asyncQuestions', 'shortAnswers', 'agentLogAccess', 'autoResumeLimitedThreads'] as const;
+const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'asyncQuestions', 'shortAnswers', 'toolSummaries', 'agentLogAccess', 'autoResumeLimitedThreads'] as const;
 /** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
 const PERCENT_KEYS = ['agentCpuCapPercent'] as const;
 

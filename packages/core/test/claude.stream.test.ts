@@ -160,8 +160,26 @@ describe('claude driver', () => {
     ]);
   });
 
+  test('tool summaries stay off until the owner turns them on, each one being a small-model request', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted((fake) => {
+      fake.emit(init('sess-off'));
+      fake.emit(success('sess-off'));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'hello')).toBe('done');
+
+    const options = calls.at(-1)!.options;
+    expect(options.extraArgs).toEqual({ 'thinking-display': 'summarized' });
+    expect(options.env).toBeDefined();
+    expect(options.env?.CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES).toBeUndefined();
+  });
+
   test('the CLI is asked for summarized thinking and tool summaries, and a summary labels the calls it names', async () => {
     const client = await harness.connect();
+    await client.call('settings.set', { toolSummaries: true });
     const threadId = await claudeThread(client);
 
     scripted((fake) => {

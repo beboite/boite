@@ -97,6 +97,7 @@ export const fr: Translation = {
     keys: {
       asyncQuestions: 'Laisser les agents demander sans s\'arrêter',
       shortAnswers: 'Réponses courtes',
+      toolSummaries: 'Résumés des outils (Claude)',
       titleModel: 'Modèle des titres',
       threadDoneRetentionDays: 'Supprimer les conversations terminées après',
       threadDeletionRetentionDays: 'Purger les conversations supprimées après',
@@ -2264,6 +2265,8 @@ export const fr: Translation = {
     asyncQuestionsHint: 'Apprend la commande boite ask aux agents au début d\'une session. Codex pose déjà ses questions ainsi.',
     shortAnswers: 'Réponses courtes',
     shortAnswersHint: 'Demande à chaque agent, à chaque message, le résultat d\'abord en quelques phrases simples, sans préambule, récapitulatif ni commentaire en cours de route. Les faits, les chiffres et les commandes restent.',
+    toolSummaries: 'Résumés des outils (Claude)',
+    toolSummariesHint: 'Claude décrit chaque série d\'appels d\'outils en une ligne au lieu de les compter. Chaque ligne est une requête à son petit modèle, Haiku, facturée au compte de la conversation. S\'applique au démarrage d\'un processus Claude.',
     titleModel: 'Modèle des titres',
     titleModelHint: 'Nomme une conversation après sa première réponse. Automatique prend l\'agent de la conversation sur son petit modèle.',
     titleModelAuto: 'Automatique',

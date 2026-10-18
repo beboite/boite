@@ -36,6 +36,7 @@ export interface SettingPlace {
 export const REQUESTABLE_SETTINGS = {
   asyncQuestions: { page: 'general', section: 'conversations', sensitive: false },
   shortAnswers: { page: 'general', section: 'conversations', sensitive: false },
+  toolSummaries: { page: 'general', section: 'conversations', sensitive: false },
   titleModel: { page: 'general', section: 'conversations', sensitive: false },
   threadDoneRetentionDays: { page: 'general', section: 'archived', sensitive: true },
   threadDeletionRetentionDays: { page: 'general', section: 'archived', sensitive: true },
@@ -117,6 +118,7 @@ const MISSING: Partial<Record<RequestableSetting, unknown>> = {
   asyncQuestions: true,
   autoResumeLimitedThreads: false,
   shortAnswers: true,
+  toolSummaries: false,
   titleModel: null,
   autoCompact: null,
   publicUrl: null,

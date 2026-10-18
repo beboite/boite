@@ -2266,6 +2266,13 @@ export interface Settings {
    */
   shortAnswers?: boolean;
   /**
+   * Claude writes a one-line summary of each batch of tool calls, which the
+   * timeline shows in place of the counted calls. Each summary is one request
+   * to Claude's small model, billed to the thread's account. Applies when a
+   * Claude process starts. Missing reads as off.
+   */
+  toolSummaries?: boolean;
+  /**
    * Agents may read this machine's anonymized diagnostics and draft an issue
    * from them (`boite logs`, `boite issue`). Missing reads as on.
    */
