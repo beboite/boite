@@ -316,7 +316,9 @@ export class Worktrees {
     let expired: ReturnType<typeof refused> | undefined;
     const late = timeoutMs === undefined ? null : new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        expired = refused(`git cleanup did not finish within ${timeoutMs} ms`, { cwd, args });
+        // Name the command, not "cleanup": draft creation runs under this bound too, and a CI
+        // run (2026-10-18) lost 10 s to a git its log showed only as [Array ...].
+        expired = refused(`git ${args.join(' ')} did not finish within ${timeoutMs} ms`, { cwd, args });
         // The registry owns POSIX groups and Windows jobs. Drain git's inherited
         // pipes before cleanup so its checkout/filter descendants stop writing.
         this.core.procs.killTree(threadId);

@@ -126,6 +126,31 @@ test('an empty landing draft during a failed read preserves unread durable text 
   expect(cleared.composerStates.draft?.text ?? '').toBe('');
 });
 
+test('a journal that opens late restores its text, keeps what was typed meanwhile, and raises no storage error', async () => {
+  const slow = () => new DOMException('Draft journal did not open within 3 seconds', 'TimeoutError');
+  vi.mocked(readDraftJournal).mockRejectedValueOnce(slow()).mockRejectedValueOnce(slow())
+    .mockResolvedValue({ updatedAt: 1, inputs: { 't-trace': { text: 'Saved before the restart', attachments: [], queued: [] } }, drafts: {} });
+  const store = await ready('late-journal');
+  store.editComposerText('t-parser', 'Typed while the journal opened');
+  await vi.waitFor(() => expect(store.draftsReadable).toBe(true));
+  expect(store.composerStates['t-trace']?.text).toBe('Saved before the restart');
+  expect(store.composerStates['t-parser']?.text).toBe('Typed while the journal opened');
+  expect(store.error).toBeNull();
+  expect(await store.flushDrafts()).toBe(true);
+  const checkpoint = vi.mocked(writeDraftJournal).mock.lastCall![1] as { inputs: Record<string, { text: string }> };
+  expect(Object.fromEntries(Object.entries(checkpoint.inputs).map(([id, input]) => [id, input.text])))
+    .toEqual({ 't-trace': 'Saved before the restart', 't-parser': 'Typed while the journal opened' });
+});
+
+test('a journal that never opens is reported once its retries run out', async () => {
+  vi.mocked(readDraftJournal).mockRejectedValue(new DOMException('Draft journal did not open within 3 seconds', 'TimeoutError'));
+  const store = await ready('silent-journal');
+  await vi.waitFor(() => expect(store.error).toBe(strings.errors.draftStorage));
+  expect(store.draftsReadable).toBe(false);
+  // The start's read, then twenty more while the open carries on.
+  expect(vi.mocked(readDraftJournal)).toHaveBeenCalledTimes(1 + 20);
+});
+
 test.each([
   { typed: null, parked: false },
   { typed: 'New text while reconnecting', parked: false },

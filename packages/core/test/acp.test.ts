@@ -24,7 +24,9 @@ const FAKE_AGENT = fileURLToPath(new URL('./fixtures/acp-agent.ts', import.meta.
 test('ACP named task calls reach the native team without exposing the side conversation', async () => {
   const client = await startCore();
   const threadId = await acpThread(client);
-  const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+  // The file's first turn starts the fake agent and the ACP driver cold: 1.3
+  // to 4.1 s on passing Windows runners, past the client's 5 s default on a slow one.
+  const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
   await client.call('turns.start', { threadId, prompt: '[agents]' });
   expect((await finished).status).toBe('done');
   expect((await client.call('delegation.get', { threadId })).nativeAgents).toEqual([
@@ -529,7 +531,7 @@ describe('acp driver', () => {
     const threadId = await acpThread(client);
     harness!.core.providers.require('acp-fake').quirks = ['antigravity'];
     const requested = client.next('question.asked', (request) => request.threadId === threadId);
-    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: '[question]' });
     const request = await requested;
     expect(request.options.map((option) => option.id)).toEqual(['yes', 'no']);
