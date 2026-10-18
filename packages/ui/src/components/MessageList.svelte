@@ -45,7 +45,7 @@
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
   const narrow = new MediaQuery('(max-width: 720px)');
-  const reveal = new MessageReveal(() => messages, () => shownTurns, () => narrow.current);
+  const reveal = new MessageReveal(() => messages, () => narrow.current);
 
   let {
     store,

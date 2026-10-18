@@ -1,4 +1,4 @@
-import type { Message, Turn } from '@boite/contracts';
+import type { Message } from '@boite/contracts';
 
 /** What a tap on a control does to the row: one in the open row keeps it, any other only closes it. */
 const CONTROL = 'button, a, input, textarea, select, summary, label, [role="button"], [contenteditable="true"]';
@@ -12,14 +12,13 @@ const CONTROL = 'button, a, input, textarea, select, summary, label, [role="butt
 export class MessageReveal {
   revealed = $state<string | null>(null);
   #messages: () => Message[];
-  #turns: () => Turn[];
   #phone: () => boolean;
   #lastPrompt = $derived.by(() => this.#messages().findLast((message) => message.role === 'user')?.id ?? null);
-  #lastTurn = $derived.by(() => this.#turns().at(-1)?.id ?? null);
+  /** The turn of the last answer drawn, read from the messages: a queued or unanswered turn after it has none. */
+  #lastAnswer = $derived.by(() => this.#messages().findLast((message) => message.role === 'assistant')?.turnId ?? null);
 
-  constructor(messages: () => Message[], turns: () => Turn[], phone: () => boolean) {
+  constructor(messages: () => Message[], phone: () => boolean) {
     this.#messages = messages;
-    this.#turns = turns;
     this.#phone = phone;
     $effect(() => {
       if (this.revealed === null) return;
@@ -34,7 +33,7 @@ export class MessageReveal {
   /** A row's marks: its key, and whether its buttons show. */
   attrs(message: Message): Record<string, string | undefined> {
     const key = this.key(message);
-    const latest = message.role === 'user' ? message.id === this.#lastPrompt : message.turnId === this.#lastTurn;
+    const latest = message.role === 'user' ? message.id === this.#lastPrompt : message.turnId === this.#lastAnswer;
     return { 'data-reveal': key, 'data-latest': latest ? '' : undefined, 'data-revealed': this.revealed === key ? '' : undefined };
   }
 

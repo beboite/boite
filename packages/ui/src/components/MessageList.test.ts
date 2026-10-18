@@ -1351,3 +1351,23 @@ test('a phone keeps the buttons under the last prompt and answer, shows another 
   document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); flushSync();
   expect(earlier.hasAttribute('data-revealed')).toBe(false);
 });
+
+test('a prompt queued behind a finished turn keeps the buttons of the answer before it on a phone', async ({ ready }) => {
+  window.localStorage.clear();
+  vi.stubGlobal('matchMedia', (media: string) => Object.assign(new EventTarget(), { media, matches: media.includes('max-width: 720px'), onchange: null, addListener() {}, removeListener() {} }));
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  const { store: live } = await ready({ delayMs: 0, long: true });
+  await live.open('t-long');
+  const thread = live.openThread!;
+  const messages = thread.messages;
+  const answer = messages.findLast((message) => message.role === 'assistant')!;
+  // Its turn is queued and nothing answers it yet: the newest turn has no answer row.
+  thread.turns.push({ id: 'turn-queued', threadId: 't-long', status: 'queued', queuedAt: Date.now(), startedAt: null, finishedAt: null, usage: null, error: null });
+  messages.push({ id: 'm-queued', threadId: 't-long', turnId: 'turn-queued', role: 'user', parts: [{ type: 'text', text: 'and then?' }], state: 'complete', createdAt: Date.now() });
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+
+  expect(document.querySelector('[data-mid="m-queued"]')?.closest('article')?.hasAttribute('data-latest')).toBe(true);
+  expect(document.querySelector(`[data-mid="${answer.id}"]`)?.closest('article')?.hasAttribute('data-latest')).toBe(true);
+});
