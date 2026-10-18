@@ -78,9 +78,27 @@ export function ceiling(published: Sizes): Sizes {
   return Object.fromEntries(MEASURES.map((key) => [key, Math.floor(published[key] * (1 + HEADROOM))])) as unknown as Sizes;
 }
 
+/** Markdown without its `<!-- -->` comments, removed until none is left; an unclosed one runs to the end. */
+function withoutComments(text: string): string {
+  const once = withoutCommentsOnce(text);
+  return once === text ? text : withoutComments(once);
+}
+
+function withoutCommentsOnce(text: string): string {
+  let kept = '';
+  let at = 0;
+  for (let open = text.indexOf('<!--'); open !== -1; open = text.indexOf('<!--', at)) {
+    kept += text.slice(at, open);
+    const close = text.indexOf('-->', open + 4);
+    if (close === -1) return kept;
+    at = close + 3;
+  }
+  return kept + text.slice(at);
+}
+
 /** The text under a `## Bundle size` heading, comments removed; undefined when absent or empty. */
 export function bodyReason(body: string | null | undefined): string | undefined {
-  const text = (body ?? '').replace(/<!--[\s\S]*?-->/g, '').replace(/\r\n/g, '\n');
+  const text = withoutComments((body ?? '').replace(/\r\n/g, '\n'));
   const heading = /^#{2,3}[ \t]+bundle size[ \t]*$/im.exec(text);
   if (!heading) return undefined;
   const rest = text.slice(heading.index + heading[0].length);
@@ -124,7 +142,8 @@ export function judge(head: Sizes, base: Reference | undefined, limit: Reference
   const notes = [
     base ? `Base: ${base.source}.` : 'Base: no measurement, growth not checked.',
     limit ? `Ceiling: ${limit.source} plus ${HEADROOM * 100} %.` : 'Ceiling: no published measurement, not checked.',
-    ...(reason ? ['', `Reason given in the body: ${reason.split('\n')[0]}`] : []),
+    // Shown in the job summary, which renders HTML: the body's text stays text.
+    ...(reason ? ['', `Reason given in the body: ${reason.split('\n')[0]!.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`)}`] : []),
   ];
   return { report: [...rows, '', ...notes].join('\n'), errors };
 }

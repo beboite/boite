@@ -66,6 +66,12 @@ test('reads the reason under a Bundle size heading, ignoring comments and empty 
   expect(bodyReason('## Bundle size\n\n<!-- Explain growth above 0.1 %. -->\n\n## Verification')).toBeUndefined();
   expect(bodyReason('Bundle size grows, see below')).toBeUndefined();
   expect(bodyReason(null)).toBeUndefined();
+  // A comment split by another, or never closed, leaves no `<!--` behind.
+  expect(bodyReason('## Bundle size\n<!<!-- x -->-- hidden -->kept')).toBe('kept');
+  expect(bodyReason('## Bundle size\nkept <!-- never closed\n## Verification')).toBe('kept');
+  const verdict = judge({ ...base, uiEntryChunk: base.uiEntryChunk + 600 }, reference, undefined, '<img src=x onerror=alert(1)> & co');
+  expect(verdict.report).toContain('&#60;img src=x onerror=alert(1)&#62; &#38; co');
+  expect(verdict.report).not.toContain('<img');
 });
 
 test('takes measurements only from a ci push run on main of this repository', () => {
