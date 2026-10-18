@@ -18,7 +18,8 @@ permissions:
 
 concurrency:
   group: flake-loop-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A loop already running keeps its data; a newer head waits for it.
+  cancel-in-progress: false
 
 env:
   RUNS: ${{ inputs.runs || 10 }}
