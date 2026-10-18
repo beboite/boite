@@ -42,16 +42,29 @@
       return;
     }
     event.preventDefault();
-    const directory = localFileDirectory(store, threadId);
-    if (directory && (directLinks || (executableLink(anchor.dataset.filePath) && !anchor.dataset.fileLine))) {
-      if (opening) return;
-      opening = true;
-      void (directLinks ? openChatFile : openLocalFile)(directory, anchor.dataset.filePath).catch(reason => {
-        store?.reportError(reason, 'minor');
-      }).finally(() => { opening = false; });
-      return;
-    }
-    selected = { path: anchor.dataset.filePath!, ...(anchor.dataset.fileLine ? { line: Number(anchor.dataset.fileLine) } : {}) };
+    const line = anchor.dataset.fileLine;
+    if (opening) return;
+    opening = true;
+    void located(anchor.dataset.filePath).then(path => {
+      const directory = localFileDirectory(store, threadId);
+      if (directory && (directLinks || (executableLink(path) && !line))) return (directLinks ? openChatFile : openLocalFile)(directory, path);
+      selected = { path, ...(line ? { line: Number(line) } : {}) };
+    }).catch(reason => {
+      store?.reportError(reason, 'minor');
+    }).finally(() => { opening = false; });
+  }
+  /**
+   * The path a file link names in its thread. An agent often writes a file by
+   * its name alone (`core.md` for `.local/core.md`): a relative path that is not
+   * there as written becomes the file the core finds by that tail. Several at
+   * the same depth are reported rather than guessed.
+   */
+  async function located(path: string): Promise<string> {
+    if (!store?.owner || !threadId || /^(?:[a-z]:)?[\\/]/i.test(path)) return path;
+    const found = await store.locateFile(threadId, path);
+    if (!found.ok || found.value.length === 0) return path;
+    if (found.value.length > 1) throw new Error(strings.artifacts.ambiguous(path, found.value.join(', ')));
+    return found.value[0]!;
   }
   // The scan resumes where the last delta stopped instead of reading the answer again.
   const scan = new ParagraphScan();

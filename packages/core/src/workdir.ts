@@ -17,6 +17,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { FILES_LIST_MAX, FILE_MAX_BYTES, FILE_ROUTE, FILE_TICKET_TTL_MS } from '@boite/contracts';
 import type { FileContent, FileEntry, ThreadId, Timestamp } from '@boite/contracts';
 import type { Core } from './core.ts';
+import { locateFile } from './files.ts';
 import { refused, RpcFailure } from './errors.ts';
 import type { RpcContext } from './router.ts';
 import { newToken } from './ids.ts';
@@ -651,6 +652,8 @@ export function readCwd(core: Core, threadId: ThreadId, ctx: RpcContext, path?: 
 export function registerWorkdirMethods(core: Core): void {
   core.router.register('files.list', (params, ctx) => listDirectory(readCwd(core, params.threadId, ctx, params.path), params.path));
   core.router.register('files.read', (params, ctx) => readFileContent(core, readCwd(core, params.threadId, ctx, params.path), params.path));
+  // Owner only: a chat link the owner clicks, which may name a file in an ignored tree.
+  core.router.register('files.locate', (params) => locateFile(threadCwd(core, params.threadId), params.path));
   // Owner only, absent from both permission maps: the agent already has its own
   // hands on the disk, and a paired phone has no business writing a file.
   core.router.register('files.write', (params) =>
