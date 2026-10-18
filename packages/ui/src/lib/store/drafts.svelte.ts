@@ -187,12 +187,19 @@ export class Drafts {
    * read is tried again; meanwhile the synchronous backup holds what is typed.
    * Only a journal still silent after LATE_JOURNAL_MS, or one that fails, is
    * reported: four Windows CI shells showed "could not save your draft" from
-   * their first second while nothing had failed but time.
+   * their first second while nothing had failed but time. The answer clears
+   * only the notice's own toast: never another error, nor one a refused
+   * backup raised meanwhile.
    */
   async #awaitJournal(generation: number): Promise<void> {
     const key = this.#key!;
     const s = this.ctx.store;
-    const notice = setTimeout(() => { if (generation === this.#generation && !this.#durableReady) s.error = strings.errors.draftStorage; }, LATE_JOURNAL_MS);
+    let noticed = false;
+    const notice = setTimeout(() => {
+      if (generation !== this.#generation || this.#durableReady || s.error) return;
+      s.error = strings.errors.draftStorage;
+      noticed = true;
+    }, LATE_JOURNAL_MS);
     try {
       for (let attempt = 1; ; attempt++) {
         let durable: Journal | null;
@@ -208,7 +215,7 @@ export class Drafts {
         this.#restore(local, durable);
         this.#durableReady = true;
         this.#writeFailed = false;
-        if (s.error === strings.errors.draftStorage) s.error = null;
+        if (noticed && s.error === strings.errors.draftStorage && !this.#backupFailed && !this.#failedEntries.size) s.error = null;
         this.#changed = true;
         this.persist();
         return;

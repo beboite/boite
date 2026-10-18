@@ -142,6 +142,29 @@ test('a journal that opens late restores its text, keeps what was typed meanwhil
     .toEqual({ 't-trace': 'Saved before the restart', 't-parser': 'Typed while the journal opened' });
 });
 
+test.each([
+  { meanwhile: 'nothing', after: null },
+  { meanwhile: 'a refused backup', after: strings.errors.draftStorage },
+  { meanwhile: 'another error', after: strings.errors.revoked },
+])('a late journal answer clears only the notice it raised, after $meanwhile', async ({ meanwhile, after }) => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.stubGlobal('indexedDB', {}); // Without one, every refused backup raises the toast again by itself.
+  let release!: (value: unknown) => void;
+  vi.mocked(readDraftJournal).mockRejectedValueOnce(new DOMException('Draft journal did not open within 3 seconds', 'TimeoutError'))
+    .mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
+  const store = await ready(`late-notice-${meanwhile}`);
+  if (meanwhile === 'another error') store.error = strings.errors.revoked;
+  vi.advanceTimersByTime(10_000);
+  expect(store.error).toBe(meanwhile === 'another error' ? strings.errors.revoked : strings.errors.draftStorage);
+  const write = meanwhile === 'a refused backup' ? vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); }) : null;
+  try {
+    store.editComposerText('t-trace', 'Typed during the wait');
+    release(null);
+    await vi.waitFor(() => expect(store.draftsReadable).toBe(true));
+    expect(store.error).toBe(after);
+  } finally { write?.mockRestore(); }
+});
+
 test('a journal that never opens is reported once its retries run out', async () => {
   vi.mocked(readDraftJournal).mockRejectedValue(new DOMException('Draft journal did not open within 3 seconds', 'TimeoutError'));
   const store = await ready('silent-journal');

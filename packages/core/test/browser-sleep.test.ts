@@ -117,18 +117,26 @@ test('a wake that fails leaves the tab asleep, and the next use wakes it', async
 
 // A turn that runs for half an hour without touching its tab must not keep
 // it awake throughout: the turn holds it only for a while after its last use,
-// and the next command wakes it.
+// and the next command wakes it. The hold is measured from the use to the
+// freeze, not by checking after a sleep: a macOS runner (2026-10-18) woke from
+// a 100 ms sleep past the 150 ms hold.
 test('a running turn keeps an unused tab awake for a while only, and its next command wakes it', async () => {
   const { tab, calls } = fakeTab();
+  const send = tab.page.send;
+  let frozeAt = 0;
+  tab.page.send = async (method, params, timeoutMs) => {
+    if (method === 'Emulation.setFocusEmulationEnabled' && params?.enabled === false) frozeAt = Date.now();
+    return send(method, params, timeoutMs);
+  };
   const sleep = new TabSleep<Sleeper>(() => false, () => true, 20, 150);
   await sleep.use(tab, async () => {});
-  await Bun.sleep(100);
-  expect(tab.sleep.asleep).toBe(false);
   await until(() => tab.sleep.asleep);
+  expect(frozeAt - tab.sleep.usedAt).toBeGreaterThanOrEqual(150);
   await sleep.use(tab, async () => { calls.push('command'); });
   expect(calls.slice(-3)).toEqual(['Page.setWebLifecycleState {"state":"active"}', 'Emulation.setFocusEmulationEnabled {"enabled":true}', 'command']);
   // The command starts the turn's hold again.
-  await Bun.sleep(100);
-  expect(tab.sleep.asleep).toBe(false);
+  const used = tab.sleep.usedAt;
+  await until(() => tab.sleep.asleep);
+  expect(frozeAt - used).toBeGreaterThanOrEqual(150);
   sleep.drop(tab);
 });

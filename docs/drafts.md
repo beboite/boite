@@ -63,8 +63,9 @@ the open carries on, then restores the durable text into the inputs nobody
 typed in. An attachment the backup held only by its ID gets its bytes back
 from the journal in every input, so the next checkpoint keeps them. The
 storage error shows when the journal refuses, or is still
-silent after ten seconds; a journal that answers later clears it, and the
-reads stop after about a minute (`lib/store/drafts.svelte.ts`). Until then, a
+silent after ten seconds, unless another error is showing; a journal that
+answers later clears that notice, but not a refused backup reported meanwhile,
+and the reads stop after about a minute (`lib/store/drafts.svelte.ts`). Until then, a
 refused synchronous backup is reported at once, since nothing else holds that
 text.
 The browser can close the journal's IndexedDB connection on its own (storage
