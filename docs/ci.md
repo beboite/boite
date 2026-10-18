@@ -184,9 +184,16 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 490,500 |
 | UI files, excluding `.br` and `.gz` copies | 4,861,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,470,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,471,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the rewind beside a working turn (PR #599) measures 4,470,693
+core JavaScript bytes after a fresh `bun run build:core` on Linux, against
+4,470,119 for `origin/main` at `3a19eb57` on the same machine (Windows CI:
+4,470,646): the `overlap` check that asks git which nested files the outer
+snapshot lists, and the busy answer, add 574 bytes. The core limit rises to
+4,471,000; the others stay.
 
 On 2026-10-18, the journal compaction (schema 37: zstd values, per-thread
 command lines, the paced background passes in `journal/retention.ts` and
