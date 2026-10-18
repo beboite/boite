@@ -133,4 +133,14 @@ describe('the file index', () => {
     expect(await locateFile(root, 'missing.md')).toEqual([]);
     expect(await locateFile(root, '../core.md')).toEqual([]);
   });
+
+  test('a single match found before the cap is no answer, since its twin may lie past it', async () => {
+    const root = join(harness.dataDir, 'twins');
+    for (const side of ['a', 'b']) {
+      mkdirSync(join(root, side), { recursive: true });
+      writeFileSync(join(root, side, 'core.md'), '');
+    }
+    expect(await locateFile(root, 'core.md', 3)).toEqual([]);
+    expect(await locateFile(root, 'core.md', 4)).toEqual(['a/core.md', 'b/core.md']);
+  });
 });
