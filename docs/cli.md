@@ -131,6 +131,14 @@ and 100 actions. Network URLs omit credentials, queries and fragments. Action
 history records operation names, not typed values or evaluated code.
 `diagnostics-clear` clears both buffers.
 
+`downloads` lists the files the conversation's pages downloaded, with their
+state, size, kind, sha256, source and a warning when the kind calls for one.
+They wait in a quarantine of the core ([downloads](browser.md#downloads)) until
+`download save <id> [path]` copies one into the working directory without the
+execute bit and never over another file; `download wait <id>` waits for one
+still running and `download discard <id>` drops it. A command that started a
+download lists it in its output.
+
 `recording-start` and `recording-stop` save a silent MP4 in the working
 directory, made in the browser itself ([recording](browser.md#recording)), up to
 1920 × 1080. `recording-start --fps 60 --codec av1` chooses the rate and codec;
