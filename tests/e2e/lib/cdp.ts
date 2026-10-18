@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import type { Subprocess } from 'bun';
 import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
+import { relay } from './ws-relay.ts';
 
 /**
  * Marks the tour seen before any script of the page runs, and only where no
@@ -599,6 +600,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     return `\nTrace: last devtools message ${Math.round(now - this.#heardAt)} ms ago; socket ${this.#closedBy ?? `state ${this.#socket.readyState}`}; browser ${this.#proc === null ? 'attached' : this.#proc.exitCode === null ? `pid ${this.#proc.pid} running` : `exited ${this.#proc.exitCode} (signal ${this.#proc.signalCode})`}
 Test loop delays over 50 ms in 30 s: ${lags.length ? lags.slice(-8).join(', ') : 'none'}
 UI server: ${ui}
+Relay: ${relays.get(this.#socket)?.report() ?? 'none'}
 Browser stderr tail:
 ${stderr || '(empty)'}`;
   }
@@ -744,11 +746,24 @@ export async function probeDebuggingPort(port: number): Promise<string> {
   }
 }
 
-function openSocket(target: TargetInfo): Promise<WebSocket> {
+/** Under `BOITE_E2E_TRACE`, each devtools socket's relay, which checks the frames the browser sent. */
+const relays = new WeakMap<WebSocket, { report(): string; dump(path: string): string; close(): void }>();
+
+async function openSocket(target: TargetInfo): Promise<WebSocket> {
   const url = target.webSocketDebuggerUrl;
   if (url === undefined) throw new Error('the page target has no debugger url');
+  const traced = TRACE ? await relay(url) : null;
   return new Promise<WebSocket>((resolve, reject) => {
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(traced?.url ?? url);
+    if (traced) {
+      relays.set(socket, traced);
+      socket.addEventListener('close', (event) => {
+        // A protocol error keeps the browser's bytes for a replay against Bun's client (`BOITE_E2E_TRACE_DIR`).
+        const dir = process.env.BOITE_E2E_TRACE_DIR;
+        if (event.code === 1002 && dir) console.warn(`[e2e] devtools socket closed 1002, kept ${traced.dump(join(dir, `devtools-${Date.now()}`))}`);
+        setTimeout(() => traced.close(), 100);
+      }, { once: true });
+    }
     // A socket that never opened is closed with its refusal: nothing else
     // holds it, and a late open would keep its connection for the whole run.
     const fail = (message: string) => {

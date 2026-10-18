@@ -124,7 +124,10 @@ runs, prints the error of each failure and writes a table to the job summary.
 browser's answers sat unread, the load and whether `Browser.getVersion` still
 answered; `BOITE_E2E_TRACE=1` makes an E2E timeout or lost browser say how the
 devtools socket closed, whether Chrome still ran, the test process's event
-loop delays and what the UI server still owed.
+loop delays and what the UI server still owed. It also passes each devtools
+socket through a loopback relay (`tests/e2e/lib/ws-relay.ts`) that checks
+every frame Chrome sends, and on a 1002 close keeps Chrome's bytes and read
+lengths in `BOITE_E2E_TRACE_DIR` for a replay against Bun's client.
 `scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
 three attempts at most, when hdiutil reports `Resource busy`. That runner
 fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly

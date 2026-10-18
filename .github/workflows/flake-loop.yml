@@ -120,6 +120,8 @@ jobs:
             if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw 'No E2E files for shard 3' }
             $runs = [math]::Max(1, [int]([int]$env:RUNS / 4)); $together = @('--together')
           }
+          New-Item -ItemType Directory -Force flake-loop/devtools | Out-Null
+          $env:BOITE_E2E_TRACE_DIR = (Resolve-Path flake-loop/devtools).Path
           bun scripts/ci/flake-loop.ts --runs $runs --out flake-loop @together @files
       - uses: ./.github/actions/upload-artifact
         if: always()
