@@ -1,8 +1,7 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
-  import { onMount } from 'svelte';
-  import { Download, ExternalLink, Play, Puzzle, RefreshCw, RotateCw, ShieldAlert, Square, TriangleAlert } from '@lucide/svelte';
+  import { ChevronDown, Download, ExternalLink, Play, Puzzle, RefreshCw, RotateCw, ShieldAlert, Square, TriangleAlert } from '@lucide/svelte';
   import type { PluginAppState, PluginGatewayState, PluginPool, PluginPreview, PluginRejected, PluginState, PluginUpdates, RpcParams } from '@boite/contracts';
   import { gatewayDashboardReachable } from '@boite/contracts';
   import { besideCore } from '../lib/gateway-dashboard';
@@ -13,9 +12,29 @@
   import { relativeTime } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import QuotaList from './QuotaList.svelte';
+  import Menu from './Menu.svelte';
+  import { isThisPC, workspace, type Machine } from '../lib/workspace.svelte';
 
-  let { store }: { store: Store } = $props();
+  let { store: page }: { store: Store } = $props();
   const t = strings.plugins;
+
+  /** The page's own machine, for a store the workspace does not list. */
+  let own = $derived<Machine>({ id: page.endpointUrl ?? 'local', label: page.core?.hostname ?? strings.machines.local, store: page });
+  /** Plugins are installed by an owner, so only the machines this window owns are offered. */
+  let machines = $derived((workspace.machines.some((machine) => machine.store === page) ? workspace.machines : [own, ...workspace.machines])
+    .filter((machine) => machine.store === page || machine.store.owner));
+  let picked = $state<string | null>(null);
+  /**
+   * A plugin runs beside the core that installed it, and a desktop app shows
+   * its window there. The page opens on this PC rather than on the machine of
+   * the open conversation, which may be a server with nothing installed.
+   */
+  let chosen = $derived(machines.find((machine) => machine.id === picked)
+    ?? machines.find(isThisPC)
+    ?? machines.find((machine) => machine.store === page)
+    ?? own);
+  let store = $derived(chosen.store);
+  let machineItems = $derived(machines.map((machine) => ({ id: machine.id, label: machine.label, active: machine === chosen })));
 
   let plugins = $state<PluginState[]>([]);
   let pools = $state<Record<string, PluginPool[]>>({});
@@ -256,8 +275,11 @@
     }
   }
 
-  onMount(() => {
+  // Each machine has its own plugins: switching reads the other core from scratch.
+  $effect(() => {
     const client = store.client;
+    plugins = []; pools = {}; busy = {}; checking = {}; errors = {}; error = '';
+    preview = null; inspectError = '';
     if (!client) return;
     let disposed = false;
     const off = client.on('plugins.updated', (value) => {
@@ -270,7 +292,7 @@
       plugins = rows;
       await Promise.all(rows.filter((plugin) => plugin.status === 'installed' && plugin.pools.length > 0).map((plugin) => loadPools(plugin.id)));
     }).catch((cause) => {
-      error = messageOf(cause);
+      if (!disposed) error = messageOf(cause);
     });
     return () => { disposed = true; off(); };
   });
@@ -453,7 +475,14 @@
 {/snippet}
 
 <div class="page" data-testid="plugins-page">
-  <header><div><h1 class="ui-label-box"><span class="ui-label">{t.heading}</span><InfoTip topic={t.heading} text={t.intro} /></h1></div></header>
+  <header>
+    <div><h1 class="ui-label-box"><span class="ui-label">{t.heading}</span><InfoTip topic={t.heading} text={t.intro} /></h1></div>
+    {#if machines.length > 1}
+      <Menu items={machineItems} label={t.machine} placement="bottom" testid="plugins-machine" onpick={(id) => { picked = id; }}>
+        <span class="machine-name ui-label">{chosen.label}</span><ChevronDown size={13} />
+      </Menu>
+    {/if}
+  </header>
   {#if error}<p class="bad" role="alert">{error}</p>{/if}
 
   {#if installed.length > 0}
@@ -541,6 +570,7 @@
 
 <style>
   .page { container-type: inline-size; }
+  .machine-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
   section { max-width: var(--settings-width); margin-bottom: 24px; }
   section > h2 { margin: 0 0 8px; display: flex; align-items: center; gap: 6px; }
   .hint { margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; }

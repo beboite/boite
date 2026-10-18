@@ -29,6 +29,11 @@ Plugins are administration of the machine that hosts the core, so every
 `plugins.*` method is owner only and the phone settings leave the page to the
 desktop app ([phone](phone.md)).
 
+Each core has its own plugins. The page opens on this PC when the window has
+one, since a desktop app shows its window there, whichever machine the open
+conversation runs on. With several machines connected, a menu beside the
+heading names the machine shown and switches to another one this window owns.
+
 ## The manifest
 
 Put `boite-plugin.json` at the root of the repository:
