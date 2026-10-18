@@ -6,9 +6,9 @@
 
   /**
    * What the core will try again by itself on the open thread: the next try
-   * of a turn the model refused at capacity, or the resume of a thread a usage
-   * limit stopped, with its countdown and a way to give it up. Stop does the
-   * same from the composer.
+   * of a turn the model refused at capacity, the resume of a thread a usage
+   * limit stopped, or of a turn that stopped before its answer, with its
+   * countdown and a way to give it up. Stop does the same from the composer.
    */
   let { store }: { store: Store } = $props();
   let retry = $derived(store.openThread?.retry ?? null);
@@ -26,7 +26,10 @@
   let left = $derived(retry ? elapsed(Math.max(0, retry.at - now)) : '');
   let body = $derived(!retry ? '' : retry.kind === 'capacity'
     ? fill(strings.thread.retryCapacityBody, { time: left, attempt: String(retry.attempt), attempts: String(retry.attempts) })
-    : fill(strings.thread.retryLimitBody, { time: clockTime(retry.at, now), in: left }));
+    : retry.kind === 'auto-continue'
+      ? fill(strings.thread.retryContinueBody, { time: left, attempt: String(retry.attempt), attempts: String(retry.attempts) })
+      : fill(strings.thread.retryLimitBody, { time: clockTime(retry.at, now), in: left }));
+  let title = $derived(!retry ? '' : retry.kind === 'capacity' ? strings.thread.retryCapacityTitle : retry.kind === 'auto-continue' ? strings.thread.retryContinueTitle : strings.thread.retryLimitTitle);
 
   async function cancel() {
     const threadId = store.openThread?.id;
@@ -38,10 +41,10 @@
 </script>
 
 {#if retry}
-  <aside class="retry" data-testid="thread-retry" data-kind={retry.kind} aria-label={retry.kind === 'capacity' ? strings.thread.retryCapacityTitle : strings.thread.retryLimitTitle}>
+  <aside class="retry" data-testid="thread-retry" data-kind={retry.kind} aria-label={title}>
     <Hourglass size={18} aria-hidden="true" />
     <div class="body">
-      <p class="title ui-label-box"><span class="ui-label">{retry.kind === 'capacity' ? strings.thread.retryCapacityTitle : strings.thread.retryLimitTitle}</span></p>
+      <p class="title ui-label-box"><span class="ui-label">{title}</span></p>
       <p class="countdown" role="timer" aria-live="off">{body}</p>
     </div>
     <button class="small ghost" data-testid="thread-retry-cancel" disabled={pending || store.connection !== 'ready'} onclick={cancel}>
