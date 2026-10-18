@@ -8,8 +8,10 @@
  * `FILE_CAP` entries and says so, rather than reading a monorepo's every file.
  */
 
+import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
+import { refused } from './errors.ts';
 
 /** How many files a walk keeps before giving up on the rest. */
 export const FILE_CAP = 20_000;
@@ -81,6 +83,50 @@ export async function walkFiles(root: string, cap = FILE_CAP): Promise<FileWalk>
     }
   }
   return { files, capped: false };
+}
+
+/**
+ * The files under `root` a chat link's `path` names: itself when it is there,
+ * else those whose relative path ends with it, so `core.md` finds
+ * `.local/core.md`. Ignored trees count here, since a link may well name a
+ * generated file. The walk goes breadth first and stops at the first depth
+ * with a match, so a copy deeper down does not make a name ambiguous, and
+ * reads at most `cap` entries.
+ */
+export async function locateFile(root: string, path: string, cap = FILE_CAP): Promise<string[]> {
+  if (typeof path !== 'string' || path.length === 0 || /[\u0000-\u001f]/.test(path)) {
+    throw refused(`files.locate path: expected a file path, got ${JSON.stringify(path)}`, { path });
+  }
+  if (existsSync(resolve(root, path))) return [path];
+  const parts = path.replaceAll('\\', '/').split('/').filter((part) => part.length > 0 && part !== '.');
+  if (isAbsolute(path) || parts.length === 0 || parts.includes('..')) return [];
+  // Windows and macOS names do not differ by case alone.
+  const fold = process.platform === 'linux' ? (text: string) => text : (text: string) => text.toLowerCase();
+  const tail = fold(parts.join('/'));
+  let level = [''];
+  let read = 0;
+  while (level.length > 0) {
+    const found: string[] = [];
+    const next: string[] = [];
+    for (const relative of level) {
+      let entries;
+      try {
+        entries = await readdir(relative.length === 0 ? root : join(root, relative), { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (++read > cap) return found.sort();
+        if (ALWAYS_SKIPPED.has(entry.name)) continue;
+        const file = relative.length === 0 ? entry.name : `${relative}/${entry.name}`;
+        if (entry.isDirectory()) next.push(file);
+        else if (entry.isFile() && (fold(file) === tail || fold(file).endsWith(`/${tail}`))) found.push(file);
+      }
+    }
+    if (found.length > 0) return found.sort();
+    level = next;
+  }
+  return [];
 }
 
 /**

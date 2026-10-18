@@ -286,6 +286,19 @@ const ready = true;
       };
       return content;
     },
+    'files.locate': async (params) => {
+      const cwd = ctx.thread(params.threadId).cwd;
+      if (typeof params.path !== 'string' || params.path.length === 0) throw refusal(`files.locate path: expected a file path, got ${JSON.stringify(params.path)}`);
+      try {
+        inside(ctx, cwd, params.path, 'files.locate path', 'file');
+        return [params.path];
+      } catch { /* Not there as written: look for it by its tail, as the core does. */ }
+      const tail = params.path.replace(/\\/g, '/').split('/').filter((part) => part !== '' && part !== '.').join('/').toLowerCase();
+      if (tail === '' || /^([a-z]:)?\//i.test(params.path) || tail.split('/').includes('..')) return [];
+      const found = [...ctx.files.keys(), ...FAKE_MEDIA_PATHS].filter((path) => path.toLowerCase() === tail || path.toLowerCase().endsWith(`/${tail}`));
+      const depth = Math.min(...found.map((path) => path.split('/').length));
+      return found.filter((path) => path.split('/').length === depth).sort();
+    },
     'files.write': async (params) => {
       const cwd = ctx.thread(params.threadId).cwd;
       const path = inside(ctx, cwd, params.path, 'files.write path');
