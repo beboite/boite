@@ -181,10 +181,10 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 493,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,874,000 |
+| UI entry chunk | 493,500 |
+| UI files, excluding `.br` and `.gz` copies | 4,875,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,472,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,494,500 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -196,11 +196,22 @@ that main as #590 and #592 measured it. The tracker, its prompts, its route
 and the model read before a reviewer or a tracker starts add 23,905 core
 bytes. The list itself loads outside the entry chunk; the entry keeps the goal
 bar's checklist line and the new English sentences (2,619 bytes), and the UI
-total adds the list, the model row and both languages (14,289 bytes). The
-three limits rise to 493,000, 4,874,000 and 4,462,500. Merged with
-`origin/main` at `95862236`, whose server update rollback (#588) adds 9,113
-core bytes, it measures 4,471,414 core bytes on Linux; the core limit
-rises to 4,472,000.
+total adds the list, the model row and both languages (14,289 bytes). Merged
+with `origin/main` at `3a19eb57`, after the server update rollback (#588) and
+the journal compaction (#583), it measures 492,969 entry bytes, 4,874,326 UI bytes and 4,494,024 core
+JavaScript bytes on Linux. The three
+limits rise to 493,500, 4,875,500 and 4,494,500.
+
+On 2026-10-18, the journal compaction (schema 37: zstd values, per-thread
+command lines, the paced background passes in `journal/retention.ts` and
+`journal/processes.ts`, and the start-time VACUUM in `journal/vacuum.ts`)
+merged with `origin/main` at `95862236` measures 490,436 entry bytes,
+4,860,909 UI bytes and 4,470,119 core JavaScript bytes with `measure()` after
+fresh `bun run build:ui` and `bun run build:core` on Windows, against 490,185,
+4,859,771 and 4,447,509 for that main on the same machine: the window's
+compacting state adds 1,138 UI bytes and the journal code 22,610 core bytes.
+The UI and core JavaScript limits rise to 4,861,500 and 4,470,500; the other
+limits stay.
 
 On 2026-10-18, the server update rollback merged with `origin/main` at
 `feccdfcd` measures 4,447,509 core JavaScript bytes with `measure()` after a

@@ -146,7 +146,7 @@ if (journal !== undefined) {
     let after = 0, moved = 0, slowest = 0;
     for (;;) {
       const one = performance.now();
-      const next = moveInlineValues(settled.db, after, () => false);
+      const next = await moveInlineValues(settled.db, after, () => false);
       if (next === null) break;
       slowest = Math.max(slowest, performance.now() - one);
       after = next;

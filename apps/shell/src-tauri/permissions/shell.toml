@@ -3,6 +3,7 @@ identifier = "allow-shell"
 description = "Allows the local main UI to invoke the desktop shell commands."
 commands.allow = [
   "core_endpoint",
+  "core_starting",
   "open_local_file",
   "open_chat_file",
   "save_attachment",
