@@ -181,10 +181,10 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 495,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,884,000 |
+| UI entry chunk | 495,500 |
+| UI files, excluding `.br` and `.gz` copies | 4,885,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,502,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,503,500 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -207,6 +207,18 @@ Merged again with `origin/main` at `80c2da06`, after keeping the prompt cache
 warm (#594), it measures 494,834 entry bytes,
 4,883,819 UI bytes and 4,501,712 core JavaScript bytes on Linux; the
 three limits rise to 495,000, 4,884,000 and 4,502,000.
+After #595 (`origin/main` at `e22bb094`) it measures 495,052 entry bytes, 4,884,876 UI bytes and
+4,502,972 core JavaScript bytes on
+Linux; the three limits rise to 495,500, 4,885,500 and 4,503,500.
+
+On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
+492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes
+with `measure()` after fresh `bun run build:ui` and `bun run build:core` on
+Windows, against 491,872, 4,867,996 and 4,477,807 recorded below for PR #594:
+`files.locate` (the walk that finds a chat link named by the tail of its path)
+adds 1,292 core bytes, and the link's lookup in `Prose.svelte` with its store
+call and strings adds 240 entry and 1,097 UI bytes. The UI and core JavaScript
+limits rise to 4,869,600 and 4,479,600; the other limits stay.
 
 On 2026-10-18, keeping the prompt cache warm (PR #594) merged with
 `origin/main` at `3a19eb57` measures 491,872 entry bytes, 4,867,996 UI bytes
