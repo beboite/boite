@@ -181,12 +181,23 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 490,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,860,100 |
+| UI entry chunk | 492,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,868,100 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,448,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,455,700 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, keeping the prompt cache warm (PR #594) merged with
+`origin/main` at `95862236` measures 491,724 entry bytes, 4,867,526 UI bytes
+and 4,455,241 core JavaScript bytes with `measure()` after fresh
+`bun run build:ui` and `bun run build:core` on Windows, against 490,185,
+4,859,771 and 4,447,509 for that main; Windows CI measured the same UI bytes.
+The settings card adds 3,897 bytes to the settings chunk, the quiet ping line
+and its message grouping 1,539 to the entry chunk, the sentences 1,523; the
+keepalive scheduler, its guards and the request clock add 7,732 core bytes.
+The entry, UI and core JavaScript limits rise to 492,000, 4,868,100 and
+4,455,700; `main.js` stays.
 
 On 2026-10-18, the server update rollback merged with `origin/main` at
 `feccdfcd` measures 4,447,509 core JavaScript bytes with `measure()` after a
