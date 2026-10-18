@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { crc32, deflateSync } from 'node:zlib';
-import type { Message } from '@boite/contracts';
+import type { Message, RpcResult } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -213,6 +213,160 @@ describe('deferred pictures', () => {
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0 })).toEqual({ data: SCREEN });
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_shot', partIndex: 1, display: true })).toEqual({ data: SHOT });
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_gif', partIndex: 0, display: true })).toEqual({ data: gif });
+  });
+
+  test('with ticket a copy and an original come as a cached file route address, the same one while it lives', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    harness.core.journal.putMessage({ id: 'msg_screen', threadId, turnId: 'trn_seed', role: 'assistant', state: 'complete', createdAt: 3_001, parts: [{ type: 'file', mimeType: 'image/png', data: SCREEN, name: 'screen.png' }] });
+    const asked = { threadId, messageId: 'msg_screen', partIndex: 0 };
+
+    const copy = await client.call('messages.attachment', { ...asked, display: true, ticket: true });
+    expect(copy).toMatchObject({ data: '', mimeType: 'image/webp' });
+    expect(copy.url).toMatch(/^\/file\/[A-Za-z0-9_-]+$/);
+    const served = await fetch(`${harness.url}${copy.url}`);
+    expect(served.status).toBe(200);
+    expect(served.headers.get('content-type')).toBe('image/webp');
+    expect(served.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
+    const bytes = new Uint8Array(await served.arrayBuffer());
+    expect(bytes.length).toBe(copy.bytes!);
+    // The same bytes the base64 answer an older client asks for carries, and the same address asked again.
+    expect(Buffer.from(bytes).toString('base64')).toBe((await client.call('messages.attachment', { ...asked, display: true })).data);
+    expect((await client.call('messages.attachment', { ...asked, display: true, ticket: true })).url).toBe(copy.url);
+
+    const original = await client.call('messages.attachment', { ...asked, ticket: true });
+    expect(original).toMatchObject({ data: '', mimeType: 'image/png', bytes: Buffer.from(SCREEN, 'base64').length });
+    expect(original.url).not.toBe(copy.url);
+    const whole = await fetch(`${harness.url}${original.url}`);
+    expect(Buffer.from(await whole.arrayBuffer()).toString('base64')).toBe(SCREEN);
+    expect(whole.headers.get('content-disposition')).toContain('screen.png');
+    // Without ticket, the base64 answer is unchanged.
+    expect(await client.call('messages.attachment', asked)).toEqual({ data: SCREEN });
+  });
+
+  test('a thumbnail copy is made once at 320 px from the kept large copy, and leaves with its thread', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    harness.core.journal.putMessage({ id: 'msg_screen', threadId, turnId: 'trn_seed', role: 'assistant', state: 'complete', createdAt: 3_001, parts: [{ type: 'file', mimeType: 'image/png', data: SCREEN, name: 'screen.png' }] });
+    const asked = { threadId, messageId: 'msg_screen', partIndex: 0, display: true };
+    const large = await client.call('messages.attachment', asked);
+
+    // Once the large copy is kept, the thumbnail is made from it: the original is never read again.
+    const journal = harness.core.journal;
+    const messagePart = journal.messagePart.bind(journal);
+    let reads = 0;
+    journal.messagePart = (...args) => { reads += 1; return messagePart(...args); };
+    const made = Bun.Image.prototype.webp;
+    let encodes = 0;
+    Bun.Image.prototype.webp = function (...args) { encodes += 1; return made.apply(this, args); };
+    let thumb: RpcResult<'messages.attachment'>;
+    let again: string;
+    try {
+      thumb = await client.call('messages.attachment', { ...asked, thumb: true, ticket: true });
+      expect(encodes).toBe(1);
+      again = (await client.call('messages.attachment', { ...asked, thumb: true })).data;
+    } finally {
+      Bun.Image.prototype.webp = made;
+    }
+    // Asked again it is the same copy, kept, not made again.
+    expect(encodes).toBe(1);
+    expect(reads).toBe(0);
+    journal.messagePart = messagePart;
+    expect(thumb.mimeType).toBe('image/webp');
+    const bytes = new Uint8Array(await (await fetch(`${harness.url}${thumb.url}`)).arrayBuffer());
+    expect(Buffer.from(bytes).toString('base64')).toBe(again);
+    expect(await new Bun.Image(bytes).metadata()).toMatchObject({ width: 320, height: 180, format: 'webp' });
+    expect(bytes.length * 4).toBeLessThan(Buffer.from(large.data, 'base64').length);
+
+    // Kept beside the large one, under the part's thumbnail slot.
+    const kept = () => journal.db.query('SELECT part_index AS part, length(data) AS n FROM media_displays WHERE thread_id = ? ORDER BY part_index').all(threadId) as { part: number; n: number }[];
+    expect(kept()).toEqual([{ part: -2, n: bytes.length }, { part: 0, n: Buffer.from(large.data, 'base64').length }]);
+
+    // A thumbnail asked first, with no large copy yet, is made from the original.
+    harness.core.journal.putMessage({ id: 'msg_fresh', threadId, turnId: 'trn_seed', role: 'user', state: 'complete', createdAt: 3_002, parts: [{ type: 'image', mimeType: 'image/png', data: SCREEN, alt: null }] });
+    const fresh = await client.call('messages.attachment', { threadId, messageId: 'msg_fresh', partIndex: 0, display: true, thumb: true });
+    expect(await new Bun.Image(Buffer.from(fresh.data, 'base64')).metadata()).toMatchObject({ width: 320, height: 180 });
+
+    // The thread goes, and its copies and their addresses with it.
+    journal.deleteThreads([threadId]);
+    expect(kept()).toEqual([]);
+    expect((await fetch(`${harness.url}${thumb.url}`)).status).toBe(404);
+  });
+
+  test('a picture already smaller than the thumbnail is sent as its larger copy or as it is', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId);
+    // A 320 by 180 PNG of noise: no copy is lighter, so the original comes.
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_shot', partIndex: 1, display: true, thumb: true })).toEqual({ data: SHOT });
+
+    // A thumbnail kept as not lighter than its source sends that source: the kept large copy,
+    // or the original when no large copy is kept, without making one.
+    const journal = harness.core.journal;
+    const rows = () => journal.db.query('SELECT part_index AS part FROM media_displays WHERE message_id = ? ORDER BY part_index').all('msg_tall') as { part: number }[];
+    journal.db.query('INSERT INTO media_displays (message_id, part_index, thread_id, data) VALUES (?, ?, ?, ?)').run('msg_tall', -3, threadId, new Uint8Array(0));
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_tall', partIndex: 1, display: true, thumb: true })).toEqual({ data: TALL });
+    expect(rows()).toEqual([{ part: -3 }]);
+    journal.db.query('INSERT INTO media_displays (message_id, part_index, thread_id, data) VALUES (?, ?, ?, ?)').run('msg_tall', 1, threadId, new Uint8Array([7, 7]));
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_tall', partIndex: 1, display: true, thumb: true })).toEqual({ data: Buffer.from([7, 7]).toString('base64'), mimeType: 'image/webp' });
+  });
+
+  test("an incognito conversation's pictures come with no-store, so no browser cache outlives it", async () => {
+    const client = await harness.connect();
+    const drafts = await client.call('projects.drafts', {});
+    const accountId = (await client.call('accounts.list', {})).find((account) => account.providerId === 'echo')!.id;
+    const thread = await client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, incognito: true });
+    harness.core.journal.putMessage({ id: 'msg_secret', threadId: thread.id, turnId: 'trn_seed', role: 'user', state: 'complete', createdAt: 3_001, parts: [{ type: 'image', mimeType: 'image/png', data: SCREEN, alt: null }] });
+    const asked = { threadId: thread.id, messageId: 'msg_secret', partIndex: 0, ticket: true };
+    for (const answer of [
+      await client.call('messages.attachment', { ...asked, display: true, thumb: true }),
+      await client.call('messages.attachment', { ...asked, display: true }),
+      await client.call('messages.attachment', asked),
+    ]) {
+      const served = await fetch(`${harness.url}${answer.url}`);
+      expect(served.status).toBe(200);
+      expect(served.headers.get('cache-control')).toBe('no-store');
+    }
+  });
+
+  test('a copy the journal cannot keep comes as base64 rather than as an address that would not load', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    harness.core.journal.putMessage({ id: 'msg_screen', threadId, turnId: 'trn_seed', role: 'user', state: 'complete', createdAt: 3_001, parts: [{ type: 'image', mimeType: 'image/png', data: SCREEN, alt: null }] });
+    // A full disk, as SQLite reports it.
+    harness.core.journal.db.exec("CREATE TRIGGER full_disk BEFORE INSERT ON media_displays BEGIN SELECT RAISE(FAIL, 'database or disk is full'); END");
+    for (const thumb of [true, false]) {
+      const answer = await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0, display: true, thumb, ticket: true });
+      expect(answer.url).toBeUndefined();
+      expect(answer.mimeType).toBe('image/webp');
+      expect(await new Bun.Image(Buffer.from(answer.data, 'base64')).metadata()).toMatchObject({ format: 'webp', width: thumb ? 320 : 1280 });
+    }
+  });
+
+  test('a fork keeps the copies of the pictures it copies, so it never makes them again', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('turns.start', { threadId, prompt: 'look', attachments: [{ kind: 'image', mimeType: 'image/png', data: SCREEN, name: 'screen.png' }] });
+    await waitFor(() => harness.core.journal.getThread(threadId)?.status === 'idle' && harness.core.journal.listMessages(threadId).length >= 2);
+    const [prompt, reply] = harness.core.journal.listMessages(threadId);
+    const partIndex = prompt!.parts.findIndex((part) => part.type === 'image');
+    await client.call('messages.attachment', { threadId, messageId: prompt!.id, partIndex, display: true });
+    await client.call('messages.attachment', { threadId, messageId: prompt!.id, partIndex, display: true, thumb: true });
+
+    const fork = await client.call('threads.fork', { threadId, messageId: reply!.id });
+    const copied = harness.core.journal.listMessages(fork.id)[0]!;
+    const made = Bun.Image.prototype.webp;
+    let encodes = 0;
+    Bun.Image.prototype.webp = function (...args) { encodes += 1; return made.apply(this, args); };
+    try {
+      await client.call('messages.attachment', { threadId: fork.id, messageId: copied.id, partIndex, display: true });
+      await client.call('messages.attachment', { threadId: fork.id, messageId: copied.id, partIndex, display: true, thumb: true });
+    } finally {
+      Bun.Image.prototype.webp = made;
+    }
+    expect(encodes).toBe(0);
+    const slots = harness.core.journal.db.query('SELECT part_index AS part FROM media_displays WHERE message_id = ? AND thread_id = ? ORDER BY part_index').all(copied.id, fork.id);
+    expect(slots).toEqual([{ part: -2 - partIndex }, { part: partIndex }]);
   });
 
   test('a light page still opens, sized and without blurs, when the blurs cannot be read', async () => {

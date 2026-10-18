@@ -61,7 +61,8 @@ test('a deferred picture has its size and its blur before a byte arrives, asks f
   expect(loadDisplayImage).not.toHaveBeenCalled();
 
   show(true);
-  expect(loadDisplayImage).toHaveBeenCalledWith('t', 'm', 1, 'image/png');
+  // 16:9 at 88 px is drawn 156 px wide: the thumbnail's copy is enough on this 1x screen.
+  expect(loadDisplayImage).toHaveBeenCalledWith('t', 'm', 1, 'image/png', true);
   await vi.waitFor(() => expect(document.querySelector('[data-testid=image-part]')?.getAttribute('src')).toBe(COPY));
   expect(image.dataDeferred).toBe(true);
   expect(loadMessageAttachment).not.toHaveBeenCalled();
@@ -105,6 +106,32 @@ test('a picture whose fetch failed asks again when it comes back near the screen
   await vi.waitFor(() => expect(document.querySelector('[data-testid=image-part]')).not.toBeNull());
   expect(loadDisplayImage).toHaveBeenCalledTimes(2);
   await vi.waitFor(() => expect(box.title).toBe(''));
+});
+
+test('a thumbnail asks for the small copy while it stays sharp on the screen, and the large one past that', () => {
+  const show = observeBy();
+  const ratio = window.devicePixelRatio;
+  const asked: boolean[] = [];
+  const store = { loadDisplayImage: vi.fn(async (...args: unknown[]) => { asked.push(args[4] as boolean); return COPY; }), reportError: vi.fn() } as unknown as Store;
+  const mountAt = (devicePixelRatio: number, width: number, height: number) => {
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: devicePixelRatio });
+    const image = reactive<ImagePart>({ type: 'image', mimeType: 'image/png', data: '', alt: null, dataDeferred: true, bytes: 70, width, height });
+    if (running) unmount(running);
+    running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 1, image, tile: 88 } });
+    flushSync();
+    show(true);
+  };
+  try {
+    // A 16:9 screenshot needs 313 device pixels on a 2x screen: the 320 px copy.
+    mountAt(2, 1920, 1080);
+    // 469 on a 3x phone: the large copy, or the thumbnail would be blurred.
+    mountAt(3, 1920, 1080);
+    // A panorama covers the box by its height: 88 px tall is 352 px wide, past 320 on a 1x screen.
+    mountAt(1, 4000, 1000);
+  } finally {
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: ratio });
+  }
+  expect(asked).toEqual([true, false, false]);
 });
 
 test('a picture that came with its bytes reads its size from their header and asks for nothing', () => {

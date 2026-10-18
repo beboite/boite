@@ -1,5 +1,26 @@
 import type { BunFile } from 'bun';
 import type { FileHandle } from 'node:fs/promises';
+import type { HeldBytes } from '../workdir.ts';
+
+/**
+ * Bytes a ticket of `FileTickets.mintBytes` names: a picture of a message,
+ * its original or a copy. The bytes behind that ticket never change, so the
+ * client keeps them for good and the timeline draws them again without
+ * asking; a new ticket is a new address. Pictures need no range. An
+ * incognito conversation's are kept by no cache, since it leaves nothing
+ * behind once erased.
+ */
+export function heldBytes(held: HeldBytes): Response {
+  // Bytes from SQLite or a Buffer, both backed by an ArrayBuffer.
+  return new Response(held.data as Uint8Array<ArrayBuffer>, {
+    headers: {
+      'content-type': held.mime,
+      'cache-control': held.noStore ? 'no-store' : 'private, max-age=31536000, immutable',
+      'x-content-type-options': 'nosniff',
+      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(held.name ?? 'download')}`,
+    },
+  });
+}
 
 /** A single byte range, shared by downloadable snapshots and isolated preview assets. */
 export function fileResponse(file: BunFile, range: string | null, headers: Record<string, string>, head = false): Response {
