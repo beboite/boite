@@ -225,7 +225,7 @@
               ondragstart={(event) => event.preventDefault()}
               aria-expanded={!collapsed}
               title={multi ? `${project.path} · ${machine.label}` : project.path}
-              onclick={() => owner.toggleProject(project.id)}
+              onclick={() => projectThreadView.toggleProject(entry, lists, draftsHere.length)}
             >
               {#if projectView.order === 'manual'}<GripVertical size={12} />{/if}<span class="fold-caret" class:open={!collapsed} aria-hidden="true"><ChevronRight size={12} /></span><ProjectTile {project} store={owner}
               /><span class="name ui-label" class:gone={project.missing === true}>{projectName(project)}</span

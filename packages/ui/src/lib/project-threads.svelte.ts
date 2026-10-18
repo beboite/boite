@@ -40,6 +40,16 @@ export class ProjectThreadView {
     if (collapsed && open) return;
     this[kind] = open ? this[kind].filter(value => value !== key) : [...this[kind], key];
   }
+
+  /** Unfolding a project whose only rows are folded working ones opens them too, so the fold never comes up empty. */
+  toggleProject(entry: ProjectEntry, lists: ThreadLists, drafts: number): void {
+    const store = entry.machine.store;
+    const unfolding = store.isCollapsed(entry.project.id);
+    store.toggleProject(entry.project.id);
+    if (unfolding && lists.attention.length === 0 && drafts === 0 && lists.working.length > 0 && recentPreferences.groupWorking && !this.isOpen(entry, 'working')) {
+      this.working = [...this.working, projectKey(entry)];
+    }
+  }
 }
 
 export const projectThreadView = new ProjectThreadView();
