@@ -1671,13 +1671,20 @@ export const INITIAL_MESSAGE_PAGE = 40;
 export { previewToolOutputs, previewToolPart, inputPreview, longerThan, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS, TOOL_OUTPUT_FOLDED_CHARS, TOOL_INPUT_INLINE_CHARS, TOOL_INPUT_PREVIEW_CHARS, TOOL_DOCUMENTS_INLINE_CHARS } from './message-preview';
 export { forTransport, projectLiveMessage, projectLivePart, projectMessage, MESSAGE_SENT_MAX_BYTES, type TransportOptions } from './transport.ts';
 export { boundedMessageWindow } from './message-window.ts';
-export { lastAgentText, notificationExcerpt, requestExcerpt, NOTIFICATION_TEXT_CHARS } from './notification-text';
+export { lastAgentText, notificationExcerpt, requestExcerpt, requestKind, NOTIFICATION_TEXT_CHARS } from './notification-text';
 /**
  * The core's generic notification body, named so a phone can show it in the
  * language it speaks: the service worker looks the label up in the words the
  * page left it, and falls back on the English body.
  */
 export type NotificationLabel = 'done' | 'failed' | 'needsYou' | 'connected';
+/**
+ * What a notification is about, the unit a device turns on or off: a
+ * permission or a change to approve, a question, a finished turn, a failed one.
+ */
+export type NotificationKind = 'approvals' | 'questions' | 'finished' | 'errors';
+/** Every kind, in the order the settings list them. A device that never chose gets them all. */
+export const NOTIFICATION_KINDS: readonly NotificationKind[] = ['approvals', 'questions', 'finished', 'errors'];
 /** A Web Push payload, as the core sends it and the service worker reads it. */
 export interface PushPayload {
   title: string;
@@ -1685,6 +1692,8 @@ export interface PushPayload {
   threadId: string | null;
   tag: string;
   label?: NotificationLabel;
+  /** What the notification is about; the test notification has none. */
+  kind?: NotificationKind;
   /** The app icon's count after this notification. */
   badge?: number;
   /**
@@ -4348,8 +4357,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** Forget a paired client: its sockets close and its token opens nothing any more. Owner only. */
   'sessions.revoke': { params: { sessionId: string }; result: { ok: true } };
   /** Push credentials are owned by the authenticated pairing, never a caller-supplied session id. */
-  'push.status': { params: Record<string, never>; result: { publicKey: string; subscribed: boolean } };
-  'push.subscribe': { params: { endpoint: string; keys: { p256dh: string; auth: string } }; result: { ok: true } };
+  /** `kinds` is what this device's subscription receives, every kind when it never chose. */
+  'push.status': { params: Record<string, never>; result: { publicKey: string; subscribed: boolean; kinds?: NotificationKind[] } };
+  /** Without `kinds`, the subscription receives every kind. */
+  'push.subscribe': { params: { endpoint: string; keys: { p256dh: string; auth: string }; kinds?: NotificationKind[] }; result: { ok: true } };
+  /** The kinds this device's subscription receives from now on, without subscribing again. An empty list receives nothing. */
+  'push.kinds': { params: { kinds: NotificationKind[] }; result: { ok: true } };
   'push.unsubscribe': { params: Record<string, never>; result: { ok: true } };
   'push.test': { params: Record<string, never>; result: { ok: true } };
 

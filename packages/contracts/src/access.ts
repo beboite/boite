@@ -50,6 +50,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'push.subscribe',
   'push.unsubscribe',
   'push.test',
+  // Which kinds of notification its own subscription receives: the device's choice, about nothing else.
+  'push.kinds',
   // The sidebar and the composer's `@`.
   'projects.list',
   // The logo the list announces: a bounded image already stored in the journal, no path and no disk read.

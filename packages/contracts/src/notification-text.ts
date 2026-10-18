@@ -1,4 +1,4 @@
-import type { Message, PermissionRequest, QuestionRequest } from './index';
+import type { Message, NotificationKind, PermissionRequest, QuestionRequest } from './index';
 
 /** About two lines on a phone's lock screen. */
 export const NOTIFICATION_TEXT_CHARS = 140;
@@ -76,4 +76,14 @@ export function requestExcerpt(request: Pick<QuestionRequest, 'text'> | Pick<Per
   const input = request.input && typeof request.input === 'object' ? request.input as Record<string, unknown> : {};
   const target = ['command', 'file_path', 'path', 'url', 'pattern'].map(key => input[key]).find(value => typeof value === 'string' && value.trim());
   return notificationExcerpt(target ? `${request.toolName}: ${target as string}` : request.toolName);
+}
+
+/**
+ * What a request for input is, for the device that chose which notifications
+ * it gets: a permission, or a card asking to apply a change (a setting, an
+ * agent's setting), is an approval; anything else the agent asks is a question.
+ */
+export function requestKind(request: Pick<QuestionRequest, 'setting' | 'agentSetting'> | Pick<PermissionRequest, 'toolName'>): NotificationKind {
+  if ('toolName' in request) return 'approvals';
+  return request.agentSetting !== undefined || request.setting?.kind === 'change' ? 'approvals' : 'questions';
 }
