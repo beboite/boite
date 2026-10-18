@@ -27,6 +27,9 @@ const SHOP = `<!doctype html><title>Shop</title>
 <div id="cover" style="position:absolute;left:0;top:400px;width:200px;height:60px;background:#ccc">Cover</div>
 <p id="note">Free delivery</p>`;
 
+export const DOWNLOAD_SCRIPT = '#!/bin/sh\necho downloaded\n';
+export const DOWNLOAD_PROGRAM = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(126)]);
+
 /** Register an independent loopback site and fresh core hooks for each browser test file. */
 export function createBrowserFixture() {
   const real = findChromium().path ? test : test.skip;
@@ -50,6 +53,11 @@ export function createBrowserFixture() {
       if (path === '/later/done') { later.complete(); return new Response('done'); }
       if (path === '/sent') return new Response(`<title>Sent</title><h1>Thanks ${new URL(request.url).searchParams.get('name')}</h1>`, { headers: { 'content-type': 'text/html' } });
       if (path === '/popup') return new Response('<title>Popup</title>popup', { headers: { 'content-type': 'text/html' } });
+      // Files a page offers for download: a script, and a program that names itself a picture.
+      if (path === '/files') return new Response('<title>Files</title><a id="script" href="/download/tool.sh?token=secret">Script</a> <a id="saved" href="/download/notes.txt" download>Notes</a>', { headers: { 'content-type': 'text/html' } });
+      if (path === '/download/tool.sh') return new Response(DOWNLOAD_SCRIPT, { headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="tool.sh"' } });
+      if (path === '/download/notes.txt') return new Response('plain notes\n', { headers: { 'content-type': 'text/plain' } });
+      if (path === '/download/report.png') return new Response(DOWNLOAD_PROGRAM, { headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="../report.png"' } });
       // Draws `hz` times a second, like a video or an animation slower than the screen.
       if (path === '/ticking') return new Response(`<title>Ticking</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},${1000 / Number(new URL(request.url).searchParams.get('hz') ?? 10)})</script>`, { headers: { 'content-type': 'text/html' } });
       // Animates every frame and every 16 ms; `gaps()` returns the longest pause of each since it was last called, the one still running included: a read right after a wake can run before the next frame.
