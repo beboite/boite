@@ -55,7 +55,8 @@ export class Cdp {
     const flush = (socket: Bun.Socket) => {
       while (queue.length) {
         const chunk = queue[0]!, written = socket.write(chunk);
-        if (written < 0) { queue.length = 0; return; }
+        // Shut or failed for good (`-errno`), and Bun does not close it: the commands waiting would only time out.
+        if (written < 0) { queue.length = 0; ended(); return; }
         if (written < chunk.length) { queue[0] = chunk.subarray(written); return; }
         queue.shift();
       }
