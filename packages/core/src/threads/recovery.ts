@@ -9,6 +9,8 @@ import { closeTools } from './turn-settlement.ts';
 
 /** What a turn a dead core left behind says, once the next core has closed it. */
 export const CRASH_WHILE_RUNNING = 'The core stopped while this turn was running; send the prompt again.';
+/** The same, for a turn that resumes by itself once the core started (`threads/auto-continue.ts`). */
+export const CRASH_RESUMING = 'The core stopped while this turn was running; Boite resumes it.';
 export const CRASH_WHILE_QUEUED = 'The core stopped while this turn was queued; send the prompt again.';
 
 /**
@@ -23,7 +25,9 @@ export class ThreadRecovery {
    * journal, and the next start comes up with an empty scheduler: nothing would
    * ever finish it. Unsent ordinary prompts retain their identity and frozen
    * selection, held until the user resumes or discards them. A turn that may
-   * have reached its provider becomes an error; it is never replayed here.
+   * have reached its provider becomes an error; it is never replayed here, but
+   * a conversation's turn cut within the hour gets a continuation once the
+   * core started (`threads/auto-continue.ts`).
    */
   recoverStuckTurns(): number {
     const stuck = this.core.journal.unfinishedTurns();
@@ -61,8 +65,9 @@ export class ThreadRecovery {
         this.core.logs.info(`Turn ${turn.id} was stopped by a restart handoff; the thread's next turn resumes it`, { source: 'turns', event: 'turn.recovery.handed-over', threadId: turn.threadId, turnId: turn.id });
         continue;
       }
+      const resumes = previous === 'running' && this.core.threads.autoContinue.resumesCrashed(turn);
       this.core.journal.db.transaction(() => {
-        this.failStuckTurn(turn, previous === 'running' ? CRASH_WHILE_RUNNING : CRASH_WHILE_QUEUED);
+        this.failStuckTurn(turn, previous === 'running' ? resumes ? CRASH_RESUMING : CRASH_WHILE_RUNNING : CRASH_WHILE_QUEUED);
         if (previous === 'queued' && turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId);
       })();
       counts.failed += 1;
