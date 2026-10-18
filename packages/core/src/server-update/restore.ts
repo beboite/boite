@@ -15,6 +15,8 @@ export const UNSAVED_DATA = new Set(['checkpoints', 'browser', 'attachments', 'a
 export interface RestoreMoves {
   copy(source: string, target: string, filter?: (source: string) => boolean): void;
   rename(source: string, target: string): void;
+  /** Flushes a directory's entries, or throws; the directory's own flush when absent. */
+  sync?(directory: string): void;
 }
 
 export const realMoves: RestoreMoves = {
@@ -58,11 +60,20 @@ function readRecord(dataDir: string): RestoreRecord | null | 'unreadable' {
   return 'unreadable';
 }
 
-/** Flushes the renames in `directory` so a power cut keeps them in their order. Windows cannot open a directory. */
-function syncDirectory(directory: string): void {
+/**
+ * Flushes the entries of `directory` so a power cut keeps them in their order.
+ * Windows cannot open a directory. `required` throws when a filesystem that
+ * syncs directories fails to; one that cannot sync them at all passes.
+ */
+function syncDirectory(directory: string, required = false): void {
   let handle: number;
-  try { handle = openSync(directory, 'r'); } catch { return; }
-  try { fsyncSync(handle); } catch { /* Not every filesystem syncs a directory. */ } finally { closeSync(handle); }
+  try { handle = openSync(directory, 'r'); }
+  catch (error) { if (required && process.platform !== 'win32') throw error; return; }
+  try { fsyncSync(handle); }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (required && process.platform !== 'win32' && code !== 'EINVAL' && code !== 'ENOTSUP') throw error;
+  } finally { closeSync(handle); }
 }
 
 function writeDurably(file: string, text: string): void {
@@ -166,6 +177,9 @@ function restoreRecorded(dataDir: string, record: RestoreRecord, moves: RestoreM
         moveTree(record.snapshot, restored, moves);
       }
       writeDurably(join(restored, RESTORED), record.id);
+      // The mark's entry must be on disk before the swap makes this copy the data: a power cut that kept
+      // the swap and lost the mark would leave a finished restore with no snapshot to redo it from.
+      (moves.sync ?? ((directory: string) => syncDirectory(directory, true)))(restored);
       lockData(restored);
       swapRestored(dataDir, record.id, moves);
       releaseOwnLock(failed);

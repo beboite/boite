@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { generateKeyPairSync, createHash, randomBytes, sign } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { zipSync } from 'fflate';
 import { Database } from 'bun:sqlite';
 import { downloadPayload, verifyPayload, unpackPayload } from '../src/server-update/release.ts';
@@ -552,6 +552,33 @@ test('a recorded restore that is no directory is set aside and redone from the s
     const journal = new Database(join(f.data, 'journal.db'));
     expect(journal.query('SELECT * FROM saved').all()).toEqual([{ message: 'conversation', newer_schema: null }]); journal.close();
     expect(existsSync(`${f.data}.rollback.json`)).toBe(true);
+  } finally { f.stop(); }
+});
+
+test('a restored copy takes the data name only once its mark is flushed with it', async () => {
+  const f = await updateFixture();
+  try {
+    const { restored } = cutRollback(f, false);
+    const events: string[] = [];
+    const moves = (flush: () => void): RestoreMoves => ({
+      copy: () => { throw new Error('no copy here'); },
+      rename: (source, target) => { events.push(`rename ${basename(source)} ${basename(target)}`); renameSync(source, target); },
+      sync: (directory) => {
+        events.push(`sync ${basename(directory)} ${existsSync(join(directory, 'server-update-restored')) ? readFileSync(join(directory, 'server-update-restored'), 'utf8') : 'unmarked'}`);
+        flush();
+      },
+    });
+    // A flush the disk refuses stops the swap: the record and the restored copy wait for the next start.
+    expect(() => open(f, moves(() => { throw Object.assign(new Error('flush failed'), { code: 'EIO' }); }))).toThrow('flush failed');
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(true);
+    expect(existsSync(restored)).toBe(true);
+    events.length = 0;
+    open(f, moves(() => undefined))();
+    f.expectPrevious();
+    const flushed = events.indexOf(`sync data.restore-${f.id} ${f.id}`);
+    expect(flushed).toBe(0);
+    expect(events.indexOf(`rename data.restore-${f.id} data`)).toBeGreaterThan(flushed);
   } finally { f.stop(); }
 });
 

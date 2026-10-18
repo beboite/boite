@@ -184,17 +184,17 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 490,500 |
 | UI files, excluding `.br` and `.gz` copies | 4,858,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,447,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,448,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-18, the server update rollback merged with `origin/main` at
-`36ef9a81` measures 4,447,258 core JavaScript bytes with `measure()` after a
+`36ef9a81` measures 4,447,509 core JavaScript bytes with `measure()` after a
 fresh `bun run build:core` on Windows, against the 4,438,396 recorded below for
 PR #590. The rollback record, the kernel lock a restore holds, the data lock it
-keeps through the swap, its completion mark and the restore a start finishes
-add 8,862 bytes; `main.js` shrinks by 1,669 as the data lock moves to its own
-module. The core limit rises to 4,447,500; the other limits stay.
+keeps through the swap, its flushed completion mark and the restore a start
+finishes add 9,113 bytes; `main.js` shrinks by 1,669 as the data lock moves to
+its own module. The core limit rises to 4,448,000; the other limits stay.
 
 On 2026-10-18, Claude's agent totals and the usage cache split (PR #590)
 merged with `origin/main` at `3a91f49f` measure 490,193 entry bytes,

@@ -245,17 +245,21 @@ takes `<data>.maintenance.lock`, a kernel `flock` the job and its recovery hold
 while they restore, so neither moves the data under the other. The restore
 starts no process while it holds it, so the kernel drops it with a killed
 holder. Whoever restores also holds the data directory's `core.lock` from its
-first look to its last move, and refuses while a live core holds it. It puts
-its own `core.lock` in the restored copy before that copy takes the data
-directory's name, so a core starting meanwhile finds the data taken, never a
-directory about to move away. It finishes that operation's restore before
-anything opens the data: it uses the `<data>.restore-<id>` the record names,
-never the newest one on disk, keeps the rejected data as `<data>.failed-<id>`
-(or `<data>.unused-data` when that name is taken) and reports the interrupted
-rollback in its update status. The swap counts as complete only when the data
-directory holds `server-update-restored` with the operation's id, written into
-the restored copy just before it takes the name; a missing folder never passes
-for one. After a completed swap, every other `<data>.restore-*` beside the
+first look until that data moves aside, and refuses while a live core holds it.
+It puts its own `core.lock` in the restored copy before that copy takes the
+data directory's name, so a core starting meanwhile finds the data taken or
+the record still there, never a directory about to move away. It finishes that
+operation's restore before anything opens the data: it uses the
+`<data>.restore-<id>` the record names, never the newest one on disk, keeps
+the rejected data as `<data>.failed-<id>` (or `<data>.unused-data` when that
+name is taken) and reports the interrupted rollback in its update status. The
+swap counts as complete only when the data directory holds
+`server-update-restored` with the operation's id, written into the restored
+copy just before it takes the name; a missing folder never passes for one. The
+mark and the restored directory's entries are flushed before the swap, and a
+flush that fails on Linux stops it with the record kept, so a power cut cannot
+keep the swap and lose the mark. After a completed swap, every other
+`<data>.restore-*` beside the
 data directory is renamed to `<data>.unused-restore-*`, so no later start
 replays an older copy. A recorded restore that is a file rather than a
 directory is set aside the same way and moved again from the snapshot.
