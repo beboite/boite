@@ -21,6 +21,20 @@ export function loginThreadId(accountId: AccountId): string {
   return `login:${accountId}`;
 }
 
+/**
+ * The directory `accounts.add` made for this account under the data
+ * directory, real and not a link; null for the default account and for any
+ * other path. Only such a directory is Boite's to delete from.
+ */
+export function ownIsolationDir(dataDir: string, account: Pick<Account, 'id' | 'isolationDir'>): string | null {
+  const directory = account.isolationDir;
+  if (directory === null) return null;
+  const own = resolve(dataDir, 'accounts', account.id);
+  if (resolve(directory) !== own) return null;
+  if (existsSync(own) && lstatSync(own).isSymbolicLink()) return null;
+  return own;
+}
+
 const URL_IN_OUTPUT = /https:\/\/\S+/;
 /** What a sign-in link carries and a terms or privacy page does not. */
 const SIGN_IN_LINK = /oauth|authorize|redirect_uri|client_id|user_code|\/device|\/login|\/auth/i;
@@ -168,8 +182,7 @@ export class AccountStore {
     checkAgentReferences();
     checkActiveTurns();
     const directory = account.isolationDir;
-    if (directory !== null && (resolve(directory) !== resolve(this.core.dataDir, 'accounts', accountId)
-      || (existsSync(directory) && lstatSync(directory).isSymbolicLink()))) {
+    if (directory !== null && ownIsolationDir(this.core.dataDir, account) === null) {
       throw refused('the account isolationDir must be its own directory under accounts', { accountId, field: 'isolationDir' });
     }
     this.removing.add(accountId);

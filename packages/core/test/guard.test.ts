@@ -304,6 +304,76 @@ describe('the audio mute rule', () => {
     expect(mute.pendingWalkIn()).toBeNull();
   });
 
+  test('a session a traced process opens late is muted on the endpoint\'s notice, not on the clock', () => {
+    const endpoint = new FakeEndpoint();
+    let walks = 0;
+    let clock = 5000;
+    const mute = new MuteLogic((skipped) => { walks += 1; return endpoint.list(skipped); }, true, () => clock);
+
+    // A notice with nothing traced walks nothing: the user's own player opened a stream.
+    mute.wake();
+    expect(walks).toBe(0);
+
+    mute.addPid('thr_late', MUTED_PID);
+    expect(walks).toBe(1);
+    const mixer = endpoint.add(MUTED_PID);
+    // Inside the batch gap the notice waits for the gap's end, then walks once.
+    mute.wake();
+    expect(walks).toBe(1);
+    expect(mute.pendingWalkIn()).toBe(MUTE_BATCH_MS);
+    clock += MUTE_BATCH_MS;
+    mute.tick();
+    expect(mixer.muted).toBe(true);
+
+    // Past the gap a notice walks at once.
+    mute.addPid('thr_late', OTHER_PID);
+    endpoint.add(OTHER_PID);
+    clock += MUTE_BATCH_MS;
+    mute.wake();
+    expect(walks).toBe(3);
+    expect(mute.takeEvents().map((event) => event.kind)).toEqual(['session-muted', 'session-muted']);
+  });
+
+  test('a traced session muted by someone else keeps the walk on the second clock, and is taken once unmuted', () => {
+    const endpoint = new FakeEndpoint();
+    const mute = new MuteLogic(endpoint.list, true);
+    mute.addPid('thr_one', OTHER_PID);
+    expect(mute.hasTracedSessions()).toBe(false);
+
+    // Windows kept this executable's mute from an earlier run: the session opens muted.
+    const mixer = endpoint.add(MUTED_PID);
+    mixer.muted = true;
+    mute.addPid('thr_one', MUTED_PID);
+    mute.tick();
+    expect(mute.mutedPids()).toEqual([]);
+    // No notice comes when it is unmuted, so the Worker keeps walking every second.
+    expect(mute.hasTracedSessions()).toBe(true);
+    mixer.muted = false;
+    mute.tick();
+    expect(mute.mutedPids()).toEqual([MUTED_PID]);
+
+    mute.removePid(MUTED_PID);
+    mute.removePid(OTHER_PID);
+    expect(mute.hasTracedSessions()).toBe(false);
+  });
+
+  test('a session opened while the mute was off is muted the moment it is turned back on', () => {
+    const endpoint = new FakeEndpoint();
+    let clock = 5000;
+    const mute = new MuteLogic(endpoint.list, true, () => clock);
+    mute.addPid('thr_one', MUTED_PID);
+    expect(mute.hasTracedSessions()).toBe(false);
+
+    mute.setEnabled(false);
+    const mixer = endpoint.add(MUTED_PID);
+    // Its only notice came while the mute was off, and the 30 s clock is the next walk.
+    mute.wake();
+    clock += 3000;
+    mute.setEnabled(true);
+    expect(mixer.muted).toBe(true);
+    expect(mute.takeEvents().map((event) => event.kind)).toEqual(['session-muted']);
+  });
+
   test('a session of a traced pid is muted once and reported once', () => {
     const endpoint = new FakeEndpoint();
     const mixer = endpoint.add(MUTED_PID);
@@ -528,6 +598,52 @@ describe('the audio endpoint the mute walks', () => {
     clock += NO_ENDPOINT_RETRY_MS;
     expect(walk()).toBeNull();
     expect(opened).toBe(2);
+  });
+
+  test('each endpoint opened is watched once after its first walk, and a refused watch is one note and the clock', () => {
+    const watched: string[] = [];
+    let refuse: string | null = null;
+    const device = (name: string): AudioSessions => {
+      const fake = new FakeDevice();
+      return { ...fake.sessions(), watch: () => {
+        if (refuse !== null) throw new Error(refuse);
+        watched.push(name);
+      } };
+    };
+    let current = device('speakers');
+    let stale = false;
+    const notices: string[] = [];
+    const endpoint = new AudioEndpoint(() => ({ ...current, stale: () => stale }), Date.now, () => notices.push('changed'));
+    const skipped: string[] = [];
+
+    expect(endpoint.watching).toBe(false);
+    endpoint.list((message) => skipped.push(message));
+    endpoint.list((message) => skipped.push(message));
+    expect(watched).toEqual(['speakers']);
+    expect(endpoint.watching).toBe(true);
+
+    // The default device changed: the next walk opens and watches the new one.
+    current = device('headset');
+    stale = true;
+    endpoint.list((message) => skipped.push(message));
+    stale = false;
+    expect(watched).toEqual(['speakers', 'headset']);
+
+    // A device whose notifications Core Audio refuses is polled, asked once per opening.
+    refuse = 'IAudioSessionManager2::RegisterSessionNotification failed with 0x80070005';
+    current = device('dock');
+    endpoint.release();
+    endpoint.list((message) => skipped.push(message));
+    endpoint.list((message) => skipped.push(message));
+    expect(endpoint.watching).toBe(false);
+    expect(skipped).toEqual([`audio notifications refused, polling every second: ${refuse}`]);
+
+    // An opener that cannot notify at all is polled without a note.
+    const plain = new AudioEndpoint(() => new FakeDevice().sessions(), Date.now, () => undefined);
+    plain.list((message) => skipped.push(message));
+    expect(plain.watching).toBe(false);
+    expect(skipped).toHaveLength(1);
+    expect(notices).toEqual([]);
   });
 });
 
