@@ -219,7 +219,11 @@ and anything else is rolled back as above before the service starts again.
 The recovery runs from a hard link of the job's executable,
 `.boite-recover-<id>`, which it deletes when done. If the recovery itself
 never ran, as after a power cut, the next update deletes the unfinished
-operation directory and the incomplete snapshot it left. A rollback cut off
+operation directory and the incomplete snapshot it left. It only deletes
+those of its own installation: each operation directory holds an
+`owner.json` naming the installation from the moment it exists, so a second
+installation in the same folder never deletes an update another one is
+running. An operation or snapshot that names no installation is left alone. A rollback cut off
 that way after the snapshot moved back leaves the previous data as
 `<data>.restore-<id>` beside the data directory; nothing deletes it.
 

@@ -316,20 +316,49 @@ export async function recoverServerUpdate(file: string, platform: ServerUpdatePl
   } finally { rmSync(recoveryLink(file), { force: true }); }
 }
 
+/** Written in an operation directory as soon as it exists, before its plan: the installation it updates. */
+export const UPDATE_OWNER = 'owner.json';
+
+/** The installation an operation directory names, in its owner record or, from an older release, its plan. */
+function operationOwner(path: string): string | null {
+  for (const file of [UPDATE_OWNER, 'plan.json']) {
+    try {
+      const record = JSON.parse(readFileSync(join(path, file), 'utf8')) as { installation?: unknown };
+      const installation = typeof record.installation === 'string' ? record.installation : (record.installation as { directory?: unknown } | undefined)?.directory;
+      if (typeof installation === 'string') return installation;
+    } catch { /* The next record, if any. */ }
+  }
+  return null;
+}
+
 /**
- * Leftovers of a worker whose recovery never ran, after a power cut: an
- * unfinished operation, a snapshot cut short and a recovery link. A finished
- * failure stays for diagnosis. The next update runs it before starting its own.
+ * Leftovers of a worker of this installation whose recovery never ran, after
+ * a power cut: an unfinished operation, a snapshot cut short and a recovery
+ * link. A finished failure stays for diagnosis. The next update runs it before
+ * starting its own. Another installation can share `parent` and be updating
+ * right now: an operation or backup whose record names another installation,
+ * or names none, is left alone.
  */
-export function clearStaleUpdates(parent: string): void {
+export function clearStaleUpdates(parent: string, installation: string): void {
   const entries = () => readdirSync(parent, { withFileTypes: true });
+  const idOf = (name: string, kind: string) => new RegExp(`^\\.boite-${kind}-([a-f0-9-]{36})$`).exec(name)?.[1];
+  // An older release's snapshot has no marker; the operation it belongs to names the installation.
+  const own = new Set<string>();
+  for (const entry of entries()) {
+    const id = entry.isDirectory() ? idOf(entry.name, 'update') : undefined;
+    if (id && operationOwner(join(parent, entry.name)) === installation) own.add(id);
+  }
   for (const entry of entries()) {
     const path = join(parent, entry.name);
     if (!entry.isDirectory()) continue;
-    if (/^\.boite-update-[a-f0-9-]{36}$/.test(entry.name) && !existsSync(join(path, FINISHED))) rmSync(path, { recursive: true, force: true });
-    if (/^\.boite-backup-[a-f0-9-]{36}$/.test(entry.name) && !existsSync(join(path, 'data'))) rmSync(path, { recursive: true, force: true });
+    const update = idOf(entry.name, 'update');
+    if (update && own.has(update) && !existsSync(join(path, FINISHED))) rmSync(path, { recursive: true, force: true });
+    const backup = idOf(entry.name, 'backup');
+    if (backup && !existsSync(join(path, 'data')) && (own.has(backup) || backupOwner(path)?.installation === installation)) rmSync(path, { recursive: true, force: true });
   }
+  // A link whose operation is gone serves nobody; a live operation of another installation keeps its own.
   for (const entry of entries()) {
-    if (/^\.boite-recover-[a-f0-9-]{36}$/.test(entry.name) && !existsSync(join(parent, entry.name.replace('.boite-recover-', '.boite-update-')))) rmSync(join(parent, entry.name), { force: true });
+    const id = idOf(entry.name, 'recover');
+    if (id && !existsSync(join(parent, `.boite-update-${id}`))) rmSync(join(parent, entry.name), { force: true });
   }
 }

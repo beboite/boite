@@ -452,22 +452,37 @@ test('the recovery of a worker that never had the core stop closes admission and
   } finally { f.stop(); }
 });
 
-test('the next update clears what a worker cut off with its recovery left, and keeps a handled failure', () => {
+test('the next update clears what a worker of this installation cut off with its recovery left, keeps a handled failure and never touches another installation', () => {
   const root = mkdtempSync(join(tmpdir(), 'boite-server-stale-'));
-  const uuid = (c: string) => `${c.repeat(8)}-${c.repeat(4)}-${c.repeat(4)}-${c.repeat(4)}-${c.repeat(12)}`;
+  const install = join(root, 'install');
+  const other = join(root, 'install-dev');
+  const operation = (c: string, record: 'owner' | 'plan' | null, installation = install) => {
+    const path = join(root, `.boite-update-${uuid(c)}`);
+    mkdirSync(join(path, 'stage'), { recursive: true });
+    if (record === 'owner') writeFileSync(join(path, 'owner.json'), JSON.stringify({ installation }));
+    if (record === 'plan') writeFileSync(join(path, 'plan.json'), JSON.stringify({ installation: { directory: installation } }));
+    return path;
+  };
+  const backup = (c: string, part: 'data' | 'data.partial', installation: string | null) => {
+    const path = join(root, `.boite-backup-${uuid(c)}`);
+    mkdirSync(join(path, part), { recursive: true });
+    if (installation) writeFileSync(join(path, 'backup.json'), JSON.stringify({ installation, at: 1 }));
+  };
   try {
-    const unfinished = join(root, `.boite-update-${uuid('a')}`);
-    const handled = join(root, `.boite-update-${uuid('b')}`);
-    mkdirSync(join(unfinished, 'stage'), { recursive: true });
-    mkdirSync(handled); writeFileSync(join(handled, 'finished'), '');
+    mkdirSync(install);
+    // This installation's worker cut off mid-copy, and a failure it handled.
+    operation('a', 'owner'); backup('a', 'data.partial', install);
     writeFileSync(join(root, `.boite-recover-${uuid('a')}`), '');
-    const partial = join(root, `.boite-backup-${uuid('a')}`);
-    const complete = join(root, `.boite-backup-${uuid('b')}`);
-    mkdirSync(join(partial, 'data.partial'), { recursive: true });
-    mkdirSync(join(complete, 'data'), { recursive: true });
-    mkdirSync(join(root, 'install'));
-    clearStaleUpdates(root);
-    expect(readdirSync(root).sort()).toEqual([`.boite-backup-${uuid('b')}`, `.boite-update-${uuid('b')}`, 'install']);
+    writeFileSync(join(operation('b', 'owner'), 'finished'), ''); backup('b', 'data', install);
+    // An older release's operation records only its plan, and its snapshot no marker.
+    operation('c', 'plan'); backup('c', 'data.partial', null);
+    // Another installation in the same folder is updating right now, and an operation names nobody yet.
+    operation('d', 'owner', other); backup('d', 'data.partial', other);
+    writeFileSync(join(root, `.boite-recover-${uuid('d')}`), '');
+    operation('e', null);
+    clearStaleUpdates(root, install);
+    expect(readdirSync(root).sort()).toEqual([`.boite-backup-${uuid('b')}`, `.boite-backup-${uuid('d')}`, `.boite-recover-${uuid('d')}`,
+      `.boite-update-${uuid('b')}`, `.boite-update-${uuid('d')}`, `.boite-update-${uuid('e')}`, 'install']);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
