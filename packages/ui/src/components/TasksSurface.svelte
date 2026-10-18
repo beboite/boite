@@ -12,12 +12,15 @@
   const sectionId = $props.id();
 
   let draft = $state('');
-  let open = $state({ activity: true, watches: true, tasks: true, todos: true });
+  let open = $state({ activity: true, checklist: true, watches: true, tasks: true, todos: true });
 
   let thread = $derived(store.openThread);
   let activity = $derived(thread?.activity ?? null);
   let tasks = $derived(activity?.tasks ?? []);
   let watches = $derived(thread?.pullRequestWatches ?? []);
+  /** A `/goal2`'s checklist, once its tracker wrote something or failed to. Dropped items count for nothing. */
+  let checklist = $derived(activity?.goal?.checklist && (activity.goal.checklist.items.length > 0 || activity.goal.checklist.error) ? activity.goal.checklist : null);
+  let listed = $derived(checklist?.items.filter((item) => item.status !== 'cancelled') ?? []);
   let todos = $derived(thread?.projectId ? (store.todos[thread.projectId] ?? []) : []);
 
   // The project's list is the same for every thread of it, so it is read once
@@ -69,10 +72,6 @@
               <span class="state ui-label-box" class:live={activity.goal.status === 'active'}><span class="ui-label">{strings.activity[activity.goal.status]}</span></span>
             {/if}
           </div>
-          <!-- A `/goal2`'s checklist: what the user asked for, under the goal it belongs to. -->
-          {#if activity.goal.checklist && (activity.goal.checklist.items.length > 0 || activity.goal.checklist.error)}
-            <div class="goal-checklist" data-testid="tasks-checklist"><GoalChecklist {store} checklist={activity.goal.checklist} /></div>
-          {/if}
         {/if}
         {#if activity?.loop}
           <div class="line" data-testid="tasks-loop">
@@ -92,6 +91,30 @@
       </div></div>
     </div>
   </section>
+
+  {#if checklist}
+    <!-- A `/goal2`'s checklist: what the user asked for, where the goal bar's line leads. -->
+    <section data-testid="tasks-checklist">
+      <button
+        type="button"
+        class="ghost head"
+        aria-expanded={open.checklist}
+        aria-controls="{sectionId}-checklist"
+        data-testid="tasks-section-checklist"
+        title={open.checklist ? strings.tasks.collapse : strings.tasks.expand}
+        onclick={() => (open.checklist = !open.checklist)}
+      >
+        <ChevronRight size={13} strokeWidth={1.75} class={open.checklist ? 'fold-caret open' : 'fold-caret'} />
+        <span class="section-label ui-label">{strings.activity.checklist}</span>
+        {#if listed.length > 0}
+          <span class="meta ui-label">{fill(strings.activity.checklistCount, { done: String(listed.filter((item) => item.status === 'done').length), total: String(listed.length) })}</span>
+        {/if}
+      </button>
+      <div class="disclosure-fold" id="{sectionId}-checklist" class:open={open.checklist} inert={!open.checklist}>
+        <div><div class="body"><GoalChecklist {store} {checklist} dense /></div></div>
+      </div>
+    </section>
+  {/if}
 
   {#if watches.length > 0}
     <section>
@@ -302,10 +325,6 @@
     min-width: 0;
   }
 
-  /* Indented under the goal's target icon, the way the bar's details sit under its toggle. */
-  .goal-checklist {
-    padding-inline-start: 14px;
-  }
 
   .head {
     display: flex;

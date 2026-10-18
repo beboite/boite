@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
-  import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListChecks, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Settings2, ShieldQuestion, Target, X } from '@lucide/svelte';
+  import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListChecks, ListTodo, MessageCircleQuestionMark, PanelRight, Pause, Play, Repeat, Reply, Settings2, ShieldQuestion, Target, X } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
@@ -104,6 +104,8 @@
   let tracked = $derived(!!checklist && (checklist.items.length > 0 || checklist.phase !== 'idle' || checklist.error !== null));
   let listed = $derived(checklist?.items.filter((item) => item.status !== 'cancelled') ?? []);
   let ticked = $derived(listed.filter((item) => item.status === 'done').length);
+  /** The owner's app lists the checklist in the side panel's Tasks tab; a paired device, which has no Tasks tab, unfolds it here. */
+  let inPanel = $derived(tracked && store.owner);
   let checklistLine = $derived.by(() => {
     if (!checklist) return '';
     if (checklist.phase === 'writing') return checklist.items.length ? strings.activity.checklistUpdating : strings.activity.checklistWriting;
@@ -338,15 +340,17 @@
       {/if}
     {/each}
     {#if tracked || tasks.length || loop || verdicts.length}
-      <button type="button" class="ghost tasks-toggle" aria-expanded={expanded} aria-controls={detailsId}
-        data-testid="activity-tasks-toggle" data-checklist={tracked || undefined} onclick={() => (expanded = !expanded)}
+      <button type="button" class="ghost tasks-toggle" aria-expanded={inPanel ? undefined : expanded} aria-controls={inPanel ? undefined : detailsId}
+        title={inPanel ? strings.activity.checklistInPanel : undefined}
+        data-testid="activity-tasks-toggle" data-checklist={tracked || undefined} data-panel={inPanel || undefined}
+        onclick={() => { if (inPanel) store.panel.openTasks(); else expanded = !expanded; }}
         onkeydown={(event) => { if (event.key === 'Escape') { expanded = false; event.stopPropagation(); } }}>
         <span class="toggle-line">
           {#if tracked}<ListChecks size={16} />{:else}<ListTodo size={16} />{/if}
           <span class="current ui-label" class:busy={tracked && checklist?.phase !== 'idle'}>{tracked ? checklistLine : tasks.length ? current : loop ? strings.activity.history : strings.activity.reviews}</span>
           {#if tracked && listed.length}<span class="count ui-label" data-testid="activity-checklist-count">{fill(strings.activity.checklistCount, { done: String(ticked), total: String(listed.length) })}</span>
           {:else if !tracked && tasks.length}<span class="count ui-label">{fill(strings.activity.taskCount, { done: String(done), total: String(tasks.length) })}</span>{/if}
-          <ChevronDown size={16} class={expanded ? 'turned' : ''} />
+          {#if inPanel}<PanelRight size={16} />{:else}<ChevronDown size={16} class={expanded ? 'turned' : ''} />{/if}
         </span>
         <!-- Inside the toggle so its hover fill covers the bar and the card's air
              is the same above the first line and under the bar. The count
@@ -356,7 +360,7 @@
       </button>
       <div class="disclosure-fold" class:open={expanded} inert={!expanded}>
         <div id={detailsId}>
-          {#if tracked && checklist}
+          {#if tracked && checklist && !inPanel}
             <GoalChecklist {store} {checklist} />
           {:else if tasks.length}
             <ul data-testid="activity-tasks">

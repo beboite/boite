@@ -1203,6 +1203,7 @@ export const fr: Translation = {
     checklistSource: 'Vous avez écrit : {source}',
     openChecklist: 'Ouvrir la conversation de la checklist',
     checklistLoadFailed: 'La checklist n’a pas pu se charger.',
+    checklistInPanel: 'Afficher la checklist dans le panneau latéral',
     stopped: 'Arrêtée',
     running: 'En cours',
     done: 'Terminée',

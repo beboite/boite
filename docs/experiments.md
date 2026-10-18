@@ -176,10 +176,12 @@ from the text alone.
 `ThreadActivity.goal.checklist` holds the tracker conversation, its model, the
 phase (`writing`, `checking` or `idle`), the items with their status (`open`,
 `done`, `cancelled`), whether a later message `added` or `changed` them, how
-often each `bounced` a claim, and the last pass's `error`. The goal bar's task
-line shows the first open item and `done/total`, dropped items left out; its
-details list every item, a press shows its source, and an item that bounced
-twice turns red. The Tasks panel shows the same list under the goal. A pass
+often each `bounced` a claim, and the last pass's `error`. The goal bar keeps
+one line: the first open item and `done/total`, dropped items left out. On the
+owner's app that line opens the side panel's Tasks tab, whose Checklist section
+lists every item; a paired device, which has no Tasks tab, unfolds the list in
+the bar instead. A press on an item shows its source, and an item that bounced
+twice turns red. A pass
 that fails, answers without its JSON block or runs past five minutes leaves the
 list as it was with the reason, and the goal goes on; a first list is tried
 three times at most. A core restart keeps the list and the tracker; work no

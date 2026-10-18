@@ -1256,6 +1256,7 @@ export const strings = {
     checklistSource: 'You wrote: {source}',
     openChecklist: 'Open the checklist conversation',
     checklistLoadFailed: 'The checklist could not load.',
+    checklistInPanel: 'Show the checklist in the side panel',
     stopped: 'Stopped',
     running: 'Running',
     done: 'Done',

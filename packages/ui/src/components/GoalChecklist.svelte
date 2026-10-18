@@ -11,19 +11,21 @@
    * Dropped items stay, struck through; an item that sent the agent back twice
    * turns red: the review decides it.
    */
-  let { store, checklist }: { store: Store; checklist: GoalChecklist } = $props();
+  /** `dense`: the side panel's rows, smaller marks and text, as its other lists. */
+  let { store, checklist, dense = false }: { store: Store; checklist: GoalChecklist; dense?: boolean } = $props();
+  let size = $derived(dense ? 13 : 14);
 
   let shown = $state<number | null>(null);
 </script>
 
-<ul class="checklist" data-testid="goal-checklist">
+<ul class="checklist" class:dense data-testid="goal-checklist">
   {#each checklist.items as item (item.id)}
     {@const held = item.status === 'open' && (item.bounced ?? 0) >= 2}
     {@const label = item.status === 'done' ? strings.activity.checklistDone : item.status === 'cancelled' ? strings.activity.checklistDropped : held ? strings.activity.checklistHeld : strings.activity.checklistOpen}
     <li data-testid="goal-checklist-item" data-status={item.status} data-held={held || undefined}>
       <button type="button" class="ghost item" aria-expanded={shown === item.id} disabled={!item.source} onclick={() => (shown = shown === item.id ? null : item.id)}>
         <span class="mark" role="img" aria-label={label} title={label}>
-          {#if item.status === 'done'}<CircleCheck size={14} />{:else if item.status === 'cancelled'}<Ban size={14} />{:else if held}<CircleAlert size={14} />{:else}<Circle size={14} />{/if}
+          {#if item.status === 'done'}<CircleCheck {size} strokeWidth={1.75} />{:else if item.status === 'cancelled'}<Ban {size} strokeWidth={1.75} />{:else if held}<CircleAlert {size} strokeWidth={1.75} />{:else}<Circle {size} strokeWidth={1.75} />{/if}
         </span>
         <span class="text">{item.text}</span>
         {#if item.added}<span class="tag">{strings.activity.checklistAdded}</span>{:else if item.changed}<span class="tag">{strings.activity.checklistChanged}</span>{/if}
@@ -51,8 +53,14 @@
   [data-status='done'] .text, [data-status='cancelled'] .text { color: var(--color-muted-foreground); }
   [data-status='cancelled'] .text { text-decoration: line-through; }
   [data-held] .mark { color: var(--color-danger); }
-  .tag { flex: none; padding: 0 6px; border-radius: var(--radius-sm); background: var(--color-accent-soft); color: var(--color-accent); font-size: var(--text-xs); line-height: 1.5rem; }
+  /* As tall as a line of text, so a tagged row keeps its neighbours' height. */
+  .tag { flex: none; align-self: center; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--color-accent-soft); color: var(--color-accent); font-size: var(--text-xs); line-height: 1.3; }
   .source { margin: 0 4px 4px 28px; color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
   .error { margin: 2px 8px 6px; color: var(--color-danger); overflow-wrap: anywhere; }
   .open { margin: 0 4px 4px; padding-inline: 6px; color: var(--color-accent); }
+  /* The side panel: its rows' size and air, flush with the section's other lines. */
+  .dense { padding: 0; }
+  .dense .item { gap: 6px; padding: 5px 0; font-size: var(--text-sm); line-height: 1.45; }
+  .dense .mark { width: 13px; height: 1.45em; }
+  .dense .source { margin: 0 0 4px 19px; }
 </style>

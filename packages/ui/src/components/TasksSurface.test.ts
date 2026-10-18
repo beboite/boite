@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
@@ -83,3 +83,28 @@ test('the thread header shows the watches with their status and stops one from i
   }
 });
 
+
+test('a reviewed goal\'s checklist has its own section in the panel, with its count and every item', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  await store.open('t-trace');
+  store.openThread!.activity = { tasks: [], loop: null, goal: { objective: 'Ship it', status: 'active', iterations: 2, error: null,
+    review: { phase: 'working', maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] },
+    checklist: { threadId: null, phase: 'idle', model: null, effort: null, error: null, items: [
+      { id: 1, text: 'Add a dark theme', source: 'dark theme', status: 'done' },
+      { id: 2, text: 'Export invoices as CSV', source: 'CSV', status: 'open' },
+      { id: 3, text: 'Mail the invoices', source: 'mail', status: 'cancelled' },
+    ] } } };
+  const component = mount(TasksSurface, { target: document.body, props: { store } });
+  try {
+    await settle();
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=tasks-checklist] [data-testid=goal-checklist-item]')).toHaveLength(3));
+    expect(document.querySelector('[data-testid=tasks-section-checklist]')!.textContent).toContain('1/2 done');
+    expect(document.querySelector('[data-testid=tasks-checklist] [data-testid=goal-checklist]')!.classList.contains('dense')).toBe(true);
+  } finally {
+    unmount(component);
+    document.body.innerHTML = '';
+  }
+});
