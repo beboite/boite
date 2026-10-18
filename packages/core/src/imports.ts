@@ -38,6 +38,8 @@ export class ImportStore {
    * is still being read.
    */
   private readonly running = new Set<string>();
+  /** Sessions whose transcripts a thread purge is removing right now (`threads/transcript-purge.ts`). */
+  readonly removing = new Set<string>();
   /**
    * What each transcript folder listed, by file name, kept while a file's size
    * and modification time stay the same: reopening the list reads nothing new.
@@ -166,7 +168,12 @@ export class ImportStore {
     }
   }
 
-  /** Refuses a session already imported, and one being imported right now. */
+  /** True while the session's transcript is being read for an import: a purge leaves it alone. */
+  busy(sessionId: string): boolean {
+    return this.running.has(sessionId);
+  }
+
+  /** Refuses a session already imported, one being imported right now, and one whose transcript is being removed. */
   private checkFree(sessionId: string): void {
     const taken = this.core.journal.listThreads().find((thread) => thread.sessionId === sessionId);
     if (taken !== undefined) {
@@ -174,6 +181,9 @@ export class ImportStore {
     }
     if (this.running.has(sessionId)) {
       throw refused('this session is already being imported', { sessionId });
+    }
+    if (this.removing.has(sessionId)) {
+      throw refused('this session belonged to a deleted thread and its transcript is being removed', { sessionId });
     }
   }
 }

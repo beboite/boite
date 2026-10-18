@@ -5,10 +5,13 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { git } from '../git/read.ts';
+import { BLOB_BYTE_LIMIT, decodeBlob, encodeBlob, errno, NO_LINK, readBlob, sharedBlob } from './checkpoint-store.ts';
+
+export { sharedBlob };
 
 const FILE_LIMIT = 20_000;
 const BYTE_LIMIT = 128 * 1024 * 1024;
-const FILE_BYTE_LIMIT = 16 * 1024 * 1024;
+const FILE_BYTE_LIMIT = BLOB_BYTE_LIMIT;
 const SKIP = new Set(['.git', '.boite', '.agents', 'node_modules']);
 
 /**
@@ -140,8 +143,9 @@ export async function snapshot(core: Core, threadId: string, root: string, objec
     if (bytes > BYTE_LIMIT) throw new Error('workspace exceeds the 128 MiB checkpoint limit');
     result[name] = saved.entry;
     if (saved.bytes) {
-      if (shared) await storeBlob(shared, objects, saved.entry.hash, saved.bytes, folders);
-      else await writeCheckpointBlob(join(objects, saved.entry.hash), saved.entry.hash, saved.bytes);
+      const stored = await encodeBlob(saved.bytes);
+      if (shared) await storeBlob(shared, objects, saved.entry.hash, saved.bytes, stored, folders);
+      else await writeCheckpointBlob(join(objects, saved.entry.hash), saved.entry.hash, stored);
     }
     next.set(name, { entry: saved.entry, metadata: saved.metadata, size: saved.size, objects });
   }
@@ -150,12 +154,6 @@ export async function snapshot(core: Core, threadId: string, root: string, objec
 }
 
 function needsBlob(entry: FileEntry): boolean { return entry.link === undefined && !entry.unbacked; }
-
-/** `<shared>/<first two hex digits>/<hash>`, so no folder holds every blob. */
-export function sharedBlob(shared: string, hash: string): string { return join(shared, hash.slice(0, 2), hash); }
-
-const NO_LINK = new Set(['EXDEV', 'EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EMLINK', 'EINVAL']);
-const errno = (error: unknown) => (error as NodeJS.ErrnoException).code ?? '';
 
 /**
  * Put the shared blob at `objects/<hash>`. Returns false when the shared blob
@@ -194,19 +192,22 @@ async function replaceBlob(source: string, dest: string, tryLink: boolean): Prom
 }
 
 /**
- * Keep a blob in `objects` and in the shared store. Known content is linked
- * once its shared copy matches `bytes`; one read costs less than a write.
+ * Keep a blob in `objects` and in the shared store. `stored` is what goes on
+ * disk for `bytes`, a zstd frame when that pays. Known content is linked
+ * without reading it whole when the shared blob is a frame of the expected
+ * size: its name is the hash and a rewind hashes it again. A raw shared blob,
+ * from before compression or incompressible, is compared byte for byte.
  * New content is written into `objects` first and gets its shared name once
  * complete, so the store never names a partial file. A shared blob left
  * short or zeroed by a crash before its data reached the disk is replaced,
  * along with the thread's own name when it is the same file.
  */
-async function storeBlob(shared: string, objects: string, hash: string, bytes: Buffer, folders: Set<string>): Promise<void> {
+async function storeBlob(shared: string, objects: string, hash: string, bytes: Buffer, stored: Buffer, folders: Set<string>): Promise<void> {
   const source = sharedBlob(shared, hash);
   const info = await lstat(source).catch(() => null);
-  if (info?.isFile() && info.size === bytes.length && await sameBytes(source, bytes) && await linkBlob(shared, objects, hash)) return;
+  if (info?.isFile() && await sameBlob(source, info.size, bytes, stored) && await linkBlob(shared, objects, hash)) return;
   const dest = join(objects, hash);
-  await writeCheckpointBlob(dest, hash, bytes);
+  await writeCheckpointBlob(dest, hash, stored);
   const folder = dirname(source);
   if (!folders.has(folder)) { await mkdir(folder, { recursive: true, mode: 0o700 }); folders.add(folder); }
   if (info) await rm(source, { force: true });
@@ -214,7 +215,17 @@ async function storeBlob(shared: string, objects: string, hash: string, bytes: B
   catch (error) { if (errno(error) !== 'EEXIST' && !NO_LINK.has(errno(error))) throw error; }
 }
 
-async function sameBytes(path: string, bytes: Buffer): Promise<boolean> {
+/** Whether the shared blob at `path` holds `bytes`, reading four bytes of a frame or the whole of a raw blob. */
+async function sameBlob(path: string, size: number, bytes: Buffer, stored: Buffer): Promise<boolean> {
+  if (stored !== bytes && size === stored.length) {
+    const handle = await open(path, constants.O_RDONLY).catch(() => null);
+    if (!handle) return false;
+    try {
+      const head = Buffer.alloc(4);
+      return (await handle.read(head, 0, 4, 0)).bytesRead === 4 && head.equals(stored.subarray(0, 4));
+    } finally { await handle.close(); }
+  }
+  if (size !== bytes.length) return false;
   const existing = await readFile(path).catch(() => null);
   return existing !== null && existing.equals(bytes);
 }
@@ -244,11 +255,12 @@ export async function collectSharedBlobs(shared: string, graceMs: number): Promi
 }
 
 /**
- * One content-addressed blob. A crash can leave a short file at the hash
- * name: `wx` then fails with EEXIST and a later rewind would trust the
- * partial bytes until the restore hash check refuses the whole rewind.
- * A matching file stays. A mismatch is replaced. Any other write error
- * removes the partial file this attempt created.
+ * One content-addressed blob, `bytes` in its stored form. A crash can leave
+ * a short file at the hash name: `wx` then fails with EEXIST and a later
+ * rewind would trust the partial bytes until the restore hash check refuses
+ * the whole rewind. A file whose content hashes to the name stays, raw or
+ * framed. A mismatch is replaced. Any other write error removes the partial
+ * file this attempt created.
  */
 export async function writeCheckpointBlob(dest: string, hash: string, bytes: Buffer): Promise<void> {
   try {
@@ -261,7 +273,7 @@ export async function writeCheckpointBlob(dest: string, hash: string, bytes: Buf
     }
   }
   const existing = await readFile(dest).catch(() => null);
-  if (existing !== null && createHash('sha256').update(existing).digest('hex') === hash) return;
+  if (existing !== null && await decodeBlob(existing, hash)) return;
   await rm(dest, { force: true });
   await writeFile(dest, bytes, { flag: 'wx', mode: 0o600 });
 }
@@ -289,8 +301,8 @@ async function writeEntry(root: string, objects: string, name: string, entry: Fi
   try {
     if (entry.link !== undefined) await symlink(entry.link, temporary);
     else {
-      const content = await readFile(join(objects, entry.hash));
-      if (createHash('sha256').update(content).digest('hex') !== entry.hash) throw new Error(`file checkpoint blob for ${name} is corrupt`);
+      const content = await readBlob(join(objects, entry.hash), entry.hash);
+      if (!content) throw new Error(`file checkpoint blob for ${name} is missing or corrupt`);
       await writeFile(temporary, content, { mode: entry.mode });
       await chmod(temporary, entry.mode);
     }
@@ -313,9 +325,8 @@ export async function restoreFiles(root: string, objects: string, changes: FileC
       throw refused(`cannot rewind: ${change.name} changed outside the removed turns`, { field: 'path', path: change.name, reason: 'file-conflict', expected: 'the file state at the end of the removed turns' });
     }
     // A missing backup must be discovered before any file is touched.
-    if (change.before && change.before.link === undefined) {
-      const bytes = await readFile(join(objects, change.before.hash));
-      if (createHash('sha256').update(bytes).digest('hex') !== change.before.hash) throw new Error(`file checkpoint blob for ${change.name} is corrupt`);
+    if (change.before && change.before.link === undefined && !await readBlob(join(objects, change.before.hash), change.before.hash)) {
+      throw new Error(`file checkpoint blob for ${change.name} is missing or corrupt`);
     }
   }
   const written: FileChange[] = [];

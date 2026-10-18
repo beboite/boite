@@ -4,6 +4,9 @@
 // each other's servers. One optimization here leaves every later server a
 // consistent cache. With an output directory argument it also builds the
 // fake-client bundle once, for `BOITE_E2E_FAKE_UI`, and opens it in a browser.
+// CI builds that bundle once for every shard: `--build-only <dir>` only builds
+// it, and `--prebuilt <dir>` warms and opens the one already there.
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { freePort } from './cdp.ts';
@@ -27,9 +30,23 @@ async function preparationStep<T>(label: string, run: () => Promise<T>): Promise
 
 async function prepare(): Promise<void> {
   const root = join(import.meta.dir, '../../../packages/ui');
+  const args = process.argv.slice(2);
+  const mode = args[0] === '--build-only' || args[0] === '--prebuilt' ? args.shift() : undefined;
+  const outDir = args[0];
+  if (mode && !outDir) throw new Error(`warm.ts ${mode}: expected the fake-client bundle's directory`);
+  if (mode === '--prebuilt' && !existsSync(join(outDir!, 'index.html'))) {
+    throw new Error(`warm.ts --prebuilt: ${resolve(outDir!)} holds no index.html; build it with bun tests/e2e/lib/warm.ts --build-only ${outDir}`);
+  }
   const { build, createServer } = await preparationStep('load Vite', () =>
     import(createRequire(join(root, 'package.json')).resolve('vite')));
   const { fixtureBridge } = await preparationStep('load fixture bridge', () => import('./ui.ts'));
+  const buildFakeUi = () => preparationStep('build fake UI', async () => {
+    await build({ root, plugins: [fixtureBridge], define: { 'import.meta.env.DEV': 'true' }, build: { outDir: resolve(outDir!), emptyOutDir: true }, logLevel: 'warn' });
+  });
+  if (mode === '--build-only') {
+    await buildFakeUi();
+    return;
+  }
 
   // Match startDevUi's plugins: Vite hashes them into the optimized-dependency cache.
   const server = await preparationStep('create dev server', async () =>
@@ -55,11 +72,8 @@ async function prepare(): Promise<void> {
     await preparationStep('close dev server', () => server.close());
   }
 
-  const outDir = process.argv[2];
   if (outDir) {
-    await preparationStep('build fake UI', async () => {
-      await build({ root, plugins: [fixtureBridge], define: { 'import.meta.env.DEV': 'true' }, build: { outDir: resolve(outDir), emptyOutDir: true }, logLevel: 'warn' });
-    });
+    if (mode !== '--prebuilt') await buildFakeUi();
     // The first Chrome of a hosted runner is the slow one. It starts here, where
     // nothing has a deadline, and not inside the first test of the run. A
     // browser that will not start is the tests' to report, so this never fails.

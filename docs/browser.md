@@ -83,6 +83,15 @@ Settings closes its tabs and removes its folder; a folder whose browser had
 already closed goes at the next settings change or the first use of the agent
 browser after a restart. A folder that cannot be removed is logged.
 
+The browser downloads no components (`--disable-component-update`) and keeps
+at most 64 MiB of HTTP cache (`--disk-cache-size`). Before a profile's first
+start under those flags, the core removes what an older profile collected for
+the browser itself (`trimProfile`): `component_crx_cache`, the
+`ProvenanceData` folders, `Edge Wallet`, `Edge Entity Extraction`,
+`Edge Shopping`, `Default/Cache` and `Default/Code Cache`, then writes
+`boite-trimmed` so it happens once. Cookies, logins, preferences and
+`Local State` stay.
+
 Logins live on the machine that runs the agent, not on the device that shows
 it. The core keeps each profile's cookies itself, in `boite-cookies.json` in
 the profile folder, readable by its own account only: saved a second after a
