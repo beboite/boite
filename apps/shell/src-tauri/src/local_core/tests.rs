@@ -298,6 +298,42 @@ fn a_core_compacting_its_journal_is_waited_on_past_the_timeout_and_says_so() {
 }
 
 #[test]
+fn a_core_another_shell_started_that_dies_while_compacting_is_replaced_at_once() {
+    let _process_guard = crate::process_test_guard();
+    let directory = scratch("compact-dies");
+    // That core never gets to serve: it is killed while compacting, and its marker stays.
+    let until = std::time::SystemTime::now() + Duration::from_secs(120);
+    std::fs::write(directory.join("compact-until"), until.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis().to_string()).unwrap();
+    let core = fake_command(&directory, "2.0.0", "compact");
+    let mut command = Command::new(&core.program);
+    command.args(&core.args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    platform::prepare_command(&mut command);
+    let mut earlier = command.spawn().expect("bun runs the fake core");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while starting::read_starting(&directory).is_none() {
+        assert!(Instant::now() < deadline, "the fake core never announced its work");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let timeout = Duration::from_secs(30);
+    let state = std::sync::Arc::new(state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "serve"), false, timeout));
+    let resolution = { let state = state.clone(); std::thread::spawn(move || resolve_core(&state)) };
+    // Waiting on that core by now, with no child of its own.
+    std::thread::sleep(Duration::from_millis(500));
+    let started = Instant::now();
+    let _ = earlier.kill();
+    let _ = earlier.wait();
+    let outcome = resolution.join().unwrap();
+    let waited = started.elapsed();
+    let pid = spawned_pid(&state);
+    state.kill_child();
+    std::fs::remove_dir_all(directory).unwrap();
+    let (_, served, _) = outcome.expect("a core of its own once the one it waited on is gone");
+    assert_eq!(served, pid);
+    assert_ne!(served, Some(earlier.id()));
+    assert!(waited < timeout, "replaced after {waited:?}, the whole {timeout:?} timeout");
+}
+
+#[test]
 fn a_caller_waits_a_whole_patience_past_the_last_time_the_resolution_saw_the_core_at_work() {
     let slot = std::sync::Arc::new((Mutex::new(Slot::default()), Condvar::new()));
     let (began, waiting) = std::sync::mpsc::channel();

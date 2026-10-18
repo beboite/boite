@@ -57,7 +57,8 @@ struct Slot {
     /// who find the same dead core only the first starts another.
     generation: u64,
     /// The last time that resolution, past its timeout, saw the core announce
-    /// work before it serves (`core.starting.json`). Callers follow it rather
+    /// work before it serves (`core.starting.json`), or started its own once
+    /// the core it waited on exited during that work. Callers follow it rather
     /// than read the file themselves.
     announced: Option<Instant>,
 }

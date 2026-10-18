@@ -66,8 +66,9 @@ export function vacuumPlan(file: string, when = VACUUM_WHEN): VacuumPlan | null 
  * Gives the free pages the background passes left back to the disk, once, and
  * turns on incremental auto-vacuum so that later free pages go back in small
  * idle ticks (`retention.ts`) and no VACUUM is needed again. Runs before the
- * journal opens, with the data directory locked: a VACUUM holds the write lock
- * for its whole length, so at runtime every write would wait on it and fail.
+ * journal opens, with the data directory locked: the copy takes the journal's
+ * place, and `VACUUM INTO` reads one snapshot, so a write committed while it
+ * ran would be lost.
  * The live file is copied with `VACUUM INTO` and the copy, checked, takes its
  * place; on any error the original stays as it was. Returns what it did, or
  * null when `vacuumPlan` says no.
@@ -126,10 +127,11 @@ export function vacuumAtStart(dataDir: string, onError: (message: string) => voi
     const left = VACUUM_RETRY.attempts - attempts - 1;
     onError(`journal vacuum: ${messageOf(error)}; the journal is left as it was, ${left > 0 ? `tried again in a day (${left} left)` : 'not tried again'}`);
     try { writeFileSync(failed, JSON.stringify({ attempts: attempts + 1, at: now, error: messageOf(error) })); } catch { /* The marker of the start holds the attempt. */ }
-    rmSync(copy, { force: true });
+    // A handle that failed the rename usually holds the copy too: the next start removes it.
+    try { rmSync(copy, { force: true }); } catch { /* See above. */ }
     return null;
   } finally {
-    rmSync(status, { force: true });
+    try { rmSync(status, { force: true }); } catch { /* A marker left names this run, which the shell then sees serve. */ }
   }
 }
 
