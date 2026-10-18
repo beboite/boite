@@ -94,8 +94,8 @@ the tables. Retention runs one minute after startup and daily. Its first ticks
 build the planner statistics a migration left missing, one `ANALYZE` per indexed
 table that has none, reading about 400 rows per index; the open itself analyzes
 nothing. It then deletes events older than 30 days in paced batches while
-retaining the latest agents revision, and the daily pass ends with
-`PRAGMA optimize`.
+retaining the latest agents revision, and after each prune it rebuilds the
+statistics that prune made stale, the same way.
 Project removal explicitly clears thread-keyed tables; foreign keys are disabled.
 A newer journal schema is refused before writing, with the file and both versions.
 
@@ -136,7 +136,9 @@ where each pass stopped in a setting (`part-blobs:moved-through`,
 pass is never scanned again. Each step sizes its batch to the time its last
 tick took, aiming at 40 ms, and compresses on Bun's thread pool
 (`Bun.zstdCompress`) before a write guarded on the row it read, so a write
-made meanwhile wins.
+made meanwhile wins. A tick is skipped while the WAL is over twice its 4 MiB
+limit, so the passes never get the WAL far enough behind that the main thread
+checkpoints it.
 
 Space goes back to the disk once. When every one-time pass has finished and
 the trace was cut once, the next core start checks the journal before opening

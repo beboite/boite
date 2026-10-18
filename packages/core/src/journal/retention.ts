@@ -103,9 +103,14 @@ export function scheduleEventRetention(journal: Journal, onError: (message: stri
   };
 }
 
-/** One batch of event retention at `now`, looking at `limit` events; true while more is left. */
+/**
+ * One batch of event retention at `now`, looking at `limit` events; true while
+ * more is left. A batch waits while the checkpoints catch up with the WAL
+ * (`WalCheckpoints.behind`), as the compaction ticks do.
+ */
 export function pruneEventsOnce(journal: Journal, now: number, limit = 5_000): boolean {
   if (journal.isClosed()) return false;
+  if (journal.checkpoints?.behind === true) return true;
   const after = (journal.getSetting(TRAIL_CURSOR) as number | undefined) ?? 0;
   const trail = journal.pruneTrail(after, now - TRAIL_RETENTION_MS, limit);
   if (trail.through !== after) journal.setSetting(TRAIL_CURSOR, trail.through);
