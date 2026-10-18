@@ -131,10 +131,16 @@ test('what the user attaches to an agent message reaches its turn and stays out 
     const scope = { kind: 'agent' as const, id: agent.id };
     const picture = { kind: 'image' as const, mimeType: 'image/png' as const, data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', name: 'pixel.png' };
     const notes = { kind: 'file' as const, mimeType: 'text/plain', data: Buffer.from('two lines\nof notes').toString('base64'), name: 'notes.txt' };
+    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
     // Pictures alone make a message, as they make a prompt.
     const sent = await client.call('agents.message.send', { scope, recipientIds: [], text: '', attachments: [picture, notes], requestId: 'attach_001' });
     expect(sent.attachments).toEqual([{ kind: 'image', mimeType: 'image/png', name: 'pixel.png', bytes: 70 }, { kind: 'file', mimeType: 'text/plain', name: 'notes.txt', bytes: 18 }]);
     expect(JSON.stringify(await client.call('agents.snapshot', {}))).not.toContain(picture.data);
+    // The delivery carries them; a decision's continuation of it, whose prompt differs, does not send them twice.
+    const pending = h.core.workforce.records.list('work')[0]!;
+    expect(h.core.workforce.attachmentsFor(pending)).toHaveLength(2);
+    expect(h.core.workforce.attachmentsFor({ ...pending, prompt: 'Decision on: which one?' })).toEqual([]);
+    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: false });
     await waitFor(() => h.core.workforce.records.list('work').some(w => w.status === 'done'));
     const run = h.core.workforce.records.list('run')[0]!;
     const prompt = [...h.core.journal.walkTurnMessages(run.threadId, run.turnId!)].find(m => m.role === 'user')!;

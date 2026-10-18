@@ -311,9 +311,14 @@ export class AgentStore {
     }
   }
 
-  /** What the user attached to the message a piece of work answers, for its turn. */
+  /**
+   * What the user attached to the message a piece of work answers, for its
+   * turn. Only the delivery itself carries them: a decision's continuation or
+   * a resume rewrites the prompt and finds them already in the thread.
+   */
   attachmentsFor(work: AgentWork): Attachment[] {
-    return work.messageId ? (this.core.journal.getSetting(attachmentsKey(work.messageId)) as Attachment[] | undefined) ?? [] : [];
+    if (!work.messageId || work.prompt !== this.records.get('message', work.messageId).text) return [];
+    return (this.core.journal.getSetting(attachmentsKey(work.messageId)) as Attachment[] | undefined) ?? [];
   }
   /** Lets a message's attachments go once no recipient's work can start again: every delivery processed, cancelled or over the limit. */
   releaseAttachments(messageId: string | null): void {
