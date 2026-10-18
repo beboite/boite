@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Group, GroupCore } from '@boite/contracts';
+import { PROTOCOL_VERSION, type Group, type GroupCore } from '@boite/contracts';
+import type { SocketLike } from './client';
 import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, rememberSession, removeBrought, type Endpoint } from './endpoint';
 import { GroupLinks, usableAddresses } from './group-links.svelte';
 import type { Machine, Workspace } from './workspace.svelte';
@@ -48,6 +49,44 @@ function workspace(machines: Machine[]) {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const members = [core('a', ['http://10.0.0.1:1']), core('b', ['http://b.tail:1', 'http://100.64.0.2:1', 'http://192.168.1.20:1'])];
+
+/** A hand-paired machine's socket: it opens after `opensIn` ms and answers `group.get` after `answersIn` ms, null for never. */
+class AnchorSocket implements SocketLike {
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onclose: SocketLike['onclose'] = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+
+  constructor(private readonly roster: Group, opensIn: number | null, private readonly answersIn: number | null) {
+    if (opensIn !== null) setTimeout(() => { if (!this.closed) this.onopen?.(); }, opensIn);
+  }
+
+  send(data: string): void {
+    const { id, method } = JSON.parse(data) as { id: number; method: string };
+    const reply = (result: unknown) => { if (!this.closed) this.onmessage?.({ data: JSON.stringify({ id, result }) }); };
+    if (method === 'hello') setTimeout(() => reply({ core: { protocolVersion: PROTOCOL_VERSION }, principal: 'owner' }), 0);
+    else if (method === 'group.get' && this.answersIn !== null) setTimeout(() => reply(this.roster), this.answersIn);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.onclose?.({});
+  }
+}
+
+const take = <T>(list: T[], item: T): T => {
+  list.push(item);
+  return item;
+};
+
+/** What `promise` resolved with so far, undefined while it is pending. */
+function settled<T>(promise: Promise<T>): { value: T | undefined } {
+  const state: { value: T | undefined } = { value: undefined };
+  void promise.then((value) => { state.value = value; });
+  return state;
+}
 
 beforeEach(() => localStorage.clear());
 
@@ -359,6 +398,48 @@ describe('group links', () => {
     expect(await new GroupLinks(ws, { secure: () => false, ask: late }).vet([held[2]!], [anchors[0]!])).toEqual([]);
     expect(readEnvironments().find((env) => env.url === repaired.url)).toMatchObject({ token: 'by-hand', paired: true });
     expect(readEnvironments().find((env) => env.url === repaired.url)?.coreId).toBeUndefined();
+  });
+
+  it('waits past three seconds for a hand-paired machine whose socket opened, and forgets a key for an address it no longer gives', async () => {
+    vi.useFakeTimers();
+    try {
+      // The group brought b at an address b gave up since: someone else may listen there now.
+      const retired = { url: 'http://100.64.0.9:1', label: 'b', token: 'key', paired: true, coreId: 'b', groupId: 'grp' };
+      localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([retired]));
+      const { workspace: ws } = workspace([machine('http://10.0.0.1:1', {})]);
+      const sockets: AnchorSocket[] = [];
+      // Its socket opens at once and its hello is answered; the roster comes four seconds later.
+      const links = new GroupLinks(ws, { secure: () => false, socket: () => take(sockets, new AnchorSocket(group('a', members), 0, 4000)) });
+      const cleared = settled(links.vet([retired], [{ url: 'http://10.0.0.1:1', token: 'hand' }]));
+      await vi.advanceTimersByTimeAsync(3500);
+      expect(cleared.value).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(cleared.value).toEqual([]);
+      expect(readEnvironments()).toEqual([]);
+      expect(sockets.map((socket) => socket.closed)).toEqual([true]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('uses a held key as it was left after three seconds when no hand-paired machine opens a socket, and after fifteen when one opened and stays silent', async () => {
+    vi.useFakeTimers();
+    try {
+      const held = { url: 'http://100.64.0.9:1', label: 'b', token: 'key', paired: true, coreId: 'b', groupId: 'grp' };
+      localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([held]));
+      const { workspace: ws } = workspace([machine('http://10.0.0.1:1', {})]);
+      const anchor = [{ url: 'http://10.0.0.1:1', token: 'hand' }];
+      const off = settled(new GroupLinks(ws, { secure: () => false, socket: () => new AnchorSocket(group('a', members), null, null) }).vet([held], anchor));
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(off.value).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(off.value).toEqual([held]);
+
+      const silent = settled(new GroupLinks(ws, { secure: () => false, socket: () => new AnchorSocket(group('a', members), 0, null) }).vet([held], anchor));
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(silent.value).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(silent.value).toEqual([held]);
+      expect(readEnvironments()).toEqual([held]);
+    } finally { vi.useRealTimers(); }
   });
 
   it('sends no ticket to an address one hand-paired machine still lists and another no longer does', async () => {
