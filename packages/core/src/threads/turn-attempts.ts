@@ -176,15 +176,14 @@ export class TurnAttempts {
         // The native session already holds the request and what the agent did with it.
         context.prompt = CAPACITY_CONTINUE_PROMPT;
         context.attachments = [];
-        context.sessionBefore = sessionAfter(context.sessionBefore, usage, totals);
       } else if (note) {
         // Shown once the context is built, so a fresh session's history does not carry it twice.
         this.threads.noteSystem(threadId, turnId, note.prompt, note.label, 'turn.resumedAfterUpdate');
-        context.sessionBefore = sessionAfter(context.sessionBefore, usage, totals);
       } else if (resumed && state.thread.sessionId !== null) {
         context.prompt = `Continue the current task from where it stopped. The user changed the permission mode to ${permissions.mode}. Do not repeat completed work. Retain subsequent instructions already in the conversation.\n\nRequest for reference:\n${context.prompt}`;
-        context.sessionBefore = sessionAfter(context.sessionBefore, usage, totals);
       }
+      // A later attempt resumes a session that already holds the earlier ones, refused or not.
+      if (attempt > 1 && state.thread.sessionId !== null) context.sessionBefore = sessionAfter(context.sessionBefore, usage, totals);
       if (state.running.execution) state.running.execution = { ...state.running.execution, permissionMode: permissions.mode };
       this.core.journal.putTurn(state.running);
       const attemptAt = performance.now();

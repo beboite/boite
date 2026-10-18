@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { Message, ThreadRetry } from '@boite/contracts';
 import { Core } from '../src/core.ts';
+import { setDriver } from '../src/drivers/index.ts';
+import type { TurnContext } from '../src/drivers/types.ts';
 import { CAPACITY_CONTINUE_PROMPT, CAPACITY_RETRY } from '../src/threads/turn-attempts.ts';
 import { LIMIT_RESUME, LIMIT_RESUME_LABEL } from '../src/threads/limit-resume.ts';
 import { echoThread, removeDir, startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -41,6 +43,29 @@ test('a turn refused at capacity before writing anything tries again with the sa
     expect(seen.map(retry => [retry.kind, retry.attempt, retry.attempts])).toEqual([['capacity', 1, 3], ['capacity', 2, 3]]);
     expect(thread.retry).toBeNull();
   } finally { await h.stop(); }
+});
+
+test('a retry after a refusal that wrote nothing resumes from the totals the refused attempt left', async () => {
+  const h = await startTestCore();
+  const attempts: TurnContext[] = [];
+  const restore = setDriver('echo', {
+    protocol: 'echo',
+    startTurn(ctx) {
+      attempts.push(ctx);
+      return { stop() {}, done: Promise.resolve(attempts.length === 1
+        ? { status: 'error', sessionId: 'native-session', usage: null, error: 'at capacity', refusal: { kind: 'capacity' }, agentTotals: { costUsd: 0.1, tokens: 60 } }
+        : { status: 'done', sessionId: 'native-session', usage: null }) };
+    },
+  });
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    const turn = await client.call('turns.start', { threadId, prompt: 'hi' });
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'done');
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]!.sessionBefore).toEqual({ costUsd: 0.1, tokens: 60 });
+    expect(h.core.journal.getTurn(turn.id)?.agentTotals).toEqual({ costUsd: 0.1, tokens: 60 });
+  } finally { await h.stop(); restore(); }
 });
 
 test('a turn refused at capacity after writing continues with a short prompt instead of resending the request', async () => {
