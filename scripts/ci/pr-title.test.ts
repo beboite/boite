@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { titleProblem } from './pr-title.ts';
+import { groupTitle, titleProblem } from './pr-title.ts';
 
 test('conventional titles pass, with or without a scope', () => {
   for (const title of [
@@ -17,4 +17,9 @@ test('free-form titles and unknown types are refused by name', () => {
   expect(titleProblem('fix(UI): normalize spacing')).toContain('type(scope): summary');
   expect(titleProblem('fix:missing space')).toContain('type(scope): summary');
   expect(titleProblem('docs: explain pairing.')).toBe('the summary ends with a period');
+});
+
+test('a merge group reads the squash title of its last commit', () => {
+  expect(groupTitle('fix(ci): queue merges (#612)\n\nbody')).toBe('fix(ci): queue merges');
+  expect(titleProblem(groupTitle('feat: keep (#12) inside (#613)'))).toBeUndefined();
 });

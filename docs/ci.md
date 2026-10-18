@@ -10,6 +10,19 @@ requests reviews; approval is not required. The `release tags` policy protects
 `type(scope): summary`, with an optional scope and one of `feat`, `fix`, `perf`,
 `refactor`, `docs`, `test`, `ci`, `build`, `chore` or `revert`. Its body is empty.
 
+### Merge queue
+
+Both required workflows also run on `merge_group`, so a squash merge queue can
+gate `main`. A group runs `ci` in `pr` mode against its `main` base: the same
+path rules, skips and platforms as a pull request, with the diff covering every
+pull request ahead of it in the queue. A group's `PR title` only reports the
+squash title of its last commit, since a pull request cannot enter the queue
+without that check passing on its title. With the queue on, an agent merges
+with `gh pr merge <number> --squash --auto`: the pull request enters the queue
+once its own checks pass and lands when its group passes. A pull request that
+the queue removes, after a failed group or a conflict, needs a fix or a rebase
+and the same command again.
+
 ## Checks
 
 `scripts/ci/changes.ts` selects jobs from changed paths. Unknown paths run the
@@ -102,8 +115,17 @@ a running publication finishes, while newer pending work can supersede older
 pending work.
 
 Artifact uploads retry once, replacing a name reserved by the failed attempt.
-A second failure fails the job. Tests and builds are not retried, with one
-exception. `scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
+A second failure fails the job. Tests and builds are not retried, with two
+exceptions. Tests listed in `scripts/ci/quarantine.json` with their reason run
+once more, alone and in a fresh process, when they fail in the core suite or
+an E2E shard (`scripts/ci/flaky.ts`); the job fails if they fail again, and the
+retry leaves a warning on the run. The retry only happens when every failure
+of that file (core) or shard (E2E) is quarantined and bun named each one: a
+crash, a timed-out file or any other failing test fails at once. The list
+started on 2026-10-18 from the 80 runs that passed on rerun since 2026-10-16:
+tests that failed at least three first attempts. A fixed test leaves the list;
+`flaky.test.ts` fails when an entry no longer exists in its file.
+`scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
 three attempts at most, when hdiutil reports `Resource busy`. That runner
 fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 37213994348 and cost a rerun. Before retrying, it detaches what the failed

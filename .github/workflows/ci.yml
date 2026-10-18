@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue tests each group like a pull request (docs/ci.md#merge-queue).
+  merge_group:
   workflow_dispatch:
   workflow_call:
     secrets:
@@ -79,9 +81,9 @@ jobs:
           bun-version-file: package.json
       - id: filter
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           GH_TOKEN: ${{ github.token }}
-          FORCE_CHECKS: ${{ inputs.force || github.ref_type == 'tag' || (github.event_name != 'push' && github.event_name != 'pull_request') }}
+          FORCE_CHECKS: ${{ inputs.force || github.ref_type == 'tag' || (github.event_name != 'push' && github.event_name != 'pull_request' && github.event_name != 'merge_group') }}
         run: bun scripts/ci/changes.ts
       - run: bun install --frozen-lockfile
       - name: Audit frozen dependencies
@@ -296,7 +298,8 @@ jobs:
         run: |
           $files = @(bun scripts/ci/e2e-shards.ts ${{ matrix.shard }} 3)
           if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw 'No browser or core E2E files for this shard' }
-          bun test @files
+          # A quarantined test that fails runs once more (scripts/ci/quarantine.json).
+          bun scripts/ci/flaky.ts @files
       - uses: ./.github/actions/upload-artifact
         if: failure() || cancelled()
         with:

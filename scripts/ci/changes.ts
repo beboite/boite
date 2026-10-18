@@ -70,9 +70,9 @@ const CORE_PR: CoreRunner[] = [
 ];
 export const CORE_ALL: CoreRunner[] = [...CORE_PR, { os: 'macos-15-intel', name: 'macOS x64' }];
 
-// `pr` gates a merge, `warm` follows it on main, `full` is a release or a
-// manual run. Main runs the extra portable architectures, the Intel Mac core
-// suite, and refreshes caches.
+// `pr` gates a merge, in the pull request and again in the merge queue, `warm`
+// follows it on main, `full` is a release or a manual run. Main runs the extra
+// portable architectures, the Intel Mac core suite, and refreshes caches.
 // A push event alone provides no proof that its tree passed PR tests, so every
 // mode runs the affected suites. A main push compares with the last main commit
 // whose CI passed, not the previous push: a cancelled or failed run's changes
@@ -82,7 +82,7 @@ export type Mode = 'pr' | 'warm' | 'full';
 
 export function ciMode(event: string, force: boolean): Mode {
   if (force) return 'full';
-  if (event === 'pull_request') return 'pr';
+  if (event === 'pull_request' || event === 'merge_group') return 'pr';
   if (event === 'push') return 'warm';
   return 'full';
 }
