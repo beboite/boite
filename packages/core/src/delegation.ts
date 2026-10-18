@@ -38,6 +38,8 @@ function teamState(thread: ThreadSummary): string {
 export class Delegation {
   readonly waits: DelegationWaits;
   readonly worktrees: ChildWorktrees;
+  /** Conversations whose team this start paused after a crash: nothing else tells their agent (`threads/auto-continue.ts`). */
+  readonly heldByRestart = new Set<string>();
   private closed = false;
   private readonly delivering = new Set<string>();
   private readonly jobs = new Set<Promise<void>>();
@@ -70,7 +72,10 @@ export class Delegation {
     for (const thread of core.journal.listThreadsIn(pending)) {
       if (thread.parentThreadId) continue;
       const config = this.config(thread.id);
-      if (config.enabled && !config.paused) this.pause(thread.id, 'restart');
+      if (config.enabled && !config.paused) {
+        this.pause(thread.id, 'restart');
+        this.heldByRestart.add(thread.id);
+      }
     }
     this.off = core.bus.onCommitted((name, payload) => {
       if (this.closed) return;
