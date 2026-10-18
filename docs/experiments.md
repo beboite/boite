@@ -53,6 +53,25 @@ the switch off closes the page if it is open. It hides the page only: agents
 already made keep their routines and missions on the core, which knows nothing
 of a client's experiments.
 
+## Contacts
+
+The Home page ([contacts](contacts.md)) and the buttons that lead there: Home
+beside Threads and Agents at the top of the sidebar, and the phone menu entry.
+Home lists each contact with its link, the trusted switch, the projects opened
+each way with their read switch, and the four fingerprint words under Details.
+Requests waiting for an answer come first, with Accept on a picked project and
+Refuse with a reason; decided ones fold under a count that says who decided.
+Invite makes a one-use link and says whether Tailscale shared the machine or
+why it could not; Join takes a pasted link and shows the four words to compare.
+The Tailscale card stores or clears the API key, never shows it back, and gives
+the policy lines to paste when the policy is open. The weakest model tier a
+contact's request may run on is the last setting.
+
+In a thread, a letter the core labelled with a contact shows that contact's
+name in a dashed "remote" chip beside the sender. The chip is drawn whatever
+the switch says: the label comes from the core. Turning the switch off closes
+Home if it is open; contacts, grants and requests stay on the core.
+
 ## Preview comments
 
 Open a Browser tab in the integrated panel and choose Reference an element.
@@ -230,3 +249,11 @@ press with one subscribe, that a turn streamed during the press is on screen,
 that a released press unsubscribes, and that the agents panel's subscription
 survives. `press-preload.test.ts` (end to end) measures the gain and covers a
 press dragged away.
+
+`fake-client.contacts.test.ts` covers the in-memory core's contacts: the seed,
+the `contacts.updated` event after each change, the refusals with their field,
+the invitation's share with and without a key, and `collaboration.ask`.
+`HomePage.test.ts` renames, trusts and opens a project for reading on the seeded
+contact, accepts a request through the menu, refuses one only with a reason,
+removes the contact behind the confirm, creates and joins an invitation, clears
+the key and moves the tier. `AgentDiscussion.svelte.test.ts` checks the remote chip.

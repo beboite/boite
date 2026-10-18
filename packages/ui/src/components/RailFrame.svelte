@@ -38,7 +38,7 @@
     foot
   }: {
     store: Store;
-    kind: 'sidebar' | 'agents-rail';
+    kind: 'sidebar' | 'agents-rail' | 'home-rail';
     label?: string;
     testid?: string;
     drawer?: boolean;
@@ -138,7 +138,7 @@
       orientation="vertical"
       edge="right"
       label={strings.sidebar.resize}
-      testid={kind === 'sidebar' ? 'sidebar-resize' : 'agents-resize'}
+      testid={kind === 'sidebar' ? 'sidebar-resize' : kind === 'home-rail' ? 'home-resize' : 'agents-resize'}
       value={store.sidebarWidth}
       min={SIDEBAR_MIN}
       max={SIDEBAR_MAX}

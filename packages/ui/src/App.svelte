@@ -14,6 +14,7 @@
   import DragGhost from './components/DragGhost.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
 
+  import RailHead from './components/RailHead.svelte';
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
   import { Closing } from './lib/closing.svelte';
@@ -179,6 +180,19 @@
   $effect(() => {
     if (experimentOn('resident-agents')) return;
     for (const machine of workspace.machines) if (machine.store.page === 'agents') machine.store.showChat();
+  });
+  // The Home page loads only once it is opened, so the boot bundle never carries it.
+  let HomePage = $state<typeof import('./components/home/HomePage.svelte').default>();
+  let homeLoadError = $state('');
+  $effect(() => {
+    if (store.page !== 'home' || !experimentOn('contacts') || HomePage) return;
+    void import('./components/home/HomePage.svelte').then(module => { HomePage = module.default; })
+      .catch(() => { homeLoadError = strings.contacts.loadFailed; });
+  });
+  $effect(() => {
+    if (experimentOn('contacts')) return;
+    for (const machine of workspace.machines) if (machine.store.page === 'home') machine.store.showChat();
+    if (store.page === 'home') store.showChat();
   });
   let settingsLoadError = $state('');
   $effect(() => {
@@ -567,6 +581,8 @@
       {/if}
     {:else if store.page === 'agents' && experimentOn('resident-agents')}
       {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
+    {:else if store.page === 'home' && experimentOn('contacts')}
+      {#if HomePage}{#key store}<HomePage {store}>{#snippet head()}<RailHead {store} current="home" />{/snippet}</HomePage>{/key}{:else}<p class="empty">{homeLoadError || strings.app.loading}</p>{/if}
     {:else if store.page === 'settings'}
       {#if SettingsShell}<SettingsShell {store} onopenthread={() => { mobileScreen = 'chat'; }} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}

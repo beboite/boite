@@ -105,6 +105,14 @@ export class Layout {
     this.sidebarOpen = false;
   }
 
+  /** The Home page, where contacts live. An experiment too: with it off, nothing leads there. */
+  showHome(): void {
+    if (!experimentOn('contacts')) return;
+    this.ctx.threads.invalidateNavigation();
+    this.page = 'home';
+    this.sidebarOpen = false;
+  }
+
   /** The right panel of the thread that is open, surfaces and all. */
   get panel(): BoundPanel {
     const s = this.ctx.store;

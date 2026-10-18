@@ -125,3 +125,20 @@ test('a letter landed on, then a gone one at the end, then the first again lands
   await tick();
   expect(top).toBe(852);
 });
+
+test('a letter across a contact link names the contact this core knows, in a remote chip beside the sender', () => {
+  const view = show([
+    letter('hello', 0, true, { contact: { coreId: 'core-build', name: 'Chris' } }),
+    letter('reply', 1, false),
+    letter('renamed', 2, true, { contact: { coreId: 'core-build', name: 'Chris (studio)' } })
+  ]);
+  const chip = view.querySelector<HTMLElement>('header [data-testid=agent-remote-chip]')!;
+  // The newest label wins: the owner renamed the contact between two letters.
+  expect(chip.textContent).toBe('Chris (studio)');
+  expect(chip.title).toContain('An agent of Chris (studio), a contact.');
+});
+
+test('letters between one owner\'s machines carry no remote chip', () => {
+  const view = show([letter('plain', 0, true)]);
+  expect(view.querySelector('[data-testid=agent-remote-chip]')).toBeNull();
+});

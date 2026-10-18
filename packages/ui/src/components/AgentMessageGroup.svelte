@@ -6,6 +6,7 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
+  import RemoteChip from './RemoteChip.svelte';
 
   /**
    * A burst of agent mail in the timeline: one row per conversation it went to
@@ -53,6 +54,7 @@
         </span>
         <span class="top">
           <strong class="title" data-testid="agent-discussion-title">{discussion.title}</strong>
+          {#if discussion.contact}<RemoteChip name={discussion.contact} />{/if}
           {#if tag}<span class="tag" data-relation={tag}>{strings.agentMessages.relation[tag]}</span>{/if}
           {#if where}<span class="where">{where}</span>{/if}
         </span>

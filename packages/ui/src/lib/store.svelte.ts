@@ -27,7 +27,7 @@ import type { Threads } from './store/threads.svelte';
 import type { Workbench } from './store/workbench.svelte';
 import type { Workflows } from './store/workflows.svelte';
 
-export type Page = 'chat' | 'settings' | 'agents';
+export type Page = 'chat' | 'settings' | 'agents' | 'home';
 export type { SettingsTab } from './settings-tabs';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
@@ -313,6 +313,7 @@ export class Store {
   showSettings(...args: Parameters<Layout['showSettings']>) { return this.#ctx.layout.showSettings(...args); }
   showChat(...args: Parameters<Layout['showChat']>) { return this.#ctx.layout.showChat(...args); }
   showAgents(...args: Parameters<Layout['showAgents']>) { return this.#ctx.layout.showAgents(...args); }
+  showHome() { return this.#ctx.layout.showHome(); }
   togglePanel(...args: Parameters<Layout['togglePanel']>) { return this.#ctx.layout.togglePanel(...args); }
   setNotifications(...args: Parameters<Layout['setNotifications']>) { return this.#ctx.layout.setNotifications(...args); }
 

@@ -1,0 +1,210 @@
+/*
+ * The Home page's state for one machine: its contacts, their requests, the
+ * contact settings and the Tailscale side, read with `contacts.get` and read
+ * again on `contacts.updated`. Only the Home page imports it, so it rides that
+ * page's chunk and never the boot bundle.
+ */
+
+import type { Contact, ContactInvite, ContactRequest, ContactSettings, ContactsState, ContactTailscale, ProjectId } from '@boite/contracts';
+import { errorText } from './errors';
+import type { Store } from './store.svelte';
+
+export class ContactsView {
+  state = $state<ContactsState | null>(null);
+  /** The last call that failed, in words; cleared by the next one that succeeds. */
+  error = $state('');
+  /** The first read failed: the page has nothing to show but this and Retry. */
+  loadError = $state('');
+  /** The invitation made on this visit, shown until another replaces it. */
+  invite = $state<ContactInvite | null>(null);
+  /** What `contacts.join` answered: the four words stay on screen until the owner closes them. */
+  joined = $state<Contact | null>(null);
+  /** Keys of the calls in flight, so a button does not send twice. */
+  busy = $state<string[]>([]);
+
+  readonly store: Store;
+  #watchers = 0;
+  #release: (() => void) | null = null;
+  #client: unknown = null;
+  #reading = 0;
+
+  constructor(store: Store) {
+    this.store = store;
+  }
+
+  /** Reads the state and follows `contacts.updated` while the page is drawn. Returns the release. */
+  watch(): () => void {
+    this.#watchers += 1;
+    this.follow();
+    return () => {
+      this.#watchers -= 1;
+      if (this.#watchers > 0) return;
+      this.#release?.();
+      this.#release = null;
+      this.#client = null;
+    };
+  }
+
+  /** A reconnection is a new client: subscribe on it and read again. */
+  follow(): void {
+    const client = this.store.client;
+    if (this.#watchers === 0 || client === this.#client) return;
+    this.#release?.();
+    this.#client = client;
+    this.#release = client ? client.on('contacts.updated', () => { void this.refresh(); }) : null;
+    void this.refresh();
+  }
+
+  async refresh(): Promise<void> {
+    const client = this.store.client;
+    if (!client) return;
+    const read = ++this.#reading;
+    try {
+      const state = await client.call('contacts.get', {});
+      // An older read that lands after a newer one must not put back what changed since.
+      if (read !== this.#reading) return;
+      this.state = state;
+      this.loadError = '';
+    } catch (error) {
+      if (read === this.#reading && !this.state) this.loadError = errorText(error);
+    }
+  }
+
+  isBusy(key: string): boolean {
+    return this.busy.includes(key);
+  }
+
+  /** One call under `key`: its error lands in `error`, its result in the caller. Null when it failed or was already running. */
+  async #run<T>(key: string, call: () => Promise<T>): Promise<T | null> {
+    if (this.busy.includes(key)) return null;
+    this.busy = [...this.busy, key];
+    try {
+      const result = await call();
+      this.error = '';
+      return result;
+    } catch (error) {
+      this.error = errorText(error);
+      return null;
+    } finally {
+      this.busy = this.busy.filter(entry => entry !== key);
+    }
+  }
+
+  #connected(): NonNullable<Store['client']> {
+    const client = this.store.client;
+    if (!client) throw new Error('This machine is disconnected.');
+    return client;
+  }
+
+  /** Puts a contact the core answered with in place, before the event's read lands. */
+  #put(contact: Contact): void {
+    if (!this.state) return;
+    const at = this.state.contacts.findIndex(entry => entry.coreId === contact.coreId);
+    this.state.contacts = at < 0 ? [...this.state.contacts, contact] : this.state.contacts.map(entry => entry.coreId === contact.coreId ? contact : entry);
+  }
+
+  async rename(coreId: string, name: string): Promise<void> {
+    const contact = await this.#run(`update:${coreId}`, () => this.#connected().call('contacts.update', { coreId, name }));
+    if (contact) this.#put(contact);
+  }
+
+  async trust(coreId: string, trusted: boolean): Promise<void> {
+    const contact = await this.#run(`update:${coreId}`, () => this.#connected().call('contacts.update', { coreId, trusted }));
+    if (contact) this.#put(contact);
+  }
+
+  async grant(coreId: string, projectId: ProjectId, readThreads?: boolean): Promise<void> {
+    const contact = await this.#run(`grant:${coreId}:${projectId}`, () => this.#connected().call('contacts.grant', { coreId, projectId, ...(readThreads === undefined ? {} : { readThreads }) }));
+    if (contact) this.#put(contact);
+  }
+
+  async revoke(coreId: string, projectId: ProjectId): Promise<void> {
+    const contact = await this.#run(`grant:${coreId}:${projectId}`, () => this.#connected().call('contacts.revoke', { coreId, projectId }));
+    if (contact) this.#put(contact);
+  }
+
+  async remove(coreId: string): Promise<void> {
+    const done = await this.#run(`remove:${coreId}`, () => this.#connected().call('contacts.remove', { coreId }));
+    if (done && this.state) this.state.contacts = this.state.contacts.filter(entry => entry.coreId !== coreId);
+  }
+
+  async decide(id: string, decision: { accept: true; projectId: ProjectId } | { accept: false; reason: string }): Promise<ContactRequest | null> {
+    const request = await this.#run(`decide:${id}`, () => this.#connected().call('contacts.decide', { id, ...decision }));
+    if (request && this.state) this.state.requests = this.state.requests.map(entry => entry.id === id ? request : entry);
+    return request;
+  }
+
+  async settings(settings: ContactSettings): Promise<void> {
+    const next = await this.#run('settings', () => this.#connected().call('contacts.settings', { settings }));
+    if (next && this.state) this.state.settings = next;
+  }
+
+  async tailscaleKey(key: string | null): Promise<ContactTailscale | null> {
+    const next = await this.#run('tailscale-key', () => this.#connected().call('contacts.tailscaleKey', { key }));
+    if (next && this.state) this.state.tailscale = next;
+    return next;
+  }
+
+  async createInvite(): Promise<void> {
+    const invite = await this.#run('invite', () => this.#connected().call('contacts.invite', {}));
+    if (invite) this.invite = invite;
+  }
+
+  async join(link: string): Promise<Contact | null> {
+    const contact = await this.#run('join', () => this.#connected().call('contacts.join', { link }));
+    if (contact) {
+      this.joined = contact;
+      this.#put(contact);
+    }
+    return contact;
+  }
+}
+
+const views = new WeakMap<Store, ContactsView>();
+
+/** One view per machine, kept while its Store lives, so a second visit draws at once. */
+export function contactsOf(store: Store): ContactsView {
+  let view = views.get(store);
+  if (!view) {
+    view = new ContactsView(store);
+    views.set(store, view);
+  }
+  return view;
+}
+
+/** Pending requests first, newest first within each half. */
+export function splitRequests(requests: readonly ContactRequest[]): { pending: ContactRequest[]; decided: ContactRequest[] } {
+  const newest = (a: ContactRequest, b: ContactRequest) => b.createdAt - a.createdAt;
+  return {
+    pending: requests.filter(request => request.status === 'pending').sort(newest),
+    decided: requests.filter(request => request.status !== 'pending').sort((a, b) => (b.decidedAt ?? b.createdAt) - (a.decidedAt ?? a.createdAt))
+  };
+}
+
+/** A contact's initials for its badge: the first letters of its first two words. */
+export function initialsOf(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const letters = words.length > 1 ? `${[...words[0]!][0]}${[...words[1]!][0]}` : [...(words[0] ?? '?')].slice(0, 2).join('');
+  return letters.toUpperCase();
+}
+
+/** The four fingerprint words, however the core spaced or hyphenated them. */
+export function fingerprintWords(fingerprint: string): string[] {
+  return fingerprint.split(/[\s-]+/).filter(Boolean);
+}
+
+/**
+ * Copies `text`. A page served over plain HTTP has no clipboard API: the field
+ * holding it is selected and copied the older way, and stays selected to copy
+ * by hand. True once something reached the clipboard.
+ */
+export async function copyText(text: string, field?: HTMLInputElement | HTMLTextAreaElement | null): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    field?.focus();
+    field?.select();
+    return !!field && !!document.execCommand?.('copy');
+  }
+}

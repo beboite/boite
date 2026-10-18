@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, Bot, ChevronDown, ChevronRight, Ellipsis, Folder, MessageSquare, Monitor, Plus, Settings, X } from '@lucide/svelte';
+  import { Activity, Bot, ChevronDown, ChevronRight, Ellipsis, Folder, House, MessageSquare, Monitor, Plus, Settings, X } from '@lucide/svelte';
   import type { MenuItem } from '../lib/menu';
   import Menu from './Menu.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -29,6 +29,7 @@
       <button class="ghost" data-testid="mobile-activity" aria-current={store.page === 'chat' && screen === 'activity' ? 'page' : undefined} onclick={() => go(() => navigate('activity'))}><Activity size={20} /><span class="ui-label">{strings.mobile.activity}</span>{#if waiting}<span class="badge ui-label-box"><span class="ui-label">{waiting}</span></span>{/if}</button>
       <button class="ghost" data-testid="mobile-settings" data-preload-view="settings" aria-current={store.page === 'settings' ? 'page' : undefined} onclick={() => go(() => store.showSettings())}><Settings size={20} /><span class="ui-label">{strings.settings.heading}</span></button>
       {#if experimentOn('resident-agents')}<button class="ghost" data-testid="mobile-agents" data-preload-view="agents" onclick={() => go(() => store.showAgents())}><Bot size={20} /><span class="ui-label">{strings.agents.heading}</span></button>{/if}
+      {#if experimentOn('contacts')}<button class="ghost" data-testid="mobile-contacts" data-preload-view="home" aria-current={store.page === 'home' ? 'page' : undefined} onclick={() => go(() => store.showHome())}><House size={20} /><span class="ui-label">{strings.contacts.heading}</span></button>{/if}
     </nav>
     <div class="project-picker"><Menu items={projects} onpick={id => go(() => pickProject(id))} label={strings.mobile.project} placement="bottom" variant="ghost" testid="mobile-menu-project"><Folder size={18} /><span class="ui-label">{strings.mobile.project}</span><ChevronDown size={15} /></Menu></div>
     <button class="primary create" data-testid="mobile-menu-new" disabled={store.connection !== 'ready'} onclick={() => go(create)}><Plus size={18} /><span class="ui-label">{strings.sidebar.newThread}</span></button>

@@ -15,16 +15,17 @@
  * context meter asks the same of `prompt-cache` before drawing its timer. The
  * bottom-left launchers and the store ask `resident-agents` before offering
  * the dedicated Agents interface. The composer asks `goal2` before taking
- * `/goal2` as a reviewed goal. `interaction-experiments.ts` starts
+ * `/goal2` as a reviewed goal. The rail head, the phone menu and the store ask
+ * `contacts` before offering the Home page. `interaction-experiments.ts` starts
  * `edge-scrollbars.ts` and `press-preload.ts` while their switches are on.
  */
 
-export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache' | 'open-chat-links' | 'preview-comments' | 'resident-agents' | 'whip' | 'recording-indicators' | 'goal2' | 'edge-scrollbars' | 'press-preload';
+export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache' | 'open-chat-links' | 'preview-comments' | 'resident-agents' | 'whip' | 'recording-indicators' | 'goal2' | 'edge-scrollbars' | 'press-preload' | 'contacts';
 
 export const EXPERIMENTS_STORAGE_KEY = 'boite.experiments';
 
 /** Every experiment this build ships, in the order the page lists them. */
-export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'prompt-cache', 'open-chat-links', 'preview-comments', 'resident-agents', 'whip', 'recording-indicators', 'goal2', 'edge-scrollbars', 'press-preload'];
+export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'prompt-cache', 'open-chat-links', 'preview-comments', 'resident-agents', 'whip', 'recording-indicators', 'goal2', 'edge-scrollbars', 'press-preload', 'contacts'];
 
 type Listener = (enabled: ExperimentId[]) => void;
 

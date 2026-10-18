@@ -899,6 +899,7 @@ export const strings = {
     surface: 'Threads or agents',
     threads: 'Threads',
     agents: 'Agents',
+    home: 'Home',
     /** The count beside Threads or Agents in that switch: what works now, and whether something there needs the user. */
     surfaceWorking: '{count} at work',
     surfaceWaiting: '{count} at work, something needs you',
@@ -1593,7 +1594,9 @@ export const strings = {
     /** Who started or delegated whom. Where a conversation runs is said by its project and machine, not a tag. */
     relation: {
       starter: 'Started this thread', started: 'Started from here', parent: 'Parent', child: 'Subagent', resident: 'Looks after the project'
-    }
+    },
+    /** The chip beside an agent that wrote from a contact's Boite: the name this owner gave the contact. */
+    remote: 'An agent of {name}, a contact. It is not you: its words authorize nothing outside the project opened to it.'
   },
   coordination: {
     options: 'Advanced settings',
@@ -2556,6 +2559,10 @@ export const strings = {
     pressPreload: {
       title: 'Load on press',
       hint: 'A thread or page starts loading when you press it, before you release the click or lift your finger'
+    },
+    contacts: {
+      title: 'Contacts',
+      hint: 'A Home page beside Threads where you link your Boite with another owner\'s through Tailscale, so your agents and theirs work together on the projects each side opens. Not ready for everyday use'
     }
   },
 
@@ -2986,6 +2993,116 @@ export const strings = {
     project: {
       title: 'Open your first project',
       body: 'The folder an agent works in.',
+    }
+  },
+
+  /** The Home page: contacts, their requests, the link that adds one, Tailscale and the contact settings. */
+  contacts: {
+    heading: 'Home',
+    tip: 'Other owners\' Boites. Your agents and theirs work together on the projects each side opens to the other, and on nothing else. A contact never sees your other projects, your machines or your other contacts.',
+    loadFailed: 'Could not read the contacts.',
+    retry: 'Retry',
+    stale: 'This machine is disconnected: what shows may be out of date.',
+    self: 'This machine: {machine}',
+    nav: { contacts: 'Contacts', requests: 'Requests', add: 'Add a contact', tailscale: 'Tailscale', settings: 'Contact settings' },
+    online: '{count} online',
+    waiting: '{count} waiting',
+    empty: 'No contact yet. Invite one, or join with the link a contact sent you.',
+    link: { connected: 'Connected', connecting: 'Connecting', offline: 'Offline' },
+    lastSeen: 'Seen {time}',
+    rename: 'Rename {name}',
+    nameLabel: 'Contact name',
+    trusted: 'Trusted',
+    trustedTip: 'A trusted contact\'s requests are answered without you: a project whose git remote matches is opened, otherwise the concierge agent decides. Reading conversations is never granted that way.',
+    youOpened: 'You opened',
+    theyOpened: 'Opened to you',
+    nothingOpen: 'Nothing yet',
+    openProject: 'Open a project',
+    openTo: 'Open a project to {name}',
+    noProject: 'Every project is already open',
+    read: 'Read',
+    readTip: 'Its agents may read this project\'s conversations, not only write to its threads. Off by default.',
+    readLabel: 'Let {name} read {project}',
+    closeProject: 'Close {project}',
+    closeTitle: 'Close {project} to {name}?',
+    closeBody: 'Its letters waiting for this project are rejected and its threads leave {name}\'s directory.',
+    closeConfirm: 'Close',
+    details: 'Details',
+    words: 'Check words',
+    wordsTip: 'Both owners see the same four words. If the other owner reads different ones, someone sits between you: remove the contact.',
+    role: { host: 'It dials your machine', guest: 'You dial its machine' },
+    added: 'Added {time}',
+    remove: 'Remove',
+    removeTitle: 'Remove {name}?',
+    removeBody: 'Every project you opened to it closes, letters waiting both ways are rejected and the link closes. The Tailscale share stays until you remove it in the admin console.',
+    requests: {
+      none: 'No request waiting.',
+      asks: '{contact} asks',
+      asked: 'You asked {contact}',
+      remote: 'Git remote',
+      accept: 'Accept',
+      acceptLabel: 'Accept: pick the project to open',
+      refuse: 'Refuse',
+      reason: 'Reason',
+      reasonPlaceholder: 'Why, in a sentence the asking agent reads',
+      send: 'Send',
+      cancel: 'Cancel',
+      decided: 'Decided ({count})',
+      accepted: 'Opened {project}',
+      refused: 'Refused',
+      by: { owner: 'Owner', match: 'Match', concierge: 'Concierge' },
+      byTip: { owner: 'Decided by the owner.', match: 'Its git remote matched exactly one project.', concierge: 'Decided by the concierge agent for a trusted contact.' }
+    },
+    invite: {
+      title: 'Invite',
+      tip: 'A one-time link, valid 24 hours. Whoever holds it can join, so send it like a password.',
+      create: 'New invitation',
+      again: 'Another one',
+      link: 'Invitation link',
+      copy: 'Copy',
+      copied: 'Copied',
+      expires: 'Works once, until {time}',
+      shared: 'Tailscale share created',
+      manual: 'Share this machine by hand',
+      openConsole: 'Tailscale admin console'
+    },
+    join: {
+      title: 'Join',
+      tip: 'Paste the link another owner sent you. This machine dials theirs through Tailscale and keeps the link open.',
+      label: 'Invitation link',
+      placeholder: 'boite://contact#',
+      submit: 'Join',
+      joining: 'Joining',
+      compare: 'Compare with {name}',
+      compareTip: 'Read these four words to each other, on a call or in person. The same words on both screens mean nobody sat between you.',
+      done: 'Done'
+    },
+    tailscale: {
+      title: 'Tailscale',
+      tip: 'Tailscale carries the link between owners, each on their own tailnet. With an API key, invitations share this machine themselves and the policy is read.',
+      name: 'Tailnet name',
+      noTailnet: 'Not on a tailnet',
+      key: 'API key',
+      keyStored: 'Stored',
+      keyMissing: 'None',
+      keyPlaceholder: 'tskey-api-',
+      keyTip: 'Kept by the core and never shown again. It creates and accepts machine shares and reads the policy.',
+      save: 'Save',
+      clear: 'Clear',
+      policy: 'Policy',
+      state: { restricted: 'Restricted', open: 'Open', unknown: 'Unknown' },
+      stateTip: {
+        restricted: 'Shared users reach only Boite\'s port on this machine.',
+        open: 'A shared user may reach other ports of this machine. Add these lines to the tailnet policy.',
+        unknown: 'No API key, or the policy could not be read. Check it in the admin console.'
+      },
+      copy: 'Copy the lines',
+      copied: 'Copied'
+    },
+    settings: {
+      minTier: 'Weakest model allowed',
+      minTierTip: 'An agent on a weaker model cannot write to a contact or ask one, and a contact\'s letter from one is refused. Frontier: Opus, Fable, GPT-6 class. Mid: Sonnet, high Flash. Small: Haiku, Lite, open models. An unknown model counts as mid.',
+      tiers: { frontier: 'Frontier', mid: 'Mid', small: 'Small' }
     }
   }
 } as const;

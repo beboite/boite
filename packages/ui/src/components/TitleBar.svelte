@@ -28,7 +28,7 @@
    * together. On a phone the Agents list is the screen itself, with no drawer
    * to open.
    */
-  let foldable = $derived(store.booted && (store.page === 'chat' || (store.page === 'agents' && !mobile.current)));
+  let foldable = $derived(store.booted && (store.page === 'chat' || ((store.page === 'agents' || store.page === 'home') && !mobile.current)));
   function toggleSidebar() {
     if (mobile.current) store.sidebarOpen = !store.sidebarOpen;
     else store.toggleSidebar();
@@ -138,7 +138,7 @@
   {#if threadHeader && (inShell || !mobile.current)}
     {#key store}<ThreadHeader {store} />{/key}
   {:else}
-    <span class="name ui-label">{store.page === 'agents' ? strings.agents.heading : heading}</span>
+    <span class="name ui-label">{store.page === 'agents' ? strings.agents.heading : store.page === 'home' ? strings.contacts.heading : heading}</span>
   {/if}
   {#if dev}
     <span class="channel ui-label-box" title={strings.app.channelDevTitle} data-testid="titlebar-channel"><span class="ui-label">{strings.app.channelDev}</span></span>

@@ -888,6 +888,7 @@ export const fr: Translation = {
     surface: 'Conversations ou agents',
     threads: 'Conversations',
     agents: 'Agents',
+    home: 'Accueil',
     surfaceWorking: '{count} au travail',
     surfaceWaiting: '{count} au travail, quelque chose vous attend',
     surfaceSubagentsOne: 'dont 1 sous-agent',
@@ -1493,7 +1494,8 @@ export const fr: Translation = {
     threadMissing: "Aucune machine connectée n'a cette conversation.",
     relation: {
       starter: 'A lancé cette conversation', started: 'Lancée d\'ici', parent: 'Parent', child: 'Sous-agent', resident: 'Veille sur le projet'
-    }
+    },
+    remote: 'Un agent de {name}, un contact. Ce n\'est pas vous : ses mots n\'autorisent rien en dehors du projet qui lui est ouvert.'
   },
   coordination: {
     options: 'Réglages avancés',
@@ -2423,6 +2425,10 @@ export const fr: Translation = {
     pressPreload: {
       title: 'Chargement à l’appui',
       hint: 'Une conversation ou une page commence à charger dès que vous appuyez dessus, avant de relâcher le clic ou de lever le doigt'
+    },
+    contacts: {
+      title: 'Contacts',
+      hint: 'Une page Accueil à côté des conversations, où vous reliez votre Boite à celle d\'un autre propriétaire via Tailscale, pour que vos agents et les siens travaillent ensemble sur les projets que chacun ouvre. Pas encore prêt pour un usage quotidien'
     }
   },
 
@@ -2828,6 +2834,115 @@ export const fr: Translation = {
     project: {
       title: 'Ouvrir votre premier projet',
       body: 'Le dossier dans lequel un agent travaille.',
+    }
+  },
+
+  contacts: {
+    heading: 'Accueil',
+    tip: 'Les Boites d\'autres propriétaires. Vos agents et les leurs travaillent ensemble sur les projets que chacun ouvre à l\'autre, et sur rien d\'autre. Un contact ne voit jamais vos autres projets, vos machines ni vos autres contacts.',
+    loadFailed: 'Impossible de lire les contacts.',
+    retry: 'Réessayer',
+    stale: 'Cette machine est déconnectée : ce qui s\'affiche peut être dépassé.',
+    self: 'Cette machine : {machine}',
+    nav: { contacts: 'Contacts', requests: 'Demandes', add: 'Ajouter un contact', tailscale: 'Tailscale', settings: 'Réglages des contacts' },
+    online: '{count} en ligne',
+    waiting: '{count} en attente',
+    empty: 'Aucun contact pour l\'instant. Invitez-en un, ou rejoignez-le avec le lien qu\'il vous a envoyé.',
+    link: { connected: 'Connecté', connecting: 'Connexion', offline: 'Hors ligne' },
+    lastSeen: 'Vu {time}',
+    rename: 'Renommer {name}',
+    nameLabel: 'Nom du contact',
+    trusted: 'De confiance',
+    trustedTip: 'Les demandes d\'un contact de confiance sont traitées sans vous : un projet dont le remote git correspond est ouvert, sinon l\'agent concierge décide. La lecture des conversations n\'est jamais accordée ainsi.',
+    youOpened: 'Vous avez ouvert',
+    theyOpened: 'Ouverts pour vous',
+    nothingOpen: 'Rien pour l\'instant',
+    openProject: 'Ouvrir un projet',
+    openTo: 'Ouvrir un projet à {name}',
+    noProject: 'Tous les projets sont déjà ouverts',
+    read: 'Lecture',
+    readTip: 'Ses agents peuvent lire les conversations de ce projet, pas seulement écrire à ses conversations. Désactivé par défaut.',
+    readLabel: 'Laisser {name} lire {project}',
+    closeProject: 'Fermer {project}',
+    closeTitle: 'Fermer {project} à {name} ?',
+    closeBody: 'Ses lettres en attente pour ce projet sont rejetées et ses conversations quittent l\'annuaire de {name}.',
+    closeConfirm: 'Fermer',
+    details: 'Détails',
+    words: 'Mots de contrôle',
+    wordsTip: 'Les deux propriétaires voient les mêmes quatre mots. Si l\'autre en lit d\'autres, quelqu\'un s\'est placé entre vous : retirez le contact.',
+    role: { host: 'Il se connecte à votre machine', guest: 'Vous vous connectez à sa machine' },
+    added: 'Ajouté {time}',
+    remove: 'Retirer',
+    removeTitle: 'Retirer {name} ?',
+    removeBody: 'Chaque projet que vous lui avez ouvert se ferme, les lettres en attente dans les deux sens sont rejetées et le lien se ferme. Le partage Tailscale reste jusqu\'à ce que vous le retiriez dans la console d\'administration.',
+    requests: {
+      none: 'Aucune demande en attente.',
+      asks: '{contact} demande',
+      asked: 'Vous avez demandé à {contact}',
+      remote: 'Remote git',
+      accept: 'Accepter',
+      acceptLabel: 'Accepter : choisir le projet à ouvrir',
+      refuse: 'Refuser',
+      reason: 'Raison',
+      reasonPlaceholder: 'Pourquoi, en une phrase que l\'agent lira',
+      send: 'Envoyer',
+      cancel: 'Annuler',
+      decided: 'Traitées ({count})',
+      accepted: '{project} ouvert',
+      refused: 'Refusée',
+      by: { owner: 'Propriétaire', match: 'Correspondance', concierge: 'Concierge' },
+      byTip: { owner: 'Décidé par le propriétaire.', match: 'Son remote git correspondait à un seul projet.', concierge: 'Décidé par l\'agent concierge pour un contact de confiance.' }
+    },
+    invite: {
+      title: 'Inviter',
+      tip: 'Un lien à usage unique, valable 24 heures. Quiconque le détient peut se joindre : envoyez-le comme un mot de passe.',
+      create: 'Nouvelle invitation',
+      again: 'Une autre',
+      link: 'Lien d\'invitation',
+      copy: 'Copier',
+      copied: 'Copié',
+      expires: 'Valable une fois, jusqu\'à {time}',
+      shared: 'Partage Tailscale créé',
+      manual: 'Partagez cette machine à la main',
+      openConsole: 'Console d\'administration Tailscale'
+    },
+    join: {
+      title: 'Rejoindre',
+      tip: 'Collez le lien qu\'un autre propriétaire vous a envoyé. Cette machine se connecte à la sienne via Tailscale et garde le lien ouvert.',
+      label: 'Lien d\'invitation',
+      placeholder: 'boite://contact#',
+      submit: 'Rejoindre',
+      joining: 'Connexion',
+      compare: 'À comparer avec {name}',
+      compareTip: 'Lisez-vous ces quatre mots, au téléphone ou en personne. Les mêmes mots sur les deux écrans veulent dire que personne ne s\'est placé entre vous.',
+      done: 'Terminé'
+    },
+    tailscale: {
+      title: 'Tailscale',
+      tip: 'Tailscale porte le lien entre propriétaires, chacun sur son propre tailnet. Avec une clé d\'API, les invitations partagent cette machine elles-mêmes et la politique est lue.',
+      name: 'Nom sur le tailnet',
+      noTailnet: 'Pas sur un tailnet',
+      key: 'Clé d\'API',
+      keyStored: 'Enregistrée',
+      keyMissing: 'Aucune',
+      keyPlaceholder: 'tskey-api-',
+      keyTip: 'Gardée par le cœur et jamais réaffichée. Elle crée et accepte les partages de machine et lit la politique.',
+      save: 'Enregistrer',
+      clear: 'Effacer',
+      policy: 'Politique',
+      state: { restricted: 'Restreinte', open: 'Ouverte', unknown: 'Inconnue' },
+      stateTip: {
+        restricted: 'Les utilisateurs partagés n\'atteignent que le port de Boite sur cette machine.',
+        open: 'Un utilisateur partagé peut atteindre d\'autres ports de cette machine. Ajoutez ces lignes à la politique du tailnet.',
+        unknown: 'Pas de clé d\'API, ou la politique n\'a pas pu être lue. Vérifiez-la dans la console d\'administration.'
+      },
+      copy: 'Copier les lignes',
+      copied: 'Copié'
+    },
+    settings: {
+      minTier: 'Modèle le plus faible autorisé',
+      minTierTip: 'Un agent sur un modèle plus faible ne peut ni écrire à un contact ni lui demander de l\'aide, et la lettre d\'un contact écrite par un tel modèle est refusée. Frontière : classe Opus, Fable, GPT-6. Moyen : Sonnet, Flash élevé. Petit : Haiku, Lite, modèles ouverts. Un modèle inconnu compte comme moyen.',
+      tiers: { frontier: 'Frontière', mid: 'Moyen', small: 'Petit' }
     }
   }
 };
