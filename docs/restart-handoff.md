@@ -32,6 +32,9 @@ server listens, each eligible entry is handled separately:
 - A turn left running when the old core was killed is closed as stopped, without
   an error part, then gets the same continuation.
 
+A core that dies without a handoff (a crash, a kill, the shell's Quit) leaves
+its work to [automatic resumes](#turns-that-stop-before-their-answer).
+
 A continuation uses a stable request identity derived from its interrupted turn.
 Admission persists the request-to-turn mapping before scheduler dispatch. The
 handoff retains accepted-but-queued continuations and failed admissions until
@@ -62,6 +65,43 @@ Resident-agent sessions, compactions and coordination wakes are excluded. Their
 own runtimes require explicit resume when recovery pauses them. See
 [persistent agents](agents.md).
 Native processes and terminals follow the ordinary [shutdown limits](trace.md#linux-and-macos).
+
+## Turns that stop before their answer
+
+`packages/core/src/threads/auto-continue.ts` resumes a conversation whose turn
+stopped before the agent gave its answer, with a `resume` turn whose prompt
+says why and asks the agent to carry on without repeating work:
+
+| Trigger | Label | When it goes out |
+| --- | --- | --- |
+| The turn failed: an API or stream error, a process exit | Resumed after an error | 1 min, then 5 min |
+| The core died mid-turn | Resumed after a crash | 3 s after the next start |
+| The turn ended on a compaction part, nothing after it | Resumed after a compaction | 1 min, then 5 min |
+| Background work the agent waited on ended without waking it (failed, vanished, cut by a restart) | Resumed after background work was interrupted | 1 min, then 5 min; 3 s after a restart |
+
+A crash resume quotes the cut turn's request like a handoff continuation. When
+a crash paused the conversation's subagent team or workflow runs, the prompt
+asks the agent to check them and run `boite delegate resume`; a parent that had
+no turn running gets a resume for that alone.
+
+Nothing resumes for a turn that answered, a turn the user stopped, a refusal
+at capacity or at a usage limit, which retries on its own
+([usage](usage.md#when-a-provider-refuses-a-turn)), a compaction or coordination turn, a
+sub-thread, a persistent agent, or background work a Stop or an archive ended.
+After a crash, nothing resumes when the previous core wrote its last thread
+event over an hour ago, or when it was stopped on purpose without a handoff
+(`core.shutdown`, `SIGINT`, `POST /shutdown`), which leaves the journal setting
+`auto-continue-stopped`.
+
+Each plan sits in the journal setting `auto-continues`, so a restart arms it
+again; one caught while dispatching is dropped. The row shows it as `retry`
+(`kind: 'auto-continue'`) with Do not resume. When it fires it is dropped
+instead if the thread was archived, answered or is busy, a card waits for the
+user, or the user paused its team. A cache ping in the way stops and lets it go.
+Two resumes in a row that stop again end
+the row: the third stop stays on the thread and notifies like any failure. The
+user's next message, or a turn of another kind that answers, starts a new row;
+a resume that answers but leaves background work that dies again does not.
 
 ## What starts it
 
@@ -95,7 +135,10 @@ cannot admit an output correction after teardown begins.
 owner cancellation, expiry, pre-listen replacement loss, durable admission,
 partial recovery, repeated restart and reentrant Stop.
 `coordination-lifecycle.test.ts` covers acknowledgement waits released by close
-and late resolve/reject callbacks. These use deterministic fixtures and reopened
+and late resolve/reject callbacks. `auto-continue.test.ts` covers each
+automatic resume trigger, a team a crash held, the two-resume limit,
+cancellation, a cache ping in the way, a crash older than an hour, a
+deliberate stop and a plan carried across a crash. These use deterministic fixtures and reopened
 temporary journals; they do not prove physical power-loss recovery or provider
 side-effect replay. `apps/shell/src-tauri/src/update_stop.rs` covers the shell
 request and older-core fallback.

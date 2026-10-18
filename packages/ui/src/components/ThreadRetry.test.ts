@@ -47,3 +47,19 @@ test('a usage limit resume names the time it resumes at, and a paired phone can 
   document.querySelector<HTMLButtonElement>('[data-testid="thread-retry-cancel"]')!.click();
   await vi.waitFor(() => expect(store.openThread?.retry ?? null).toBeNull());
 });
+
+test('an automatic resume counts down to its try and Do not resume cancels it', async ({ ready }) => {
+  const { store, client } = await ready();
+  await store.open('t-trace');
+  const turnId = store.openThread!.turns.at(-1)!.id;
+  client.planRetry('t-trace', { kind: 'auto-continue', turnId, at: Date.now() + 60_000, attempt: 1, attempts: 2, resetsAt: null });
+  await vi.waitFor(() => expect(store.openThread?.retry?.kind).toBe('auto-continue'));
+  view = mount(ThreadRetry, { target: document.body, props: { store } });
+  flushSync();
+  const banner = document.querySelector('[data-testid="thread-retry"]')!;
+  expect(banner.getAttribute('aria-label')).toBe('Stopped before its answer');
+  expect(banner.textContent).toMatch(/Resumes by itself in (59|60)s, resume 1 of 2\./);
+  expect(banner.textContent).toContain('Do not resume');
+  document.querySelector<HTMLButtonElement>('[data-testid="thread-retry-cancel"]')!.click();
+  await vi.waitFor(() => expect(store.openThread?.retry ?? null).toBeNull());
+});
