@@ -157,7 +157,12 @@ give free pages back with `PRAGMA incremental_vacuum`, down to 16 MiB kept for
 later writes, and no VACUUM is needed again. The VACUUM runs before the
 journal opens because it holds the write lock for its whole length: at
 runtime every write would wait on it, and a copy made beside a live core
-would miss the writes made during the copy.
+would miss the writes made during the copy. A VACUUM that does not finish (an
+error, a kill) leaves the journal as it was and its attempt in
+`journal.vacuum-failed.json`: a later start tries again only a day after the
+last attempt, three attempts in all, so a failure that repeats does not cost
+every start the whole copy. A VACUUM that took the journal's place removes the
+file.
 
 A process trace row names its command line through `command_lines`, which holds
 each distinct line of a thread's trace once, found by thread and an xxHash64

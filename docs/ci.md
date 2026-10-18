@@ -184,7 +184,7 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 490,500 |
 | UI files, excluding `.br` and `.gz` copies | 4,857,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,437,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,440,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -197,6 +197,9 @@ fresh `bun run build:ui` and `bun run build:core` on Windows, against 489,501,
 4,854,887 and 4,416,190 for that main: the window's compacting state adds
 1,136 UI bytes and the journal code 20,540 core bytes. The UI and core
 JavaScript limits rise to 4,857,000 and 4,437,500; the other limits stay.
+With the daily retry of a failed VACUUM and `origin/main` at `a791c298`, the
+same measure gives 4,856,023 UI bytes and 4,439,022 core JavaScript bytes, and
+the core limit rises to 4,440,000.
 
 On 2026-10-18, the tool summaries setting on `origin/main` at `150d7bb6`
 measures 489,501 entry bytes, 4,854,418 UI bytes and 4,413,357 core

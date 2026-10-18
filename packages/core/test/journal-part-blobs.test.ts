@@ -207,6 +207,16 @@ test('a message written while its values were compressed keeps that write, and t
   expect(codecs()).toHaveLength(1);
 });
 
+test('a journal closed while its values were compressed ends the pass without touching it', async () => {
+  journal.db.query("INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES ('msg_a', 'thr_a', 'trn_a', 'assistant', ?, 'complete', 1)")
+    .run(JSON.stringify([toolPart('closing output line\n'.repeat(400))]));
+  // As the retention ticks pass it: a closed journal counts as an open message.
+  const pass = moveInlineOutputs(journal.db, 0, 1024 * 1024, () => journal.isClosed());
+  journal.close();
+  // The cursor stays before the row, which the next start moves.
+  expect(await pass).toBe(0);
+});
+
 test('a value that starts with a byte order mark keeps it, compressed or recoded', async () => {
   const output = `﻿${'BOM output line\n'.repeat(400)}`;
   const stored = () => (journal.getMessage('msg_a')?.parts[0] as { output: string }).output;

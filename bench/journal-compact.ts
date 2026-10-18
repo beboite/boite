@@ -56,8 +56,9 @@ async function blocked<T>(run: () => T | Promise<T>): Promise<{ result: T; ms: n
   };
   setImmediate(probe);
   const started = performance.now();
-  const result = await run();
-  live = false;
+  let result: T;
+  // A step that throws stops the probe too, or its setImmediate chain keeps the bench from exiting.
+  try { result = await run(); } finally { live = false; }
   const now = performance.now();
   return { result, ms: now - started, block: Math.max(worst, now - last) };
 }

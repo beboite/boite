@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import * as fs from 'node:fs';
 import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Journal } from '../src/journal.ts';
 import { compactionSteps, compactOnce, ONE_TIME_PASSES, PRUNED_AT } from '../src/journal/retention.ts';
-import { STARTING_FILE, vacuumAtStart, vacuumPlan } from '../src/journal/vacuum.ts';
+import { STARTING_FILE, VACUUM_FAILED_FILE, VACUUM_RETRY, vacuumAtStart, vacuumPlan } from '../src/journal/vacuum.ts';
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'boite-vacuum-')); });
@@ -76,4 +77,32 @@ test('no VACUUM before the passes finished or under the thresholds, and the jour
   const before = statSync(file()).size;
   expect(vacuumAtStart(dir, () => {}, when)).toBeNull();
   expect(statSync(file()).size).toBe(before);
+});
+
+test('a VACUUM that failed is tried again a day later, three times in all, not at every start', () => {
+  journalWithFreePages(12 * MiB);
+  const before = statSync(file()).size;
+  const errors: string[] = [];
+  // The new file is held when it would take the journal's name, as an antivirus can hold it on Windows.
+  const held = spyOn(fs, 'renameSync').mockImplementation(() => { throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' }); });
+  try {
+    const start = 1_000_000;
+    expect(vacuumAtStart(dir, message => errors.push(message), when, null, start)).toBeNull();
+    expect(errors).toEqual([expect.stringContaining('EPERM')]);
+    expect(statSync(file()).size).toBe(before);
+    // The next start, an hour later, copies nothing.
+    expect(vacuumAtStart(dir, message => errors.push(message), when, null, start + 60 * 60 * 1000)).toBeNull();
+    expect(errors).toHaveLength(1);
+    for (let day = 1; day < VACUUM_RETRY.attempts; day++) vacuumAtStart(dir, message => errors.push(message), when, null, start + day * VACUUM_RETRY.afterMs);
+    expect(errors).toHaveLength(VACUUM_RETRY.attempts);
+    expect(errors.at(-1)).toContain('not tried again');
+    expect(vacuumAtStart(dir, message => errors.push(message), when, null, start + 30 * VACUUM_RETRY.afterMs)).toBeNull();
+    expect(errors).toHaveLength(VACUUM_RETRY.attempts);
+  } finally {
+    held.mockRestore();
+  }
+  // Once the file is let go, removing the record lets a start compact again, and a success leaves none.
+  rmSync(join(dir, VACUUM_FAILED_FILE));
+  expect(vacuumAtStart(dir, message => errors.push(message), when)).not.toBeNull();
+  expect(existsSync(join(dir, VACUUM_FAILED_FILE))).toBe(false);
 });

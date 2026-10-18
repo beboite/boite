@@ -271,14 +271,16 @@ async function moveRows(db: Database, rows: MessageRow[], isOpen: (messageId: st
   const values = parsed.map(inlineValues);
   if (values.every(list => list.length === 0)) return rows.map(() => true);
   const packed = await packValues(values.flat());
-  const guarded = db.query('UPDATE messages SET parts = ? WHERE rowid = ? AND id = ? AND thread_id = ? AND parts = ?');
+  let guarded: ReturnType<Database['query']> | undefined;
   return rows.map((row, at) => {
     if (values[at]!.length === 0) return true;
+    // Also true once the journal closed during the compression, before anything is prepared on it.
     if (isOpen(row.id)) return false;
+    guarded ??= db.query('UPDATE messages SET parts = ? WHERE rowid = ? AND id = ? AND thread_id = ? AND parts = ?');
     try {
       db.transaction(() => {
         const texts = parsed[at]!.map((part, index) => part === null || part[MARK] ? JSON.stringify(part) : storePart(db, { id: row.id, threadId: row.threadId }, index, part, packed));
-        if (guarded.run(`[${texts.join(',')}]`, row.rowid, row.id, row.threadId, row.parts).changes !== 1) throw STALE;
+        if (guarded!.run(`[${texts.join(',')}]`, row.rowid, row.id, row.threadId, row.parts).changes !== 1) throw STALE;
       })();
       return true;
     } catch (error) {
