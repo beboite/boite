@@ -199,9 +199,9 @@ The core (`packages/core/src/pull-request-watch.ts`) wakes the conversation
 with one message, a `pull-request` turn, when:
 
 - the first check of a head fails; failures after it on that head wait until
-  no CI job runs and go out together as its verdict, unless only required
-  checks are among them (a gate such as `CI required` failing after a job
-  did); a rerun that fails again counts again;
+  no CI job runs and go out together as its verdict, unless only an aggregate
+  gate is new (a required job such as `CI required` that started once every
+  other job of its workflow ended); a rerun that fails again counts again;
 - every check the base branch requires passed and no CI job still runs (every
   job when none is required), once per head; again when a required check
   appears already passed or after one of them failed. A commit status such as

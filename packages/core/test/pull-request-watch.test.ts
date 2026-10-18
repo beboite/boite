@@ -13,9 +13,9 @@ afterEach(async () => { await harness?.stop(); harness = undefined; });
 // --- What a read decides ----------------------------------------------------
 
 /** A CI job, or with `context` a commit status such as CodeRabbit's (`status` is then its state). */
-type Run = { name: string; status?: string; conclusion?: string; required?: boolean; completedAt?: string; workflow?: string; context?: boolean };
+type Run = { name: string; status?: string; conclusion?: string; required?: boolean; startedAt?: string; completedAt?: string; workflow?: string; context?: boolean };
 const checkRun = (run: Run) => run.context ? { __typename: 'StatusContext', context: run.name, state: run.status ?? 'SUCCESS', targetUrl: 'https://coderabbit.ai', createdAt: run.completedAt ?? '2026-10-15T10:05:00Z', isRequired: run.required ?? false } : ({ __typename: 'CheckRun', name: run.name, status: run.status ?? 'COMPLETED', conclusion: run.conclusion ?? 'SUCCESS',
-  detailsUrl: `https://github.com/example/repo/actions/runs/1#${run.name}`, startedAt: '2026-10-15T10:00:00Z', completedAt: run.completedAt ?? '2026-10-15T10:05:00Z',
+  detailsUrl: `https://github.com/example/repo/actions/runs/1#${run.name}`, startedAt: run.startedAt ?? '2026-10-15T10:00:00Z', completedAt: run.completedAt ?? '2026-10-15T10:05:00Z',
   isRequired: run.required ?? false, checkSuite: { workflowRun: { workflow: { name: run.workflow ?? 'CI' } } } });
 const detailJson = (runs: Run[], extra: Record<string, unknown> = {}) => JSON.stringify({ data: { viewer: { login: 'meetsu' }, repository: { pullRequest: {
   url: URL, state: 'OPEN', mergeable: 'MERGEABLE', headRefOid: 'a'.repeat(40), baseRefName: 'main', ...extra,
@@ -93,6 +93,7 @@ const CR_OUTSIDE = '**Actionable comments posted: 0**\n\n> [!CAUTION]\n> Some co
 const CR_INLINE = '**🎯 Functional Correctness** | **🟡 Minor** | **⚡ Quick win**\n\n**Pass the kept pause origin to `stop`.**\n\nThe comment on Line 242 says that saving other settings of a paused team keeps the recorded pause origin.';
 const CR_REPLY = '@klNuno Thanks for the fix. The supplied code passes both `pause.by` and `pause.at` from `configure` to `stop`, which forwards them to `pause`.\n\nThe reported regression test covers the original failure path.\n\n---\n\nIf you found this review helpful, would you consider giving us a shout-out on X?';
 const CR_WITHDRAW = '@klNuno, you’re right. I withdraw this finding. Thanks for clarifying the pause contract.\n\n`adopt` records an already-started turn as the step’s attempt. It does not start or authorize a turn.';
+const CR_CONCEDE = '@klNuno You’re right about the retry, but the fix is still incomplete: the cancellation handler does not release its lock.';
 const CR_PUSHBACK = '@klNuno Thanks for the update, but the fix is incomplete: `stop` still drops the recorded origin when the team has live work.';
 const PATROL_REVIEW = '<!-- mtsu-patrol:297ca19b-7b01-4632-8bc8-075409846b6b -->\n\n**Actionable comments posted: 0**\n\n<details>\n<summary>Outside diff range comments (1)</summary>\n\n`L90-L104`: **Missing letter marks landed, pending letter never flashes**';
 const PATROL_SUMMARY = (posted: boolean, head: string) => `<!-- mtsu-patrol:summary -->\n<!-- mtsu-patrol:9017fed0 -->\n\nThis pull request makes a discussion opened on a missing letter land at the end.\n\n${posted ? '**Comments posted**: no critical or major finding.\n\n1 minor in [the review](https://github.com/beboite/boite/pull/441#pullrequestreview-5485468072).' : '**No comments posted**: the reviewers raised no finding.'}\n\n<details>\n<summary>Review details</summary>\n\n- Compared commits: \`e7b2b8c\` to \`${head}\`\n\n</details>`;
@@ -116,6 +117,8 @@ test('a bot wakes the agent for findings only: quota notices, summaries, empty c
     // A finding about rate limits is a finding, inline or in a comment that is not a notice heading.
     remark('18', rabbit, at, { kind: 'review-comment', id: 'review-comment:18', body: '**🎯 Functional Correctness** | **🟡 Minor**\n\n## Rate limit exceeded is retried forever\n\n`rateLimited` matches "rate limit exceeded" and never gives up.', path: 'packages/core/src/pull-request-watch.ts' }),
     remark('19', 'dependabot[bot]', at, { body: 'GitHub answered "rate limit exceeded" while fetching the changelog; the update is still opened.' }),
+    // Conceding a point then turning against the fix keeps the thread open.
+    remark('27', rabbit, at, { kind: 'review-comment', id: 'review-comment:27', body: CR_CONCEDE, path: 'packages/core/src/delegation.ts', reply: true }),
   ];
   const dropped = [
     remark('20', rabbit, at, { body: QUOTA }),
@@ -157,35 +160,43 @@ test('CI wakes on its first failure and on its verdict, not on each check that f
   const title = { name: 'PR title', workflow: 'pr title', required: true };
   const job = (name: string, more: Partial<Run> = {}) => ({ name, workflow: 'ci', ...more });
   const running = { status: 'IN_PROGRESS', conclusion: '' };
+  // "CI required" needs every other job: it starts once they all ended.
+  const gate = (more: Partial<Run> = {}) => job('CI required', { required: true, startedAt: '2026-10-15T10:06:00Z', completedAt: '2026-10-15T10:06:10Z', ...more });
   const rabbit = { name: 'CodeRabbit', context: true, status: 'PENDING' };
   let memory = initialMemory(since);
   const step = (runs: Run[]) => { const result = evaluate(memory, detail(runs), null); memory = result.next; return result.changes; };
   // beboite/boite requires "PR title", done in seconds, and "CI required", which exists only once every job finished.
   expect(step([title, job('Core tests', running), job('Build UI', running), rabbit])).toEqual([]);
   expect(step([title, job('Core tests'), job('Build UI', running), rabbit])).toEqual([]);
-  expect(step([title, job('Core tests'), job('Build UI'), job('CI required', { required: true, ...running }), rabbit])).toEqual([]);
-  expect(step([title, job('Core tests'), job('Build UI'), job('CI required', { required: true }), rabbit])).toEqual([{ kind: 'passed', head, count: 2, required: true }]);
+  expect(step([title, job('Core tests'), job('Build UI'), gate(running), rabbit])).toEqual([]);
+  expect(step([title, job('Core tests'), job('Build UI'), gate(), rabbit])).toEqual([{ kind: 'passed', head, count: 2, required: true }]);
   // CodeRabbit's status settling, a title edit rerunning "PR title": no second "passed".
-  expect(step([title, job('Core tests'), job('Build UI'), job('CI required', { required: true }), { ...rabbit, status: 'SUCCESS' }])).toEqual([]);
-  expect(step([{ ...title, ...running }, job('Core tests'), job('Build UI'), job('CI required', { required: true })])).toEqual([]);
-  expect(step([title, job('Core tests'), job('Build UI'), job('CI required', { required: true })])).toEqual([]);
+  expect(step([title, job('Core tests'), job('Build UI'), gate(), { ...rabbit, status: 'SUCCESS' }])).toEqual([]);
+  expect(step([{ ...title, ...running }, job('Core tests'), job('Build UI'), gate()])).toEqual([]);
+  expect(step([title, job('Core tests'), job('Build UI'), gate()])).toEqual([]);
 
   // A new head: the first failure wakes at once, the next ones wait for the jobs to settle.
   memory = { ...memory, head: 'old' };
   const failedNames = (changes: ReturnType<typeof step>) => changes.flatMap(change => change.kind === 'failed' ? change.checks.map(check => check.name) : []);
   expect(failedNames(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('Build UI', running), job('E2E', running)]))).toEqual(['ci / Core tests']);
   expect(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('Build UI', { conclusion: 'FAILURE' }), job('E2E', running)])).toEqual([]);
-  expect(failedNames(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('Build UI', { conclusion: 'FAILURE' }), job('E2E'), job('CI required', { required: true, conclusion: 'FAILURE' })])))
+  expect(failedNames(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('Build UI', { conclusion: 'FAILURE' }), job('E2E'), gate({ conclusion: 'FAILURE' })])))
     .toEqual(['ci / Build UI', 'ci / CI required']);
   // The required gate failing alone after a job already did says nothing new.
   memory = { ...memory, head: 'older' };
   expect(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('E2E', running)])).toHaveLength(1);
-  expect(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('E2E'), job('CI required', { required: true, conclusion: 'FAILURE' })])).toEqual([]);
+  expect(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('E2E'), gate({ conclusion: 'FAILURE' })])).toEqual([]);
+  // A required job of its own failing after another job did is news: it ran beside it, it does not sum it up.
+  memory = { ...memory, head: 'oldest' };
+  expect(failedNames(step([title, job('lint', { conclusion: 'FAILURE' }), job('security', { required: true, ...running })]))).toEqual(['ci / lint']);
+  expect(failedNames(step([title, job('lint', { conclusion: 'FAILURE' }), job('security', { required: true, conclusion: 'FAILURE', completedAt: '2026-10-15T10:07:00Z' })]))).toEqual(['ci / security']);
+  memory = { ...memory, head: 'older' };
+  step([title, job('Core tests', { conclusion: 'FAILURE' }), job('E2E'), gate({ conclusion: 'FAILURE' })]);
   // Rerun after the fix.
-  step([title, job('Core tests', running), job('Build UI', running), job('E2E'), job('CI required', { required: true, ...running })]);
+  step([title, job('Core tests', running), job('Build UI', running), job('E2E'), gate(running)]);
   // Rerun and passing: the verdict is news again after a failure.
-  expect(step([title, job('Core tests', running), job('Build UI', running), job('E2E'), job('CI required', { required: true, ...running })])).toEqual([]);
-  expect(step([title, job('Core tests'), job('Build UI'), job('E2E'), job('CI required', { required: true })])).toEqual([{ kind: 'passed', head, count: 2, required: true }]);
+  expect(step([title, job('Core tests', running), job('Build UI', running), job('E2E'), gate(running)])).toEqual([]);
+  expect(step([title, job('Core tests'), job('Build UI'), job('E2E'), gate()])).toEqual([{ kind: 'passed', head, count: 2, required: true }]);
 
   // Where nothing is required: one "passed" per head, a check joining later is no news, a commit status pending for good holds nothing.
   memory = initialMemory(since);

@@ -105,6 +105,8 @@ export interface WatchCheck {
   name: string; status: CheckStatus; conclusion: string; required: boolean; url: string;
   /** A commit status a service posted rather than a CI job: one may stay pending as long as it likes. */
   context: boolean;
+  /** The workflow a CI job belongs to, its start and its end: empty for a commit status or what did not happen yet. */
+  workflow: string; started: string; finished: string;
 }
 export interface WatchDetail {
   state: Fingerprint['state'];
@@ -131,15 +133,17 @@ export function parseDetail(raw: string): WatchDetail {
   const nodes = list(row(row(commit.statusCheckRollup).contexts).nodes).map(row);
   const runs = new Map<string, { check: WatchCheck; at: string }>();
   for (const node of nodes) {
-    let name: string, status: CheckStatus, conclusion: string, url: string, at: string;
+    let name: string, status: CheckStatus, conclusion: string, url: string, at: string, workflow = '', started = '', finished = '';
     if (node.__typename === 'CheckRun') {
-      const workflow = text(row(row(row(node.checkSuite).workflowRun).workflow).name, 200);
+      workflow = text(row(row(row(node.checkSuite).workflowRun).workflow).name, 200);
       name = workflow ? `${workflow} / ${text(node.name, 200)}` : text(node.name, 200);
       const done = node.status === 'COMPLETED';
       conclusion = done ? text(node.conclusion, 50) : text(node.status, 50);
       status = !done ? 'pending' : FAILED.has(conclusion) ? 'failed' : 'passed';
       url = safeUrl(node.detailsUrl);
       at = done ? text(node.completedAt, 50) : '9999';
+      started = text(node.startedAt, 50);
+      finished = done ? text(node.completedAt, 50) : '';
     } else if (node.__typename === 'StatusContext') {
       name = text(node.context, 200);
       conclusion = text(node.state, 50);
@@ -148,7 +152,7 @@ export function parseDetail(raw: string): WatchDetail {
       at = status === 'pending' ? '9999' : text(node.createdAt, 50);
     } else continue;
     if (!name) continue;
-    const check: WatchCheck = { name, status, conclusion, required: node.isRequired === true, url, context: node.__typename === 'StatusContext' };
+    const check: WatchCheck = { name, status, conclusion, required: node.isRequired === true, url, context: node.__typename === 'StatusContext', workflow, started, finished };
     const held = runs.get(name);
     if (!held || at > held.at) runs.set(name, { check: { ...check, required: check.required || held?.check.required === true }, at });
     else if (check.required) held.check.required = true;
@@ -264,11 +268,12 @@ const bodyKey = (remark: Remark) => `${remark.id}#${createHash('sha256').update(
 /** A bot answering the agent's reply in a thread by agreeing: CodeRabbit's "Thanks for the fix", "I withdraw this finding". */
 const ACK = /^\s*`?@[\w-]+(?:\[bot\])?`?[,:]?\s+(?:thanks|thank you|verified|you(?:'|’)re right|i withdraw|understood|got it|confirmed)/i;
 const CONCEDE = /\bi withdraw\b|\byou(?:'|’)re right\b/i;
-/** Words that turn a thanks into a finding still open. */
+/** Words that turn a thanks into a finding still open. A concession goes on to explain the code, so there only a turn against it counts. */
 const DOUBT = /\b(?:however|but|still|not (?:yet|fully|quite)|missing|incomplete|instead|does(?:n't| not)|reopen\w*)\b/i;
+const TURN = /\b(?:however|but|still|not (?:yet|fully|quite)|missing|incomplete|reopen\w*)\b/i;
 /** What a bot reply says, without its markup, folded analysis, scripts and footer. */
 const prose = (body: string) => body.replaceAll(/<!--[\s\S]*?-->/g, ' ').replaceAll(/<details>[\s\S]*?<\/details>/g, ' ').replaceAll(/```[\s\S]*?```/g, ' ').split(/\n---\n/)[0]!.trim();
-const agrees = (body: string) => { const said = prose(body); return ACK.test(said) && (CONCEDE.test(said) || !DOUBT.test(said)); };
+const agrees = (body: string) => { const said = prose(body); return ACK.test(said) && !(CONCEDE.test(said) ? TURN : DOUBT).test(said); };
 
 /**
  * Whether a remark someone else wrote asks something of the agent. A person's
@@ -290,9 +295,9 @@ export function actionable(remark: Remark, edited: boolean): boolean {
 /**
  * Compares what GitHub shows with what the agent was told. The first check
  * to fail on a head is told at once; failures after it wait for the head's CI
- * jobs to settle and go out as its verdict, unless only required checks are
- * among them: a required gate failing after a job did (CI required) says
- * nothing new. "Passed" is told once per head,
+ * jobs to settle and go out as its verdict, unless an aggregate gate is all
+ * that is new: a required job that started once the rest of its workflow
+ * ended (CI required) says nothing new. "Passed" is told once per head,
  * when every check the base branch requires passed (every CI job where none is
  * required) and no CI job still runs; again when a new required check joins
  * that set, or after one of it failed. A remark counts when someone other than
@@ -313,8 +318,11 @@ export function evaluate(memory: WatchMemory, detail: WatchDetail, remarks: Rema
     // A check that runs again leaves the list, so failing again is news again.
     failed = failed.filter(name => failing.some(check => check.name === name));
     const fresh = failing.filter(check => !failed.includes(check.name));
+    // An aggregate gate (CI required) is a required job that started once every other job of its workflow ended.
+    const aggregate = (check: WatchCheck) => check.required && !check.context && check.started !== ''
+      && jobs.every(other => other === check || other.workflow !== check.workflow || (other.finished !== '' && other.finished <= check.started));
     if (fresh.length && (!failed.length || !running)) {
-      if (!failed.length || fresh.some(check => !check.required)) changes.push({ kind: 'failed', head: detail.head, checks: fresh.map(({ name, conclusion, url }) => ({ name, conclusion, url })) });
+      if (!failed.length || !fresh.every(aggregate)) changes.push({ kind: 'failed', head: detail.head, checks: fresh.map(({ name, conclusion, url }) => ({ name, conclusion, url })) });
       failed = failing.map(check => check.name);
     }
     const required = detail.checks.filter(check => check.required);
