@@ -61,6 +61,10 @@ struct Slot {
     /// waited on exited during that work. Callers follow it rather than read
     /// the file themselves.
     announced: Option<Instant>,
+    /// How many times a caller went to sleep on this slot: a test moves the
+    /// sighting only once its caller is asleep.
+    #[cfg(test)]
+    sleeps: u32,
 }
 
 /// Everything a start of the core depends on, decided once when the app is
@@ -310,6 +314,10 @@ fn wait_for_endpoint(slot: &(Mutex<Slot>, Condvar), patience: Duration) -> Resul
         let wait = endpoint_deadline(begun, guard.announced, patience).saturating_duration_since(Instant::now());
         if wait.is_zero() {
             return Err("no core answered within the start timeout".to_string());
+        }
+        #[cfg(test)]
+        {
+            guard.sleeps += 1;
         }
         let (next, _) = ready
             .wait_timeout(guard, wait)

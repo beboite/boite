@@ -119,13 +119,18 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
 
     // A core an earlier shell started, compacting its journal: it holds the
     // data directory's lock, so a second one would only fail. This resolution
-    // waits on that run, known by pid and start as `read_starting` checked it,
-    // rather than on a child of its own.
+    // waits on that run rather than on a child of its own. The handle opened
+    // here is checked against the run `read_starting` named, since its pid
+    // may have changed hands in between; on Windows it then keeps that pid
+    // from naming another process, and elsewhere the start is checked again.
     let child = running_child(state);
     let foreign = match child {
         Some(_) => None,
-        None => read_starting(&launch.directory)
-            .map(|starting| (starting.pid, CoreStart { at: Some(starting.started_at), key: starting.start_key })),
+        None => read_starting(&launch.directory).and_then(|starting| {
+            let start = CoreStart { at: Some(starting.started_at), key: starting.start_key };
+            let watched = platform::process::Watched::open(starting.pid)?;
+            same_core(starting.pid, &start).then_some((starting.pid, start, watched))
+        }),
     };
     if foreign.is_some() {
         if let Ok(mut slot) = state.slot.0.lock() {
@@ -178,8 +183,8 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
         // now another process's: nothing holds the lock, so this resolution
         // starts its own rather than wait out the timeout, and callers wait a
         // whole patience for it from here.
-        if let Some((pid, start)) = &foreign {
-            if !same_core(*pid, start) {
+        if let Some((pid, start, watched)) = &foreign {
+            if watched.exited_within(Duration::ZERO) || (cfg!(not(windows)) && !same_core(*pid, start)) {
                 shell_log::warn("core", "shell.core.compactor-exited", format!("the core pid {pid} exited while it compacted the journal; starting another"), json!({ "pid": pid }));
                 if let Ok(mut slot) = state.slot.0.lock() {
                     slot.announced = Some(Instant::now());
