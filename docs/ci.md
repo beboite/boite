@@ -181,21 +181,31 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 493,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,875,000 |
+| UI entry chunk | 493,700 |
+| UI files, excluding `.br` and `.gz` copies | 4,875,700 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,478,300 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,479,600 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-18 on Linux, the keyboard pass on the command palette and the
-draft's project list measures 493,195 entry bytes and 4,874,291 UI bytes with a
-fresh `bun run build:ui`, against 491,894 and 4,868,036 for `origin/main` at
-`80c2da06` on the same machine. The entry gains 1,301 bytes for the per-field
-ranking the project list now shares with the palette, the folder shortening,
-the list's modal keys and the find chord's request; the palette chunk grows
-with its project headings, project rows and thread states. The entry and UI
-limits rise to 493,500 and 4,875,000; the core limits stay.
+draft's project list (PR #608) merged with `origin/main` at `e22bb094`
+measures 493,413 entry bytes and 4,875,348 UI bytes with a fresh
+`bun run build:ui`. Measured alone against `80c2da06` on the same machine
+(491,894 and 4,868,036), it adds 1,301 entry bytes for the per-field ranking
+the project list shares with the palette, the folder shortening, the list's
+modal keys and the find chord's request, and 6,255 UI bytes with the palette's
+project headings, project rows and thread states. The entry and UI limits rise
+to 493,700 and 4,875,700; the core limits stay.
+
+On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
+492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes
+with `measure()` after fresh `bun run build:ui` and `bun run build:core` on
+Windows, against 491,872, 4,867,996 and 4,477,807 recorded below for PR #594:
+`files.locate` (the walk that finds a chat link named by the tail of its path)
+adds 1,292 core bytes, and the link's lookup in `Prose.svelte` with its store
+call and strings adds 240 entry and 1,097 UI bytes. The UI and core JavaScript
+limits rise to 4,869,600 and 4,479,600; the other limits stay.
 
 On 2026-10-18, keeping the prompt cache warm (PR #594) merged with
 `origin/main` at `3a19eb57` measures 491,872 entry bytes, 4,867,996 UI bytes
