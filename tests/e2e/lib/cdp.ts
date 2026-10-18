@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
+import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
@@ -18,6 +18,10 @@ const CONNECT_TIMEOUT_MS = 30_000;
 const EXIT_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 20_000;
 const POLL_MS = 100;
+/** Distinct debugging-port answers a failed wait reports. */
+const MAX_POLL_ANSWERS = 12;
+/** How long the failure probe gives the debugging port, for TCP and then HTTP. */
+const PROBE_TIMEOUT_MS = 5_000;
 const WAIT_DIAGNOSTIC_TIMEOUT_MS = 250;
 /** What a page that left an evaluate hanging is doing: frames drawn in a second, fonts and animations still pending. */
 const HUNG_PAGE = `new Promise((resolve) => {
@@ -301,10 +305,21 @@ export class BrowserPage {
 
   /**
    * Drives a page that something else launched, such as the shell's WebView2
-   * started with `--remote-debugging-port`. Closing it kills nothing.
+   * started with `--remote-debugging-port`. Closing it kills nothing. When no
+   * page shows up, `diagnose` says what the launcher left behind (the shell's
+   * own log, its process tree) and its text joins the error.
    */
-  static async attach(port: number, urlIncludes = ''): Promise<BrowserPage> {
-    const socket = await openSocket(await waitForPageTarget(port, urlIncludes));
+  static async attach(port: number, urlIncludes = '', diagnose?: () => string | Promise<string>): Promise<BrowserPage> {
+    let target: TargetInfo;
+    try {
+      target = await waitForPageTarget(port, urlIncludes);
+    } catch (error) {
+      if (diagnose === undefined) throw error;
+      const details = await Promise.resolve().then(diagnose)
+        .catch((failure: unknown) => `the diagnosis failed: ${failure instanceof Error ? failure.message : String(failure)}`);
+      throw new Error(`${error instanceof Error ? error.message : String(error)}\n${details}`, { cause: error });
+    }
+    const socket = await openSocket(target);
     const page = new BrowserPage(socket, null, null);
     await page.send('Page.enable', {});
     await page.send('Runtime.enable', {});
@@ -599,8 +614,13 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
 }
 
 async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subprocess, allowBlank = false): Promise<TargetInfo> {
-  const deadline = Date.now() + CONNECT_TIMEOUT_MS;
+  const started = Date.now();
+  const deadline = started + CONNECT_TIMEOUT_MS;
   let last = 'the debugging port never answered';
+  // Every distinct answer and when it came: the last one alone cannot say
+  // whether the port never opened, opened late or listed a page that never
+  // left about:blank.
+  const answers = new Map<string, { count: number; first: number; last: number }>();
   for (;;) {
     if (proc && proc.exitCode !== null) throw new Error(`the browser exited before opening CDP with code ${proc.exitCode}`);
     try {
@@ -618,8 +638,41 @@ async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subproce
     } catch (error) {
       last = error instanceof Error ? error.message : String(error);
     }
-    if (Date.now() > deadline) throw new Error(`the browser never exposed a page: ${last}`);
+    const at = Date.now() - started;
+    const seen = answers.get(last);
+    if (seen !== undefined) { seen.count += 1; seen.last = at; }
+    else if (answers.size < MAX_POLL_ANSWERS) answers.set(last, { count: 1, first: at, last: at });
+    if (Date.now() > deadline) {
+      const history = [...answers].map(([answer, { count, first, last: end }]) =>
+        `${count}x ${(first / 1000).toFixed(1)}-${(end / 1000).toFixed(1)} s: ${answer}`).join('\n  ');
+      throw new Error(`the browser never exposed a page: ${last}\nPolls of port ${port}:\n  ${history}\nPort ${port} now: ${await probeDebuggingPort(port)}`);
+    }
     await Bun.sleep(POLL_MS);
+  }
+}
+
+/**
+ * What the debugging port does once the wait gave up. A poll that timed out
+ * after 1 s cannot tell a port nothing answers on from a browser that accepts
+ * the connection and never replies, as one whose UI thread is stuck would:
+ * the probe connects first, then gives `/json/list` longer to answer.
+ */
+async function probeDebuggingPort(port: number): Promise<string> {
+  const tcp = await new Promise<string>((resolve) => {
+    const socket = createConnection({ host: '127.0.0.1', port });
+    const done = (text: string) => { socket.destroy(); resolve(text); };
+    socket.setTimeout(PROBE_TIMEOUT_MS, () => done(`no TCP answer within ${PROBE_TIMEOUT_MS} ms`));
+    socket.once('connect', () => done('accepts TCP'));
+    socket.once('error', (error: NodeJS.ErrnoException) => done(`TCP ${error.code ?? error.message}`));
+  });
+  if (tcp !== 'accepts TCP') return tcp;
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    const text = await response.text();
+    return `accepts TCP; /json/list answered HTTP ${response.status} in ${Date.now() - startedAt} ms: ${text.replace(/\s+/g, ' ').slice(0, 600)}`;
+  } catch (error) {
+    return `accepts TCP; /json/list gave nothing in ${Date.now() - startedAt} ms: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
 

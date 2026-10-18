@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { release, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { connect } from '../../packages/core/src/client.ts';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { describeShell } from './lib/shell-diagnosis.ts';
 import { freshDataDir, killProcessTree, removeDirectory, startCore } from './lib/core.ts';
 
 const TIMEOUT = 120_000;
@@ -298,6 +299,14 @@ async function waitForHealthyCore(ownDataDir: string): Promise<CoreFile> {
 /** The webview exposes its page target before the IPC bridge is injected. */
 const TAURI_READY = "typeof window.__TAURI_INTERNALS__?.invoke === 'function'";
 
+/**
+ * Attaches to a hidden shell's page. A shell whose page never shows up fails
+ * with its own log and process tree, so the run says where WebView2 stopped.
+ */
+function attachShell(port: number, ownDataDir: string, pid: number, urlIncludes = ''): Promise<BrowserPage> {
+  return BrowserPage.attach(port, urlIncludes, () => describeShell(ownDataDir, pid));
+}
+
 shellTest('a resident core finishes agent work after shell exit, is adopted, and stops explicitly', async () => {
   const ownDataDir = freshDataDir();
   let shellPid = 0; let found: CoreFile | undefined; let ownPage: BrowserPage | undefined;
@@ -308,7 +317,7 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     client = await connect(`http://127.0.0.1:${found.port}`, found.token);
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
-    ownPage = await BrowserPage.attach(port); await ownPage.waitFor(TAURI_READY);
+    ownPage = await attachShell(port, ownDataDir, shellPid); await ownPage.waitFor(TAURI_READY);
     await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid=titlebar] .close')`);
     const started = client.next('turn.started', () => true, 10000);
     const finished = client.next('turn.finished', () => true, 30000);
@@ -341,7 +350,7 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     expect((await client.call('agents.snapshot', {})).work[0]?.status).toBe('done');
     await ownPage.close(); ownPage = undefined;
     const secondPort = await freePort(); shellPid = spawnHiddenShell(ownDataDir, secondPort, true);
-    ownPage = await BrowserPage.attach(secondPort); await ownPage.waitFor(TAURI_READY);
+    ownPage = await attachShell(secondPort, ownDataDir, shellPid); await ownPage.waitFor(TAURI_READY);
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('core_endpoint')`);
     expect((await waitForHealthyCore(ownDataDir)).pid).toBe(found.pid);
     expect(await client.call('core.shutdown', {})).toEqual({ ok: true });
@@ -364,7 +373,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
   try {
     const port = await freePort(); ownPid = spawnHiddenShell(ownDataDir, port);
     ownCore = await waitForHealthyCore(ownDataDir);
-    ownPage = await BrowserPage.attach(port);
+    ownPage = await attachShell(port, ownDataDir, ownPid);
     await ownPage.waitFor(TAURI_READY);
     // A first launch opens centred in the work area, not at Windows' cascade spot.
     const main = await ownPage.evaluate<{ dx: number; dy: number }>(`(async () => {
@@ -389,7 +398,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.close(); ownPage = undefined;
 
     const secondPort = await freePort(); ownPid = spawnHiddenShell(ownDataDir, secondPort);
-    ownCore = await waitForHealthyCore(ownDataDir); ownPage = await BrowserPage.attach(secondPort);
+    ownCore = await waitForHealthyCore(ownDataDir); ownPage = await attachShell(secondPort, ownDataDir, ownPid);
     await ownPage.waitFor(`document.querySelector('[data-testid="nav-settings"]')`);
     await ownPage.click('[data-testid="nav-settings"]');
     // Settings open on Home; the window's own switches live under General.
@@ -426,7 +435,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
       for (const account of await client.call('accounts.list', {})) await client.call('quotas.configure', { accountId: account.id, enabled: false });
     } finally { client.close(); }
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'show'})`);
-    popup = await BrowserPage.attach(secondPort, 'view=quotas');
+    popup = await attachShell(secondPort, ownDataDir, ownPid, 'view=quotas');
     await popup.waitFor(`document.querySelector('[data-testid="quota-popup"]') && !document.querySelector('[role="alert"]')`);
     // Every account is off, so the popup says there is nothing to read and offers the way to a provider.
     await popup.waitFor(`document.querySelector('[data-testid="quota-empty"]') && document.querySelectorAll('[data-testid="quota-provider"]').length === 0`);
@@ -488,7 +497,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     while (await quotaTargets() > 0 && Date.now() < releaseBy) await Bun.sleep(POLL_MS);
     expect(await quotaTargets()).toBe(0);
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'show'})`);
-    popup = await BrowserPage.attach(secondPort, 'view=quotas');
+    popup = await attachShell(secondPort, ownDataDir, ownPid, 'view=quotas');
     await popup.waitFor(`document.querySelector('[data-testid="quota-popup"]')`);
     await popup.close(); popup = undefined;
     await quitShell(ownPage);
@@ -496,7 +505,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.close(); ownPage = undefined;
 
     const thirdPort = await freePort(); ownPid = spawnHiddenShell(ownDataDir, thirdPort);
-    ownCore = await waitForHealthyCore(ownDataDir); ownPage = await BrowserPage.attach(thirdPort);
+    ownCore = await waitForHealthyCore(ownDataDir); ownPage = await attachShell(thirdPort, ownDataDir, ownPid);
     await ownPage.waitFor(TAURI_READY);
     expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior')`)).toBe(true);
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior', {enabled:false})`);
@@ -553,18 +562,7 @@ beforeAll(async () => {
   startToHealthMs = performance.now() - startedAt;
   console.log(`[shell.test] spawn to /health: ${startToHealthMs.toFixed(0)} ms`);
 
-  try {
-    page = await BrowserPage.attach(debugPort);
-  } catch (error) {
-    const diagnostic = Bun.spawnSync(['powershell', '-NoProfile', '-Command',
-      `$all = Get-CimInstance Win32_Process; $ids = @(${shellPid}); do { $next = @($all | Where-Object { $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids } | Select-Object -ExpandProperty ProcessId); $ids += $next } while ($next.Count); $all | Where-Object { $_.ProcessId -in $ids } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Depth 3`,
-    ], { stdout: 'pipe', stderr: 'pipe', windowsHide: true });
-    const details = diagnostic.stdout.toString();
-    mkdirSync(join(import.meta.dir, '.artifacts'), { recursive: true });
-    writeFileSync(join(import.meta.dir, '.artifacts', 'shell-processes.json'), details);
-    console.error(`Shell debugging port ${debugPort} unavailable; process tree: ${details}`);
-    throw error;
-  }
+  page = await attachShell(debugPort, dataDir, shellPid);
 }, TIMEOUT);
 
 afterAll(async () => {
@@ -1322,7 +1320,7 @@ shellTest(
       // Started, not adopted: the core is this shell's own child.
       expect(parentOf(corePid)).toBe(shell);
 
-      shellPage = await BrowserPage.attach(debugPort);
+      shellPage = await attachShell(debugPort, ownDataDir, shell);
       await quitShell(shellPage);
 
       await waitUntil(() => !pidAlive(shell) && !pidAlive(corePid), CORE_GONE_TIMEOUT_MS);
@@ -1354,7 +1352,7 @@ shellTest(
 
     try {
       corePid = (await waitForHealthyCore(ownDataDir)).pid;
-      shellPage = await BrowserPage.attach(debugPort);
+      shellPage = await attachShell(debugPort, ownDataDir, shell);
       await shellPage.waitFor(TAURI_READY);
       await shellPage.waitFor(`document.querySelector('[data-testid="titlebar"]')`);
 
@@ -1407,7 +1405,7 @@ shellTest(
 
     try {
       shell = spawnHiddenShell(adopted.dataDir, debugPort);
-      shellPage = await BrowserPage.attach(debugPort);
+      shellPage = await attachShell(debugPort, adopted.dataDir, shell);
 
       // Adopted, not replaced: the endpoint the shell hands its own UI is the
       // core this test started, and `core.json` still names that process. The
