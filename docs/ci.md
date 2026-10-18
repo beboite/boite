@@ -204,8 +204,9 @@ other 7,736 UI bytes, 2,904 of them in the entry; core JavaScript measures
 599,526 entry bytes, 5,160,249 UI bytes and 4,412,366 core JavaScript bytes
 after fresh builds the same way, 1,327 entry bytes more than before the merge,
 close to the 1,283 that main's ticket and relay choice measured. Reading the
-terminal's sequences as xterm.js 6 ends them brings the UI to 5,160,535. The
-entry and UI limits rise to 599,800 and 5,161,000; the core limits stay.
+terminal's sequences as xterm.js 6 ends them brings the UI to 5,160,535, and
+making that reader the only source of a terminal's status and directory to
+5,160,658. The entry and UI limits rise to 599,800 and 5,161,000; the core limits stay.
 
 On 2026-10-18, removing a purged or erased thread's Claude transcripts and
 muting new audio sessions on Core Audio's notice, rebased on `b611c01f`,

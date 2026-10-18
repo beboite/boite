@@ -41,7 +41,7 @@ export function knownLanguage(language: string): language is Language {
 const loaded = new Map<Language, Promise<void>>();
 async function load(language: Language): Promise<void> {
   const loader = LOADER_OF.get(language);
-  if (loader === undefined) throw new Error(`unknown grammar ${JSON.stringify(language)}`);
+  if (typeof loader !== 'function') throw new Error(`unknown grammar ${JSON.stringify(language)}`);
   let pending = loaded.get(language);
   if (!pending) {
     pending = Promise.all([import('highlight.js/lib/core'), loader()]).then(([{ default: highlighter }, { default: grammar }]) => {

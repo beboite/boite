@@ -70,8 +70,8 @@ const OSC_CONTROL = /[\x00-\x1f\x9c]/g;
 
 /**
  * The OSC sequences in a shell's raw output, read as xterm.js 6 reads them
- * (`EscapeSequenceParser`), so a session can follow its marks while its xterm
- * is released: each `<code>;<data>` goes to `onOsc` when BEL, ESC (ST's first
+ * (`EscapeSequenceParser`), so a session follows its marks with or without
+ * an xterm: each `<code>;<data>` goes to `onOsc` when BEL, ESC (ST's first
  * byte or any other escape) or C1 ST ends it, a sequence split across chunks
  * included. CAN and SUB cancel it; other C0 controls inside it are dropped.
  */
@@ -131,6 +131,13 @@ export class OscScanner {
   #open(): void {
     this.#data = '';
     this.#skip = false;
+  }
+
+  /** Forgets a sequence in progress: the next chunk starts on fresh output. */
+  reset(): void {
+    this.#data = null;
+    this.#skip = false;
+    this.#escape = false;
   }
 
   #end(): void {

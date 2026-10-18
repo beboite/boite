@@ -64,25 +64,27 @@ test('a hidden terminal gives its WebGL context back at once and its xterm after
   expect(query('[data-testid=terminal] .terminal-screen')).toBe(element);
   expect(contexts).toEqual({ made: 3, disposed: 2, lost: 2 });
 
-  // A released tab still hears its shell, a mark cut by the release included:
-  // the command's end turns its dot red unselected, the next one clears it.
+  // A released tab still hears its shell. The command's end comes while the
+  // hidden xterm has only queued it (xterm parses on a later task) and the
+  // release runs first: the dot still turns red, and the next command clears it.
   const first = `terminal:${threadId}`;
   const shell = store.client as FakeClient;
   const firstTab = () => [...document.querySelectorAll('[data-testid=terminal-tab]')].find((tab) => !tab.classList.contains('selected'));
   const dot = () => firstTab()?.querySelector('[data-testid=terminal-status]')?.classList;
-  shell.emitTerminalOutput(first, '\x1b]133;C\x07build\r\n\x1b]133;D;');
+  shell.emitTerminalOutput(first, '\x1b]133;C\x07build\r\n');
   await waitFor(() => store.terminalScreen(first)?.running === true);
   timers.mockClear();
   store.newTerminal(threadId);
   await waitFor(() => document.querySelectorAll('[data-testid=terminal-tab]').length === 2 && store.terminalLayout(threadId)?.active !== first);
   const releaseFirst = timers.mock.calls.find(([, delay]) => delay === HIDDEN_RELEASE_MS)?.[0] as (() => void) | undefined;
   expect(releaseFirst).toBeTypeOf('function');
+  expect(dot()?.contains('running')).toBe(true);
+  shell.emitTerminalOutput(first, '\x1b]133;D;1\x07\x1b]133;A\x07PS C:\\work>\x1b]133;B\x07');
   releaseFirst!();
   expect(element.childElementCount).toBe(0);
-  expect(dot()?.contains('running')).toBe(true);
-  shell.emitTerminalOutput(first, '1\x07\x1b]133;A\x07PS C:\work> \x1b]133;B\x07');
-  await waitFor(() => dot()?.contains('failed') === true);
   expect(store.terminalScreen(first)?.lastExit).toBe(1);
+  expect(store.terminalScreen(first)?.running).toBe(false);
+  await waitFor(() => dot()?.contains('failed') === true);
   store.writeTerminal(first, 'git status\r');
   await waitFor(() => store.terminalScreen(first)?.lastExit === 0);
   expect(dot()).toBeUndefined();
