@@ -26,7 +26,8 @@ interface Entry extends BrowserDownload {
   expire?: ReturnType<typeof setTimeout>;
 }
 
-const EXTENSIONS: Record<string, BrowserDownloadKind> = {};
+/** A Map, so a name ending in `.constructor` or `.__proto__` is no known kind. */
+const EXTENSIONS = new Map<string, BrowserDownloadKind>();
 const kinds: Array<[BrowserDownloadKind, string]> = [
   ['executable', 'exe msi msix msixbundle appx appxbundle com scr dll sys cpl ocx so dylib app dmg pkg mpkg deb rpm apk aab xapk jar war appimage run bin elf xpi crx iso img vhd vhdx lnk'],
   ['script', 'sh bash zsh fish ps1 psm1 psd1 bat cmd vbs vbe js mjs cjs jse wsf wsh hta py pyw rb pl php applescript scpt reg desktop command'],
@@ -36,7 +37,7 @@ const kinds: Array<[BrowserDownloadKind, string]> = [
   ['media', 'mp3 mp4 m4a wav ogg oga opus flac webm mkv mov avi'],
   ['text', 'txt md csv tsv json xml yaml yml html htm css log ini toml'],
 ];
-for (const [kind, list] of kinds) for (const ext of list.split(' ')) EXTENSIONS[ext] = kind;
+for (const [kind, list] of kinds) for (const ext of list.split(' ')) EXTENSIONS.set(ext, kind);
 const RISK: BrowserDownloadKind[] = ['executable', 'script', 'archive', 'document', 'other', 'image', 'media', 'text'];
 const MACROS = new Set(['docm', 'xlsm', 'pptm']);
 
@@ -60,7 +61,7 @@ export function sniffDownload(head: Uint8Array): BrowserDownloadKind | null {
 export function classifyDownload(name: string, head: Uint8Array): { kind: BrowserDownloadKind; warning?: string } {
   const dot = name.lastIndexOf('.');
   const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
-  const named = EXTENSIONS[ext] ?? null, sniffed = sniffDownload(head);
+  const named = EXTENSIONS.get(ext) ?? null, sniffed = sniffDownload(head);
   // A package of executable code inside a zip (jar, apk, xpi) is an executable, not an archive.
   const bytes = sniffed === 'archive' && named === 'executable' ? 'executable' : sniffed;
   const kind = [named, bytes].filter((one): one is BrowserDownloadKind => one !== null).sort((a, b) => RISK.indexOf(a) - RISK.indexOf(b))[0] ?? 'other';

@@ -116,8 +116,14 @@ const DOWNLOAD_ID = /^dl-[a-f0-9]{12}$/;
  * control or reserved characters, no leading dot, at most 200 characters.
  */
 export function browserDownloadName(raw: unknown): string {
-  const base = String(raw ?? '').split(/[\\/]/).pop() ?? '';
-  let name = base.replace(/[\u0000-\u001f\u007f<>:"|?*]/g, '_').replace(/^[\s.]+|[\s.]+$/g, '');
+  const base = (String(raw ?? '').split(/[\\/]/).pop() ?? '').slice(0, 1000);
+  let name = base.replace(/[\u0000-\u001f\u007f<>:"|?*]/g, '_');
+  // Dots and spaces at either end, trimmed by index: an anchored regex is quadratic on a long run of them.
+  const edge = (char: string) => char === '.' || /\s/.test(char);
+  let start = 0, end = name.length;
+  while (start < end && edge(name[start]!)) start++;
+  while (end > start && edge(name[end - 1]!)) end--;
+  name = name.slice(start, end);
   if (/^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(name)) name = `_${name}`;
   if (name.length > 200) { const dot = name.lastIndexOf('.'); const ext = dot > 0 && name.length - dot <= 16 ? name.slice(dot) : ''; name = name.slice(0, 200 - ext.length) + ext; }
   return name || 'download';

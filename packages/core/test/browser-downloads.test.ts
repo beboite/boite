@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_ENV, browserDownloadName, type BrowserDownload } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
@@ -22,6 +22,8 @@ test('a download is classed by the riskier of its name and its bytes', () => {
   expect(classifyDownload('paper.pdf', bytes('%PDF-1.7'))).toEqual({ kind: 'document' });
   expect(classifyDownload('notes.txt', bytes('hello\n'))).toEqual({ kind: 'text' });
   expect(classifyDownload('blob', new Uint8Array([0, 1, 2]))).toEqual({ kind: 'other' });
+  // A name ending like an Object property is no known kind, never a way around the bytes.
+  expect(classifyDownload('photo.constructor', bytes('MZ'))).toMatchObject({ kind: 'executable', warning: expect.stringContaining('never run it') });
 });
 
 test('a download keeps a file name that is safe in any folder', () => {
@@ -86,6 +88,14 @@ real('a page downloads into the quarantine, the agent hears of it and copies it 
   expect(listed.out).toContain(`${script.id}  done  ${DOWNLOAD_SCRIPT.length} B  tool.sh  script`);
   expect(listed.out).toContain('treat each as untrusted');
   // A file already there is never replaced.
+  // Only under the working directory, so a page's text cannot steer a file into ~/.ssh.
+  expect((await run(['download', 'save', script.id, '../authorized_keys'])).error).toContain('under the working directory');
+  expect((await run(['download', 'save', script.id, join(harness.dataDir, 'elsewhere.sh')])).error).toContain('under the working directory');
+  symlinkSync(harness.dataDir, join(cwd, 'out'));
+  expect((await run(['download', 'save', script.id, 'out/x.sh'])).error).toContain('under the working directory');
+  // A link pointing nowhere is a taken name too.
+  symlinkSync(join(harness.dataDir, 'missing'), join(cwd, 'dangling.sh'));
+  expect((await run(['download', 'save', script.id, 'dangling.sh'])).error).toContain('already exists');
   writeFileSync(join(cwd, 'taken.sh'), 'mine');
   expect((await run(['download', 'save', script.id, 'taken.sh'])).error).toContain('already exists');
   expect(readFileSync(join(cwd, 'taken.sh'), 'utf8')).toBe('mine');
@@ -99,6 +109,17 @@ real('a page downloads into the quarantine, the agent hears of it and copies it 
   expect(((await command({ kind: 'downloads' })).value as { downloads: BrowserDownload[] }).downloads.map(one => one.id)).toEqual([disguised.id]);
   expect(readdirSync(quarantine)).toHaveLength(1);
   expect(readFileSync(join(quarantine, readdirSync(quarantine)[0]!))).toEqual(DOWNLOAD_PROGRAM);
+
+  // A frame of another site downloads for this conversation too, after its frame moved to another process.
+  await command({ kind: 'open', url: url('/framed'), reuse: true });
+  const deadline = Date.now() + 10_000;
+  let framed: BrowserDownload | undefined;
+  while (!framed && Date.now() < deadline) {
+    framed = ((await command({ kind: 'downloads' })).value as { downloads: BrowserDownload[] }).downloads.find(one => one.id !== disguised.id);
+    if (!framed) await Bun.sleep(100);
+  }
+  expect((await command({ kind: 'download-wait', downloadId: framed!.id })).value).toMatchObject({ name: 'tool.sh', state: 'done' });
+  await command({ kind: 'download-discard', downloadId: framed!.id });
 
   // Archiving the conversation takes what it still holds.
   harness.core.browser.release(threadId as never);

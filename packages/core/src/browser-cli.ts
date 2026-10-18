@@ -1,5 +1,5 @@
-import { writeFileSync, openSync, writeSync, closeSync, renameSync, unlinkSync, existsSync, linkSync } from 'node:fs';
-import { extname, resolve } from 'node:path';
+import { writeFileSync, openSync, writeSync, closeSync, renameSync, unlinkSync, linkSync, copyFileSync, constants, lstatSync, realpathSync } from 'node:fs';
+import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { browserActionError, browserDownloadName, BROWSER_DOWNLOAD_CHUNK_BYTES, type BrowserDownload, BROWSER_PRESETS, type BrowserReply, BROWSER_RECORDING_CHUNK_BYTES, BROWSER_RECORDING_CODECS, BROWSER_RECORDING_FRAME_RATES, BROWSER_RECORDING_MAX_BYTES, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserPreset, type BrowserRecordingCodec, type BrowserRecordingFrameRate } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import type { CliIo } from './cli.ts';
@@ -42,8 +42,8 @@ Targets: @e3 (a ref from the last snapshot), a CSS selector matching one element
   recording-stop                  stop and save the video in cwd
   downloads                       the files this conversation's pages downloaded: state, size, kind,
                                   sha256 and source
-  download save <id> [path]       copy a finished download out of quarantine (default: its name in
-                                  cwd, never overwriting), without the execute bit
+  download save <id> [path]       copy a finished download out of quarantine into cwd or a folder
+                                  under it (default: its name), never overwriting, never executable
   download wait <id> [--timeout <ms>] | download discard <id>
 
 Each action waits for the navigation it starts and reports where the page went and the
@@ -425,9 +425,28 @@ function freePath(cwd: string, name: string): string {
   const ext = extname(name), stem = ext ? name.slice(0, -ext.length) : name;
   for (let n = 1; n < 1000; n++) {
     const path = resolve(cwd, n === 1 ? name : `${stem} (${n})${ext}`);
-    if (!existsSync(path) && !existsSync(`${path}.part`)) return path;
+    if (!taken(path) && !taken(`${path}.part`)) return path;
   }
   throw new Error(`no free file name for ${name} in ${cwd}`);
+}
+
+/** A file or a link, even one pointing nowhere. */
+function taken(path: string): boolean {
+  try { lstatSync(path); return true; } catch { return false; }
+}
+
+/**
+ * Where `save <id> <path>` may write: under the working directory, through no
+ * link that leaves it. A page's text cannot steer a file into ~/.ssh or a
+ * startup folder; the agent moves it there itself if the task needs it.
+ */
+function insideCwd(cwd: string, output: string): string {
+  const path = resolve(cwd, output), root = realpathSync(cwd);
+  let parent: string;
+  try { parent = realpathSync(dirname(path)); } catch { throw new Error(`${dirname(path)} does not exist; save into an existing folder of the working directory`); }
+  const within = relative(root, parent);
+  if (within.startsWith('..') || isAbsolute(within)) throw new Error(`a download is saved under the working directory ${cwd}, not ${path}; move it afterwards if the task needs it elsewhere`);
+  return resolve(parent, browserDownloadName(output.split(/[\\/]/).pop()));
 }
 
 /**
@@ -441,8 +460,8 @@ async function saveDownload(downloadId: string, io: CliIo, client: CoreClient, t
   if (!download) throw new Error(`no download ${downloadId} in this conversation; boite browser downloads lists them`);
   if (download.state === 'downloading') throw new Error(`download ${downloadId} is still running (${size(download.bytes)} so far); boite browser download wait ${downloadId}`);
   if (download.state !== 'done' || !download.sha256) throw new Error(`download ${downloadId} ${download.state}${download.reason ? `: ${download.reason}` : ''}`);
-  const path = output === undefined ? freePath(io.cwd, browserDownloadName(download.name)) : resolve(io.cwd, output);
-  if (existsSync(path)) throw new Error(`${path} already exists; give another path`);
+  const path = output === undefined ? freePath(io.cwd, browserDownloadName(download.name)) : insideCwd(io.cwd, output);
+  if (taken(path)) throw new Error(`${path} already exists; give another path`);
   const partial = `${path}.part`;
   const fd = openSync(partial, 'wx', 0o644);
   const hasher = new Bun.CryptoHasher('sha256');
@@ -465,12 +484,15 @@ async function saveDownload(downloadId: string, io: CliIo, client: CoreClient, t
     if (hasher.digest('hex') !== download.sha256) throw new Error(`download ${downloadId} changed while it was copied: its sha256 does not match`);
     complete = true;
   } finally { closeSync(fd); if (!complete) unlinkSync(partial); }
-  // A link fails when the name was taken meanwhile, where a rename would replace that file.
-  try { linkSync(partial, path); unlinkSync(partial); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') { unlinkSync(partial); throw new Error(`${path} already exists; give another path`); }
-    try { renameSync(partial, path); } catch (cause) { unlinkSync(partial); throw cause; }
+  // Both fail when the name was taken meanwhile, where a rename would replace that file; a copy covers a folder without hard links.
+  try {
+    try { linkSync(partial, path); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw error; copyFileSync(partial, path, constants.COPYFILE_EXCL); }
+  } catch (error) {
+    unlinkSync(partial);
+    throw (error as NodeJS.ErrnoException).code === 'EEXIST' ? new Error(`${path} already exists; give another path`) : error;
   }
+  unlinkSync(partial);
   await client.call('browser.command', { threadId, action: { kind: 'download-discard', downloadId } }).catch(() => {});
   return { ...download, path };
 }

@@ -221,7 +221,8 @@ export class AgentBrowser {
       url => { tab.url = url; this.#remote.stale(tab); this.#changed(threadId); this.#engines.saveCookiesSoon(engine); });
     on('Page.frameAttached', params => { if (tab.frames.size < 500) tab.frames.add(String(params.frameId)); });
     on('Page.frameNavigated', params => { const frame = params.frame as { id: string }; if (tab.frames.size < 500) tab.frames.add(String(frame.id)); });
-    on('Page.frameDetached', params => { tab.frames.delete(String(params.frameId)); });
+    // A frame moving to another process (`swap`) is still the page's: only a removed one goes.
+    on('Page.frameDetached', params => { if (params.reason !== 'swap') tab.frames.delete(String(params.frameId)); });
     // Before its first request: the page, its workers and its requests say what a browser with a window says.
     if (engine.identity) await engine.cdp.send('Emulation.setUserAgentOverride', { userAgent: engine.identity.userAgent, userAgentMetadata: engine.identity.metadata }, sessionId).catch(() => {});
     // Nothing reads response bodies (`Network.getResponseBody`): Chromium keeps none for this tab.

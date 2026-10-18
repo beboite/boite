@@ -55,6 +55,9 @@ export function createBrowserFixture() {
       if (path === '/popup') return new Response('<title>Popup</title>popup', { headers: { 'content-type': 'text/html' } });
       // Files a page offers for download: a script, and a program that names itself a picture.
       if (path === '/files') return new Response('<title>Files</title><a id="script" href="/download/tool.sh?token=secret">Script</a> <a id="saved" href="/download/notes.txt" download>Notes</a>', { headers: { 'content-type': 'text/html' } });
+      // A frame of another site, so in another process, that downloads as soon as it loads.
+      if (path === '/framed') return new Response(`<title>Framed</title><iframe src="http://localhost:${new URL(request.url).port}/autoload"></iframe>`, { headers: { 'content-type': 'text/html' } });
+      if (path === '/autoload') return new Response('<a id="s" href="/download/tool.sh">Script</a><script>setTimeout(() => s.click(), 300)</script>', { headers: { 'content-type': 'text/html' } });
       if (path === '/download/tool.sh') return new Response(DOWNLOAD_SCRIPT, { headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="tool.sh"' } });
       if (path === '/download/notes.txt') return new Response('plain notes\n', { headers: { 'content-type': 'text/plain' } });
       if (path === '/download/report.png') return new Response(DOWNLOAD_PROGRAM, { headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="../report.png"' } });

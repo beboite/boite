@@ -251,7 +251,9 @@ project, so nothing lands where it could be run or opened by accident.
   not at the 10 s a navigation is given, and `open` of an address that is a
   file leaves the page where it was instead of failing.
 - At most 1 GiB per file and 2 GiB in the whole quarantine of a machine; past
-  either, the browser cancels it. A conversation keeps 20, the oldest finished
+  either, the browser cancels it. The size is checked at each progress event
+  Chrome sends, about every 500 ms, so a file can pass the cap by what arrives
+  in that time; a finished file over it is removed. A conversation keeps 20, the oldest finished
   one going for a new one.
 - When it ends the core reads its sha256 and its first 512 bytes. Its `kind`
   is the riskier of what the bytes and the name say (executable, script,
@@ -260,7 +262,8 @@ project, so nothing lands where it could be run or opened by accident.
   that exact file, an archive is unpacked into its own empty folder, a picture
   whose bytes are a program is flagged as disguised. The address is kept without
   its query and fragment, which can carry tokens.
-- `boite browser download save <id> [path]` copies it out in 4 MB chunks, with
+- `boite browser download save <id> [path]` copies it into the working
+  directory or a folder under it, never through a link that leaves it, in 4 MB chunks, with
   mode 644 so never executable, under a cleaned name (no path, no reserved
   character, no leading dot) that never replaces a file, checks the sha256,
   then removes it from the quarantine.
