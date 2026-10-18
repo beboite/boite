@@ -181,12 +181,22 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 492,200 |
-| UI files, excluding `.br` and `.gz` copies | 4,869,600 |
+| UI entry chunk | 495,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,879,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,479,600 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,485,600 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the sign-in card (PR #604) merged with `origin/main` at
+`e22bb094` measures 494,498 entry bytes, 4,878,952 UI bytes and 4,485,124 core
+JavaScript bytes with `measure()` after fresh `bun run build:ui` and
+`bun run build:core` on Windows, against 492,112, 4,869,093 and 4,479,099
+recorded below for PR #595: the lazy `SignInCard` chunk adds 4,052 JavaScript
+and 1,878 CSS bytes, its loader, card routing and contracts 2,386 entry bytes,
+the sentences about 1,540; `browser login`, `browser/sign-in.ts` and the
+`browser.signIn` routes add 6,025 core bytes. The entry, UI and core JavaScript
+limits rise to 495,000, 4,879,500 and 4,485,600; `main.js` stays.
 
 On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
 492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes
