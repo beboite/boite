@@ -2048,6 +2048,8 @@ export const fr: Translation = {
     coverage: 'Jetons {reported}/{turns} tours · Coût {priced}/{turns}',
     partialCost: "{count} tours n'ont pas de prix et sont laissés hors de l'estimation.",
     rates: 'Tarif API public de {model}, par million de jetons : entrée {input}, sortie {output}, lecture du cache {cacheRead}, écriture du cache {cacheWrite}.',
+    cacheSplit: 'Cache : {read} lus, {write} écrits.',
+    cacheSplitCost: 'Cache : {read} lus ({readCost}), {write} écrits ({writeCost}).',
     reportedCost: "Aucun tarif public ne correspond à ce modèle : le coût est celui que son agent a rapporté.",
     noRates: "Aucun tarif public ne correspond à ce modèle et son agent n'a rapporté aucun coût.",
     olderCore: "La machine qui a fait ces tours a une version de Boite antérieure aux tarifs publics des API : seul un coût rapporté par son agent apparaît ici. Mettez-la à jour dans Réglages, Machines et mises à jour pour les estimer.",

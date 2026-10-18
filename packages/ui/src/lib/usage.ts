@@ -99,25 +99,40 @@ export function formatRate(value: number): string {
 
 /**
  * Where a model's cost comes from, for the "i" beside its name: the public
- * rates it was priced at, the agent's own figure, or nothing.
+ * rates it was priced at, the agent's own figure, or nothing. Then the Cache
+ * column taken apart, since a written token costs dozens of read ones.
  */
-export function priceNote(row: { price: UsagePrice | null; priced: number; reported: number; olderCore?: boolean }): string {
+export function priceNote(row: { price: UsagePrice | null; priced: number; reported: number; olderCore?: boolean; usage?: Usage }): string {
   const price = row.price;
   // Rates price nothing without tokens: Grok reports none.
   if (row.reported === 0 && row.priced === 0) return strings.usage.noTokens;
   if (price !== null) {
     const { input, output, cacheRead, cacheWrite } = price.rates;
-    return fill(strings.usage.rates, {
+    return `${fill(strings.usage.rates, {
       model: price.model,
       input: formatRate(input),
       output: formatRate(output),
       cacheRead: formatRate(cacheRead),
       cacheWrite: formatRate(cacheWrite),
-    });
+    })}${cacheSplit(row.usage, price)}`;
   }
   // A core from before public prices knows no rate at all, whatever the model.
   if (row.olderCore) return strings.usage.olderCore;
-  return row.priced > 0 ? strings.usage.reportedCost : strings.usage.noRates;
+  return `${row.priced > 0 ? strings.usage.reportedCost : strings.usage.noRates}${cacheSplit(row.usage, null)}`;
+}
+
+/** What the Cache column adds up, read and written apart, priced at the rates when there are some. */
+function cacheSplit(usage: Usage | undefined, price: UsagePrice | null): string {
+  if (!usage || usage.cacheReadTokens + usage.cacheWriteTokens === 0) return '';
+  const read = formatMetric('tokens', usage.cacheReadTokens);
+  const write = formatMetric('tokens', usage.cacheWriteTokens);
+  if (price === null) return ` ${fill(strings.usage.cacheSplit, { read, write })}`;
+  return ` ${fill(strings.usage.cacheSplitCost, {
+    read,
+    write,
+    readCost: formatMetric('cost', usage.cacheReadTokens * price.rates.cacheRead / 1e6),
+    writeCost: formatMetric('cost', usage.cacheWriteTokens * price.rates.cacheWrite / 1e6),
+  })}`;
 }
 
 /** A shorter label for an axis: `$2.5`, `$1.5k`. Token counts already drop a `.0`. */
