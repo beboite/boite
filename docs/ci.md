@@ -181,12 +181,20 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 490,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,861,500 |
+| UI entry chunk | 490,800 |
+| UI files, excluding `.br` and `.gz` copies | 4,862,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,470,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,471,800 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, PR #595 on `origin/main` at `3a19eb57` measures 490,654 entry
+bytes, 4,861,966 UI bytes and 4,471,411 core JavaScript bytes with `measure()`
+after fresh `bun run build:ui` and `bun run build:core` on Windows, against
+490,436, 4,860,909 and 4,470,119 recorded below: `files.locate` (the walk that
+finds a chat link named by the tail of its path) adds 1,292 core bytes, and the
+link's lookup in `Prose.svelte` with its store call and strings adds 218 entry
+and 1,057 UI bytes. The limits rise to 490,800, 4,862,500 and 4,471,800.
 
 On 2026-10-18, the journal compaction (schema 37: zstd values, per-thread
 command lines, the paced background passes in `journal/retention.ts` and
