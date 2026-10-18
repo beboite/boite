@@ -275,6 +275,14 @@ test('opens on this PC rather than on the server the chat is on, and switches ma
   const pc = new FakeClient({ delayMs: 0 });
   const server = new FakeClient({ delayMs: 0 });
   await Promise.all([pc.connect(), server.connect()]);
+  const pcCall = pc.call.bind(pc);
+  // The PC answers Stop only when the test lets it, after the page has moved to the server.
+  let answer: () => void = () => {};
+  const held = new Promise<void>((resolve) => { answer = resolve; });
+  vi.spyOn(pc, 'call').mockImplementation((async (method: string, params: unknown) => {
+    if (method === 'plugins.app') await held;
+    return pcCall(method as never, params as never);
+  }) as never);
   const serverList = server.call.bind(server);
   // Nothing is installed on the server.
   vi.spyOn(server, 'call').mockImplementation((async (method: string, params: unknown) => {
@@ -293,12 +301,21 @@ test('opens on this PC rather than on the server the chat is on, and switches ma
     mounted = mount(PluginsPage, { target: document.body, props: { store: serverStore } });
     await vi.waitFor(() => expect(row('bots')?.closest('[data-testid="plugins-installed"]') ?? null).not.toBeNull());
     expect(q('[data-testid="plugins-machine"]')?.textContent).toContain('nuno-pc');
+    await vi.waitFor(() => expect(appButton('bots', 'stop')).not.toBeNull());
+    appButton('bots', 'stop')!.click();
 
     q('[data-testid="plugins-machine"]')!.click();
     flushSync();
     q('[data-testid="plugins-machine-menu"] [data-value="https://server.test"]')!.click();
     await vi.waitFor(() => expect(row('bots')?.closest('[data-testid="plugins-recommended"]') ?? null).not.toBeNull());
     expect(q('[data-testid="plugins-machine"]')?.textContent).toContain('server');
+
+    // The PC's late answer stays out of the server's page.
+    answer();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    flushSync();
+    expect(row('bots')?.closest('[data-testid="plugins-recommended"]') ?? null).not.toBeNull();
+    expect(app('bots')).toBeNull();
   } finally {
     workspace.machines = [];
     pc.close(); server.close();
