@@ -181,7 +181,7 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 491,500 |
+| UI entry chunk | 492,400 |
 | UI files, excluding `.br` and `.gz` copies | 4,861,500 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,470,500 |
@@ -193,8 +193,8 @@ On 2026-10-18, the draft heading that names the machine, merged with
 `bun run build:ui` on Linux, against 490,436 that main measured on Windows
 (the two agreed on `95862236`, 490,185): 934 bytes for the machine's icon and
 name in the desktop sentence and after the phone's project chip. The entry
-limit rises to 491,500. The text faces Geist, Figtree and DM Sans leave the
-bundle, about 236 KB of woff2; the other limits stay.
+limit rises to 492,400, about a kilobyte above. The faces Geist, Figtree and
+DM Sans leave the bundle, about 236 KB of woff2; the other limits stay.
 
 On 2026-10-18, the journal compaction (schema 37: zstd values, per-thread
 command lines, the paced background passes in `journal/retention.ts` and
