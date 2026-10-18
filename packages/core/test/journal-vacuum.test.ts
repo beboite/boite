@@ -56,7 +56,11 @@ test('once the passes are done, a start gives the free pages back and turns on i
     expect(pragma(journal, 'freelist_count') * 4096).toBeGreaterThan(30 * MiB);
     const steps = compactionSteps(journal);
     let ticks = 0;
-    while (await compactOnce(steps, Date.now()) === 'more') ticks++;
+    while (await compactOnce(steps, Date.now()) === 'more') {
+      ticks++;
+      // No timer turns in this loop: the checkpoint the Worker would run catches the WAL up here.
+      if (journal.checkpoints?.behind === true) journal.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    }
     expect(ticks).toBeGreaterThan(1);
     expect(pragma(journal, 'freelist_count') * 4096).toBeLessThanOrEqual(16 * MiB);
   } finally {
