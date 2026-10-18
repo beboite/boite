@@ -40,6 +40,17 @@ test('connecting another machine keeps thread rows at their single-machine heigh
   // In Projects the header names the machine; a row repeating it would only take room from the title.
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-row')}')).every(e => !e.querySelector('.machine'))`)).toBe(true);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('project-row')}')).every(e => e.querySelector('${id('project-host')}[title][aria-label]'))`)).toBe(true);
+  // The project's tile leads its header, the machine after it; under the keyboard (or a mouse) the tile gives way to the fold chevron.
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('project-row')}')).every(e => !!(e.querySelector('${id('project-tile')}').compareDocumentPosition(e.querySelector('${id('project-host')}')) & Node.DOCUMENT_POSITION_FOLLOWING))`)).toBe(true);
+  const swapped = (tile: string, caret: string) => `(() => { const r = document.querySelector('${id('project-row')}'); return getComputedStyle(r.querySelector('${id('project-tile')}')).opacity === '${tile}' && getComputedStyle(r.querySelector('.fold-caret')).opacity === '${caret}'; })()`;
+  expect(await page.evaluate<boolean>(swapped('1', '0'))).toBe(true);
+  // A key first, so the focus that follows reads as the keyboard's.
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+  await page.evaluate(`document.querySelector('${id('project-row')}').focus()`);
+  await page.waitFor(swapped('0', '1'));
+  await page.evaluate(`document.querySelector('${id('project-row')}').blur()`);
+  await page.waitFor(swapped('1', '0'));
   await showThreadView(page, 'recent');
   await page.waitFor(`Array.from(document.querySelectorAll('${id('thread-row')}')).every(e => e.querySelector('.headline .machine[title][aria-label]'))`);
   await page.click(id('project-filter'));
