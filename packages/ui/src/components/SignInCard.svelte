@@ -6,6 +6,7 @@
   import { keepFocus } from '../lib/focus';
   import { liveViews, machineName } from '../lib/live-view.svelte';
   import { rightPanel } from '../lib/right-panel.svelte';
+  import { holdThread } from '../lib/thread-holds';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -56,10 +57,8 @@
   // The panel's browser, loaded with the first Open of a card that hosts it.
   let surface = $state.raw<Promise<typeof import('./AgentBrowserSurface.svelte')> | null>(null);
   // Its browser streams only to a subscriber: the card holds the hidden thread's subscription while it shows it.
-  let held: { client: NonNullable<Store['client']> } | null = null;
-  onDestroy(() => {
-    if (held && held.client === store.client && store.openThread?.id !== threadId) void held.client.call('threads.unsubscribe', { threadId }).catch(() => undefined);
-  });
+  let hold: { client: NonNullable<Store['client']>; release: () => void } | null = null, gone = false;
+  onDestroy(() => { gone = true; hold?.release(); hold = null; });
 
   function path(url: string): string {
     // The query can hold a token: the card shows the path only, the title the whole address.
@@ -76,7 +75,15 @@
     if (!client || opening !== null) return;
     opening = site; failure = '';
     try {
-      if (hostBrowser && held?.client !== client) { await client.call('threads.subscribe', { threadId }); held = { client }; }
+      if (hostBrowser && hold?.client !== client) {
+        hold?.release();
+        // Taken before the round trip, so a card that leaves meanwhile still lets it go.
+        const taken = holdThread(client, threadId, () => store.openThread?.id === threadId);
+        hold = { client, release: taken.release };
+        // A refused subscription holds nothing: the next Open asks again.
+        await taken.ready.catch((cause: unknown) => { taken.release(); if (hold?.release === taken.release) hold = null; throw cause; });
+      }
+      if (gone) return;
       await client.call('browser.signInOpen', { threadId, questionId, site });
       opened = true;
       // The user asked for this page: it shows live, without the cover.

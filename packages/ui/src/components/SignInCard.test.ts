@@ -14,6 +14,7 @@ afterEach(async () => {
   if (mounted) await unmount(mounted);
   mounted = undefined;
   document.body.innerHTML = '';
+  vi.restoreAllMocks();
 });
 
 function query<T extends Element>(selector: string): T {
@@ -122,4 +123,55 @@ test('a skipped card reads skipped in the timeline and its page no longer opens'
   await expect(client.call('browser.signInOpen', { threadId: 't-trace', questionId, site: 0 })).rejects.toThrow('closed');
   await timelineRow(store, questionId);
   expect(query('[data-testid=sign-in-verdict]').textContent).toBe('Sign-in skipped');
+});
+
+async function agentCards(count: number): Promise<{ client: FakeClient; store: Store; hidden: string }> {
+  const { client, store } = await setup();
+  const hidden = store.threads.find((thread) => thread.id !== 't-trace' && !thread.archived)!.id;
+  for (let i = 0; i < count; i++) await client.call('browser.signIn', { threadId: hidden, reason: 'To read the build logs', urls: [`https://ci${i}.example/login`] });
+  const scope = { kind: 'agent' as const, id: 'a-ada' };
+  const view = { store, snapshot: { profiles: [], groups: [], work: [], sessions: [{ id: 's-1', agentId: 'a-ada', scope, threadId: hidden }] } };
+  mounted = mount(AgentPendingQuestions, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
+  await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=sign-in-open]')).toHaveLength(count));
+  return { client, store, hidden };
+}
+
+test('two cards on one hidden thread share its subscription: the one that leaves keeps the other browser streaming', async () => {
+  const { client, hidden } = await agentCards(2);
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-testid=sign-in-open]')) button.click();
+  await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=sign-in-browser]')).toHaveLength(2));
+  query<HTMLButtonElement>('[data-testid=sign-in-skip]').click();
+  await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=sign-in-card]')).toHaveLength(1));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(client.coreSubscribers).toContain(hidden);
+  await expect(client.call('browser.remoteStatus', { threadId: hidden })).resolves.toMatchObject({ live: true });
+
+  // The last card to leave lets the thread go.
+  await unmount(mounted!);
+  mounted = undefined;
+  await vi.waitFor(() => expect(client.coreSubscribers).not.toContain(hidden));
+});
+
+test('a card that leaves while its subscription is on the way lets the thread go when it lands', async () => {
+  const { client, hidden } = await agentCards(1);
+  const real = client.call.bind(client);
+  let land = (): void => {};
+  let asked = false, opened = false;
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
+    if (method === 'browser.signInOpen') opened = true;
+    if (method === 'threads.subscribe' && params.threadId === hidden) {
+      asked = true;
+      return new Promise((resolve, reject) => { land = () => { real(method as never, params as never).then(resolve, reject); }; });
+    }
+    return real(method as never, params as never);
+  }) as typeof client.call);
+  query<HTMLButtonElement>('[data-testid=sign-in-open]').click();
+  await vi.waitFor(() => expect(asked).toBe(true));
+  await unmount(mounted!);
+  mounted = undefined;
+  land();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(client.coreSubscribers).not.toContain(hidden);
+  // Nor did it open the page for a card nobody sees.
+  expect(opened).toBe(false);
 });

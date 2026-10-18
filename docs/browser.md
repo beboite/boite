@@ -127,7 +127,9 @@ hand, in the panel, as in any browser. A persistent agent's card on the
 Agents page has no panel to bring forward, since nobody opens its session
 thread: Open shows that thread's browser inside the card, which subscribes to
 the thread while it shows it, because the browser streams only to a
-subscriber. **Signed in** tells the agent, which
+subscriber. Cards on one thread share that subscription
+(`lib/thread-holds.ts`): the last to leave lets it go, unless the thread is
+open in the chat. **Signed in** tells the agent, which
 reads which sites and which profile to open them in, and **Skip** closes the
 card. The agent never sees what was typed: the card carries no field, and
 only the user's clicks and keys reach the page. The answer comes from the
