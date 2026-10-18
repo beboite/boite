@@ -2,6 +2,7 @@ import type { AgentMessageFile, ArtifactContent, Message, Turn } from '@boite/co
 import { requestAgentSetting } from './agent-settings';
 import type { FakeContext } from './context';
 import { FAKE_MEDIA } from './files';
+import { requestSignIn } from './requests';
 
 /** Pictures the demo's agent attached, served by `artifacts.read` beside the ones a turn publishes. */
 const seeded = new WeakMap<FakeContext, Map<string, ArtifactContent>>();
@@ -57,4 +58,6 @@ function askForAnotherProject(ctx: FakeContext): void {
   const turn: Turn = { id: `turn-agents-demo-${++ctx.seq}`, threadId: thread.id, status: 'done', queuedAt: at, startedAt: at, finishedAt: at + 60_000, usage: null, error: null };
   thread.turns.push(turn);
   requestAgentSetting(ctx, thread, turn, { threadId: thread.id, key: 'projects', value: { add: [next.id] }, reason: `${next.name} has threads nobody follows. Entrust it to me and I will watch them the way I watch the others.` });
+  // And a sign-in, whose Open shows the page in the conversation: no panel shows that thread.
+  requestSignIn(ctx, thread, turn, { threadId: thread.id, reason: 'To read the failed deploy logs on the staging dashboard.', urls: ['https://dashboard.example.com/login'] });
 }

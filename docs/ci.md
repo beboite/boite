@@ -191,11 +191,19 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 495,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,879,500 |
+| UI files, excluding `.br` and `.gz` copies | 4,882,500 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,485,600 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-19, the sign-in card hosting its browser on the Agents page
+(PR #604, merged with `origin/main` at `ea79290b`) measures 494,720 entry
+bytes and 4,881,967 UI bytes with `measure()` after fresh `bun run build:ui`
+on Windows, against 494,498 and 4,878,952 recorded below: the card chunk
+grows by 1,320 JavaScript and 212 CSS bytes, the browser surface it loads
+splits from the panel's chunk, and the agents demo seeds a sign-in. The UI
+limit rises to 4,882,500; the other limits stay.
 
 On 2026-10-18, the sign-in card (PR #604) merged with `origin/main` at
 `e22bb094` measures 494,498 entry bytes, 4,878,952 UI bytes and 4,485,124 core

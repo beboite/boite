@@ -123,7 +123,11 @@ The card lists each site with an **Open** button. Open
 card's profile, and brings the panel's Browser surface forward, live without
 the cover since the user asked for it; a tab of the conversation already on
 that site comes forward instead of a second one. The user signs in there by
-hand, in the panel, as in any browser. **Signed in** tells the agent, which
+hand, in the panel, as in any browser. A persistent agent's card on the
+Agents page has no panel to bring forward, since nobody opens its session
+thread: Open shows that thread's browser inside the card, which subscribes to
+the thread while it shows it, because the browser streams only to a
+subscriber. **Signed in** tells the agent, which
 reads which sites and which profile to open them in, and **Skip** closes the
 card. The agent never sees what was typed: the card carries no field, and
 only the user's clicks and keys reach the page. The answer comes from the

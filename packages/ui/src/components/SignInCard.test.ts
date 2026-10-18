@@ -4,8 +4,10 @@ import type { Message, QuestionRequest } from '@boite/contracts';
 import { FakeClient } from '../lib/fake-client';
 import { rightPanel } from '../lib/right-panel.svelte';
 import { Store } from '../lib/store.svelte';
+import type { AgentsView } from '../lib/agents.svelte';
 import AssistantMessage from './AssistantMessage.svelte';
 import SignInCard from './SignInCard.svelte';
+import AgentPendingQuestions from './agents/AgentPendingQuestions.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => {
@@ -90,6 +92,25 @@ test('the card names each site and the profile that keeps it; Open shows the pag
   await timelineRow(store, questionId);
   expect(query('[data-testid=sign-in-card]').getAttribute('data-state')).toBe('answered');
   expect(query('[data-testid=sign-in-verdict]').textContent).toBe('Signed in');
+});
+
+test('on the Agents page, where no panel shows the hidden session thread, Open shows the page in the card', async () => {
+  const { client, store } = await setup();
+  // A session thread nobody opens: this client is not subscribed to it.
+  const hidden = store.threads.find((thread) => thread.id !== 't-trace' && !thread.archived)!.id;
+  const { questionId } = await client.call('browser.signIn', { threadId: hidden, reason: 'To read the build logs', urls: ['https://ci.example/login'] });
+  await asked(store, questionId);
+  const scope = { kind: 'agent' as const, id: 'a-ada' };
+  const view = { store, snapshot: { profiles: [], groups: [], work: [], sessions: [{ id: 's-1', agentId: 'a-ada', scope, threadId: hidden }] } };
+  mounted = mount(AgentPendingQuestions, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=sign-in-open]')).not.toBeNull());
+  expect(document.querySelector('[data-testid=agent-browser-surface]')).toBeNull();
+
+  query<HTMLButtonElement>('[data-testid=sign-in-open]').click();
+  await vi.waitFor(() => expect(query('[data-testid=sign-in-card] [data-testid=agent-browser-tab]')).not.toBeNull());
+  expect(document.querySelector('[data-testid=sign-in-card] [role=alert]')).toBeNull();
+  const { tabs } = await client.call('browser.remoteStatus', { threadId: hidden });
+  expect(tabs).toMatchObject([{ url: 'https://ci.example/login', active: true }]);
 });
 
 test('a skipped card reads skipped in the timeline and its page no longer opens', async () => {
