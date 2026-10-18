@@ -4,16 +4,19 @@ import { constants } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import type { Core } from '../core.ts';
 import { VIEW_GZIP_SUFFIX } from '../views.ts';
-import { fdResponse } from './file-response.ts';
+import { fdResponse, heldBytes } from './file-response.ts';
 
 /**
  * The file a ticket opens: what `files.read` could not put in a JSON frame.
  * The ticket is the whole address, so no request here names a path and no
  * answer says what an unknown one missed. A `Range` is honoured because that
  * is how a video seeks, and nothing is cached because the ticket outlives
- * neither the ten minutes nor the next write to the file.
+ * neither the ten minutes nor the next write to the file. A message's
+ * picture comes from the journal instead (`heldBytes`).
  */
 export async function ticketedFile(core: Core, ticket: string, range: string | null): Promise<Response> {
+  const held = core.fileTickets.bytes(ticket);
+  if (held !== null) return heldBytes(held);
   const opened = await core.fileTickets.open(ticket);
   if (opened === null) return new Response('unknown or expired ticket', { status: 404 });
   const headers: Record<string, string> = {

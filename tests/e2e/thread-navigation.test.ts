@@ -46,7 +46,20 @@ async function drag(page: BrowserPage, selector: string) {
     await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...initial });
     // Native activation and rendering finish before the gesture's final hitboxes are measured.
     await page.waitFor('document.hasFocus()');
-    await page.evaluate('document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))');
+    // The list glides to its bottom while a closed viewer or a late picture changes its height: the text is measured
+    // once it has held still for three frames, or a loaded runner presses where it was a moment ago (2026-10-13).
+    await page.evaluate(`document.fonts.ready.then(async () => {
+      const element = document.querySelector(${JSON.stringify(selector)});
+      const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+      let last = element.getBoundingClientRect(), still = 0;
+      for (let i = 0; i < 120 && still < 3; i++) {
+        await frame();
+        const box = element.getBoundingClientRect();
+        still = box.top === last.top && box.left === last.left ? still + 1 : 0;
+        last = box;
+      }
+      if (still < 3) throw new Error('drag target did not stabilize');
+    })`);
     geometry = await page.evaluate<typeof geometry>(`(() => {
       const element = document.querySelector(${JSON.stringify(selector)});
       const text = element.querySelector('.ui-label') ?? element;

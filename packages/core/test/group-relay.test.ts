@@ -240,6 +240,14 @@ test('a file and a view of the other member come through the relay with their he
   const part = await fetch(`${base}/file/${ticket}`, { headers: { range: 'bytes=0-6' } });
   expect(part.status).toBe(206);
   expect(await part.text()).toBe('carried');
+  // A picture of a message is held bytes, cached for good on the phone that asked through the relay.
+  const held = await fetch(`${base}/file/${b.core.fileTickets.mintBytes('picture', () => ({ data: new Uint8Array([1, 2, 3]), mime: 'image/webp' }))}`);
+  expect(held.status).toBe(200);
+  expect(held.headers.get('cache-control')).toContain('immutable');
+  expect(new Uint8Array(await held.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+  // An incognito conversation's picture is kept by no cache, the relay's answer included.
+  const secret = await fetch(`${base}/file/${b.core.fileTickets.mintBytes('secret', () => ({ data: new Uint8Array([4]), mime: 'image/webp', noStore: true }))}`);
+  expect(secret.headers.get('cache-control')).toBe('no-store');
 
   const page = join(dir, 'view.html');
   writeFileSync(page, '<p>view</p>');

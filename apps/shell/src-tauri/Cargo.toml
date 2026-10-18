@@ -87,3 +87,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+# No release profile here: local builds keep Cargo's defaults, about 1.5
+# minutes per shell change. A publishing run in desktop.yml sets fat LTO over
+# one codegen unit through CARGO_PROFILE_RELEASE_*, which takes the executable
+# from 20.6 MB to 16.7 MB for about 9 minutes per build (docs/releasing.md).
+# `panic` stays "unwind" either way: update commands run under `catch_unwind`.
