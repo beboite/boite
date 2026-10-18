@@ -21,17 +21,20 @@
   import { keepFocus } from '../lib/focus';
   import { contextLevel, contextPercent } from '../lib/tokens';
   import { speedControl } from '../lib/model-speeds';
+  import type { ComposerTarget } from '../lib/composer-target';
 
   /**
    * The row under the composer's box: the model, effort, mode and worktree
    * chips (folded into Options on a phone), then stop, attach, dictation and
    * send. A pick on a thread is saved at once, after the switch warnings; on a
    * draft the whole choice is remembered. `choice`, `picking` and `dictating`
-   * are the composer's, bound here.
+   * are the composer's, bound here. An agent's box (`target`) keeps stop,
+   * attach, dictation and send, and shows its own chips in place of the thread's.
    */
   let {
     store,
     key,
+    target = null,
     provider,
     canSend,
     answering = false,
@@ -47,6 +50,7 @@
     store: Store;
     /** The open thread's id, or the draft's stash key. */
     key: string;
+    target?: ComposerTarget | null;
     provider: ProviderSummary | null | undefined;
     canSend: boolean;
     answering?: boolean;
@@ -64,11 +68,11 @@
   let picker = $state<HTMLInputElement | undefined>(undefined);
   let bar = $state<HTMLDivElement | undefined>(undefined);
 
-  let bound = $derived(store.openThread !== null);
+  let bound = $derived(!target && store.openThread !== null);
   // Keep the stored visibility preference and reveal a nearly full context.
   let showContext = $derived(work.shows('header.context') || contextLevel(store.openThread?.context ? contextPercent(store.openThread.context) : null) === 'full');
   /** Every agent can read uploaded files through its local tools. */
-  let canAttach = $derived(provider !== null && provider !== undefined);
+  let canAttach = $derived(!!target || (provider !== null && provider !== undefined));
 
   // Older modes keep their execution policy until the user makes a choice.
   let displayedMode = $derived<PermissionMode>(shownMode(choice?.permissionMode ?? 'default', provider));
@@ -221,8 +225,10 @@
 
 <svelte:window onstorage={(event) => { if (event.key === VOICE_STORAGE_KEY || event.key === null) voice.load(); }} />
 
-<div class="bar" class:answering bind:this={bar}>
-  {#if !answering}
+<div class="bar" class:answering class:direct={!!target} bind:this={bar}>
+  {#if target}
+  <div class="chips">{#if target.chips}{@render target.chips()}{/if}</div>
+  {:else if !answering}
   {#key `${key}:${store.draft?.projectId ?? ''}`}
   <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {agentDefault} {speeds} speed={speedOptions.speed} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
   {/key}
@@ -279,8 +285,8 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="context-control" oncontextmenu={(event) => controlMenu(event, store, 'header.context')}><ContextControl {store} /></div>
   {/if}
-  {#if store.busy}
-    <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onmousedown={keepFocus} onclick={() => void store.stop()}>
+  {#if target ? target.busy && target.stop : store.busy}
+    <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onmousedown={keepFocus} onclick={() => { if (target) target.stop?.(); else void store.stop(); }}>
       <Square size={12} strokeWidth={2.5} />
     </button>
   {/if}
@@ -428,7 +434,7 @@
   .answering { justify-content: flex-end; }
   .answering .stop, .answering .send { margin-left: 0; }
   .answering .send { width: auto; padding-inline: 12px; border-radius: var(--radius-md); }
-  .answering .attach { display: inline-flex; }
+  .answering .attach, .direct .attach { display: inline-flex; }
 
   .stop {
     color: var(--color-foreground);

@@ -121,3 +121,30 @@ test('an idle agent runtime reads nothing until a record changes, then starts th
     await waitFor(() => r.list('run').some(run => run.status === 'done'));
   } finally { await h.stop(); }
 });
+
+test('what the user attaches to an agent message reaches its turn and stays out of the snapshot', async () => {
+  const h = await startTestCore();
+  try {
+    const client = await h.connect();
+    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+    const agent = await client.call('agents.profile.save', { value: { name: 'Looker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
+    const scope = { kind: 'agent' as const, id: agent.id };
+    const picture = { kind: 'image' as const, mimeType: 'image/png' as const, data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', name: 'pixel.png' };
+    const notes = { kind: 'file' as const, mimeType: 'text/plain', data: Buffer.from('two lines\nof notes').toString('base64'), name: 'notes.txt' };
+    // Pictures alone make a message, as they make a prompt.
+    const sent = await client.call('agents.message.send', { scope, recipientIds: [], text: '', attachments: [picture, notes], requestId: 'attach_001' });
+    expect(sent.attachments).toEqual([{ kind: 'image', mimeType: 'image/png', name: 'pixel.png', bytes: 70 }, { kind: 'file', mimeType: 'text/plain', name: 'notes.txt', bytes: 18 }]);
+    expect(JSON.stringify(await client.call('agents.snapshot', {}))).not.toContain(picture.data);
+    await waitFor(() => h.core.workforce.records.list('work').some(w => w.status === 'done'));
+    const run = h.core.workforce.records.list('run')[0]!;
+    const prompt = [...h.core.journal.walkTurnMessages(run.threadId, run.turnId!)].find(m => m.role === 'user')!;
+    expect(prompt.parts.filter(p => p.type === 'image').length).toBe(1);
+    expect(prompt.parts.some(p => p.type === 'file' && p.name === 'notes.txt')).toBe(true);
+    // Once every recipient took them, the bytes leave the core's settings.
+    expect(h.core.journal.getSetting(`agents:attachments:${sent.id}`)).toBeUndefined();
+    // An agent speaks in words: its own messages carry no attachments.
+    const worker = await connect(h.url, h.core.agents.tokenFor(run.threadId));
+    await expect(worker.call('agents.message.send', { threadId: run.threadId, scope, recipientIds: [], text: 'mine', attachments: [notes], requestId: 'attach_002' })).rejects.toThrow(/attachments/);
+    worker.close();
+  } finally { await h.stop(); }
+});

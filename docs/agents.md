@@ -21,10 +21,21 @@ name, the same state a thread shows on the right (Working with its time, Needs
 you while it waits on the user, or when it last moved) and the last thing said
 under it. On desktop, the foot adds the engine settings for the owner; a phone draws no foot.
 
-A conversation is the whole page, drawn with the thread's bubbles and
-composer: the user asks, the agent answers in its bubble, works (three dots in
-a bubble) and comes back with the result, in words, with the pictures and files
-it attached under the bubble. The agent's own thread, where its tools and code
+A conversation is the whole page, drawn with the thread's bubbles and the
+thread's own composer (`Composer.svelte` with a `ComposerTarget`,
+`lib/composer-target.ts`): attachments by the button, a paste or a drop,
+dictation, ArrowUp recall, undo, the stash chord, and Stop or Escape while the
+agent works, which cancels that work. The model, effort, mode and worktree
+chips, the queue and the slash and mention menus stay out: the agent's model is
+its own setting and a message never queues. Each prompt shows the thread's
+copy button, send time and two ticks, received and taken into a turn. The user
+asks, the agent answers in its bubble, works (three dots in a bubble) and comes
+back with the result, in words, with the pictures and files it attached under
+the bubble. What the user attaches goes with `agents.message.send`: the message
+keeps only each file's name, type and size, the bytes wait in the core's
+settings (`agents:attachments:<message>`) and reach every recipient's turn, and
+leave once each delivery is processed, cancelled or over the limit. An agent's
+own messages carry none. The agent's own thread, where its tools and code
 run, stays one step away: See its work in the header's menu opens it. A
 planned task's result is labelled with the task's name. A question the agent
 asks stands in the conversation with its answers to pick and a free answer. A group names who speaks and shows only deliveries that failed. The
@@ -354,9 +365,8 @@ sentence under the choices says what will happen and when it runs next before
 anything is saved, for example "Every Monday and Friday at 6:00 PM". The time
 zone is the device's and is never asked; a routine saved elsewhere names its
 zone in that sentence and keeps it until its time changes. The name is
-optional: it defaults to the first words of the task. Plan, beside a direct
-conversation's composer, turns what is written there into a task for that
-agent; the header's planned tasks button lists them. A routine's result comes
+optional: it defaults to the first words of the task. The header's planned
+tasks button lists them and adds one. A routine's result comes
 back in the agent's conversation labelled with the routine's name. Each
 routine shows its next run and how its last run went, with Run
 now, Pause or Resume, Edit and the way into that run's thread.

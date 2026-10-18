@@ -266,7 +266,7 @@ export class AgentRuntime {
     });
     // Run intent is committed before any provider can execute. The turn request is idempotent.
     try {
-      const turn = this.core.threads.startTurn(thread.id, run.context.instructions, [], undefined, undefined, undefined, run.id, undefined, [], run.id);
+      const turn = this.core.threads.startTurn(thread.id, run.context.instructions, this.store.attachmentsFor(work), undefined, undefined, undefined, run.id, undefined, [], run.id);
       const current = this.r.get('run', run.id);
       this.r.update('run', run.id, current.revision, { ...current, turnId: turn.id, actualExecution: turn.execution ?? null });
       this.store.changed();
@@ -312,6 +312,7 @@ export class AgentRuntime {
       this.store.publishReply(work, run.id, result, files);
       remember = { work, result, published: this.r.find('message', 'sourceRunId', [run.id]).length > before };
       for (const d of this.r.find('delivery', 'workId', [work.id])) this.r.update('delivery', d.id, d.revision, { ...d, status: 'processed' });
+      this.store.releaseAttachments(work.messageId);
       if (work.taskId) {
         const task = this.r.get('task', work.taskId);
         if (task.generation === work.taskGeneration && task.status === 'running') this.r.update('task', task.id, task.revision, { ...task, status: 'review', result, leaseUntil: null });

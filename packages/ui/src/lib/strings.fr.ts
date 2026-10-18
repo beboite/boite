@@ -288,7 +288,7 @@ export const fr: Translation = {
       when: 'Quand ?', modes: { once: 'Une fois', daily: 'Chaque jour', days: 'Certains jours', interval: 'Régulièrement' },
       inAnHour: 'Dans une heure', thisEvening: 'Ce soir, 18:00', tomorrowMorning: 'Demain, 09:00', dateAndTime: 'Date et heure',
       otherInterval: 'Toutes les', minutesUnit: 'minutes', at: 'À', inThePast: 'Cette date est passée. Choisissez un moment à venir.', pickDays: 'Choisissez au moins un jour.',
-      next: 'Prochaine fois : {when}', name: 'Nom', schedule: 'Planifier', newRoutine: 'Planifier une tâche', scheduleThis: 'Planifier ce message comme une tâche', scheduleShort: 'Planifier',
+      next: 'Prochaine fois : {when}', name: 'Nom', schedule: 'Planifier', newRoutine: 'Planifier une tâche',
       everyMinutes: 'Toutes les {count} minutes', everyHour: 'Toutes les heures', everyHours: 'Toutes les {count} heures', everyDay: 'Tous les jours', everyDays: 'Tous les {count} jours',
       minutesShort: '{count} min', hoursShort: '{count} h',
       onceAt: 'Une fois, {date}', daily: 'Tous les jours à {time}', weekdays: 'Du lundi au vendredi à {time}', weekend: 'Le week-end à {time}', onDays: 'Chaque {days} à {time}',

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, CornerDownLeft, FileText } from '@lucide/svelte';
+  import { CornerDownLeft, FileText } from '@lucide/svelte';
   import type { Message, Turn } from '@boite/contracts';
   import { bytes, count } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
@@ -12,7 +12,7 @@
   import PreviewReferences from './PreviewReferences.svelte';
   import ChatImage from './ChatImage.svelte';
   import { THUMB_HEIGHT } from '../lib/message-window';
-  import MessageActions from './MessageActions.svelte';
+  import MessageReceipts from './MessageReceipts.svelte';
   import MoveMarker from './MoveMarker.svelte';
   import Deferred, { parts } from './Deferred.svelte';
 
@@ -202,22 +202,11 @@
   {/if}
 </div>
 {#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer} floating>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={() => viewing = null} />{/snippet}</Deferred>{/if}
-<div class="receipts" class:agent={!!startedBy} class:settled={!!turn && progress.responded(message.turnId)} data-testid="message-receipts">
-  <MessageActions text={copyText} at={message.createdAt} {edit} />
-  <span class="tick" data-testid="receipt-accepted" class:received={!!turn} title={strings.chat.accepted} aria-label={strings.chat.accepted}><Check size={12} /></span>
-  <span class="tick" data-testid="receipt-responded" class:received={progress.responded(message.turnId)} title={strings.chat.responseStarted} aria-label={strings.chat.responseStarted}><Check size={12} /></span>
-</div>
+<MessageReceipts text={copyText} at={message.createdAt} {edit} accepted={!!turn} responded={progress.responded(message.turnId)} agent={!!startedBy} />
 
 <style>
   .text-omitted { margin: 4px 0 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
 
-  .receipts { display: flex; align-items: center; gap: 1px; margin: 4px 2px 0; color: var(--color-muted-foreground); }
-  .receipts .tick { display: flex; opacity: .45; }
-  .receipts .received { color: var(--color-accent); opacity: 1; }
-  /* Delivered and answered: the ticks wait for the pointer like the time beside them. A pending one stays. */
-  .receipts.settled .tick { opacity: 0; transition: opacity var(--dur-2); }
-  :global(.message:hover) .receipts.settled .tick, .receipts.settled:focus-within .tick, .receipts.settled:not(:has(button)) .tick { opacity: 1; }
-  @media (hover: none) { .receipts.settled .tick { opacity: 1; } }
   .command { color: var(--color-accent); font-weight: 600; }
 
   .bubble {
@@ -230,7 +219,7 @@
     box-shadow: var(--shadow-e1);
   }
 
-  .bubble.agent, .receipts.agent { align-self: flex-start; }
+  .bubble.agent { align-self: flex-start; }
   .bubble.agent {
     background: var(--color-surface-2);
     border-color: var(--color-border);

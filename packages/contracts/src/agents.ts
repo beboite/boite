@@ -1,4 +1,4 @@
-import type { DelegationConfig, DelegationProfile, MessagePart, PermissionMode, RequestId, TurnExecution } from './index';
+import type { Attachment, DelegationConfig, DelegationProfile, MessagePart, PermissionMode, RequestId, TurnExecution } from './index';
 import type { AgentSettingApplyParams, AgentSettingAsk, AgentSettingRequestParams, AgentSettingsReading, AgentSettingsReadParams } from './agent-setting-requests';
 
 export interface AgentRuntimeConfig {
@@ -136,6 +136,17 @@ export interface AgentConversationMessage extends AgentRecord {
    * own thread and message.
    */
   files?: AgentMessageFile[];
+  /**
+   * What the user attached to this message, described: the bytes stay on
+   * the core and reach each recipient with its turn, never the snapshot.
+   */
+  attachments?: AgentMessageAttachment[];
+}
+export interface AgentMessageAttachment {
+  kind: Attachment['kind'];
+  mimeType: string;
+  name: string | null;
+  bytes: number;
 }
 export interface AgentMessageFile {
   threadId: string;
@@ -352,7 +363,8 @@ export interface AgentsRpcMethods {
   'agents.resource.save': { params: AgentSave<AgentResource>; result: AgentResource };
   'agents.memory.save': { params: AgentSave<AgentMemory> & { threadId?: string }; result: AgentMemory };
   'agents.message.send': {
-    params: { threadId?: string; scope: AgentScope; text: string; recipientIds: string[]; replyTo?: string; requestId: string };
+    /** `attachments` are the user's alone: an agent's own message refuses them. */
+    params: { threadId?: string; scope: AgentScope; text: string; recipientIds: string[]; replyTo?: string; requestId: string; attachments?: Attachment[] };
     result: AgentConversationMessage;
   };
   'agents.task.acquire': { params: { threadId?: string; taskId: string; agentId: string; expectedRevision: number }; result: AgentMissionTask };

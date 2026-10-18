@@ -1,16 +1,36 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { ThreadSummary } from '@boite/contracts';
 import type { AgentsView } from '../../lib/agents.svelte';
+import { store as realStore } from '../../lib/store.svelte';
+import { strings } from '../../lib/strings';
 import AgentConversation from './AgentConversation.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
+// The composer measures its box, and jsdom has no ResizeObserver.
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(async () => {
   if (mounted) await unmount(mounted);
   mounted = undefined;
   document.body.innerHTML = '';
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
+
+/**
+ * The real store, since the conversation's box is the thread's own composer:
+ * getters answer the given values and methods run the given functions.
+ */
+function useStore(overrides: Record<string, unknown> = {}) {
+  const values: Record<string, unknown> = { owner: true, threads: [], connection: 'ready', ...overrides };
+  // The store's members by name, getters and methods alike.
+  const spy = vi.spyOn as unknown as (target: object, name: string, access?: 'get') => { mockImplementation(run: unknown): void; mockReturnValue(value: unknown): void };
+  for (const [name, value] of Object.entries(values)) {
+    if (typeof value === 'function') spy(realStore, name).mockImplementation(value);
+    else spy(realStore, name, 'get').mockReturnValue(value);
+  }
+  return realStore;
+}
 
 const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); } };
 const scope = { kind: 'agent' as const, id: 'a-ada' };
@@ -20,8 +40,8 @@ const message = (id: string, senderId: string | null) => ({ id, scope, senderId,
 test('an agent message follows a reader at the bottom and leaves one reading older messages alone', async () => {
   const view = $state({
     seen: { messages: [message('m1', 'a-ada')], deliveries: [], decisions: [] },
-    snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '' }], groups: [], work: [], sessions: [] },
-    store: { owner: true },
+    snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
+    store: useStore(),
     pending: false,
     loadingOlder: null,
     fill() {},
@@ -70,15 +90,15 @@ test('HTTP agent sending keeps its secure request id for an uncertain retry', as
   vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
   const call = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'm-sent' });
   const view = {
-    seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '' }], groups: [], work: [], sessions: [] },
-    store: { owner: true }, pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
+    seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
+    store: useStore(), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
   };
   mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
   await settle();
-  const input = document.querySelector<HTMLTextAreaElement>('[data-testid="agent-message-input"]')!;
+  const input = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')!;
   input.value = 'Keep the original request'; input.dispatchEvent(new Event('input', { bubbles: true }));
   await settle();
-  const send = document.querySelector<HTMLButtonElement>('[data-testid="agent-message-send"]')!;
+  const send = document.querySelector<HTMLButtonElement>('[data-testid="composer-send"]')!;
   send.click(); await settle();
   expect(call).toHaveBeenCalledOnce();
   const first = call.mock.calls[0]![1];
@@ -98,8 +118,8 @@ function replyView(work: Record<string, unknown>, reply: Record<string, unknown>
       deliveries: [], decisions: [], runs: [{ id: 'r-1', workId: 'w-1' }],
       work: [{ id: 'w-1', messageId: null, taskId: null, ...work }],
     },
-    snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '' }], groups: [], work: [], sessions: [], routines: [] },
-    store: { owner: true, threads: [], ...store }, pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
+    snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [], routines: [] },
+    store: useStore(store), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
   } as unknown as AgentsView;
 }
 
@@ -180,4 +200,31 @@ test('a question the agent asked in its hidden session thread stands in its conv
   await settle();
   // Once answered the card only waits to leave the list: a second press sends nothing.
   expect(answerQuestion).toHaveBeenCalledOnce();
+});
+
+test('the conversation types into the thread composer: attach and dictation stay, the thread and plan chips go', async () => {
+  const call = vi.fn().mockResolvedValue({ id: 'm-sent' });
+  const view = {
+    seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
+    store: useStore(), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
+  };
+  mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
+  await settle();
+  const composer = document.querySelector('.agent-chat [data-testid="composer"]')!;
+  expect(composer).not.toBeNull();
+  expect(composer.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')!.placeholder).toBe('Message Ada');
+  expect(composer.querySelector('[data-testid="composer-attach"]')).not.toBeNull();
+  // The microphone, or its stand-in while its chunk loads.
+  expect(composer.querySelector(`[data-testid="dictation"], button[aria-label="${strings.speech.start}"]`)).not.toBeNull();
+  for (const gone of ['agent-schedule-message', 'composer-picker', 'composer-mode', 'composer-effort', 'composer-options', 'composer-worktree']) expect(composer.querySelector(`[data-testid="${gone}"]`)).toBeNull();
+  expect(document.querySelector('[data-testid="agent-message-input"]')).toBeNull();
+  // A picture goes with the words to the agent.
+  const picture = { kind: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=', name: 'shot.png' } as const;
+  realStore.composerStates['agent:agent:a-ada'] = { text: 'Look at this', attachments: [picture], queued: [], sending: false, paused: false };
+  await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid="composer-send"]')!.click();
+  await settle();
+  expect(call).toHaveBeenCalledWith('agents.message.send', expect.objectContaining({ scope, text: 'Look at this', recipientIds: ['a-ada'], attachments: [picture] }));
+  expect(realStore.composerStates['agent:agent:a-ada']).toMatchObject({ text: '', attachments: [] });
+  delete realStore.composerStates['agent:agent:a-ada'];
 });

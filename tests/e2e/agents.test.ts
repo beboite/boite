@@ -161,9 +161,9 @@ test('create, converse, configure the resident engine and follow background work
   await page.type('textarea', 'Explore ideas and report useful findings.');
   await capture('agents-editor-desktop.png');
   await page.click('[data-testid="agent-save"]');
-  await page.waitFor(`document.querySelector('[data-testid="agent-message-input"]')`);
-  await page.type('[data-testid="agent-message-input"]', 'Suggest a small local prototype.');
-  await page.click('[data-testid="agent-message-send"]');
+  await page.waitFor(`document.querySelector('.agents-main [data-testid="composer-input"]')`);
+  await page.type('.agents-main [data-testid="composer-input"]', 'Suggest a small local prototype.');
+  await page.click('.agents-main [data-testid="composer-send"]');
   await page.waitFor(`document.querySelectorAll('.agent-message').length >= 2`);
   expect(await page.evaluate(`document.querySelector('[data-testid="agent-transcript"]').textContent`)).toContain('Mira');
   await capture('agents-conversation-desktop.png');
@@ -356,7 +356,7 @@ test('a new agent runs on the machine picked in its form, and opens there', asyn
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.click('[data-testid="agent-save"]');
   // Created on Builder's core alone, and the page follows it there.
-  await page.waitFor(`window.__boiteTest.workspace.active.machineId === 'http://builder.test' && document.querySelector('[data-testid="agent-message-input"]')`);
+  await page.waitFor(`window.__boiteTest.workspace.active.machineId === 'http://builder.test' && document.querySelector('.agents-main [data-testid="composer-input"]')`);
   const names = `(async () => Object.fromEntries(await Promise.all(window.__boiteTest.workspace.machines.map(async m => [m.label, (await m.store.client.call('agents.snapshot', {})).profiles.map(a => a.name)]))))()`;
   const byMachine = await page.evaluate<Record<string, string[]>>(names);
   expect(byMachine['Builder']).toContain('Scout');

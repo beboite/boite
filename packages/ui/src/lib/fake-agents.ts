@@ -3,6 +3,7 @@ import type { AgentDraft, AgentEntities, AgentEntityKind, AgentRecord, AgentSave
 import { RpcErrorCode, AGENT_HISTORY_PAGE, AGENT_HISTORY_MAX_PAGE } from '@boite/contracts';
 import type { AgentAccountGrant, AgentBrain, AgentBrainRoot, AgentMessageFile, AgentRuntimeConfig, AgentSchedule, AgentSelection, AgentHistoryCursor, AgentHistoryKind, AgentsHistoryPage, AgentRun, AgentRunSummary, AgentScope, AgentConversationMessage, AgentEntrustment, ThreadActivity } from '@boite/contracts';
 import { RpcFailure } from './client';
+import { decodedBytes } from './attachments';
 
 /** The core's `nextOccurrence` in local time, without its timezone and DST search. */
 function nextOccurrence(schedule: AgentSchedule, after: number): number | null {
@@ -506,7 +507,8 @@ export class FakeAgents {
   }
 
   private sendMessage(p: RpcParams<'agents.message.send'>): RpcResult<'agents.message.send'> {
-    if (!p.text.trim() || p.text.length > 32000) this.refuse('text: expected 1 to 32000 characters');
+    const attachments = p.attachments ?? [];
+    if ((!p.text.trim() && !attachments.length) || p.text.length > 32000) this.refuse('text: expected 1 to 32000 characters');
     const group = p.scope.kind === 'group' ? this.get('group', p.scope.id) : null;
     if (!group && p.scope.kind !== 'agent') this.refuse('scope: messages belong to a direct conversation or a group');
     const allowed = group?.memberIds ?? [this.get('profile', p.scope.id).id];
@@ -516,7 +518,8 @@ export class FakeAgents {
     return this.once(p.requestId, { method: 'agents.message.send', ...p }, () => {
       const recipientIds = p.recipientIds.length ? p.recipientIds : group?.mode === 'mentions' ? [] : group?.mode === 'autonomous' ? allowed.slice(0, 1) : allowed;
       const episodeId = parent?.episodeId ?? `fake-episode-${++this.sequence}`;
-      const message = this.save('message', { value: { scope: p.scope, senderId: null, text: p.text, recipientIds, replyTo: p.replyTo ?? null, episodeId, sourceRunId: null } });
+      const described = attachments.map(a => ({ kind: a.kind, mimeType: a.mimeType, name: a.name ?? null, bytes: decodedBytes(a.data) }));
+      const message = this.save('message', { value: { scope: p.scope, senderId: null, text: p.text.trim(), recipientIds, replyTo: p.replyTo ?? null, episodeId, sourceRunId: null, ...(described.length ? { attachments: described } : {}) } });
       this.deliver(message);
       return message;
     });

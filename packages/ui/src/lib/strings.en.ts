@@ -287,7 +287,7 @@ export const strings = {
       when: 'When?', modes: { once: 'Once', daily: 'Every day', days: 'Some days', interval: 'Repeatedly' },
       inAnHour: 'In an hour', thisEvening: 'This evening, 18:00', tomorrowMorning: 'Tomorrow, 09:00', dateAndTime: 'Date and time',
       otherInterval: 'Every', minutesUnit: 'minutes', at: 'At', inThePast: 'This date has passed. Pick a time to come.', pickDays: 'Pick at least one day.',
-      next: 'Next: {when}', name: 'Name', schedule: 'Plan it', newRoutine: 'Plan a task', scheduleThis: 'Plan this message as a task', scheduleShort: 'Plan',
+      next: 'Next: {when}', name: 'Name', schedule: 'Plan it', newRoutine: 'Plan a task',
       everyMinutes: 'Every {count} minutes', everyHour: 'Every hour', everyHours: 'Every {count} hours', everyDay: 'Every day', everyDays: 'Every {count} days',
       minutesShort: '{count} min', hoursShort: '{count} h',
       onceAt: 'Once, {date}', daily: 'Every day at {time}', weekdays: 'Weekdays at {time}', weekend: 'Weekends at {time}', onDays: 'Every {days} at {time}',

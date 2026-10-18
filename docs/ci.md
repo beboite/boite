@@ -193,9 +193,17 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 492,200 |
 | UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,479,600 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,480,600 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, attachments on an agent's message (`agents.message.send`
+storing them beside the snapshot and handing them to the recipient's turn) on
+`origin/main` at `ea79290b` measure 4,480,589 core JavaScript bytes with
+`measure()` from `scripts/ci/budgets.ts` after fresh `bun run build:ui` and
+`bun run build:core` on Linux, against 4,479,099 for that main built the same
+way, 1,490 more. The core JavaScript limit rises to 4,480,600; the branch's UI
+measures 482,887 entry and 4,868,797 total bytes, under their limits.
 
 On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
 492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes
