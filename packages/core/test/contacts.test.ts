@@ -411,7 +411,7 @@ test('two owners joining each other at once keep one relationship: the smaller c
   await waitFor(() => small.core.contacts.linked(largeId), 10000);
 }, 30000);
 
-test('joins in flight hold their contact slots: two joins at the last slot keep one, and an incoming join cannot take a held slot', async () => {
+test('joins in flight hold their contact slots: two joins at the last slot keep one, an incoming join cannot take a held slot, and a core stored while still joining counts once', async () => {
   const guest = await startTestCore();
   const a = await startTestCore();
   const b = await startTestCore();
@@ -434,6 +434,13 @@ test('joins in flight hold their contact slots: two joins at the last slot keep 
   release();
   await c.core.contacts.join((await guest.core.contacts.invite()).link);
   expect(guest.core.contacts.list()).toEqual([expect.objectContaining({ coreId: c.core.coordination.card().coreId, role: 'host' })]);
+
+  // A reciprocal join can store a core whose own join is still out: it holds one slot, not two.
+  (guest.core.contacts as { maxContacts: number }).maxContacts = 2;
+  const stillJoining = guest.core.contacts.reserve(c.core.coordination.card().coreId);
+  await b.core.contacts.join((await guest.core.contacts.invite()).link);
+  stillJoining();
+  expect(guest.core.contacts.list().map(contact => contact.coreId).sort()).toEqual([b, c].map(side => side.core.coordination.card().coreId).sort());
 }, 30000);
 
 test('the tailnet listener opens for an invitation and closes once the last one expires', async () => {

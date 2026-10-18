@@ -109,8 +109,16 @@ export class ContactStore {
   list(): StoredContact[] { return (this.core.journal.getSetting(CONTACTS) as StoredContact[] | undefined) ?? []; }
   find(coreId: string | null | undefined): StoredContact | undefined { return coreId ? this.list().find(contact => contact.coreId === coreId) : undefined; }
   has(coreId: string | null | undefined): boolean { return this.find(coreId) !== undefined; }
-  /** Stored contacts plus the slots outgoing joins hold, without the one `coreId` would fill itself. */
-  occupied(coreId?: string): number { return this.list().length + this.joining.size - (coreId !== undefined && this.joining.has(coreId) ? 1 : 0); }
+  /**
+   * Cores that hold a slot: stored contacts and outgoing joins, each counted
+   * once since a reciprocal join can store a core it is still joining, and
+   * without the slot `coreId` would fill itself.
+   */
+  occupied(coreId?: string): number {
+    const held = new Set(this.list().map(contact => contact.coreId));
+    for (const id of this.joining) if (id !== coreId) held.add(id);
+    return held.size;
+  }
 
   /** Holds a slot for an outgoing join, so joins in flight never exceed the cap together; the caller releases it. */
   reserve(coreId: string): () => void {
