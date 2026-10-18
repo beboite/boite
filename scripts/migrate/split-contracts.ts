@@ -223,10 +223,16 @@ const withHeader = (header: string, body: string) => `${header ? `${header}\n\n`
 interface Piece { text: string; nodes: Node[] }
 
 /** The files the split writes, by name under `src/`, from the single `index.ts`. */
-export function splitContracts(source: string): Map<string, string> {
+export interface Table {
+  anchors: ReadonlyArray<readonly [string, string]>;
+  namespaces: Readonly<Record<string, string>>;
+}
+const TABLE: Table = { anchors: ANCHORS, namespaces: NAMESPACES };
+
+export function splitContracts(source: string, table: Table = TABLE): Map<string, string> {
   const statements = parse('index.ts', source);
-  const anchors = new Map(ANCHORS);
-  const missing = ANCHORS.filter(([name]) => !statements.some((s) => declared(s).some((d) => d.name === name)));
+  const anchors = new Map(table.anchors);
+  const missing = table.anchors.filter(([name]) => !statements.some((s) => declared(s).some((d) => d.name === name)));
   if (missing.length) throw new Error(`index.ts: anchors not declared: ${missing.map(([name]) => name).join(', ')}; restore them or split by hand`);
 
   const parts = new Map<string, Piece[]>();
@@ -259,7 +265,7 @@ export function splitContracts(source: string): Map<string, string> {
         const chunk = source.slice(at, member.end).replace(/^[ \t]*\n/, '');
         at = member.end;
         const key = member.key?.value ?? member.key?.name ?? '';
-        owner = NAMESPACES[String(key).split('.')[0]!] ?? owner;
+        owner = table.namespaces[String(key).split('.')[0]!] ?? owner;
         if (owner === 'index') throw new Error(`index.ts: ${map} member ${key} has no namespace file; add it to NAMESPACES`);
         const byMap = members.get(owner) ?? new Map();
         byMap.set(map, [...(byMap.get(map) ?? []), chunk]);
@@ -364,14 +370,14 @@ export interface MigrationResult {
  * Replays the branch's contract edits (`base` to `ours`, single `index.ts`)
  * onto main's split files (`theirs`) in the working tree of `cwd`.
  */
-export function migrate(cwd: string, ours: string, theirs: string): MigrationResult {
+export function migrate(cwd: string, ours: string, theirs: string, table: Table = TABLE): MigrationResult {
   const result: MigrationResult = { written: [], conflicts: [] };
   const base = git(cwd, ['merge-base', ours, theirs]).stdout.trim();
   if (!base) throw new Error(`no merge base between ${ours} and ${theirs}`);
   const split = (ref: string) => {
     const source = show(cwd, ref, `${SRC}/index.ts`);
     if (source === undefined) throw new Error(`${ref} has no ${SRC}/index.ts`);
-    return splitContracts(source);
+    return splitContracts(source, table);
   };
   const before = split(base);
   const after = split(ours);
@@ -433,9 +439,10 @@ export function migrate(cwd: string, ours: string, theirs: string): MigrationRes
     result.written.push(`${SRC}/${name}`);
   }
 
+  // The index is written even unchanged: `git merge` left its conflict markers there.
   for (const name of [...clean, 'index.ts']) {
     const text = final.get(name);
-    if (text === undefined || text === mainFiles.get(name)) continue;
+    if (text === undefined || (name !== 'index.ts' && text === mainFiles.get(name))) continue;
     mkdirSync(join(cwd, SRC), { recursive: true });
     writeFileSync(join(cwd, SRC, name), text);
   }
@@ -467,6 +474,7 @@ function main() {
   }
   const result = migrate(cwd, sides.ours, sides.theirs);
   if (result.written.length) git(cwd, ['add', '--', ...result.written]);
+  if (sides.merging && !result.conflicts.includes(`${SRC}/index.ts`)) git(cwd, ['add', '--', `${SRC}/index.ts`]);
   for (const path of result.written) console.log(`merged   ${path}`);
   for (const conflict of result.conflicts) console.error(`conflict ${conflict}`);
   if (!sides.merging) console.log('Files are staged; commit them on top of the merge.');

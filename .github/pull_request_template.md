@@ -22,5 +22,5 @@ Tick what this change touches and was checked on. Leave the rest empty.
 - [ ] Both transports: the real core and `lib/fake-client.ts`
 - [ ] Reverse actions: archive, uninstall, unsubscribe, shutdown
 - [ ] Windows and Linux
-- [ ] Contract first: `packages/contracts/src/index.ts`
+- [ ] Contract first: the domain file in `packages/contracts/src/`
 - [ ] Documentation
