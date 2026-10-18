@@ -508,9 +508,9 @@ test(
 test(
   'the trace panel lists what the turn launched, or says it launched nothing',
   async () => {
-    // The header button opens the panel itself, unless a wide window already
-    // shows it; the trace is one card of its launcher, or the tab already there.
-    if (!(await page.evaluate<boolean>(`!!document.querySelector('${testid('right-panel')}')`))) await page.click(testid('panel-toggle'));
+    // The header button opens the panel itself; the trace is one card of its
+    // launcher, or the tab that is already there.
+    await page.click(testid('panel-toggle'));
     await page.waitFor(
       `document.querySelector('${testid('launch-trace')}') || document.querySelector('${testid('trace-panel')}')`,
     );
