@@ -167,9 +167,6 @@ test('dropping URL text keeps the app open and still inserts text in the compose
       await ${state}.open('t-trace');
       document.addEventListener('dragover', event => { window.__textDropOver = event.defaultPrevented; });
     })()`);
-    // The panel an untouched conversation opens at this width moves the composer: the drops aim once it is in.
-    await page.waitFor(`document.querySelector('${id('panel-launcher')}')`);
-    await page.settleAnimations();
     for (const phone of [false, true]) {
       await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: phone ? 844 : 900, deviceScaleFactor: 1, mobile: phone });
       for (const target of ['timeline', 'composer-input']) {

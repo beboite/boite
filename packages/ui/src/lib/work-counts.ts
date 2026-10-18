@@ -1,4 +1,4 @@
-import type { ThreadSummary } from '@boite/contracts';
+import { threadBusy, type ThreadId, type ThreadSummary } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import { agentDirectory } from './agent-directory.svelte';
 import { needsUser, threadState } from './thread-state';
@@ -10,18 +10,45 @@ export interface WorkCount {
   waiting: boolean;
 }
 
+/** The threads at work behind the Threads side: `subagents` of `count` are delegated agents, not rows of the list. */
+export interface ThreadWork extends WorkCount {
+  subagents: number;
+}
+
 /**
  * The conversations the thread list draws that are at work: a turn under way,
  * queued, waiting on its delegated agents or on something it left running, or
- * asking the user. Archived projects and archived threads are out of the list,
- * so they are out of the count, and so is a machine that is not connected: a
- * laptop gone to sleep mid-turn would otherwise count as at work for hours.
+ * asking the user, plus every delegated agent under them at work or asking, at
+ * any depth: seven sub-agents are seven agents running, not one row.
+ * Archived projects and archived threads are out of the list, so they are out
+ * of the count, and so is a machine that is not connected: a laptop gone to
+ * sleep mid-turn would otherwise count as at work for hours.
  */
-export function workingThreads(stores: readonly Store[]): WorkCount {
+export function workingThreads(stores: readonly Store[]): ThreadWork {
   let count = 0;
+  let subagents = 0;
   let waiting = false;
   for (const store of stores) {
     if (store.connection !== 'ready') continue;
+    const children = new Map<ThreadId, ThreadSummary[]>();
+    for (const thread of store.threads) {
+      if (!thread.parentThreadId || thread.archived) continue;
+      const held = children.get(thread.parentThreadId);
+      if (held) held.push(thread);
+      else children.set(thread.parentThreadId, [thread]);
+    }
+    const seen = new Set<ThreadId>();
+    const descend = (parent: ThreadId) => {
+      for (const child of children.get(parent) ?? []) {
+        if (seen.has(child.id)) continue;
+        seen.add(child.id);
+        const asks = needsUser(child);
+        if (asks || threadBusy(child)) subagents++;
+        // A grandchild's question never reaches its grandparent's row state: the badge reads it here.
+        waiting ||= asks;
+        descend(child.id);
+      }
+    };
     for (const project of store.projects) {
       if (project.archived) continue;
       for (const thread of store.threadsOf(project.id)) {
@@ -29,10 +56,11 @@ export function workingThreads(stores: readonly Store[]): WorkCount {
         const asks = threadState(thread, store.subagents(thread.id)) === 'waiting';
         if (asks || workingThread(store, thread)) count++;
         waiting ||= asks;
+        descend(thread.id);
       }
     }
   }
-  return { count, waiting };
+  return { count: count + subagents, subagents, waiting };
 }
 
 /**
