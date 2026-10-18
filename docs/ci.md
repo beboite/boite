@@ -182,11 +182,17 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 596,700 |
-| UI files, excluding `.br` and `.gz` copies | 5,038,000 |
+| UI files, excluding `.br` and `.gz` copies | 5,039,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,417,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the group vet's two-phase wait (`group-links.svelte.ts`) and
+the vet client's own open deadline (`ws-client.ts`), on `origin/main` at
+`2be13d45`, measure 5,038,322 UI bytes in the Windows desktop job of CI, 598
+more than the 5,037,724 that main measures after a fresh `bun run build:ui` on
+Windows. The UI limit rises to 5,039,000; the other limits stay.
 
 On 2026-10-18, removing a purged or erased thread's Claude transcripts and
 muting new audio sessions on Core Audio's notice, rebased on `b611c01f`,
