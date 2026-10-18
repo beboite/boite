@@ -156,7 +156,8 @@ and the next ping is planned from it. A miss ends the wait and is logged. A
 ping misses when less than half of the tokens it sent were read from the cache
 (`missOf`). On Anthropic a miss writes the prefix again; on OpenAI it bills the
 prefix as fresh input. A ping without usage, stopped or failed, also ends the
-wait.
+wait. A ping whose session the agent lost fails without the retry on a fresh
+session that a real turn gets: that retry would write the whole history again.
 
 A wait also ends, logged as `cache-keepalive.ended` with its reason, when:
 

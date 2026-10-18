@@ -6,7 +6,7 @@ import type { ThreadStore } from '../threads.ts';
 import { CACHE_KEEPALIVE } from './auto-compact.ts';
 
 /** What a ping asks: an answer of one word, so it reads the cached prefix and writes almost nothing. */
-export const KEEPALIVE_PROMPT = 'Boite is keeping the prompt cache warm while you wait for your agents. Reply with the single word ok. Do not use any tools.';
+export const KEEPALIVE_PROMPT = 'Cache keepalive: reply ok, no tools.';
 /** What the opening message of a ping is labelled. */
 export const KEEPALIVE_LABEL = 'Prompt cache kept warm';
 

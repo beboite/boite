@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { DEFAULT_DELEGATION_CONFIG, checkSettingsPatch, type Turn, type Usage } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
+import { SHORT_ANSWERS } from '../src/agent-guide.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { KEEPALIVE_PING_CAP } from '../src/prompt-cache.ts';
@@ -22,7 +23,7 @@ async function setup(h: TestCore) {
   const children = new Map<string, () => void>();
   const held = new Map<string, () => void>();
   const prompts: string[] = [];
-  const state = { pings: [] as Usage[], holdPings: false, holdParent: false };
+  const state = { pings: [] as Usage[], holdPings: false, holdParent: false, losePings: false };
   const restore = setDriver('echo', { protocol: 'echo', startTurn(ctx: TurnContext) {
     const done = Promise.withResolvers<TurnResult>();
     const answer = (text: string, result: Omit<TurnResult, 'status' | 'sessionId'>) => {
@@ -36,6 +37,10 @@ async function setup(h: TestCore) {
     } else {
       prompts.push(ctx.prompt);
       const ping = ctx.turn.execution?.operation === 'keepalive';
+      if (ping && state.losePings) {
+        done.resolve({ status: 'error', sessionId: ctx.thread.sessionId, usage: null, error: 'no such session', sessionLost: true });
+        return { done: done.promise, stop() {} };
+      }
       const finish = () => answer(ping ? 'ok' : 'parent answer', {
         usage: ping ? state.pings.shift() ?? HIT : usage(0, 1_000),
         promptCache: { ttlSeconds: 300, source: 'documented' },
@@ -143,6 +148,27 @@ describe('cache keepalive', () => {
       expect((await missed).usage).toEqual(MISS);
       await pause(700);
       expect((await s.pings()).length).toBe(1);
+    } finally { s.restore(); }
+  });
+
+  test('a ping carries none of the guides a real turn gets, and a lost session is not retried on a fresh one', async () => {
+    const s = await setup(h);
+    try {
+      await s.client.call('brain.configure', { path: null, enabled: false, boiteGuide: true });
+      await s.client.call('settings.set', { cacheKeepalive: { hours: 12 }, shortAnswers: true });
+      await s.spawn();
+      s.state.losePings = true;
+      const lost = s.client.next('turn.finished', t => t.threadId === s.threadId && t.execution?.operation === 'keepalive');
+      await s.turn();
+      const before = s.prompts.length;
+      expect(s.prompts.at(-1)).toContain('Boite coordination');
+      expect(s.prompts.at(-1)).toContain(SHORT_ANSWERS);
+      expect((await lost).status).toBe('error');
+      // One attempt, the prompt alone: no answer style, no coordination, no history replayed on a new session.
+      expect(s.prompts.slice(before)).toEqual([KEEPALIVE_PROMPT]);
+      await pause(700);
+      expect((await s.pings()).length).toBe(1);
+      expect(h.core.threads.require(s.threadId).status).toBe('idle');
     } finally { s.restore(); }
   });
 
