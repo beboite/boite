@@ -56,10 +56,10 @@ struct Slot {
     /// Bumped each time a new resolution starts, so that of several callers
     /// who find the same dead core only the first starts another.
     generation: u64,
-    /// The last time that resolution, past its timeout, saw the core announce
-    /// work before it serves (`core.starting.json`), or started its own once
-    /// the core it waited on exited during that work. Callers follow it rather
-    /// than read the file themselves.
+    /// The last time that resolution saw the core announce work before it
+    /// serves (`core.starting.json`), or started its own once the core it
+    /// waited on exited during that work. Callers follow it rather than read
+    /// the file themselves.
     announced: Option<Instant>,
 }
 
@@ -289,6 +289,12 @@ fn publish(slot: &(Mutex<Slot>, Condvar), outcome: Result<Resolved, String>) {
     ready.notify_all();
 }
 
+/// When a caller that began waiting at `begun` gives up: `patience` after
+/// that, or after the resolution's last sighting of the core at work.
+fn endpoint_deadline(begun: Instant, announced: Option<Instant>, patience: Duration) -> Instant {
+    announced.map_or(begun, |announced| announced.max(begun)) + patience
+}
+
 /// Waits up to `patience` for the resolution, and `patience` past the last
 /// time the resolution saw the core announce work before it serves
 /// (`Slot::announced`): the resolver waits a whole timeout past that moment,
@@ -301,8 +307,7 @@ fn wait_for_endpoint(slot: &(Mutex<Slot>, Condvar), patience: Duration) -> Resul
         .map_err(|_| "the core state is poisoned".to_string())?;
 
     while !guard.done {
-        let from = guard.announced.map_or(begun, |announced| announced.max(begun));
-        let wait = (from + patience).saturating_duration_since(Instant::now());
+        let wait = endpoint_deadline(begun, guard.announced, patience).saturating_duration_since(Instant::now());
         if wait.is_zero() {
             return Err("no core answered within the start timeout".to_string());
         }

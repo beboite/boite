@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::health::{endpoint_of, health, probe, read_core_file, Probe};
+use super::health::{endpoint_of, health, probe, read_core_file, same_core, CoreStart, Probe};
 use super::spawn::spawn_core;
 use super::starting::{read_starting, STARTING_CAP};
 use super::{CoreState, Resolved, HELD, POLL_INTERVAL};
@@ -119,13 +119,19 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
 
     // A core an earlier shell started, compacting its journal: it holds the
     // data directory's lock, so a second one would only fail. This resolution
-    // waits on it rather than on a child of its own.
+    // waits on that run, known by pid and start as `read_starting` checked it,
+    // rather than on a child of its own.
     let child = running_child(state);
     let foreign = match child {
         Some(_) => None,
         None => read_starting(&launch.directory)
-            .and_then(|starting| platform::process::Watched::open(starting.pid).map(|watched| (starting.pid, watched))),
+            .map(|starting| (starting.pid, CoreStart { at: Some(starting.started_at), key: starting.start_key })),
     };
+    if foreign.is_some() {
+        if let Ok(mut slot) = state.slot.0.lock() {
+            slot.announced = Some(Instant::now());
+        }
+    }
     let ready = match (child, &foreign) {
         (Some(ready), _) => ready,
         (None, Some(_)) => Arc::new(AtomicBool::new(false)),
@@ -168,11 +174,12 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
                 }
             }
         }
-        // That earlier shell's core exited without serving: nothing holds the
-        // lock now, so this resolution starts its own rather than wait out the
-        // timeout, and callers wait a whole patience for it from here.
-        if let Some((pid, watched)) = &foreign {
-            if watched.exited_within(Duration::ZERO) {
+        // That earlier shell's core exited without serving, its pid gone or
+        // now another process's: nothing holds the lock, so this resolution
+        // starts its own rather than wait out the timeout, and callers wait a
+        // whole patience for it from here.
+        if let Some((pid, start)) = &foreign {
+            if !same_core(*pid, start) {
                 shell_log::warn("core", "shell.core.compactor-exited", format!("the core pid {pid} exited while it compacted the journal; starting another"), json!({ "pid": pid }));
                 if let Ok(mut slot) = state.slot.0.lock() {
                     slot.announced = Some(Instant::now());

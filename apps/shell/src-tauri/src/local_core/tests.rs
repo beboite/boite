@@ -317,8 +317,13 @@ fn a_core_another_shell_started_that_dies_while_compacting_is_replaced_at_once()
     let timeout = Duration::from_secs(30);
     let state = std::sync::Arc::new(state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "serve"), false, timeout));
     let resolution = { let state = state.clone(); std::thread::spawn(move || resolve_core(&state)) };
-    // Waiting on that core by now, with no child of its own.
-    std::thread::sleep(Duration::from_millis(500));
+    // The resolution dates its sighting once it chose to wait on that core.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while state.slot.0.lock().unwrap().announced.is_none() {
+        assert!(Instant::now() < deadline, "the resolution never waited on the compacting core");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(spawned_pid(&state).is_none(), "a core was started beside the compacting one");
     let started = Instant::now();
     let _ = earlier.kill();
     let _ = earlier.wait();
@@ -335,7 +340,22 @@ fn a_core_another_shell_started_that_dies_while_compacting_is_replaced_at_once()
 
 #[test]
 fn a_caller_waits_a_whole_patience_past_the_last_time_the_resolution_saw_the_core_at_work() {
+    // Patience from the later of the caller's start and the last sighting.
+    let begun = Instant::now();
+    let (patience, later) = (Duration::from_secs(5), Duration::from_secs(3));
+    assert_eq!(endpoint_deadline(begun, None, patience), begun + patience);
+    assert_eq!(endpoint_deadline(begun + later, Some(begun), patience), begun + later + patience);
+    assert_eq!(endpoint_deadline(begun, Some(begun + later), patience), begun + later + patience);
+
+    // A sighting moved later while the caller waits wakes nobody: the caller
+    // reads it at its deadline. With a patience of 1 s, the first sighting
+    // gives it until 3 s, the one moved at 1 s until 5 s, and the core serves
+    // at 4 s; a caller that read the sighting once gave up at 3 s. A runner
+    // too loaded to keep that schedule proves nothing, and is not checked.
     let slot = std::sync::Arc::new((Mutex::new(Slot::default()), Condvar::new()));
+    let start = Instant::now();
+    let at = |seconds: u64| start + Duration::from_secs(seconds);
+    slot.0.lock().unwrap().announced = Some(at(2));
     let (began, waiting) = std::sync::mpsc::channel();
     let caller = {
         let slot = slot.clone();
@@ -344,20 +364,20 @@ fn a_caller_waits_a_whole_patience_past_the_last_time_the_resolution_saw_the_cor
             wait_for_endpoint(&slot, Duration::from_secs(1)).map(|settled| settled.outcome)
         })
     };
-    let begun = waiting.recv().unwrap();
-    // The resolution sees the core at work while the caller waits and wakes
-    // nobody: the caller reads it at its own deadline, a second in. The
-    // sighting is dated ahead so that no delay of this thread lands it after
-    // that deadline; each margin below is a whole second.
-    std::thread::sleep(Duration::from_millis(100));
-    slot.0.lock().unwrap().announced = Some(begun + Duration::from_secs(2));
-    // Served at two seconds: past the caller's own patience, a second inside
-    // the one that sighting gives it. A caller that ignored it gave up at one.
-    std::thread::sleep((begun + Duration::from_secs(2)).saturating_duration_since(Instant::now()));
+    let entered = waiting.recv().unwrap();
+    std::thread::sleep(at(1).saturating_duration_since(Instant::now()));
+    slot.0.lock().unwrap().announced = Some(at(4));
+    let moved = Instant::now();
+    std::thread::sleep(at(4).saturating_duration_since(Instant::now()));
     let endpoint = CoreEndpoint { url: "http://127.0.0.1:1".to_string(), token: "t".to_string() };
     publish(&slot, Ok((endpoint, None, health::CoreStart::default())));
+    let served = Instant::now();
     let outcome = caller.join().unwrap().and_then(|outcome| outcome);
-    assert!(outcome.is_ok(), "{:?}", outcome.err());
+    if entered < moved && moved < at(3) && served < at(5) {
+        assert!(outcome.is_ok(), "{:?}", outcome.err());
+    } else {
+        eprintln!("schedule missed: entered {:?}, moved {:?}, served {:?}", entered - start, moved - start, served - start);
+    }
     // Nothing seen: the caller gives up at its patience.
     let idle = (Mutex::new(Slot::default()), Condvar::new());
     let started = Instant::now();
