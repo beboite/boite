@@ -1171,6 +1171,8 @@ test('fake files and diffs stay inside the thread directory like the core', asyn
   await expect(client.call('git.diff', { threadId: 't-trace', path: '../outside.ts' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   expect((await client.call('files.read', { threadId: 't-trace', path: './docs//guide/editor.md' })).path).toBe('docs/guide/editor.md');
   expect((await client.call('files.list', { threadId: 't-trace', path: 'docs/' })).map((entry) => entry.path)).toContain('docs/guide');
+  expect(await client.call('files.locate', { threadId: 't-trace', path: 'guide/editor.md' })).toEqual(['docs/guide/editor.md']);
+  expect(await client.call('files.locate', { threadId: 't-trace', path: '../editor.md' })).toEqual([]);
 });
 
 test('fake [ask] leaves a card nobody waits on, and its answer opens the next turn', async ({ createClient }) => {
