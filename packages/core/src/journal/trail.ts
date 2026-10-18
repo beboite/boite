@@ -62,3 +62,21 @@ export function rewindTrailCursor(db: Database): void {
   // The TEXT column stores the id as the JSON `getSetting` parses.
   db.query('UPDATE settings SET value = ?2 WHERE key = ?1 AND CAST(value AS INTEGER) > ?2').run(TRAIL_CURSOR, lastEventId(db));
 }
+
+/**
+ * Looks at the `limit` oldest events and deletes those written before
+ * `before`; 0 means nothing old is left at the front. Only the front is read,
+ * never the whole table: ids grow with time. Nothing replays events but
+ * `openAsyncQuestions`, since the projections are written in the same transaction. The newest agents
+ * event stays, because its id is the agents revision and must never go back.
+ */
+export function pruneOldEvents(db: Database, before: number, limit: number): number {
+  return db.transaction(() => {
+    const { changes } = db.query(
+      `DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT ?) AND ts < ?
+         AND id IS NOT (SELECT MAX(id) FROM events WHERE type IN ('agents.record', 'agents.limits'))`,
+    ).run(limit, before);
+    rewindTrailCursor(db);
+    return changes;
+  })();
+}

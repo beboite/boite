@@ -14,7 +14,8 @@ import type {
   Turn,
 } from '@boite/contracts';
 import { isNativeAgentPart } from './journal/native-agent-parts.ts';
-import { TRAIL_ONLY, UNWRITTEN, pruneTrail, rewindTrailCursor, trailOf } from './journal/trail.ts';
+import { TRAIL_ONLY, UNWRITTEN, pruneOldEvents, pruneTrail, rewindTrailCursor, trailOf } from './journal/trail.ts';
+import { analyze, staleStatistics } from './journal/statistics.ts';
 import { hydrate, hydratePart } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
 import { PROCESS_COLUMNS, PROCESS_FROM, ProcessRows } from './journal/processes.ts';
@@ -149,23 +150,9 @@ export class Journal {
     return this.closed;
   }
 
-  /**
-   * Looks at the `limit` oldest events and deletes those written before
-   * `before`; 0 means nothing old is left at the front. Only the front is read,
-   * never the whole table: ids grow with time. Nothing replays events but
-   * `openAsyncQuestions`, since the projections are written in the same transaction. The newest agents
-   * event stays, because its id is the agents revision and must never go back.
-   */
+  /** Events written before `before` among the `limit` oldest (`journal/trail.ts`); 0 when none is left at the front. */
   pruneEvents(before: number, limit: number): number {
-    if (this.closed) return 0;
-    return this.db.transaction(() => {
-      const { changes } = this.db.query(
-        `DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT ?) AND ts < ?
-           AND id IS NOT (SELECT MAX(id) FROM events WHERE type IN ('agents.record', 'agents.limits'))`,
-      ).run(limit, before);
-      rewindTrailCursor(this.db);
-      return changes;
-    })();
+    return this.closed ? 0 : pruneOldEvents(this.db, before, limit);
   }
 
   /** Trail events written before `before`, walked forward from `afterId` (`journal/trail.ts`). */
@@ -173,26 +160,13 @@ export class Journal {
     return this.closed ? { through: afterId, done: true } : pruneTrail(this.db, afterId, before, limit);
   }
 
-  /**
-   * The `ANALYZE` statements `PRAGMA optimize` would run now, without running
-   * them (its debug flag, 0x01), so that each runs in its own tick: in one
-   * call it held the event loop 270 ms to 1.6 s after the migration and
-   * 225 ms after the compaction passes on a 4.2 GB journal (2026-10-18).
-   * `all` adds the tables never analyzed, as after a migration (0x10000).
-   */
+  /** The `ANALYZE` statements stale now, to run one per tick (`journal/statistics.ts`). */
   staleStatistics(all = false): string[] {
-    if (this.closed) return [];
-    return (this.db.query(`PRAGMA optimize=${all ? '0x10003' : '0x03'}`).all() as Record<string, unknown>[])
-      .map(row => String(Object.values(row)[0]))
-      .filter(statement => /^ANALYZE /i.test(statement));
+    return this.closed ? [] : staleStatistics(this.db, all);
   }
 
-  /** One statement of `staleStatistics`, reading about 400 rows per index (sqlite.org/lang_analyze.html#approx). */
   analyze(statement: string): void {
-    if (this.closed) return;
-    if (!/^ANALYZE "?[\w.\-" ]+$/i.test(statement)) throw new Error(`journal analyze: expected an ANALYZE statement from PRAGMA optimize, received ${statement}`);
-    this.db.exec('PRAGMA analysis_limit = 400');
-    this.db.exec(statement);
+    if (!this.closed) analyze(this.db, statement);
   }
 
   countEvents(type?: string): number {

@@ -165,11 +165,21 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 596,500 |
-| UI files, excluding `.br` and `.gz` copies | 5,037,000 |
+| UI files, excluding `.br` and `.gz` copies | 5,038,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,413,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,429,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the journal compaction (schema 36: zstd values, per-thread
+command lines, the paced background passes in `journal/retention.ts` and
+`journal/processes.ts`, and the start-time VACUUM in `journal/vacuum.ts`)
+rebased on `15fdbb81` measures 5,037,590 UI bytes and 4,428,853 core
+JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
+Windows, against 5,036,808 and 4,408,525 for that main: the window's
+compacting state adds 782 UI bytes and the journal code 20,328 core bytes. The
+UI and core JavaScript limits rise to 5,038,000 and 4,429,000; the other
+limits stay.
 
 On 2026-10-18, removing a purged or erased thread's Claude transcripts and
 muting new audio sessions on Core Audio's notice, rebased on `b611c01f`,
