@@ -74,6 +74,10 @@ test('remarks count when someone else wrote them, once each, a bot rewriting one
   ]));
   expect(page.remarks.map(entry => entry.editedAt)).toEqual(['2026-10-15T09:10:00Z', null]);
   expect(page.full).toBe(false);
+  expect(parseRemarks('review-comment', JSON.stringify([
+    { id: 4303360301, user: { login: 'coderabbitai[bot]', type: 'Bot' }, body: 'finding', path: 'a.ts', created_at: '2026-10-15T09:00:00Z', updated_at: '2026-10-15T09:00:00Z', html_url: URL },
+    { id: 4303402494, in_reply_to_id: 4303360301, user: { login: 'coderabbitai[bot]', type: 'Bot' }, body: 'thanks', path: 'a.ts', created_at: '2026-10-15T09:01:00Z', updated_at: '2026-10-15T09:01:00Z', html_url: URL },
+  ])).remarks.map(entry => entry.reply)).toEqual([false, true]);
   // Conflicts: told once, kept while GitHub still computes, cleared by a clean answer.
   const conflict = evaluate(memory, { ...detail([]), mergeable: 'CONFLICTING' }, null);
   expect(conflict.changes).toEqual([{ kind: 'conflict', base: 'main' }]);
@@ -87,7 +91,9 @@ const WALKTHROUGH = '<!-- This is an auto-generated comment: summarize by codera
 const CR_REVIEW = (count: number) => `**Actionable comments posted: ${count}**\n\n---\n\n<!-- autofix_checkbox_start -->\n- [ ] <!-- {"checkboxId":"4b0d0e0a"} --> 🪄 Fix comments: Fix CodeRabbit comments on this PR\n<!-- autofix_checkbox_end -->`;
 const CR_OUTSIDE = '**Actionable comments posted: 0**\n\n> [!CAUTION]\n> Some comments are outside the diff and can’t be posted inline due to GitHub limitations.\n> \n> **⚠️ Outside diff range comments (1)**';
 const CR_INLINE = '**🎯 Functional Correctness** | **🟡 Minor** | **⚡ Quick win**\n\n**Pass the kept pause origin to `stop`.**\n\nThe comment on Line 242 says that saving other settings of a paused team keeps the recorded pause origin.';
-const CR_REPLY = '@klNuno Thanks for the fix. The supplied code passes both `pause.by` and `pause.at` from `configure` to `stop`, which forwards them to `pause`.';
+const CR_REPLY = '@klNuno Thanks for the fix. The supplied code passes both `pause.by` and `pause.at` from `configure` to `stop`, which forwards them to `pause`.\n\nThe reported regression test covers the original failure path.\n\n---\n\nIf you found this review helpful, would you consider giving us a shout-out on X?';
+const CR_WITHDRAW = '@klNuno, you’re right. I withdraw this finding. Thanks for clarifying the pause contract.\n\n`adopt` records an already-started turn as the step’s attempt. It does not start or authorize a turn.';
+const CR_PUSHBACK = '@klNuno Thanks for the update, but the fix is incomplete: `stop` still drops the recorded origin when the team has live work.';
 const PATROL_REVIEW = '<!-- mtsu-patrol:297ca19b-7b01-4632-8bc8-075409846b6b -->\n\n**Actionable comments posted: 0**\n\n<details>\n<summary>Outside diff range comments (1)</summary>\n\n`L90-L104`: **Missing letter marks landed, pending letter never flashes**';
 const PATROL_SUMMARY = (posted: boolean, head: string) => `<!-- mtsu-patrol:summary -->\n<!-- mtsu-patrol:9017fed0 -->\n\nThis pull request makes a discussion opened on a missing letter land at the end.\n\n${posted ? '**Comments posted**: no critical or major finding.\n\n1 minor in [the review](https://github.com/beboite/boite/pull/441#pullrequestreview-5485468072).' : '**No comments posted**: the reviewers raised no finding.'}\n\n<details>\n<summary>Review details</summary>\n\n- Compared commits: \`e7b2b8c\` to \`${head}\`\n\n</details>`;
 
@@ -103,7 +109,7 @@ test('a bot wakes the agent for findings only: quota notices, summaries, empty c
     remark('11', rabbit, at, { kind: 'review', id: 'review:11', body: CR_OUTSIDE, state: 'COMMENTED' }),
     remark('12', patrol, at, { kind: 'review', id: 'review:12', body: PATROL_REVIEW, state: 'CHANGES_REQUESTED' }),
     remark('13', rabbit, at, { kind: 'review-comment', id: 'review-comment:13', body: CR_INLINE, path: 'packages/core/src/delegation.ts' }),
-    remark('14', rabbit, at, { kind: 'review-comment', id: 'review-comment:14', body: CR_REPLY, path: 'packages/core/src/delegation.ts' }),
+    remark('14', rabbit, at, { kind: 'review-comment', id: 'review-comment:14', body: CR_PUSHBACK, path: 'packages/core/src/delegation.ts', reply: true }),
     remark('15', patrol, at, { body: PATROL_SUMMARY(true, '7723c1b') }),
     remark('16', 'dependabot[bot]', at, { body: 'Looks like rustls is up-to-date now, so this is no longer needed.' }),
     remark('17', 'reviewer', at, { kind: 'review', id: 'review:17', body: '', state: 'APPROVED' }),
@@ -114,6 +120,8 @@ test('a bot wakes the agent for findings only: quota notices, summaries, empty c
     remark('22', rabbit, at, { kind: 'review', id: 'review:22', body: CR_REVIEW(0), state: 'COMMENTED' }),
     remark('23', rabbit, at, { kind: 'review', id: 'review:23', body: '', state: 'APPROVED' }),
     remark('24', patrol, at, { body: PATROL_SUMMARY(false, '66df392') }),
+    remark('25', rabbit, at, { kind: 'review-comment', id: 'review-comment:25', body: CR_REPLY, path: 'packages/core/src/delegation.ts', reply: true }),
+    remark('26', rabbit, at, { kind: 'review-comment', id: 'review-comment:26', body: CR_WITHDRAW, path: 'packages/core/src/workflows.ts', reply: true }),
   ];
   const first = told([...kept, ...dropped]);
   expect(first.ids).toEqual(kept.map(entry => entry.id));
@@ -166,6 +174,12 @@ test('CI wakes on its first failure and on its verdict, not on each check that f
   expect(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('Build UI', { conclusion: 'FAILURE' }), job('E2E', running)])).toEqual([]);
   expect(failedNames(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('Build UI', { conclusion: 'FAILURE' }), job('E2E'), job('CI required', { required: true, conclusion: 'FAILURE' })])))
     .toEqual(['ci / Build UI', 'ci / CI required']);
+  // The required gate failing alone after a job already did says nothing new.
+  memory = { ...memory, head: 'older' };
+  expect(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('E2E', running)])).toHaveLength(1);
+  expect(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('E2E'), job('CI required', { required: true, conclusion: 'FAILURE' })])).toEqual([]);
+  // Rerun after the fix.
+  step([title, job('Core tests', running), job('Build UI', running), job('E2E'), job('CI required', { required: true, ...running })]);
   // Rerun and passing: the verdict is news again after a failure.
   expect(step([title, job('Core tests', running), job('Build UI', running), job('E2E'), job('CI required', { required: true, ...running })])).toEqual([]);
   expect(step([title, job('Core tests'), job('Build UI'), job('E2E'), job('CI required', { required: true })])).toEqual([{ kind: 'passed', head, count: 2, required: true }]);

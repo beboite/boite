@@ -178,6 +178,8 @@ export interface Remark {
   editedAt: string | null;
   path: string | null;
   state: string | null;
+  /** An inline comment that answers another in its thread. */
+  reply?: boolean;
 }
 
 /** The REST pages of one kind of remark, newest pages read until a short one. */
@@ -208,6 +210,7 @@ export function parseRemarks(kind: RemarkKind, raw: string): { remarks: Remark[]
       id: `${kind}:${String(id)}`, kind, author: login, bot, body: text(item.body, 4000), url: safeUrl(item.html_url),
       createdAt, editedAt: bot && updated && Date.parse(updated) > Date.parse(createdAt) ? updated : null,
       path: kind === 'review-comment' && item.path ? text(item.path, 500) : null, state,
+      reply: kind === 'review-comment' && item.in_reply_to_id !== undefined && item.in_reply_to_id !== null,
     });
   }
   return { remarks, full: values.length >= 100 };
@@ -258,12 +261,22 @@ function findings(body: string): number | null {
 /** What an edit must change to be another remark: markup comments and spacing are not it. */
 const bodyKey = (remark: Remark) => `${remark.id}#${createHash('sha256').update(remark.body.replaceAll(/<!--[\s\S]*?-->/g, ' ').replaceAll(/\s+/g, ' ').trim()).digest('hex').slice(0, 16)}`;
 
+/** A bot answering the agent's reply in a thread by agreeing: CodeRabbit's "Thanks for the fix", "I withdraw this finding". */
+const ACK = /^\s*`?@[\w-]+(?:\[bot\])?`?[,:]?\s+(?:thanks|thank you|verified|you(?:'|’)re right|i withdraw|understood|got it|confirmed)/i;
+const CONCEDE = /\bi withdraw\b|\byou(?:'|’)re right\b/i;
+/** Words that turn a thanks into a finding still open. */
+const DOUBT = /\b(?:however|but|still|not (?:yet|fully|quite)|missing|incomplete|instead|does(?:n't| not)|reopen\w*)\b/i;
+/** What a bot reply says, without its markup, folded analysis, scripts and footer. */
+const prose = (body: string) => body.replaceAll(/<!--[\s\S]*?-->/g, ' ').replaceAll(/<details>[\s\S]*?<\/details>/g, ' ').replaceAll(/```[\s\S]*?```/g, ' ').split(/\n---\n/)[0]!.trim();
+const agrees = (body: string) => { const said = prose(body); return ACK.test(said) && (CONCEDE.test(said) || !DOUBT.test(said)); };
+
 /**
  * Whether a remark someone else wrote asks something of the agent. A person's
  * always does; their edits never reach here. A bot's does when it is a new
  * comment, an inline thread or a reply in one, or a review or summary that
  * names findings; its rewrite of a remark does only when that is a summary
- * naming findings. A notice of a review it will not make never does.
+ * naming findings. A notice of a review it will not make never does, nor a
+ * reply that only agrees with the agent's answer in a thread.
  */
 export function actionable(remark: Remark, edited: boolean): boolean {
   if (!remark.bot) return true;
@@ -271,13 +284,15 @@ export function actionable(remark: Remark, edited: boolean): boolean {
   const count = findings(remark.body);
   if (remark.kind === 'review') return remark.state === 'CHANGES_REQUESTED' || (count === null ? remark.body.trim() !== '' : count > 0);
   if (edited || SUMMARY_MARK.test(remark.body)) return count !== null && count > 0;
-  return true;
+  return !(remark.reply && agrees(remark.body));
 }
 
 /**
  * Compares what GitHub shows with what the agent was told. The first check
  * to fail on a head is told at once; failures after it wait for the head's CI
- * jobs to settle and go out as its verdict. "Passed" is told once per head,
+ * jobs to settle and go out as its verdict, unless only required checks are
+ * among them: a required gate failing after a job did (CI required) says
+ * nothing new. "Passed" is told once per head,
  * when every check the base branch requires passed (every CI job where none is
  * required) and no CI job still runs; again when a new required check joins
  * that set, or after one of it failed. A remark counts when someone other than
@@ -299,7 +314,7 @@ export function evaluate(memory: WatchMemory, detail: WatchDetail, remarks: Rema
     failed = failed.filter(name => failing.some(check => check.name === name));
     const fresh = failing.filter(check => !failed.includes(check.name));
     if (fresh.length && (!failed.length || !running)) {
-      changes.push({ kind: 'failed', head: detail.head, checks: fresh.map(({ name, conclusion, url }) => ({ name, conclusion, url })) });
+      if (!failed.length || fresh.some(check => !check.required)) changes.push({ kind: 'failed', head: detail.head, checks: fresh.map(({ name, conclusion, url }) => ({ name, conclusion, url })) });
       failed = failing.map(check => check.name);
     }
     const required = detail.checks.filter(check => check.required);

@@ -199,8 +199,9 @@ The core (`packages/core/src/pull-request-watch.ts`) wakes the conversation
 with one message, a `pull-request` turn, when:
 
 - the first check of a head fails; failures after it on that head wait until
-  no CI job runs and go out together as its verdict; a rerun that fails again
-  counts again;
+  no CI job runs and go out together as its verdict, unless only required
+  checks are among them (a gate such as `CI required` failing after a job
+  did); a rerun that fails again counts again;
 - every check the base branch requires passed and no CI job still runs (every
   job when none is required), once per head; again when a required check
   appears already passed or after one of them failed. A commit status such as
@@ -211,7 +212,9 @@ with one message, a `pull-request` turn, when:
   when it names findings (`Actionable comments posted` above zero, outside
   diff comments, changes requested), and its summary (CodeRabbit's
   walkthrough, mtsu-patrol's) only when rewritten to name findings. A bot's
-  other rewrites, an empty review and a notice that it will not review (quota,
+  other rewrites, an empty review, a reply in a thread that only agrees with
+  the agent's answer ("Thanks for the fix", "I withdraw this finding", with no
+  "but", "still" or "incomplete") and a notice that it will not review (quota,
   rate limit, review skipped) wake nothing. A body already read, its HTML
   comments and spacing aside, never wakes twice;
 - the branch starts to conflict with its base;
