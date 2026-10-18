@@ -5,8 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::health::{endpoint_of, health, probe, read_core_file, Probe};
+use super::health::{endpoint_of, health, probe, read_core_file, same_core, CoreStart, Probe};
 use super::spawn::spawn_core;
+use super::starting::{read_starting, STARTING_CAP};
 use super::{CoreState, Resolved, HELD, POLL_INTERVAL};
 use crate::shell_log::{self, Level};
 use serde_json::json;
@@ -116,9 +117,30 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
         }
     }
 
-    let ready = match running_child(state) {
-        Some(ready) => ready,
-        None => {
+    // A core an earlier shell started, compacting its journal: it holds the
+    // data directory's lock, so a second one would only fail. This resolution
+    // waits on that run rather than on a child of its own. The handle opened
+    // here is checked against the run `read_starting` named, since its pid
+    // may have changed hands in between; on Windows it then keeps that pid
+    // from naming another process, and elsewhere the start is checked again.
+    let child = running_child(state);
+    let foreign = match child {
+        Some(_) => None,
+        None => read_starting(&launch.directory).and_then(|starting| {
+            let start = CoreStart { at: Some(starting.started_at), key: starting.start_key };
+            let watched = platform::process::Watched::open(starting.pid)?;
+            same_core(starting.pid, &start).then_some((starting.pid, start, watched))
+        }),
+    };
+    if foreign.is_some() {
+        if let Ok(mut slot) = state.slot.0.lock() {
+            slot.announced = Some(Instant::now());
+        }
+    }
+    let ready = match (child, &foreign) {
+        (Some(ready), _) => ready,
+        (None, Some(_)) => Arc::new(AtomicBool::new(false)),
+        (None, None) => {
             // Asked again here: stopping an older core above takes seconds.
             if state.held.load(Ordering::SeqCst) {
                 return Err(HELD.to_string());
@@ -137,6 +159,7 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
     };
 
     let started = Instant::now();
+    let mut announced = started;
     loop {
         if let Some(reason) = exited_early(state) {
             return Err(reason);
@@ -156,8 +179,32 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
                 }
             }
         }
+        // That earlier shell's core exited without serving, its pid gone or
+        // now another process's: nothing holds the lock, so this resolution
+        // starts its own rather than wait out the timeout, and callers wait a
+        // whole patience for it from here.
+        if let Some((pid, start, watched)) = &foreign {
+            if watched.exited_within(Duration::ZERO) || (cfg!(not(windows)) && !same_core(*pid, start)) {
+                shell_log::warn("core", "shell.core.compactor-exited", format!("the core pid {pid} exited while it compacted the journal; starting another"), json!({ "pid": pid }));
+                if let Ok(mut slot) = state.slot.0.lock() {
+                    slot.announced = Some(Instant::now());
+                }
+                return resolve_core(state);
+            }
+        }
+        // Past the timeout while the core says it is still at work before
+        // serving, and for a whole timeout after it last said so: once that
+        // work ends it still opens its journal before it writes `core.json`.
         if started.elapsed() >= launch.timeout {
-            break;
+            if started.elapsed() < STARTING_CAP && read_starting(&launch.directory).is_some() {
+                announced = Instant::now();
+                if let Ok(mut slot) = state.slot.0.lock() {
+                    slot.announced = Some(announced);
+                }
+            }
+            if announced.elapsed() >= launch.timeout {
+                break;
+            }
         }
         std::thread::sleep(POLL_INTERVAL);
     }

@@ -182,11 +182,22 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 490,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,860,100 |
+| UI files, excluding `.br` and `.gz` copies | 4,861,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,448,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,470,500 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the journal compaction (schema 37: zstd values, per-thread
+command lines, the paced background passes in `journal/retention.ts` and
+`journal/processes.ts`, and the start-time VACUUM in `journal/vacuum.ts`)
+merged with `origin/main` at `95862236` measures 490,436 entry bytes,
+4,860,909 UI bytes and 4,470,119 core JavaScript bytes with `measure()` after
+fresh `bun run build:ui` and `bun run build:core` on Windows, against 490,185,
+4,859,771 and 4,447,509 for that main on the same machine: the window's
+compacting state adds 1,138 UI bytes and the journal code 22,610 core bytes.
+The UI and core JavaScript limits rise to 4,861,500 and 4,470,500; the other
+limits stay.
 
 On 2026-10-18, the server update rollback merged with `origin/main` at
 `feccdfcd` measures 4,447,509 core JavaScript bytes with `measure()` after a

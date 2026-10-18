@@ -18,6 +18,7 @@ pub(crate) mod health;
 mod locate;
 mod resolve;
 mod spawn;
+mod starting;
 #[cfg(test)]
 mod tests;
 
@@ -25,6 +26,7 @@ pub(crate) use locate::resolve_data_dir;
 use locate::{core_command, CoreCommand};
 use resolve::resolve_core;
 use spawn::Spawned;
+use starting::{read_starting, Starting};
 
 /// How long a core the shell started gets to answer. A warm start takes about
 /// a second; the first start of a freshly installed sidecar, scanned by the
@@ -54,6 +56,18 @@ struct Slot {
     /// Bumped each time a new resolution starts, so that of several callers
     /// who find the same dead core only the first starts another.
     generation: u64,
+    /// The last time that resolution saw the core announce work before it
+    /// serves (`core.starting.json`), or started its own once the core it
+    /// waited on exited during that work. Callers follow it rather than read
+    /// the file themselves.
+    announced: Option<Instant>,
+    /// How many times a caller went to sleep on this slot, and how many times
+    /// it woke to a later deadline than the one it slept to: a test moves the
+    /// sighting once its caller sleeps and serves once it read the move.
+    #[cfg(test)]
+    sleeps: u32,
+    #[cfg(test)]
+    extended: u32,
 }
 
 /// Everything a start of the core depends on, decided once when the app is
@@ -188,6 +202,15 @@ pub(crate) async fn core_endpoint(app: AppHandle, webview: Webview) -> Result<Co
     .map_err(|error| format!("the endpoint task did not finish: {error}"))?
 }
 
+/// What the core does before it serves, while it says so: the window shows it
+/// in place of its plain waiting message.
+#[tauri::command]
+pub(crate) fn core_starting(app: AppHandle, webview: Webview) -> Result<Option<Starting>, String> {
+    quota_window::only_ui(&webview)?;
+    let state = app.try_state::<CoreState>().ok_or("the shell has not set up its core yet")?;
+    Ok(read_starting(&state.launch.directory))
+}
+
 /// What the last resolution settled on.
 struct Settled {
     outcome: Result<CoreEndpoint, String>,
@@ -273,25 +296,43 @@ fn publish(slot: &(Mutex<Slot>, Condvar), outcome: Result<Resolved, String>) {
     ready.notify_all();
 }
 
+/// When a caller that began waiting at `begun` gives up: `patience` after
+/// that, or after the resolution's last sighting of the core at work.
+fn endpoint_deadline(begun: Instant, announced: Option<Instant>, patience: Duration) -> Instant {
+    announced.map_or(begun, |announced| announced.max(begun)) + patience
+}
+
+/// Waits up to `patience` for the resolution, and `patience` past the last
+/// time the resolution saw the core announce work before it serves
+/// (`Slot::announced`): the resolver waits a whole timeout past that moment,
+/// so a caller gives up only after it does.
 fn wait_for_endpoint(slot: &(Mutex<Slot>, Condvar), patience: Duration) -> Result<Settled, String> {
     let (lock, ready) = slot;
-    let deadline = Instant::now() + patience;
+    let begun = Instant::now();
     let mut guard = lock
         .lock()
         .map_err(|_| "the core state is poisoned".to_string())?;
 
+    #[cfg(test)]
+    let mut slept_to: Option<Instant> = None;
     while !guard.done {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
+        let deadline = endpoint_deadline(begun, guard.announced, patience);
+        let wait = deadline.saturating_duration_since(Instant::now());
+        if wait.is_zero() {
             return Err("no core answered within the start timeout".to_string());
         }
-        let (next, timeout) = ready
-            .wait_timeout(guard, remaining)
+        #[cfg(test)]
+        {
+            if slept_to.is_some_and(|earlier| deadline > earlier) {
+                guard.extended += 1;
+            }
+            slept_to = Some(deadline);
+            guard.sleeps += 1;
+        }
+        let (next, _) = ready
+            .wait_timeout(guard, wait)
             .map_err(|_| "the core state is poisoned".to_string())?;
         guard = next;
-        if timeout.timed_out() && !guard.done {
-            return Err("no core answered within the start timeout".to_string());
-        }
     }
 
     let outcome = match (guard.endpoint.as_ref(), guard.error.as_ref()) {

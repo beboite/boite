@@ -128,6 +128,16 @@ export class WalCheckpoints {
     return Atomics.load(this.state, 0) !== 0;
   }
 
+  /**
+   * True while the WAL is past twice its limit: the checkpoints have not caught
+   * up with the writes. A background pass then skips its tick, so that its
+   * writes keep the WAL short of `BEHIND`, where this thread copies it; a tick
+   * that starts under the mark and writes more than the room left crosses it.
+   */
+  get behind(): boolean {
+    return this.walBytes() > this.limitBytes * 2;
+  }
+
   /** Looks for writes since the last tick and asks for the checkpoint they call for. */
   tick(): void {
     if (this.stopped) return;
@@ -181,17 +191,23 @@ export class WalCheckpoints {
   private run(mode: Mode): void {
     const worker = this.fallback ? null : this.ensureWorker();
     // Without a Worker this thread checkpoints, as SQLite did, but no more than once a tick.
-    if (worker === null) return this.passive();
+    if (worker === null) return this.here(mode);
     this.ran.worker++;
     Atomics.store(this.state, 0, 1);
     this.sentAt = performance.now();
     worker.postMessage({ file: this.file, mode, state: this.state });
   }
 
-  private passive(): void {
+  /**
+   * A checkpoint on this thread. A truncation empties the WAL file, which a
+   * passive one never does, so `behind` turns false without another write; one
+   * that met a reader is tried again at the next idle tick, as the Worker's is.
+   */
+  private here(mode: Mode): void {
     this.ran.main++;
     try {
-      this.db.query('PRAGMA wal_checkpoint(PASSIVE)').get();
+      const { busy } = this.db.query(`PRAGMA wal_checkpoint(${mode})`).get() as { busy: number };
+      if (mode === 'TRUNCATE' && busy !== 0) this.writtenSinceTruncate = true;
     } catch (error) {
       this.onError(`journal checkpoint: ${messageOfError(error)}`);
     }
@@ -205,7 +221,7 @@ export class WalCheckpoints {
         if ('error' in data) return this.fail(data.error);
         // A truncation that met a reader is tried again at the next idle tick.
         if (data.busy !== 0) this.writtenSinceTruncate = true;
-        if (!this.stopped && this.walBytes() > this.limitBytes * BEHIND) this.passive();
+        if (!this.stopped && this.walBytes() > this.limitBytes * BEHIND) this.here('PASSIVE');
       };
       worker.onerror = (event) => {
         event.preventDefault?.();
