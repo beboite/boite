@@ -92,6 +92,19 @@ describe('ShellStatusReader', () => {
     flood(lines.status);
     lines.status.seed('\x1b]633;P;Cwd=/new/', 10);
     expect(lines.seen.cwd).toBe('/new/dir');
+
+    // After a bare ESC, a control opens nothing, so the `]` after it is text; a `]` right after it opens a sequence.
+    const text = reader();
+    text.status.read('\r]133;D;1\x07', 11);
+    flood(text.status);
+    text.status.seed(`${RUNNING}\x1b`, 10);
+    expect(text.seen).toMatchObject({ running: true, exits: [] });
+
+    const opened = reader();
+    opened.status.read(']133;D;1\x07', 11);
+    flood(opened.status);
+    opened.status.seed(`${RUNNING}\x1b`, 10);
+    expect(opened.seen).toMatchObject({ running: true, exits: [1] });
   });
 
   it('ends a sequence that output leaving the buffer left open with the output still in it', () => {

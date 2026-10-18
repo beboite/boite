@@ -44,11 +44,13 @@ interface Overflow {
    * How the output that left the buffer starts, as the rest of a sequence the
    * snapshot may leave open, which the overflow's own parser read as text: the
    * characters `OscScanner` counts in a sequence, up to the first that ends
-   * it, or until they run past `MAX_OSC`.
+   * it, or until they run past `LEAD`.
    */
   lead: string;
-  /** `lead` holds that end, or ran past `MAX_OSC`: the output after it is not in it. */
+  /** `lead` holds that end, or ran past `LEAD`: the output after it is not in it. */
   leadEnded: boolean;
+  /** The first character that left the buffer, controls included: what follows a snapshot ending on ESC. */
+  head: string;
   phases: Record<Phase, { phase: Phase; exit?: { sequence: number | undefined; code: number | null } }>;
   cwd?: { sequence: number | undefined; path: string };
 }
@@ -57,6 +59,8 @@ interface Overflow {
 const OSC_END = /[\x07\x1b\x9c\x18\x1a]/;
 /** The other C0 controls, which a sequence drops without counting them. */
 const OSC_DROPPED = /[\x00-\x1f]/g;
+/** A sequence's payload past `MAX_OSC`, with the `]` that opens it after a snapshot ending on ESC. */
+const LEAD = MAX_OSC + 2;
 
 export interface ShellStatus {
   running(running: boolean): void;
@@ -135,6 +139,8 @@ export class ShellStatusReader {
    */
   #stitch(overflow: Overflow, follows: boolean): boolean {
     if (!follows || !this.#scanner.open) return false;
+    // After a bare ESC, anything but `]`, a control the lead drops included, opens nothing: the overflow's parser read it right.
+    if (this.#scanner.escaped && overflow.head !== ']') return false;
     this.#scanner.feed(overflow.lead);
     return !overflow.leadEnded;
   }
@@ -158,16 +164,18 @@ export class ShellStatusReader {
       unsequenced: false,
       lead: '',
       leadEnded: false,
+      head: '',
       phases: { idle: { phase: 'idle' }, prompt: { phase: 'prompt' }, running: { phase: 'running' } }
     };
     overflow.reading = sequence;
     if (sequence === undefined) overflow.unsequenced = true;
     else overflow.newest = Math.max(overflow.newest ?? sequence, sequence);
+    overflow.head ||= data.charAt(0);
     if (!overflow.leadEnded) {
       const end = data.search(OSC_END);
-      overflow.lead += (end >= 0 ? data.slice(0, end) : data).replace(OSC_DROPPED, '').slice(0, MAX_OSC + 1 - overflow.lead.length);
-      if (end >= 0 && overflow.lead.length <= MAX_OSC) overflow.lead += data[end];
-      overflow.leadEnded = end >= 0 || overflow.lead.length > MAX_OSC;
+      overflow.lead += (end >= 0 ? data.slice(0, end) : data).replace(OSC_DROPPED, '').slice(0, LEAD - overflow.lead.length);
+      if (end >= 0 && overflow.lead.length < LEAD) overflow.lead += data[end];
+      overflow.leadEnded = end >= 0 || overflow.lead.length >= LEAD;
     }
     overflow.scanner.feed(data);
   }

@@ -195,7 +195,8 @@ entry bytes, 4,852,925 UI bytes and 4,413,077 core JavaScript bytes with
 Windows, against 486,005 and 4,727,998 that main measured: 3,496 entry bytes
 and 124,927 UI bytes more, of which the highlight worker is 114,882. The rest
 is the change's terminal status reader with its overflow seams and the model
-cache's held write. The entry and UI limits rise to 490,500 and 4,853,900,
+cache's held write. Reading a snapshot that ends on a bare ESC brings the UI
+to 4,853,016. The entry and UI limits rise to 490,500 and 4,853,900,
 about a kilobyte above; the core limits stay.
 
 On 2026-10-18, the group vet merged with `origin/main` at `8868384d` (the

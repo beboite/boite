@@ -95,6 +95,11 @@ export class OscScanner {
     return this.#data !== null || this.#escape;
   }
 
+  /** Right after an ESC outside a sequence: only a `]` next opens one. */
+  get escaped(): boolean {
+    return this.#escape;
+  }
+
   feed(chunk: string): void {
     let at = 0;
     while (at < chunk.length) {
