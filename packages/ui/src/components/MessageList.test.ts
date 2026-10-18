@@ -1392,3 +1392,33 @@ test('a prompt queued behind a finished turn keeps the buttons of the answer bef
   expect(document.querySelector('[data-mid="m-queued"]')?.closest('article')?.hasAttribute('data-latest')).toBe(true);
   expect(document.querySelector(`[data-mid="${answer.id}"]`)?.closest('article')?.hasAttribute('data-latest')).toBe(true);
 });
+
+test('a row counts at the height it is drawn, fractions included, so rows measured above the reader move the view by what they weigh', async () => {
+  const messages = thread(200);
+  stubLayout(messages.length * ESTIMATE);
+  const observers: Array<{ callback: ResizeObserverCallback }> = [];
+  vi.stubGlobal('ResizeObserver', class {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; observers.push(this); }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.scrollTop = 4_000;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  const before = timeline.scrollTop;
+  // Each drawn row is 0.37 px taller than a whole pixel, as text lays out on some screens and font metrics.
+  const observer = observers.at(-1)!;
+  observer.callback(articles().map((target) => ({ target, borderBoxSize: [{ blockSize: 100.37, inlineSize: 300 }] }) as unknown as ResizeObserverEntry), observer as unknown as ResizeObserver);
+  await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  await settle();
+  const moved = timeline.scrollTop - before;
+  expect(moved).toBeGreaterThan(0);
+  // Rounded heights would move it by whole pixels and leave the reader's text a fraction off per row.
+  expect(Math.abs(moved - Math.round(moved))).toBeGreaterThan(0.01);
+});

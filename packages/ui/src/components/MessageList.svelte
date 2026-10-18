@@ -165,7 +165,7 @@
     if (!anchor || !viewport?.isConnected || pinned || navigationTarget || promptTarget) return;
     const delta = anchors.drift(viewport, anchor);
     if (delta === null) return;
-    if (Math.abs(delta) >= 0.5) { viewport.scrollTop += delta; scrollTop = viewport.scrollTop; }
+    if (Math.abs(delta) > 1) { viewport.scrollTop += delta; scrollTop = viewport.scrollTop; }
     anchors.current = anchor;
   }
   function releaseAnchor() { anchors.restoring = false; }
@@ -396,11 +396,11 @@
       }
       const id = node.dataset['mid'];
       if (!id) continue;
-      // The observer already measured the box; reading `offsetHeight` again would lay out, mid-scroll,
-      // whatever the window just mounted. A row that continues a message sits a paragraph's gap under it.
+      // The box is measured already: `offsetHeight` would lay out, mid-scroll, what the window just mounted. Fractions
+      // stay (rounded, each row above the reader left it up to half a pixel off); a continued message sits a gap under.
       const gap = slotGap(node.dataset['seam'], node.dataset['rest'] !== undefined);
       node.dataset['gap'] = String(gap);
-      const next = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight) + gap;
+      const next = (entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight) + gap;
       const at = slots.indexOf(rows, id);
       const previous = heights.get(id) ?? slots.estimateOf(rows[at]);
       if (previous === next) continue;
