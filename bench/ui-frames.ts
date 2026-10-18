@@ -260,9 +260,35 @@ async function main(): Promise<void> {
       await page.call(`function (text) { const input = document.querySelector('[data-testid=composer-input]'); input.focus(); if (text) { input.value = text; input.dispatchEvent(new Event('input', { bubbles: true })); } input.setSelectionRange(input.value.length, input.value.length); }`, draft);
       await Bun.sleep(300);
     };
-    /** A pasted screenshot's worth of base64 on the draft, what every save of it carries. */
+    /**
+     * A pasted 1920 by 1080 screenshot on the draft: a PNG the page draws (a
+     * window of text rows and a photo-like patch, from a fixed seed) so the
+     * tile decodes a real picture, as large as a screenshot, every run the same.
+     */
     const attachImage = async (): Promise<void> => {
-      await page.evaluate(`(() => { const s = globalThis.__bench.store; const key = s.openThread?.id ?? 'draft'; const state = s.composerStates[key]; state.attachments = [{ kind: 'image', mimeType: 'image/png', name: 'bench.png', data: 'iVBORw0KGgo'.repeat(140000) }]; })()`);
+      const made = await page.evaluate(`(() => {
+        const canvas = document.createElement('canvas'); canvas.width = 1920; canvas.height = 1080;
+        const c = canvas.getContext('2d');
+        let seed = 7; const rand = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+        c.fillStyle = '#1e1f24'; c.fillRect(0, 0, 1920, 1080);
+        c.fillStyle = '#26272d'; c.fillRect(0, 0, 320, 1080);
+        c.font = '15px sans-serif';
+        for (let y = 24; y < 1080; y += 22) {
+          c.fillStyle = 'hsl(' + Math.floor(rand() * 360) + ', 40%, 75%)';
+          c.fillText('row ' + y + ' ' + Math.floor(rand() * 1e12).toString(36).repeat(1 + Math.floor(rand() * 6)), y % 44 ? 340 : 16, y);
+        }
+        const patch = c.createImageData(640, 400);
+        for (let i = 0; i < patch.data.length; i += 4) { const x = (i / 4) % 640, y = Math.floor(i / 2560); patch.data[i] = (x / 2.5 + rand() * 60) | 0; patch.data[i + 1] = (y / 1.6 + rand() * 60) | 0; patch.data[i + 2] = (128 + rand() * 90) | 0; patch.data[i + 3] = 255; }
+        c.putImageData(patch, 1180, 560);
+        const data = canvas.toDataURL('image/png').slice('data:image/png;base64,'.length);
+        const s = globalThis.__bench.store; const key = s.openThread?.id ?? 'draft'; const state = s.composerStates[key];
+        state.attachments = [{ kind: 'image', mimeType: 'image/png', name: 'bench.png', data }];
+        return data.length;
+      })()`) as number;
+      // The tile drew what it shows: the thumbnail, or on an older build the whole picture.
+      await page.waitFor(`(() => { const img = document.querySelector('[data-testid=composer-image-open] img'); return img && img.complete && img.naturalWidth > 0; })()`);
+      const tile = await page.evaluate(`document.querySelector('[data-testid=composer-image-open] img').naturalWidth`) as number;
+      console.log(`  picture 1920x1080, ${made} base64 characters; the tile draws one ${tile} pixels wide`);
       await Bun.sleep(300);
     };
     /** A thousand idle threads more in the sidebar, laid over the fake's own rows. */

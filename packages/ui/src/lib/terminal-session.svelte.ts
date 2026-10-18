@@ -11,7 +11,8 @@
  * when it comes back. After `HIDDEN_RELEASE_MS` out of the page the whole
  * xterm goes, its scrollback included: shown again, the screen is drawn from
  * the core's snapshot, its last 256 Ki characters
- * of output. The shell runs on meanwhile.
+ * of output. The shell runs on meanwhile, and the session still reads its
+ * marks and directory from the raw output, so the tab's dot stays true.
  *
  * The screen draws on the GPU (WebGL) and falls back to xterm's DOM renderer
  * when the browser refuses a context or loses it. A shell started with the
@@ -29,7 +30,7 @@ import type { RpcEvents, TerminalShell, TerminalState } from '@boite/contracts';
 import { TERMINAL_COMMANDS, isMac } from './keybindings';
 import { openExternal } from './links';
 import { readTerminalCursor, readTerminalGpu } from './terminal-cursor';
-import { clearLineKeys, parseCwdProperty, parseFileUrl, parsePromptMark } from './terminal-marks';
+import { OscScanner, clearLineKeys, parseConEmuCwd, parseCwdProperty, parseFileUrl, parsePromptMark } from './terminal-marks';
 import type { Store } from './store.svelte';
 
 export type TerminalStart = (cols: number, rows: number) => Promise<TerminalState | null>;
@@ -201,6 +202,10 @@ export class TerminalSession {
   #screenCleanups: (() => void)[] = [];
   #releaseTimer: ReturnType<typeof setTimeout> | null = null;
   #listening = false;
+  /** Reads the shell's marks and directory while the xterm is released, so a hidden tab's dot stays true. */
+  #scanner: OscScanner | null = null;
+  /** Where the last command is for the scanner: at its prompt, running, or neither. */
+  #phase: 'idle' | 'prompt' | 'running' = 'idle';
   #marks: CommandMark[] = [];
   #query = '';
   #windows = false;
@@ -293,6 +298,9 @@ export class TerminalSession {
     this.#resizeTimer = null;
     if (this.#frame !== null) cancelAnimationFrame(this.#frame);
     this.#frame = null;
+    const last = this.#marks.at(-1);
+    this.#phase = last === undefined ? 'idle' : last.status === 'running' ? 'running' : last.ran ? 'idle' : 'prompt';
+    this.#scanner = new OscScanner((code, data) => this.#report(code, data));
     this.#disposeScreen();
     this.element.replaceChildren();
     this.#loading = null;
@@ -461,6 +469,7 @@ export class TerminalSession {
       term.unicode.activeVersion = '11';
     }
     this.#term = term;
+    this.#scanner = null;
     this.#fit = fit;
     if (searchModule !== null) {
       const search = new searchModule.SearchAddon({ highlightLimit: 2000 });
@@ -493,6 +502,10 @@ export class TerminalSession {
     // A shell can end while its screen is released: the session hears it either way.
     if (!this.#listening) {
       this.#listening = true;
+      // Released, the screen parses nothing: the session reads the marks itself.
+      this.#cleanups.push(client.on('terminal.output', (event) => {
+        if (event.id === this.id) this.#scanner?.feed(event.data);
+      }));
       this.#cleanups.push(client.on('terminal.exited', (event) => {
         if (event.id !== this.id) return;
         const onexit = this.#onexit;
@@ -548,12 +561,34 @@ export class TerminalSession {
     });
     // Windows Terminal's own cwd report, `9;9;"C:\path"`.
     const conemu = term.parser.registerOscHandler(9, (data) => {
-      const match = /^9;"?(.*?)"?$/.exec(data);
-      if (match === null) return false;
-      if (match[1]!.length > 0) this.cwd = match[1]!;
+      const cwd = parseConEmuCwd(data);
+      if (cwd === null) return false;
+      if (cwd.length > 0) this.cwd = cwd;
       return true;
     });
     this.#screenCleanups.push(() => { prompt.dispose(); properties.dispose(); fileUrl.dispose(); conemu.dispose(); });
+  }
+
+  /** One OSC of a released screen: what `#listenToShell` reads, without the lines. */
+  #report(code: number, data: string): void {
+    if (code === 133) {
+      const mark = parsePromptMark(data);
+      if (mark?.kind === 'prompt') {
+        this.#phase = 'prompt';
+        this.running = false;
+      } else if (mark?.kind === 'run' && this.#phase === 'prompt') {
+        this.#phase = 'running';
+        this.running = true;
+      } else if (mark?.kind === 'done') {
+        this.running = false;
+        if (this.#phase !== 'running') return;
+        this.#phase = 'idle';
+        this.lastExit = mark.exit;
+      }
+      return;
+    }
+    const cwd = code === 633 ? parseCwdProperty(data) : code === 7 ? parseFileUrl(data) : code === 9 ? parseConEmuCwd(data) : null;
+    if (cwd !== null && cwd.length > 0) this.cwd = cwd;
   }
 
   #onMark(term: Terminal, mark: ReturnType<typeof parsePromptMark> & object): void {

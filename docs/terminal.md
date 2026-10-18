@@ -128,7 +128,10 @@ again, which draws it once. After
 five minutes detached (`HIDDEN_RELEASE_MS`) the whole xterm goes and the shell
 keeps running; shown again, the screen is drawn from the core's snapshot, so its
 scrollback is the snapshot's 256 KiB rather than 10,000 lines, and its selection
-and find matches start over. The shell's exit is still heard while released.
+and find matches start over. The shell's exit is still heard while released,
+and so are its marks and directory reports: the session reads the OSC 133, 633,
+7 and 9;9 sequences from the raw output (`OscScanner` in `terminal-marks.ts`),
+so a hidden tab's dot turns red or stops spinning when its command ends.
 
 Reloading, opening another window or reconnecting replays the 256 KiB snapshot.
 Truncation prefers a nearby line boundary. Output arriving before the response is

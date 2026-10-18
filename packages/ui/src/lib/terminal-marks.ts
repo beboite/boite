@@ -56,6 +56,85 @@ export function parseFileUrl(data: string): string | null {
   }
 }
 
+/** The directory of Windows Terminal's `9;"C:\path"` report (OSC 9;9), `''` for an empty one, null for another OSC 9. */
+export function parseConEmuCwd(data: string): string | null {
+  return /^9;"?(.*?)"?$/.exec(data)?.[1] ?? null;
+}
+
+/** Longer than this, an OSC is not a mark or a directory: it is skipped to its end. */
+const MAX_OSC = 4096;
+const OSC_END = /[\x07\x1b]/g;
+
+/**
+ * The OSC sequences in a shell's raw output, for a session whose xterm is
+ * released: each `<code>;<data>` goes to `onOsc` once its BEL or ST arrives,
+ * a sequence split across chunks included. Everything else is skipped.
+ */
+export class OscScanner {
+  /** What came after `ESC ]` so far, or null outside a sequence. */
+  #data: string | null = null;
+  #skip = false;
+  /** The last chunk ended on an ESC. */
+  #escape = false;
+
+  constructor(private readonly onOsc: (code: number, data: string) => void) {}
+
+  feed(chunk: string): void {
+    let at = 0;
+    while (at < chunk.length) {
+      if (this.#escape) {
+        this.#escape = false;
+        const next = chunk[at];
+        if (this.#data !== null && next === '\\') {
+          at++;
+          this.#end();
+          continue;
+        }
+        // Any other escape ends an open sequence unfinished, as xterm does.
+        this.#data = null;
+        if (next === ']') {
+          at++;
+          this.#data = '';
+          this.#skip = false;
+        }
+        continue;
+      }
+      if (this.#data === null) {
+        const start = chunk.indexOf('\x1b', at);
+        if (start === -1) return;
+        at = start + 1;
+        this.#escape = true;
+        continue;
+      }
+      OSC_END.lastIndex = at;
+      const end = OSC_END.exec(chunk);
+      const stop = end === null ? chunk.length : end.index;
+      if (!this.#skip) {
+        this.#data += chunk.slice(at, stop);
+        if (this.#data.length > MAX_OSC) {
+          this.#data = '';
+          this.#skip = true;
+        }
+      }
+      if (end === null) return;
+      at = stop + 1;
+      if (chunk[stop] === '\x07') this.#end();
+      else this.#escape = true;
+    }
+  }
+
+  #end(): void {
+    const data = this.#data ?? '';
+    const skip = this.#skip;
+    this.#data = null;
+    this.#skip = false;
+    const cut = data.indexOf(';');
+    const head = cut === -1 ? data : data.slice(0, cut);
+    if (skip || !/^\d+$/.test(head)) return;
+    this.onOsc(Number(head), cut === -1 ? '' : data.slice(cut + 1));
+  }
+}
+
 /** The last part of a path, Windows or POSIX: what a tab shows. A root stays whole. */
 export function baseName(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, '');

@@ -62,6 +62,23 @@ test('a hidden terminal gives its WebGL context back at once and its xterm after
   expect(attach.mock.calls[0]?.[0]).toBe(threadId);
   expect(query('[data-testid=terminal] .terminal-screen')).toBe(element);
   expect(contexts).toEqual({ made: 3, disposed: 2, lost: 2 });
+
+  // A released tab still hears its shell: a command that ends badly turns its dot red unselected.
+  const first = `terminal:${threadId}`;
+  timers.mockClear();
+  store.newTerminal(threadId);
+  await waitFor(() => document.querySelectorAll('[data-testid=terminal-tab]').length === 2 && store.terminalLayout(threadId)?.active !== first);
+  const releaseFirst = timers.mock.calls.find(([, delay]) => delay === HIDDEN_RELEASE_MS)?.[0] as (() => void) | undefined;
+  expect(releaseFirst).toBeTypeOf('function');
+  releaseFirst!();
+  expect(element.childElementCount).toBe(0);
+  const firstTab = () => [...document.querySelectorAll('[data-testid=terminal-tab]')].find((tab) => !tab.classList.contains('selected'));
+  expect(firstTab()?.querySelector('[data-testid=terminal-status]')).toBeNull();
+  store.writeTerminal(first, 'fail-build\r');
+  await waitFor(() => firstTab()?.querySelector('[data-testid=terminal-status]')?.classList.contains('failed') === true);
+  expect(store.terminalScreen(first)?.lastExit).toBe(1);
+  expect(store.terminalLayout(threadId)?.active).not.toBe(first);
+  expect(element.childElementCount).toBe(0);
   timers.mockRestore();
   attach.mockRestore();
 });

@@ -975,10 +975,18 @@ Chrome at 1280 by 890:
 | --- | --- | --- |
 | Large file highlight, grammar on the main thread | 108 to 242 ms | 0 to 2 ms |
 | Large file highlight, long tasks | 2 to 3 (2,706 to 5,423 ms) | 1 to 2 (204 to 616 ms) |
-| Typing with a picture attached, key p95 | 186.9 ms | 18.7 ms |
-| Typing with a picture attached, long tasks | 2 (375 ms) | 0 |
+| Typing with a 1920 by 1080 PNG attached, key p95 | 16.7 to 17.6 ms | 16.0 to 17.5 ms |
+| Typing with a 1920 by 1080 PNG attached, long tasks | 0 | 0 |
+| The same picture, as the tile decodes it | 1920 by 1080 | 149 by 84 |
 | Long thread scroll, long tasks | 2 (112 ms) | 0 |
 | Heavy thread jumps, long tasks | 0 to 2 in 8 runs (0 to 147 ms) | 0 in the last 4 runs, 2 to 5 (117 to 436 ms) in 4 earlier ones |
+
+The picture rows are from 2026-10-18 with the base at `15fdbb81`: the bench
+draws a 1920 by 1080 PNG in the page from a fixed seed, 1,311,112 base64
+characters, and waits for the tile to show it. Typing costs the same on both
+sides; what the thumbnail changes is the picture the tile keeps decoded, about
+7.9 MiB of pixels on the base against 49 KiB after. An earlier version of this
+table compared bytes the decoder rejected, so neither side drew a picture.
 
 The large file task left after the change is the browser building 23,000
 highlighted nodes, not script. The heavy thread jumps scenario is noisy on both
