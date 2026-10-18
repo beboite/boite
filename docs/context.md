@@ -322,9 +322,10 @@ by the removed turns makes the whole restore unavailable and nothing is
 restored; an unchanged one does not get in the way. Old turns without backups,
 overlapping turns in the same workspace, a cut inside a running turn and
 incomplete snapshots cannot restore code. Two folders overlap when one holds
-the other, unless the outer snapshot leaves the inner one out: a repository or
-worktree of its own inside a git workspace (`.boite/worktrees/*`), or a skipped
-folder in a plain one. An edit made while another turn still works in an
+the other and the outer snapshot would list a file of the inner one: git
+lists a repository or worktree of its own (`.boite/worktrees/*`) as one
+directory entry, unless the outer index tracks its files; a plain walk lists
+all but the skipped folders. An edit made while another turn still works in an
 overlapping folder, such as a sub-agent winding down after a Stop, rewinds the
 messages and leaves every file as it is, with `busy: true`. The rewind
 answers `files: { status, count, reason?, busy? }`; `status` is `restored`, `unchanged`

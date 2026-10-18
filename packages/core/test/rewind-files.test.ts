@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { CodeCheckpoints, IDLE_THREAD_MS, KEEP_TURNS } from '../src/threads/code-checkpoints.ts';
-import { restoreFiles, sharedBlob, snapshot } from '../src/threads/checkpoint-files.ts';
+import { overlap, restoreFiles, sharedBlob, snapshot } from '../src/threads/checkpoint-files.ts';
 import { BLOB_BYTE_LIMIT, decodeBlob, decodeManifest } from '../src/threads/checkpoint-store.ts';
 import { git } from '../src/git/read.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -46,6 +46,16 @@ async function run(prompt: string): Promise<string> {
   await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt != null);
   expect(h.core.journal.getTurn(turn.id)?.status).toBe('done');
   return h.core.threads.get(threadId).messages.find(message => message.turnId === turn.id && message.role === 'user')!.id;
+}
+
+/** The fixture must not depend on the runner having a configured Git identity. */
+function commitFixture(folder = cwd): void {
+  const committed = Bun.spawnSync({
+    cmd: ['git', 'commit', '--quiet', '-m', 'fixture'], cwd: folder,
+    env: { ...process.env, GIT_AUTHOR_NAME: 'boite test', GIT_AUTHOR_EMAIL: 'test@boite.invalid', GIT_COMMITTER_NAME: 'boite test', GIT_COMMITTER_EMAIL: 'test@boite.invalid' },
+    stdout: 'pipe', stderr: 'pipe', windowsHide: true,
+  });
+  if (!committed.success) throw new Error(committed.stderr.toString());
 }
 
 test('editing restores changed, deleted, created and binary files, then runs the replacement from that state', async () => {
@@ -91,13 +101,7 @@ test('git checkpoints restore the dirty starting state without changing HEAD, th
   await writeFile(join(cwd, '.gitignore'), 'ignored.txt\n');
   await writeFile(join(cwd, 'app.ts'), 'staged');
   expect((await git(h.core, threadId, cwd, ['add', '.'])).code).toBe(0);
-  // The fixture must not depend on the runner having a configured Git identity.
-  const committed = Bun.spawnSync({
-    cmd: ['git', 'commit', '--quiet', '-m', 'fixture'], cwd,
-    env: { ...process.env, GIT_AUTHOR_NAME: 'boite test', GIT_AUTHOR_EMAIL: 'test@boite.invalid', GIT_COMMITTER_NAME: 'boite test', GIT_COMMITTER_EMAIL: 'test@boite.invalid' },
-    stdout: 'pipe', stderr: 'pipe', windowsHide: true,
-  });
-  if (!committed.success) throw new Error(committed.stderr.toString());
+  commitFixture();
   await writeFile(join(cwd, 'app.ts'), 'dirty staged');
   expect((await git(h.core, threadId, cwd, ['add', 'app.ts'])).code).toBe(0);
   await writeFile(join(cwd, 'app.ts'), 'dirty unstaged');
@@ -240,7 +244,7 @@ test('a turn in a worktree nested in the project neither blocks nor spoils a rew
   await writeFile(join(cwd, '.gitignore'), '.boite/\n');
   await writeFile(join(cwd, 'app.ts'), 'initial');
   expect((await git(h.core, threadId, cwd, ['add', '.'])).code).toBe(0);
-  expect((await git(h.core, threadId, cwd, ['commit', '--quiet', '-m', 'initial'])).code).toBe(0);
+  commitFixture();
   const nested = join(cwd, '.boite', 'worktrees', 'wt-child');
   expect((await git(h.core, threadId, cwd, ['worktree', 'add', '--quiet', '-b', 'child', nested])).code).toBe(0);
   const thread = h.core.threads.require(threadId);
@@ -262,6 +266,13 @@ test('a turn in a worktree nested in the project neither blocks nor spoils a rew
     expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('kept');
   } finally { held.resolve(); }
   await waitFor(() => h.core.journal.getTurn(pending.id)?.finishedAt != null);
+  // A repository of its own whose files the outer index still tracks shares them.
+  await mkdir(join(cwd, 'vendor'));
+  await writeFile(join(cwd, 'vendor', 'lib.ts'), 'tracked');
+  expect((await git(h.core, threadId, cwd, ['add', 'vendor'])).code).toBe(0);
+  expect((await git(h.core, threadId, join(cwd, 'vendor'), ['init', '--quiet'])).code).toBe(0);
+  expect(await overlap(h.core, threadId, cwd, join(cwd, 'vendor'))).toBe(true);
+  expect(await overlap(h.core, threadId, nested, cwd)).toBe(false);
 });
 
 test('permanently removing a project removes its private file checkpoints', async () => {

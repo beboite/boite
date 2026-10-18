@@ -124,7 +124,7 @@ export class CodeCheckpoints {
     this.active.set(turnId, { threadId: thread.id, turnId, checkpoint });
     try {
       for (const other of others) {
-        if (await overlap(root, other.checkpoint.root)) checkpoint.reason = other.checkpoint.reason = 'turns ran concurrently in the same workspace';
+        if (await overlap(this.core, thread.id, root, other.checkpoint.root)) checkpoint.reason = other.checkpoint.reason = 'turns ran concurrently in the same workspace';
       }
       this.pruned ??= this.prune();
       await this.pruned;
@@ -176,7 +176,7 @@ export class CodeCheckpoints {
       // is not exact, and restoring would write under that agent. The edit
       // still goes through; only the files stay as they are.
       for (const active of [...this.active.values()]) {
-        if (await overlap(root, active.checkpoint.root)) {
+        if (await overlap(this.core, thread.id, root, active.checkpoint.root)) {
           return cut({ status: 'unavailable', count: 0, reason: 'another turn is working in this folder; files were left as they are', busy: true });
         }
       }
