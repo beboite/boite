@@ -10,7 +10,8 @@ use std::process::{Child, Command, Stdio};
 /// answers `/health` with its version and pid and stops on an authorised
 /// `POST /shutdown`; `fail` exits at once with a reason on stderr, as the
 /// real core does on a held lock; `hang` never answers; `compact` announces
-/// its work in `core.starting.json` for 5 s, then serves.
+/// its work in `core.starting.json` until the time its test wrote in
+/// `compact-until`, however long Bun took to start, then serves.
 const FAKE_CORE: &str = r#"
 const [version, mode] = process.argv.slice(2);
 const dir = process.argv[process.argv.indexOf('--data-dir') + 1];
@@ -21,7 +22,7 @@ if (mode === 'fail') {
 if (mode === 'compact') {
   const status = `${dir}/core.starting.json`;
   await Bun.write(status, JSON.stringify({ pid: process.pid, phase: 'compacting', startedAt: Date.now(), bytes: 1 }));
-  await Bun.sleep(5000);
+  await Bun.sleep(Math.max(0, Number(await Bun.file(`${dir}/compact-until`).text()) - Date.now()));
   (await import('node:fs')).rmSync(status);
 }
 if (mode === 'serve' || mode === 'compact') {
@@ -249,7 +250,12 @@ fn a_slow_resident_core_is_left_running_and_a_slow_owned_one_is_stopped() {
 fn a_core_compacting_its_journal_is_waited_on_past_the_timeout_and_says_so() {
     let _process_guard = crate::process_test_guard();
     let directory = scratch("compact");
-    let state = state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "compact"), false, Duration::from_secs(2));
+    // The timeout leaves Bun's cold start on a CI runner room to write the
+    // marker; the core serves only once that timeout has passed.
+    let timeout = Duration::from_secs(4);
+    let until = std::time::SystemTime::now() + timeout + Duration::from_millis(500);
+    std::fs::write(directory.join("compact-until"), until.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis().to_string()).unwrap();
+    let state = state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "compact"), false, timeout);
     let watcher = {
         let directory = directory.clone();
         std::thread::spawn(move || {
@@ -261,15 +267,31 @@ fn a_core_compacting_its_journal_is_waited_on_past_the_timeout_and_says_so() {
             }
         })
     };
+    let started = Instant::now();
     let outcome = resolve_core(&state);
+    let waited = started.elapsed();
     state.kill_child();
     let seen = watcher.join().unwrap().expect("the core announced its work");
     assert_eq!(seen.phase, "compacting");
     assert!(outcome.is_ok(), "{:?}", outcome.err());
+    assert!(waited >= timeout, "the core served after {waited:?}, inside the {timeout:?} timeout: nothing was waited on past it");
     // Gone once the core serves, and a file a dead core left counts for nothing.
     assert!(starting::read_starting(&directory).is_none());
     std::fs::write(directory.join("core.starting.json"), r#"{"pid":4294967294,"phase":"compacting","startedAt":1,"bytes":1}"#).unwrap();
     assert!(starting::read_starting(&directory).is_none());
+    // A file left by a core that crashed, whose pid now names a later live
+    // process (this test's own), counts for nothing either: the shell starts a core.
+    let pid = std::process::id();
+    let (own, earlier) = health::own_start_and_an_earlier_one();
+    let marker = |start: &health::CoreStart| {
+        let mut file = serde_json::json!({ "pid": pid, "phase": "compacting", "startedAt": start.at.unwrap_or(u64::MAX / 2), "bytes": 1 });
+        if let Some(key) = &start.key { file["startKey"] = serde_json::json!(key); }
+        std::fs::write(directory.join("core.starting.json"), file.to_string()).unwrap();
+    };
+    marker(&earlier);
+    assert!(starting::read_starting(&directory).is_none(), "a marker older than the process holding its pid is stale");
+    marker(&own);
+    assert!(starting::read_starting(&directory).is_some(), "the process that wrote the marker is that core");
     std::fs::remove_dir_all(directory).unwrap();
 }
 

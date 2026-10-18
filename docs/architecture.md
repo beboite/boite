@@ -116,7 +116,8 @@ again from the message when missing ([performance](performance.md)).
 
 A tool output of 4 KiB or more, and a tool input text, file or image of 32 KiB
 or more, is stored in `part_blobs`, one row per value, and its part in the
-message row names it under `$blob`. A value is stored as zstd (`codec` 1) when
+message row names it under `$blob`. A value UTF-8 cannot hold as it is (an
+unpaired surrogate) stays inline, where JSON keeps it as an escape. A value is stored as zstd (`codec` 1) when
 that saves at least 5 %, else as text (`codec` 0); `chars` holds its length in
 characters, and a compressed tool output keeps its first 1,024 characters as
 text in `preview`. Journal reads put the values back. A page asked with
@@ -136,9 +137,11 @@ where each pass stopped in a setting (`part-blobs:moved-through`,
 pass is never scanned again. Each step sizes its batch to the time its last
 tick took, aiming at 40 ms, and compresses on Bun's thread pool
 (`Bun.zstdCompress`) before a write guarded on the row it read, so a write
-made meanwhile wins. A tick is skipped while the WAL is over twice its 4 MiB
-limit, so the passes never get the WAL far enough behind that the main thread
-checkpoints it.
+made meanwhile wins, and a row is written only under the id and thread it was
+read with. A tick is skipped while the WAL is over twice its 4 MiB limit, so
+the passes never get the WAL far enough behind that the main thread
+checkpoints it; the idle truncation empties it with no further write, on the
+Worker or on the main thread without one.
 
 Space goes back to the disk once. When every one-time pass has finished and
 the trace was cut once, the next core start checks the journal before opening
@@ -146,7 +149,9 @@ it (`journal/vacuum.ts`): with free pages over a quarter of the file and over
 256 MiB, and room on the volume for the live pages plus 512 MiB, it writes
 `core.starting.json`, copies the journal with `VACUUM INTO` in incremental
 auto-vacuum, checks the copy, syncs it and renames it over the journal. The
-shell waits past its start timeout while that file names a live core, and the
+shell waits past its start timeout while that file names a live core, the run
+that wrote it by pid and start as for `core.json` (a crash leaves the file,
+and a later process may get the pid), and the
 window says the history is being compacted. From then on the compaction ticks
 give free pages back with `PRAGMA incremental_vacuum`, down to 16 MiB kept for
 later writes, and no VACUUM is needed again. The VACUUM runs before the

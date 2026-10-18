@@ -55,10 +55,12 @@ export function internCommandLine(db: Database, threadId: string, text: string):
 
 /**
  * Deletes the lines of `ids` no trace row of `threadId` names. Run once the
- * thread holds what it keeps: the check reads its remaining rows.
+ * thread holds what it keeps: the check reads its remaining rows. Only that
+ * thread's lines go: an id held between ticks may since name another
+ * thread's line, once the thread was removed and its ids reused.
  */
 function deleteLines(db: Database, threadId: string, ids: Iterable<number>): void {
-  db.query(`DELETE FROM command_lines WHERE id IN (SELECT value FROM json_each(?1))
+  db.query(`DELETE FROM command_lines WHERE id IN (SELECT value FROM json_each(?1)) AND thread_id = ?2
     AND id NOT IN (SELECT command_id FROM processes WHERE thread_id = ?2 AND command_id IS NOT NULL)`).run(JSON.stringify([...ids]), threadId);
 }
 

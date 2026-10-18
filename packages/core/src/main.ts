@@ -486,7 +486,7 @@ export function main(argv: string[]): void {
   }
 
   // Commands do not need the server graph. Finish imports before taking its data lock.
-  void Promise.all([import('./core.ts'), import('./server.ts'), import('./journal/vacuum.ts')]).then(([{ Core }, { PREFERRED_PORTS, startServerOnStickyPort }, { vacuumAtStart }]) => {
+  void Promise.all([import('./core.ts'), import('./server.ts'), import('./journal/vacuum.ts')]).then(([{ Core }, { PREFERRED_PORTS, startServerOnStickyPort }, { vacuumAtStart, VACUUM_WHEN }]) => {
     let flags: Flags;
     let dataDir: string;
     let unlock: () => void;
@@ -504,7 +504,7 @@ export function main(argv: string[]): void {
     const token = previous.token ?? newToken();
     // Once, after the background passes freed a large part of the journal; the shell shows it (`core.starting.json`).
     const vacuumErrors: string[] = [];
-    const vacuumed = vacuumAtStart(dataDir, message => vacuumErrors.push(message));
+    const vacuumed = vacuumAtStart(dataDir, message => vacuumErrors.push(message), VACUUM_WHEN, processPlatform.startKey?.(process.pid) ?? null);
     let core: Core;
     try {
       // Windows ships a Bun runtime and a split bundle. Capture what this run

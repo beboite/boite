@@ -49,6 +49,15 @@ function minChars(type: MessagePart['type'] | undefined, field: string): number 
   return type === 'tool' && field === 'output' ? TOOL_OUTPUT_BLOB_MIN_CHARS : BLOB_MIN_CHARS;
 }
 
+/**
+ * Whether `value` of a `type` part goes to `part_blobs`: long enough, and text
+ * that UTF-8 holds as it is. An unpaired surrogate would come back as U+FFFD,
+ * while the row's JSON keeps it as an escape, so such a value stays inline.
+ */
+function movable(type: MessagePart['type'] | undefined, field: string, value: unknown): value is string {
+  return typeof value === 'string' && value.length >= minChars(type, field) && (value as unknown as { isWellFormed(): boolean }).isWellFormed();
+}
+
 export function createPartBlobs(db: Database): void {
   db.exec(`CREATE TABLE IF NOT EXISTS part_blobs (
       message_id TEXT NOT NULL, part_index INTEGER NOT NULL, field TEXT NOT NULL, thread_id TEXT NOT NULL, data TEXT NOT NULL, digest TEXT NOT NULL,
@@ -115,7 +124,7 @@ function writeBlob(db: Database, message: Pick<Message, 'id' | 'threadId'>, inde
 export function storePart(db: Database, message: Pick<Message, 'id' | 'threadId'>, index: number, part: MessagePart | undefined, packed?: Packed): string {
   const fields = part === undefined || part === null ? [] : FIELDS[part.type] ?? [];
   const values = (part ?? {}) as unknown as Record<string, unknown>;
-  const moved = fields.filter(field => typeof values[field] === 'string' && (values[field] as string).length >= minChars(part?.type, field));
+  const moved = fields.filter(field => movable(part?.type, field, values[field]));
   if (moved.length === 0) {
     db.query('DELETE FROM part_blobs WHERE message_id = ? AND part_index = ?').run(message.id, index);
     return part === undefined || part === null ? 'null' : JSON.stringify(part);
@@ -243,7 +252,7 @@ export async function moveInlineValues(db: Database, afterRowid: number, isOpen:
 function inlineValues(stored: (Stored | null)[]): string[] {
   return stored.flatMap(part => part === null || part[MARK] ? [] : (FIELDS[part.type] ?? []).flatMap(field => {
     const value = (part as unknown as Record<string, unknown>)[field];
-    return typeof value === 'string' && value.length >= minChars(part.type, field) ? [value] : [];
+    return movable(part.type, field, value) ? [value] : [];
   }));
 }
 
@@ -251,8 +260,10 @@ const STALE = new Error('the row changed while its values were compressed');
 
 /**
  * Moves the inline values of `rows` out, compressing them on the thread pool
- * first. A row is written only if its `parts` text is still the one read and
- * its message is not open, so a write made during the compression wins.
+ * first. A row is written only if it still holds the message read, under the
+ * same id, thread and `parts` text, and that message is not open: a write made
+ * during the compression wins, and a row a deleted message left free for a
+ * copy (SQLite reuses the largest rowid) is never written under the old id.
  * Returns, per row, whether it is done: moved, or nothing to move.
  */
 async function moveRows(db: Database, rows: MessageRow[], isOpen: (messageId: string) => boolean): Promise<boolean[]> {
@@ -260,14 +271,14 @@ async function moveRows(db: Database, rows: MessageRow[], isOpen: (messageId: st
   const values = parsed.map(inlineValues);
   if (values.every(list => list.length === 0)) return rows.map(() => true);
   const packed = await packValues(values.flat());
-  const guarded = db.query('UPDATE messages SET parts = ? WHERE rowid = ? AND parts = ?');
+  const guarded = db.query('UPDATE messages SET parts = ? WHERE rowid = ? AND id = ? AND thread_id = ? AND parts = ?');
   return rows.map((row, at) => {
     if (values[at]!.length === 0) return true;
     if (isOpen(row.id)) return false;
     try {
       db.transaction(() => {
         const texts = parsed[at]!.map((part, index) => part === null || part[MARK] ? JSON.stringify(part) : storePart(db, { id: row.id, threadId: row.threadId }, index, part, packed));
-        if (guarded.run(`[${texts.join(',')}]`, row.rowid, row.parts).changes !== 1) throw STALE;
+        if (guarded.run(`[${texts.join(',')}]`, row.rowid, row.id, row.threadId, row.parts).changes !== 1) throw STALE;
       })();
       return true;
     } catch (error) {

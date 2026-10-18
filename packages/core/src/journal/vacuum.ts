@@ -8,7 +8,9 @@ import { SCHEMA_VERSION } from './schema.ts';
 /**
  * Written beside `core.json` while the core does long work before it serves,
  * so the shell waits past its start timeout and the window says why. Holds
- * the pid, what the core is doing and since when.
+ * the pid, what the core is doing and since when, and the OS start key of
+ * this run where there is one: a crash leaves the file, and the shell must
+ * not take the later process that gets the pid for this core.
  */
 export const STARTING_FILE = 'core.starting.json';
 /** The VACUUM runs once the free pages are past both: a quarter of the file and 256 MiB. */
@@ -61,7 +63,7 @@ export function vacuumPlan(file: string, when = VACUUM_WHEN): VacuumPlan | null 
  * place; on any error the original stays as it was. Returns what it did, or
  * null when `vacuumPlan` says no.
  */
-export function vacuumAtStart(dataDir: string, onError: (message: string) => void, when = VACUUM_WHEN): Vacuumed | null {
+export function vacuumAtStart(dataDir: string, onError: (message: string) => void, when = VACUUM_WHEN, startKey: string | null = null): Vacuumed | null {
   const file = join(dataDir, 'journal.db');
   const copy = `${file}.compact`;
   const status = join(dataDir, STARTING_FILE);
@@ -78,7 +80,7 @@ export function vacuumAtStart(dataDir: string, onError: (message: string) => voi
   if (plan === null) return null;
   const started = performance.now();
   try {
-    writeFileSync(status, JSON.stringify({ pid: process.pid, phase: 'compacting', startedAt: Date.now(), bytes: plan.liveBytes }));
+    writeFileSync(status, JSON.stringify({ pid: process.pid, phase: 'compacting', startedAt: Date.now(), bytes: plan.liveBytes, ...(startKey === null ? {} : { startKey }) }));
     const db = new Database(file);
     try {
       db.exec('PRAGMA busy_timeout = 5000');

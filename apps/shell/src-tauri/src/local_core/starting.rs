@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::platform;
+use super::health::{same_core, CoreStart};
 
 /// The longest a start doing that work is waited on. Compacting a 4 GB
 /// journal took about a minute on a busy machine.
@@ -26,12 +26,19 @@ pub struct Starting {
     pub started_at: u64,
     /// The bytes it works through.
     pub bytes: u64,
+    /// `platform::process::start_key` of the core, where the OS names a run
+    /// with one (Linux).
+    #[serde(default, skip_serializing)]
+    pub start_key: Option<String>,
 }
 
-/// The work a running core announced; None without a file, for a file a core
-/// left when it exited, or for one that cannot be read.
+/// The work a running core announced; None without a file, for one that
+/// cannot be read, or for a file a core left when it exited, even once its
+/// pid names a later process (`health::same_core`): a crash during that work
+/// leaves the file, and the next start must not wait on whatever got the pid.
 pub(crate) fn read_starting(directory: &Path) -> Option<Starting> {
     let text = std::fs::read_to_string(directory.join(FILE)).ok()?;
     let starting: Starting = serde_json::from_str(&text).ok()?;
-    platform::process::alive(starting.pid).then_some(starting)
+    let start = CoreStart { at: Some(starting.started_at), key: starting.start_key.clone() };
+    same_core(starting.pid, &start).then_some(starting)
 }

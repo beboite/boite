@@ -376,3 +376,25 @@ test('removing a thread, an incognito one at the next start included, removes it
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a trace prune that waits between its delete and its sweep never deletes the line another thread got under a freed id', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'boite-trace-'));
+  const journal = new Journal(join(dir, 'journal.db'));
+  try {
+    const put = (threadId: string, pid: number, commandLine: string) => journal.putProcess({
+      threadId, pid, parentPid: null, exe: 'bash', commandLine, startedAt: pid, exitedAt: pid + 1, exitCode: 0, cpuMs: 1, peakMemoryBytes: null, ioBytes: null,
+    });
+    journal.db.transaction(() => { for (let pid = 1; pid <= 2_601; pid++) put('thr_a', pid, `make step-${pid}`); })();
+    const trace = new TracePrune(journal.db, 1_000);
+    let through = '';
+    while (trace.phase !== 'sweep') ({ through } = trace.step(through));
+    // Between two ticks the thread goes, and another one runs a command under an id it freed.
+    journal.deleteThreads(['thr_a']);
+    put('thr_b', 1, 'new command');
+    for (let more = true; more;) ({ through, more } = trace.step(through));
+    expect(journal.listProcesses('thr_b', 10).map(row => row.commandLine)).toEqual(['new command']);
+  } finally {
+    journal.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

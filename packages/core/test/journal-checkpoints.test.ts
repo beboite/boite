@@ -114,3 +114,23 @@ test('the compaction passes and event retention wait while the WAL is past twice
   while (pruneEventsOnce(target, now));
   expect(events()).toBe(0);
 });
+
+for (const [name, options] of [['the Worker', {}], ['this thread, without a Worker', { worker: () => { throw new Error('no Worker here'); } }]] as const) {
+  test(`with no write after a WAL past twice its limit, the idle checkpoint on ${name} empties it and the passes go on`, async () => {
+    const target = open({ idleMs: 0, ...options });
+    target.db.exec(`PRAGMA journal_size_limit = ${256 * 1024}`);
+    const now = Date.now();
+    target.db.query("INSERT INTO events (thread_id, ts, type, version, payload) VALUES ('thr_test', ?, 'turn.finished', 1, '{}')").run(now - 40 * 86_400_000);
+    for (let n = 0; n < 6; n++) write(target, n);
+    expect(target.checkpoints!.behind).toBe(true);
+    target.checkpoints!.tick();
+    await settle(target);
+    // Nothing else is written: the idle truncation alone lets them go on.
+    expect(target.checkpoints!.behind).toBe(false);
+    const [first] = compactionSteps(target);
+    while (await first!(now) === 'more');
+    expect(target.getSetting(ONE_TIME_PASSES[0])).toBe(Number.MAX_SAFE_INTEGER);
+    while (pruneEventsOnce(target, now));
+    expect((target.db.query('SELECT COUNT(*) AS n FROM events').get() as { n: number }).n).toBe(0);
+  });
+}

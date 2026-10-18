@@ -220,3 +220,30 @@ test('a value that starts with a byte order mark keeps it, compressed or recoded
   expect((codecs() as { codec: number }[]).map(row => row.codec)).toEqual([1]);
   expect(stored()).toBe(output);
 });
+
+test('a message deleted while its values were compressed is never written into the copy that got its rowid', async () => {
+  const insert = journal.db.query("INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES (?, ?, 'trn_a', 'assistant', ?, 'complete', 1)");
+  const output = toolPart('shared output line\n'.repeat(400));
+  insert.run('older', 'thr_kept', JSON.stringify([output]));
+  insert.run('newer', 'thr_gone', JSON.stringify([output]));
+  const newer = journal.messageRowid('thr_gone', 'newer')!;
+  // The pass picks `newer` and awaits the thread pool; meanwhile its thread goes and a fork of `older`, same parts, takes its rowid.
+  const pass = moveInlineOutputs(journal.db, journal.messageRowid('thr_kept', 'older')!, 1024 * 1024, () => false);
+  journal.deleteThreads(['thr_gone']);
+  journal.copyMessage('older', { id: 'fork', threadId: 'thr_fork', turnId: 'trn_f', state: 'complete' });
+  expect(journal.messageRowid('thr_fork', 'fork')).toBe(newer);
+  await pass;
+  expect(journal.getMessage('fork')?.parts).toEqual([output]);
+  expect(journal.db.query("SELECT message_id FROM part_blobs WHERE thread_id = 'thr_gone'").all()).toEqual([]);
+});
+
+test('a value UTF-8 cannot hold as it is stays inline, written or moved, and reads back the same', async () => {
+  // An unpaired surrogate: JSON keeps it as an escape, UTF-8 would turn it into U+FFFD.
+  const output = toolPart(`${'x'.repeat(5_000)}\ud800`);
+  journal.putMessage({ id: 'msg_a', threadId: 'thr_a', turnId: 'trn_a', role: 'assistant', parts: [output], state: 'complete', createdAt: 1 });
+  journal.db.query("INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES ('old', 'thr_a', 'trn_a', 'assistant', ?, 'complete', 2)")
+    .run(JSON.stringify([output]));
+  await moveInlineOutputs(journal.db, 0, 1024 * 1024, () => false);
+  expect(codecs()).toEqual([]);
+  for (const id of ['msg_a', 'old']) expect(journal.getMessage(id)?.parts).toEqual([output]);
+});

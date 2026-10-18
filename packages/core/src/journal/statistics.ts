@@ -5,12 +5,26 @@ import type { Database } from 'bun:sqlite';
  * them (its debug flag, 0x01), so that each runs in its own tick: in one
  * call it held the event loop 270 ms to 1.6 s after the migration and
  * 225 ms after the compaction passes on a 4.2 GB journal (2026-10-18).
- * `all` adds the tables never analyzed, as after a migration (0x10000).
+ * `all` adds the tables never analyzed, as after a migration: SQLite 3.46
+ * and later list them under 0x10000, an older library (the system one Bun
+ * opens on macOS) ignores that bit, so they are also read from
+ * `sqlite_stat1` here, the indexed tables with a row and no statistics.
  */
 export function staleStatistics(db: Database, all: boolean): string[] {
-  return (db.query(`PRAGMA optimize=${all ? '0x10003' : '0x03'}`).all() as Record<string, unknown>[])
+  const statements = (db.query(`PRAGMA optimize=${all ? '0x10003' : '0x03'}`).all() as Record<string, unknown>[])
     .map(row => String(Object.values(row)[0]))
     .filter(statement => /^ANALYZE /i.test(statement));
+  if (!all) return statements;
+  const missing = neverAnalyzed(db).map(table => `ANALYZE "main"."${table}"`).filter(statement => !statements.includes(statement));
+  return [...statements, ...missing];
+}
+
+/** Tables with an index, at least one row and no `sqlite_stat1` entry. */
+function neverAnalyzed(db: Database): string[] {
+  const hasStats = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1'").get() !== null;
+  const tables = db.query(`SELECT DISTINCT tbl_name AS name FROM sqlite_master WHERE type = 'index' AND tbl_name NOT GLOB 'sqlite_*'${hasStats ? ' AND tbl_name NOT IN (SELECT tbl FROM sqlite_stat1)' : ''} ORDER BY tbl_name`).all() as { name: string }[];
+  return tables.map(row => row.name)
+    .filter(name => /^\w+$/.test(name) && db.query(`SELECT 1 FROM "${name}" LIMIT 1`).get() !== null);
 }
 
 /** One statement of `staleStatistics`, reading about 400 rows per index (sqlite.org/lang_analyze.html#approx). */
