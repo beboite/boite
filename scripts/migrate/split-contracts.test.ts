@@ -139,6 +139,16 @@ describe('migrate', () => {
     expect(read('threads.ts')).toStartWith("import type { Extra as Bonus } from './extra';");
   });
 
+  test('keeps an alias main gave to an import from another domain', () => {
+    const read = diverge(titled(single()), (files) => {
+      const threads = files.get('threads.ts')!.replace("import type { Settings } from './settings';", "import type { Settings as Prefs } from './settings';");
+      files.set('threads.ts', threads.replace('settings: Settings;', 'settings: Prefs;'));
+    });
+    expect(migrate(dir, 'HEAD', 'MERGE_HEAD', table).conflicts).toEqual([]);
+    expect(read('threads.ts')).toContain("import type { Settings as Prefs } from './settings';");
+    expect(read('threads.ts')).toContain('title: string;\n  extra: Extra;\n  settings: Prefs;');
+  });
+
   test('leaves conflict markers where both sides changed the same line', () => {
     const read = diverge(single().replace('theme: string;', 'theme: number;'), (files) => files.set('settings.ts', files.get('settings.ts')!.replace('theme: string;', 'theme: boolean;')));
     expect(migrate(dir, 'HEAD', 'MERGE_HEAD', table).conflicts).toEqual([`${SRC}/settings.ts`]);

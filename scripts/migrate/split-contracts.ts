@@ -444,11 +444,25 @@ export function migrate(cwd: string, ours: string, theirs: string, table: Table 
     }
   }
   for (const map of MAPS) symbols.set(map, { module: './index', type: true });
+  // A renamed import holds in its own file only, wherever it imports from.
+  const aliases = (name: string) => {
+    const own = new Map<string, Symbol>();
+    for (const side of [after.get(name), mainFiles.get(name)]) {
+      if (side === undefined) continue;
+      for (const statement of parse(name, splitHeader(side).header)) {
+        for (const specifier of statement.specifiers ?? []) {
+          const symbol = importedSymbol(statement, specifier);
+          if (symbol.imported) own.set(specifier.local.name, symbol);
+        }
+      }
+    }
+    return own;
+  };
   for (const name of clean) {
     const body = final.get(name)!;
     const reads = new Map<string, boolean>();
     for (const statement of parse(name, body)) references(statement, reads);
-    final.set(name, withHeader(importHeader(`./${name.slice(0, -3)}`, reads, symbols), body));
+    final.set(name, withHeader(importHeader(`./${name.slice(0, -3)}`, reads, new Map([...symbols, ...aliases(name)])), body));
     result.written.push(`${SRC}/${name}`);
   }
 
