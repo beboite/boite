@@ -257,8 +257,10 @@ swap counts as complete only when the data directory holds
 `server-update-restored` with the operation's id, written into the restored
 copy just before it takes the name; a missing folder never passes for one. The
 mark and the restored directory's entries are flushed before the swap, and a
-flush that fails on Linux stops it with the record kept, so a power cut cannot
-keep the swap and lose the mark. After a completed swap, every other
+flush that fails on Linux stops it with the record kept, so on a filesystem
+that can flush a directory a power cut cannot keep the swap and lose the mark.
+One that answers `EINVAL` or `ENOTSUP` to that flush gets the swap without
+that guarantee. After a completed swap, every other
 `<data>.restore-*` beside the
 data directory is renamed to `<data>.unused-restore-*`, so no later start
 replays an older copy. A recorded restore that is a file rather than a
