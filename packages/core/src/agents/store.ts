@@ -1,6 +1,6 @@
 import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
-import { AGENT_HISTORY_MAX_PAGE, AGENT_HISTORY_PAGE, answerAttachmentError } from '@boite/contracts';
+import { AGENT_HISTORY_MAX_PAGE, AGENT_HISTORY_PAGE, answerAttachmentError, decodedBytes } from '@boite/contracts';
 import type {
   AgentDraft, AgentEntities, AgentEntityKind, AgentProfile, AgentGroup, AgentTeam,
   AgentMission, AgentMissionTask, AgentSave, AgentScope, AgentMemory, AgentResource,
@@ -32,11 +32,7 @@ function unique<T extends AgentRecord>(records: T[]): T[] { const seen = new Set
 /** The frozen instructions stay in the core and in the run's own thread. */
 const attachmentsKey = (messageId: string) => `agents:attachments:${messageId}`;
 /** What a message shows of an attachment: never its bytes. */
-function describeAttachment(attachment: Attachment): AgentMessageAttachment {
-  const data = typeof attachment.data === 'string' ? attachment.data : '';
-  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
-  return { kind: attachment.kind, mimeType: attachment.mimeType, name: attachment.name ?? null, bytes: Math.max(0, Math.floor(data.length * 3 / 4) - padding) };
-}
+const describe = ({ kind, mimeType, name, data }: Attachment): AgentMessageAttachment => ({ kind, mimeType, name, bytes: decodedBytes(data) });
 function summary({ context: { instructions: _instructions, ...context }, ...run }: AgentRun): AgentRunSummary { return { ...run, context }; }
 type Reader<K extends AgentHistoryKind> = { filters: RecentFilter[]; keep: (record: AgentEntities[K]) => boolean };
 
@@ -281,18 +277,18 @@ export class AgentStore {
     const parent = params.replyTo ? this.records.get('message', params.replyTo) : null;
     if (parent && !sameScope(parent.scope, target)) throw refused('replyTo: message belongs to another conversation');
     const attachments = params.attachments ?? [];
-    if (attachments.length && session) throw refused('attachments: only the user attaches files to a message');
-    const attachmentProblem = answerAttachmentError(attachments);
-    if (attachmentProblem) throw refused(attachmentProblem.message, attachmentProblem.data);
-    const described = attachments.map(describeAttachment);
-    const result = this.records.command(actor, params.requestId, { method: 'send', target, body, recipientIds, replyTo: params.replyTo ?? null, ...(described.length ? { attachments: described } : {}) }, () => {
+    const problem = session && attachments.length ? { message: 'attachments: only the user sends them' } : answerAttachmentError(attachments);
+    if (problem) throw refused(problem.message, problem.data);
+    // Undefined when there are none, so JSON leaves the field out.
+    const described = attachments.length ? attachments.map(describe) : undefined;
+    const result = this.records.command(actor, params.requestId, { method: 'send', target, body, recipientIds, replyTo: params.replyTo ?? null, attachments: described }, () => {
       const current = session ? this.currentWork(session.threadId) : null;
       const episodeId = current?.episodeId ?? parent?.episodeId ?? newId('episode_');
       const available = allowed.filter(id => this.records.get('profile', id).status !== 'archived');
       const recipients = recipientIds.length ? recipientIds : session || group?.mode === 'mentions' ? [] : group?.mode === 'autonomous' ? available.slice(0, 1) : available;
-      const message = this.records.create('message', { scope: target, senderId: session?.agentId ?? null, text: body, recipientIds: recipients, replyTo: parent?.id ?? null, episodeId, sourceRunId: current?.runId ?? null, ...(described.length ? { attachments: described } : {}) });
+      const message = this.records.create('message', { scope: target, senderId: session?.agentId ?? null, text: body, recipientIds: recipients, replyTo: parent?.id ?? null, episodeId, sourceRunId: current?.runId ?? null, attachments: described });
       // The bytes wait beside the snapshot until every recipient's turn took them.
-      if (attachments.length) this.core.journal.setSetting(attachmentsKey(message.id), attachments);
+      if (described) this.core.journal.setSetting(attachmentsKey(message.id), attachments);
       this.deliver(message);
       return message;
     });
@@ -322,8 +318,7 @@ export class AgentStore {
   }
   /** Lets a message's attachments go once no recipient's work can start again: every delivery processed, cancelled or over the limit. */
   releaseAttachments(messageId: string | null): void {
-    if (!messageId || !this.core.journal.getSetting(attachmentsKey(messageId))) return;
-    if (this.records.find('delivery', 'messageId', [messageId]).every(d => ['processed', 'cancelled', 'limited'].includes(d.status))) this.core.journal.deleteSetting(attachmentsKey(messageId));
+    if (messageId && this.records.find('delivery', 'messageId', [messageId]).every(d => ['processed', 'cancelled', 'limited'].includes(d.status))) this.core.journal.deleteSetting(attachmentsKey(messageId));
   }
 
   /**
