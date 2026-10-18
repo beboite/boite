@@ -197,23 +197,35 @@ export function references(node: Node, found = new Map<string, boolean>(), inTyp
   return found;
 }
 
-export interface Symbol { module: string; type: boolean }
+/** Where a name comes from; `imported` is the name the module exports when the import renamed it. */
+export interface Symbol { module: string; type: boolean; imported?: string }
+
+/** The symbol an import specifier binds, keyed by its local name. */
+export function importedSymbol(statement: Node, specifier: Node): Symbol {
+  if (specifier.type === 'ImportNamespaceSpecifier') throw new Error(`import * as ${specifier.local.name} from '${statement.source.value}': name the imports instead`);
+  const imported = specifier.type === 'ImportDefaultSpecifier' ? 'default' : (specifier.imported.name ?? specifier.imported.value);
+  return {
+    module: statement.source.value,
+    type: statement.importKind === 'type' || specifier.importKind === 'type',
+    ...(imported === specifier.local.name ? {} : { imported }),
+  };
+}
 
 /** One `import type` line and one `import` line per module, sorted, for the names `reads` takes from elsewhere. */
 export function importHeader(self: string, reads: Map<string, boolean>, symbols: Map<string, Symbol>): string {
   const byModule = new Map<string, { types: string[]; values: string[] }>();
-  for (const [name, onlyType] of reads) {
+  for (const [name, onlyType] of [...reads].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     const symbol = symbols.get(name);
     if (!symbol || symbol.module === self) continue;
     const entry = byModule.get(symbol.module) ?? { types: [], values: [] };
-    (symbol.type || onlyType ? entry.types : entry.values).push(name);
+    (symbol.type || onlyType ? entry.types : entry.values).push(symbol.imported ? `${symbol.imported} as ${name}` : name);
     byModule.set(symbol.module, entry);
   }
   const lines: string[] = [];
   for (const module of [...byModule.keys()].sort()) {
     const { types, values } = byModule.get(module)!;
-    if (types.length) lines.push(`import type { ${types.sort().join(', ')} } from '${module}';`);
-    if (values.length) lines.push(`import { ${values.sort().join(', ')} } from '${module}';`);
+    if (types.length) lines.push(`import type { ${types.join(', ')} } from '${module}';`);
+    if (values.length) lines.push(`import { ${values.join(', ')} } from '${module}';`);
   }
   return lines.join('\n');
 }
@@ -294,9 +306,7 @@ export function splitContracts(source: string, table: Table = TABLE): Map<string
   for (const piece of top.concat(index.filter((p): p is Piece => 'text' in p))) {
     const statement = piece.nodes[0]!;
     if (statement.type !== 'ImportDeclaration') continue;
-    for (const specifier of statement.specifiers) {
-      symbols.set(specifier.local.name, { module: statement.source.value, type: statement.importKind === 'type' || specifier.importKind === 'type' });
-    }
+    for (const specifier of statement.specifiers) symbols.set(specifier.local.name, importedSymbol(statement, specifier));
   }
   for (const [name, pieces] of parts) for (const piece of pieces) for (const d of piece.nodes.flatMap(declared)) symbols.set(d.name, { module: `./${name}`, type: d.type });
   for (const [name, byMap] of members) for (const map of byMap.keys()) symbols.set(`${pascal(name)}${map}`, { module: `./${name}`, type: true });
@@ -417,15 +427,18 @@ export function migrate(cwd: string, ours: string, theirs: string, table: Table 
     for (const statement of parse('part.ts', splitHeader(text).header)) {
       for (const specifier of statement.specifiers ?? []) {
         if (statement.source.value.startsWith('./') && final.has(`${statement.source.value.slice(2).replace(/\.ts$/, '')}.ts`)) continue;
-        symbols.set(specifier.local.name, { module: statement.source.value, type: statement.importKind === 'type' || specifier.importKind === 'type' });
+        symbols.set(specifier.local.name, importedSymbol(statement, specifier));
       }
     }
   };
   for (const [name, text] of [...after, ...mainFiles]) if (name !== 'index.ts') external(text);
-  for (const [name, text] of final) {
-    if (result.conflicts.includes(`${SRC}/${name}`)) continue;
+  // A conflicted file cannot be parsed; its names belong to it on both sides, so they come from those.
+  const sources = [...final].flatMap(([name, text]): Array<[string, string]> => {
+    if (!result.conflicts.includes(`${SRC}/${name}`)) return [[name, clean.has(name) || name === 'index.ts' ? text : splitHeader(text).body]];
+    return [mainFiles.get(name), after.get(name)].flatMap((side) => (side === undefined ? [] : [[name, splitHeader(side).body] as [string, string]]));
+  });
+  for (const [name, body] of sources) {
     const module = `./${name.slice(0, -3)}`;
-    const body = clean.has(name) || name === 'index.ts' ? text : splitHeader(text).body;
     for (const statement of parse(name, body)) {
       for (const d of declared(statement)) symbols.set(d.name, { module, type: d.type });
     }

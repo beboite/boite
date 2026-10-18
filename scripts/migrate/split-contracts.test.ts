@@ -20,6 +20,7 @@ export type ThreadId = string;
 export interface Thread {
   id: ThreadId;
   extra: Extra;
+  settings: Settings;
 }
 ${extra.thread ?? ''}
 export const THREAD_MAX = 10;
@@ -42,11 +43,14 @@ export interface RpcEvents {
 }
 `;
 
+const aliased = (source: string) => source.replace("import type { Extra } from './extra';", "import type { Extra as Bonus } from './extra';").replace('extra: Extra;', 'extra: Bonus;');
+const titled = (source: string) => source.replace('id: ThreadId;', 'id: ThreadId;\n  title: string;');
+
 describe('splitContracts', () => {
   test('puts each declaration in its anchor file and each member in its namespace file', () => {
     const files = splitContracts(single(), table);
     expect([...files.keys()].sort()).toEqual(['ids.ts', 'index.ts', 'settings.ts', 'threads.ts']);
-    expect(files.get('threads.ts')).toStartWith("import type { Extra } from './extra';\nimport type { ThreadId } from './ids';\n\nexport interface Thread {");
+    expect(files.get('threads.ts')).toStartWith("import type { Extra } from './extra';\nimport type { ThreadId } from './ids';\nimport type { Settings } from './settings';\n\nexport interface Thread {");
     expect(files.get('threads.ts')).toContain("export interface ThreadsRpcEvents {\n  'thread.changed': { id: ThreadId; max: typeof THREAD_MAX };\n}");
     expect(files.get('settings.ts')).toContain("import type { PROTOCOL_VERSION } from './index';");
     expect(files.get('settings.ts')).toContain("export interface SettingsRpcMethods {\n  /** Owner only. */\n  'settings.get'");
@@ -54,6 +58,10 @@ describe('splitContracts', () => {
     expect(index).toContain("export * from './extra';\nimport type { SettingsRpcMethods } from './settings';");
     expect(index).toContain('export interface RpcMethods extends\n  ThreadsRpcMethods,\n  SettingsRpcMethods {}');
     expect(index).not.toContain('import type { Extra }');
+  });
+
+  test('keeps an aliased import under its exported name', () => {
+    expect(splitContracts(aliased(single()), table).get('threads.ts')).toStartWith("import type { Extra as Bonus } from './extra';");
   });
 
   test('refuses a single file that lost an anchor', () => {
@@ -112,6 +120,23 @@ describe('migrate', () => {
     expect(read('threads.ts')).toContain("  'threads.page': { params: { id: ThreadId }; result: ThreadPage };\n}");
     expect(read('settings.ts')).toContain('density: number;');
     expect(read('index.ts')).not.toContain('<<<<<<<');
+  });
+
+  test('keeps the imports of a clean domain that reads a type of a conflicted one', () => {
+    const read = diverge(
+      titled(single()).replace('theme: string;', 'theme: number;'),
+      (files) => files.set('settings.ts', files.get('settings.ts')!.replace('theme: string;', 'theme: boolean;')),
+    );
+    const result = migrate(dir, 'HEAD', 'MERGE_HEAD', table);
+    expect(result.conflicts).toEqual([`${SRC}/settings.ts`]);
+    expect(result.written).toEqual([`${SRC}/threads.ts`]);
+    expect(read('threads.ts')).toContain("import type { Settings } from './settings';");
+  });
+
+  test('replays the branch edits of a file that imports under an alias', () => {
+    const read = diverge(titled(aliased(single())));
+    expect(migrate(dir, 'HEAD', 'MERGE_HEAD', table).conflicts).toEqual([]);
+    expect(read('threads.ts')).toStartWith("import type { Extra as Bonus } from './extra';");
   });
 
   test('leaves conflict markers where both sides changed the same line', () => {
