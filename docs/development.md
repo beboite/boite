@@ -920,7 +920,8 @@ palette notices ship in `packages/ui/public/theme-licenses.txt`.
 Text and code faces are device preferences. Bundled variable fonts carry OFL
 licences under `public/fonts`; only selected Unicode ranges load, and the
 service worker precaches default faces. `lib/fonts.ts` and the boot script apply
-and preload preferences before the first paint. System choices use installed
+both preferences before the first paint and preload the selected text face; the
+code face loads when mono text first draws. System choices use installed
 fonts. In the shell, `Ctrl+=`, `Ctrl+-` and `Ctrl+0` control WebView zoom from
 50% to 200%, restored before the window appears. The panel browser has separate
 zoom; plain browsers keep their native shortcut behavior.
