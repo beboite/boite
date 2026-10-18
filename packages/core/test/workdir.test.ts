@@ -259,6 +259,15 @@ describe('byte tickets', () => {
   });
 });
 
+describe('files.locate', () => {
+  test('answers a chat link with the file its tail names under the thread', async () => {
+    mkdirSync(join(harness.dataDir, 'notes', '.local'), { recursive: true });
+    writeFileSync(join(harness.dataDir, 'notes', '.local', 'core-rules.md'), '# rules');
+    expect(await client.call('files.locate', { threadId, path: 'core-rules.md' })).toEqual(['notes/.local/core-rules.md']);
+    await expect(client.call('files.locate', { threadId, path: '' })).rejects.toThrow('files.locate path: expected a file path');
+  });
+});
+
 describe('files.write', () => {
   test('an existing file is replaced and the previous tail is not left behind', async () => {
     writeFileSync(join(harness.dataDir, 'note.txt'), 'ORIGINAL-CONTENT');

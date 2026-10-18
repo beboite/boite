@@ -494,6 +494,7 @@ test('every phone control on the chat, the panel, the list and Appearance takes 
     await page.click('[data-testid=panel-toggle]');
     await page.waitFor(`document.querySelector('[data-testid=panel-launcher]')`);
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+    await capture('mobile-panel-launcher.png');
     await page.click('[data-testid=launch-changes]');
     // The strip shows its scroll chevrons for a frame while the new tab lays out.
     await page.waitFor(`document.querySelector('[data-testid=panel-tab-close]') && !document.querySelector('[data-testid=right-panel] .chev')`);
