@@ -216,7 +216,8 @@ export class TurnAttempts {
         result = { ...result, status: 'stopped', ...(fresh ? { error: undefined } : {}) };
         break;
       }
-      if (fresh !== null && result.status === 'error') {
+      // A keepalive on a fresh session would write the whole history to warm nothing: it fails, and the wait ends.
+      if (fresh !== null && result.status === 'error' && queued.execution?.operation !== 'keepalive') {
         state.thread = fresh;
         retriedLostSession = true;
         totals = undefined;

@@ -73,11 +73,14 @@ function finishThread(core: Core, { thread, finished, result }: Settlement): Com
   const sameSession = (current.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0)
     && current.sessionId === thread.sessionId && current.providerId === thread.providerId && current.accountId === thread.accountId;
   const sessionId = sameSession ? result.sessionId ?? current.sessionId : current.sessionId;
+  // A keepalive is the core's housekeeping: it says nothing new, so it leaves the thread as read as it was,
+  // and a failed one leaves it idle, where the result it waits for can still come in (`threads/cache-keepalive.ts`).
+  const keepalive = finished.execution?.operation === 'keepalive';
   const next: ThreadSummary = {
     ...current, sessionId,
     sessionResumeAt: !sameSession ? current.sessionResumeAt : current.sessionResumeAt && sessionId === current.sessionId && sessionId === thread.sessionId ? current.sessionResumeAt : null,
-    status: result.status === 'error' ? 'error' : 'idle',
-    unread: current.unread || !core.subscribers.hasSubscribers(thread.id),
+    status: result.status === 'error' && !keepalive ? 'error' : 'idle',
+    unread: keepalive ? current.unread : current.unread || !core.subscribers.hasSubscribers(thread.id),
     promptCache: sameSession ? promptCacheOf(result, thread, finished.finishedAt ?? Date.now(), current.promptCache ?? null) ?? current.promptCache ?? null : current.promptCache ?? null,
     updatedAt: Date.now(),
   };

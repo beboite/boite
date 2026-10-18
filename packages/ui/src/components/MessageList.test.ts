@@ -209,6 +209,27 @@ test('system coordination messages show their display text outside the user bubb
   expect(document.querySelector('.bubble')).toBeNull();
 });
 
+test('cache pings are one quiet line between the turns they sit in, with no answer, summary or bubble', () => {
+  stubLayout(400);
+  const ping = (n: number) => ({ id: `turn-ping-${n}`, threadId: 't-short', status: 'done', queuedAt: n, startedAt: n, finishedAt: n, usage: null, error: null, execution: { operation: 'keepalive', automatic: true } });
+  const messages: Message[] = [
+    { id: 'm-answer', threadId: 't-short', turnId: 'turn-real', role: 'assistant', state: 'complete', createdAt: 1, parts: [{ type: 'text', text: 'Agents started' }] },
+    ...[2, 3].flatMap((n): Message[] => [
+      { id: `m-ping-${n}`, threadId: 't-short', turnId: `turn-ping-${n}`, role: 'system', state: 'complete', createdAt: n * 10, parts: [{ type: 'text', text: 'Reply with the single word ok.', displayText: 'Prompt cache kept warm' }] },
+      { id: `m-ok-${n}`, threadId: 't-short', turnId: `turn-ping-${n}`, role: 'assistant', state: 'complete', createdAt: n * 10 + 1, parts: [{ type: 'text', text: 'ok' }] },
+    ]),
+  ];
+  const pinged = { ...store, openThread: { id: 't-short', turns: [ping(2), ping(3)], messages } } as unknown as Store;
+  running = mount(MessageList, { target: document.body, props: { store: pinged, threadId: 't-short', messages } });
+  flushSync();
+  const markers = document.querySelectorAll('[data-testid="keepalive-marker"]');
+  expect(markers).toHaveLength(1);
+  expect(markers[0]!.textContent).toContain('Prompt cache kept warm 2 times');
+  expect(document.querySelectorAll('[data-testid="message"]')).toHaveLength(2);
+  expect(document.querySelector('[data-testid="timeline"]')?.textContent).not.toContain('ok');
+  expect(document.querySelector('[data-testid="message-system"]')).toBeNull();
+});
+
 test.for([false, true])('the outline rail is left of the bubbles on a desktop and not drawn on a phone (phone: %s)', async (phone, { createStore }) => {
   const { store: owner, client } = createStore({ delayMs: 0 });
   owner.attach(client);
