@@ -215,7 +215,7 @@
     font-weight: 600;
   }
   .pip { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .contact[data-link='connecting'] .pip { animation: pulse 1.6s var(--ease-out-quint) infinite; }
+  .contact[data-link='connecting'] .pip { animation: pulse 1.6s var(--ease-out-quint) infinite var(--loops); }
   .trust { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-radius: var(--radius-md); background: var(--color-surface-2); font-weight: 500; }
   .lanes { position: relative; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
   .lane { display: grid; gap: 8px; align-content: start; min-width: 0; }

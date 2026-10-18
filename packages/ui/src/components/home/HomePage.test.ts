@@ -121,3 +121,26 @@ test('an invitation shows its link and share; a joined link shows the four words
   await vi.waitFor(() => { flushSync(); expect(one('home-tier-3')!.getAttribute('aria-pressed')).toBe('true'); });
   expect((await contacts(store)).settings.minTier).toBe(3);
 });
+
+test('a link that shares the inviter, pasted without an API key, offers the share first and keeps it after a join that cannot reach', async () => {
+  await draw();
+  // Made while the key is set, the invitation carries its Tailscale share.
+  one<HTMLButtonElement>('contact-invite-create')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-share')?.dataset.status).toBe('created'); });
+  const link = one<HTMLInputElement>('contact-invite-link')!.value;
+  const share = one<HTMLAnchorElement>('contact-invite-share')!.href;
+  one<HTMLButtonElement>('contact-key-clear')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-key-state')!.textContent).toBe(strings.contacts.tailscale.keyMissing); });
+  expect(one('contact-join-share')).toBeNull();
+
+  type(one<HTMLInputElement>('contact-join-link')!, link);
+  const step = one<HTMLAnchorElement>('contact-join-share')!;
+  expect([step.href, step.target, step.textContent]).toEqual([share, '_blank', strings.contacts.join.acceptShare]);
+  one<HTMLButtonElement>('contact-join')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('home-error')?.textContent).toContain('accept its Tailscale share'); });
+  expect(one('contact-join-share')).not.toBeNull();
+  // Accepted meanwhile: the same link joins.
+  one<HTMLButtonElement>('contact-join')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-joined-words')?.querySelectorAll('li')).toHaveLength(4); });
+  expect(one('contact-join-share')).toBeNull();
+});

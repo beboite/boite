@@ -3073,6 +3073,8 @@ export const strings = {
       placeholder: 'boite://contact#',
       submit: 'Join',
       joining: 'Joining',
+      acceptShare: 'Accept the Tailscale share',
+      acceptShareTip: 'This invitation shares the other machine through Tailscale. Without an API key here, accept the share in your browser first, then join.',
       compare: 'Compare with {name}',
       compareTip: 'Read these four words to each other, on a call or in person. The same words on both screens mean nobody sat between you.',
       done: 'Done'

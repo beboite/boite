@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
   import { Check, Copy, ExternalLink, Link2, Send, TriangleAlert } from '@lucide/svelte';
+  import { inviteShare } from '../../lib/contact-link';
   import { copyText, type ContactsView } from '../../lib/contacts.svelte';
   import { time } from '../../lib/format';
   import { fill, strings } from '../../lib/strings';
@@ -10,7 +11,9 @@
   /**
    * The two ways a contact starts: Invite makes a one-time link with Copy, its
    * expiry and how the Tailscale share went; Join takes the link another owner
-   * sent and then shows the four words to compare with them.
+   * sent and then shows the four words to compare with them. A link that
+   * shares the inviter through Tailscale, pasted where no API key can accept
+   * it, first offers the share to accept by hand.
    */
   let { view }: { view: ContactsView } = $props();
   const labels = $derived(strings.contacts);
@@ -31,6 +34,7 @@
   $effect(() => { void view.invite; untrack(() => { copied = false; }); });
 
   let pasted = $state('');
+  const shareStep = $derived(view.state?.tailscale.apiKey === true ? null : inviteShare(pasted));
   async function join() {
     const link = pasted.trim();
     if (!link) return;
@@ -88,6 +92,15 @@
         <button type="button" class="small done" onclick={() => { view.joined = null; }} data-testid="contact-joined-done">{labels.join.done}</button>
       </div>
     {:else}
+      {#if shareStep}
+        <!-- Stays while the link does, so it is still there after a join that could not reach the inviter. -->
+        <span class="step ui-label-box">
+          <a class="share manual-step" href={shareStep} target="_blank" rel="noreferrer" data-testid="contact-join-share">
+            <Link2 size={14} strokeWidth={2} /><span class="ui-label">{labels.join.acceptShare}</span><ExternalLink size={12} />
+          </a>
+          <InfoTip topic={labels.join.acceptShare} text={labels.join.acceptShareTip} />
+        </span>
+      {/if}
       <form class="join" onsubmit={event => { event.preventDefault(); void join(); }}>
         <input class="mono" bind:value={pasted} placeholder={labels.join.placeholder} aria-label={labels.join.label} spellcheck="false" autocomplete="off" data-testid="contact-join-link" />
         <button type="submit" class="primary" disabled={!pasted.trim() || view.isBusy('join')} data-testid="contact-join">
@@ -127,6 +140,8 @@
   .reason { color: var(--color-muted-foreground); font-size: var(--text-sm); overflow-wrap: anywhere; }
   .share.manual a { display: inline-flex; align-items: center; gap: 4px; justify-self: start; color: var(--color-foreground); font-size: var(--text-sm); }
   .again { justify-self: start; }
+  .step { display: flex; align-items: center; gap: 4px; }
+  .manual-step { background: color-mix(in oklch, var(--color-live) 12%, transparent); color: var(--color-live); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-live) 35%, transparent); }
   .join { display: flex; gap: 8px; min-width: 0; }
   .join input { flex: 1; min-width: 0; font-size: var(--text-sm); }
   .compare { display: flex; align-items: center; gap: 4px; margin: 0; font-weight: 600; }
@@ -137,6 +152,6 @@
     .tile { padding: 14px; }
     .join { flex-direction: column; }
     .join input { flex: none; }
-    .big, .join button, .join input { min-height: var(--touch-target); }
+    .big, .join button, .join input, .manual-step { min-height: var(--touch-target); }
   }
 </style>

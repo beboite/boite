@@ -1,10 +1,10 @@
 /** Contacts: another owner's Boite, linked for agent work on the projects each side opens. Seeded with Chris. */
 import { RpcErrorCode, type Contact, type ContactRequest, type ContactsState, type ContactTailscale } from '@boite/contracts';
 import { RpcFailure } from '../client';
+import { encodeInvite, INVITE_PREFIX, inviteShare, readInvite } from '../contact-link';
 import type { FakeContext, FakeMethods } from './context';
 
 const DAY = 24 * 60 * 60_000;
-const INVITE_PREFIX = 'boite://contact#';
 const WORDS = ['amber', 'orbit', 'lantern', 'meadow', 'falcon', 'cobalt', 'harbor', 'velvet', 'thistle', 'glacier', 'ember', 'quartz'];
 const POLICY_FIX = `"grants": [
   { "src": ["autogroup:shared"], "dst": ["autogroup:self:8777"], "ip": ["tcp:8777"] }
@@ -15,6 +15,8 @@ const refuse = (message: string, field?: string) =>
 const invalid = (message: string, field: string) => new RpcFailure({ code: RpcErrorCode.InvalidParams, message, data: { field } });
 
 const states = new WeakMap<FakeContext, ContactsState>();
+/** Shares an invitee without a key was sent to: the next join with the link goes through, as once the owner accepted it. */
+const opened = new WeakMap<FakeContext, Set<string>>();
 
 function tailscale(apiKey: boolean): ContactTailscale {
   return apiKey
@@ -106,26 +108,31 @@ export function contactMethods(ctx: FakeContext) {
     'contacts.invite': async () => {
       const state = stateOf(ctx);
       const token = `fake-contact-${++ctx.seq}`;
-      const card = { c: state.self.coreId, m: state.self.machine, u: `http://${state.tailscale.fqdn ?? 'boite-pc'}:8777`, t: token };
+      const share = state.tailscale.apiKey
+        ? { status: 'created' as const, url: `https://login.tailscale.com/admin/invite/${token}` }
+        : { status: 'manual' as const, reason: 'No Tailscale API key is stored: share this machine from the admin console.' };
+      const url = `http://${state.tailscale.fqdn ?? 'boite-pc'}:8777`;
       return {
-        link: INVITE_PREFIX + btoa(JSON.stringify(card)),
+        link: encodeInvite({ v: 1, c: state.self.coreId, m: state.self.machine, u: url, t: token, s: share.status === 'created' ? share.url : null }),
         expiresAt: ctx.now() + DAY,
-        share: state.tailscale.apiKey
-          ? { status: 'created' as const, url: `https://login.tailscale.com/admin/invite/${token}` }
-          : { status: 'manual' as const, reason: 'No Tailscale API key is stored: share this machine from the admin console.' }
+        share
       };
     },
     'contacts.join': async (params) => {
       const link = typeof params?.link === 'string' ? params.link.trim() : '';
       if (!link.startsWith(INVITE_PREFIX)) throw invalid(`link: expected an invitation starting with ${INVITE_PREFIX}`, 'link');
-      let machine = 'new-contact';
-      try {
-        const card = JSON.parse(atob(link.slice(INVITE_PREFIX.length))) as { m?: unknown };
-        if (typeof card.m === 'string' && card.m) machine = card.m;
-      } catch {
-        throw invalid('link: the invitation is damaged; ask for a new one', 'link');
-      }
+      const card = readInvite(link);
+      if (!card) throw invalid('link: the invitation is damaged; ask for a new one', 'link');
+      const machine = typeof card.m === 'string' && card.m ? card.m : 'new-contact';
       const state = stateOf(ctx);
+      // Like the core: without a key nothing accepts the share, and the inviter stays out of reach until the owner does.
+      const share = inviteShare(link);
+      const seen = opened.get(ctx) ?? new Set<string>();
+      opened.set(ctx, seen);
+      if (share !== null && !state.tailscale.apiKey && !seen.has(share)) {
+        seen.add(share);
+        throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `could not reach ${machine} at ${String(card.u)}: accept its Tailscale share, then join again` });
+      }
       const seq = ++ctx.seq;
       const contact: Contact = {
         coreId: `core-${machine}-${seq}`, name: machine, machine, fingerprint: words(seq), role: 'guest',

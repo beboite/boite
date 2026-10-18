@@ -2913,6 +2913,8 @@ export const fr: Translation = {
       placeholder: 'boite://contact#',
       submit: 'Rejoindre',
       joining: 'Connexion',
+      acceptShare: 'Accepter le partage Tailscale',
+      acceptShareTip: 'Cette invitation partage l\'autre machine via Tailscale. Sans clé d\'API ici, acceptez d\'abord le partage dans votre navigateur, puis rejoignez.',
       compare: 'À comparer avec {name}',
       compareTip: 'Lisez-vous ces quatre mots, au téléphone ou en personne. Les mêmes mots sur les deux écrans veulent dire que personne ne s\'est placé entre vous.',
       done: 'Terminé'

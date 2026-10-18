@@ -574,9 +574,15 @@ export class Coordination {
 
   /** A project closed to a contact: its letters waiting for threads it no longer reaches go nowhere. */
   rejectContactLetters(coreId: string, reason: string): void {
+    const unreachable = (letter: AgentLetter): boolean => letter.from.coreId === coreId && !this.core.contacts.mayReach(coreId, letter.to.threadId);
+    // A wake already queued for such a letter is stopped, and finds nothing left to deliver if it starts anyway.
+    const queued = this.rows("direction = 'in' AND status = 'uncertain'").map(row => JSON.parse(row.data) as AgentLetter)
+      .filter(letter => letter.error === 'Queued for provider delivery' && unreachable(letter));
+    for (const letter of queued) this.update(letter, 'rejected', reason);
+    for (const threadId of new Set(queued.map(letter => letter.to.threadId))) this.core.threads.stopQueuedCoordination(threadId);
     for (const row of this.rows("direction = 'in' AND status IN ('queued', 'received')")) {
       const letter = JSON.parse(row.data) as AgentLetter;
-      if (letter.from.coreId === coreId && !this.core.contacts.mayReach(coreId, letter.to.threadId)) this.update(letter, 'rejected', reason);
+      if (unreachable(letter)) this.update(letter, 'rejected', reason);
     }
   }
 

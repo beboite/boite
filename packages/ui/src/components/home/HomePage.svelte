@@ -201,7 +201,7 @@
   .stat { --tone: var(--color-success); display: inline-flex; align-items: center; gap: 6px; height: var(--control-sm); padding: 0 10px; border-radius: var(--radius-full); background: color-mix(in oklch, var(--tone) 15%, transparent); color: var(--tone); font-size: var(--text-xs); font-weight: 600; }
   .stat[data-tone='accent'] { --tone: var(--color-accent); }
   .pip { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .stat[data-tone='accent'] .pip { animation: pulse 1.6s var(--ease-out-quint) infinite; }
+  .stat[data-tone='accent'] .pip { animation: pulse 1.6s var(--ease-out-quint) infinite var(--loops); }
 
   .banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0; padding: 8px 8px 8px 12px; border-radius: var(--radius-md); background: color-mix(in oklch, var(--color-danger) 12%, transparent); color: var(--color-danger); font-size: var(--text-sm); }
   .banner.quiet { background: var(--color-surface-2); color: var(--color-muted-foreground); }

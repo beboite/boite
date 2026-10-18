@@ -1,20 +1,21 @@
 /**
- * The concierge: one fresh conversation that answers a trusted contact's
+ * The concierge: one tool-free inference that answers a trusted contact's
  * request when no git remote decides it. It reads the request and this
- * owner's project list as data, in read-only mode, and ends on one verdict
- * line. Like a `/goal2` reviewer it has none of another conversation's
- * context, and the core, not the agent, applies what it said.
+ * owner's project list as data and ends on one verdict line. It runs on the
+ * driver's side-question path: no tools, no MCP, no hooks or settings, no
+ * agent token and nothing persisted, so a request cannot make it read a file.
+ * A protocol without that path never runs it: the request waits for the
+ * owner. The core, not the model, applies what it said.
  */
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ContactRequest, DelegationConfig, ThreadSummary, Turn } from '@boite/contracts';
-import { assertDriverRunnable } from '../drivers/index.ts';
+import type { ContactRequest, DelegationConfig, ThreadSummary } from '@boite/contracts';
+import { assertDriverRunnable, getDriver } from '../drivers/index.ts';
 import type { Core } from '../core.ts';
 import { newId } from '../ids.ts';
-import { messageOf } from '../errors.ts';
 
 /** A concierge that has not answered by then leaves the request to the owner. */
-const TIMEOUT_MS = 10 * 60_000;
+const TIMEOUT_MS = 3 * 60_000;
 const FALLBACK = { providerId: 'claude', model: 'claude-opus-5-5', effort: 'high' } as const;
 
 export type ConciergeVerdict = { accept: true; projectId: string } | { accept: false; reason: string };
@@ -52,8 +53,7 @@ export function conciergePrompt(request: ContactRequest, projects: { id: string;
 }
 
 export class Concierge {
-  private readonly runs = new Map<string, { finish: (answer: string | Error) => void }>();
-  private off: (() => void) | null = null;
+  private readonly runs = new Set<AbortController>();
   private closed = false;
 
   constructor(private readonly core: Core) {}
@@ -74,70 +74,64 @@ export class Concierge {
     return { providerId: FALLBACK.providerId, accountId: account.id, model: FALLBACK.model, effort: FALLBACK.effort };
   }
 
-  /** Runs one concierge conversation; throws when it cannot start, fails or ends without a verdict. */
+  /** Runs one tool-free inference; throws when the route cannot run it, it fails, or it ends without a verdict. */
   async decide(request: ContactRequest, projects: { id: string; name: string; gitRemote?: string }[]): Promise<ConciergeVerdict> {
     if (this.closed) throw new Error('the core is stopping');
     const route = this.route();
     const provider = this.core.providers.require(route.providerId);
-    assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(route.accountId), () => this.core.providers.launcherScriptOnly(provider.id));
-    this.off ??= this.core.bus.onAny((name, payload) => {
-      if (name !== 'turn.finished') return;
-      const turn = payload as Turn;
-      const run = this.runs.get(turn.threadId);
-      if (!run) return;
-      if (turn.status !== 'done') { run.finish(new Error(`the concierge ${turn.status === 'stopped' ? 'was stopped' : `failed: ${turn.error ?? 'no error given'}`}`)); return; }
-      const text = [...this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })]
-        .filter(message => message.role === 'assistant')
-        .flatMap(message => message.parts.flatMap(part => part.type === 'text' ? [part.text] : []))
-        .join('\n');
-      run.finish(text);
-    });
-    const id = this.thread(route, request.contact);
-    const answer = await new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => finish(new Error('the concierge did not answer within 10 minutes')), TIMEOUT_MS);
-      timer.unref?.();
-      const finish = (value: string | Error): void => {
-        if (!this.runs.delete(id)) return;
-        clearTimeout(timer);
-        if (value instanceof Error) reject(value); else resolve(value);
-      };
-      this.runs.set(id, { finish });
-      try {
-        this.core.threads.startTurn(id, conciergePrompt(request, projects), [], undefined, undefined, undefined, undefined, `Answer ${request.contact}'s request`.slice(0, 500));
-      } catch (error) { finish(error instanceof Error ? error : new Error(messageOf(error))); }
-    }).finally(() => {
-      // Kept for the owner to read what it decided, out of the way.
-      try { if (!this.core.journal.isClosed()) this.core.threads.archive(id, true); } catch { /* Already archived or removed. */ }
-    });
+    const account = this.core.accounts.require(route.accountId);
+    assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account, () => this.core.providers.launcherScriptOnly(provider.id));
+    const driver = getDriver(provider.protocol);
+    if (!driver.sideQuestion) throw new Error(`${provider.name} has no tool-free inference, so it cannot be the concierge`);
+    const cwd = join(this.core.dataDir, 'contacts', 'concierge');
+    mkdirSync(cwd, { recursive: true });
+    const now = Date.now();
+    // Never stored: the driver reads its model, effort and folder, nothing else.
+    const thread: ThreadSummary = {
+      id: newId('thr_'), projectId: null, title: `Concierge for ${request.contact}`.slice(0, 120), titleSource: 'user',
+      providerId: route.providerId, accountId: route.accountId, model: route.model, effort: route.effort, speed: null,
+      cwd, branch: null, permissionMode: 'plan', status: 'idle', unread: false, archived: false, pinned: false,
+      sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, createdAt: now, updatedAt: now,
+    };
+    // Its processes are traced under their own id and stopped with it; no agent token reaches them.
+    const procId = `concierge:${thread.id}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error('the concierge did not answer within 3 minutes')), TIMEOUT_MS);
+    timer.unref?.();
+    this.runs.add(controller);
+    const installs = this.core.providers.installs;
+    const prompt = conciergePrompt(request, projects);
+    let answer: string;
+    try {
+      answer = await driver.sideQuestion({
+        thread, provider, question: prompt, prompt, accountEnv: this.core.accounts.accountEnv(account, provider), signal: controller.signal,
+        spawnChild: (cmd, args, opts) => {
+          const child = this.core.procs.spawnChild(procId, cmd, args, opts);
+          // The install stays in place while the child runs.
+          installs.acquire(provider.id);
+          let released = false;
+          const drop = (): void => { if (!released) { released = true; installs.release(provider.id); } };
+          child.once('exit', drop);
+          child.once('error', drop);
+          return child;
+        },
+        log: (level, message) => this.core.log(level, `contacts concierge: ${message}`, { source: 'contacts' }),
+      });
+      controller.signal.throwIfAborted();
+    } finally {
+      clearTimeout(timer);
+      this.runs.delete(controller);
+      this.core.procs.killTree(procId);
+    }
     const verdict = parseConciergeVerdict(answer);
     if (verdict === null) throw new Error('the concierge ended without a CONCIERGE line');
     if (verdict.accept && !projects.some(project => project.id === verdict.projectId)) throw new Error(`the concierge named ${verdict.projectId}, not one of the listed projects`);
     return verdict;
   }
 
-  /** A top-level, projectless conversation in read-only mode, with coordination off. */
-  private thread(route: Route, contact: string): string {
-    const cwd = join(this.core.dataDir, 'contacts', 'concierge');
-    mkdirSync(cwd, { recursive: true });
-    const now = Date.now();
-    const thread: ThreadSummary = {
-      id: newId('thr_'), projectId: null, title: `Concierge · ${contact}`.slice(0, 120), titleSource: 'user',
-      providerId: route.providerId, accountId: route.accountId, model: route.model, effort: route.effort, speed: null,
-      cwd, branch: null, permissionMode: 'plan', status: 'idle', unread: false, archived: false, pinned: false,
-      sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, createdAt: now, updatedAt: now,
-    };
-    this.core.journal.db.transaction(() => {
-      this.core.journal.append({ type: 'thread.created', threadId: thread.id, version: 1, payload: thread }, () => this.core.journal.putThread(thread));
-      this.core.journal.setSetting(`coordination:${thread.id}`, { mode: 'off', resources: '', remote: false, paused: false });
-    })();
-    this.core.bus.emit('thread.created', thread);
-    return thread.id;
-  }
-
   close(): void {
     this.closed = true;
-    this.off?.();
-    this.off = null;
-    for (const run of [...this.runs.values()]) run.finish(new Error('the core is stopping'));
+    for (const run of this.runs) run.abort(new Error('the core is stopping'));
+    this.runs.clear();
   }
 }

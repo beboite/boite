@@ -1,10 +1,17 @@
 import { afterEach, expect, test } from 'bun:test';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentLetter } from '@boite/contracts';
+import type { AgentContact, AgentLetter } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
+import { decodeInvite, tokenHash } from '../src/contacts/invite.ts';
+import { CONTACT_JOIN_ROUTE, JOIN_INPUT } from '../src/contacts/join.ts';
 import { CONTACT_LINK_ROUTE } from '../src/contacts/store.ts';
+import { pack, seal, SEALED } from '../src/group/seal.ts';
+import { newToken } from '../src/ids.ts';
+import { Refusals, REFUSALS_PER_MINUTE } from '../src/server/refusals.ts';
 import { setDriver } from '../src/drivers/index.ts';
+import type { Driver } from '../src/drivers/types.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const cores: TestCore[] = [];
@@ -50,7 +57,7 @@ async function linked() {
 }
 
 const letters = (harness: TestCore, threadId: string): AgentLetter[] => harness.core.coordination.get(threadId).messages;
-const requestsOf = (harness: TestCore) => (harness.core.journal.getSetting('contacts:requests') as { id: string; direction: string; status: string }[] | undefined) ?? [];
+const requestsOf = (harness: TestCore) => (harness.core.journal.getSetting('contacts:requests') as { id: string; remoteId?: string; direction: string; status: string }[] | undefined) ?? [];
 
 /** Polls an async condition, for what only an RPC reads. */
 async function eventually(predicate: () => Promise<boolean>, timeoutMs = 10000): Promise<void> {
@@ -148,11 +155,14 @@ test('an ask waits for the owner, who opens a project; the asking thread hears t
   // An agent names a contact as its owner did, in any case.
   const asked = await guestClient.call('collaboration.ask', { threadId: guestThread, contact: guest.core.contacts.find(hostId)!.name.toUpperCase(), text: 'an agent on a project like alpha' });
   expect(asked).toMatchObject({ direction: 'out', coreId: hostId, status: 'pending' });
-  await waitFor(() => requestsOf(host).some(request => request.id === asked.id && request.direction === 'in'), 10000);
+  await waitFor(() => requestsOf(host).some(request => request.remoteId === asked.id && request.direction === 'in'), 10000);
   const incoming = (await hostClient.call('contacts.get', {})).requests;
-  expect(incoming[0]).toMatchObject({ id: asked.id, direction: 'in', status: 'pending', text: 'an agent on a project like alpha' });
-  await expect(hostClient.call('contacts.decide', { id: asked.id, accept: true })).rejects.toThrow('projectId');
-  const decided = await hostClient.call('contacts.decide', { id: asked.id, accept: true, projectId: open.id });
+  // The host names the request with its own id; the guest's stays on the wire.
+  expect(incoming[0]).toMatchObject({ direction: 'in', status: 'pending', text: 'an agent on a project like alpha' });
+  expect(incoming[0]!.id).not.toBe(asked.id);
+  await expect(hostClient.call('contacts.decide', { id: asked.id, accept: true, projectId: open.id })).rejects.toThrow('pending request');
+  await expect(hostClient.call('contacts.decide', { id: incoming[0]!.id, accept: true })).rejects.toThrow('projectId');
+  const decided = await hostClient.call('contacts.decide', { id: incoming[0]!.id, accept: true, projectId: open.id });
   expect(decided).toMatchObject({ status: 'accepted', decidedBy: 'owner', project: { id: open.id, name: 'alpha' } });
   expect(host.core.contacts.find(guestId)?.grants).toEqual([expect.objectContaining({ projectId: open.id, readThreads: false })]);
   await waitFor(() => letters(guest, guestThread).some(letter => letter.origin === 'contact'), 15000);
@@ -178,50 +188,85 @@ test('a trusted contact whose git remote matches exactly one project is answered
   // Only host and path leave the guest: never the credentials its remote carries.
   expect(matched.gitRemote).toBe('github.com/acme/app');
   await waitFor(() => requestsOf(guest).find(request => request.id === matched.id)?.status === 'accepted', 15000);
-  const answered = (await hostClient.call('contacts.get', {})).requests.find(request => request.id === matched.id);
+  const answered = (await hostClient.call('contacts.get', {})).requests.find(request => request.text === 'help on the app');
   expect(answered).toMatchObject({ status: 'accepted', decidedBy: 'match', project: { id: app.id } });
 
   // No remote decides this one: the concierge, on the owner's "concierge" profile, opens docs.
   const echo = (await hostClient.call('accounts.list', {})).find(entry => entry.providerId === 'echo')!;
   host.core.journal.setSetting('delegation:contacts-test', { enabled: true, paused: false, profiles: [{ id: 'concierge', name: 'Concierge', providerId: 'echo', accountId: echo.id, model: 'echo', effort: null }] });
   const prompts: string[] = [];
+  const threadsBefore = host.core.journal.listThreads().length;
+  const startTurn: Driver['startTurn'] = ctx => {
+    const id = ctx.emit.startMessage('assistant');
+    ctx.emit.part(id, 0, { type: 'text', text: 'Noted.' });
+    ctx.emit.complete(id, 'complete');
+    return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+  };
   restore = setDriver('echo', {
     protocol: 'echo',
-    startTurn(ctx) {
-      const id = ctx.emit.startMessage('assistant');
-      const concierge = ctx.prompt.includes('You are the concierge');
-      if (concierge) prompts.push(ctx.prompt);
-      ctx.emit.part(id, 0, { type: 'text', text: concierge ? `The docs project fits.\nCONCIERGE: OPEN ${docs.id}` : 'Noted.' });
-      ctx.emit.complete(id, 'complete');
-      return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+    startTurn,
+    // The tool-free path: nothing stored, no agent token, the request as data.
+    async sideQuestion(ctx) {
+      prompts.push(ctx.prompt);
+      expect(host.core.journal.getThread(ctx.thread.id)).toBeNull();
+      return `The docs project fits.\nCONCIERGE: OPEN ${docs.id}`;
     },
   });
   const other = await guestClient.call('collaboration.ask', { threadId: plainThread, contact: hostId, text: 'someone who writes documentation' });
   expect(other.gitRemote).toBeUndefined();
   await waitFor(() => requestsOf(guest).find(request => request.id === other.id)?.status === 'accepted', 20000);
-  const viaConcierge = (await hostClient.call('contacts.get', {})).requests.find(request => request.id === other.id);
+  const viaConcierge = (await hostClient.call('contacts.get', {})).requests.find(request => request.text === 'someone who writes documentation');
   expect(viaConcierge).toMatchObject({ status: 'accepted', decidedBy: 'concierge', project: { id: docs.id } });
   expect(prompts).toHaveLength(1);
   expect(prompts[0]).toContain('someone who writes documentation');
-  // The concierge never opens conversations to reading.
+  // The concierge never opens conversations to reading, and leaves no conversation behind.
   expect(host.core.contacts.find(guestId)?.grants.every(grant => !grant.readThreads)).toBe(true);
-  const conciergeThread = host.core.journal.listThreads().find(entry => entry.title.startsWith('Concierge'));
-  expect(conciergeThread).toMatchObject({ permissionMode: 'plan', projectId: null });
-  await waitFor(() => host.core.journal.getThread(conciergeThread!.id)?.archived === true);
+  expect(host.core.journal.listThreads()).toHaveLength(threadsBefore);
+
+  // A route that cannot run without tools never runs: the request waits for the owner.
+  restore();
+  restore = setDriver('echo', { protocol: 'echo', startTurn });
+  const waits = new Promise<string>(resolve => {
+    const off = host.core.bus.onAny((name, payload) => {
+      const message = (payload as { message?: string }).message ?? '';
+      if (name === 'core.log' && message.includes('waits for the owner')) { off(); resolve(message); }
+    });
+  });
+  await guestClient.call('collaboration.ask', { threadId: plainThread, contact: hostId, text: 'someone for the release notes' });
+  expect(await waits).toContain('no tool-free inference');
+  expect((await hostClient.call('contacts.get', {})).requests.find(request => request.text === 'someone for the release notes')?.status).toBe('pending');
+  expect(prompts).toHaveLength(1);
 }, 40000);
 
-test('revoke rejects letters waiting for the closed project and hides it; remove closes the link', async () => {
+test('revoke rejects letters waiting for the closed project, queued wakes included, closes the reply window and hides it; remove closes the link', async () => {
   const { host, guest, hostClient, guestClient, hostId, guestId } = await linked();
   const open = await project(host, hostClient, 'alpha');
   const hostThread = await thread(hostClient, open.id, 'Alpha work');
   const guestThread = await thread(guestClient, (await project(guest, guestClient, 'mine')).id, 'Guest work');
   await hostClient.call('contacts.grant', { coreId: guestId, projectId: open.id });
-  // Paused, the host thread keeps the letter waiting.
+  host.core.coordination.configure(hostThread, { mode: 'brief', resources: '', remote: true, paused: false });
+  const send = (text: string) => guest.core.coordination.send({ threadId: guestThread, to: { coreId: hostId, threadId: hostThread }, text, requestId: crypto.randomUUID() });
+  // A real exchange: the host thread answers, so it may hear back for 7 days.
+  const hello = await send('Hello from the guest.');
+  await waitFor(() => letters(host, hostThread).some(entry => entry.id === hello.id), 10000);
+  const back = await host.core.coordination.send({ threadId: hostThread, to: { coreId: guestId, threadId: guestThread }, text: 'Which one?', requestId: crypto.randomUUID() });
+  await waitFor(() => letters(guest, guestThread).some(entry => entry.id === back.id), 10000);
+  // Paused, the host thread keeps the next letters waiting.
   host.core.coordination.configure(hostThread, { mode: 'brief', resources: '', remote: true, paused: true });
-  const letter = await guest.core.coordination.send({ threadId: guestThread, to: { coreId: hostId, threadId: hostThread }, text: 'Can you free port 8080?', requestId: crypto.randomUUID() });
+  const letter = await send('Can you free port 8080?');
   await waitFor(() => letters(host, hostThread).find(entry => entry.id === letter.id)?.status === 'received', 10000);
+  // A second letter already handed to a provider wake.
+  const queued = await send('The dev server one.');
+  await waitFor(() => letters(host, hostThread).find(entry => entry.id === queued.id)?.status === 'received', 10000);
+  (host.core.coordination as unknown as { update(letter: AgentLetter, status: string, error: string): void })
+    .update(letters(host, hostThread).find(entry => entry.id === queued.id)!, 'uncertain', 'Queued for provider delivery');
   await hostClient.call('contacts.revoke', { coreId: guestId, projectId: open.id });
-  expect(letters(host, hostThread).find(entry => entry.id === letter.id)).toMatchObject({ status: 'rejected', error: 'Project closed to this contact' });
+  for (const id of [letter.id, queued.id]) expect(letters(host, hostThread).find(entry => entry.id === id)).toMatchObject({ status: 'rejected', error: 'Project closed to this contact' });
+  expect(host.core.coordination.prepareWake(hostThread, 'turn_late')).toBe(false);
+  expect(host.core.contacts.mayReach(guestId, hostThread)).toBe(false);
+  const late = await send('Still there?');
+  await waitFor(() => letters(guest, guestThread).find(entry => entry.id === late.id)?.status === 'rejected', 10000);
+  expect(letters(guest, guestThread).find(entry => entry.id === late.id)?.error).toContain('not a thread of a project opened to you');
   await waitFor(() => guest.core.contacts.find(hostId)?.offers.length === 0, 10000);
   expect((await guest.core.coordination.directory(guestThread)).agents.some(agent => agent.threadId === hostThread)).toBe(false);
 
@@ -271,3 +316,108 @@ test('the link refuses a replayed or stale hello, a contact\'s readable request,
   await expect(guestClient.call('contacts.join', { link: invite.link })).rejects.toThrow('already used or expired');
   expect(host.core.contacts.list()).toHaveLength(1);
 }, 30000);
+
+test('each incoming request gets this core\'s own id: two contacts reusing one id, or an id of this core\'s own requests, never decide each other', async () => {
+  const harness = await startTestCore();
+  cores.push(harness);
+  const client = await harness.connect();
+  const contacts = harness.core.contacts;
+  contacts.setSettings({ minTier: 2 });
+  const card = (machine: string) => ({
+    coreId: createHash('sha256').update(machine).digest('hex'), machine, box: 'unused',
+    publicKey: generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+  });
+  const first = contacts.store(card('first'), 'host');
+  const second = contacts.store(card('second'), 'host');
+  const alpha = await project(harness, client, 'alpha');
+  const from = (coreId: string) => ({ coreId, threadId: 'thr_remote', title: 'Remote work', machine: 'remote', resources: '', status: 'idle', mode: 'brief' }) as AgentContact;
+  // An outgoing request of this core, whose id a contact reuses below.
+  harness.core.journal.setSetting('contacts:requests', [{ id: 'creq_mine', direction: 'out', coreId: first.coreId, contact: first.name, from: from(first.coreId), text: 'mine', createdAt: Date.now(), status: 'pending' }]);
+  expect(contacts.asked(first.coreId, { id: 'same-id', text: 'from first' }, from(first.coreId))).toEqual({ id: 'same-id' });
+  contacts.asked(second.coreId, { id: 'same-id', text: 'from second' }, from(second.coreId));
+  contacts.asked(first.coreId, { id: 'creq_mine', text: 'reused id' }, from(first.coreId));
+  // A retry of the same ask is the same request.
+  contacts.asked(first.coreId, { id: 'same-id', text: 'from first' }, from(first.coreId));
+  const incoming = (await client.call('contacts.get', {})).requests.filter(request => request.direction === 'in');
+  expect(incoming).toHaveLength(3);
+  expect(new Set(incoming.map(request => request.id)).size).toBe(3);
+  expect(incoming.some(request => request.id === 'same-id' || request.id === 'creq_mine')).toBe(false);
+  await client.call('contacts.decide', { id: incoming.find(request => request.text === 'from second')!.id, accept: true, projectId: alpha.id });
+  expect(contacts.find(second.coreId)?.grants.map(grant => grant.projectId)).toEqual([alpha.id]);
+  expect(contacts.find(first.coreId)?.grants).toEqual([]);
+  const after = (await client.call('contacts.get', {})).requests;
+  expect(after.find(request => request.text === 'from first')?.status).toBe('pending');
+  expect(after.find(request => request.text === 'reused id')?.status).toBe('pending');
+  expect(after.find(request => request.id === 'creq_mine')).toMatchObject({ direction: 'out', status: 'pending' });
+}, 20000);
+
+test('a join without a live invitation is a 403 the address quota counts, and leaves no nonce behind', async () => {
+  const host = await startTestCore();
+  const guest = await startTestCore();
+  cores.push(host, guest);
+  const hostId = host.core.coordination.card().coreId;
+  const guestId = guest.core.coordination.card().coreId;
+  const join = async (): Promise<Response> => {
+    const body = JSON.stringify({ nonce: crypto.randomUUID(), at: Date.now(), token: newToken(), card: guest.core.contacts.card() });
+    const signature = guest.core.coordination.signature(Buffer.from(`${JOIN_INPUT}${body}`)).toString('base64');
+    const sealed = seal(pack(body, signature), host.core.group.boxPublic(), { from: guestId, to: hostId });
+    return fetch(`${host.url}${CONTACT_JOIN_ROUTE}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-boite-peer': guestId, 'x-boite-signature': SEALED }, body: sealed.body });
+  };
+  // The server never counts loopback: the quota is applied here as it is to a remote address.
+  const refusals = new Refusals();
+  for (let n = 0; n < REFUSALS_PER_MINUTE; n += 1) {
+    const answered = refusals.begin('203.0.113.7');
+    expect(answered).not.toBeNull();
+    const response = await join();
+    expect(response.status).toBe(403);
+    expect(response.headers.get('x-boite-signature')).toBe(SEALED);
+    answered!(response.status);
+  }
+  expect(refusals.begin('203.0.113.7')).toBeNull();
+  expect((host.core.contacts as unknown as { nonces: Map<string, number> }).nonces.size).toBe(0);
+}, 30000);
+
+test('invitations made at once are all usable', async () => {
+  const host = await startTestCore();
+  cores.push(host);
+  host.core.contacts.selfUrl = async () => { await new Promise(resolve => setTimeout(resolve, 20)); return host.url; };
+  const made = await Promise.all([host.core.contacts.invite(), host.core.contacts.invite()]);
+  const stored = Object.keys(host.core.journal.getSetting('contacts:invites') as Record<string, unknown>).sort();
+  expect(stored).toEqual(made.map(invite => tokenHash(decodeInvite(invite.link).token)).sort());
+});
+
+test('two owners joining each other at once keep one relationship: the smaller core id hosts and the link comes up', async () => {
+  const a = await startTestCore();
+  const b = await startTestCore();
+  cores.push(a, b);
+  for (const side of [a, b]) side.core.contacts.selfUrl = async () => side.url;
+  const [inviteA, inviteB] = await Promise.all([a.core.contacts.invite(), b.core.contacts.invite()]);
+  const joins = await Promise.allSettled([a.core.contacts.join(inviteB.link), b.core.contacts.join(inviteA.link)]);
+  expect(joins.map(result => result.status === 'rejected' ? String(result.reason) : 'fulfilled')).toEqual(['fulfilled', 'fulfilled']);
+  const [small, large] = a.core.coordination.card().coreId < b.core.coordination.card().coreId ? [a, b] : [b, a];
+  const smallId = small.core.coordination.card().coreId;
+  const largeId = large.core.coordination.card().coreId;
+  expect(small.core.contacts.list()).toEqual([expect.objectContaining({ coreId: largeId, role: 'host' })]);
+  expect(large.core.contacts.list()).toEqual([expect.objectContaining({ coreId: smallId, role: 'guest', url: small.url })]);
+  await waitFor(() => small.core.contacts.linked(largeId), 10000);
+  expect(await small.core.coordination.check(largeId)).toEqual({ ok: true });
+}, 30000);
+
+test('the tailnet listener opens for an invitation and closes once the last one expires', async () => {
+  const harness = await startTestCore();
+  cores.push(harness);
+  harness.core.contacts.selfUrl = async () => harness.url;
+  const heard: (string | null)[] = [];
+  harness.core.network = { also: address => { heard.push(address); return address !== null; } };
+  (harness.core.group as unknown as { tailnet: { ip: string; name: string | null } }).tailnet = { ip: '100.64.0.7', name: null };
+  await harness.core.contacts.invite();
+  expect(heard.at(-1)).toBe('100.64.0.7');
+  const invites = harness.core.journal.getSetting('contacts:invites') as Record<string, { expiresAt: number }>;
+  harness.core.journal.setSetting('contacts:invites', Object.fromEntries(Object.keys(invites).map(hash => [hash, { expiresAt: Date.now() - 1 }])));
+  await waitFor(() => heard.at(-1) === null, 5000);
+  expect(harness.core.contacts.wantsTailnet()).toBe(false);
+  // Told on a change only.
+  const told = heard.length;
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  expect(heard).toHaveLength(told);
+}, 20000);

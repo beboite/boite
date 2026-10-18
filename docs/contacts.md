@@ -29,16 +29,24 @@ but opens none, and the invitee exposes nothing.
    admin console.
 2. The invitee pastes the link (`contacts.join`). Its core accepts the
    Tailscale share with its own API key when it has one
-   (`POST /api/v2/device-invites/-/accept`); otherwise the owner accepts the
-   share link in a browser and joins again.
+   (`POST /api/v2/device-invites/-/accept`). Without a key, the Join card
+   reads the share from the pasted link and shows **Accept the Tailscale
+   share** before Join; it stays while the link does, so after a join that
+   could not reach the inviter the owner accepts it and joins again.
 3. The invitee's core posts to the inviter at its tailnet name,
    `http://<machine>.<tailnet>.ts.net:<port>/contacts/join`: a shared machine
    is reachable by that name only, and its IP may differ in the invitee's
    tailnet. The body is sealed to the inviter's sealing key and carries the
-   token and the invitee's card, signed by its key. The inviter spends the
-   token first, so a second join with the same link is refused, then answers
-   with its own card, signed and sealed back. Each core stores the other's
-   keys. The inviter keeps only the token's SHA-256.
+   token and the invitee's card, signed by its key. The inviter looks the
+   token up before it checks the signature or keeps the nonce, spends it
+   before anything else changes, so a second join with the same link is
+   refused, then answers with its own card, signed and sealed back. Every
+   refusal is a sealed 403, which the server counts against the caller's
+   address (60 a minute). Each core stores the other's keys. The inviter
+   keeps only the token's SHA-256.
+   Two owners who invite and join each other at once end with one
+   relationship: the core with the smaller core id hosts and the other
+   dials it, a rule both cores compute alone.
 4. Both apps show the same four words, derived from both public keys. Two
    owners who read the same four words know nobody sat between them.
 5. The invitee's core keeps a WebSocket open to the inviter at
@@ -58,8 +66,9 @@ and the Tailscale API key never cross. The API key sits in
 or error carries it, and the core sends it to `api.tailscale.com` only.
 
 The inviter's core listens on its tailnet address while it hosts a contact or
-has an invitation out, as it does in a group. A core with no contact and no
-invitation opens nothing and runs no timer. **The tailnet policy decides which ports a shared user
+has an invitation out, as it does in a group, and closes that listener once
+the last invitation expires or the last hosted contact goes. A core with no
+contact and no invitation opens nothing and runs no timer. **The tailnet policy decides which ports a shared user
 reaches**: without a rule, assume every port of the shared machine. The
 Contacts page reads the policy with the API key and says `restricted`, `open`
 or `unknown`; when `open`, it gives the lines that limit `autogroup:shared` to
@@ -86,15 +95,23 @@ a reason. A contact marked trusted is answered without the owner:
 
 1. a request whose git remote matches exactly one local project opens that
    project (`decidedBy: 'match'`);
-2. otherwise the concierge decides: a one-shot conversation on the delegation
-   profile named `concierge`, else Opus 5.5 at high effort, in read-only mode,
-   given the request and the project list as JSON data. It answers with the
-   project to open or the reason to refuse (`decidedBy: 'concierge'`). If it
-   fails, the request waits for the owner.
+2. otherwise the concierge decides: one inference on the delegation profile
+   named `concierge`, else Opus 5.5 at high effort, given the request and the
+   project list as JSON data. It answers with the project to open or the
+   reason to refuse (`decidedBy: 'concierge'`). If it fails, takes over 3
+   minutes or ends without a verdict, the request waits for the owner.
 
-The concierge never grants `readThreads`. Its conversation is a projectless
-thread titled `Concierge · <contact>`, archived once it answers, so the owner
-can read what it decided. The decision comes back to the asking thread as a
+The concierge runs on the driver's side-question path: no tools, no MCP
+servers, hooks or settings, no agent token, nothing persisted, in an empty
+folder under the data directory. A request cannot make it read a file. A
+profile on a protocol without that path (pi, Codex, ACP) never runs it: the
+request waits for the owner and the log says why. It creates no thread; the
+decided request shows its verdict and reason. It never grants `readThreads`.
+
+Each request a contact sends gets an id of this core; the contact's own id is
+kept only to recognize its retries and to answer it, so two contacts, or a
+contact reusing an id of this core's requests, never reach each other's
+request. The decision comes back to the asking thread as a
 message (`origin: 'contact'`): the project opened and its threads, or the
 reason for the refusal. When the contact's core refuses the ask itself (a
 tier, a full queue), the asking thread is told the same way.
@@ -124,9 +141,11 @@ cooperation rule, not a security boundary.
 
 ## Revoking
 
-`contacts.revoke` closes one project: pending letters to it are rejected with
-`Project closed to this contact` and its threads leave the contact's
-directory. `contacts.remove` ends every grant, drops the contact's requests,
+`contacts.revoke` closes one project: its threads stop hearing back from the
+contact under the 7-day reply rule (only a later letter of theirs opens it
+again), pending letters to them are rejected with `Project closed to this
+contact`, a provider wake already queued for such a letter included, and its
+threads leave the contact's directory. `contacts.remove` ends every grant, drops the contact's requests,
 rejects pending letters both ways and closes the link. Removing is one-sided:
 the other core keeps its entry, its redials are refused and its letters wait
 undelivered until they expire, until its owner removes it too. Removing the
@@ -142,7 +161,8 @@ gets on Tailscale later listens there after a restart.
 ## Code and tests
 
 `packages/core/src/contacts/`: `store.ts` (contacts, invitations, the link,
-requests and the RPC methods), `invite.ts` (the link format), `words.ts`
+requests and the RPC methods), `join.ts` (both sides of a join),
+`invite.ts` (the link format), `words.ts`
 (fingerprint words), `tier.ts`, `git-remote.ts` (read from the git config
 files, no process), `concierge.ts` and `tailscale.ts`. `contacts.*` are
 owner-only; agents call `collaboration.contacts` and `collaboration.ask`.

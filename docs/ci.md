@@ -181,12 +181,23 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 490,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,861,500 |
+| UI entry chunk | 493,500 |
+| UI files, excluding `.br` and `.gz` copies | 4,934,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,470,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,538,500 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, contacts (PR #602) on `origin/main` at `3a19eb57` measure
+493,338 entry bytes, 4,933,935 UI bytes and 4,537,639 core JavaScript bytes
+with `measure()` after fresh `bun run build:ui` and `bun run build:core` on
+Windows, against the 490,436, 4,860,909 and 4,470,119 recorded below for that
+main. The Home surface loads on first open: its chunk is 36,610 bytes of
+JavaScript and 21,880 of CSS, and its strings sit in the catalogue chunks. The
+entry grows 2,902 bytes for the Home switch, the remote chip and the lazy
+loader's wiring. The contact store, join, link, concierge and Tailscale client
+add 67,520 core bytes. The entry, UI and core JavaScript limits rise to
+493,500, 4,934,500 and 4,538,500; the `main.js` limit stays.
 
 On 2026-10-18, the journal compaction (schema 37: zstd values, per-thread
 command lines, the paced background passes in `journal/retention.ts` and
