@@ -160,6 +160,23 @@ regressions set `BOITE_CI_INSTALLER_REQUIRED=1`, so missing NSIS or generated
 fixtures fail rather than skip. Unsupported local runs keep intentional skips.
 The tested installer becomes the release artifact.
 
+The shipped shell uses fat LTO over one codegen unit. Its final step is serial:
+on 2026-10-17, recompiling only the shell crate took 8 min 57 s with fat LTO and
+10 min 18 s with thin LTO on the shared 8-thread development machine, against
+1 min 32 s with Cargo's defaults (`bun run --cwd apps/shell tauri build
+--no-bundle`). `Cargo.toml` therefore keeps Cargo's release defaults, and
+`desktop.yml` sets `CARGO_PROFILE_RELEASE_LTO=fat` and
+`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1` only on the steps that build a shipped
+shell (the Windows installer, the Debian package, the macOS bundle) and only
+when `sign-updates` is on: the nightly and a release. Other steps and runs set
+`false` and `16`, Cargo's defaults, so `test:shell --release` keeps them even in
+a release run. Both desktop jobs get 60 minutes instead of 35 when publishing.
+The cache is saved from `main`, so a publishing run also
+compiles its dependencies with LTO, an estimated 7 to 8 minutes more per
+platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
+2026-10-17, four alternating local runs of the old and new command, median
+5.4 s against 3.4 s, and a 105 MB write less.
+
 `scripts/ci/budgets.ts` reads [budgets.json](../scripts/ci/budgets.json):
 
 | Measure | Maximum uncompressed bytes |
