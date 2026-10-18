@@ -182,7 +182,7 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 495,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,885,500 |
+| UI files, excluding `.br` and `.gz` copies | 4,887,500 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,503,500 |
 
@@ -209,7 +209,9 @@ warm (#594), it measures 494,834 entry bytes,
 three limits rise to 495,000, 4,884,000 and 4,502,000.
 After #595 (`origin/main` at `e22bb094`) it measures 495,052 entry bytes, 4,884,876 UI bytes and
 4,502,972 core JavaScript bytes on
-Linux; the three limits rise to 495,500, 4,885,500 and 4,503,500.
+Linux; the three limits rise to 495,500, 4,885,500 and 4,503,500. The
+reviews' own section in the Tasks panel then brings the UI to 4,887,289 bytes,
+the entry chunk unchanged; the UI limit rises to 4,887,500.
 
 On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
 492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes

@@ -179,7 +179,8 @@ phase (`writing`, `checking` or `idle`), the items with their status (`open`,
 often each `bounced` a claim, and the last pass's `error`. The goal bar keeps
 one line: the first open item and `done/total`, dropped items left out. On the
 owner's app that line opens the side panel's Tasks tab, whose Checklist section
-lists every item; a paired device, which has no Tasks tab, unfolds the list in
+lists every item and whose Reviews section lists each review, newest first,
+with what it found; a paired device, which has no Tasks tab, unfolds both in
 the bar instead. A press on an item shows its source, and an item that bounced
 twice turns red. A pass
 that fails, answers without its JSON block or runs past five minutes leaves the

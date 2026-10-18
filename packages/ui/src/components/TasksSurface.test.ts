@@ -84,14 +84,17 @@ test('the thread header shows the watches with their status and stops one from i
 });
 
 
-test('a reviewed goal\'s checklist has its own section in the panel, with its count and every item', async () => {
+test('a reviewed goal\'s checklist and reviews have their own sections in the panel', async () => {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();
   store.attach(client);
   await store.connect();
   await store.open('t-trace');
   store.openThread!.activity = { tasks: [], loop: null, goal: { objective: 'Ship it', status: 'active', iterations: 2, error: null,
-    review: { phase: 'working', maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] },
+    review: { phase: 'working', maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 1, verdicts: [
+      { round: 1, verdict: 'fail', summary: '- The CSV export drops the totals', threadId: 'reviewer-1', finishedAt: 1 },
+      { round: 2, verdict: 'pass', summary: 'Both exports work.', threadId: 'reviewer-2', finishedAt: 2 },
+    ] },
     checklist: { threadId: null, phase: 'idle', model: null, effort: null, error: null, items: [
       { id: 1, text: 'Add a dark theme', source: 'dark theme', status: 'done' },
       { id: 2, text: 'Export invoices as CSV', source: 'CSV', status: 'open' },
@@ -103,6 +106,13 @@ test('a reviewed goal\'s checklist has its own section in the panel, with its co
     await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=tasks-checklist] [data-testid=goal-checklist-item]')).toHaveLength(3));
     expect(document.querySelector('[data-testid=tasks-section-checklist]')!.textContent).toContain('1/2 done');
     expect(document.querySelector('[data-testid=tasks-checklist] [data-testid=goal-checklist]')!.classList.contains('dense')).toBe(true);
+    // The bar keeps only the verdict dots: the panel lists each review, newest first, with what it found.
+    const reviews = [...document.querySelectorAll<HTMLElement>('[data-testid=tasks-review]')];
+    expect(reviews.map(review => review.dataset.verdict)).toEqual(['pass', 'fail']);
+    expect(reviews[1]!.textContent).toContain('- The CSV export drops the totals');
+    const open = vi.spyOn(store, 'open').mockResolvedValue(undefined as never);
+    reviews[1]!.querySelector<HTMLButtonElement>('button')!.click();
+    expect(open).toHaveBeenCalledWith('reviewer-1');
   } finally {
     unmount(component);
     document.body.innerHTML = '';

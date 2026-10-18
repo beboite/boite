@@ -12,7 +12,7 @@
   const sectionId = $props.id();
 
   let draft = $state('');
-  let open = $state({ activity: true, checklist: true, watches: true, tasks: true, todos: true });
+  let open = $state({ activity: true, checklist: true, reviews: true, watches: true, tasks: true, todos: true });
 
   let thread = $derived(store.openThread);
   let activity = $derived(thread?.activity ?? null);
@@ -21,6 +21,8 @@
   /** A `/goal2`'s checklist, once its tracker wrote something or failed to. Dropped items count for nothing. */
   let checklist = $derived(activity?.goal?.checklist && (activity.goal.checklist.items.length > 0 || activity.goal.checklist.error) ? activity.goal.checklist : null);
   let listed = $derived(checklist?.items.filter((item) => item.status !== 'cancelled') ?? []);
+  /** A `/goal2`'s reviews, newest first, with what each reviewer found: the bar keeps only their dots. */
+  let verdicts = $derived([...(activity?.goal?.review?.verdicts ?? [])].reverse());
   let todos = $derived(thread?.projectId ? (store.todos[thread.projectId] ?? []) : []);
 
   // The project's list is the same for every thread of it, so it is read once
@@ -112,6 +114,37 @@
       </button>
       <div class="disclosure-fold" id="{sectionId}-checklist" class:open={open.checklist} inert={!open.checklist}>
         <div><div class="body"><GoalChecklist {store} {checklist} dense /></div></div>
+      </div>
+    </section>
+  {/if}
+
+  {#if verdicts.length > 0}
+    <section data-testid="tasks-reviews">
+      <button
+        type="button"
+        class="ghost head"
+        aria-expanded={open.reviews}
+        aria-controls="{sectionId}-reviews"
+        data-testid="tasks-section-reviews"
+        title={open.reviews ? strings.tasks.collapse : strings.tasks.expand}
+        onclick={() => (open.reviews = !open.reviews)}
+      >
+        <ChevronRight size={13} strokeWidth={1.75} class={open.reviews ? 'fold-caret open' : 'fold-caret'} />
+        <span class="section-label ui-label">{strings.activity.reviews}</span>
+      </button>
+      <div class="disclosure-fold" id="{sectionId}-reviews" class:open={open.reviews} inert={!open.reviews}>
+        <div><div class="body">
+          {#each verdicts as verdict (verdict.threadId)}
+            <div class="review" data-testid="tasks-review" data-verdict={verdict.verdict}>
+              <div class="review-head">
+                <span class="ui-label">{fill(strings.activity.reviewRound, { round: String(verdict.round) })}</span>
+                <span class="verdict-name ui-label">{strings.activity[verdict.verdict]}</span>
+                <button type="button" class="ghost small open-review" onclick={() => void store.open(verdict.threadId)}>{strings.activity.openReview}</button>
+              </div>
+              {#if verdict.summary}<p class="review-summary">{verdict.summary}</p>{/if}
+            </div>
+          {/each}
+        </div></div>
       </div>
     </section>
   {/if}
@@ -323,6 +356,46 @@
   section {
     flex: none;
     min-width: 0;
+  }
+
+  /* A review: its round and verdict on one line, what the reviewer found under it. */
+  .review {
+    padding: 6px 0;
+    font-size: var(--text-sm);
+  }
+
+  .review + .review {
+    border-top: 1px solid var(--color-border);
+  }
+
+  .review-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--control-sm);
+  }
+
+  .verdict-name {
+    flex: 1;
+    font-weight: 600;
+    color: var(--verdict, var(--color-muted-foreground));
+  }
+
+  [data-verdict='pass'] { --verdict: var(--color-success); }
+  [data-verdict='partial'] { --verdict: var(--color-live); }
+  [data-verdict='fail'], [data-verdict='missing'] { --verdict: var(--color-danger); }
+
+  .open-review {
+    flex: none;
+    padding-inline: 6px;
+    color: var(--color-accent);
+  }
+
+  .review-summary {
+    margin: 4px 0 0;
+    color: var(--color-muted-foreground);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
 

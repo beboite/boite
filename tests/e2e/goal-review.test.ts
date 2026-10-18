@@ -5,7 +5,7 @@ import { startDevUi } from './lib/ui.ts';
 
 // The Reviewed goals experiment on the fake core: the first review fails, the
 // agent works on the finding, the second passes. Captures the bar mid-review
-// and finished, at desktop and phone widths.
+// and the Tasks panel once finished, at desktop and phone widths.
 let server: { close(): Promise<void> };
 let page: BrowserPage;
 const id = (name: string) => `[data-testid="${name}"]`;
@@ -42,11 +42,13 @@ test.each([['desktop', false], ['phone', true]] as const)('a reviewed goal shows
   await capture(`goal2-reviewing-${name}`);
   await page.waitFor(`document.querySelector('${dots}[data-verdict="pass"]')`, 20_000);
   expect(await verdicts()).toEqual(['fail', 'pass']);
+  // The owner's app keeps one line in the bar; the checklist and each review's findings are in the side panel's Tasks tab.
   await page.click(id('activity-tasks-toggle'));
-  await page.waitFor(`document.querySelector('${id('activity-tasks-toggle')}').getAttribute('aria-expanded') === 'true'`);
-  expect(await page.text(id('activity-reviews'))).toContain('The empty state still shows the old label');
+  await page.waitFor(`document.querySelector('${id('tasks-reviews')}')?.textContent.includes('The empty state still shows the old label') && document.querySelector('${id('tasks-checklist')}')`);
+  expect(await page.text(id('tasks-section-checklist'))).toContain('1/1 done');
   await capture(`goal2-passed-${name}`);
-  await page.click(id('activity-tasks-toggle'));
+  await page.click(id('panel-close'));
+  await page.waitFor(`!document.querySelector('${id('tasks-reviews')}')`);
   // A dot opens that review's own conversation, a child the header leads back from.
   await page.click(`${dots}[data-verdict="fail"]`);
   await page.waitFor(`document.querySelector('${id('delegation-back-parent')}')`);
