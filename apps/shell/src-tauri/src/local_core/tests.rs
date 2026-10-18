@@ -299,22 +299,28 @@ fn a_core_compacting_its_journal_is_waited_on_past_the_timeout_and_says_so() {
 
 #[test]
 fn a_caller_waits_a_whole_patience_past_the_last_time_the_resolution_saw_the_core_at_work() {
-    // The resolution saw the core at work at 700 ms; the core then opens its
-    // journal and serves at 1.35 s, past the caller's own patience of 1 s.
-    // A caller that counted from its own start alone gave up at 1 s.
     let slot = std::sync::Arc::new((Mutex::new(Slot::default()), Condvar::new()));
-    let resolver = {
+    let (began, waiting) = std::sync::mpsc::channel();
+    let caller = {
         let slot = slot.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(700));
-            slot.0.lock().unwrap().announced = Some(Instant::now());
-            std::thread::sleep(Duration::from_millis(650));
-            let endpoint = CoreEndpoint { url: "http://127.0.0.1:1".to_string(), token: "t".to_string() };
-            publish(&slot, Ok((endpoint, None, health::CoreStart::default())));
+            began.send(Instant::now()).unwrap();
+            wait_for_endpoint(&slot, Duration::from_secs(1)).map(|settled| settled.outcome)
         })
     };
-    let outcome = wait_for_endpoint(&slot, Duration::from_secs(1)).unwrap().outcome;
-    resolver.join().unwrap();
+    let begun = waiting.recv().unwrap();
+    // The resolution sees the core at work while the caller waits and wakes
+    // nobody: the caller reads it at its own deadline, a second in. The
+    // sighting is dated ahead so that no delay of this thread lands it after
+    // that deadline; each margin below is a whole second.
+    std::thread::sleep(Duration::from_millis(100));
+    slot.0.lock().unwrap().announced = Some(begun + Duration::from_secs(2));
+    // Served at two seconds: past the caller's own patience, a second inside
+    // the one that sighting gives it. A caller that ignored it gave up at one.
+    std::thread::sleep((begun + Duration::from_secs(2)).saturating_duration_since(Instant::now()));
+    let endpoint = CoreEndpoint { url: "http://127.0.0.1:1".to_string(), token: "t".to_string() };
+    publish(&slot, Ok((endpoint, None, health::CoreStart::default())));
+    let outcome = caller.join().unwrap().and_then(|outcome| outcome);
     assert!(outcome.is_ok(), "{:?}", outcome.err());
     // Nothing seen: the caller gives up at its patience.
     let idle = (Mutex::new(Slot::default()), Condvar::new());
