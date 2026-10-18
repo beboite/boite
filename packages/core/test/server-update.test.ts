@@ -8,6 +8,7 @@ import { Database } from 'bun:sqlite';
 import { downloadPayload, verifyPayload, unpackPayload } from '../src/server-update/release.ts';
 import { applyServerUpdate, clearStaleUpdates, recoverServerUpdate, UNSAVED_DATA, type UpdateDisk } from '../src/server-update/apply.ts';
 import { linuxServerUpdates, unitWord } from '../src/platform/linux-server-update.ts';
+import { openDataDir, type FileLock, type RestoreMoves } from '../src/server-update/restore.ts';
 import type { ServerUpdatePlan, ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { echoThread, holdAccountTurns, startTestCore, waitFor } from './harness.ts';
 import { lockDataDir } from '../src/main.ts';
@@ -106,6 +107,7 @@ async function updatingCore(prefix: string) {
     launch: async (_run, _executable, plan) => { state.planFile = plan; writeFileSync(join(dirname(plan), 'ready'), ''); },
     control: async () => undefined,
     mainPid: async () => process.pid,
+    lock: () => () => undefined,
   };
   const h = await startTestCore({ onShutdown: () => { state.stops++; }, serverUpdates: { platform, pollMs: 5,
     findOffer: async () => ({ version: '2.0.0-beta.2', publishedAt: '2026-10-01T00:00:00Z', url: 'https://example.test/signed.zip', signature: 'signed' }),
@@ -176,6 +178,7 @@ test('a failed update admission write leaves the server running and reports the 
     },
     control: async () => undefined,
     mainPid: async () => process.pid,
+    lock: () => () => undefined,
   };
   const h = await startTestCore({ onShutdown: () => { stops++; }, serverUpdates: { platform, pollMs: 5,
     findOffer: async () => ({ version: '2.0.0-beta.2', publishedAt: '2026-10-01T00:00:00Z', url: 'https://example.test/signed.zip', signature: 'signed' }),
@@ -192,6 +195,16 @@ test('a failed update admission write leaves the server running and reports the 
     expect((await client.call('core.updateStatus', {})).phase).toBe('error');
   } finally { await h.stop(); rmSync(root, { recursive: true, force: true }); }
 });
+
+/** An exclusive lock per path within this process, standing for the kernel's `flock` the Linux platform takes. */
+function memoryLock(): FileLock {
+  const held = new Set<string>();
+  return (file) => {
+    if (held.has(file)) throw new Error(`a server update holds ${file}`);
+    held.add(file);
+    return () => { held.delete(file); };
+  };
+}
 
 /** An installation, its data and a staged update, as the core leaves them for the worker. */
 async function updateFixture() {
@@ -218,8 +231,9 @@ async function updateFixture() {
   writeFileSync(file, JSON.stringify(plan));
   const state = { pid: 123 };
   const controls: string[] = [];
+  const lock = memoryLock();
   const platform: ServerUpdatePlatform = { inspect: async () => null, launch: async () => undefined,
-    mainPid: async () => state.pid,
+    mainPid: async () => state.pid, lock,
     control: async (_unit, action) => {
       controls.push(action); state.pid = action === 'start' ? 456 : 0;
       if (action === 'start' && readFileSync(join(install, 'boite-core'), 'utf8') === 'new executable') {
@@ -237,7 +251,7 @@ async function updateFixture() {
     expect(restored.query('SELECT * FROM saved').all()).toEqual([{ message: 'conversation' }]); restored.close();
     expect(readFileSync(join(data, 'checkpoints', 'thr_a', 'object'), 'utf8')).toBe('checkpoint bytes');
   };
-  return { root, install, data, id, operation, backup: join(root, `.boite-backup-${id}`), file, plan, state, controls, platform, result, expectPrevious,
+  return { root, install, data, id, operation, backup: join(root, `.boite-backup-${id}`), file, plan, state, controls, platform, lock, result, expectPrevious,
     stop: () => rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -418,26 +432,37 @@ test('a rollback whose only failure is deleting the used snapshot starts the pre
   } finally { f.stop(); }
 });
 
-/** A rollback a power cut stopped: its record, and the restored copy beside the data or the snapshot still in the backup. */
+/** A rollback a power cut stopped after the new version ran: its record, and the restored copy beside the data or the snapshot still in the backup. */
 function cutRollback(f: Awaited<ReturnType<typeof updateFixture>>, moved: boolean, id = f.id) {
   const restored = `${f.data}.restore-${id}`;
   const snapshot = join(f.root, `.boite-backup-${id}`, 'data');
   cpSync(f.data, moved ? restored : snapshot, { recursive: true, filter: (source) => !source.includes('checkpoints') });
   if (moved) renameSync(join(f.data, 'checkpoints'), join(restored, 'checkpoints'));
   writeFileSync(`${f.data}.rollback.json`, JSON.stringify({ id, snapshot }));
+  const migrated = new Database(join(f.data, 'journal.db')); migrated.run('ALTER TABLE saved ADD COLUMN newer_schema INTEGER'); migrated.close();
   writeFileSync(join(f.data, 'pairing.json'), 'new run changed pairing');
   return { restored, snapshot };
 }
 
 const prepare = (dataDir: string) => mkdirSync(dataDir, { recursive: true });
+const open = (f: Awaited<ReturnType<typeof updateFixture>>, moves?: RestoreMoves) => openDataDir(f.data, prepare, f.lock, undefined, moves);
+
+test('an ordinary start creates its data directory and parents, and writes nothing beside it', () => {
+  const root = mkdtempSync(join(tmpdir(), 'boite-server-start-'));
+  try {
+    // As in the server image, where the data directory is a mount point in an unwritable `/`.
+    const data = join(root, 'not-created', 'data');
+    const untouchable: FileLock = (file) => { throw new Error(`took ${file}`); };
+    openDataDir(data, prepare, untouchable)();
+    expect(readdirSync(join(root, 'not-created'))).toEqual(['data']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 for (const moved of [true, false]) test(`a core starting after a power cut cut off a rollback ${moved ? 'swap' : 'copy'} puts the previous data back before opening it, once`, async () => {
   const f = await updateFixture();
   try {
     const { snapshot } = cutRollback(f, moved);
-    // Imported as the startup does, so a release without it fails here rather than at load.
-    const { openDataDir } = await import('../src/server-update/restore.ts');
-    openDataDir(f.data, prepare)();
+    open(f)();
     f.expectPrevious();
     expect(readFileSync(join(`${f.data}.failed-${f.id}`, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
     expect(f.result().error).toContain('rollback was cut off');
@@ -445,15 +470,14 @@ for (const moved of [true, false]) test(`a core starting after a power cut cut o
     expect(existsSync(`${f.data}.rollback.json`)).toBe(false);
     // The next start finds nothing to do.
     writeFileSync(join(f.data, 'pairing.json'), 'paired after the recovery');
-    openDataDir(f.data, prepare)();
+    open(f)();
     expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('paired after the recovery');
   } finally { f.stop(); }
 });
 
-test('a starting core never moves the data under a live core, and older restores never replay over a completed one', async () => {
+test('a starting core never moves the data under a live core or a restoring worker, and older restores never replay over a completed one', async () => {
   const f = await updateFixture();
   try {
-    const { openDataDir } = await import('../src/server-update/restore.ts');
     cutRollback(f, true);
     // An older interrupted rollback's copy, and one whose name is no valid id.
     const older = uuid('1');
@@ -464,35 +488,115 @@ test('a starting core never moves the data under a live core, and older restores
     // A live core (a process that is not this one, wrote the lock after it started) holds the data.
     writeFileSync(join(f.data, 'core.lock'), JSON.stringify({ pid: process.ppid, startedAt: Date.now() }));
     const live = (dataDir: string) => lockDataDir(dataDir, () => 0, () => 0, () => null);
-    expect(() => openDataDir(f.data, prepare, live)).toThrow('another core is already running');
+    expect(() => openDataDir(f.data, prepare, f.lock, live)).toThrow('another core is already running');
     expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
     rmSync(join(f.data, 'core.lock'));
-    // Gone, the recorded restore goes in, not the one with the newest date, and every other is set aside.
-    openDataDir(f.data, prepare)();
-    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('test pairing survives');
+    // A worker restoring holds the maintenance lock.
+    const worker = f.lock(`${f.data}.maintenance.lock`);
+    expect(() => open(f)).toThrow('a server update holds');
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    worker();
+    // Both gone, the recorded restore goes in, not the one with the newest date, and every other is set aside.
+    open(f)();
+    f.expectPrevious();
     expect(readdirSync(f.root).filter(name => name.startsWith('data.restore-'))).toEqual([]);
     expect(readFileSync(join(`${f.data}.unused-restore-${older}`, 'pairing.json'), 'utf8')).toBe('older restore pairing');
     writeFileSync(join(f.data, 'pairing.json'), 'paired after the recovery');
-    openDataDir(f.data, prepare)();
+    open(f)();
     expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('paired after the recovery');
   } finally { f.stop(); }
 });
 
-test('a recorded restore that cannot go in is set aside, and the core starts on its data as it was, every time', async () => {
+test('a recorded restore that fails to go in keeps the server closed and its record, and the next start finishes it', async () => {
   const f = await updateFixture();
   try {
-    const { openDataDir } = await import('../src/server-update/restore.ts');
-    writeFileSync(`${f.data}.restore-${f.id}`, 'not a directory');
-    writeFileSync(`${f.data}.rollback.json`, JSON.stringify({ id: f.id, snapshot: join(f.backup, 'data') }));
-    for (let start = 0; start < 2; start++) {
-      openDataDir(f.data, prepare)();
-      f.expectPrevious();
-      expect(existsSync(join(f.data, 'checkpoints', 'thr_a', 'object'))).toBe(true);
-    }
-    expect(f.result().error).toContain('could not put the previous data back');
-    expect(readFileSync(`${f.data}.unused-restore-${f.id}`, 'utf8')).toBe('not a directory');
+    const { restored } = cutRollback(f, true);
+    // A rejected-data folder already there: the rename aside cannot take its name.
+    mkdirSync(`${f.data}.failed-${f.id}`); writeFileSync(join(`${f.data}.failed-${f.id}`, 'pairing.json'), 'earlier rejected pairing');
+    // Then an I/O error on the rename that puts the restored copy in.
+    const failing: RestoreMoves = { copy: () => { throw new Error('no copy here'); }, rename: (source, target) => {
+      if (source === restored) throw Object.assign(new Error(`EIO: i/o error, rename '${source}'`), { code: 'EIO' });
+      renameSync(source, target);
+    } };
+    for (let start = 0; start < 2; start++) expect(() => open(f, failing)).toThrow('the server stays stopped');
+    expect(JSON.parse(readFileSync(`${f.data}.rollback.json`, 'utf8')).id).toBe(f.id);
+    expect(existsSync(join(restored, 'journal.db'))).toBe(true);
+    open(f)();
+    f.expectPrevious();
+    // The data in place when the start came, kept beside it.
+    expect(readFileSync(join(`${f.data}.unused-data`, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
     expect(existsSync(`${f.data}.rollback.json`)).toBe(false);
   } finally { f.stop(); }
+});
+
+test('a recorded restore that is no directory is set aside and redone from the snapshot, or the start is refused', async () => {
+  const f = await updateFixture();
+  try {
+    cutRollback(f, false);
+    writeFileSync(`${f.data}.restore-${f.id}`, 'not a directory');
+    open(f)();
+    f.expectPrevious();
+    expect(readFileSync(`${f.data}.unused-restore-${f.id}`, 'utf8')).toBe('not a directory');
+    // Without the snapshot, the data in place stays the rejected version's: nothing opens it.
+    const next = uuid('2');
+    rmSync(cutRollback(f, false, next).snapshot, { recursive: true, force: true });
+    writeFileSync(`${f.data}.restore-${next}`, 'not a directory');
+    expect(() => open(f)).toThrow('is missing');
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(true);
+  } finally { f.stop(); }
+});
+
+test('a start never opens a fresh data directory beside a restore whose record it cannot read', async () => {
+  const f = await updateFixture();
+  try {
+    // A swap cut between its two renames, its record left empty.
+    const { restored } = cutRollback(f, true);
+    renameSync(f.data, `${f.data}.failed-${f.id}`);
+    writeFileSync(`${f.data}.rollback.json`, '');
+    expect(() => open(f)).toThrow('cannot be read');
+    expect(existsSync(f.data)).toBe(false);
+    expect(existsSync(join(restored, 'journal.db'))).toBe(true);
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(true);
+  } finally { f.stop(); }
+});
+
+test('a rollback records its restore before the previous version can boot, so a power cut right after leaves it to the next start', async () => {
+  const f = await updateFixture();
+  writeFileSync(join(f.operation, 'admitted'), f.id);
+  // The power goes the moment the previous installation is back in place.
+  const disk: Partial<UpdateDisk> = { rename: (source, target) => {
+    renameSync(source, target);
+    if (target === f.install) throw new Error('power cut');
+  } };
+  try {
+    await expect(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: 0, disk, health: async () => null })).rejects.toThrow('power cut');
+    expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('old executable');
+    // At boot the service starts the previous version.
+    open(f)();
+    f.expectPrevious();
+    expect(f.result().error).toContain('rollback was cut off');
+  } finally { f.stop(); }
+});
+
+test.skipIf(process.platform !== 'linux')('the Linux maintenance lock has one holder at a time, and a killed holder leaves it free', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'boite-server-lock-'));
+  const file = join(root, 'data.maintenance.lock');
+  const { linuxFileLock } = await import('../src/platform/linux-server-update.ts');
+  try {
+    const release = linuxFileLock(file);
+    expect(() => linuxFileLock(file)).toThrow('a server update holds');
+    release();
+    linuxFileLock(file)();
+    const script = `const { linuxFileLock } = await import(${JSON.stringify(join(import.meta.dir, '../src/platform/linux-server-update.ts'))}); linuxFileLock(${JSON.stringify(file)}); console.log('held'); setInterval(() => {}, 1000);`;
+    const child = Bun.spawn([process.execPath, '-e', script], { stdout: 'pipe', stderr: 'inherit' });
+    try {
+      const reader = child.stdout.getReader();
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('held');
+      expect(() => linuxFileLock(file)).toThrow('a server update holds');
+    } finally { child.kill('SIGKILL'); await child.exited; }
+    linuxFileLock(file)();
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 /**

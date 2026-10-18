@@ -235,22 +235,29 @@ those of its own installation: each operation directory holds an
 `owner.json` naming the installation from the moment it exists, so a second
 installation in the same folder never deletes an update another one is
 running. An operation or snapshot that names no installation is left alone.
-A rollback writes `<data>.rollback.json`, naming its operation and snapshot,
-before it moves any data, and removes it once the swap is complete. A power cut
-in between leaves no recovery running, and the service starts at boot. Every
-core start off Windows holds `<data>.maintenance.lock` beside the data
-directory from that check until it has taken the data directory's own lock,
-and the job and its recovery hold it while they restore, so neither moves the
-data under the other. A start that finds the record, with no live core on the
-data, finishes that operation's restore before it opens anything: it uses the
-`<data>.restore-<id>` the record names, never the newest one on disk, keeps the
-rejected data as `<data>.failed-<id>` and reports the interrupted rollback in
-its update status. A snapshot it cannot copy back stops the start, and the
-next one retries. After a completed swap, every other `<data>.restore-*`
-beside the data directory is renamed to `<data>.unused-restore-*`, so no later
-start replays an older copy. A restore that cannot go in (a file in its place,
-a failed rename) is undone and set aside the same way, with its record, and the
-core starts on its data as it was, with the reason in its update status.
+Before the previous installation goes back in place, a rollback publishes
+`<data>.rollback.json` beside the data directory, naming its operation and
+snapshot: written whole to a temporary name, flushed and renamed in, and left
+as it is when a retry finds it valid. It is removed only once the swap is
+complete and flushed. A power cut in between leaves no recovery running, and
+the service starts the previous version at boot. A start that finds the record
+takes `<data>.maintenance.lock`, a kernel `flock` the job and its recovery hold
+while they restore, so neither moves the data under the other, and the kernel
+drops it with a killed holder. With no live core on the data, it finishes that
+operation's restore before it opens anything: it uses the `<data>.restore-<id>`
+the record names, never the newest one on disk, keeps the rejected data as
+`<data>.failed-<id>` and reports the interrupted rollback in its update status.
+After a completed swap, every other `<data>.restore-*` beside the data
+directory is renamed to `<data>.unused-restore-*`, so no later start replays an
+older copy. A recorded restore that is a file rather than a directory is set
+aside the same way and moved again from the snapshot. Whatever else stops the
+restore (a failed rename or copy, a missing snapshot, a record it cannot
+read) refuses the start and keeps the record, the restored copy and the data
+as they are: the data in place may be the rejected version's, and the previous
+core must not open it. The next start tries again. A start that finds no
+record reads nothing more and writes nothing outside the data directory, so
+the server image, whose data directory is a mount point in an unwritable `/`,
+and a first start that creates the data directory's parents work as before.
 
 From a terminal on the server, the same owner actions need no thread:
 

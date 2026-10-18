@@ -646,6 +646,7 @@ describe('harness updates', () => {
       launch: async (_run, _executable, plan) => { writeFileSync(join(dirname(plan), 'ready'), ''); },
       control: async () => undefined,
       mainPid: async () => process.pid,
+      lock: () => () => undefined,
     };
     try {
       const { client, state } = await start('npm', 'update', undefined, undefined, {

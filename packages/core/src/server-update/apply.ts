@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { unzipSync } from 'fflate';
 import { recoveryLink, type ServerUpdatePlan, type ServerUpdatePlatform } from './types.ts';
-import { restoreSnapshot, UNSAVED_DATA } from './restore.ts';
+import { recordRestore, restoreSnapshot, UNSAVED_DATA } from './restore.ts';
 
 export { UNSAVED_DATA };
 
@@ -159,6 +159,7 @@ async function rollBack(plan: ServerUpdatePlan, directory: string, platform: Ser
   const backup = backupOf(plan);
   const previous = join(backup, 'installation');
   const failedInstallation = join(directory, 'failed-installation');
+  const restore = { id: plan.id, snapshot: join(backup, 'data') };
   // The staged directory leaves the operation only to become the installation.
   const installed = !existsSync(join(directory, 'stage'));
   const touched = installed || existsSync(backup);
@@ -167,13 +168,15 @@ async function rollBack(plan: ServerUpdatePlan, directory: string, platform: Ser
   // A process the service started on its own is left as it is.
   if (touched || await platform.mainPid(service) === plan.originalPid) await platform.control(service, 'stop');
   if (installed && !existsSync(failedInstallation)) renameSync(root, failedInstallation);
-  if (existsSync(previous) && !existsSync(root)) renameSync(previous, root);
   // A new version in place has run on the live data, or will have: the recovery starts one it finds stopped.
+  // Its restore is on record before the previous version can boot on that data, so a start at boot finishes it.
+  if (installed && existsSync(restore.snapshot)) recordRestore(plan.dataDir, restore, platform.lock);
+  if (existsSync(previous) && !existsSync(root)) disk.rename(previous, root);
   if (installed) {
     try {
       // The snapshot moves back rather than being copied: the update checked room for one copy, and a
       // second one once failed the rollback of a disk left with only the spare, with the service stopped.
-      restoreSnapshot(plan.dataDir, { id: plan.id, snapshot: join(backup, 'data') }, disk);
+      restoreSnapshot(plan.dataDir, restore, disk, platform.lock);
     } catch (error) {
       // The previous core would open the data the rejected one migrated, and the restore that follows
       // would discard whatever it accepted: the service stays stopped, and the recovery or the next start retries.

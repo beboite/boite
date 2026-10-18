@@ -387,9 +387,10 @@ export function main(argv: string[]): void {
     try {
       flags = parseFlags(argv);
       dataDir = resolveDataDir(flags.dataDir, flags.channel);
-      // Before the journal is opened, because opening it is already a write. Off Windows, where server updates
-      // run, under the maintenance lock: a server rollback a power cut interrupted finishes before anything opens the data.
-      if (process.platform !== 'win32') unlock = openDataDir(dataDir, prepareDataDir);
+      // Before the journal is opened, because opening it is already a write. Where server updates run, a
+      // rollback a power cut interrupted finishes first.
+      const updates = processPlatform.serverUpdates;
+      if (updates) unlock = openDataDir(dataDir, prepareDataDir, updates.lock);
       else {
         prepareDataDir(dataDir);
         unlock = lockDataDir(dataDir);
