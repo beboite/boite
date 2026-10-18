@@ -113,12 +113,12 @@ jobs:
           MODE: ${{ matrix.mode }}
         run: |
           if ($env:MODE -eq 'alone') {
-            $files = @('tests/e2e/coordination-bridge-live.test.ts'); $runs = [int]$env:RUNS * 3
+            $files = @('tests/e2e/coordination-bridge-live.test.ts'); $runs = [int]$env:RUNS * 3; $together = @()
           } else {
-            $files = @(bun scripts/ci/e2e-shards.ts 3 3); $runs = [math]::Max(1, [int]([int]$env:RUNS / 4))
+            $files = @(bun scripts/ci/e2e-shards.ts 3 3)
+            if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw 'No E2E files for shard 3' }
+            $runs = [math]::Max(1, [int]([int]$env:RUNS / 4)); $together = @('--together')
           }
-          if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw 'No E2E files to loop' }
-          $together = @(if ($env:MODE -eq 'alone') { } else { '--together' })
           bun scripts/ci/flake-loop.ts --runs $runs --out flake-loop @together @files
       - uses: ./.github/actions/upload-artifact
         if: always()
