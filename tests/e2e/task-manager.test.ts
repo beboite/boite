@@ -63,7 +63,27 @@ test('the real task manager reads owned processes on desktop and a paired phone'
     await mobileAction(phone, 'mobile-settings');
     await phone.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
     expect(await phone.evaluate(`document.querySelector('[data-testid=settings-tab-task-manager]') === null`)).toBe(true);
+    // A card in a conversation still leads the phone there, the way an agent sends it: it asks inside a turn.
+    await owner.call('turns.start', { threadId, prompt: 'Which processes does this conversation run?' });
+    const finished = Date.now() + 15_000;
+    while ((await owner.call('threads.get', { threadId })).turns.at(-1)?.status !== 'done') {
+      if (Date.now() > finished) throw new Error('the echo turn did not finish');
+      await Bun.sleep(100);
+    }
+    const title = (await owner.call('threads.get', { threadId })).title;
+    await owner.call('settings.request', { threadId, reason: 'See what this conversation runs', page: 'task-manager' });
+    await mobileAction(phone, 'mobile-conversations');
+    await phone.click(`[data-testid="mobile-thread-${threadId}"]`);
+    await phone.waitFor(`document.querySelector('[data-testid=setting-open]')`);
+    await phone.click('[data-testid=setting-open]');
+    await phone.waitFor(`document.querySelector('${selector}')`);
+    expect(await phone.evaluate(`document.querySelector('${selector} .actions') === null`)).toBe(true);
+    expect(await phone.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true);
+    await phone.evaluate('document.fonts.ready');
     await phone.screenshot(join(import.meta.dir, '.artifacts', 'task-manager-phone.png'));
+    await phone.click(`${selector} .title`);
+    await phone.waitFor(`document.querySelector('.app.phone-chat') && !document.querySelector('[data-testid=mobile-list]') && !document.querySelector('[data-testid=task-manager]') && document.querySelector('[data-testid=composer-input]')`);
+    expect(await phone.evaluate(`document.querySelector('[data-testid=thread-title]')?.textContent`)).toBe(title);
 
     await desktop.click(`${selector} .actions button`);
     await desktop.click(`${selector} .actions button.danger`);
