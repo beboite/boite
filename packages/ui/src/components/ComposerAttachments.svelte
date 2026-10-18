@@ -8,6 +8,7 @@
   import { imageLabel } from '../lib/composer-images';
   import { Closing } from '../lib/closing.svelte';
   import { focusWithin, keepFocus } from '../lib/focus';
+  import { AttachmentPreviews } from '../lib/attachment-previews.svelte';
 
   /** The attachments this prompt carries, above the box they were pasted into. */
   let { attachments, highlighted = null, onremove, onfocus }: {
@@ -20,6 +21,10 @@
   let previewElement = $state<HTMLElement>();
   let strip = $state<HTMLElement>();
   const preview = new Closing();
+  const pictures = new AttachmentPreviews();
+  // A copy reads every entry here, so a push into the prompt's list syncs too.
+  $effect(() => { pictures.sync([...attachments]); });
+  $effect(() => () => pictures.close());
   const images = $derived(attachments.filter(attachment => attachment.kind === 'image'));
   /** Tile widths, in px: the strip is one row and counts what fits from these. */
   const IMAGE_TILE = 56, FILE_TILE = 168, MORE_TILE = 44, GAP = 6;
@@ -92,7 +97,7 @@
     </header>
     <!-- The enlarged picture closes on a click too, the way it opened. -->
     <button type="button" class="preview-image" data-testid="composer-image-shrink" title={strings.composer.imagePreviewClose} aria-label={strings.composer.imagePreviewClose} onmousedown={keepFocus} onclick={closePreview}>
-      <img src="data:{visible.mimeType};base64,{visible.data}" alt={visible.name ?? strings.composer.attachAlt} />
+      <img src={pictures.full(visible)} alt={visible.name ?? strings.composer.attachAlt} />
     </button>
   </section>
 {/if}
@@ -103,10 +108,11 @@
     {@const pending = unresolvedAssetId(attachment)}
     <div class="attachment" style:width="{widths[at]}px" class:highlighted={highlighted === attachment} class:selected={visible === attachment && preview.shown} class:document={attachment.kind === 'file' || !!pending} data-testid="composer-attachment" title={pending ? strings.errors.draftAttachment : attachment.kind === 'image' ? `${imageLabel(images.indexOf(attachment) + 1)} · ${label}` : label}>
       {#if attachment.kind === 'image' && !pending}
+        {@const thumb = pictures.thumb(attachment)}
         <button type="button" class="image-open" data-testid="composer-image-open"
           aria-label={fill(strings.composer.imagePreview, { image: imageLabel(images.indexOf(attachment) + 1) })}
           aria-expanded={visible === attachment && preview.shown} onmousedown={keepFocus} onclick={() => pick(attachment)}>
-          <img src="data:{attachment.mimeType};base64,{attachment.data}" alt={label} />
+          {#if thumb}<img src={thumb} alt={label} />{/if}
         </button>
       {:else}
         <FileText size={20} strokeWidth={1.5} />

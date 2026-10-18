@@ -69,7 +69,7 @@ async function buildBundle(outDir: string): Promise<void> {
     name: 'bench-ui-frames-bridge',
     transform(code: string, id: string) {
       if (id.replaceAll('\\', '/') !== join(UI, 'src/main.ts').replaceAll('\\', '/')) return;
-      return `${code}\nimport { store as __store } from './lib/store.svelte.ts';\nglobalThis.__bench = { store: __store };\n`;
+      return `${code}\nimport { store as __store } from './lib/store.svelte.ts';\nimport { rightPanel as __panel } from './lib/right-panel.svelte.ts';\nglobalThis.__bench = { store: __store, panel: __panel };\n`;
     },
   };
   await build({ root: UI, plugins: [bridge], define: { 'import.meta.env.DEV': 'true' }, build: { outDir, emptyOutDir: true, ...(process.env.BENCH_MINIFY === '0' ? { minify: false } : {}) }, logLevel: 'warn' });
@@ -147,6 +147,8 @@ const SCROLLER = `(() => { let best = null; for (const el of document.querySelec
  * paragraphs keep text arriving on screen through the measured window.
  */
 const PROMPT = 'Streaming bench paragraph with enough words to wrap across the column.\n\n'.repeat(60);
+/** A TypeScript file just under `HIGHLIGHT_LIMIT` (200,000 characters): the largest text the editor highlights. */
+const LARGE_FILE = Array.from({ length: 2600 }, (_, index) => `export function step${index}(input: { id: string; count: number }): string { return \`\${input.id}:\${input.count + ${index}}\`; }\n`).join('').slice(0, 190_000);
 const SETUP = `
   window.__long = [];
   // Each key's latency: from the keydown's own timestamp to the task after the
@@ -258,10 +260,51 @@ async function main(): Promise<void> {
       await page.call(`function (text) { const input = document.querySelector('[data-testid=composer-input]'); input.focus(); if (text) { input.value = text; input.dispatchEvent(new Event('input', { bubbles: true })); } input.setSelectionRange(input.value.length, input.value.length); }`, draft);
       await Bun.sleep(300);
     };
-    /** A pasted screenshot's worth of base64 on the draft, what every save of it carries. */
+    /**
+     * A pasted 1920 by 1080 screenshot on the draft: a PNG the page draws (a
+     * window of text rows and a photo-like patch, from a fixed seed) so the
+     * tile decodes a real picture, as large as a screenshot, every run the same.
+     */
     const attachImage = async (): Promise<void> => {
-      await page.evaluate(`(() => { const s = globalThis.__bench.store; const key = s.openThread?.id ?? 'draft'; const state = s.composerStates[key]; state.attachments = [{ kind: 'image', mimeType: 'image/png', name: 'bench.png', data: 'iVBORw0KGgo'.repeat(140000) }]; })()`);
+      const made = await page.evaluate(`(() => {
+        const canvas = document.createElement('canvas'); canvas.width = 1920; canvas.height = 1080;
+        const c = canvas.getContext('2d');
+        let seed = 7; const rand = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+        c.fillStyle = '#1e1f24'; c.fillRect(0, 0, 1920, 1080);
+        c.fillStyle = '#26272d'; c.fillRect(0, 0, 320, 1080);
+        c.font = '15px sans-serif';
+        for (let y = 24; y < 1080; y += 22) {
+          c.fillStyle = 'hsl(' + Math.floor(rand() * 360) + ', 40%, 75%)';
+          c.fillText('row ' + y + ' ' + Math.floor(rand() * 1e12).toString(36).repeat(1 + Math.floor(rand() * 6)), y % 44 ? 340 : 16, y);
+        }
+        const patch = c.createImageData(640, 400);
+        for (let i = 0; i < patch.data.length; i += 4) { const x = (i / 4) % 640, y = Math.floor(i / 2560); patch.data[i] = (x / 2.5 + rand() * 60) | 0; patch.data[i + 1] = (y / 1.6 + rand() * 60) | 0; patch.data[i + 2] = (128 + rand() * 90) | 0; patch.data[i + 3] = 255; }
+        c.putImageData(patch, 1180, 560);
+        const data = canvas.toDataURL('image/png').slice('data:image/png;base64,'.length);
+        const s = globalThis.__bench.store; const key = s.openThread?.id ?? 'draft'; const state = s.composerStates[key];
+        state.attachments = [{ kind: 'image', mimeType: 'image/png', name: 'bench.png', data }];
+        return data.length;
+      })()`) as number;
+      // The tile drew what it shows: the thumbnail, or on an older build the whole picture.
+      await page.waitFor(`(() => { const img = document.querySelector('[data-testid=composer-image-open] img'); return img && img.complete && img.naturalWidth > 0; })()`);
+      const tile = await page.evaluate(`document.querySelector('[data-testid=composer-image-open] img').naturalWidth`) as number;
+      console.log(`  picture 1920x1080, ${made} base64 characters; the tile draws one ${tile} pixels wide`);
       await Bun.sleep(300);
+    };
+    /** A thousand idle threads more in the sidebar, laid over the fake's own rows. */
+    const manyThreads = async (count = 1000): Promise<void> => {
+      await page.evaluate(`(() => { const s = globalThis.__bench.store; const base = JSON.parse(JSON.stringify(s.threads.find(t => t.projectId) ?? s.threads[0])); const now = Date.now(); s.threads = [...s.threads, ...Array.from({ length: ${count} }, (_, i) => ({ ...base, id: 't-bench-' + i, title: 'Bench thread number ' + i + ' with a title long enough', status: 'idle', unread: i % 7 === 0, archived: false, updatedAt: new Date(now - i * 60000).toISOString(), createdAt: new Date(now - i * 60000).toISOString() }))]; })()`);
+      await Bun.sleep(1500);
+    };
+    // A wheel down the thread list, over the sidebar at the left of the window.
+    const sidebarWheel = (distance = -9000, speed = 2400): void => {
+      void page.send('Input.synthesizeScrollGesture', { x: 120, y: Math.round(H * 0.5), yDistance: distance, speed, gestureSourceType: 'mouse' }).catch(() => {});
+    };
+    /** Writes the large file in the open thread's folder and opens it in the panel, not awaited: its highlight runs in the measured window. */
+    const openLargeFile = async (): Promise<void> => {
+      await page.call(`async function (text) { const s = globalThis.__bench.store; await s.client.call('files.write', { threadId: s.openThread.id, path: 'bench-large.ts', text }); }`, LARGE_FILE);
+      // Opened 200 ms into the measured window, so the window holds the open and the grammar's run.
+      await page.evaluate(`(() => { const s = globalThis.__bench.store; setTimeout(() => globalThis.__bench.panel.for(s.threadKey(s.openThread.id)).openFile('bench-large.ts'), 200); })()`);
     };
     const activity = `(() => { const t = globalThis.__bench.store.openThread; t.activity = { goal: { objective: 'Verify the bench', status: 'running', iterations: 1, error: null }, loop: null, tasks: Array.from({ length: 12 }, (_, i) => ({ id: 't' + i, text: 'Bench task number ' + i + ' with a line long enough to wrap', status: i < 4 ? 'completed' : i === 4 ? 'in_progress' : 'pending' })) }; })()`;
     const openActivity = async (): Promise<void> => {
@@ -298,6 +341,9 @@ async function main(): Promise<void> {
         wheel();
       },
       'scroll under activity': async () => { await open('open=recent&stream=tokens&long=1'); await stream(); await openActivity(); wheel(); },
+      'sidebar scroll': async () => { await open('open=recent'); await manyThreads(); sidebarWheel(); },
+      // A 190,000-character TypeScript file opened in the panel: its first highlight runs inside the window.
+      'large file highlight': async () => { await open('open=recent'); await openLargeFile(); },
       'onboarding tour': async () => {
         await page.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: DPR, mobile: false });
         await page.send('Page.navigate', { url: `http://127.0.0.1:${uiPort}/?fake=1&open=recent&tour=1` });

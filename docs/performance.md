@@ -998,6 +998,105 @@ its frame rate stands for a fast one; at 60 Hz the staircases save little in
 front and the rest still saves the whole cost. Not measured in WebView2.
 [Report](../bench/results/2026-10-17-ui-at-rest.md).
 
+### What a page left running holds
+
+Beyond the loops, a page left open kept a few costs that nothing on screen
+needed:
+
+- The model cache was rewritten in `localStorage` on every probe answer, and a
+  restore serialized the provider and account lists three times to compare
+  them. `saveModels` now writes at most once a second, the last state, and on
+  `pagehide`; `restoreModels` compares the lists field by field (`sameJson`).
+  A `thread.load` sample, one per working thread at each load report, found its
+  row with `Array.find` through the store's proxy; `Threads.rowOf` reads the
+  row's position from an id index and checks the id there, so a row replaced
+  in place is still found, and builds the index again when the list is
+  replaced, grows or moves.
+- A composer tile drew its picture as a `data:` URL, the whole picture decoded
+  for a 56 by 42 tile, with a multi-megabyte string in the DOM.
+  `lib/attachment-previews.svelte.ts` makes one WebP thumbnail at twice the
+  tile's size when the picture is attached, and the enlarged preview draws the
+  bytes through an object URL; each URL is revoked when its picture leaves the
+  prompt. What is sent does not change.
+- A hidden terminal kept its xterm and its WebGL context. It now loses the
+  context through `WEBGL_lose_context` as it leaves the page (xterm's addon
+  only removes its canvas, which holds the context until a collection), and
+  drops the whole xterm after five minutes hidden
+  ([terminal](terminal.md#the-screen)).
+- Every row of a windowed list had its own `ResizeObserver`, and every
+  threshold an `IntersectionObserver` crossed read the list's place again. The
+  rows of a list share one observer, and those notifications read the layout
+  once a frame. Deferred pictures and files had one `IntersectionObserver`
+  each, rooted at an ancestor found by reading `getComputedStyle` up the tree;
+  `lib/on-view.ts` shares one observer per scrolling root and margin, and the
+  timeline marks itself `data-scroll-root`.
+- A text from 20,000 characters goes through its grammar in a worker
+  ([panel](panel.md)).
+
+The second clock (`lib/clock.svelte.ts`), which the working rows read for
+their elapsed time, keeps ticking at rest and stops only while the page is
+hidden: a window left visible beside another application is at rest and
+still shows its times.
+
+`bun bench/ui-at-rest.ts --only working --runs 3 --wait 120`, 2026-10-17,
+headless Chrome on ANGLE Direct3D 11 (RTX 5080), `?fake=1&working=16` with
+nobody at the PC, 6 s windows, the base being `1c168fd6` and the heap read
+after 120 s. After is measured again on 2026-10-18, merged with `origin/main`
+at `9ffdb977`, with the second clock ticking at rest:
+
+| Measure | Base | After |
+| --- | --- | --- |
+| Frames/s | 2.7 to 3.0 | 2.8 to 3.0 |
+| Renderer ms/s | 10 to 15 | 8 |
+| GPU ms/s | 6 to 7 | 4 |
+| Renderer main thread ms/s | 5 to 7 | 4 |
+| Long tasks since load | 2 to 4 (191 to 740 ms) | 0 to 1 (0 to 51 ms) |
+| JS heap, MiB | 9.9 to 14.5 | 11.2 to 13.8 |
+
+The long tasks are the page's load, which this change does not touch and the
+lean boot on main shortened, and the heap stays within run-to-run noise.
+
+With five terminals opened then hidden, `bun bench/ui-at-rest.ts --only
+"hidden terminals"` (2026-10-18, xterm on WebGL, the base being `origin/main`
+at `b611c01f`) counts the contexts still live, neither lost nor collected,
+before the window's two forced collections and after them:
+
+| Run | Base | After |
+| --- | --- | --- |
+| `--runs 2`, window 1 s after hiding | 5 live, then 5; heap 12.5 and 16.4 MiB | 0 live, then 0; heap 10.2 and 10.1 MiB |
+| `--wait 310`, window 310 s after hiding | 5 live, then 5; heap 12.9 MiB | 0 live, then 0; heap 12.5 MiB |
+
+The base keeps every hidden screen's context; after, each is lost as its
+screen leaves the page. Past five minutes the xterms are gone too, which
+moves the heap by less than its run-to-run spread.
+
+`bun bench/ui-frames.ts --only "<scenario>" --runs 3`, 2026-10-17, headless
+Chrome at 1280 by 890:
+
+| Scenario | Base | After |
+| --- | --- | --- |
+| Large file highlight, grammar on the main thread | 108 to 242 ms | 0 to 2 ms |
+| Large file highlight, long tasks | 2 to 3 (2,706 to 5,423 ms) | 1 to 2 (204 to 616 ms) |
+| Typing with a 1920 by 1080 PNG attached, key p95 | 16.7 to 17.6 ms | 16.0 to 17.5 ms |
+| Typing with a 1920 by 1080 PNG attached, long tasks | 0 | 0 |
+| The same picture, as the tile decodes it | 1920 by 1080 | 149 by 84 |
+| Long thread scroll, long tasks | 2 (112 ms) | 0 |
+| Heavy thread jumps, long tasks | 0 to 2 in 8 runs (0 to 147 ms) | 0 in the last 4 runs, 2 to 5 (117 to 436 ms) in 4 earlier ones |
+
+The picture rows are from 2026-10-18 with the base at `15fdbb81`: the bench
+draws a 1920 by 1080 PNG in the page from a fixed seed, 1,311,112 base64
+characters, and waits for the tile to show it. Typing costs the same on both
+sides; what the thumbnail changes is the picture the tile keeps decoded, about
+7.9 MiB of pixels on the base against 49 KiB after. An earlier version of this
+table compared bytes the decoder rejected, so neither side drew a picture.
+
+The large file task left after the change is the browser building 23,000
+highlighted nodes, not script. The heavy thread jumps scenario is noisy on both
+sides; in its profiles the long tasks are rows mounting (`innerHTML` and the
+scroll anchor's layout read in `remember`), none of it code this change
+touched, and yielding from script would not split them, so nothing yields
+there.
+
 ## What a long day holds
 
 The desktop page of a machine with many agents at work stays open for days,

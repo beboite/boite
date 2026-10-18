@@ -1,4 +1,5 @@
 import { createWithPreparation, mergeCreationSnapshot } from './thread-creation';
+import { messageCopies, RowIndex, threadCopies } from './thread-lookup';
 import type {
   Message,
   MessageId,
@@ -38,6 +39,7 @@ function summaryOf(thread: Thread): ThreadSummary {
 /** The thread list, the open thread and its subscription, and what one thread's lifecycle asks of the core. */
 export class Threads {
   threads = $state<ThreadSummary[]>([]);
+  #rowIndex = new RowIndex();
   /**
    * The open thread holds the window that is loaded, not the whole history:
    * `threads.get` gives the last page and `loadOlder` prepends what is above it.
@@ -797,11 +799,14 @@ export class Threads {
     await Promise.all(ids.map(threadId => client.call('threads.unsubscribe', { threadId }).catch(() => undefined)));
   }
 
+  /** The row of `threadId` the list holds, through the id index. */
+  rowOf(threadId: ThreadId): ThreadSummary | undefined { return this.#rowIndex.of(this.threads, threadId); }
+
   upsertThread(summary: ThreadSummary): void {
     this.ctx.threadReads.change(summary.id, summary);
-    const row = this.threads.find((t) => t.id === summary.id);
+    const row = this.rowOf(summary.id);
     if (row) patchRow(row, keepArchived(row, summary));
-    else this.threads.push(summary);
+    else this.#rowIndex.push(this.threads, summary);
   }
 
   /** Drops reading state; automatic archives can retain unsent input for restoration. */
@@ -829,17 +834,12 @@ export class Threads {
     if (left?.archived && left.id !== next) this.forgetThread(left.id, left.archiveReason?.type === 'pr-merged');
   }
 
-  threadSnapshots(threadId: ThreadId): Set<Thread> {
-    return new Set([this.openThread, this.ctx.store.delegationThread, ...this.preloads.pages()].filter((thread): thread is Thread => !!thread && thread.id === threadId));
+  threadSnapshots(threadId: ThreadId): Thread[] {
+    return threadCopies(threadId, this.openThread, this.ctx.store.delegationThread, this.preloads.pages());
   }
 
-  messages(threadId: ThreadId, messageId: string): Set<Message> {
-    const messages = new Set<Message>();
-    for (const thread of this.threadSnapshots(threadId)) {
-      const message = thread.messages[lastIndexById(thread.messages, messageId)];
-      if (message) messages.add(message);
-    }
-    return messages;
+  messages(threadId: ThreadId, messageId: string): Message[] {
+    return messageCopies(this.threadSnapshots(threadId), messageId);
   }
 
   invalidateSync(threadId: ThreadId): void {

@@ -22,14 +22,18 @@ afterEach(() => {
 
 /** An IntersectionObserver that reports what the test says, when it says it. */
 function observeBy(): (visible: boolean) => void {
-  const callbacks: IntersectionObserverCallback[] = [];
+  const observers: { callback: IntersectionObserverCallback; nodes: Set<Element> }[] = [];
   globalThis.IntersectionObserver = class {
-    constructor(callback: IntersectionObserverCallback) { callbacks.push(callback); }
-    observe() {}
-    disconnect() {}
+    nodes = new Set<Element>();
+    constructor(callback: IntersectionObserverCallback) { observers.push({ callback, nodes: this.nodes }); }
+    observe(node: Element) { this.nodes.add(node); }
+    unobserve(node: Element) { this.nodes.delete(node); }
+    disconnect() { this.nodes.clear(); }
   } as unknown as typeof IntersectionObserver;
   return (visible) => {
-    for (const callback of callbacks) callback([{ isIntersecting: visible } as IntersectionObserverEntry], {} as IntersectionObserver);
+    for (const { callback, nodes } of observers) {
+      callback([...nodes].map(target => ({ target, isIntersecting: visible }) as IntersectionObserverEntry), {} as IntersectionObserver);
+    }
     flushSync();
   };
 }

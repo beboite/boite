@@ -3,8 +3,18 @@
  * as the shell runs. The screen outlives the component that shows it: hiding
  * the drawer or opening another thread takes its element out of the page and
  * puts the same one back later, with its scrollback, its selection and whatever
- * a full-screen program drew. Only a reload or a reconnect redraws from the
- * core's snapshot.
+ * a full-screen program drew. Only a reload, a reconnect or a long absence
+ * redraws from the core's snapshot.
+ *
+ * A hidden screen gives back what it holds. Its WebGL context goes as it
+ * leaves the page (Chromium keeps sixteen at most) and a new one draws it once
+ * when it comes back. After `HIDDEN_RELEASE_MS` out of the page the whole
+ * xterm goes, its scrollback included: shown again, the screen is drawn from
+ * the core's snapshot, its last 256 Ki characters
+ * of output. The shell runs on meanwhile. Its status and directory never
+ * come from xterm: the session reads them from the raw output for its whole
+ * life (`terminal-status.ts`), so the tab's dot stays true whether a screen
+ * exists or not.
  *
  * The screen draws on the GPU (WebGL) and falls back to xterm's DOM renderer
  * when the browser refuses a context or loses it. A shell started with the
@@ -22,7 +32,8 @@ import type { RpcEvents, TerminalShell, TerminalState } from '@boite/contracts';
 import { TERMINAL_COMMANDS, isMac } from './keybindings';
 import { openExternal } from './links';
 import { readTerminalCursor, readTerminalGpu } from './terminal-cursor';
-import { clearLineKeys, parseCwdProperty, parseFileUrl, parsePromptMark } from './terminal-marks';
+import { clearLineKeys, parseConEmuCwd, parsePromptMark } from './terminal-marks';
+import { ShellStatusReader } from './terminal-status';
 import type { Store } from './store.svelte';
 
 export type TerminalStart = (cols: number, rows: number) => Promise<TerminalState | null>;
@@ -41,6 +52,8 @@ const FONT_SIZE = 13;
 const SCROLLBACK = 10_000;
 /** Commands whose dots are kept: older ones scrolled out of the buffer long ago. */
 const MAX_MARKS = 1000;
+/** How long a screen out of the page keeps its xterm before the core's snapshot is all it needs. */
+export const HIDDEN_RELEASE_MS = 5 * 60_000;
 
 /**
  * True for a key the shell takes even when the app has a command on it: Ctrl
@@ -162,7 +175,10 @@ export class TerminalSession {
   #fit: FitAddon | null = null;
   #search: SearchAddon | null = null;
   #webgl: { dispose(): void } | null = null;
+  #webglLost: { dispose(): void } | null = null;
   #WebglAddon: (new () => { dispose(): void; onContextLoss: (listener: () => void) => { dispose(): void } }) | null = null;
+  /** WebGL failed or lost its context: the session asks for it no more, a screen drawn again after a release included. */
+  #gpuRefused = false;
   #host: HTMLElement | null = null;
   #onexit: TerminalMount['onexit'];
   #wantsFocus = false;
@@ -185,7 +201,18 @@ export class TerminalSession {
   #resizeTimer: ReturnType<typeof setTimeout> | null = null;
   #frame: number | null = null;
   #observer: ResizeObserver | null = null;
+  /** What lives as long as the session: the connection watch and the shell's exit. */
   #cleanups: (() => void)[] = [];
+  /** What lives as long as one xterm, released with it. */
+  #screenCleanups: (() => void)[] = [];
+  #releaseTimer: ReturnType<typeof setTimeout> | null = null;
+  #listening = false;
+  /** The only reader of `running`, `lastExit` and `cwd`, so a release never hands anything over. */
+  readonly #status = new ShellStatusReader({
+    running: (running) => { this.running = running; },
+    exit: (code) => { this.lastExit = code; },
+    cwd: (path) => { this.cwd = path; }
+  });
   #marks: CommandMark[] = [];
   #query = '';
   #windows = false;
@@ -224,6 +251,8 @@ export class TerminalSession {
     this.#onexit = options.onexit;
     this.#wantsFocus = options.autofocus;
     host.append(this.element);
+    if (this.#releaseTimer !== null) clearTimeout(this.#releaseTimer);
+    this.#releaseTimer = null;
     this.#observer?.disconnect();
     this.#observer = new ResizeObserver(() => this.#scheduleFit());
     this.#observer.observe(host);
@@ -240,6 +269,9 @@ export class TerminalSession {
     this.#host = null;
     this.#onexit = undefined;
     this.element.remove();
+    this.#dropGpu();
+    if (this.#releaseTimer !== null) clearTimeout(this.#releaseTimer);
+    this.#releaseTimer = setTimeout(() => this.#release(), HIDDEN_RELEASE_MS);
     return focused;
   }
 
@@ -253,16 +285,50 @@ export class TerminalSession {
     this.#run++;
     if (this.#resizeTimer !== null) clearTimeout(this.#resizeTimer);
     if (this.#frame !== null) cancelAnimationFrame(this.#frame);
+    if (this.#releaseTimer !== null) clearTimeout(this.#releaseTimer);
     this.#observer?.disconnect();
     for (const cleanup of this.#cleanups.reverse()) cleanup();
     this.#cleanups = [];
-    this.#webgl?.dispose();
-    this.#webgl = null;
-    this.#term?.dispose();
-    this.#term = null;
+    this.#disposeScreen();
     this.element.remove();
     this.#host = null;
     this.ondispose();
+  }
+
+  /** The screen was out of the page long enough: its xterm goes, the shell and this session stay. */
+  #release(): void {
+    this.#releaseTimer = null;
+    if (this.#disposed || this.#host !== null || this.#term === null) return;
+    // An attach in flight lands on nothing.
+    this.#run++;
+    if (this.#resizeTimer !== null) clearTimeout(this.#resizeTimer);
+    this.#resizeTimer = null;
+    if (this.#frame !== null) cancelAnimationFrame(this.#frame);
+    this.#frame = null;
+    this.#disposeScreen();
+    this.element.replaceChildren();
+    this.#loading = null;
+    this.#opened = false;
+    this.#attached = false;
+    this.#attaching = false;
+    this.#pending = [];
+    this.#typed = '';
+    this.#muted = 0;
+    this.#sent = null;
+    this.#query = '';
+    this.searchResults = null;
+  }
+
+  #disposeScreen(): void {
+    for (const cleanup of this.#screenCleanups.reverse()) cleanup();
+    this.#screenCleanups = [];
+    for (const mark of this.#marks) mark.decoration?.dispose();
+    this.#marks = [];
+    this.#dropGpu();
+    this.#term?.dispose();
+    this.#term = null;
+    this.#fit = null;
+    this.#search = null;
   }
 
   // ---------------------------------------------------------------------------
@@ -366,7 +432,7 @@ export class TerminalSession {
       import('@xterm/addon-web-links'),
       import('@xterm/addon-search').catch(() => null),
       import('@xterm/addon-unicode11').catch(() => null),
-      readTerminalGpu() ? import('@xterm/addon-webgl').catch(() => null) : null,
+      readTerminalGpu() && !this.#gpuRefused ? import('@xterm/addon-webgl').catch(() => null) : null,
       fontReady(family)
     ]);
     this.#WebglAddon = webgl?.WebglAddon ?? null;
@@ -415,7 +481,7 @@ export class TerminalSession {
       const results = search.onDidChangeResults(({ resultIndex, resultCount }) => {
         this.searchResults = this.#query.length === 0 ? null : { index: resultIndex, count: resultCount };
       });
-      this.#cleanups.push(() => results.dispose());
+      this.#screenCleanups.push(() => results.dispose());
     }
     this.#listenToShell(term);
     term.attachCustomKeyEventHandler((event) => this.#key(event));
@@ -430,18 +496,26 @@ export class TerminalSession {
       this.store.writeTerminal(this.id, data);
     });
     const resize = term.onResize(() => this.#scheduleResize());
-    this.#cleanups.push(() => { input.dispose(); resize.dispose(); });
-    this.#cleanups.push(client.on('terminal.output', (event) => {
+    this.#screenCleanups.push(() => { input.dispose(); resize.dispose(); });
+    this.#screenCleanups.push(client.on('terminal.output', (event) => {
       if (event.id !== this.id) return;
       if (this.#attached) term.write(event.data);
       else if (this.#attaching) this.#pending.push(event);
     }));
-    this.#cleanups.push(client.on('terminal.exited', (event) => {
-      if (event.id !== this.id) return;
-      const onexit = this.#onexit;
-      this.dispose();
-      onexit?.(event.exitCode);
-    }));
+    // A shell can end while its screen is released: the session hears it either way.
+    if (!this.#listening) {
+      this.#listening = true;
+      // The status and the directory are read here, whether a screen draws the output or not.
+      this.#cleanups.push(client.on('terminal.output', (event) => {
+        if (event.id === this.id) this.#status.read(event.data, event.sequence);
+      }));
+      this.#cleanups.push(client.on('terminal.exited', (event) => {
+        if (event.id !== this.id) return;
+        const onexit = this.#onexit;
+        this.dispose();
+        onexit?.(event.exitCode);
+      }));
+    }
     // Windows Terminal's right click: copy the selection, or paste when there is none.
     const contextMenu = (event: MouseEvent) => {
       if (event.shiftKey) return;
@@ -455,7 +529,7 @@ export class TerminalSession {
       term.focus();
     };
     this.element.addEventListener('contextmenu', contextMenu);
-    this.#cleanups.push(() => this.element.removeEventListener('contextmenu', contextMenu));
+    this.#screenCleanups.push(() => this.element.removeEventListener('contextmenu', contextMenu));
     const looks = new MutationObserver(() => {
       term.options.theme = theme();
       const next = fontFamily();
@@ -466,10 +540,10 @@ export class TerminalSession {
       this.#scheduleFit();
     });
     looks.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style', 'class', 'data-terminal-cursor'] });
-    this.#cleanups.push(() => looks.disconnect());
+    this.#screenCleanups.push(() => looks.disconnect());
   }
 
-  /** The integration's marks and the directory reports, read as xterm parses them. */
+  /** The integration's marks as xterm parses them, for the dots on its lines; the directory reports draw nothing. */
   #listenToShell(term: Terminal): void {
     const prompt = term.parser.registerOscHandler(133, (data) => {
       const mark = parsePromptMark(data);
@@ -477,25 +551,12 @@ export class TerminalSession {
       this.#onMark(term, mark);
       return true;
     });
-    const properties = term.parser.registerOscHandler(633, (data) => {
-      const cwd = parseCwdProperty(data);
-      if (cwd !== null) this.cwd = cwd;
-      // Other properties (the history file) are the core's; they draw nothing.
-      return true;
-    });
-    const fileUrl = term.parser.registerOscHandler(7, (data) => {
-      const cwd = parseFileUrl(data);
-      if (cwd !== null) this.cwd = cwd;
-      return true;
-    });
-    // Windows Terminal's own cwd report, `9;9;"C:\path"`.
-    const conemu = term.parser.registerOscHandler(9, (data) => {
-      const match = /^9;"?(.*?)"?$/.exec(data);
-      if (match === null) return false;
-      if (match[1]!.length > 0) this.cwd = match[1]!;
-      return true;
-    });
-    this.#cleanups.push(() => { prompt.dispose(); properties.dispose(); fileUrl.dispose(); conemu.dispose(); });
+    // The session's scanner reads the directory; these only keep the reports off the screen.
+    const properties = term.parser.registerOscHandler(633, () => true);
+    const fileUrl = term.parser.registerOscHandler(7, () => true);
+    // Windows Terminal's own cwd report, `9;9;"C:\path"`; another OSC 9 is a notification.
+    const conemu = term.parser.registerOscHandler(9, (data) => parseConEmuCwd(data) !== null);
+    this.#screenCleanups.push(() => { prompt.dispose(); properties.dispose(); fileUrl.dispose(); conemu.dispose(); });
   }
 
   #onMark(term: Terminal, mark: ReturnType<typeof parsePromptMark> & object): void {
@@ -517,7 +578,6 @@ export class TerminalSession {
           old.decoration?.dispose();
           old.marker.dispose();
         }
-        this.running = false;
         return;
       }
       case 'input':
@@ -526,16 +586,13 @@ export class TerminalSession {
         if (current === undefined || current.ran) return;
         current.ran = true;
         current.status = 'running';
-        this.running = true;
         this.#decorate(current);
         return;
       case 'done':
-        this.running = false;
         // An empty line ends no command: the prompt simply comes back.
         if (current === undefined || !current.ran || current.status !== 'running') return;
         current.exit = mark.exit;
         current.status = mark.exit === null || mark.exit === 0 ? 'success' : 'failure';
-        this.lastExit = mark.exit;
         this.#decorate(current);
     }
   }
@@ -578,6 +635,28 @@ export class TerminalSession {
     };
   }
 
+  /**
+   * The WebGL context goes with the screen out of the page; `gpu` still says how
+   * it draws when shown. The addon only removes its canvas, which would hold the
+   * context until a collection, so the context is lost here: Chromium keeps
+   * sixteen at most.
+   */
+  #dropGpu(): void {
+    const addon = this.#webgl;
+    if (addon === null) return;
+    const canvases = [...this.#term?.element?.querySelectorAll('canvas') ?? []];
+    // Disposed first: this loss is not the browser's, and must not turn the GPU off.
+    this.#webglLost?.dispose();
+    this.#webglLost = null;
+    addon.dispose();
+    this.#webgl = null;
+    for (const canvas of canvases) {
+      if (canvas.isConnected) continue;
+      const gl = canvas.getContext('webgl2') as WebGL2RenderingContext | null;
+      gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+  }
+
   /** WebGL once the screen is in the page; the DOM renderer when it fails or its context is lost. */
   #useGpu(term: Terminal): void {
     const Addon = this.#WebglAddon;
@@ -587,18 +666,24 @@ export class TerminalSession {
       term.loadAddon(addon as never);
       this.#webgl = addon;
       this.gpu = true;
-      const lost = addon.onContextLoss(() => {
+      const lost = this.#webglLost = addon.onContextLoss(() => {
         lost.dispose();
         addon.dispose();
+        if (this.#webglLost === lost) this.#webglLost = null;
         if (this.#webgl === addon) this.#webgl = null;
         this.gpu = false;
         // Do not ask again: a browser out of contexts would lose the next one too.
-        this.#WebglAddon = null;
+        this.#refuseGpu();
       });
     } catch {
-      this.#WebglAddon = null;
-      this.gpu = false;
+      this.#refuseGpu();
     }
+  }
+
+  #refuseGpu(): void {
+    this.#gpuRefused = true;
+    this.#WebglAddon = null;
+    this.gpu = false;
   }
 
   /** The element is in the page: open xterm in it the first time, fit, attach, focus. */
@@ -608,8 +693,9 @@ export class TerminalSession {
     if (!this.#opened) {
       term.open(this.element);
       this.#opened = true;
-      this.#useGpu(term);
     }
+    // A new context draws the whole screen once; a screen back from the DOM renderer has none.
+    this.#useGpu(term);
     this.#fitNow();
     if (!this.#attached && !this.#attaching) void this.#attach();
     else if (this.#stale && this.store.connection === 'ready') void this.#attach();
@@ -625,6 +711,8 @@ export class TerminalSession {
     this.#attached = false;
     this.#attaching = true;
     this.#pending = [];
+    // Output was lost with the socket: the scanner reads the shell again from the snapshot.
+    if (this.#stale) this.#status.unseed();
     const state = await this.start(term.cols, term.rows);
     if (this.#disposed || run !== this.#run) return;
     this.#attaching = false;
@@ -643,6 +731,7 @@ export class TerminalSession {
     this.#stale = this.store.connection !== 'ready';
     this.shell = state.shell ?? null;
     this.cwd ??= state.cwd;
+    if (!this.#status.seeded) this.#status.seed(state.output, state.sequence);
     this.#windows = state.windowsPty !== undefined;
     // The store may have started the shell at a default size before this screen
     // was measured, and joins that request here: the shell is told the real one.
@@ -657,7 +746,6 @@ export class TerminalSession {
       mark.decoration?.dispose();
       mark.marker.dispose();
     }
-    this.running = false;
     term.reset();
     term.write(output, () => {
       this.#muted--;

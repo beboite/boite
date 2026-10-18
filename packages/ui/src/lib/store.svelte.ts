@@ -174,6 +174,7 @@ export class Store {
   detach(): void {
     const ctx = this.#ctx;
     ctx.clientGeneration++;
+    ctx.models.flushModels();
     void ctx.threads.unsubscribe();
     ctx.threads.loadingThreadId = null;
     this.retitling = [];

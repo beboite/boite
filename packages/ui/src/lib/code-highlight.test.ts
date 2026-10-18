@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { codeLanguage, highlightCode, HIGHLIGHT_LIMIT } from './code-highlight';
 
 test('file extensions and conventional names select a grammar, unknown files stay plain', () => {
@@ -38,4 +38,49 @@ test('CRLF files keep one displayed line per editor line and diff row', async ()
     row.innerHTML = html;
     expect(row.textContent).not.toMatch(/[\r\n]/);
   }
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.resetModules();
+});
+
+/** A worker that runs the grammar as the real one does, on this thread, and counts what it was sent. */
+async function fakeWorker(fails = false) {
+  const { highlightText } = await import('./code-grammar');
+  const sent: { id: number; text: string; language: string }[] = [];
+  class FakeWorker {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    constructor(readonly url: URL, readonly options: WorkerOptions) {}
+    postMessage(job: { id: number; text: string; language: 'typescript' }) {
+      sent.push(job);
+      if (fails) { queueMicrotask(() => this.onerror?.(new Event('error', { cancelable: true }))); return; }
+      void highlightText(job.text, job.language).then(lines => this.onmessage?.({ data: { id: job.id, lines } } as MessageEvent));
+    }
+    terminate() {}
+  }
+  vi.stubGlobal('Worker', FakeWorker);
+  return { sent, module: await import('./code-highlight') };
+}
+
+test('a long text goes through its grammar in a module worker, a short one here, both into the same cache', async () => {
+  const { sent, module } = await fakeWorker();
+  const long = 'const value = 1; // a line of code\n'.repeat(Math.ceil(module.WORKER_FROM / 35));
+  const lines = await module.highlightCode(long, 'typescript');
+  expect(sent).toHaveLength(1);
+  expect(lines?.[0]).toContain('hljs-keyword');
+  expect(await module.highlightCode(long, 'typescript')).toBe(lines);
+  expect(sent).toHaveLength(1);
+  await module.highlightCode('const small = 1;', 'typescript');
+  expect(sent).toHaveLength(1);
+});
+
+test('a worker that cannot start leaves every text to the page', async () => {
+  const { sent, module } = await fakeWorker(true);
+  const long = 'let n = 2;\n'.repeat(module.WORKER_FROM / 10);
+  expect((await module.highlightCode(long, 'typescript'))?.[0]).toContain('hljs-keyword');
+  expect(sent).toHaveLength(1);
+  expect((await module.highlightCode(`${long}// another`, 'typescript'))?.at(-1)).toContain('hljs-comment');
+  expect(sent).toHaveLength(1);
 });

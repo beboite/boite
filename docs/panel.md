@@ -236,7 +236,13 @@ unsaved edits included.
 Text files and diffs choose syntax highlighting from the file extension or
 the file's reported language. Highlight.js loads its core and each requested
 grammar on demand. Unknown languages and texts over 200,000 characters remain
-plain text. The editor keeps its selection, caret and scroll in a textarea
+plain text. A text from 20,000 characters (`WORKER_FROM`) goes through its
+grammar in a worker (`lib/code-highlight.worker.ts`, 112 KB before
+compression, fetched with the first such text), which carries the grammars in
+its own file and sets up only those a text needs; a shorter one stays on the
+page, where posting it would
+cost more than the run. A worker that cannot start leaves every text to the
+page. The editor keeps its selection, caret and scroll in a textarea
 over the colored text. Diffs render additions in green and deletions in red,
 including the text, line numbers and signs; unchanged context keeps syntax
 colors. Multiline tokens retain their color across folded context. A diff
