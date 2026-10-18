@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import type { AgentLetter } from '@boite/contracts';
 import AgentDiscussion from './AgentDiscussion.svelte';
 import { agentMailFor, discussionsOf } from '../lib/agent-mail';
@@ -18,11 +18,11 @@ function letter(id: string, minute: number, incoming: boolean, extra: Partial<Ag
   return { id, from: incoming ? contact : mine, to: incoming ? self : peer, toTitle: incoming ? 'Current agent' : 'Deployment agent',
     text: `Text ${id}`, replyTo: null, createdAt: minute * MIN, expiresAt: Number.MAX_SAFE_INTEGER, status: 'delivered', error: null, ...extra };
 }
-function show(letters: AgentLetter[]): HTMLElement {
+function show(letters: AgentLetter[], letterId?: string): HTMLElement {
   const store = { coordination: { self, config: { mode: 'brief', resources: '', remote: true, paused: false }, messages: letters, sent: 0, sendLimit: null, wakes: 0, wakeLimit: null },
     delegation: null, threads: [], projects: [] } as unknown as Store;
   const [discussion] = discussionsOf(agentMailFor(store, self.threadId), store);
-  component = mount(AgentDiscussion, { target: document.body, props: { store, discussion: discussion!, onback: () => {} } });
+  component = mount(AgentDiscussion, { target: document.body, props: { store, discussion: discussion!, letterId, onback: () => {} } });
   flushSync();
   return document.querySelector<HTMLElement>('[data-testid=agent-discussion-view]')!;
 }
@@ -85,4 +85,43 @@ test('a resident letter carries its agent\'s name and robot, never on the user\'
   expect(view.querySelector('[data-testid=agent-discussion-heading]')?.textContent).toBe('Mira');
   expect(view.querySelector('header .tag')?.getAttribute('data-relation')).toBe('resident');
   expect(view.querySelector('header [data-testid=resident-avatar]')?.getAttribute('data-agent-id')).toBe('agent-mira');
+});
+
+test('a discussion opened on a letter that is gone lands on its end', async () => {
+  // A timeline row can name a letter the core has since pruned; the view must not stay at the top waiting for it.
+  const view = show([letter('kept', 0, true), letter('last', 1, false)], 'pruned');
+  const list = view.querySelector<HTMLElement>('[data-testid=agent-discussion-letters]')!;
+  let top = 0;
+  Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => 900 });
+  Object.defineProperty(list, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => { top = value; } });
+  await tick();
+  expect(top).toBe(900);
+});
+
+test('a letter landed on, then a gone one at the end, then the first again lands on the first again', async () => {
+  // The messages tab keeps one mounted discussion while timeline clicks change its letter.
+  const store = { coordination: { self, config: { mode: 'brief', resources: '', remote: true, paused: false },
+    messages: [letter('first', 0, true), letter('last', 1, false)], sent: 0, sendLimit: null, wakes: 0, wakeLimit: null },
+    delegation: null, threads: [], projects: [] } as unknown as Store;
+  const [discussion] = discussionsOf(agentMailFor(store, self.threadId), store);
+  const props = $state({ store, discussion: discussion!, letterId: 'first' as string | undefined, onback: () => {} });
+  let top = 0;
+  const geometry = (list: HTMLElement) => {
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => 900 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => { top = value; } });
+  };
+  component = mount(AgentDiscussion, { target: document.body, props });
+  geometry(document.querySelector<HTMLElement>('[data-testid=agent-discussion-letters]')!);
+  flushSync();
+  await tick();
+  // jsdom puts every row at 0: landing on a letter scrolls 48 above it.
+  expect(top).toBe(-48);
+  props.letterId = 'pruned';
+  flushSync();
+  await tick();
+  expect(top).toBe(900);
+  props.letterId = 'first';
+  flushSync();
+  await tick();
+  expect(top).toBe(852);
 });

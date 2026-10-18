@@ -16,7 +16,7 @@
     "build:core": "bun run --cwd packages/core build",
     "build:core:exe": "bun run --cwd packages/core build:exe",
     "build:core:linux": "bun run --cwd packages/core build:linux",
-    "stage:core": "bun run build:core:exe && bun run apps/shell/scripts/stage-sidecar.ts",
+    "stage:core": "bun run apps/shell/scripts/build-core.ts && bun run apps/shell/scripts/stage-sidecar.ts",
     "build:shell": "bun run stage:core && bun apps/shell/scripts/tauri.ts build --config src-tauri/tauri.bundle.conf.json",
     "build:shell:nightly": "bun run stage:core && bun apps/shell/scripts/tauri.ts build --config src-tauri/tauri.bundle.conf.json --config src-tauri/tauri.nightly.conf.json",
     "build:shell:dev": "bun run stage:core && bun apps/shell/scripts/tauri.ts build --config src-tauri/tauri.bundle.conf.json --config src-tauri/tauri.dev.conf.json",

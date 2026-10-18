@@ -249,6 +249,16 @@ describe('files.read', () => {
   });
 });
 
+describe('byte tickets', () => {
+  test('a ticket in use stays alive, and dies ten minutes after its last read', () => {
+    const tickets = harness.core.fileTickets;
+    const ticket = tickets.mintBytes('picture', () => ({ data: new Uint8Array([1]), mime: 'image/webp' }), 0);
+    // Read before each expiry, it keeps the same address well past the first ten minutes.
+    for (const at of [1, 2, 3]) expect(tickets.bytes(ticket, at * (FILE_TICKET_TTL_MS - 1))).not.toBeNull();
+    expect(tickets.bytes(ticket, 4 * FILE_TICKET_TTL_MS)).toBeNull();
+  });
+});
+
 describe('files.write', () => {
   test('an existing file is replaced and the previous tail is not left behind', async () => {
     writeFileSync(join(harness.dataDir, 'note.txt'), 'ORIGINAL-CONTENT');

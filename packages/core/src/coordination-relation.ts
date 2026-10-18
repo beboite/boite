@@ -58,7 +58,9 @@ export function senderContext(core: Core, localCore: string, threadId: string): 
     const local = relation !== 'machine';
     // A row older than its field, or a peer that left it out, must not stop delivery.
     const resources = typeof letter.from.resources === 'string' ? letter.from.resources.trim() : '';
-    const about = resources ? excerpt(resources) : local ? openingRequest(core, letter.from.threadId) : undefined;
+    // An ordinary letter reached this thread because its sender is a contact it may already read with
+    // `boite agents read`; the conversation of the agent a project is entrusted to spans the user's other work, so it says nothing more.
+    const about = resources ? excerpt(resources) : local && letter.origin !== 'resident' ? openingRequest(core, letter.from.threadId) : undefined;
     const answered = letter.replyTo
       ? core.journal.db.query("SELECT data FROM coordination_letters WHERE id = ? AND thread_id = ? AND direction = 'out'").get(letter.replyTo, threadId) as { data: string } | null
       : null;
