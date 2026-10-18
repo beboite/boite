@@ -10,6 +10,7 @@ import { mayReceiveEvent } from './access.ts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
 import { JOIN_ROUTE } from './group.ts';
+import { CONTACT_JOIN_ROUTE, CONTACT_LINK_ROUTE, type ContactSocketData } from './contacts/store.ts';
 import { LAZY_MCP_ROUTE } from './mcp/lazy.ts';
 import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts';
 import type { Connection } from './router.ts';
@@ -458,7 +459,7 @@ export function startServer(options: ServerOptions): RunningServer {
 
   // One set of handlers for every address the core answers on: the sockets,
   // the hello bounds and the broadcast are the core's, not a listener's.
-  const serve = (hostname: string, bind: number) => Bun.serve<SocketData | RelaySocketData>({
+  const serve = (hostname: string, bind: number) => Bun.serve<SocketData | RelaySocketData | ContactSocketData>({
     hostname,
     port: bind,
     // HTTP only: the websocket block below keeps Bun's own 120 s and its pings.
@@ -468,14 +469,14 @@ export function startServer(options: ServerOptions): RunningServer {
       if (stopping) return new Response('core stopping', { status: 503 });
       const url = new URL(request.url);
 
-      if (url.pathname === '/agent-messages' || url.pathname === JOIN_ROUTE) {
+      if (url.pathname === '/agent-messages' || url.pathname === JOIN_ROUTE || url.pathname === CONTACT_JOIN_ROUTE) {
         if (core.stopping) return new Response('core stopping', { status: 503 });
         // A stranger's requests are counted against its address from the moment they arrive, before any body is read.
         const address = self.requestIP(request)?.address ?? null;
         const answered = address === null || isLoopbackAddress(address) ? () => undefined : refusals.begin(address);
         if (answered === null) return new Response('too many refused requests from this address', { status: 429 });
         const named = request.headers.get('x-boite-peer') ?? '';
-        const response = (url.pathname === JOIN_ROUTE ? core.group.http(request) : core.coordination.http(request)).then((answer) => {
+        const response = (url.pathname === JOIN_ROUTE ? core.group.http(request) : url.pathname === CONTACT_JOIN_ROUTE ? core.contacts.http(request) : core.coordination.http(request)).then((answer) => {
           // Served means the signature of the machine the request names was checked: that address is this member's.
           answered(answer.status, named);
           return answer;
@@ -486,6 +487,25 @@ export function startServer(options: ServerOptions): RunningServer {
         peerRequests.add(response);
         void response.finally(() => peerRequests.delete(response)).catch(() => undefined);
         return response;
+      }
+
+      // A contact's core keeps this socket open: this core's requests to it go down it (contacts/store.ts).
+      if (url.pathname === CONTACT_LINK_ROUTE) {
+        if (core.stopping) return new Response('core stopping', { status: 503 });
+        const address = self.requestIP(request)?.address ?? null;
+        const answered = address === null || isLoopbackAddress(address) ? () => undefined : refusals.begin(address);
+        if (answered === null) return new Response('too many refused requests from this address', { status: 429 });
+        const verdict = core.contacts.hello(request);
+        if (verdict instanceof Response) {
+          answered(verdict.status);
+          return verdict;
+        }
+        if (self.upgrade(request, { data: { contact: verdict } })) {
+          answered(200, verdict.coreId);
+          return undefined;
+        }
+        answered(400);
+        return new Response('expected a websocket upgrade', { status: 400 });
       }
 
       if (url.pathname === '/health') {
@@ -595,6 +615,10 @@ export function startServer(options: ServerOptions): RunningServer {
       backpressureLimit: OUTBOUND_MAX_BUFFERED_BYTES,
 
       open(socket) {
+        if ('contact' in socket.data) {
+          core.contacts.attach(socket.data.contact, socket);
+          return;
+        }
         if ('relay' in socket.data) {
           socket.data.relay.attach(socket as ServerWebSocket<RelaySocketData>);
           return;
@@ -612,6 +636,10 @@ export function startServer(options: ServerOptions): RunningServer {
 
       message(socket, raw) {
         if (stopping) return;
+        if ('contact' in socket.data) {
+          core.contacts.frame(socket.data.contact, raw);
+          return;
+        }
         if ('relay' in socket.data) {
           socket.data.relay.receive(raw);
           return;
@@ -629,11 +657,16 @@ export function startServer(options: ServerOptions): RunningServer {
       },
 
       drain(socket) {
+        if ('contact' in socket.data) return;
         if ('relay' in socket.data) socket.data.relay.drained();
         else socket.data.connection.drain();
       },
 
       close(socket, code, reason) {
+        if ('contact' in socket.data) {
+          core.contacts.detach(socket.data.contact);
+          return;
+        }
         if ('relay' in socket.data) {
           socket.data.relay.close(1000, 'client closed');
           return;
@@ -804,6 +837,7 @@ export function startServer(options: ServerOptions): RunningServer {
   });
 
   core.group.start();
+  core.contacts.start();
 
   return {
     host,

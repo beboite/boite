@@ -27,7 +27,7 @@ import type { KeyObject } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join as joinPath } from 'node:path';
-import { DEVICE_LINK_JOIN, GRANT_TTL_MS, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
+import { GRANT_TTL_MS, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
 import { deviceAdmitInput, deviceHelloInput, type CoordinationPeer, type DeviceHello, type DeviceInvite, type Group, type GroupDevice, type GroupInvite, type GroupTicket, type PairingRole, type Principal } from '@boite/contracts';
 import { boundedBody, MAX_BODY, PeerGone } from './coordination-wire.ts';
 import type { Core } from './core.ts';
@@ -38,7 +38,7 @@ import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, SERVED_ORIGINS
 import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
 import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
 import type { Sealing } from './group/seal.ts';
-import { encodeInvite, encodeTicket, parseInvite, parseTicket, ticketSigningInput, inviteId, invitePsk } from './group/ticket.ts';
+import { encodeInvite, encodeTicket, inviteOf, parseInvite, parseTicket, ticketSigningInput, inviteId, invitePsk } from './group/ticket.ts';
 import type { Invite } from './group/ticket.ts';
 import { DEVICES_MAX, GroupClients } from './group/clients.ts';
 import { SyncBackoff } from './group/backoff.ts';
@@ -68,14 +68,6 @@ const NAME_REFRESH_MS = 5 * 60_000;
 const FAREWELL_MS = 6000;
 
 export type { NetworkSink } from './group/addresses.ts';
-
-/** The invitation in what was pasted: itself, or the one a device link carries after `#join=`. */
-export function inviteOf(text: string): string {
-  const marker = `#${DEVICE_LINK_JOIN}=`;
-  const at = text.indexOf(marker);
-  if (at < 0) return text.trim();
-  try { return decodeURIComponent(text.slice(at + marker.length).trim()); } catch { return text.trim(); }
-}
 
 interface JoinReply { nonce: string; publicKey: string; roster?: unknown; error?: string }
 
@@ -281,6 +273,9 @@ export class GroupStore {
     return { key: this.boxKey, box: boxPublic(this.boxKey) };
   }
 
+  /** This machine's sealing key, public half: what a contact seals its requests to. */
+  boxPublic(): string { return this.box().box; }
+
   /** A signed message sealed to a machine of the roster, or null for a machine outside it. */
   sealFor(coreId: string, plaintext: string): ({ body: string } & Sealing) | null {
     const entry = this.roster?.cores.find((core) => core.coreId === coreId);
@@ -302,9 +297,16 @@ export class GroupStore {
     this.tailnet = await probeTailnet(this.tailnet, stale);
   }
 
-  /** A member answers on its tailnet address; a core in no group opens nothing. */
+  /** A member answers on its tailnet address, and so does a core a contact dials; any other core opens nothing. */
   private listen(member: boolean): void {
-    this.onTailnet = this.core.network.also(member && this.tailnet !== null ? this.tailnet.ip : null);
+    const wanted = member || this.core.contacts?.wantsTailnet() === true;
+    this.onTailnet = this.core.network.also(wanted && this.tailnet !== null ? this.tailnet.ip : null);
+  }
+
+  /** Contacts changed: the tailnet listener follows. */
+  relisten(): void {
+    if (this.closed || !this.live) return;
+    this.listen(this.roster !== null);
   }
 
   private card(): CoreCard {

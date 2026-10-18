@@ -108,6 +108,8 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['collaboration.search', 'contacts it may already reach, found by their title, project, branch, model, resources or chat'],
   ['collaboration.read', 'the conversation of a contact it may already reach, text and tool names only; the user wants agents to help with each other'],
   ['collaboration.wait', 'blocks on its own inbox until a reply arrives'],
+  ['collaboration.contacts', 'the contacts it may write to and the project names each opened to this core, never their keys or addresses'],
+  ['collaboration.ask', 'a request as this thread to a contact, which that contact\'s owner or concierge decides; it opens nothing here'],
   // Resident methods name the persistent agent's own direct conversation like
   // every agent method; agents/projects.ts holds each call to the projects the
   // owner entrusted to that agent's profile. Any other thread is refused.

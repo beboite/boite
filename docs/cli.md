@@ -327,6 +327,8 @@ boite agents send <agent> <text> [--wait] [--timeout <s>]
 boite agents reply <message-id> <text> [--wait] [--timeout <s>]
 boite agents log <agent>
 boite agents wait [agent] [--timeout <s>]
+boite agents contacts
+boite agents ask <contact> <text> [--wait] [--timeout <s>]
 boite agent context|inbox|missions
 boite agent send <recipient-ids|-> <text>
 boite agent reply <message-id> <text>

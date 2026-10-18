@@ -1,15 +1,16 @@
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign, verify } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultCoordinationConfig } from '@boite/contracts';
-import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
-import { checkMatchExtras, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
+import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, ContactRequest, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
+import { checkMatchExtras, checkRemoteContact, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
+import { PeerDesk } from './coordination-peer.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
 import { dropGroupRead, groupPeers, migrateGroupPeer } from './coordination-group.ts';
 import { address, coordinationGuide, coordinationUrl, LETTER_TTL_MS, letterPrompt, RESIDENT_LETTER_TTL_MS, same, text } from './coordination-letter.ts';
 import { senderContext, withRelations } from './coordination-relation.ts';
-import { boundedBody, firstAnswer, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer } from './coordination-wire.ts';
-import { pack, SEALED, sealResponse, unpack, type Sealing } from './group/seal.ts';
+import { boundedBody, firstAnswer, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer, type Envelope, type Operation } from './coordination-wire.ts';
+import { pack, SEALED } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
 
@@ -28,8 +29,6 @@ export const SWEEP_PROBES = [
 export const WAIT_MAX_MS = 300_000;
 export { coordinationUrl, letterPrompt, RESIDENT_LETTER_TTL_MS };
 type Row = { data: string; fingerprint: string | null };
-type Operation = 'directory' | 'deliver' | 'receipt' | 'search' | 'read' | 'group.sync' | 'group.push';
-type Envelope = { from: string; to: string; at: number; nonce: string; operation: Operation; payload: unknown };
 
 export class Coordination {
   readonly bridge = new CoordinationBridge();
@@ -41,8 +40,8 @@ export class Coordination {
   private readonly localWaits = new Set<() => void>();
   private readonly pending = new Set<Promise<unknown>>();
   private readonly delivering = new Set<string>();
-  private readonly nonces = new Map<string, number>();
-  private readonly rates = new Map<string, { since: number; count: number; floor?: number }>();
+  /** Answers other cores' signed requests. */
+  private readonly desk: PeerDesk;
   private readonly attempts = new Map<string, number>();
   /** Agents blocked in `collaboration.wait`, by thread. */
   private readonly waiters = new Map<string, Set<{ from: AgentAddress | null; done: (letters: AgentLetter[]) => void }>>();
@@ -54,6 +53,10 @@ export class Coordination {
 
   /** `threadJsonChecked`: the core already validated visible thread JSON at this start. */
   constructor(private readonly core: Core, threadJsonChecked = false) {
+    this.desk = new PeerDesk(core, {
+      closed: () => this.closed, selfId: () => this.self('').coreId, trusted: () => this.trusted(), peers: () => this.peers(), signature: input => this.signature(input),
+      directory: () => this.localDirectory(), contactDirectory: coreId => this.contactDirectory(coreId), receive: (letter, peer) => this.receive(letter, peer), received: id => this.find(id, 'in'),
+    });
     // A restart keeps idle contacts reachable, but never replays pending work automatically.
     if (!threadJsonChecked) core.journal.validateVisibleThreadJson();
     const candidates = core.journal.db.query(`SELECT settings.key, settings.value, threads.rowid FROM settings JOIN threads ON settings.key = 'coordination:' || threads.id
@@ -112,11 +115,13 @@ export class Coordination {
   peers(): CoordinationPeer[] { return (this.core.journal.getSetting('coordination:peers') as CoordinationPeer[] | undefined) ?? []; }
   /**
    * Every machine a letter may cross to: the hand-made links first, so the
-   * permissions the owner set on one win, then the members of this core's group.
+   * permissions the owner set on one win, then the members of this core's
+   * group, then contacts, whose reach is decided per project (`contacts/store.ts`).
    */
   trusted(): CoordinationPeer[] {
     const manual = this.peers();
-    return [...manual, ...groupPeers(this.core).filter(peer => !manual.some(known => known.coreId === peer.coreId))];
+    const own = [...manual, ...groupPeers(this.core).filter(peer => !manual.some(known => known.coreId === peer.coreId))];
+    return [...own, ...(this.core.contacts?.peers() ?? []).filter(peer => !own.some(known => known.coreId === peer.coreId))];
   }
   async check(coreId: string): Promise<{ ok: true }> {
     const peer = this.trusted().find(p => p.coreId === coreId);
@@ -138,6 +143,7 @@ export class Coordination {
     const canonical = parsed.export({ type: 'spki', format: 'pem' }).toString();
     const coreId = createHash('sha256').update(canonical).digest('hex');
     if (coreId !== peer.coreId || coreId === this.self('').coreId) throw invalidParams('peer.coreId: expected the other machine public key fingerprint');
+    if (this.core.contacts.has(coreId)) throw refused('peer.coreId: that core is a contact; contacts are linked in Contacts');
     for (const field of ['readThreads', 'viaClient'] as const) if (peer[field] !== undefined && typeof peer[field] !== 'boolean') throw invalidParams(`peer.${field}: expected a boolean`);
     const previous = this.peers().find(p => p.coreId === coreId);
     const checked = { coreId, name: text(peer.name, 'peer.name', 100), url: coordinationUrl(peer.url), publicKey: canonical,
@@ -258,6 +264,17 @@ export class Coordination {
       paused: config.paused,
     };
   }
+  /** This thread as the directory lists it: what a contact request names as its sender. */
+  describe(threadId: string): AgentContact { return this.contact(threadId); }
+  /**
+   * What a contact's agents see: the threads of the projects opened to it,
+   * each still under its own settings (on, and open to other machines).
+   */
+  contactDirectory(coreId: string): AgentContact[] {
+    return this.core.contacts.granted(coreId).filter(projectId => this.core.journal.getProject(projectId) !== null)
+      .flatMap(projectId => this.localDirectory(projectId)).filter(contact => this.config(contact.threadId).remote)
+      .sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0)).slice(0, 100);
+  }
   /** Reachable threads, the most recently active first: an old thread never hides a live one. */
   private localDirectory(projectId?: string): AgentContact[] {
     return this.core.journal.listThreads(projectId)
@@ -295,7 +312,7 @@ export class Coordination {
           const remote = await this.exchange(peer, 'directory', {}) as AgentContact[];
           if (!this.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
           if (!Array.isArray(remote) || remote.length > 100) throw new Error('invalid remote directory');
-          return { peer, contacts: remote.map(a => this.checkContact(a, peer)) };
+          return { peer, contacts: remote.map(a => checkRemoteContact(a, peer)) };
         } catch { return { peer, contacts: null }; }
       }));
       for (const result of found) {
@@ -308,21 +325,6 @@ export class Coordination {
     const reachable = new Set(this.localReach(threadId).map(contact => contact.threadId));
     const localCoreId = this.self('').coreId;
     return { agents: agents.filter(contact => contact.coreId !== localCoreId || reachable.has(contact.threadId)), unavailable };
-  }
-  private checkContact(contact: AgentContact, peer: CoordinationPeer): AgentContact {
-    if (!contact || contact.coreId !== peer.coreId || !['brief', 'team'].includes(contact.mode) || !['idle', 'queued', 'running', 'waiting', 'error'].includes(contact.status)) throw invalidParams('agent: invalid remote contact');
-    const optional = (value: unknown) => typeof value === 'string' && value.length <= 200 ? value : undefined;
-    const project = optional(contact.project);
-    const agent = optional(contact.agent);
-    const branch = optional(contact.branch);
-    return {
-      ...address(contact, 'agent'), title: text(contact.title, 'agent.title', 200), machine: peer.name, resources: typeof contact.resources === 'string' && contact.resources.length <= 500 ? contact.resources : '', status: contact.status, mode: contact.mode,
-      ...(project === undefined ? {} : { project }), ...(agent === undefined ? {} : { agent }),
-      ...(branch === undefined ? {} : { branch }), ...(Number.isSafeInteger(contact.activeAt) ? { activeAt: contact.activeAt } : {}),
-      ...(contact.lastCompletedAt === null || Number.isSafeInteger(contact.lastCompletedAt) && contact.lastCompletedAt! >= 0 ? { lastCompletedAt: contact.lastCompletedAt } : {}),
-      ...(typeof contact.projectArchived === 'boolean' ? { projectArchived: contact.projectArchived } : {}),
-      ...(typeof contact.paused === 'boolean' ? { paused: contact.paused } : {}),
-    };
   }
   /** Every contact this thread may reach on each trusted machine, in parallel; a machine that fails is named, not fatal. */
   private async remoteAll<T>(threadId: string, operation: 'search' | 'read', payload: unknown, check: (answer: unknown, peer: CoordinationPeer) => T, peers = this.trusted()): Promise<{ results: T[]; unavailable: string[] }> {
@@ -354,7 +356,7 @@ export class Coordination {
     const matches = searchContacts(this.core.journal.db, own, words);
     const remote = await this.remoteAll(threadId, 'search', { words }, (answer, peer) => {
       if (!Array.isArray(answer) || answer.length > 100) throw new Error('invalid remote search');
-      return answer.map(match => ({ ...this.checkContact(match, peer), ...checkMatchExtras(match) }));
+      return answer.map(match => ({ ...checkRemoteContact(match, peer), ...checkMatchExtras(match) }));
     });
     this.checkLookupAccess(threadId, config.remote);
     const reachable = new Set(this.localReach(threadId).map(contact => contact.threadId));
@@ -383,7 +385,7 @@ export class Coordination {
     if (!config.remote) throw refused('cross-machine coordination is disabled for this thread');
     const { results, unavailable } = await this.remoteAll(threadId, 'read', { threadId: to.threadId, limit, ...(before === undefined ? {} : { before }) }, (answer, from) => {
       const raw = answer as { contact?: AgentContact } | null;
-      const contact = this.checkContact(raw?.contact as AgentContact, from);
+      const contact = checkRemoteContact(raw?.contact as AgentContact, from);
       if (contact.threadId !== to.threadId) throw new Error('transcript of another thread');
       return { contact, ...checkTranscript(answer) };
     }, [peer]);
@@ -460,6 +462,7 @@ export class Coordination {
       if (!config.remote) throw refused('cross-machine coordination is disabled for this thread');
       const peer = this.trusted().find(p => p.coreId === to.coreId);
       if (!peer) throw refused('destination machine is not trusted for coordination');
+      if (this.core.contacts.has(to.coreId)) this.core.contacts.checkSendTier(params.threadId);
       // No directory round trip on send: a disconnected recipient can receive after reconnect.
       toTitle = to.threadId;
       toMachine = peer.name;
@@ -472,8 +475,12 @@ export class Coordination {
     }
     // Recheck budgets after all validation, before the synchronous durable write.
     const createdAt = Date.now();
-    const letter: AgentLetter = { ...(resident ? { origin: 'resident' as const } : {}), id: randomUUID(), from, to, toTitle, toProject, toMachine, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + (resident ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS), status: 'queued', error: null };
+    const contact = this.core.contacts.find(to.coreId);
+    const letter: AgentLetter = { ...(resident ? { origin: 'resident' as const } : {}), id: randomUUID(), from, to, toTitle, toProject, toMachine, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + (resident ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS), status: 'queued', error: null,
+      ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}) };
     this.core.journal.append({ type: 'coordination.sent', threadId: from.threadId, version: 1, payload: letter }, () => this.put(letter, 'out', from.threadId, requestId, fingerprint));
+    // It may hear back from that contact for a while, even outside the projects opened to it.
+    if (contact) this.core.contacts.noteSent(from.threadId, contact.coreId);
     this.core.threads.runner.noteMail(from.threadId, letter.createdAt);
     // The thread's turns now report back to the agent that wrote to it.
     if (resident) this.core.workforce.projects.follow(resident.id, to.threadId);
@@ -491,10 +498,14 @@ export class Coordination {
     // Only this core marks a letter as a persistent agent's, and only while the project is entrusted to it. A remote origin is never believed.
     const resident = !peer && this.core.workforce.projects.over(letter.from.threadId, letter.to.threadId) !== null;
     if (!peer && letter.origin === 'resident' && !resident) throw refused('the project is no longer entrusted to this agent');
+    // A contact reaches the projects opened to it and the threads that wrote to it, nothing else: an unknown thread reads the same.
+    const contact = peer ? this.core.contacts.find(peer.coreId) : undefined;
+    if (contact && !this.core.contacts.mayReach(contact.coreId, letter.to.threadId)) throw refused('letter.to: not a thread of a project opened to you');
     const target = this.contact(letter.to.threadId, resident);
     const config = this.config(target.threadId);
-    const from = peer ? this.checkContact(letter.from, peer) : this.contact(letter.from.threadId, resident);
+    const from = peer ? checkRemoteContact(letter.from, peer) : this.contact(letter.from.threadId, resident);
     if (peer && !config.remote) throw refused('recipient has not enabled cross-machine coordination');
+    if (contact) this.core.contacts.checkAttestedTier(from.agent);
     for (const row of this.rows('id = ?', letter.id)) {
       const known = JSON.parse(row.data) as AgentLetter;
       if (!same(known.from, from) || !same(known.to, target) || known.text !== letter.text || known.replyTo !== letter.replyTo) throw refused('message id already used for different content');
@@ -506,7 +517,9 @@ export class Coordination {
     }
     if (!Number.isSafeInteger(letter.createdAt) || !Number.isSafeInteger(letter.expiresAt) || letter.createdAt > Date.now() + 60_000 || letter.expiresAt <= Date.now() || letter.expiresAt > letter.createdAt + (resident ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS)) throw refused('message expired or timestamps invalid');
     const origin = resident ? 'resident' as const : undefined;
-    const accepted: AgentLetter = { ...(origin ? { origin } : {}), id: letter.id, from, to: this.self(target.threadId), toTitle: target.title, toProject: target.project, toMachine: target.machine, text: text(letter.text, 'letter.text'), replyTo: letter.replyTo === null ? null : text(letter.replyTo, 'letter.replyTo', 100), createdAt: Date.now(), expiresAt: letter.expiresAt, status: 'received', error: null };
+    const accepted: AgentLetter = { ...(origin ? { origin } : {}), id: letter.id, from, to: this.self(target.threadId), toTitle: target.title, toProject: target.project, toMachine: target.machine, text: text(letter.text, 'letter.text'), replyTo: letter.replyTo === null ? null : text(letter.replyTo, 'letter.replyTo', 100), createdAt: Date.now(), expiresAt: letter.expiresAt, status: 'received', error: null,
+      // The name this owner gave the contact, never the sender's word.
+      ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}) };
     this.core.journal.append({ type: 'coordination.received', threadId: target.threadId, version: 1, payload: accepted }, () => this.put(accepted, 'in', target.threadId));
     this.core.threads.runner.noteMail(target.threadId, accepted.createdAt);
     this.update(accepted, 'received');
@@ -537,9 +550,39 @@ export class Coordination {
     for (const letter of pending.filter(l => l.from.threadId === agentThreadId && this.core.workforce.projects.over(agentThreadId, l.to.threadId) === null)) this.update(letter, 'rejected', 'The project is no longer entrusted to this agent');
   }
 
+  /**
+   * A contact decided a request this thread made (`collaboration.ask`): the
+   * thread reads it as a message from that contact, written by this core.
+   */
+  contactAnswer(request: ContactRequest, name: string, threads: AgentContact[]): void {
+    const threadId = request.from.threadId;
+    const thread = this.core.journal.getThread(threadId);
+    if (!thread || thread.archived) return;
+    const list = threads.slice(0, 20).map(entry => `${JSON.stringify(entry.title)} (${entry.machine.replace(/\s+/g, '-')}/${entry.threadId}${entry.status === 'idle' ? '' : `, ${entry.status}`})`);
+    const body = request.status === 'accepted'
+      ? `${name} opened its project ${JSON.stringify(request.project?.name ?? '')} to you. ${list.length ? `Its agents: ${list.join('; ')}.` : 'No agent of it can be reached yet.'} Write to one with boite agents send <contact>/<thread-id> <text>; boite agents list shows them.`
+      : `${name} refused your request: ${request.reason ?? 'no reason given'}`;
+    const now = Date.now();
+    const from: AgentContact = { coreId: request.coreId, threadId: request.id, title: `Answer to your request to ${name}`.slice(0, 200), machine: name, resources: '', status: 'idle', mode: 'brief' };
+    const letter: AgentLetter = { origin: 'contact', contact: { coreId: request.coreId, name }, id: randomUUID(), from, to: this.self(threadId), toTitle: thread.title.slice(0, 200), toProject: this.projectName(threadId),
+      toMachine: this.core.info().hostname ?? 'Boite', text: body.slice(0, 4000), replyTo: null, createdAt: now, expiresAt: now + RESIDENT_LETTER_TTL_MS, status: 'received', error: null };
+    this.core.journal.append({ type: 'coordination.received', threadId, version: 1, payload: letter }, () => this.put(letter, 'in', threadId));
+    this.core.threads.runner.noteMail(threadId, now);
+    this.update(letter, 'received');
+    if (!this.handToWaiter(letter)) this.kick(threadId);
+  }
+
+  /** A project closed to a contact: its letters waiting for threads it no longer reaches go nowhere. */
+  rejectContactLetters(coreId: string, reason: string): void {
+    for (const row of this.rows("direction = 'in' AND status IN ('queued', 'received')")) {
+      const letter = JSON.parse(row.data) as AgentLetter;
+      if (letter.from.coreId === coreId && !this.core.contacts.mayReach(coreId, letter.to.threadId)) this.update(letter, 'rejected', reason);
+    }
+  }
+
   instructions(threadId: string): string {
     const config = this.config(threadId);
-    return config.mode === 'off' ? '' : coordinationGuide(config.paused);
+    return config.mode === 'off' ? '' : coordinationGuide(config.paused, config.remote && this.core.contacts.list().length > 0);
   }
 
   /** Hook delivery: one batch at a provider's next safe tool boundary. */
@@ -570,7 +613,10 @@ export class Coordination {
     if (resident !== null) return resident;
     const recipient = this.config(letter.to.threadId);
     if (recipient.mode === 'off' || recipient.paused) return false;
-    if (letter.from.coreId !== this.self('').coreId) return recipient.remote && this.trusted().some(peer => peer.coreId === letter.from.coreId);
+    if (letter.from.coreId !== this.self('').coreId) {
+      if (!recipient.remote || !this.trusted().some(peer => peer.coreId === letter.from.coreId)) return false;
+      return !this.core.contacts.has(letter.from.coreId) || this.core.contacts.mayReach(letter.from.coreId, letter.to.threadId);
+    }
     const sender = this.config(letter.from.threadId);
     if (sender.mode === 'off') return false;
     return this.inProject(letter) || (recipient.remote && sender.remote);
@@ -736,13 +782,18 @@ export class Coordination {
     // Signed and sealed anew for every address tried, the owner's app included: the same request sent twice
     // is a replay at a machine both addresses lead to, refused there, and every operation bears being asked twice.
     const routes = this.core.group.routes(peer.coreId);
+    // A contact this core hosts is reached only down the link its core keeps open.
+    const contact = routes === null && this.core.contacts.has(peer.coreId);
+    if (contact && !this.core.contacts.linked(peer.coreId)) throw unavailable(`${peer.name} is not linked right now; its core dials this one again by itself`);
     const attempt = async (url: string | null): Promise<Answer> => {
       const nonce = randomUUID();
       const body = JSON.stringify({ from: this.coreId, to: peer.coreId, at: Date.now(), nonce, operation, payload } satisfies Envelope);
       const signed = sign(null, Buffer.from(body), this.key!).toString('base64');
-      const sealing = this.core.group.sealFor(peer.coreId, pack(body, signed));
+      const packed = pack(body, signed);
+      const sealing = this.core.group.sealFor(peer.coreId, packed) ?? (contact ? this.core.contacts.sealFor(peer.coreId, packed) : null);
       // Begun for a member of the group, it ends sealed or not at all: this core may have left the group between two attempts.
       if (routes !== null && sealing === null) throw new Error('no longer in the group this request was for');
+      if (contact && sealing === null) throw new Error('no longer a contact');
       const wire = sealing === null ? body : sealing.body;
       const signature = sealing === null ? signed : SEALED;
       if (url !== null) return post(url, this.coreId, peer.publicKey, wire, signature, nonce, sealing);
@@ -763,99 +814,8 @@ export class Coordination {
     if (answer.refusal !== undefined) throw new PeerRefusal(answer.refusal);
     return answer.result;
   }
-  async http(request: Request): Promise<Response> {
-    if (this.closed || request.method !== 'POST' || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
-    const id = request.headers.get('x-boite-peer');
-    // A machine its group removed still signs with a key this core knows, so it can be told and leave.
-    const peer = this.trusted().find(p => p.coreId === id) ?? this.core.group.removedPeer(id);
-    if (!peer) return new Response('unknown peer', { status: 403 });
-    let envelope: Envelope;
-    let sealing: Sealing | null = null;
-    try {
-      let raw = await boundedBody(request.body);
-      const now = Date.now(); // once the body is in: a request held open is not judged by the time it began
-      let signature = request.headers.get('x-boite-signature') ?? '';
-      if (signature === SEALED) {
-        const opened = this.core.group.unseal(raw, peer.coreId);
-        sealing = { responseKey: opened.responseKey, context: opened.context };
-        ({ body: raw, signature } = unpack(opened.plaintext));
-      }
-      if (!verify(null, Buffer.from(raw), peer.publicKey, Buffer.from(signature, 'base64'))) throw new Error('invalid signature');
-      envelope = JSON.parse(raw) as Envelope;
-      if (envelope.from !== peer.coreId || envelope.to !== this.self('').coreId || !Number.isSafeInteger(envelope.at) || Math.abs(now - envelope.at) > 60_000) throw new Error('invalid envelope');
-      text(envelope.nonce, 'nonce', 100);
-      for (const [id, at] of this.nonces) if (now - at > 120_000) this.nonces.delete(id);
-      const key = `${peer.coreId}:${envelope.nonce}`;
-      if (this.nonces.has(key)) throw new Error('replayed request');
-      const rate = this.rates.get(peer.coreId) ?? { since: now, count: 0 };
-      if (envelope.at <= (rate.floor ?? 0)) throw new Error('replayed request');
-      if (now - rate.since > 60_000) { rate.since = now; rate.count = 0; }
-      this.rates.set(peer.coreId, rate);
-      // Remembered before the quota decides, so a request recorded and sent again never spends the member's allowance, in this minute or,
-      // turned away here, in the next. Up to three times the quota by name; past that by date, nothing as old being taken again: bounded either way.
-      if (++rate.count <= 360) this.nonces.set(key, now);
-      else rate.floor = Math.max(rate.floor ?? 0, envelope.at);
-      // A member that sent a signed request is up, even past its quota: the next tick offers it the roster, whatever its wait.
-      this.core.group.backoff.heard(peer.coreId);
-      if (rate.count > 120) return new Response('peer rate limit', { status: 429 });
-    } catch { return new Response('invalid signed message', { status: 403 }); }
-    const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push'; // the group's own: sealed, from a member
-    if (this.core.group.removedPeer(peer.coreId) !== null && (groupOnly || !this.trusted().some(p => p.coreId === peer.coreId))) {
-      return this.signed({ nonce: envelope.nonce, error: 'this machine was removed from the group', gone: true }, 410, sealing);
-    }
-    // A machine trusted through the group alone speaks sealed, and the roster is never exchanged readable.
-    if (sealing === null && (groupOnly || !this.peers().some(p => p.coreId === peer.coreId))) {
-      return this.signed({ nonce: envelope.nonce, error: 'machines of a group exchange sealed requests only' }, 400);
-    }
-    // Reading an unsigned body cannot hold an update. Admission may have won
-    // during that await, so authenticated processing must enter the same gate.
-    if (this.closed || this.core.stopping) return new Response('the core is stopping', { status: 503 });
-    return this.core.router.trackRequest(() => {
-      let result: unknown;
-      let error: string | undefined;
-      let status = 200;
-      try {
-        // A revoke while the body streamed wins before any data is read or changed.
-        const currentPeer = this.trusted().find(p => p.coreId === peer.coreId);
-        if (!currentPeer) throw refused('peer permission revoked');
-        if (envelope.operation === 'directory') result = this.localDirectory();
-        else if (envelope.operation === 'deliver') result = this.receive(envelope.payload as AgentLetter, peer);
-        else if (envelope.operation === 'search') {
-          const words = searchWords(((envelope.payload as { words?: unknown })?.words as string[] | undefined)?.join?.(' '));
-          result = searchContacts(this.core.journal.db, this.localDirectory(), words, currentPeer.readThreads === true);
-        } else if (envelope.operation === 'read') {
-          if (!currentPeer.readThreads) throw refused('agents on this machine are not allowed to read conversations; enable their access in Machines on the destination');
-          const payload = envelope.payload as { threadId?: unknown; limit?: unknown; before?: unknown };
-          const threadId = text(payload?.threadId, 'read.threadId', 128);
-          const limit = payload.limit === undefined ? 30 : payload.limit;
-          if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 100) throw invalidParams('read.limit: expected 1 to 100');
-          if (payload.before !== undefined && !Number.isSafeInteger(payload.before)) throw invalidParams('read.before: expected a timestamp');
-          const contact = this.localDirectory().find(a => a.threadId === threadId);
-          if (!contact) throw refused('read.threadId: not a thread open to other machines');
-          result = { contact, ...transcript(this.core.journal.db, threadId, limit as number, payload.before as number | undefined, id => this.core.journal.streamingMessage(id)) };
-        }
-        else if (envelope.operation === 'receipt') {
-          const payload = envelope.payload as { id: string; fromThreadId: string };
-          const letter = this.find(text(payload?.id, 'receipt.id', 100), 'in');
-          if (!letter || letter.from.coreId !== peer.coreId || letter.from.threadId !== payload.fromThreadId) throw refused('unknown receipt');
-          result = letter;
-        } else if (envelope.operation === 'group.sync') result = this.core.group.receive(peer, envelope.payload);
-        else if (envelope.operation === 'group.push') result = this.core.push.relayed(peer, envelope.payload);
-        else throw invalidParams('operation: expected directory, deliver, receipt, search, read, group.sync or group.push');
-      } catch (reason) {
-        status = reason instanceof RpcFailure ? 400 : 500;
-        error = reason instanceof RpcFailure ? reason.message : 'Machine could not process the request';
-      }
-      return this.signed({ nonce: envelope.nonce, result, error }, status, sealing);
-    });
-  }
-  /** The answer, signed, and sealed back to the asker when its request came sealed. */
-  private signed(reply: { nonce: string; result?: unknown; error?: string | undefined; gone?: true }, status: number, sealing: Sealing | null = null): Response {
-    const raw = JSON.stringify(reply);
-    const signature = this.signature(Buffer.from(raw)).toString('base64');
-    const body = sealing === null ? raw : sealResponse(pack(raw, signature), sealing.responseKey, sealing.context);
-    return new Response(body, { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': sealing === null ? signature : SEALED } });
-  }
+  /** A signed request from another core, answered by the desk (`coordination-peer.ts`). */
+  http(request: Request): Promise<Response> { return this.desk.http(request); }
   /** The owner app forwards the original signed envelope, without changing any peer permission. */
   async forward(params: RpcParams<'collaboration.bridge.forward'>): Promise<CoordinationBridgeResponse> {
     const coreId = text(params.coreId, 'coreId', 100);
@@ -891,7 +851,8 @@ export function registerCoordination(core: Core): void {
   core.router.register('collaboration.trust', p => core.coordination.trust(p.peer));
   core.router.register('collaboration.untrust', p => core.coordination.untrust(p.coreId));
   core.router.register('collaboration.bridge.register', (p, ctx) => {
-    if (!core.coordination.trusted().some(peer => peer.coreId === p.coreId)) throw refused('coreId: expected a machine trusted for coordination');
+    // A contact's route is the link its own core keeps, never an owner app.
+    if (core.contacts.has(p.coreId) || !core.coordination.trusted().some(peer => peer.coreId === p.coreId)) throw refused('coreId: expected a machine trusted for coordination');
     return core.coordination.bridge.register(p.coreId, p.enabled, ctx.connection);
   });
   core.router.register('collaboration.bridge.forward', p => core.coordination.forward(p));

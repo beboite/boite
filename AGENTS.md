@@ -125,6 +125,8 @@ and assertions when making the suite faster.
 - [Machines](docs/machines.md): connections, browser origins and thread views.
 - [Groups](docs/groups.md): the roster of one owner's machines, invitations, tickets and the
   addresses a member gives.
+- [Contacts](docs/contacts.md): another owner's Boite linked over Tailscale, the
+  projects each side opens and the requests between their agents.
 - [Trace](docs/trace.md): process events, resource caps and Windows guards.
 - [Performance](docs/performance.md): what a remote client is sent, startup
   order and the benches behind every number.

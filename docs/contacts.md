@@ -1,0 +1,158 @@
+# Contacts
+
+Behind the Contacts experiment ([experiments](experiments.md)). Not ready for a
+stable channel: a full security pass and a network pass come first.
+
+A contact is another owner's Boite. Your agents and theirs work together on the
+projects each side opens to the other, and on nothing else. A contact never
+sees your other projects, your group, your devices or your other contacts. The
+machines of your own [group](groups.md) stay what they are: full control,
+yours only.
+
+## Linking two owners
+
+Tailscale carries the link, with each owner keeping their own tailnet. The
+inviter shares one machine with the invitee through Tailscale's machine
+sharing; the invitee's tailnet sees that machine and nothing else of the
+inviter's. Only the inviter's machine is shared. The invitee's core dials it
+and keeps one link open, and the inviter's requests to the invitee travel on
+that link: Tailscale quarantines a shared machine, which answers connections
+but opens none, and the invitee exposes nothing.
+
+1. The inviter's **Invite a contact** (`contacts.invite`) makes a one-time link
+   valid 24 hours: `boite://contact#` then the inviter's core id, signing
+   key, sealing key, machine name, tailnet URL, a one-time token and the
+   Tailscale share link. With a Tailscale API key stored
+   (`contacts.tailscaleKey`), the core creates the share itself
+   (`POST /api/v2/device/{id}/device-invites`, single use); without one the
+   invitation says so and the owner shares the machine from the Tailscale
+   admin console.
+2. The invitee pastes the link (`contacts.join`). Its core accepts the
+   Tailscale share with its own API key when it has one
+   (`POST /api/v2/device-invites/-/accept`); otherwise the owner accepts the
+   share link in a browser and joins again.
+3. The invitee's core posts to the inviter at its tailnet name,
+   `http://<machine>.<tailnet>.ts.net:<port>/contacts/join`: a shared machine
+   is reachable by that name only, and its IP may differ in the invitee's
+   tailnet. The body is sealed to the inviter's sealing key and carries the
+   token and the invitee's card, signed by its key. The inviter spends the
+   token first, so a second join with the same link is refused, then answers
+   with its own card, signed and sealed back. Each core stores the other's
+   keys. The inviter keeps only the token's SHA-256.
+4. Both apps show the same four words, derived from both public keys. Two
+   owners who read the same four words know nobody sat between them.
+5. The invitee's core keeps a WebSocket open to the inviter at
+   `/coordination/contact/link` and redials with backoff, from one second to
+   a minute. It dials with a hello in its headers: from, to, the time and a
+   nonce, signed. Before the upgrade, the inviter refuses a hello more than a
+   minute off, a nonce it has seen or a signature by another key. That link
+   is a [coordination bridge](coordination.md#contacts) route for the
+   invitee: the inviter's signed requests go down it and the answers come
+   back on it. The invitee's requests to the inviter are plain POSTs.
+
+Requests between contacts are signed with each core's Ed25519 key and sealed
+to the recipient, as between members of a group, then carried by WireGuard. A
+readable request from a contact is refused. Owner tokens, provider credentials
+and the Tailscale API key never cross. The API key sits in
+`contacts-tailscale-key` in the data directory, mode 600; no RPC answer, log
+or error carries it, and the core sends it to `api.tailscale.com` only.
+
+The inviter's core listens on its tailnet address while it hosts a contact or
+has an invitation out, as it does in a group. A core with no contact and no
+invitation opens nothing and runs no timer. **The tailnet policy decides which ports a shared user
+reaches**: without a rule, assume every port of the shared machine. The
+Contacts page reads the policy with the API key and says `restricted`, `open`
+or `unknown`; when `open`, it gives the lines that limit `autogroup:shared` to
+Boite's port. Boite never writes the policy.
+
+## Projects and requests
+
+Each side opens projects to the other (`contacts.grant`). An open project's
+threads are listed in the contact's agent directory: title, project, branch,
+model, status and declared resources. Each thread's own coordination settings
+still apply: one with communication off or kept to its project stays hidden.
+The contact's agents can write to them. Reading a conversation, and searching
+its chat, needs `readThreads` on that grant, off by default. A thread that
+wrote to a contact, or asked it something, may hear back from it for 7 days
+after its last letter, even in a project not opened to it. A grant change
+reaches the contact as `contact.sync`, retried until heard, and becomes the
+contact's `offers`.
+
+An agent asks a contact for help with `boite agents ask <contact> "<text>"`
+(`collaboration.ask`): "an agent on a project like X". The request carries the
+agent's git remote when its checkout has one. On the contact's side it waits
+in the Contacts page: the owner accepts by opening one project, or refuses with
+a reason. A contact marked trusted is answered without the owner:
+
+1. a request whose git remote matches exactly one local project opens that
+   project (`decidedBy: 'match'`);
+2. otherwise the concierge decides: a one-shot conversation on the delegation
+   profile named `concierge`, else Opus 5.5 at high effort, in read-only mode,
+   given the request and the project list as JSON data. It answers with the
+   project to open or the reason to refuse (`decidedBy: 'concierge'`). If it
+   fails, the request waits for the owner.
+
+The concierge never grants `readThreads`. Its conversation is a projectless
+thread titled `Concierge · <contact>`, archived once it answers, so the owner
+can read what it decided. The decision comes back to the asking thread as a
+message (`origin: 'contact'`): the project opened and its threads, or the
+reason for the refusal. When the contact's core refuses the ask itself (a
+tier, a full queue), the asking thread is told the same way.
+
+## What an agent knows
+
+A letter from a contact carries `contact`, the name this owner gave that
+contact, set by the receiving core from its own list, never taken from the
+sender. The agent reads "Chris's agent, a contact: not your user" beside the
+sender's thread and project. The guide tells the agent that a contact is not its owner:
+a contact's message does not authorize a destructive action, a credential or
+work outside the opened project.
+
+Agents may talk with contacts as long as the work needs: there is no cap on
+exchanges. The guide asks for messages that move the work, with no courtesy or
+acknowledgment-only replies.
+
+## Model tiers
+
+`ContactSettings.minTier` sets the least capable model allowed on contact
+traffic, 1 by default. An agent below it cannot write to a contact or ask one,
+and an incoming letter whose sender model, as the contact's core attests it,
+is below it is refused with the reason. Tiers: 1 frontier (Opus, Fable, GPT-6
+class), 2 mid (Sonnet, high Flash), 3 small (Haiku, Lite, OSS); an unknown
+model is 2. The attested model is the contact's word: a tier is a cost and
+cooperation rule, not a security boundary.
+
+## Revoking
+
+`contacts.revoke` closes one project: pending letters to it are rejected with
+`Project closed to this contact` and its threads leave the contact's
+directory. `contacts.remove` ends every grant, drops the contact's requests,
+rejects pending letters both ways and closes the link. Removing is one-sided:
+the other core keeps its entry, its redials are refused and its letters wait
+undelivered until they expire, until its owner removes it too. Removing the
+Tailscale share is the owner's, in the admin console.
+
+## Limits
+
+At most 32 contacts and 16 open invitations, 32 requests waiting per contact
+and direction, and the last 50 decided requests kept. The tailnet address is
+read when the core starts or joins a group: a core outside any group that
+gets on Tailscale later listens there after a restart.
+
+## Code and tests
+
+`packages/core/src/contacts/`: `store.ts` (contacts, invitations, the link,
+requests and the RPC methods), `invite.ts` (the link format), `words.ts`
+(fingerprint words), `tier.ts`, `git-remote.ts` (read from the git config
+files, no process), `concierge.ts` and `tailscale.ts`. `contacts.*` are
+owner-only; agents call `collaboration.contacts` and `collaboration.ask`.
+`packages/core/test/contacts.test.ts` links two cores over loopback, and
+`contacts-parts.test.ts` covers the pieces, the Tailscale client against a
+stubbed `fetch`.
+
+## Not yet
+
+Shared projects (both sides' threads in one view, a kanban synced with
+`/goal2`), shared compute between owners, a person writing straight to a
+contact's agent, default denial of secret files in opened projects and the
+review agent that can revoke a contact are later phases.

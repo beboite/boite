@@ -55,6 +55,7 @@ import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
 import { GroupStore, type NetworkSink } from './group.ts';
+import { ContactStore } from './contacts/store.ts';
 import type { RelaySink } from './group/relay.ts';
 import { Delegation } from './delegation.ts';
 import { Workflows } from './workflows.ts';
@@ -179,6 +180,8 @@ export class Core {
   readonly coordination: Coordination;
   /** The machines this core trusts as one owner's, and what it hands their clients. */
   readonly group: GroupStore;
+  /** Other owners' Boites linked for agent work on the projects each side opens. */
+  readonly contacts: ContactStore;
   readonly delegation: Delegation;
   readonly workflows: Workflows;
   readonly brain: BrainStore;
@@ -363,6 +366,7 @@ export class Core {
     this.coordination = new Coordination(this, true);
     this.group = new GroupStore(this);
     this.group.restore();
+    this.contacts = new ContactStore(this);
     this.delegation = new Delegation(this);
     this.workflows = new Workflows(this);
     this.brain = new BrainStore(this);
@@ -485,6 +489,7 @@ export class Core {
     void this.worktreeCleanup.close();
     void this.pullRequestWatches.close();
     this.group.beginClose();
+    this.contacts.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
     this.threads.limitResumes.close();
@@ -532,6 +537,7 @@ export class Core {
     await this.delegation.close();
     await this.coordination.close();
     await this.group.close();
+    await this.contacts.close();
     await this.speech.close();
     await this.push.close();
     await this.plugins.close();

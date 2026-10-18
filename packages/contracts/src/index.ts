@@ -3235,8 +3235,10 @@ export interface AgentLetter {
    * them is a message the user typed. `question` is written by the core when
    * a delegated agent asks something (a question card or a permission request)
    * and tells its parent; it is withdrawn when the card closes before delivery.
+   * `contact` is a contact's answer to a request this thread made
+   * (`collaboration.ask`), written by this core.
    */
-  origin?: 'user' | 'agent' | 'result' | 'resident' | 'question';
+  origin?: 'user' | 'agent' | 'result' | 'resident' | 'question' | 'contact';
   /**
    * A `result` written when a delegated agent ended its turn to wait on its
    * own background work: what it said so far, not its final result, which
@@ -3261,6 +3263,12 @@ export interface AgentLetter {
    * a question card. Missing otherwise and on older cores.
    */
   answered?: RequestId;
+  /**
+   * Set on a letter that crossed a contact link: the contact's local name on
+   * this core. Set by the receiving core from its own contact list, never from
+   * the sender's word. Missing on letters between one owner's machines.
+   */
+  contact?: { coreId: string; name: string };
   /**
    * How the other end relates to the thread whose view lists this letter.
    * The core sets it when it reads the letter out, never stores it; missing on
@@ -3326,6 +3334,111 @@ export interface CoordinationPeer {
 }
 /** Signed coordination response carried unchanged through the owner's app. */
 export interface CoordinationBridgeResponse { status: number; body: string; signature: string }
+
+/**
+ * How capable a model is, for contact traffic: 1 frontier (Opus, Fable, GPT-6
+ * class), 2 mid (Sonnet, high Flash), 3 small (Haiku, Lite, OSS). Unknown models
+ * read as 2. `modelTier` in the core decides from the provider and model id.
+ */
+export type ModelTier = 1 | 2 | 3;
+/** A project this core opened to a contact: the contact's agents reach its threads. */
+export interface ContactGrant {
+  projectId: ProjectId;
+  /** Agents of the contact may read this project's conversations, text and tool names. Off by default. */
+  readThreads: boolean;
+  grantedAt: Timestamp;
+}
+/** A project the contact opened to this core, as the contact's core announced it. */
+export interface ContactOffer { projectId: ProjectId; name: string }
+/**
+ * Another owner's Boite, linked for agent work on the projects each side opens
+ * to the other. A contact never sees this core's other projects, its group or
+ * its other contacts.
+ */
+export interface Contact {
+  coreId: string;
+  /** The name this owner gives the contact; letters and requests show it. Starts as the machine name it announced. */
+  name: string;
+  /** The machine name the contact's core announced. */
+  machine: string;
+  /** Four words derived from both public keys; both owners see the same four. */
+  fingerprint: string;
+  /**
+   * `host`: this core shared its machine and the contact dials it, keeping a
+   * link open that carries this core's requests too. `guest`: this core dials.
+   */
+  role: 'host' | 'guest';
+  /** What a guest dials: the host's tailnet name URL. Missing on the host side. */
+  url?: string;
+  /** Its access requests are decided without the owner: a git remote match, else the concierge. */
+  trusted: boolean;
+  /** Projects this core opened to the contact. */
+  grants: ContactGrant[];
+  /** Projects the contact opened to this core. */
+  offers: ContactOffer[];
+  link: 'connected' | 'connecting' | 'offline';
+  lastSeenAt: Timestamp | null;
+  addedAt: Timestamp;
+}
+/** An invitation a contact joins with. One use; whoever holds it can join, so it travels like a password. */
+export interface ContactInvite {
+  /** `boite://contact#...`: this core's identity, its tailnet URL and the Tailscale share link. */
+  link: string;
+  expiresAt: Timestamp;
+  /** The Tailscale share of this machine, made through the owner's API key, or the reason it was not. */
+  share: { status: 'created'; url: string } | { status: 'manual'; reason: string };
+}
+/**
+ * A contact asks for an agent on a project of this core ("a project like X"),
+ * or this core asked one of its contacts. Accepting opens one project to it.
+ */
+export interface ContactRequest {
+  id: string;
+  direction: 'in' | 'out';
+  coreId: string;
+  /** The contact's local name. */
+  contact: string;
+  /** The agent that asked; on an incoming request, as the contact's core attests it. */
+  from: AgentContact;
+  text: string;
+  /** The git remote the asking agent works on, when it has one: the first thing a request is matched by. */
+  gitRemote?: string;
+  createdAt: Timestamp;
+  status: 'pending' | 'accepted' | 'refused';
+  /** The project opened, once accepted. Its name on the side that opened it. */
+  project?: { id: ProjectId; name: string };
+  /** Why it was refused, written by the owner or the concierge. */
+  reason?: string;
+  decidedBy?: 'owner' | 'match' | 'concierge';
+  decidedAt?: Timestamp;
+}
+export interface ContactSettings {
+  /** The least capable model an agent may run on to write to a contact, or to be heard from one. Default 1. */
+  minTier: ModelTier;
+}
+/** The Tailscale side of contacts on this machine. */
+export interface ContactTailscale {
+  /** This machine's tailnet name, `<machine>.<tailnet>.ts.net`, or null without a tailnet. */
+  fqdn: string | null;
+  /** An API key is stored: invitations create the share themselves. The key itself never leaves the core. */
+  apiKey: boolean;
+  /**
+   * Whether the tailnet policy limits shared users to Boite's port: `restricted`,
+   * `open` (a shared user may reach other ports of this machine) or `unknown`
+   * (no API key, or the policy could not be read).
+   */
+  policy: 'restricted' | 'open' | 'unknown';
+  /** The policy lines to add when it is `open`, ready to paste. */
+  policyFix?: string;
+}
+export interface ContactsState {
+  self: { coreId: string; machine: string };
+  contacts: Contact[];
+  /** Pending requests first, then the last 50 decided. */
+  requests: ContactRequest[];
+  settings: ContactSettings;
+  tailscale: ContactTailscale;
+}
 
 /**
  * One machine of a group. `coreId` is the fingerprint of its Ed25519 public
@@ -4049,6 +4162,29 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'collaboration.bridge.forward': { params: { coreId: string; body: string; signature: string }; result: CoordinationBridgeResponse };
   /** Only the owner connection that received this request can complete it. */
   'collaboration.bridge.reply': { params: { requestId: string; response: CoordinationBridgeResponse }; result: { ok: true } };
+  /** Contacts, requests, settings and the Tailscale state. Owner only. */
+  'contacts.get': { params: Record<string, never>; result: ContactsState };
+  /** A one-time invitation, valid 24 hours. Creates the Tailscale share when an API key is stored. Owner only. */
+  'contacts.invite': { params: Record<string, never>; result: ContactInvite };
+  /** Joins with an invitation: this core dials the host, checks its key and keeps the link open. Owner only. */
+  'contacts.join': { params: { link: string }; result: Contact };
+  /** Rename a contact or mark it trusted. Owner only. */
+  'contacts.update': { params: { coreId: string; name?: string; trusted?: boolean }; result: Contact };
+  /** Open a project to a contact, or change its read grant. Owner only. */
+  'contacts.grant': { params: { coreId: string; projectId: ProjectId; readThreads?: boolean }; result: Contact };
+  /** Close a project to a contact: its pending letters to that project are rejected. Owner only. */
+  'contacts.revoke': { params: { coreId: string; projectId: ProjectId }; result: Contact };
+  /** Forget a contact: every grant ends, pending letters are rejected and the link closes. Owner only. */
+  'contacts.remove': { params: { coreId: string }; result: { ok: true } };
+  /** Accept a request by opening `projectId`, or refuse it with a reason sent back to the asking agent. Owner only. */
+  'contacts.decide': { params: { id: string; accept: boolean; projectId?: ProjectId; reason?: string }; result: ContactRequest };
+  'contacts.settings': { params: { settings: ContactSettings }; result: ContactSettings };
+  /** Store or clear the Tailscale API key; it never leaves the core. Owner only. */
+  'contacts.tailscaleKey': { params: { key: string | null }; result: ContactTailscale };
+  /** The contacts this thread's agent may write to, with the projects each opened to this core. */
+  'collaboration.contacts': { params: { threadId: ThreadId }; result: { name: string; coreId: string; projects: string[]; link: Contact['link'] }[] };
+  /** Ask a contact for an agent on a project like `text`. The answer comes back to this thread as a message. */
+  'collaboration.ask': { params: { threadId: ThreadId; contact: string; text: string }; result: ContactRequest };
   /** The group this core belongs to, or null. A paired device reads the machines and its own device entry. */
   'group.get': { params: Record<string, never>; result: Group | null };
   /** Starts a group with this core as its only member. Refused while it belongs to one. Owner only. */
@@ -5096,6 +5232,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   'keybindings.updated': Keybindings;
   /** The roster changed, or this core joined or left a group: re-read `group.get`. */
   'group.updated': Record<string, never>;
+  /** A contact, a request, a link state or the contact settings changed: re-read `contacts.get`. */
+  'contacts.updated': Record<string, never>;
   /** A session was created or revoked: the list to re-read is `sessions.list`. */
   'sessions.updated': { sessionId: string; state: 'created' | 'revoked' };
   /** What `providers.reload` found: the descriptors that loaded and the ones refused. */
