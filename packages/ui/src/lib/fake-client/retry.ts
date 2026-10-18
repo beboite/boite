@@ -6,11 +6,12 @@ const MINUTE = 60_000;
 /**
  * `?retry=capacity` shows a running thread waiting for its second try after
  * the model was at capacity, `?retry=usage-limit` a failed thread that resumes
- * once its usage window resets: the core's two automatic retries, for captures.
+ * once its usage window resets, `?retry=auto-continue` a failed thread that
+ * resumes by itself in a minute: the core's automatic retries, for captures.
  */
 export function seedRetry(ctx: FakeContext): void {
   const kind = new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('retry');
-  if (kind !== 'capacity' && kind !== 'usage-limit') return;
+  if (kind !== 'capacity' && kind !== 'usage-limit' && kind !== 'auto-continue') return;
   const thread = ctx.threads.get(kind === 'capacity' ? 't-scheduler' : 't-trace');
   const turn = thread?.turns.at(-1);
   if (!thread || !turn) return;
@@ -18,7 +19,9 @@ export function seedRetry(ctx: FakeContext): void {
   const now = Date.now();
   const retry: ThreadRetry = kind === 'capacity'
     ? { kind, turnId: turn.id, at: now + 2 * MINUTE, attempt: 2, attempts: 3, resetsAt: null }
-    : { kind, turnId: turn.id, at: now + 95 * MINUTE, attempt: 1, attempts: 1, resetsAt: now + 94 * MINUTE };
+    : kind === 'auto-continue'
+      ? { kind, turnId: turn.id, at: now + MINUTE, attempt: 1, attempts: 2, resetsAt: null }
+      : { kind, turnId: turn.id, at: now + 95 * MINUTE, attempt: 1, attempts: 1, resetsAt: now + 94 * MINUTE };
   thread.retry = retry;
 }
 

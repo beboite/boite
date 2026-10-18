@@ -190,12 +190,28 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 506,600 |
-| UI files, excluding `.br` and `.gz` copies | 4,869,600 |
+| UI entry chunk | 506,700 |
+| UI files, excluding `.br` and `.gz` copies | 4,870,800 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,479,600 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,493,700 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the leaner phone app, merged with `origin/main` at `ab30db2c`,
+measures 505,758 entry bytes, 4,869,841 UI bytes and 4,493,506 core JavaScript
+bytes with `measure()` after fresh `bun run build:ui` and `bun run build:core`
+on Linux. The limits it reached rise about a kilobyte above: entry 506,700, UI
+4,870,800; the others stay.
+
+On 2026-10-18, automatic resumes (PR #603) merged with `origin/main` at
+`e22bb094` measure 492,249 entry bytes, 4,869,493 UI bytes and 4,493,171 core
+JavaScript bytes with `measure()` after fresh `bun run build:ui` and
+`bun run build:core` on Windows, against 492,112, 4,869,093 and 4,479,099
+recorded below for PR #595: `threads/auto-continue.ts` (the plans, their
+journal record, the crash and background triggers and their prompts) adds
+14,072 core bytes, and the banner's resume wording adds 137 entry and 400 UI
+bytes. The entry and core JavaScript limits rise to 492,300 and 4,493,700; the
+other limits stay.
 
 On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
 492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes
@@ -205,15 +221,6 @@ Windows, against 491,872, 4,867,996 and 4,477,807 recorded below for PR #594:
 adds 1,292 core bytes, and the link's lookup in `Prose.svelte` with its store
 call and strings adds 240 entry and 1,097 UI bytes. The UI and core JavaScript
 limits rise to 4,869,600 and 4,479,600; the other limits stay.
-
-On 2026-10-18, the leaner phone app merged with `origin/main` at `e22bb094`
-measures 505,635 entry bytes, 4,869,455 UI bytes and 4,479,099 core JavaScript
-bytes with `measure()` after fresh `bun run build:core` and `bun x vite build`
-on Linux, against 492,112, 4,869,093 and 4,479,099 that PR #595 measured on
-Windows. The UI grows 362 bytes in all: the phone navigation no longer imports
-the project menu, the agent directory or the surface switch, so about 11 KB of
-them leave the shared `boot` chunk for the entry, which is their only importer
-left. The entry limit rises to 506,600; the other limits stay.
 
 On 2026-10-18, keeping the prompt cache warm (PR #594) merged with
 `origin/main` at `3a19eb57` measures 491,872 entry bytes, 4,867,996 UI bytes
