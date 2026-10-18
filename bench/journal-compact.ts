@@ -25,7 +25,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { MESSAGE_PAGE } from '../packages/contracts/src/index.ts';
 import { Journal } from '../packages/core/src/journal.ts';
-import { compactionSteps, MOVE_EVERY_MS, pruneEventsOnce, rowPace } from '../packages/core/src/journal/retention.ts';
+import { compactionSteps, eventPace, MOVE_EVERY_MS, pruneEventsOnce } from '../packages/core/src/journal/retention.ts';
 import { vacuumAtStart, vacuumPlan } from '../packages/core/src/journal/vacuum.ts';
 
 const flag = (name: string): string | undefined => {
@@ -204,7 +204,7 @@ try {
   }
   const passesMs = performance.now() - at;
   const events: Ticks = { blocks: [], total: 0 };
-  const pace = rowPace();
+  const pace = eventPace();
   for (let more = true; more;) {
     const tick = await blocked(() => pace.run(limit => pruneEventsOnce(journal, now, limit)));
     events.blocks.push(tick.block); events.total += tick.ms;

@@ -45,6 +45,8 @@ export const bytePace = (): Pace => new Pace(512 * 1024, 64 * 1024, 2 * 1024 * 1
  * warm rows.
  */
 export const rowPace = (): Pace => new Pace(1_000, 100, 2_000);
+/** Events a retention tick looks at: deleting one cold event cost up to 125 µs with its indexes. */
+export const eventPace = (): Pace => new Pace(500, 100, 600);
 
 /**
  * Prunes events past the retention a minute after start and then daily, one
@@ -60,7 +62,7 @@ export function scheduleEventRetention(journal: Journal, onError: (message: stri
   // The statistics this pass still builds, one per tick; null at the start of a pass.
   let statistics: string[] | null = null;
   let first = true, pruned = false;
-  const pace = rowPace();
+  const pace = eventPace();
   const arm = (delay: number): void => {
     timer = setTimeout(pass, delay);
     timer.unref?.();
