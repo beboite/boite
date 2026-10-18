@@ -68,11 +68,9 @@ test('copy path stays readable with a long working directory in conversation men
   })()`);
   await page.send('Browser.grantPermissions', { origin: new URL(url).origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
   await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-  for (const opener of ['thread-row', 'thread-title', 'thread-menu-trigger']) {
-    const phone = opener === 'thread-menu-trigger';
-    await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 360 : 1300, height: phone ? 800 : 850, deviceScaleFactor: 1, mobile: phone });
-    if (phone) await page.click(id(opener));
-    else await page.evaluate(`(() => {
+  for (const opener of ['thread-row', 'thread-title']) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
+    await page.evaluate(`(() => {
       const { workspace } = globalThis.__boiteTest;
       const owner = workspace.active;
       const machine = workspace.machines.find(m => m.store === owner);
@@ -81,7 +79,7 @@ test('copy path stays readable with a long working directory in conversation men
         : document.querySelector('${id(opener)}');
       target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 180 }));
     })()`);
-    const menu = id(phone ? 'thread-menu-trigger-menu' : 'context-menu');
+    const menu = id('context-menu');
     const copy = `${menu} [data-value=copy]`;
     await page.waitFor(`document.querySelector('${copy}')`);
     await capture(`copy-path-${opener}.png`);
@@ -95,6 +93,13 @@ test('copy path stays readable with a long working directory in conversation men
     // clipboard write is asynchronous and nothing awaits it.
     await page.waitFor(`navigator.clipboard.readText().then(text => text === ${JSON.stringify(cwd)})`);
   }
+  // A phone leaves the path to the desktop: its title menu has no Copy path.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
+  await page.click(id('thread-menu-trigger'));
+  await page.waitFor(`document.querySelector('${id('thread-menu-trigger-menu')} [data-value=rename]')`);
+  expect(await page.evaluate(`document.querySelector('${id('thread-menu-trigger-menu')} [data-value=copy]')`)).toBeNull();
+  await page.click(id('thread-menu-trigger'));
+  await page.waitFor(`!document.querySelector('${id('thread-menu-trigger-menu')}')`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
   await page.send('Emulation.setFocusEmulationEnabled', { enabled: false });
 }, 20_000);

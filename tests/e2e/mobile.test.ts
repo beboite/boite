@@ -331,9 +331,10 @@ test('Appearance in French at 360 px keeps every label beside its choices readab
       const text = row.querySelector('.text'), t = text.getBoundingClientRect(), s = row.querySelector('.segmented').getBoundingClientRect();
       return { text: text.textContent.trim(), clipped: text.scrollWidth > text.clientWidth + 1, overlap: t.right > s.left + 1 && t.left < s.right - 1 && t.bottom > s.top + 1 && t.top < s.bottom - 1, narrow: t.width < 120 };
     })`);
-    await page.evaluate(`document.querySelector('[data-testid=panel-start-launcher], [data-testid^=panel-start-]').scrollIntoView({ block: 'center' })`);
+    // The workspace and terminal rows are the desktop's: language, theme and the code face remain.
+    await page.evaluate(`document.querySelector('[data-testid^=font-mono-]').scrollIntoView({ block: 'center' })`);
     await capture('mobile-appearance-fr-360.png');
-    expect(rows.length).toBeGreaterThanOrEqual(4);
+    expect(rows.length).toBeGreaterThanOrEqual(3);
     expect(rows.filter(row => row.clipped || row.overlap || row.narrow)).toEqual([]);
     expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   } finally {

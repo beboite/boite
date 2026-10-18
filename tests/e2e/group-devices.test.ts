@@ -222,7 +222,7 @@ test('a phone installed from one machine scans the code of another and lists and
 
   // Settings, Machines on the phone: the group, its two machines and this phone, in one list.
   await mobileAction(phone, 'mobile-settings');
-  await phone.click(id('settings-tab-machines'));
+  await phone.click(id('mobile-settings-connection'));
   await phone.waitFor(`document.querySelectorAll('${id('machine-card')}').length === 2 && document.querySelector('${id('group-device')}')`);
   expect(await phone.evaluate(`document.body.textContent.includes('Phones and other devices')`)).toBe(false);
   await capture(phone, 'devices-phone-machines.png');

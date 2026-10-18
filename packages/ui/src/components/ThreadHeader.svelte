@@ -75,8 +75,9 @@
   });
   let desktopItems = $derived(thread ? threadMenuItems(store, thread, { tools }) : []);
 
-  /** Children delegated from this thread, at work or done: the phone offers Subagents only then. */
-  let delegated = $derived(!!thread && (store.subagents(thread.id) !== null || store.threads.some(row => row.parentThreadId === thread!.id)));
+  /** Children delegated from this thread, at work or done, its CLI's own agents included: the phone offers Subagents only then. */
+  let delegated = $derived(!!thread && (store.subagents(thread.id) !== null || store.threads.some(row => row.parentThreadId === thread!.id)
+    || (store.delegation?.agents.length ?? 0) > 0 || (store.delegation?.nativeAgents?.length ?? 0) > 0));
   /**
    * A phone's header is the title and this one menu: the panel, ticked when
    * open, then the thread's own actions. The terminal, the coordination and

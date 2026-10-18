@@ -7,9 +7,14 @@ remain on the machines.
 
 ## Settings on a phone
 
-The top-right menu opens Conversations, Activity and Settings. There is no
-bottom navigation bar. A conversation uses one compact header; Back returns
-to the thread list, which includes a search field. The composer stays at the
+The list's header holds the machine and project picker, whose last row adds a
+project, the new-thread `+` and a menu with the machine, Conversations,
+Activity, with its count, and Settings. There is no bottom navigation bar. A
+conversation's header holds Back, which carries a mark while another thread
+waits on the user, and its title, whose menu is the only one there. The thread
+list opens on its search field, with the display options at its right end:
+the view, by project or recent, and the grouping switches. The project order
+and a project's own switches stay on the desktop. The composer stays at the
 bottom of the available viewport, above the keyboard when it is open. A touch
 keyboard has no Shift+Enter, so where the primary pointer is coarse
 (`pointer: coarse`, the question the app's other touch rules ask) plain Enter
@@ -21,10 +26,15 @@ keyboard connected to such a device, so that keyboard's Enter writes a new
 line too. A touchscreen laptop whose primary pointer is a mouse keeps Enter's
 send.
 
-At phone widths, Settings opens a vertical list with separate screens for
-App & notifications, Appearance, and Machines. The back button or browser Back
-returns to that list. Theme and accent belong to the current device; the
-notification screen names the connected machine that will send its alerts.
+At phone widths, Settings opens a list in two groups. This phone:
+Notifications, Appearance and Privacy, the two analytics switches. Machine: the
+machine itself with its connection, which opens Machines, then Usage, Voice and
+Archived threads. Each opens a screen of its own; the back button or browser
+Back returns to the list. Theme and accent belong to the current device;
+Appearance also holds the chat's files and previews switch, and leaves the
+column width, the terminal, the workspace and the header's buttons to the
+desktop. The notification screen names the connected machine that will send
+its alerts, and offers to install the app while it is not installed.
 Machines shows the group: its machines, which the phone switches to or
 reconnects, and its devices, this phone marked as such. A phone that reaches no
 machine shows **Scan the code** and **Paste the link** there, as on its first
@@ -35,11 +45,15 @@ closing the view stops its tracks. A machine takes the hostname reported by its
 core; its card can rename it.
 Voice shows the connected core's dictation readiness. Engine installation and
 API credentials stay in desktop Voice settings, including for owner sessions.
-Usage shows the connected core's tokens and API cost per day, provider and
-model; Limits draws the core's subscription bars, read-only ([usage.md](usage.md)).
+Usage has two tabs: Usage shows the connected core's tokens and API cost per
+day, provider and model; Limits draws the core's subscription bars, read-only
+([usage.md](usage.md)).
 
-Provider accounts, keyboard shortcuts, plugins, resource limits, adding and
-removing devices and server configuration stay in desktop settings. This smaller
+Provider accounts, keyboard shortcuts, plugins, resource limits, the brain, the
+task manager, worktrees, automatic compaction, diagnostics, experiments, the
+tour, adding and removing devices and server configuration stay in desktop
+settings; a link or a card in a conversation that names one of those pages
+still opens it. Project management stays on the desktop too. This smaller
 phone menu also applies to owner sessions; it does not change RPC permissions.
 
 Device sessions receive only events corresponding to the state they may read.
@@ -292,14 +306,22 @@ link scanned or pasted in the app asks nothing either: the owner just showed it.
 
 The browser uses mobile navigation under 720 px. Conversations lists threads
 across connected machines; Activity puts waiting requests first, followed by
-running and queued turns. A phone has no right-click, so the actions a desktop
-finds there open from a tap: the conversation's title in its header lists
-rename, regenerate title, pin, copy path and archive, and the `...` button of a
-row in the list offers pin, regenerate title and archive. The same title sheet
-holds the Agents and Terminal toggles, so the header row keeps only the title,
-the context ring and the Panel button: at 360 px in French, 192 px of a 193 px
-title stay visible, where 96 px did with the toggles in the row. A draft's header shows its "New thread" label. Settings is the third destination. The header names
-the machine, connection and project, and starts a new conversation.
+running and queued turns; the header names the screen. A phone has no
+right-click, so the actions a desktop finds there open from a tap: the
+conversation's title in its header lists Browser, files and tools (the right
+panel), pin, rename, find in this thread, Subagents when the thread has some,
+archive and delete, and the `...` button of a row in the list offers the same
+actions a thread keeps on a phone, with Mark done in the list. A new title by
+the agent, moving to a project, the path, coordination and the terminal stay on
+the desktop. A draft's header shows its "New thread" label. Settings is the
+third destination.
+
+Under a conversation, the copy, edit and retry buttons show under the last
+prompt and the last answer; any other message shows its row when tapped, until
+a second tap on it or one elsewhere (`lib/message-reveal.svelte.ts`). A phone
+offers no fork. The turn's footer line, time, duration and tokens, stays. The
+composer's model chip names the model alone, without its account, and drops
+whole words when the row is short.
 
 Model, effort and action menus open as bottom sheets. The browser's Back, the
 Android Back gesture and a mouse's back button close the top sheet, dialog,

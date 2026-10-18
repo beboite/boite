@@ -57,7 +57,6 @@
   let groups = $derived(projectView.sorted(machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))));
   let activeGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(activeProject) : groups);
   let otherGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(entry => !activeProject(entry)) : []);
-  let shownGroups = $derived(query ? groups : activeGroups);
   let shelved = $derived(machines.flatMap(machine => machine.store.projects.filter(project => project.archived === true).map(project => ({ machine, project }))));
   let selected = $derived(projectView.selected(groups));
   let draftOwner = $derived(screen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);
@@ -129,8 +128,16 @@
         ?.querySelector<HTMLElement>('[aria-haspopup=menu]')
     });
   }
+  /** Adding a project from the picker starts a draft in it: the phone opens that draft, as the desktop does. */
+  let known = $state<Set<string> | null>(null);
+  $effect(() => {
+    if (!known || store.projectPickerOpen) return;
+    const before = known;
+    known = null;
+    if (store.draft?.projectId && !before.has(store.draft.projectId)) show('chat');
+  });
   async function pickProject(key: string) {
-    if (key === 'add-project') { store.projectPickerOpen = true; return; }
+    if (key === 'add-project') { known = new Set(store.projects.map(p => p.id)); store.projectPickerOpen = true; return; }
     const [id, projectId] = JSON.parse(key) as [string, string];
     const target = machines.find(m => m.id === id);
     if (!target) return;

@@ -32,7 +32,7 @@ test('a phone with no key is added again from Machines with a pasted link and se
   await page.waitFor(`document.querySelector('${id('mobile-header')}')`);
   await mobileAction(page, 'mobile-settings');
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
-  await page.click(id('settings-tab-machines'));
+  await page.click(id('mobile-settings-connection'));
   await page.waitFor(`document.querySelector('${id('machine-card')}')`);
   // Refused, and named by its address: it is not this phone, and it never answered.
   await page.waitFor(`document.querySelector('${id('machine-card')} .status')?.textContent === 'Add this app to your group'`);
