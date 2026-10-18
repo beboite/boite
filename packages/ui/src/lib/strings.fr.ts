@@ -1399,6 +1399,9 @@ export const fr: Translation = {
     movePendingShow: "Voir ce qui sera dit à l'agent",
     movePendingHide: "Masquer ce qui sera dit à l'agent",
     movedByAgent: "Déplacé par l'agent vers {project}",
+    keepalive: 'Cache de prompt gardé au chaud',
+    keepaliveMany: 'Cache de prompt gardé au chaud {count} fois',
+    keepaliveRunning: 'Cache de prompt en cours de relance',
     startedByAgent: "Lancé par l'agent de {title} dans {project}",
     promptFromAgent: "Envoyé par l'agent de",
     agentStartedThread: "L'agent a lancé {title} dans {project}",
@@ -2213,6 +2216,11 @@ export const fr: Translation = {
     experiments: {
       intro: 'Ce n\'est pas fini et peut changer ou disparaître.'
     },
+    cacheKeepalive: 'Garder le cache de prompt au chaud',
+    cacheKeepaliveHint: "Pendant qu'une conversation attend ses agents ou ses workflows, Boite envoie un tour d'un mot peu avant que le fournisseur oublie le prompt en cache, pour que leur résultat soit lu au tarif du cache. Chaque relance compte dans l'usage. Une relance qui rate le cache met fin aux relances.",
+    cacheKeepaliveHours: 'Pendant au plus',
+    cacheKeepaliveHoursHint: "Compté depuis la fin du dernier tour de la conversation. Les relances s'arrêtent aussi quand les agents ont fini, quand vous écrivez ou arrêtez, et après autant de relances que coûterait un cache raté.",
+    cacheKeepaliveUnit: 'heures',
     material: 'Matériau de la fenêtre',
     workspace: 'Espace de travail',
     startIn: "L'appli s'ouvre sur",

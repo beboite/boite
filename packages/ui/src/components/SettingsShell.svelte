@@ -333,7 +333,7 @@ import { workspace } from '../lib/workspace.svelte';
       {:else if tab === 'plugins'}
         <PluginsPage {store} />
       {:else if tab === 'experiments'}
-        <ExperimentsPage />
+        <ExperimentsPage {store} />
       {:else if tab === 'diagnostics'}
         <DiagnosticsPage {store} {onopenthread} />
       {:else}
