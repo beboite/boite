@@ -68,6 +68,7 @@ export interface TurnRow {
   execution: string | null;
   checkpoint?: string | null;
   queue_hold?: string | null;
+  agent_totals?: string | null;
 }
 
 export interface MessageRow {
@@ -169,6 +170,7 @@ export function toTurn(row: TurnRow): Turn {
     ...(row.execution === null ? {} : { execution: parseJson<NonNullable<Turn['execution']>>(row.execution, `turns.execution of ${row.id}`) }),
     ...(row.checkpoint ? { checkpoint: parseJson<NonNullable<Turn['checkpoint']>>(row.checkpoint, `turns.checkpoint of ${row.id}`) } : {}),
     ...(row.queue_hold ? { queueHold: parseJson<NonNullable<Turn['queueHold']>>(row.queue_hold, `turns.queue_hold of ${row.id}`) } : {}),
+    ...(row.agent_totals ? { agentTotals: parseJson<NonNullable<Turn['agentTotals']>>(row.agent_totals, `turns.agent_totals of ${row.id}`) } : {}),
   };
 }
 

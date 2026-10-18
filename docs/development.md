@@ -606,6 +606,18 @@ shims from the same build before another worktree replaces them. Test that copy
 through `BOITE_E2E_SHELL_EXE`. Filenames and timestamps alone do not identify the
 branch; inspect the running UI over CDP for installation claims.
 
+A hidden shell whose page never reaches the debugging port fails with "the
+browser never exposed a page", followed by every distinct answer the port gave
+and when, a last TCP and `/json/list` probe, the end of the shell's own
+`logs/shell.0.ndjson` and its process tree (`tests/e2e/lib/shell-diagnosis.ts`).
+Any other failure of a shell attach (the page socket, `Page.enable`) carries
+the same shell details. The whole text lands in
+`tests/e2e/.artifacts/shell-<pid>-diagnosis.txt`, which the
+`desktop-failure-captures` artifact keeps. The diagnosis gets 20 s at most and
+the process tree 10 s, so a stuck WMI query costs the tree, not the error. A
+missing `main-window` startup phase means the main webview was never built; a
+phase with no `shell.webview.page-load` means the page never started loading.
+
 ## Staging the sidecar
 
 `bun run stage:core` builds and stages the core. Staging copies artifacts into

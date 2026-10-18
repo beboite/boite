@@ -182,20 +182,34 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 490,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,855,400 |
+| UI files, excluding `.br` and `.gz` copies | 4,858,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,446,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,447,500 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-18, the server update rollback merged with `origin/main` at
-`616c9856` measures 4,446,022 core JavaScript bytes with `measure()` after fresh
-`bun run build:ui` and `bun run build:core` on Windows, against 4,437,160 for
-that main's core built the same way. The rollback record, the kernel lock a
-restore holds, the data lock it keeps through the swap, its completion mark and
-the restore a start finishes add 8,862 bytes; `main.js` shrinks by 1,669 as the
-data lock moves to its own module. The core limit rises to 4,446,500; the other
-limits stay.
+`36ef9a81` measures 4,447,258 core JavaScript bytes with `measure()` after a
+fresh `bun run build:core` on Windows, against the 4,438,396 recorded below for
+PR #590. The rollback record, the kernel lock a restore holds, the data lock it
+keeps through the swap, its completion mark and the restore a start finishes
+add 8,862 bytes; `main.js` shrinks by 1,669 as the data lock moves to its own
+module. The core limit rises to 4,447,500; the other limits stay.
+
+On 2026-10-18, Claude's agent totals and the usage cache split (PR #590)
+merged with `origin/main` at `3a91f49f` measure 490,193 entry bytes,
+4,857,911 UI bytes and 4,438,396 core JavaScript bytes with `measure()` after
+fresh `bun run build:ui` and `bun run build:core` on Linux, against 489,771,
+4,857,227 and 4,437,160 for that main; at `616c9856` Windows CI measured the
+same UI bytes as Linux. The cache split's sentences add 684 UI bytes, the
+recorded totals and their retry handling 1,236 core bytes. The UI and core
+JavaScript limits rise to 4,858,500 and 4,439,000; the others stay.
+
+On 2026-10-18, the boot notice that tells a lost chunk from an old browser,
+on `origin/main` at `5055522c`, measures 4,856,869 UI bytes with `measure()`
+after a fresh `bun run build:ui` on Windows, against 4,854,887 for main at
+`ee9f9ac8`: its sentences, retry button and feature probe add 1,982 bytes to
+`index.html`. The UI limit rises to 4,857,800; the other limits stay.
 
 On 2026-10-18, agent browser downloads (PR #585) on `origin/main` at
 `ee9f9ac8` measure 4,436,753 core JavaScript bytes on the Windows CI runner.

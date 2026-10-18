@@ -137,6 +137,7 @@ export class TurnRunner {
       usage: result.usage,
       error: result.error ?? null,
       ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}),
+      ...(result.agentTotals ? { agentTotals: result.agentTotals } : {}),
     };
     const completion = await settleTurn(this.core, { queued, running, thread, result, started, finished });
     // No in-memory events or after-finish effects run before the transaction

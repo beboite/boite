@@ -1,7 +1,7 @@
 import type { Account, PermissionMode, ProviderDescriptor, ProviderId, RpcEvents, ThreadId, ThreadRetry, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { releaseThread } from '../drivers/index.ts';
-import type { Driver, TurnHandle, TurnResult } from '../drivers/types.ts';
+import type { Driver, TurnContext, TurnHandle, TurnResult } from '../drivers/types.ts';
 import type { Resume } from '../providers/update-resume.ts';
 import type { ThreadStore } from '../threads.ts';
 import { totalTokens } from '../usage.ts';
@@ -140,6 +140,8 @@ export class TurnAttempts {
     let retriedLostSession = false;
     let resumed = false;
     let usage: Usage | null = null;
+    /** The agent's running totals as the last attempt that reported them ended. */
+    let totals: TurnResult['agentTotals'] = undefined;
     let result: TurnResult;
     /** What the agent is told when its turn goes on after an agent update. */
     let afterUpdate: Resume | null = null;
@@ -174,24 +176,14 @@ export class TurnAttempts {
         // The native session already holds the request and what the agent did with it.
         context.prompt = CAPACITY_CONTINUE_PROMPT;
         context.attachments = [];
-        if (usage) context.sessionBefore = {
-          costUsd: (context.sessionBefore?.costUsd ?? 0) + (usage.costUsdEquivalent ?? 0),
-          tokens: (context.sessionBefore?.tokens ?? 0) + totalTokens(usage),
-        };
       } else if (note) {
         // Shown once the context is built, so a fresh session's history does not carry it twice.
         this.threads.noteSystem(threadId, turnId, note.prompt, note.label, 'turn.resumedAfterUpdate');
-        if (usage) context.sessionBefore = {
-          costUsd: (context.sessionBefore?.costUsd ?? 0) + (usage.costUsdEquivalent ?? 0),
-          tokens: (context.sessionBefore?.tokens ?? 0) + totalTokens(usage),
-        };
       } else if (resumed && state.thread.sessionId !== null) {
         context.prompt = `Continue the current task from where it stopped. The user changed the permission mode to ${permissions.mode}. Do not repeat completed work. Retain subsequent instructions already in the conversation.\n\nRequest for reference:\n${context.prompt}`;
-        if (usage) context.sessionBefore = {
-          costUsd: (context.sessionBefore?.costUsd ?? 0) + (usage.costUsdEquivalent ?? 0),
-          tokens: (context.sessionBefore?.tokens ?? 0) + totalTokens(usage),
-        };
       }
+      // A later attempt resumes a session that already holds the earlier ones, refused or not.
+      if (attempt > 1 && state.thread.sessionId !== null) context.sessionBefore = sessionAfter(context.sessionBefore, usage, totals);
       if (state.running.execution) state.running.execution = { ...state.running.execution, permissionMode: permissions.mode };
       this.core.journal.putTurn(state.running);
       const attemptAt = performance.now();
@@ -211,6 +203,7 @@ export class TurnAttempts {
       if (this.core.updates.wantsPause(provider.id)) this.pauseWanted.set(threadId, provider.id);
       if (!resumed && !retriedLostSession && capacityTries === 0 && !queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
       result = await Promise.race([handle.done, forced.promise]);
+      totals = result.agentTotals ?? totals;
       logAttemptEnd(this.core, threadId, turnId, attempt, result, performance.now() - attemptAt);
       permissions.detach();
       settings?.detach();
@@ -226,6 +219,7 @@ export class TurnAttempts {
       if (fresh !== null && result.status === 'error') {
         state.thread = fresh;
         retriedLostSession = true;
+        totals = undefined;
         state.running = { ...state.running, ...(state.running.execution ? { execution: { ...state.running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
         because = 'retry on a fresh session';
         continue;
@@ -278,7 +272,7 @@ export class TurnAttempts {
       resumed = true;
       because = 'after a permission mode change';
     }
-    result = { ...result, usage: sumUsage(usage, result.usage) };
+    result = { ...result, usage: sumUsage(usage, result.usage), ...(totals ? { agentTotals: totals } : {}) };
     if (state.running.execution) state.running.execution = { ...state.running.execution, permissionMode: state.thread.permissionMode };
     return result;
   }
@@ -525,6 +519,17 @@ function logAttemptEnd(core: Core, threadId: ThreadId, turnId: TurnId, attempt: 
 /** A diagnostic storage failure must not break a turn: its result, its retries or its pause. */
 function quiet(write: () => void): void {
   try { write(); } catch { /* the turn goes on without the record */ }
+}
+
+/**
+ * What the session holds once an earlier attempt of the same turn ended. An
+ * agent that restores its own totals resumes from the ones that attempt
+ * reported; otherwise its usage adds to what the earlier turns used.
+ */
+function sessionAfter(before: TurnContext['sessionBefore'], usage: Usage | null, totals: TurnResult['agentTotals']): TurnContext['sessionBefore'] {
+  if (totals) return totals;
+  if (!usage) return before;
+  return { costUsd: (before?.costUsd ?? 0) + (usage.costUsdEquivalent ?? 0), tokens: (before?.tokens ?? 0) + totalTokens(usage) };
 }
 
 /** Native attempts belong to one visible turn, including their reported usage. */
