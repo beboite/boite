@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import type { Subprocess } from 'bun';
+import { SOCKET_OPTIONS } from '../../../packages/core/src/client.ts';
 import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
 import { relay } from './ws-relay.ts';
 
@@ -754,7 +755,7 @@ async function openSocket(target: TargetInfo): Promise<WebSocket> {
   if (url === undefined) throw new Error('the page target has no debugger url');
   const traced = TRACE ? await relay(url) : null;
   return new Promise<WebSocket>((resolve, reject) => {
-    const socket = new WebSocket(traced?.url ?? url);
+    const socket = new WebSocket(traced?.url ?? url, SOCKET_OPTIONS as unknown as string[]);
     if (traced) {
       relays.set(socket, traced);
       socket.addEventListener('close', (event) => {
