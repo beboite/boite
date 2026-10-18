@@ -181,12 +181,40 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 596,700 |
-| UI files, excluding `.br` and `.gz` copies | 5,040,000 |
+| UI entry chunk | 487,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,728,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,417,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the slow draft journal merged with `origin/main` at `9ffdb977`
+(the lean boot) measures 486,005 entry bytes, 4,727,415 UI bytes and
+4,413,077 core JavaScript bytes with `measure()` after fresh `bun run build:ui`
+and `bun run build:core` on Windows. The UI limit rises to 4,728,000; the
+other limits stay.
+
+On 2026-10-18, the lean boot merged with `origin/main` at `2be13d45`
+(message pictures as file tickets and the media wire) measures 486,005 entry
+bytes, 4,725,790 UI bytes and 4,412,394 core JavaScript bytes after fresh
+`bun run build:ui` and `bun run build:core` on Windows. The entry limit rises
+to 487,000, about a kilobyte above it; the other limits stay.
+
+On 2026-10-18, the lean boot merged with `origin/main` at `57d41e70`, which
+refreshes the UI dependencies, measures 485,472 entry bytes, 4,724,812 UI
+bytes and 4,408,525 core JavaScript bytes after fresh `bun run build:ui` and
+`bun run build:core` on Windows. The entry limit rises to 486,500,
+a kilobyte above it; the other limits stay.
+
+On 2026-10-18, the lean boot on `origin/main` at `b611c01f` measures 484,682
+entry bytes and 4,723,056 UI bytes after a fresh `bun run build:ui` on
+Windows, against 595,295 and 5,036,764 for `b611c01f` built the same way:
+English left the entry for a chunk of its own, nine components the first frame
+does not draw load lazily, the fake client resolves to an empty module, Geist
+ships as latin, latin-ext and rest subsets and the onboarding clip is
+re-encoded at 15 fps; a notice and a retry cover a catalogue or a lazy part
+that fails to load. The limits fall to 485,800 and 4,727,000; the core
+limits stay. [Performance](performance.md#static-files) has the boot files.
 
 On 2026-10-18, removing a purged or erased thread's Claude transcripts and
 muting new audio sessions on Core Audio's notice, rebased on `b611c01f`,

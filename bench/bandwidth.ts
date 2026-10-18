@@ -4,11 +4,13 @@
  * thread, one streamed turn and a reconnect. Everything runs on the echo
  * driver in a fresh data directory, through the counting relay of `lib/wire.ts`.
  *
- *   bun run bench/bandwidth.ts [--rtt 150] [--sequence sequential|pipelined] [--core path/to/main.ts] [--json out.json]
+ *   bun run bench/bandwidth.ts [--rtt 150] [--sequence sequential|pipelined] [--core path/to/main.ts] [--locale en|fr] [--only page] [--json out.json]
  *
  * `--sequence` is which client the calls imitate: `sequential` is the UI before
  * 2026-09-19 (one call awaited after the other on a thread open), `pipelined`
- * the UI after it.
+ * the UI after it. `--locale` is the device's language: the page load adds the
+ * catalogue chunk index.html's head script preloads for it. `--only page`
+ * stops after the three page-load rows.
  */
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,6 +35,10 @@ const JSON_OUT = flag('json', '');
 const REMOTE = { client: { name: 'bench', version: '2.0.0-beta.1' }, timeoutMs: 20_000, headers: { host: 'phone.bench.test' } };
 
 const CORE_MAIN = flag('core', '');
+const LOCALE = flag('locale', 'en');
+const ONLY_PAGE = flag('only', '') === 'page';
+/** What a browser opens to one host over HTTP/1.1, which is all Bun.serve speaks. */
+const CONNECTIONS = 6;
 
 /**
  * Text that deflates like prose rather than like `word0 word1 word2`: a fixed
@@ -120,18 +126,43 @@ const UI_DIST = CORE_MAIN === ''
   : join(dirname(CORE_MAIN), '..', '..', 'ui', 'dist');
 const UI_INDEX = join(UI_DIST, 'index.html');
 
-/** The faces index.html preloads when Appearance was never touched (`--font-sans` and `--font-mono` in app.css): its script builds their URLs, so no regex finds them. */
-const DEFAULT_FONTS = ['/fonts/Inter-latin.woff2', '/fonts/GeistMono-Variable.woff2'];
+/** The faces index.html preloads when Appearance was never touched (`--font-sans` and `--font-mono` in app.css): its script builds their URLs from names, so the mono one is read by its name. */
+function defaultFonts(html: string): string[] {
+  const mono = /['"`](GeistMono-[\w-]+)['"`]/.exec(html)?.[1] ?? 'GeistMono-latin';
+  return ['/fonts/Inter-latin.woff2', `/fonts/${mono}.woff2`];
+}
 
 /** What a browser keeps of one answer to decide the next load: its freshness and its validators. */
 interface Cached { path: string; cacheControl: string; etag: string | null; lastModified: string | null }
 
-/** The files a first load fetches: what the document loads by `src` or `href`, the default fonts, the manifest and the worker. */
+/** The catalogue chunk the head script preloads for `locale` (`lib/locale-preload.ts`), if the build has one. */
+function catalogueOf(html: string, locale: string): string[] {
+  const map = /var c=(\{[^}]*\})/.exec(html)?.[1];
+  const chunk = map === undefined ? undefined : (JSON.parse(map) as Record<string, string>)[locale];
+  return chunk === undefined ? [] : [chunk.replace(/^\./, '')];
+}
+
+/** Runs `tasks` with at most `limit` in flight, in their order, as a browser queues requests to one host. */
+async function pooled<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
+  const results: T[] = new Array(tasks.length);
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < tasks.length) {
+      const at = next++;
+      results[at] = await (tasks[at] as () => Promise<T>)();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, lane));
+  return results;
+}
+
+/** The files a first load fetches: what the document loads by `src` or `href`, the device's catalogue, the default fonts, the manifest and the worker. */
 async function staticLoad(base: string): Promise<Cached[]> {
   const html = readFileSync(UI_INDEX, 'utf8');
-  // Attributes only, as the worker precaches: the locale map of an inline script names catalogues an English load never fetches.
-  const referenced = [...new Set([...html.matchAll(/(?:src|href)="\.?(\/assets\/[^"]+)"/g)].map((found) => found[1] as string))];
-  const paths = ['/', ...referenced, ...DEFAULT_FONTS, '/manifest.webmanifest', '/sw.js'];
+  // Attributes, as the worker precaches, and the one catalogue of the locale map this device fetches.
+  const named = [...html.matchAll(/(?:src|href)="\.?(\/assets\/[^"]+)"/g)].map((found) => found[1] as string);
+  const referenced = [...new Set([...named, ...catalogueOf(html, LOCALE)])];
+  const paths = ['/', ...referenced, ...defaultFonts(html), '/manifest.webmanifest', '/sw.js'];
   // A browser opens six connections to one host; the order is the document's.
   const headers = { 'accept-encoding': 'gzip, deflate, br, zstd' };
   const get = async (path: string): Promise<Cached> => {
@@ -140,7 +171,7 @@ async function staticLoad(base: string): Promise<Cached[]> {
     return { path, cacheControl: response.headers.get('cache-control') ?? '', etag: response.headers.get('etag'), lastModified: response.headers.get('last-modified') };
   };
   const first = await get('/');
-  return [first, ...await Promise.all(paths.slice(1).map(get))];
+  return [first, ...await pooled(paths.slice(1).map((path) => () => get(path)), CONNECTIONS)];
 }
 
 /**
@@ -159,7 +190,7 @@ async function warmLoad(base: string, cached: Cached[]): Promise<void> {
   if (shell === undefined) return;
   const get = (entry: Cached): Promise<ArrayBuffer> => fetch(`${base}${entry.path}`, { headers: conditional(entry) }).then((response) => response.arrayBuffer());
   await get(shell);
-  await Promise.all(rest.filter((entry) => !fresh(entry)).map(get));
+  await pooled(rest.filter((entry) => !fresh(entry)).map((entry) => () => get(entry)), CONNECTIONS);
 }
 
 /** Every script and stylesheet the document does not name: what the idle prefetch and the first visit to Settings bring in. */
@@ -168,6 +199,17 @@ async function lazyLoad(base: string): Promise<void> {
   const headers = { 'accept-encoding': 'gzip, deflate, br, zstd' };
   const rest = readdirSync(join(UI_DIST, 'assets')).filter((name) => /\.(?:js|css)$/.test(name) && !html.includes(name));
   await Promise.all(rest.map((name) => fetch(`${base}/assets/${name}`, { headers }).then((response) => response.arrayBuffer())));
+}
+
+function report(rows: Row[]): void {
+  const kb = (bytes: number): string => (bytes / 1024).toFixed(1);
+  console.log(`\nround trip ${RTT_MS} ms, ${SEQUENCE} client, ${LOCALE} device, ${new Date().toISOString().slice(0, 10)}\n`);
+  console.log('| scenario | down KB | up KB | relay reads down | ms |');
+  console.log('| --- | ---: | ---: | ---: | ---: |');
+  for (const row of rows) {
+    console.log(`| ${row.name} | ${row.downBytes === 0 && row.upBytes === 0 ? '' : kb(row.downBytes)} | ${row.downBytes === 0 && row.upBytes === 0 ? '' : kb(row.upBytes)} | ${row.chunksDown === 0 ? '' : row.chunksDown} | ${Math.round(row.ms)} |`);
+  }
+  if (JSON_OUT !== '') writeFileSync(JSON_OUT, `${JSON.stringify({ rttMs: RTT_MS, sequence: SEQUENCE, locale: LOCALE, rows }, null, 2)}\n`);
 }
 
 async function main(): Promise<void> {
@@ -217,6 +259,7 @@ async function main(): Promise<void> {
     await measure('every other script and stylesheet (idle prefetch, settings, highlighters)', async () => {
       await lazyLoad(relay.url);
     });
+    if (ONLY_PAGE) return report(rows);
 
     await measure('connect, hello and the boot calls', async () => {
       client = await connect(relay.url, core.token, REMOTE);
@@ -267,14 +310,7 @@ async function main(): Promise<void> {
     await removeDirectory(directory);
   }
 
-  const kb = (bytes: number): string => (bytes / 1024).toFixed(1);
-  console.log(`\nround trip ${RTT_MS} ms, ${SEQUENCE} client, ${new Date().toISOString().slice(0, 10)}\n`);
-  console.log('| scenario | down KB | up KB | relay reads down | ms |');
-  console.log('| --- | ---: | ---: | ---: | ---: |');
-  for (const row of rows) {
-    console.log(`| ${row.name} | ${row.downBytes === 0 && row.upBytes === 0 ? '' : kb(row.downBytes)} | ${row.downBytes === 0 && row.upBytes === 0 ? '' : kb(row.upBytes)} | ${row.chunksDown === 0 ? '' : row.chunksDown} | ${Math.round(row.ms)} |`);
-  }
-  if (JSON_OUT !== '') writeFileSync(JSON_OUT, `${JSON.stringify({ rttMs: RTT_MS, sequence: SEQUENCE, rows }, null, 2)}\n`);
+  report(rows);
 }
 
 await main();

@@ -14,7 +14,7 @@
   import DelegationActivity from './DelegationActivity.svelte';
   import { teamLaunches } from '../lib/delegation-progress';
   import UserMessage from './UserMessage.svelte';
-  import ImageViewer from './ImageViewer.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import { provideViewerHost, type Gallery } from '../lib/media-gallery';
   import AssistantMessage from './AssistantMessage.svelte';
   import MoveMarker from './MoveMarker.svelte';
@@ -833,7 +833,7 @@
     </button>
   {/if}
 </div>
-{#if viewing}<ImageViewer items={viewing.items} index={viewing.index} onclose={() => { viewing = null; releaseHeld(); }} />{/if}
+{#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer} floating>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={() => { viewing = null; releaseHeld(); }} />{/snippet}</Deferred>{/if}
 
 <style>
   .timeline-wrap {

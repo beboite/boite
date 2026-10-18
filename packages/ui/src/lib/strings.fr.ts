@@ -2688,6 +2688,13 @@ export const fr: Translation = {
     fast: 'Rapide'
   },
 
+  parts: {
+    loading: 'Chargement',
+    failed: "Cette partie de Boite n'a pas pu se charger.",
+    navigationFailed: "La navigation n'a pas pu se charger.",
+    dictationFailed: "La dictée n'a pas pu se charger. Réessayer"
+  },
+
   common: {
     none: 'aucun',
     unknown: 'inconnu',
