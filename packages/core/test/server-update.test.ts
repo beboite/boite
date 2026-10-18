@@ -287,16 +287,18 @@ for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper $
   const fails = mode === 'fails';
   const f = await updateFixture();
   // Two older snapshots of this installation: a successful update keeps the newest two in all.
-  const backup = (c: string, installation: string | null, day: number) => {
+  const backup = (c: string, installation: string | null, day: number, snapshot = true) => {
     const path = join(f.root, `.boite-backup-${uuid(c)}`);
     mkdirSync(path);
+    if (snapshot) mkdirSync(join(path, 'data'));
     if (installation) writeFileSync(join(path, 'backup.json'), JSON.stringify({ installation, at: new Date(2026, 0, day).getTime() }));
     utimesSync(path, new Date(2026, 0, day), new Date(2026, 0, day));
     return path;
   };
   const older = [backup('b', f.install, 1), backup('c', f.install, 2)];
-  // Newer backups another installation in the same folder made, and one the user made, are not this update's to prune.
-  const foreign = [backup('d', join(f.root, 'other-install'), 3), backup('e', join(f.root, 'other-install'), 4), backup('f', null, 5)];
+  // Newer backups another installation in the same folder made, and one the user made, are not this update's to prune;
+  // nor is the newest of this installation, whose snapshot a rollback used: it must not count as a kept one.
+  const foreign = [backup('d', join(f.root, 'other-install'), 3), backup('e', join(f.root, 'other-install'), 4), backup('f', null, 5), backup('9', f.install, 6, false)];
   writeFileSync(join(f.operation, 'admitted'), f.id);
   const spare = 1024;
   // A failed restart finds only the spare room the update checked: the snapshot took the rest.
@@ -367,6 +369,50 @@ test('with the data on another filesystem, an update reserves room there for the
   }
 });
 
+test('a rollback whose data restore fails still starts the previous installation, and the recovery puts the data back', async () => {
+  const f = await updateFixture();
+  writeFileSync(join(f.operation, 'admitted'), f.id);
+  const spare = 1024;
+  const need = snapshotSize(f.data) + spare;
+  const low = lowDisk(f.root, { root: need, data: need }, { data: 'data' });
+  // An I/O error on the copy back across filesystems.
+  const disk: Partial<UpdateDisk> = { ...low.disk, copy: (source, target, filter) => {
+    if (target.includes('.restore-')) throw Object.assign(new Error(`EIO: i/o error, copy '${source}'`), { code: 'EIO' });
+    low.disk.copy!(source, target, filter);
+  } };
+  try {
+    await expect(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk, health: async () => null })).rejects.toThrow('EIO');
+    expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
+    expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('old executable');
+    expect(f.result().error).toContain('the previous version was restored but not yet its data (EIO');
+    expect(existsSync(join(f.backup, 'data', 'journal.db'))).toBe(true);
+    // Not finished: the recovery that follows the worker's exit retries the data.
+    expect(existsSync(join(f.operation, 'finished'))).toBe(false);
+    await recoverServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, health: async () => null });
+    f.expectPrevious();
+    expect(f.controls.at(-1)).toBe('start');
+    expect(existsSync(f.operation)).toBe(false);
+  } finally { f.stop(); }
+});
+
+test('a core starting after a power cut interrupted a rollback swap puts the previous data back before opening it', async () => {
+  const f = await updateFixture();
+  try {
+    // The snapshot is back beside the data and took the live checkpoints; the rejected data is still in place.
+    const restored = `${f.data}.restore-${f.id}`;
+    cpSync(f.data, restored, { recursive: true, filter: (source) => !source.includes('checkpoints') });
+    renameSync(join(f.data, 'checkpoints'), join(restored, 'checkpoints'));
+    writeFileSync(join(f.data, 'pairing.json'), 'new run changed pairing');
+    // Imported as the startup does, so a release without it fails here rather than at load.
+    const { finishInterruptedRestore } = await import('../src/server-update/restore.ts');
+    expect(finishInterruptedRestore(f.data)).toBe(f.id);
+    f.expectPrevious();
+    expect(readFileSync(join(`${f.data}.failed-${f.id}`, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    expect(f.result().error).toContain('rollback was cut off');
+    expect(finishInterruptedRestore(f.data)).toBeNull();
+  } finally { f.stop(); }
+});
+
 /**
  * Where a worker killed mid-update (the memory controller once did it 30 s
  * into the snapshot copy) leaves the disk, rebuilt step by step.
@@ -378,6 +424,8 @@ const KILLED_AT = {
   // A version the worker rejected stays rejected, even if it answers health once restarted.
   rejected: 'between stopping the rejected version and moving it aside',
   restore: 'during its own rollback, once the snapshot had moved back and taken the live checkpoints',
+  // Across filesystems the snapshot is copied back, then deleted, which a kill can cut short.
+  cleanup: 'during its own rollback across filesystems, while it deleted the snapshot it had copied back',
 } as const;
 for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`the recovery of a worker killed ${KILLED_AT[point]} restores the previous version and starts it`, async () => {
   const f = await updateFixture();
@@ -387,6 +435,7 @@ for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`
     writeFileSync(link, 'recovery executable');
     f.state.pid = 0;
     mkdirSync(f.backup);
+    writeFileSync(join(f.backup, 'backup.json'), JSON.stringify({ installation: f.install, at: Date.now() }));
     if (point === 'copy') {
       mkdirSync(join(f.backup, 'data.partial'));
       writeFileSync(join(f.backup, 'data.partial', 'pairing.json'), 'test pairing survives');
@@ -397,15 +446,19 @@ for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`
         renameSync(join(f.operation, 'stage'), f.install);
         await f.platform.control(f.plan.installation.service, 'start');
       }
-      if (point === 'rejected' || point === 'restore') {
+      if (point === 'rejected' || point === 'restore' || point === 'cleanup') {
         writeFileSync(join(f.operation, 'rolling-back'), '');
         await f.platform.control(f.plan.installation.service, 'stop');
       }
-      if (point === 'restore') {
+      if (point === 'restore' || point === 'cleanup') {
         renameSync(f.install, join(f.operation, 'failed-installation'));
         renameSync(join(f.backup, 'installation'), f.install);
         const restored = `${f.data}.restore-${f.id}`;
-        renameSync(join(f.backup, 'data'), restored);
+        if (point === 'restore') renameSync(join(f.backup, 'data'), restored);
+        else {
+          cpSync(join(f.backup, 'data'), restored, { recursive: true });
+          rmSync(join(f.backup, 'data', 'journal.db'));
+        }
         renameSync(join(f.data, 'checkpoints'), join(restored, 'checkpoints'));
       }
     }

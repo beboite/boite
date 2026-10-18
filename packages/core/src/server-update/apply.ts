@@ -3,17 +3,11 @@ import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { unzipSync } from 'fflate';
 import { recoveryLink, type ServerUpdatePlan, type ServerUpdatePlatform } from './types.ts';
+import { swapRestored, UNSAVED_DATA } from './restore.ts';
+
+export { UNSAVED_DATA };
 
 const pause = (ms: number) => new Promise<void>(done => setTimeout(done, ms));
-
-/**
- * Data-directory entries the snapshot leaves out. A release migrates the
- * journal and the small state files beside it; these stores it does not
- * rewrite, and they were most of the bytes: on a server with 1,300 threads,
- * checkpoints and browser profiles made the copy 8.9 GB and kept the service
- * down 2 min 25 s per update. A rollback keeps the live ones in place.
- */
-export const UNSAVED_DATA = new Set(['checkpoints', 'browser', 'attachments', 'attachment-uploads', 'artifacts', 'logs', 'speech']);
 
 /** Snapshots kept beside the installation; each still holds a whole journal. */
 export const KEPT_BACKUPS = 2;
@@ -49,7 +43,9 @@ function backupOwner(path: string): { installation: string; at: number } | null 
  * Keeps this update's snapshot and the newest older ones of the same
  * installation, `KEPT_BACKUPS` in all. Another installation can share the
  * folder and the user can keep copies there: a backup whose marker does not
- * name this installation, an unmarked one included, is never touched. A
+ * name this installation, an unmarked one included, is never touched. Only a
+ * backup holding a complete snapshot counts: one whose snapshot a rollback
+ * used, or a kill cut short, must not push out a usable older one. A
  * failure here never fails an installed update.
  */
 function pruneBackups(plan: ServerUpdatePlan): void {
@@ -58,7 +54,7 @@ function pruneBackups(plan: ServerUpdatePlan): void {
   try {
     const backups = readdirSync(parent, { withFileTypes: true }).flatMap(entry => {
       const path = join(parent, entry.name);
-      const owner = entry.isDirectory() && BACKUP_NAME.test(entry.name) && path !== current ? backupOwner(path) : null;
+      const owner = entry.isDirectory() && BACKUP_NAME.test(entry.name) && path !== current && existsSync(join(path, 'data')) ? backupOwner(path) : null;
       return owner?.installation === plan.installation.directory ? [{ path, at: owner.at }] : [];
     }).sort((a, b) => b.at - a.at);
     for (const old of backups.slice(KEPT_BACKUPS - 1)) rmSync(old.path, { recursive: true, force: true });
@@ -162,22 +158,25 @@ async function becomesHealthy(plan: ServerUpdatePlan, platform: ServerUpdatePlat
  */
 function restoreData(plan: ServerUpdatePlan, snapshot: string, disk: UpdateDisk): void {
   const restored = `${plan.dataDir}.restore-${plan.id}`;
-  const failed = `${plan.dataDir}.failed-${plan.id}`;
-  if (!existsSync(restored)) {
-    if (existsSync(failed) || !existsSync(snapshot)) return;
+  // The swap renames the data aside before the restored copy in: with neither left to do, it is done.
+  if (!existsSync(restored) && !existsSync(`${plan.dataDir}.failed-${plan.id}`)) {
+    if (!existsSync(snapshot)) return;
     moveTree(snapshot, restored, disk);
   }
-  if (existsSync(plan.dataDir)) {
-    // The stores left out of the snapshot move across as they are.
-    for (const name of UNSAVED_DATA) if (existsSync(join(plan.dataDir, name)) && !existsSync(join(restored, name))) renameSync(join(plan.dataDir, name), join(restored, name));
-    renameSync(plan.dataDir, failed);
-  }
-  renameSync(restored, plan.dataDir);
+  if (existsSync(restored)) swapRestored(plan.dataDir, plan.id);
+  // A copy across filesystems leaves its source, which a kill can have left half deleted.
+  discard(snapshot);
+}
+
+/** Renames a used tree aside before deleting it, so one cut short never passes for a complete one. */
+function discard(path: string): void {
+  if (existsSync(path)) renameSync(path, `${path}.consumed`);
+  rmSync(`${path}.consumed`, { recursive: true, force: true });
 }
 
 /**
  * Renames `source` to `target`. Across filesystems, which the update reserved
- * room for, a complete copy takes the target's name before the source goes.
+ * room for, a complete copy takes the target's name; the caller discards the source.
  */
 function moveTree(source: string, target: string, disk: UpdateDisk): void {
   try { disk.rename(source, target); return; }
@@ -186,7 +185,6 @@ function moveTree(source: string, target: string, disk: UpdateDisk): void {
   rmSync(partial, { recursive: true, force: true });
   disk.copy(source, partial);
   renameSync(partial, target);
-  rmSync(source, { recursive: true, force: true });
 }
 
 /**
@@ -209,12 +207,19 @@ async function rollBack(plan: ServerUpdatePlan, directory: string, platform: Ser
   if (touched || await platform.mainPid(service) === plan.originalPid) await platform.control(service, 'stop');
   if (installed && !existsSync(failedInstallation)) renameSync(root, failedInstallation);
   if (existsSync(previous) && !existsSync(root)) renameSync(previous, root);
-  if (installed) restoreData(plan, join(backup, 'data'), disk);
+  // A data restore that fails (an I/O error, a disk filled by something else) still starts the previous
+  // installation: the snapshot is untouched until its copy is complete, and the recovery retries the data.
+  let unrestored: unknown = null;
+  if (installed) try { restoreData(plan, join(backup, 'data'), disk); } catch (error) { unrestored = error; }
   // A copy cut short (a full disk, a kill) frees its space, and a snapshot that became the data leaves the backup empty;
   // a snapshot never used stays with the failure.
   if (!existsSync(join(backup, 'data'))) rmSync(backup, { recursive: true, force: true });
-  writeResult(plan, touched ? `Server update failed; the previous version was restored. ${reason}` : `Server update was not installed. ${reason}`);
+  try {
+    writeResult(plan, unrestored ? `Server update failed; the previous version was restored but not yet its data (${unrestored instanceof Error ? unrestored.message : String(unrestored)}). ${reason}`
+      : touched ? `Server update failed; the previous version was restored. ${reason}` : `Server update was not installed. ${reason}`);
+  } catch (error) { if (!unrestored) throw error; }
   await platform.control(service, 'start');
+  if (unrestored) throw unrestored;
   writeFileSync(join(directory, FINISHED), '', { mode: 0o600 });
 }
 

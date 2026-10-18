@@ -188,7 +188,8 @@ the disk holds the snapshot plus 1 GB; otherwise it starts the untouched
 server again, since the core stops itself once it admits the update, with the
 reason in its status. When the data directory sits on another filesystem than
 the installation, the same room is checked beside the data directory too,
-since a rollback must then copy the snapshot across. A copy cut short is
+since a rollback must then copy the snapshot across; the live data already
+sits on that disk, so the copy is the only thing added there. A copy cut short is
 deleted. Health must report the target version and that service's new PID
 within 30 seconds.
 Failure restores both the previous installation and its data snapshot before
@@ -197,15 +198,20 @@ time, so a rollback needs no room beyond what the update checked: a second
 copy once failed the rollback of a disk left with only the spare 1 GB and
 left the service stopped. Every step is a rename that a resumed rollback
 picks up, so the data directory is either the new data or the restored one.
+Across filesystems the copy takes its final name only once complete, and its
+source is renamed aside before it is deleted, so a half-deleted snapshot never
+passes for a backup. If the data cannot be put back (an I/O error, a disk
+another process filled), the previous installation still starts, the status
+says the data is not restored yet, and the recovery below retries it.
 The rejected data stays beside it as `<data>.failed-<id>`, without the stores
 the snapshot left out, which move back with the restored data.
 Pairings and conversations survive; clients reconnect normally.
 Backups remain private beside the installation as `.boite-backup-<id>`, each
 with a `backup.json` naming its installation. A successful update keeps its
-own and the newest older one of the same installation, and deletes that
-installation's older ones. It never touches a backup another installation in
-the same folder made, or one without that marker, older releases' included:
-remove those by hand.
+own and the newest older one of the same installation that still holds a
+complete snapshot, and deletes that installation's older ones. It never
+touches a backup another installation in the same folder made, or one without
+that marker, older releases' included: remove those by hand.
 Failure artifacts also remain for diagnosis; inspect them before removing them.
 
 The job runs under `MemoryHigh=1G`, which throttles it, rather than a hard
@@ -223,9 +229,12 @@ operation directory and the incomplete snapshot it left. It only deletes
 those of its own installation: each operation directory holds an
 `owner.json` naming the installation from the moment it exists, so a second
 installation in the same folder never deletes an update another one is
-running. An operation or snapshot that names no installation is left alone. A rollback cut off
-that way after the snapshot moved back leaves the previous data as
-`<data>.restore-<id>` beside the data directory; nothing deletes it.
+running. An operation or snapshot that names no installation is left alone.
+A power cut during the rollback's swap leaves the previous data, complete, as
+`<data>.restore-<id>` beside the data directory, and the service starts at
+boot with no recovery running. The core finishes that swap at startup, before
+it opens anything in the data directory, keeps the rejected data as
+`<data>.failed-<id>` and reports the interrupted rollback in its update status.
 
 From a terminal on the server, the same owner actions need no thread:
 

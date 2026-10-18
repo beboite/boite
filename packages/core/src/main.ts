@@ -18,6 +18,7 @@ import { CORE_VERSION } from './version.ts';
 import { messageOf } from './errors.ts';
 import { newToken } from './ids.ts';
 import { resolveDataDir } from './paths.ts';
+import { finishInterruptedRestore } from './server-update/restore.ts';
 import { processPlatform } from './platform/index.ts';
 
 const CHANNELS: readonly Channel[] = ['stable', 'dev'];
@@ -493,6 +494,8 @@ export function main(argv: string[]): void {
     try {
       flags = parseFlags(argv);
       dataDir = resolveDataDir(flags.dataDir, flags.channel);
+      // A server rollback a power cut interrupted finishes before anything opens the data. Server updates exist only off Windows.
+      if (process.platform !== 'win32') finishInterruptedRestore(dataDir);
       prepareDataDir(dataDir);
       // Before the journal is opened, because opening it is already a write.
       unlock = lockDataDir(dataDir);
