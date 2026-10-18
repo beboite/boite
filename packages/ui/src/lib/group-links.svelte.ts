@@ -65,16 +65,19 @@ function watched(socket: SocketLike, opened: () => void): SocketLike {
  */
 function askGroup(endpoint: Endpoint, patience: number, socket: SocketFactory): Promise<Group | null | undefined> {
   let opened = false;
+  const wait = Math.max(patience, ANSWER_WAIT_MS);
   const client = new WsClient({
     url: endpoint.url, token: endpoint.token, paired: endpoint.paired === true || endpoint.signs !== undefined, reconnect: false,
     socketFactory: (url) => watched(socket(url), () => { opened = true; }),
+    // A slow hello is that slow answer too: the client's own 10 s must not give up on it first.
+    openDeadline: () => wait,
     // A machine this device's key opens answers a signed hello.
     ...(endpoint.signs === undefined ? {} : { signer: { key: deviceKey, coreId: endpoint.signs } })
   });
   const timers: ReturnType<typeof setTimeout>[] = [];
   return new Promise<Group | null | undefined>((resolve) => {
     timers.push(setTimeout(() => { if (!opened) resolve(undefined); }, patience));
-    timers.push(setTimeout(() => resolve(undefined), Math.max(patience, ANSWER_WAIT_MS)));
+    timers.push(setTimeout(() => resolve(undefined), wait));
     void client.connect().then(() => client.call('group.get', {})).then(resolve, () => resolve(undefined));
   }).finally(() => {
     for (const timer of timers) clearTimeout(timer);

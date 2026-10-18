@@ -69,7 +69,8 @@ export class WsClient implements ObservableClient {
       device: options.device ?? (() => null),
       socketFactory: options.socketFactory ?? browserSocket,
       reconnect: options.reconnect ?? true,
-      backoff: options.backoff ?? defaultBackoff
+      backoff: options.backoff ?? defaultBackoff,
+      openDeadline: options.openDeadline ?? openDeadline
     };
     this.#grant = options.grant ?? null;
     this.#ticket = options.ticket ?? null;
@@ -260,7 +261,7 @@ export class WsClient implements ObservableClient {
     const socket = this.#options.socketFactory(rpcUrl(this.#options.url));
     this.#socket = socket;
 
-    const deadline = openDeadline(this.#attempt);
+    const deadline = this.#options.openDeadline(this.#attempt);
     return new Promise<CoreInfo>((resolve, reject) => {
       let settled = false;
       const timeout = setTimeout(() => {
