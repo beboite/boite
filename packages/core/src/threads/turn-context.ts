@@ -308,20 +308,22 @@ export class TurnContexts {
     const continued = fresh ? carry() : input;
     const prepared = prepareAttachments(this.core.dataDir, continued);
     const operation = turn.execution?.operation;
+    // A compaction or a cache keepalive goes to the agent as its command alone: nothing taken rides on it.
+    const bare = operation === 'compact' || operation === 'keepalive';
     // Both are taken once per turn: a second context for the same turn (the
     // core's retry on a fresh session) and a driver's `continuation` get what
     // the first one took.
     const preparedPrompt = prepared.prompt;
     carried.deferred ??= operation || nativeCommandPrompt(preparedPrompt) ? '' : this.threads.deferred.takeDeferred(threadId);
-    carried.memory ??= this.threads.deferred.memory.take(threadId);
-    carried.letters ??= operation === 'compact' ? '' : this.core.delegation.initialInput(threadId, turn.id);
+    carried.memory ??= operation === 'keepalive' ? '' : this.threads.deferred.memory.take(threadId);
+    carried.letters ??= bare ? '' : this.core.delegation.initialInput(threadId, turn.id);
     const deferred = carried.deferred;
     // The subagent guide comes with the Boite guide on a fresh session, and on any turn about delegation.
     // Core-woken turns (results, workflow summaries) bring no request of their own.
     // A context mode without guides gets its brief and the letters meant for it, nothing from the brain, Boite or the team.
     const mode = thread.contextMode ?? null;
     const noGuides = mode !== null && !mode.guides;
-    const tail = (fresh: boolean): string => operation === 'compact' ? '' : (noGuides ? '' : this.core.delegation.instructions(threadId, operation ? '' : preparedPrompt, fresh)) + carried.letters;
+    const tail = (fresh: boolean): string => bare ? '' : (noGuides ? '' : this.core.delegation.instructions(threadId, operation ? '' : preparedPrompt, fresh)) + carried.letters;
     const origin = input.sentFrom;
     const systemGuide = this.systemGuide(thread, provider);
     // Skills the harness already names to its model stay out of the brain's catalog.
@@ -334,14 +336,14 @@ export class TurnContexts {
       // Boite's own text, so the guide switch turns it off with the rest.
       const said = origin && inject && guideEnabled && (sessionId === null || !sameOrigin(origin, this.sentFromBefore(threadId, origin.messageId)))
         ? sentFromNote(origin.from) : '';
-      const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.workforce.entrusted.instructions(threadId) : '';
+      const coordinationGuide = inject && !bare && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.workforce.entrusted.instructions(threadId) : '';
       // A driver that takes the guide in its system prompt keeps it there, compaction included.
       const guide = inject && sessionId === null && guideEnabled && systemGuide === undefined ? this.boiteGuide(thread, provider) : '';
       // Custom rules lead every fresh session, whatever the guides, on every provider.
       const rules = inject && sessionId === null && mode?.rules ? `${contextRulesBlock(mode.rules)}\n\n` : '';
       // Every turn, not once a session: a style said once fades after a few answers.
       // Boite's own text, so the guide switch turns it off with the rest.
-      const style = inject && guideEnabled && operation !== 'compact' && this.core.settings.get().shortAnswers !== false ? `${SHORT_ANSWERS}\n\n` : '';
+      const style = inject && guideEnabled && !bare && this.core.settings.get().shortAnswers !== false ? `${SHORT_ANSWERS}\n\n` : '';
       const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id, listedSkills) : '') + guide + style;
       return carried.memory + prefix + (prefix ? 'User request:\n' : '') + said + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };
@@ -353,7 +355,8 @@ export class TurnContexts {
       prompt: compose(preparedPrompt, thread.sessionId),
       systemGuide,
       continuation: freshStart(this.core.dataDir, carry, compose),
-      coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id)
+      // A keepalive takes nothing while it runs: a result or a note waits for the turn after it.
+      coordination: () => operation === 'keepalive' ? null : this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id)
         ?? this.threads.deferred.takeForRunningTurn(threadId),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,

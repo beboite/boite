@@ -38,10 +38,26 @@ export function openAiCacheLife(model: string | null): PromptCacheLife | null {
 }
 
 /**
+ * How many keepalive pings one wait may send before they cost more than the
+ * cache miss they avoid: floor(miss price / ping price), by the lifetime the
+ * cache was written for. A ping reads the whole prefix from the cache; a miss
+ * writes it again.
+ * - Anthropic 1 hour: a write costs 2x the input price, a read 0.1x, so 20.
+ * - Anthropic 5 minutes: a write costs 1.25x, a read 0.1x, so 12.
+ *   https://platform.claude.com/docs/en/build-with-claude/prompt-caching#pricing
+ * - OpenAI 30 minutes: an uncached prefix costs the input price, a cached one
+ *   0.1x, so 10. https://developers.openai.com/api/docs/guides/prompt-caching
+ * A lifetime missing here has no known price ratio and is never kept warm.
+ */
+export const KEEPALIVE_PING_CAP: Readonly<Record<number, number>> = { 3600: 20, 300: 12, 1800: 10 };
+
+/**
  * The prompt cache a finished turn left, or null when the driver names no
  * lifetime or nothing shows a request went out: a turn stopped before its
  * first call reported no usage and touched no cache. A lifetime that is not a
- * whole positive number of seconds is dropped, never shown.
+ * whole positive number of seconds is dropped, never shown. Its clock starts
+ * at the turn's last main-loop request when the driver saw it (`cacheAt`),
+ * otherwise at `at`, the turn's end.
  */
 export function promptCacheOf(
   result: TurnResult,
@@ -57,8 +73,9 @@ export function promptCacheOf(
   if (!life || (result.usage === null && result.status !== 'done')) return null;
   if (!Number.isInteger(life.ttlSeconds) || life.ttlSeconds <= 0) return null;
   const max = life.maxSeconds !== undefined && Number.isInteger(life.maxSeconds) && life.maxSeconds > life.ttlSeconds ? life.maxSeconds : undefined;
+  const requested = result.cacheAt !== undefined && Number.isFinite(result.cacheAt) && result.cacheAt <= at ? result.cacheAt : at;
   return {
-    at,
+    at: requested,
     ttlSeconds: life.ttlSeconds,
     ...(max === undefined ? {} : { maxSeconds: max }),
     source: life.source,

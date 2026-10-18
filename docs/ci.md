@@ -181,23 +181,34 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 493,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,934,500 |
+| UI entry chunk | 495,100 |
+| UI files, excluding `.br` and `.gz` copies | 4,942,100 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,538,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,545,900 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-18, contacts (PR #602) on `origin/main` at `3a19eb57` measure
-493,338 entry bytes, 4,933,935 UI bytes and 4,537,639 core JavaScript bytes
-with `measure()` after fresh `bun run build:ui` and `bun run build:core` on
-Windows, against the 490,436, 4,860,909 and 4,470,119 recorded below for that
-main. The Home surface loads on first open: its chunk is 36,610 bytes of
-JavaScript and 21,880 of CSS, and its strings sit in the catalogue chunks. The
-entry grows 2,902 bytes for the Home switch, the remote chip and the lazy
+On 2026-10-18, contacts (PR #602) merged with `origin/main` at `80c2da06`
+measure 494,915 entry bytes, 4,941,535 UI bytes and 4,545,327 core JavaScript
+bytes with `measure()` after fresh `bun run build:ui` and `bun run build:core`
+on Windows, against the 491,872, 4,867,996 and 4,477,807 recorded below for
+that main. The Home surface loads on first open: its chunk is 36,618 bytes of
+JavaScript and 21,882 of CSS, and its strings sit in the catalogue chunks. The
+entry grows 3,043 bytes for the Home switch, the remote chip and the lazy
 loader's wiring. The contact store, join, link, concierge and Tailscale client
 add 67,520 core bytes. The entry, UI and core JavaScript limits rise to
-493,500, 4,934,500 and 4,538,500; the `main.js` limit stays.
+495,100, 4,942,100 and 4,545,900; the `main.js` limit stays.
+
+On 2026-10-18, keeping the prompt cache warm (PR #594) merged with
+`origin/main` at `3a19eb57` measures 491,872 entry bytes, 4,867,996 UI bytes
+and 4,477,807 core JavaScript bytes with `measure()` after fresh
+`bun run build:ui` and `bun run build:core` on Windows, against 490,436,
+4,860,909 and 4,470,119 recorded below for that main on the same machine.
+Measured on its own against `95862236`, the settings card adds 3,897 bytes to
+the settings chunk, the quiet ping line and its message grouping 1,539 to the
+entry chunk, the sentences 1,523; the keepalive scheduler, its guards and the
+request clock add 7,732 core bytes. The entry, UI and core JavaScript limits
+rise to 492,200, 4,868,600 and 4,478,300; `main.js` stays.
 
 On 2026-10-18, the journal compaction (schema 37: zstd values, per-thread
 command lines, the paced background passes in `journal/retention.ts` and
