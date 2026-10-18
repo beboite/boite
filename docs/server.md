@@ -186,12 +186,36 @@ threads down 2 min 25 s for 8.9 GB, and filled its disk once mid-copy; a
 rollback keeps the live ones. Before stopping the service, the job checks that
 the disk holds the snapshot plus 1 GB; otherwise it starts the untouched
 server again, since the core stops itself once it admits the update, with the
-reason in its status. A copy cut short is deleted. Health must
-report the target version and that service's new PID within 30 seconds.
+reason in its status. When the data directory sits on another filesystem than
+the installation, the same room is checked beside the data directory too,
+since a rollback must then copy the snapshot across; the live data already
+sits on that disk, so the copy is the only thing added there. A copy cut short is
+deleted. Health must report the target version and that service's new PID
+within 30 seconds.
 Failure restores both the previous installation and its data snapshot before
-restarting. Pairings and conversations survive; clients reconnect normally.
-Backups remain private beside the installation as `.boite-backup-<id>`; a
-successful update keeps the two newest and deletes the older ones.
+restarting. The snapshot is renamed back into place, never copied a second
+time, so a rollback needs no room beyond what the update checked: a second
+copy once failed the rollback of a disk left with only the spare 1 GB and
+left the service stopped. Every step is a rename that a resumed rollback
+picks up, so the data directory is either the new data or the restored one.
+Across filesystems the copy takes its final name only once complete, and its
+source is renamed aside before it is deleted, so a half-deleted snapshot never
+passes for a backup. The previous installation starts only once the data is
+back, or when the new version never ran on it; failing to delete the used
+snapshot does not hold it back. If the data cannot be put back (an I/O error, a
+disk another process filled) after the new version ran, the service stays
+stopped, since the previous core would open data the new one migrated. The
+reason goes in `server-update-result.json` in the data directory and the job's
+journal, and the recovery below retries the restore. Once the data is back the
+server's update status reports the failed update. The rejected data stays beside it as `<data>.failed-<id>`, without the stores
+the snapshot left out, which move back with the restored data.
+Pairings and conversations survive; clients reconnect normally.
+Backups remain private beside the installation as `.boite-backup-<id>`, each
+with a `backup.json` naming its installation. A successful update keeps its
+own and the newest older one of the same installation that still holds a
+complete snapshot, and deletes that installation's older ones. It never
+touches a backup another installation in the same folder made, or one without
+that marker, older releases' included: remove those by hand.
 Failure artifacts also remain for diagnosis; inspect them before removing them.
 
 The job runs under `MemoryHigh=1G`, which throttles it, rather than a hard
@@ -205,7 +229,54 @@ and anything else is rolled back as above before the service starts again.
 The recovery runs from a hard link of the job's executable,
 `.boite-recover-<id>`, which it deletes when done. If the recovery itself
 never ran, as after a power cut, the next update deletes the unfinished
-operation directory and the incomplete snapshot it left.
+operation directory and the incomplete snapshot it left, a half-deleted
+used one (`data.consumed`) included. It only deletes
+those of its own installation: each operation directory holds an
+`owner.json` naming the installation from the moment it exists, so a second
+installation in the same folder never deletes an update another one is
+running. An operation or snapshot that names no installation is left alone.
+Before the previous installation goes back in place, a rollback publishes
+`<data>.rollback.json` beside the data directory, naming its operation and
+snapshot: written whole to a temporary name, flushed and renamed in, and left
+as it is when a retry finds it valid. It is removed only once the swap is
+complete and flushed. A power cut in between leaves no recovery running, and
+the service starts the previous version at boot. A start that finds the record
+takes `<data>.maintenance.lock`, a kernel `flock` the job and its recovery hold
+while they restore, so neither moves the data under the other. The restore
+starts no process while it holds it, so the kernel drops it with a killed
+holder. Whoever restores also holds the data directory's `core.lock` from its
+first look until that data moves aside, and refuses while a live core holds it.
+It puts its own `core.lock` in the restored copy before that copy takes the
+data directory's name, so a core starting meanwhile finds the data taken or
+the record still there, never a directory about to move away. It finishes that
+operation's restore before anything opens the data: it uses the
+`<data>.restore-<id>` the record names, never the newest one on disk, keeps
+the rejected data as `<data>.failed-<id>` (or `<data>.unused-data` when that
+name is taken) and reports the interrupted rollback in its update status. The
+swap counts as complete only when the data directory holds
+`server-update-restored` with the operation's id, written into the restored
+copy just before it takes the name; a missing folder never passes for one. The
+mark and the restored directory's entries are flushed before the swap, and a
+flush that fails on Linux stops it with the record kept, so on a filesystem
+that can flush a directory a power cut cannot keep the swap and lose the mark.
+One that answers `EINVAL` or `ENOTSUP` to that flush gets the swap without
+that guarantee. After a completed swap, every other
+`<data>.restore-*` beside the
+data directory is renamed to `<data>.unused-restore-*`, so no later start
+replays an older copy. A recorded restore that is a file rather than a
+directory is set aside the same way and moved again from the snapshot.
+Whatever else stops the restore (a failed rename or copy, a missing snapshot,
+a record it cannot read) refuses the start and keeps the record, the restored
+copy and the data as they are: the data in place may be the rejected
+version's, and the previous core must not open it. The next start tries again.
+A start that finds no record writes nothing outside the data directory, so the
+server image, whose data directory is a mount point in an unwritable `/`, and
+a first start that creates the data directory's parents work as before. It
+takes `core.lock`, then admits itself only if the record is still absent and
+the data directory is still the one it locked (same inode); otherwise it
+releases and looks again, and after three tries it takes the maintenance
+lock as a start with a record does. A core lock is only removed by the process
+that wrote it.
 
 From a terminal on the server, the same owner actions need no thread:
 

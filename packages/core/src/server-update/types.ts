@@ -24,6 +24,8 @@ export interface ServerUpdatePlatform {
   launch(run: UpdateCommand, executable: string, plan: string): Promise<void>;
   control(service: string, action: 'start' | 'stop'): Promise<void>;
   mainPid(service: string): Promise<number>;
+  /** The maintenance lock a rollback and a start that finishes one hold; see `FileLock` in `restore.ts`. */
+  lock(file: string): () => void;
 }
 
 export interface ServerUpdatePlan {

@@ -118,14 +118,17 @@ export class ServerUpdates {
 
   private async prepare(offer: ServerOffer, abort: AbortController): Promise<void> {
     const installation = this.installation!;
+    const { clearStaleUpdates, UPDATE_OWNER } = await import('./server-update/apply.ts');
     // A worker cut off with its recovery, by a power cut, left its files beside the installation.
-    try { (await import('./server-update/apply.ts')).clearStaleUpdates(dirname(installation.directory)); }
+    try { clearStaleUpdates(dirname(installation.directory), installation.directory); }
     catch (error) { this.core.log('warn', `server update cleanup: ${messageOf(error)}`); }
     if (abort.signal.aborted || this.closed) return;
     const id = randomUUID();
     const directory = join(dirname(installation.directory), `.boite-update-${id}`);
     this.directory = directory;
     mkdirSync(directory, { mode: 0o700 });
+    // Another installation's cleanup in the same folder leaves an operation that names someone else.
+    writeFileSync(join(directory, UPDATE_OWNER), JSON.stringify({ installation: installation.directory }), { mode: 0o600 });
     const progress = (received: number, total: number | null) => {
       if (this.abort === abort) this.move({ received, total });
     };
