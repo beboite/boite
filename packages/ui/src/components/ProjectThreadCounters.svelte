@@ -15,24 +15,35 @@
 <div class="counters">
   {#each kinds as kind (kind)}
     {@const total = kind === 'working' ? working : archiveCount(entry.project, kind)}
-    {@const open = total > 0 && !collapsed && !(kind === 'working' && searching) && projectThreadView.isOpen(entry, kind)}
+    {@const open = !collapsed && !(kind === 'working' && searching) && projectThreadView.isOpen(entry, kind)}
     {@const label = fill(labels[kind], { count: String(total), project: projectName(entry.project) })}
     {@const grouped = kind !== 'working' || recentPreferences.groupWorking}
+    {#if total > 0}
     <button type="button" class="ghost counter {kind}" class:away class:active={open && grouped} data-testid="project-{kind}-toggle" data-count={total}
-      title={label} aria-label={label} aria-expanded={grouped ? open : undefined} aria-controls={grouped ? `${controls}-${kind}` : undefined} disabled={!grouped || total === 0 || (kind === 'working' && searching)}
+      title={label} aria-label={label} aria-expanded={grouped ? open : undefined} aria-controls={grouped ? `${controls}-${kind}` : undefined} disabled={!grouped || (kind === 'working' && searching)}
       onclick={() => projectThreadView.toggle(entry, kind, collapsed)}>
-      {#if kind === 'working'}<LoaderCircle size={12} aria-hidden="true" />{:else if kind === 'done'}<CheckCheck size={12} aria-hidden="true" />{:else}<Archive size={12} aria-hidden="true" />{/if}
+      {#if kind === 'working'}<LoaderCircle size={13} aria-hidden="true" />{:else if kind === 'done'}<CheckCheck size={13} aria-hidden="true" />{:else}<Archive size={13} aria-hidden="true" />{/if}
       <span class="ui-label">{formatCount(total)}</span>
     </button>
+    {/if}
   {/each}
 </div>
 
 <style>
-  .counters { display: flex; flex: none; gap: 2px; }
-  .counter { height: 28px; min-width: 30px; padding: 0 4px; gap: 3px; font-size: var(--text-xs); font-variant-numeric: tabular-nums; color: var(--color-muted-foreground); border: 1px solid transparent; }
-  .counter:disabled { opacity: .35; }
-  .counter.active { background: var(--color-active); border-color: var(--color-edge); color: var(--color-foreground); }
-  .working:not(:disabled):not(.away) { color: var(--color-accent); }
-  .done:not(:disabled) { color: var(--color-success); }
-  @media (max-width: 720px) { .counter { min-width: var(--touch-target); min-height: var(--touch-target); padding: 0 7px; gap: 5px; } }
+  .counters { display: flex; flex: none; align-items: center; gap: 6px; }
+  /* A pill per state that holds threads: nothing is drawn for a 0. */
+  .counter { height: 28px; min-width: 0; padding: 0 10px 0 9px; gap: 5px; border-radius: var(--radius-full); font-size: var(--text-xs); font-weight: 600; font-variant-numeric: tabular-nums;
+    color: var(--color-muted-foreground); background-color: var(--color-hover); border: 1px solid transparent; background-clip: padding-box; }
+  .working:not(.away) { color: var(--color-accent); background-color: var(--color-accent-soft); }
+  .done { color: var(--color-success); background-color: color-mix(in oklch, var(--color-success) 14%, transparent); }
+  .counter:disabled { opacity: 1; }
+  .counter.active { box-shadow: inset 0 0 0 1px currentColor; }
+  /* Hover deepens the pill's own tint instead of the grey a ghost button takes. */
+  .counter:hover:not(:disabled) { background-color: color-mix(in oklch, currentColor 24%, transparent); background-clip: padding-box; }
+  .working:not(.away):hover:not(:disabled) { color: var(--color-accent); }
+  .done:hover:not(:disabled) { color: var(--color-success); }
+  /* A narrow column keeps the project's name readable: tighter pills. */
+  @container sidebar (max-width: 300px) { .counters { gap: 4px; } .counter { padding: 0 7px 0 6px; gap: 3px; } }
+  /* A phone keeps the 44px target; the transparent border leaves a 32px pill drawn inside it. */
+  @media (max-width: 720px) { .counters { gap: 0; } .counter { min-width: var(--touch-target); min-height: var(--touch-target); padding: 0 8px; gap: 5px; border-width: 6px; } }
 </style>

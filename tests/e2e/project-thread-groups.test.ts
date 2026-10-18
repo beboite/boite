@@ -125,8 +125,8 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate(`document.querySelector(${JSON.stringify(project(main, 'p-notes'))}) === null && document.querySelector(${JSON.stringify(project(main, empty))}) === null`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${root} ${id('project-shelf-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
       expect(await page.evaluate(`document.querySelector('${first} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
-      // t-parser was archived by hand: it waits under Archived, not Done.
-      expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').dataset.count`)).toBe('0');
+      // t-parser was archived by hand: it waits under Archived, not Done, and an empty Done draws no counter.
+      expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}') === null`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${first} ${id('project-archived-toggle')}').dataset.count`)).toBe('1');
       expect(await page.evaluate(`!!document.querySelector('${row(first, 't-bench')}') && !document.querySelector('${row(first, 't-scheduler')}')`)).toBe(true);
       await page.evaluate(`document.querySelector(${JSON.stringify(project(main, busy))}).scrollIntoView({block:'center'})`);
@@ -141,10 +141,20 @@ for (const width of [1280, 390]) {
       await page.evaluate(`(() => { const store = globalThis.__boiteTest.workspace.machines[0].store; store.threads = store.threads.map(t => t.id === 't-building' ? {...t, status:'running', unread:false} : t); })()`);
       await page.waitFor(`document.querySelector('${building}:not(.inactive)')`);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
+      if (width >= 720) {
+        // Unfolding a project whose only conversation is working opens its working list with it.
+        await click(`${building} ${id('project-row')}`);
+        await page.waitFor(`document.querySelector('${building} ${id('project-row')}').getAttribute('aria-expanded') === 'false'`);
+        await click(`${building} ${id('project-row')}`);
+        await page.waitFor(`document.querySelector('${row(building, 't-building')}')`);
+        expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').getAttribute('aria-expanded')`)).toBe('true');
+        await click(`${building} ${id('project-working-toggle')}`);
+        await page.waitFor(`!document.querySelector('${row(building, 't-building')}')`);
+      }
 
       await click(`${first} ${id('project-working-toggle')}`);
       await page.waitFor(`document.querySelector('${row(first, 't-scheduler')}')`);
-      expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').disabled`)).toBe(true);
+      expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}') === null`)).toBe(true);
       await click(`${first} ${id('project-archived-toggle')}`);
       await page.waitFor(`document.querySelector('${first} ${id('project-archived')} ${id('done-thread')}[data-thread-id="t-parser"]')`);
       expect(await page.evaluate(`!document.querySelector('${first} ${id('project-done')} ${id('done-thread')}')`)).toBe(true);
@@ -168,8 +178,8 @@ for (const width of [1280, 390]) {
       } else await click(`${trace} ~ ${id('thread-done')}`);
       // Mark done lands in Done; a plain archive lands in Archived.
       const landed = width < 720 ? 'archived' : 'done';
-      await page.waitFor(`document.querySelector('${first} ${id(`project-${landed}-toggle`)}').dataset.count === '${width < 720 ? 2 : 1}'`);
-      // Done was empty, so its list opens only now.
+      await page.waitFor(`document.querySelector('${first} ${id(`project-${landed}-toggle`)}')?.dataset.count === '${width < 720 ? 2 : 1}'`);
+      // Done was empty, so its counter and its list appear only now.
       if (landed === 'done') await click(`${first} ${id('project-done-toggle')}`);
       await page.waitFor(`document.querySelector('${first} ${id(`project-${landed}`)} ${id('done-thread')}[data-thread-id="t-trace"]')`);
       expect(await page.evaluate(`!!document.querySelector('${row(project(remote, 'p-boite'), 't-trace')}')`)).toBe(true);
@@ -209,7 +219,7 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
       await click(`${building} ${id('project-working-toggle')}`);
       await page.waitFor(`document.querySelector('${row(building, 't-building')}')`);
-      expect(await page.evaluate(`document.querySelector('${building} ${id('project-done-toggle')}').disabled`)).toBe(true);
+      expect(await page.evaluate(`document.querySelector('${building} ${id('project-done-toggle')}') === null`)).toBe(true);
       // Queued and background work also keep the project out of the fold of idle projects.
       for (const [index, renderedState] of ['queued', 'monitoring', 'background', 'working'].entries()) {
         await page.evaluate(`(() => {
@@ -253,7 +263,7 @@ for (const width of [1280, 390]) {
       await page.waitFor(`globalThis.__boiteTest.workspace.machines[0].store.draft?.projectId === ${JSON.stringify(empty)}`);
       if (width < 720) await page.click(id('mobile-back'));
       await page.waitFor(`document.querySelector('${project(main, empty)}:not(.inactive)') && !document.querySelector('${idleRow(empty)}')`);
-      expect(await page.evaluate(`document.querySelector('${project(main, empty)} ${id('project-done-toggle')}').disabled && document.querySelector('${project(main, empty)} ${id('project-working-toggle')}').disabled`)).toBe(true);
+      expect(await page.evaluate(`document.querySelector('${project(main, empty)} ${id('project-done-toggle')}') === null && document.querySelector('${project(main, empty)} ${id('project-working-toggle')}') === null`)).toBe(true);
       if (width < 720) await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
       else await page.evaluate('globalThis.__boiteTest.workspace.active.setSidebarWidth(208)');
       await shot('narrow');

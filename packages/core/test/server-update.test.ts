@@ -1,15 +1,17 @@
 import { expect, test } from 'bun:test';
 import { generateKeyPairSync, createHash, randomBytes, sign } from 'node:crypto';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { zipSync } from 'fflate';
 import { Database } from 'bun:sqlite';
 import { downloadPayload, verifyPayload, unpackPayload } from '../src/server-update/release.ts';
-import { applyServerUpdate, clearStaleUpdates, recoverServerUpdate } from '../src/server-update/apply.ts';
+import { applyServerUpdate, clearStaleUpdates, recoverServerUpdate, UNSAVED_DATA, type UpdateDisk } from '../src/server-update/apply.ts';
 import { linuxServerUpdates, unitWord } from '../src/platform/linux-server-update.ts';
+import { openDataDir, restoreSnapshot, type FileLock, type RestoreMoves } from '../src/server-update/restore.ts';
 import type { ServerUpdatePlan, ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { echoThread, holdAccountTurns, startTestCore, waitFor } from './harness.ts';
+import { lockDataDir } from '../src/main.ts';
 
 /** A publisher key and a Minisign packet over `bytes`, in the shape Tauri publishes. */
 function publisher() {
@@ -105,6 +107,7 @@ async function updatingCore(prefix: string) {
     launch: async (_run, _executable, plan) => { state.planFile = plan; writeFileSync(join(dirname(plan), 'ready'), ''); },
     control: async () => undefined,
     mainPid: async () => process.pid,
+    lock: () => () => undefined,
   };
   const h = await startTestCore({ onShutdown: () => { state.stops++; }, serverUpdates: { platform, pollMs: 5,
     findOffer: async () => ({ version: '2.0.0-beta.2', publishedAt: '2026-10-01T00:00:00Z', url: 'https://example.test/signed.zip', signature: 'signed' }),
@@ -175,6 +178,7 @@ test('a failed update admission write leaves the server running and reports the 
     },
     control: async () => undefined,
     mainPid: async () => process.pid,
+    lock: () => () => undefined,
   };
   const h = await startTestCore({ onShutdown: () => { stops++; }, serverUpdates: { platform, pollMs: 5,
     findOffer: async () => ({ version: '2.0.0-beta.2', publishedAt: '2026-10-01T00:00:00Z', url: 'https://example.test/signed.zip', signature: 'signed' }),
@@ -191,6 +195,16 @@ test('a failed update admission write leaves the server running and reports the 
     expect((await client.call('core.updateStatus', {})).phase).toBe('error');
   } finally { await h.stop(); rmSync(root, { recursive: true, force: true }); }
 });
+
+/** An exclusive lock per path within this process, standing for the kernel's `flock` the Linux platform takes. */
+function memoryLock(): FileLock {
+  const held = new Set<string>();
+  return (file) => {
+    if (held.has(file)) throw new Error(`a server update holds ${file}`);
+    held.add(file);
+    return () => { held.delete(file); };
+  };
+}
 
 /** An installation, its data and a staged update, as the core leaves them for the worker. */
 async function updateFixture() {
@@ -217,8 +231,9 @@ async function updateFixture() {
   writeFileSync(file, JSON.stringify(plan));
   const state = { pid: 123 };
   const controls: string[] = [];
+  const lock = memoryLock();
   const platform: ServerUpdatePlatform = { inspect: async () => null, launch: async () => undefined,
-    mainPid: async () => state.pid,
+    mainPid: async () => state.pid, lock,
     control: async (_unit, action) => {
       controls.push(action); state.pid = action === 'start' ? 456 : 0;
       if (action === 'start' && readFileSync(join(install, 'boite-core'), 'utf8') === 'new executable') {
@@ -236,28 +251,76 @@ async function updateFixture() {
     expect(restored.query('SELECT * FROM saved').all()).toEqual([{ message: 'conversation' }]); restored.close();
     expect(readFileSync(join(data, 'checkpoints', 'thr_a', 'object'), 'utf8')).toBe('checkpoint bytes');
   };
-  return { root, install, data, id, operation, backup: join(root, `.boite-backup-${id}`), file, plan, state, controls, platform, result, expectPrevious,
+  return { root, install, data, id, operation, backup: join(root, `.boite-backup-${id}`), file, plan, state, controls, platform, lock, result, expectPrevious,
     stop: () => rmSync(root, { recursive: true, force: true }) };
 }
 
+const uuid = (c: string) => `${c.repeat(8)}-${c.repeat(4)}-${c.repeat(4)}-${c.repeat(4)}-${c.repeat(12)}`;
+
+const treeSize = (path: string): number => {
+  const info = lstatSync(path);
+  return info.isDirectory() ? readdirSync(path).reduce((sum, name) => sum + treeSize(join(path, name)), 0) : info.isFile() ? info.size : 0;
+};
+
+/** Bytes the update snapshot copies out of `data`. */
+const snapshotSize = (data: string) => readdirSync(data).filter(name => !UNSAVED_DATA.has(name)).reduce((sum, name) => sum + treeSize(join(data, name)), 0);
+
+/**
+ * Filesystems with `free[device]` bytes left. A path's device is the one
+ * `devices` names for its first segment under `root`, `root` otherwise; a copy
+ * past the room left fails as a full disk does, a rename across devices as the kernel refuses it.
+ */
+function lowDisk(root: string, free: Record<string, number>, devices: Record<string, string> = {}) {
+  const left = { ...free };
+  const device = (path: string) => devices[path.slice(root.length + 1).split(/[\\/]/)[0]!.replace(/\.(restore|failed)-.*$/, '')] ?? 'root';
+  const disk: Partial<UpdateDisk> = {
+    free: (path) => left[device(path)]!,
+    device: (path) => device(path) === 'root' ? 1 : 2,
+    copy: (source, target, filter) => {
+      cpSync(source, target, { recursive: true, filter });
+      const bytes = treeSize(target);
+      if (bytes > left[device(target)]!) {
+        rmSync(target, { recursive: true, force: true });
+        throw Object.assign(new Error(`ENOSPC: no space left on device, copy '${source}'`), { code: 'ENOSPC' });
+      }
+      left[device(target)]! -= bytes;
+    },
+    rename: (source, target) => {
+      if (device(source) !== device(target)) throw Object.assign(new Error(`EXDEV: cross-device link not permitted, rename '${source}'`), { code: 'EXDEV' });
+      renameSync(source, target);
+    },
+  };
+  return { disk, left };
+}
+
 const APPLY_CASES = {
-  installs: 'installs the complete bundle and checks the new process health',
-  fails: 'restores the previous binary, SQLite journal and pairing on a failed restart',
+  installs: 'installs the complete bundle, checks the new process health and prunes only its own backups',
+  fails: 'restores the previous binary, SQLite journal and pairing on a failed restart, on a disk left with only the spare room it checked',
   full: 'restarts the untouched server when the disk cannot hold the backup',
 } as const;
 for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper ${APPLY_CASES[mode]}`, async () => {
   const fails = mode === 'fails';
   const f = await updateFixture();
-  // Two older snapshots: a successful update keeps the newest two in all.
-  const older = ['bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc'].map((name, index) => {
-    const path = join(f.root, `.boite-backup-${name}`);
-    mkdirSync(path); utimesSync(path, new Date(2026, 0, 1 + index), new Date(2026, 0, 1 + index));
+  // Two older snapshots of this installation: a successful update keeps the newest two in all.
+  const backup = (c: string, installation: string | null, day: number, snapshot = true) => {
+    const path = join(f.root, `.boite-backup-${uuid(c)}`);
+    mkdirSync(path);
+    if (snapshot) mkdirSync(join(path, 'data'));
+    if (installation) writeFileSync(join(path, 'backup.json'), JSON.stringify({ installation, at: new Date(2026, 0, day).getTime() }));
+    utimesSync(path, new Date(2026, 0, day), new Date(2026, 0, day));
     return path;
-  });
+  };
+  const older = [backup('b', f.install, 1), backup('c', f.install, 2)];
+  // Newer backups another installation in the same folder made, and one the user made, are not this update's to prune;
+  // nor is the newest of this installation, whose snapshot a rollback used: it must not count as a kept one.
+  const foreign = [backup('d', join(f.root, 'other-install'), 3), backup('e', join(f.root, 'other-install'), 4), backup('f', null, 5), backup('9', f.install, 6, false)];
   writeFileSync(join(f.operation, 'admitted'), f.id);
+  const spare = 1024;
+  // A failed restart finds only the spare room the update checked: the snapshot took the rest.
+  const low = lowDisk(f.root, { root: snapshotSize(f.data) + spare });
   try {
     const run = applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35,
-      spareBytes: mode === 'full' ? Number.MAX_SAFE_INTEGER : 0,
+      spareBytes: mode === 'full' ? Number.MAX_SAFE_INTEGER : fails ? spare : 0, disk: fails ? low.disk : undefined,
       health: async () => fails ? null : { ok: true, version: '2.1.0', pid: 456 } });
     if (mode === 'full') {
       await expect(run).rejects.toThrow('Not enough disk space');
@@ -270,7 +333,9 @@ for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper $
       await expect(run).rejects.toThrow('healthy');
       f.expectPrevious();
       expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
-      expect(older.every(path => existsSync(path))).toBe(true);
+      // The snapshot moved back instead of being copied a second time.
+      expect(low.left.root).toBe(spare);
+      expect([...older, ...foreign].every(path => existsSync(path))).toBe(true);
       // The failure stays for diagnosis, marked as handled for the recovery and the next update.
       expect(existsSync(join(f.operation, 'finished'))).toBe(true);
     } else {
@@ -282,14 +347,338 @@ for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper $
       expect(existsSync(join(f.backup, 'data', 'checkpoints'))).toBe(false);
       expect(existsSync(join(f.backup, 'data.partial'))).toBe(false);
       expect(f.controls).toEqual(['stop', 'start']);
-      // The oldest snapshot goes; this one and the newest older one stay.
+      // The oldest snapshot of this installation goes; this one and the newest older one stay, and nobody else's is touched.
       expect(older.map(path => existsSync(path))).toEqual([false, true]);
+      expect(foreign.every(path => existsSync(path))).toBe(true);
+      expect(JSON.parse(readFileSync(join(f.backup, 'backup.json'), 'utf8')).installation).toBe(f.install);
     }
     // The recovery that follows any worker exit has nothing left to do.
     const controls = f.controls.length;
     await recoverServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35 });
     expect(f.controls.length).toBe(controls);
   } finally { f.stop(); }
+});
+
+test('with the data on another filesystem, an update reserves room there for the rollback copy, which a failed restart then uses', async () => {
+  const spare = 1024;
+  for (const roomy of [false, true]) {
+    const f = await updateFixture();
+    writeFileSync(join(f.operation, 'admitted'), f.id);
+    const need = snapshotSize(f.data) + spare;
+    const low = lowDisk(f.root, { root: need, data: roomy ? need : need - 1 }, { data: 'data' });
+    try {
+      const run = applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk: low.disk, health: async () => null });
+      if (!roomy) {
+        await expect(run).rejects.toThrow(`Not enough disk space beside ${f.data} for a rollback`);
+        expect(f.controls).toEqual(['stop', 'start']);
+        expect(existsSync(f.backup)).toBe(false);
+        continue;
+      }
+      await expect(run).rejects.toThrow('healthy');
+      f.expectPrevious();
+      expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
+      // A rename cannot cross filesystems: one copy each way, each within the room checked.
+      expect(low.left).toEqual({ root: spare, data: spare });
+      expect(existsSync(f.backup)).toBe(false);
+    } finally { f.stop(); }
+  }
+});
+
+test('a rollback whose data restore fails after the new version ran keeps the server stopped until the recovery puts the data back', async () => {
+  const f = await updateFixture();
+  writeFileSync(join(f.operation, 'admitted'), f.id);
+  const spare = 1024;
+  const need = snapshotSize(f.data) + spare;
+  const low = lowDisk(f.root, { root: need, data: need }, { data: 'data' });
+  // An I/O error on the copy back across filesystems.
+  const disk: Partial<UpdateDisk> = { ...low.disk, copy: (source, target, filter) => {
+    if (target.includes('.restore-')) throw Object.assign(new Error(`EIO: i/o error, copy '${source}'`), { code: 'EIO' });
+    low.disk.copy!(source, target, filter);
+  } };
+  try {
+    await expect(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk, health: async () => null })).rejects.toThrow('EIO');
+    // The previous core would open the data the rejected one migrated: nothing starts it.
+    expect(f.controls).toEqual(['stop', 'start', 'stop']);
+    expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('old executable');
+    expect(f.result().error).toContain('the previous data could not be put back yet (EIO');
+    expect(f.result().error).toContain('the server stays stopped');
+    expect(existsSync(join(f.backup, 'data', 'journal.db'))).toBe(true);
+    // Recorded for a start after a power cut, and not finished: the recovery that follows the worker's exit retries.
+    expect(JSON.parse(readFileSync(`${f.data}.rollback.json`, 'utf8')).id).toBe(f.id);
+    expect(existsSync(join(f.operation, 'finished'))).toBe(false);
+    await recoverServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, health: async () => null });
+    f.expectPrevious();
+    expect(f.controls.at(-1)).toBe('start');
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(false);
+    expect(existsSync(f.operation)).toBe(false);
+  } finally { f.stop(); }
+});
+
+test('a rollback whose only failure is deleting the used snapshot starts the previous version and finishes', async () => {
+  const f = await updateFixture();
+  writeFileSync(join(f.operation, 'admitted'), f.id);
+  const spare = 1024;
+  const need = snapshotSize(f.data) + spare;
+  const low = lowDisk(f.root, { root: need, data: need }, { data: 'data' });
+  const disk: Partial<UpdateDisk> = { ...low.disk, rename: (source, target) => {
+    if (target.endsWith('.consumed')) throw Object.assign(new Error(`EIO: i/o error, rename '${source}'`), { code: 'EIO' });
+    low.disk.rename!(source, target);
+  } };
+  try {
+    await expect(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk, health: async () => null })).rejects.toThrow('healthy');
+    f.expectPrevious();
+    expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
+    expect(existsSync(join(f.operation, 'finished'))).toBe(true);
+  } finally { f.stop(); }
+});
+
+/** A rollback a power cut stopped after the new version ran: its record, and the restored copy beside the data or the snapshot still in the backup. */
+function cutRollback(f: Awaited<ReturnType<typeof updateFixture>>, moved: boolean, id = f.id) {
+  const restored = `${f.data}.restore-${id}`;
+  const snapshot = join(f.root, `.boite-backup-${id}`, 'data');
+  cpSync(f.data, moved ? restored : snapshot, { recursive: true, filter: (source) => !source.includes('checkpoints') });
+  if (moved) renameSync(join(f.data, 'checkpoints'), join(restored, 'checkpoints'));
+  writeFileSync(`${f.data}.rollback.json`, JSON.stringify({ id, snapshot }));
+  const migrated = new Database(join(f.data, 'journal.db')); migrated.run('ALTER TABLE saved ADD COLUMN newer_schema INTEGER'); migrated.close();
+  writeFileSync(join(f.data, 'pairing.json'), 'new run changed pairing');
+  return { restored, snapshot };
+}
+
+const prepare = (dataDir: string) => mkdirSync(dataDir, { recursive: true });
+const open = (f: Awaited<ReturnType<typeof updateFixture>>, moves?: RestoreMoves) => openDataDir(f.data, prepare, f.lock, undefined, moves);
+
+test('an ordinary start creates its data directory and parents, and writes nothing beside it', () => {
+  const root = mkdtempSync(join(tmpdir(), 'boite-server-start-'));
+  try {
+    // As in the server image, where the data directory is a mount point in an unwritable `/`.
+    const data = join(root, 'not-created', 'data');
+    const untouchable: FileLock = (file) => { throw new Error(`took ${file}`); };
+    openDataDir(data, prepare, untouchable)();
+    expect(readdirSync(join(root, 'not-created'))).toEqual(['data']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+for (const moved of [true, false]) test(`a core starting after a power cut cut off a rollback ${moved ? 'swap' : 'copy'} puts the previous data back before opening it, once`, async () => {
+  const f = await updateFixture();
+  try {
+    const { snapshot } = cutRollback(f, moved);
+    open(f)();
+    f.expectPrevious();
+    expect(readFileSync(join(`${f.data}.failed-${f.id}`, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    expect(f.result().error).toContain('rollback was cut off');
+    expect(existsSync(snapshot)).toBe(false);
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(false);
+    // The next start finds nothing to do.
+    writeFileSync(join(f.data, 'pairing.json'), 'paired after the recovery');
+    open(f)();
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('paired after the recovery');
+  } finally { f.stop(); }
+});
+
+test('a starting core never moves the data under a live core or a restoring worker, and older restores never replay over a completed one', async () => {
+  const f = await updateFixture();
+  try {
+    cutRollback(f, true);
+    // An older interrupted rollback's copy, and one whose name is no valid id.
+    const older = uuid('1');
+    cpSync(`${f.data}.restore-${f.id}`, `${f.data}.restore-${older}`, { recursive: true });
+    writeFileSync(join(`${f.data}.restore-${older}`, 'pairing.json'), 'older restore pairing');
+    utimesSync(`${f.data}.restore-${older}`, new Date(2030, 0, 1), new Date(2030, 0, 1));
+    mkdirSync(`${f.data}.restore-junk`);
+    // A live core (a process that is not this one, wrote the lock after it started) holds the data.
+    writeFileSync(join(f.data, 'core.lock'), JSON.stringify({ pid: process.ppid, startedAt: Date.now() }));
+    const live = (dataDir: string) => lockDataDir(dataDir, () => 0, () => 0, () => null);
+    expect(() => openDataDir(f.data, prepare, f.lock, live)).toThrow('another core is already running');
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    rmSync(join(f.data, 'core.lock'));
+    // A worker restoring holds the maintenance lock.
+    const worker = f.lock(`${f.data}.maintenance.lock`);
+    expect(() => open(f)).toThrow('a server update holds');
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    worker();
+    // Both gone, the recorded restore goes in, not the one with the newest date, and every other is set aside.
+    open(f)();
+    f.expectPrevious();
+    expect(readdirSync(f.root).filter(name => name.startsWith('data.restore-'))).toEqual([]);
+    expect(readFileSync(join(`${f.data}.unused-restore-${older}`, 'pairing.json'), 'utf8')).toBe('older restore pairing');
+    writeFileSync(join(f.data, 'pairing.json'), 'paired after the recovery');
+    open(f)();
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('paired after the recovery');
+  } finally { f.stop(); }
+});
+
+test('a recorded restore that fails to go in keeps the server closed and its record, and the next start finishes it', async () => {
+  const f = await updateFixture();
+  try {
+    const { restored } = cutRollback(f, true);
+    // A rejected-data folder already there: the rename aside cannot take its name.
+    mkdirSync(`${f.data}.failed-${f.id}`); writeFileSync(join(`${f.data}.failed-${f.id}`, 'pairing.json'), 'earlier rejected pairing');
+    // Then an I/O error on the rename that puts the restored copy in.
+    const failing: RestoreMoves = { copy: () => { throw new Error('no copy here'); }, rename: (source, target) => {
+      if (source === restored) throw Object.assign(new Error(`EIO: i/o error, rename '${source}'`), { code: 'EIO' });
+      renameSync(source, target);
+    } };
+    for (let start = 0; start < 2; start++) expect(() => open(f, failing)).toThrow('the server stays stopped');
+    expect(JSON.parse(readFileSync(`${f.data}.rollback.json`, 'utf8')).id).toBe(f.id);
+    expect(existsSync(join(restored, 'journal.db'))).toBe(true);
+    open(f)();
+    f.expectPrevious();
+    // The data in place when the start came, kept beside it.
+    expect(readFileSync(join(`${f.data}.unused-data`, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(false);
+  } finally { f.stop(); }
+});
+
+test('a recorded restore that is no directory is set aside and redone from the snapshot, or the start is refused', async () => {
+  const f = await updateFixture();
+  const rejected = (id: string) => { mkdirSync(`${f.data}.failed-${id}`); writeFileSync(join(`${f.data}.failed-${id}`, 'pairing.json'), 'earlier rejected pairing'); };
+  try {
+    // A rejected-data folder already there too: setting the file aside must not read as a finished swap.
+    cutRollback(f, false);
+    rejected(f.id);
+    writeFileSync(`${f.data}.restore-${f.id}`, 'not a directory');
+    open(f)();
+    f.expectPrevious();
+    expect(readFileSync(`${f.data}.unused-restore-${f.id}`, 'utf8')).toBe('not a directory');
+    expect(readFileSync(join(`${f.data}.unused-data`, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    expect(readFileSync(join(`${f.data}.failed-${f.id}`, 'pairing.json'), 'utf8')).toBe('earlier rejected pairing');
+    // Without the snapshot, the data in place stays the rejected version's: nothing opens it.
+    const next = uuid('2');
+    rmSync(cutRollback(f, false, next).snapshot, { recursive: true, force: true });
+    rejected(next);
+    writeFileSync(`${f.data}.restore-${next}`, 'not a directory');
+    expect(() => open(f)).toThrow('is missing');
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    const journal = new Database(join(f.data, 'journal.db'));
+    expect(journal.query('SELECT * FROM saved').all()).toEqual([{ message: 'conversation', newer_schema: null }]); journal.close();
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(true);
+  } finally { f.stop(); }
+});
+
+test('a restored copy takes the data name only once its mark is flushed with it', async () => {
+  const f = await updateFixture();
+  try {
+    const { restored } = cutRollback(f, false);
+    const events: string[] = [];
+    const moves = (flush: () => void): RestoreMoves => ({
+      copy: () => { throw new Error('no copy here'); },
+      rename: (source, target) => { events.push(`rename ${basename(source)} ${basename(target)}`); renameSync(source, target); },
+      sync: (directory) => {
+        events.push(`sync ${basename(directory)} ${existsSync(join(directory, 'server-update-restored')) ? readFileSync(join(directory, 'server-update-restored'), 'utf8') : 'unmarked'}`);
+        flush();
+      },
+    });
+    // A flush the disk refuses stops the swap: the record and the restored copy wait for the next start.
+    expect(() => open(f, moves(() => { throw Object.assign(new Error('flush failed'), { code: 'EIO' }); }))).toThrow('flush failed');
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(true);
+    expect(existsSync(restored)).toBe(true);
+    events.length = 0;
+    open(f, moves(() => undefined))();
+    f.expectPrevious();
+    const flushed = events.indexOf(`sync data.restore-${f.id} ${f.id}`);
+    expect(flushed).toBe(0);
+    expect(events.indexOf(`rename data.restore-${f.id} data`)).toBeGreaterThan(flushed);
+  } finally { f.stop(); }
+});
+
+test('a core that starts while a rollback restores never holds a directory the rollback moves away', async () => {
+  const f = await updateFixture();
+  const { snapshot } = cutRollback(f, false);
+  // The record a rollback publishes comes after this start's first look.
+  rmSync(`${f.data}.rollback.json`);
+  const signal = (name: string) => join(f.root, `signal-${name}`);
+  const waitSync = (names: string[]) => {
+    const deadline = Date.now() + 10_000;
+    while (!names.some(name => existsSync(signal(name)))) {
+      if (Date.now() > deadline) throw new Error(`no ${names.join(' or ')} signal`);
+      Bun.sleepSync(10);
+    }
+  };
+  // A starting core in another process: it pauses once prepared, and again once it holds the data lock.
+  const script = `
+    const { existsSync, mkdirSync, writeFileSync } = await import('node:fs');
+    const { openDataDir } = await import(${JSON.stringify(join(import.meta.dir, '../src/server-update/restore.ts'))});
+    const { lockDataDir } = await import(${JSON.stringify(join(import.meta.dir, '../src/data-lock.ts'))});
+    const signal = (name) => ${JSON.stringify(f.root)} + '/signal-' + name;
+    const wait = (name) => { const deadline = Date.now() + 10000; while (!existsSync(signal(name)) && Date.now() < deadline) Bun.sleepSync(10); };
+    let result;
+    try {
+      openDataDir(${JSON.stringify(f.data)}, (dir) => { mkdirSync(dir, { recursive: true }); writeFileSync(signal('prepared'), ''); wait('go'); },
+        () => { throw new Error('took the maintenance lock'); },
+        (dir) => { const release = lockDataDir(dir); writeFileSync(signal('locked'), ''); wait('finished'); return release; });
+      result = 'admitted';
+    } catch (error) { result = error.message; }
+    writeFileSync(signal('result'), result);
+    setInterval(() => {}, 1000);`;
+  const child = Bun.spawn([process.execPath, '-e', script], { stdout: 'ignore', stderr: 'inherit', windowsHide: true });
+  try {
+    waitSync(['prepared']);
+    // The rollback's first move lets the start go on and waits until it has its data lock or has given up.
+    const moves: RestoreMoves = { copy: () => { throw new Error('no copy here'); }, rename: (source, target) => {
+      if (source === snapshot) { writeFileSync(signal('go'), ''); waitSync(['locked', 'result']); }
+      renameSync(source, target);
+    } };
+    restoreSnapshot(f.data, { id: f.id, snapshot }, moves, f.lock);
+    writeFileSync(signal('finished'), '');
+    waitSync(['result']);
+    expect(readFileSync(signal('result'), 'utf8')).toContain('another core is already running');
+    f.expectPrevious();
+    // Nobody holds the data now: the next core takes it.
+    lockDataDir(f.data)();
+  } finally { child.kill(); await child.exited; f.stop(); }
+});
+
+test('a start never opens a fresh data directory beside a restore whose record it cannot read', async () => {
+  const f = await updateFixture();
+  try {
+    // A swap cut between its two renames, its record left empty.
+    const { restored } = cutRollback(f, true);
+    renameSync(f.data, `${f.data}.failed-${f.id}`);
+    writeFileSync(`${f.data}.rollback.json`, '');
+    expect(() => open(f)).toThrow('cannot be read');
+    expect(existsSync(f.data)).toBe(false);
+    expect(existsSync(join(restored, 'journal.db'))).toBe(true);
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(true);
+  } finally { f.stop(); }
+});
+
+test('a rollback records its restore before the previous version can boot, so a power cut right after leaves it to the next start', async () => {
+  const f = await updateFixture();
+  writeFileSync(join(f.operation, 'admitted'), f.id);
+  // The power goes the moment the previous installation is back in place.
+  const disk: Partial<UpdateDisk> = { rename: (source, target) => {
+    renameSync(source, target);
+    if (target === f.install) throw new Error('power cut');
+  } };
+  try {
+    await expect(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: 0, disk, health: async () => null })).rejects.toThrow('power cut');
+    expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('old executable');
+    // At boot the service starts the previous version.
+    open(f)();
+    f.expectPrevious();
+    expect(f.result().error).toContain('rollback was cut off');
+  } finally { f.stop(); }
+});
+
+test.skipIf(process.platform !== 'linux')('the Linux maintenance lock has one holder at a time, and a killed holder leaves it free', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'boite-server-lock-'));
+  const file = join(root, 'data.maintenance.lock');
+  const { linuxFileLock } = await import('../src/platform/linux-server-update.ts');
+  try {
+    const release = linuxFileLock(file);
+    expect(() => linuxFileLock(file)).toThrow('a server update holds');
+    release();
+    linuxFileLock(file)();
+    const script = `const { linuxFileLock } = await import(${JSON.stringify(join(import.meta.dir, '../src/platform/linux-server-update.ts'))}); linuxFileLock(${JSON.stringify(file)}); console.log('held'); setInterval(() => {}, 1000);`;
+    const child = Bun.spawn([process.execPath, '-e', script], { stdout: 'pipe', stderr: 'inherit' });
+    try {
+      const reader = child.stdout.getReader();
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('held');
+      expect(() => linuxFileLock(file)).toThrow('a server update holds');
+    } finally { child.kill('SIGKILL'); await child.exited; }
+    linuxFileLock(file)();
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 /**
@@ -302,7 +691,9 @@ const KILLED_AT = {
   health: 'while the new version was starting, and it never became healthy',
   // A version the worker rejected stays rejected, even if it answers health once restarted.
   rejected: 'between stopping the rejected version and moving it aside',
-  restore: 'during its own rollback, once the restored data had been copied',
+  restore: 'during its own rollback, once the snapshot had moved back and taken the live checkpoints',
+  // Across filesystems the snapshot is copied back, then deleted, which a kill can cut short.
+  cleanup: 'during its own rollback across filesystems, while it deleted the snapshot it had copied back',
 } as const;
 for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`the recovery of a worker killed ${KILLED_AT[point]} restores the previous version and starts it`, async () => {
   const f = await updateFixture();
@@ -312,6 +703,7 @@ for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`
     writeFileSync(link, 'recovery executable');
     f.state.pid = 0;
     mkdirSync(f.backup);
+    writeFileSync(join(f.backup, 'backup.json'), JSON.stringify({ installation: f.install, at: Date.now() }));
     if (point === 'copy') {
       mkdirSync(join(f.backup, 'data.partial'));
       writeFileSync(join(f.backup, 'data.partial', 'pairing.json'), 'test pairing survives');
@@ -322,17 +714,21 @@ for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`
         renameSync(join(f.operation, 'stage'), f.install);
         await f.platform.control(f.plan.installation.service, 'start');
       }
-      if (point === 'rejected' || point === 'restore') {
+      if (point === 'rejected' || point === 'restore' || point === 'cleanup') {
         writeFileSync(join(f.operation, 'rolling-back'), '');
         await f.platform.control(f.plan.installation.service, 'stop');
       }
-      if (point === 'restore') {
+      if (point === 'restore' || point === 'cleanup') {
         renameSync(f.install, join(f.operation, 'failed-installation'));
         renameSync(join(f.backup, 'installation'), f.install);
         const restored = `${f.data}.restore-${f.id}`;
-        cpSync(join(f.backup, 'data'), restored, { recursive: true });
+        writeFileSync(`${f.data}.rollback.json`, JSON.stringify({ id: f.id, snapshot: join(f.backup, 'data') }));
+        if (point === 'restore') renameSync(join(f.backup, 'data'), restored);
+        else {
+          cpSync(join(f.backup, 'data'), restored, { recursive: true });
+          rmSync(join(f.backup, 'data', 'journal.db'));
+        }
         renameSync(join(f.data, 'checkpoints'), join(restored, 'checkpoints'));
-        renameSync(f.data, `${f.data}.failed-${f.id}`);
       }
     }
     f.controls.length = 0;
@@ -342,8 +738,9 @@ for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`
     expect(f.controls.at(-1)).toBe('start');
     expect(f.state.pid).toBe(456);
     expect(f.result().error).toBe('Server update failed; the previous version was restored. The update worker ended before it finished (oom-kill, killed, KILL)');
-    // A snapshot cut short goes; a complete one stays with the failure.
-    expect(existsSync(f.backup)).toBe(point !== 'copy');
+    // A snapshot cut short goes, and so does one that became the data again; one never used stays with the failure.
+    expect(existsSync(f.backup)).toBe(point === 'switch');
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(false);
     expect(existsSync(f.operation)).toBe(false);
     expect(existsSync(link)).toBe(false);
   } finally { f.stop(); }
@@ -378,22 +775,40 @@ test('the recovery of a worker that never had the core stop closes admission and
   } finally { f.stop(); }
 });
 
-test('the next update clears what a worker cut off with its recovery left, and keeps a handled failure', () => {
+test('the next update clears what a worker of this installation cut off with its recovery left, keeps a handled failure and never touches another installation', () => {
   const root = mkdtempSync(join(tmpdir(), 'boite-server-stale-'));
-  const uuid = (c: string) => `${c.repeat(8)}-${c.repeat(4)}-${c.repeat(4)}-${c.repeat(4)}-${c.repeat(12)}`;
+  const install = join(root, 'install');
+  const other = join(root, 'install-dev');
+  const operation = (c: string, record: 'owner' | 'plan' | null, installation = install) => {
+    const path = join(root, `.boite-update-${uuid(c)}`);
+    mkdirSync(join(path, 'stage'), { recursive: true });
+    if (record === 'owner') writeFileSync(join(path, 'owner.json'), JSON.stringify({ installation }));
+    if (record === 'plan') writeFileSync(join(path, 'plan.json'), JSON.stringify({ installation: { directory: installation } }));
+    return path;
+  };
+  const backup = (c: string, part: 'data' | 'data.partial' | 'data.consumed', installation: string | null) => {
+    const path = join(root, `.boite-backup-${uuid(c)}`);
+    mkdirSync(join(path, part), { recursive: true });
+    if (installation) writeFileSync(join(path, 'backup.json'), JSON.stringify({ installation, at: 1 }));
+  };
   try {
-    const unfinished = join(root, `.boite-update-${uuid('a')}`);
-    const handled = join(root, `.boite-update-${uuid('b')}`);
-    mkdirSync(join(unfinished, 'stage'), { recursive: true });
-    mkdirSync(handled); writeFileSync(join(handled, 'finished'), '');
+    mkdirSync(install);
+    // This installation's worker cut off mid-copy, and a failure it handled.
+    operation('a', 'owner'); backup('a', 'data.partial', install);
     writeFileSync(join(root, `.boite-recover-${uuid('a')}`), '');
-    const partial = join(root, `.boite-backup-${uuid('a')}`);
-    const complete = join(root, `.boite-backup-${uuid('b')}`);
-    mkdirSync(join(partial, 'data.partial'), { recursive: true });
-    mkdirSync(join(complete, 'data'), { recursive: true });
-    mkdirSync(join(root, 'install'));
-    clearStaleUpdates(root);
-    expect(readdirSync(root).sort()).toEqual([`.boite-backup-${uuid('b')}`, `.boite-update-${uuid('b')}`, 'install']);
+    writeFileSync(join(operation('b', 'owner'), 'finished'), ''); backup('b', 'data', install);
+    // An older release's operation records only its plan, and its snapshot no marker.
+    operation('c', 'plan'); backup('c', 'data.partial', null);
+    // Another installation in the same folder is updating right now, and an operation names nobody yet.
+    operation('d', 'owner', other); backup('d', 'data.partial', other);
+    writeFileSync(join(root, `.boite-recover-${uuid('d')}`), '');
+    operation('e', null);
+    // A rollback put this snapshot back and was killed while it deleted the used copy.
+    writeFileSync(join(operation('f', 'owner'), 'finished'), ''); backup('f', 'data.consumed', install);
+    writeFileSync(join(root, `.boite-backup-${uuid('f')}`, 'data.consumed', 'journal.db'), 'used journal');
+    clearStaleUpdates(root, install);
+    expect(readdirSync(root).sort()).toEqual([`.boite-backup-${uuid('b')}`, `.boite-backup-${uuid('d')}`, `.boite-recover-${uuid('d')}`,
+      `.boite-update-${uuid('b')}`, `.boite-update-${uuid('d')}`, `.boite-update-${uuid('e')}`, `.boite-update-${uuid('f')}`, 'install']);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
