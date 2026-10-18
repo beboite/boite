@@ -10,6 +10,14 @@ import type { ThreadStore } from '../threads.ts';
  * moment fires. Mutable so a test can shorten them.
  */
 export const AUTO_COMPACT = { settleMs: 2_000, cacheMarginMs: 60_000 };
+/**
+ * The `cacheKeepalive` setting's timings (`threads/cache-keepalive.ts`).
+ * `marginMs`: how long before the prompt cache lapses a ping goes out, wide
+ * enough for a ping that waits for a slot or for its first token. `retryMs`:
+ * how soon a ping that found something else about to run looks again.
+ * Mutable so a test can shorten them.
+ */
+export const CACHE_KEEPALIVE = { marginMs: 120_000, retryMs: 5_000 };
 /** What the opening message of an automatic compaction is labelled. */
 export const AUTO_COMPACT_LABEL = 'Automatic compaction';
 
