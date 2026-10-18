@@ -61,10 +61,13 @@ struct Slot {
     /// waited on exited during that work. Callers follow it rather than read
     /// the file themselves.
     announced: Option<Instant>,
-    /// How many times a caller went to sleep on this slot: a test moves the
-    /// sighting only once its caller is asleep.
+    /// How many times a caller went to sleep on this slot, and how many times
+    /// it woke to a later deadline than the one it slept to: a test moves the
+    /// sighting once its caller sleeps and serves once it read the move.
     #[cfg(test)]
     sleeps: u32,
+    #[cfg(test)]
+    extended: u32,
 }
 
 /// Everything a start of the core depends on, decided once when the app is
@@ -310,13 +313,20 @@ fn wait_for_endpoint(slot: &(Mutex<Slot>, Condvar), patience: Duration) -> Resul
         .lock()
         .map_err(|_| "the core state is poisoned".to_string())?;
 
+    #[cfg(test)]
+    let mut slept_to: Option<Instant> = None;
     while !guard.done {
-        let wait = endpoint_deadline(begun, guard.announced, patience).saturating_duration_since(Instant::now());
+        let deadline = endpoint_deadline(begun, guard.announced, patience);
+        let wait = deadline.saturating_duration_since(Instant::now());
         if wait.is_zero() {
             return Err("no core answered within the start timeout".to_string());
         }
         #[cfg(test)]
         {
+            if slept_to.is_some_and(|earlier| deadline > earlier) {
+                guard.extended += 1;
+            }
+            slept_to = Some(deadline);
             guard.sleeps += 1;
         }
         let (next, _) = ready

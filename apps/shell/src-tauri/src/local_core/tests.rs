@@ -348,11 +348,11 @@ fn a_caller_waits_a_whole_patience_past_the_last_time_the_resolution_saw_the_cor
     assert_eq!(endpoint_deadline(begun, Some(begun + later), patience), begun + later + patience);
 
     // A sighting moved while the caller sleeps wakes nobody: the caller reads
-    // it at its deadline. With a patience of 2 s, the caller asleep at `w`
-    // would give up by `w + 2 s`; the sighting moved at `w` to `w + 3 s`
-    // gives it until `w + 5 s`, and the core serves at `w + 3.5 s`. A caller
-    // that read the sighting once gave up first. A runner too loaded to keep
-    // that schedule gets another try, and none in three fails.
+    // it when it wakes, at its own deadline 2 s in at the latest, and sleeps
+    // on to the later one. The core serves only once the caller did, so a
+    // caller that read the sighting once gives up first. A runner too loaded
+    // to move the sighting before that deadline gets another try, and none
+    // in three fails.
     let mut exercised = false;
     for _ in 0..3 {
         let slot = std::sync::Arc::new((Mutex::new(Slot::default()), Condvar::new()));
@@ -365,31 +365,30 @@ fn a_caller_waits_a_whole_patience_past_the_last_time_the_resolution_saw_the_cor
             })
         };
         let entered = waiting.recv().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let asleep = loop {
-            let mut guard = slot.0.lock().unwrap();
-            if guard.sleeps > 0 {
-                let now = Instant::now();
-                guard.announced = Some(now + Duration::from_secs(3));
-                break now;
-            }
-            drop(guard);
-            assert!(Instant::now() < deadline, "the caller never went to sleep");
+        let until = |deadline: Instant, what: &str, done: &dyn Fn(&Slot) -> bool| loop {
+            if done(&slot.0.lock().unwrap()) || caller.is_finished() { return; }
+            assert!(Instant::now() < deadline, "{what}");
             std::thread::sleep(Duration::from_millis(5));
         };
-        std::thread::sleep((asleep + Duration::from_millis(3_500)).saturating_duration_since(Instant::now()));
+        until(Instant::now() + Duration::from_secs(10), "the caller never went to sleep", &|slot| slot.sleeps > 0);
+        let moved = {
+            let mut guard = slot.0.lock().unwrap();
+            guard.announced = Some(Instant::now() + Duration::from_secs(10));
+            Instant::now()
+        };
+        if moved < entered + Duration::from_secs(2) {
+            until(Instant::now() + Duration::from_secs(10), "the caller never woke to its first deadline", &|slot| slot.extended > 0);
+        }
+        let read_the_move = slot.0.lock().unwrap().extended > 0;
         let endpoint = CoreEndpoint { url: "http://127.0.0.1:1".to_string(), token: "t".to_string() };
         publish(&slot, Ok((endpoint, None, health::CoreStart::default())));
-        let served = Instant::now();
         let outcome = caller.join().unwrap().and_then(|outcome| outcome);
-        let sleeps = slot.0.lock().unwrap().sleeps;
-        if asleep < entered + Duration::from_secs(2) && served < asleep + Duration::from_secs(5) {
-            assert!(outcome.is_ok(), "{:?}", outcome.err());
-            assert!(sleeps >= 2, "the caller never slept again past its own patience");
+        if moved < entered + Duration::from_secs(2) {
+            assert!(read_the_move && outcome.is_ok(), "the caller gave up without reading the moved sighting: {:?}", outcome.err());
             exercised = true;
             break;
         }
-        eprintln!("schedule missed: asleep {:?} after the caller began, served {:?} after", asleep - entered, served - asleep);
+        eprintln!("schedule missed: the sighting moved {:?} after the caller began", moved - entered);
     }
     assert!(exercised, "three runs missed the schedule");
     // Nothing seen: the caller gives up at its patience.
