@@ -56,8 +56,10 @@ function readTail(path: string): string {
     const start = Math.max(0, size - SHELL_LOG_TAIL_BYTES);
     const buffer = Buffer.alloc(size - start);
     const read = readSync(fd, buffer, 0, buffer.length, start);
-    const text = buffer.subarray(0, read).toString('utf8');
-    return start === 0 ? text : text.slice(text.indexOf('\n') + 1);
+    // Cut on the newline byte before decoding, so a window that starts inside
+    // a character drops its broken record with the rest of that line.
+    const from = start === 0 ? 0 : buffer.subarray(0, read).indexOf(0x0a) + 1;
+    return buffer.subarray(from, read).toString('utf8');
   } finally {
     closeSync(fd);
   }

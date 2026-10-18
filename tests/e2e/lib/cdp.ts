@@ -711,14 +711,18 @@ function openSocket(target: TargetInfo): Promise<WebSocket> {
   if (url === undefined) throw new Error('the page target has no debugger url');
   return new Promise<WebSocket>((resolve, reject) => {
     const socket = new WebSocket(url);
-    const timer = setTimeout(() => reject(new Error('the devtools socket did not open')), CONNECT_TIMEOUT_MS);
+    // A socket that never opened is closed with its refusal: nothing else
+    // holds it, and a late open would keep its connection for the whole run.
+    const fail = (message: string) => {
+      clearTimeout(timer);
+      socket.close();
+      reject(new Error(message));
+    };
+    const timer = setTimeout(() => fail('the devtools socket did not open'), CONNECT_TIMEOUT_MS);
     socket.addEventListener('open', () => {
       clearTimeout(timer);
       resolve(socket);
-    });
-    socket.addEventListener('error', () => {
-      clearTimeout(timer);
-      reject(new Error('the devtools socket failed to open'));
-    });
+    }, { once: true });
+    socket.addEventListener('error', () => fail('the devtools socket failed to open'), { once: true });
   });
 }
