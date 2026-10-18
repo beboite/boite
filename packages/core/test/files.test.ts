@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { FileIndex, ignoredNames, rankFiles, scorePath, walkFiles } from '../src/files.ts';
+import { FileIndex, ignoredNames, locateFile, rankFiles, scorePath, walkFiles } from '../src/files.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -115,5 +115,32 @@ describe('the file index', () => {
       failure = (error as Error).message;
     }
     expect(failure).toBe('unknown project prj_nope');
+  });
+
+  test('a link named by the tail of its path finds the shallowest files that end with it, ignored trees included', async () => {
+    const root = join(harness.dataDir, 'tree');
+    plantTree(root);
+    mkdirSync(join(root, '.local'), { recursive: true });
+    writeFileSync(join(root, '.local', 'core.md'), '# rules');
+    mkdirSync(join(root, '.boite', 'worktrees', 'task'), { recursive: true });
+    writeFileSync(join(root, '.boite', 'worktrees', 'task', 'core.md'), '');
+    expect(await locateFile(root, 'core.md')).toEqual(['.local/core.md']);
+    expect(await locateFile(root, 'README.md')).toEqual(['README.md']);
+    expect(await locateFile(root, 'lib/store.ts')).toEqual(['src/lib/store.ts']);
+    expect(await locateFile(root, 'app.js')).toEqual(['dist/app.js']);
+    writeFileSync(join(root, 'src', 'core.md'), '');
+    expect(await locateFile(root, 'core.md')).toEqual(['.local/core.md', 'src/core.md']);
+    expect(await locateFile(root, 'missing.md')).toEqual([]);
+    expect(await locateFile(root, '../core.md')).toEqual([]);
+  });
+
+  test('a single match found before the cap is no answer, since its twin may lie past it', async () => {
+    const root = join(harness.dataDir, 'twins');
+    for (const side of ['a', 'b']) {
+      mkdirSync(join(root, side), { recursive: true });
+      writeFileSync(join(root, side, 'core.md'), '');
+    }
+    expect(await locateFile(root, 'core.md', 3)).toEqual([]);
+    expect(await locateFile(root, 'core.md', 4)).toEqual(['a/core.md', 'b/core.md']);
   });
 });

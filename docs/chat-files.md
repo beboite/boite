@@ -53,6 +53,10 @@ Markdown links, bare URLs, absolute paths, `file:///` links and inline-code file
 paths. Use angle brackets for spaces, such as `<reports/review one.pdf>`, and
 `:line` or `#Lline` for source locations. Files resolve through the message's
 owning thread and machine; preview paths stay inside its working directory.
+A relative path that is not there as written is looked up by its tail
+(`files.locate`, owner only): `core.md` opens `.local/core.md`, the shallowest
+match wins, ignored folders count but `.git`, `.boite` and `node_modules` do
+not, and two matches at the same depth are reported instead of guessed.
 The local desktop's explicit open action follows the rules in
 [Open chat links](experiments.md#open-chat-links).
 
