@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # The merge queue tests each group like a pull request (docs/ci.md#merge-queue).
-  merge_group:
   workflow_dispatch:
   workflow_call:
     secrets:
@@ -81,9 +79,9 @@ jobs:
           bun-version-file: package.json
       - id: filter
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GH_TOKEN: ${{ github.token }}
-          FORCE_CHECKS: ${{ inputs.force || github.ref_type == 'tag' || (github.event_name != 'push' && github.event_name != 'pull_request' && github.event_name != 'merge_group') }}
+          FORCE_CHECKS: ${{ inputs.force || github.ref_type == 'tag' || (github.event_name != 'push' && github.event_name != 'pull_request') }}
         run: bun scripts/ci/changes.ts
       - run: bun install --frozen-lockfile
       - name: Audit frozen dependencies

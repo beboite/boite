@@ -13,19 +13,7 @@ export function titleProblem(title: string): string | undefined {
   return undefined;
 }
 
-/** The squash title a merge group commit carries, without the ` (#123)` GitHub appends. */
-export function groupTitle(message: string): string {
-  return message.split('\n')[0]!.replace(/ \(#\d+\)$/, '');
-}
-
 if (import.meta.main) {
-  // A merge group only reports: its pull request could not enter the queue without this check.
-  const group = process.env.GROUP_COMMIT;
-  if (group) {
-    const problem = titleProblem(groupTitle(group));
-    console.log(problem ? `::warning title=Merge group title::${problem}` : `Merge group title passed: ${groupTitle(group)}`);
-    process.exit(0);
-  }
   const title = process.env.PR_TITLE ?? '';
   const problem = titleProblem(title);
   if (problem) {

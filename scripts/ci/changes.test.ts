@@ -79,8 +79,6 @@ test('runtime, build inputs and unknown files require the complete suite', () =>
 
 test('pull requests, main pushes and forced runs pick their mode', () => {
   expect(ciMode('pull_request', false)).toBe('pr');
-  // A merge group compares with its main base and runs what its pull requests ran.
-  expect(ciMode('merge_group', false)).toBe('pr');
   expect(ciMode('push', false)).toBe('warm');
   expect(ciMode('push', true)).toBe('full');
   expect(ciMode('workflow_dispatch', false)).toBe('full');

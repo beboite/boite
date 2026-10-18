@@ -3,14 +3,12 @@ name: pr title
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
-  # The queue needs this required check on its group too.
-  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pr-title-${{ github.event.pull_request.number || github.ref }}
+  group: pr-title-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -31,6 +29,4 @@ jobs:
           bun-version-file: package.json
       - env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-          # A queued pull request passed this check on its title; the group only reports it.
-          GROUP_COMMIT: ${{ github.event.merge_group.head_commit.message }}
         run: bun scripts/ci/pr-title.ts
