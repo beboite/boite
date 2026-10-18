@@ -114,7 +114,7 @@ jobs:
           MODE: ${{ matrix.mode }}
         run: |
           if ($env:MODE -eq 'alone') {
-            $files = @('tests/e2e/coordination-bridge-live.test.ts'); $runs = [int]$env:RUNS * 3; $together = @()
+            $files = @('tests/e2e/coordination-bridge-live.test.ts', 'tests/e2e/machines.test.ts'); $runs = [int]$env:RUNS * 2; $together = @()
           } else {
             $files = @(bun scripts/ci/e2e-shards.ts 3 3)
             if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw 'No E2E files for shard 3' }

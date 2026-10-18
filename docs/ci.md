@@ -116,7 +116,8 @@ The `flake-loop` workflow measures a flaky test before and after its fix. It
 runs on a pull request that carries the `flake-loop` label, or by hand: the
 quarantined browser files four at a time on macOS arm64, macOS Intel and
 Linux, `cli.test.ts` four copies at a time on every OS, and
-`coordination-bridge-live.test.ts` alone and within E2E shard 3 on Windows.
+`coordination-bridge-live.test.ts` and `machines.test.ts` alone and shard 3
+whole on Windows.
 `scripts/ci/flake-loop.ts` counts each test's passes and failures over the
 runs, prints the error of each failure and writes a table to the job summary.
 `BOITE_CDP_TRACE=1` makes a core DevTools timeout say how many bytes of the

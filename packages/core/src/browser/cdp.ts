@@ -166,7 +166,7 @@ export class Cdp {
       .then(() => `answered in ${Math.round(performance.now() - started)} ms`, (error: Error) => error.message.split(';')[0]);
     const after = this.#unread?.();
     const bytes = unread === undefined || unread === null ? 'unread bytes unknown' : `${unread} bytes unread before the probe, ${after} after`;
-    return `; trace: ${bytes}, load ${loadavg().map(n => n.toFixed(1)).join(' ')}, Browser.getVersion ${probe}`;
+    return `; trace: ${bytes}, load ${loadavg().map(n => n.toFixed(1)).join(' ')}, Browser.getVersion ${probe}; busiest: ${busiest()}`;
   }
 
   #receive(text: string): void {
@@ -193,6 +193,16 @@ export class Cdp {
     for (const waiting of this.#waiting.values()) { clearTimeout(waiting.timer); waiting.reject(error); }
     this.#waiting.clear();
   }
+}
+
+/** The ten processes using the most CPU, with their state and memory, and how many Chromium processes run. */
+function busiest(): string {
+  if (process.platform === 'win32') return 'not read on Windows';
+  const ps = Bun.spawnSync(['ps', '-A', '-o', 'pid=,pcpu=,rss=,state=,comm='], { stdout: 'pipe', stderr: 'ignore' });
+  const rows = ps.stdout.toString().trim().split('\n').map(line => line.trim().split(/\s+/))
+    .map(([pid, cpu, rss, state, ...command]) => ({ pid, cpu: Number(cpu), rss: Math.round(Number(rss) / 1024), state, name: command.join(' ').split('/').pop() ?? '' }));
+  const chromium = rows.filter(row => /chrom/i.test(row.name)).length;
+  return `${chromium} Chromium processes; ` + rows.sort((a, b) => b.cpu - a.cpu).slice(0, 10).map(row => `${row.name} ${row.pid} ${row.cpu}% ${row.rss} MB ${row.state}`).join(', ');
 }
 
 /**
