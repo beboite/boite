@@ -6,6 +6,9 @@ import { writeExperiments } from '../lib/experiments';
 import { resetFeatures, setFeature } from '../lib/features';
 import { installExternalLinks } from '../lib/links';
 
+/** `files.locate` for a file that is there as written. */
+const asWritten = async (_threadId: string, path: string) => ({ ok: true, value: [path] });
+
 let running: Record<string, unknown> | null = null;
 
 afterEach(() => {
@@ -21,7 +24,7 @@ test('clicking a local executable opens the original file without downloading or
   setFeature('chat-artifacts', true);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
-  const store = { owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }], readFile: vi.fn() } as unknown as Store;
+  const store = { owner: true, locateFile: asWritten, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }], readFile: vi.fn() } as unknown as Store;
   running = mount(Prose, { target: document.body, props: { text: '[Launch game](target/release/game.exe)', store, threadId: 'game' } });
   flushSync();
   expect(invoke).not.toHaveBeenCalled();
@@ -36,7 +39,7 @@ test('a native open failure is shown and never falls back to downloading', async
   const invoke = vi.fn(async () => { throw 'game.exe: file does not exist'; });
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const reportError = vi.fn();
-  const store = { owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }], reportError } as unknown as Store;
+  const store = { owner: true, locateFile: asWritten, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }], reportError } as unknown as Store;
   running = mount(Prose, { target: document.body, props: { text: '[Launch game](game.exe)', store, threadId: 'game' } });
   flushSync();
   query<HTMLAnchorElement>('a[data-file-path]').click();
@@ -49,7 +52,7 @@ test('a local file can still open when its preview cannot be read', async () => 
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const store = {
-    owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }],
+    owner: true, locateFile: asWritten, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }],
     readFile: vi.fn(async () => ({ ok: false, error: 'Preview could not be read' })),
   } as unknown as Store;
   running = mount(Prose, { target: document.body, props: { text: '[Manual](manual.pdf)', store, threadId: 'game' } });
@@ -74,7 +77,7 @@ test('dragging across a game path never launches it, and the next click still do
   setFeature('chat-artifacts', true);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
-  const store = { owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }] } as unknown as Store;
+  const store = { owner: true, locateFile: asWritten, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }] } as unknown as Store;
   running = mount(Prose, { target: document.body, props: { text: '[Launch game](build/game.exe)', store, threadId: 'game' } });
   flushSync();
   const link = query<HTMLAnchorElement>('a[data-file-path]');
@@ -122,7 +125,7 @@ test('the direct-link experiment opens a desktop shortcut and text outside the c
   setFeature('chat-artifacts', false);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
-  const store = { owner: true, localCore: true, threads: [{ id: 'local', cwd: 'E:/project' }], readFile: vi.fn() } as unknown as Store;
+  const store = { owner: true, locateFile: asWritten, localCore: true, threads: [{ id: 'local', cwd: 'E:/project' }], readFile: vi.fn() } as unknown as Store;
   running = mount(Prose, { target: document.body, props: {
     text: '[Test](</C:/Users/Chris/Desktop/Boite - Test medias.lnk>) [Notes](file:///E:/reports/test%20result.txt)', store, threadId: 'local',
   } });
@@ -145,7 +148,7 @@ test('a remote machine file is never opened by the desktop experiment', async ()
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const readFile = vi.fn(async () => ({ ok: false, error: 'Remote file unavailable' }));
-  const store = { owner: true, localCore: false, threads: [{ id: 'remote', cwd: 'C:/project' }], readFile } as unknown as Store;
+  const store = { owner: true, locateFile: asWritten, localCore: false, threads: [{ id: 'remote', cwd: 'C:/project' }], readFile } as unknown as Store;
   running = mount(Prose, { target: document.body, props: { text: '[Notes](report.txt)', store, threadId: 'remote' } });
   flushSync(); query<HTMLAnchorElement>('a[data-file-path]').click();
   await vi.waitFor(() => expect(readFile).toHaveBeenCalledWith('remote', 'report.txt'));
@@ -213,4 +216,21 @@ test('plain text preserves its rendered content and gets no copy button', async 
 
   expect(query('[data-testid=text-part]').textContent).toBe('Plain inline text only.');
   expect(document.querySelector('[data-testid=code-copy]')).toBeNull();
+});
+
+test('a file named by its tail opens where the core finds it, and two candidates are reported', async () => {
+  writeExperiments(['open-chat-links']);
+  const invoke = vi.fn(async () => {});
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const reportError = vi.fn();
+  const locateFile = vi.fn(async (_threadId: string, path: string) => ({ ok: true, value: path === 'core.md' ? ['.local/core.md'] : ['a/index.ts', 'b/index.ts'] }));
+  const store = { owner: true, locateFile, localCore: true, threads: [{ id: 'brain', cwd: 'D:/brain' }], reportError } as unknown as Store;
+  running = mount(Prose, { target: document.body, props: { text: 'Trim `core.md` and `index.ts`.', store, threadId: 'brain' } });
+  flushSync();
+  const links = document.querySelectorAll<HTMLAnchorElement>('a[data-file-path]');
+  links[0]!.click();
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('open_chat_file', { directory: 'D:/brain', path: '.local/core.md' }, undefined));
+  await tick(); links[1]!.click();
+  await vi.waitFor(() => expect(reportError).toHaveBeenCalledWith(new Error('index.ts names several files: a/index.ts, b/index.ts'), 'minor'));
+  expect(invoke).toHaveBeenCalledTimes(1);
 });
