@@ -181,12 +181,21 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 490,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,861,500 |
+| UI entry chunk | 491,500 |
+| UI files, excluding `.br` and `.gz` copies | 4,868,400 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,470,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,473,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, notification kinds merged with `origin/main` at `3a19eb57`
+measure 490,500 entry bytes, 4,867,341 UI bytes and 4,472,034 core JavaScript
+bytes with `measure()` after fresh `bun run build:ui` and `bun run build:core`
+on Linux, against 490,436, 4,860,909 and 4,470,119 that main measured on
+Windows: the four kind switches, the push home and the worker-shown page
+notices add 64 entry and 6,432 UI bytes, the kinds in the push store 1,915
+core bytes. The limits rise to 491,500, 4,868,400 and 4,473,000; the core
+entry limit stays.
 
 On 2026-10-18, the journal compaction (schema 37: zstd values, per-thread
 command lines, the paced background passes in `journal/retention.ts` and
