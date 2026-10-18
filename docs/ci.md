@@ -164,12 +164,18 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 485,800 |
+| UI entry chunk | 486,500 |
 | UI files, excluding `.br` and `.gz` copies | 4,727,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,413,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the lean boot merged with `origin/main` at `57d41e70`, which
+refreshes the UI dependencies, measures 485,472 entry bytes, 4,724,812 UI
+bytes and 4,408,525 core JavaScript bytes after fresh `bun run build:ui` and
+`bun run build:core` on Windows. The entry limit rises to 486,500,
+a kilobyte above it; the other limits stay.
 
 On 2026-10-18, the lean boot on `origin/main` at `b611c01f` measures 484,682
 entry bytes and 4,723,056 UI bytes after a fresh `bun run build:ui` on
