@@ -578,9 +578,12 @@ export const fr: Translation = {
     computer: 'Ordinateur connecté',
     pairAgain: 'Rajouter',
     settingsDevice: 'Ce téléphone',
-    settingsPhone: 'Application et notifications',
+    settingsPhone: 'Notifications',
+    settingsPrivacy: 'Confidentialité',
+    settingsMachine: 'Machine',
     settingsBack: 'Retour aux réglages',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activité', project: 'Choisir un projet',
+    waitingElsewhere: '{count} en attente de vous',
     search: 'Trouver une conversation', noActivity: "Aucun agent n'attend votre réponse.", noThreads: 'Aucune conversation ne correspond.'
   },
   machines: {
@@ -1280,6 +1283,7 @@ export const fr: Translation = {
     trace: 'Trace',
     panel: 'Panneau',
     panelHint: 'Navigateur, fichiers et outils de cette conversation',
+    panelMenu: 'Navigateur, fichiers et outils',
     terminalHint: 'Terminal dans le dossier de cette conversation',
     cwd: 'Répertoire de travail',
     model: 'Modèle',

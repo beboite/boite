@@ -440,7 +440,10 @@
     .chips { flex: 1; flex-wrap: nowrap; }
     .chips :global(.picker) { min-width: 0; max-width: 100%; }
     .chips :global(.picker > .trigger) { max-width: 100%; height: var(--touch-target); padding: 0 6px; border: none; background: transparent; font-weight: 500; color: var(--color-muted-foreground); }
-    .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
+    /* The model's name alone, and whole words of it: one line high, a name too long for the row
+       wraps its last words onto a second line nobody sees, never half of one. */
+    .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; height: 1lh; padding-block: 0; margin-block: 0; text-box: normal; overflow: hidden; white-space: normal; overflow-wrap: normal; }
+    .chips :global(.picker > .trigger .account-name) { display: none; }
     .chips :global(.picker > .trigger.connect) { padding: 0 12px; border-radius: var(--radius-md); background: var(--color-accent-soft); color: var(--color-accent); }
     .send, .stop { margin-left: 2px; }
   }

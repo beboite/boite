@@ -59,25 +59,11 @@ test('the real task manager reads owned processes on desktop and a paired phone'
     const { url } = await owner.call('pairing.grant', {});
     phone = await BrowserPage.launch({ url, windowSize: { width: 390, height: 844 } });
     await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`);
-    for (const from of ['mobile-conversations', 'mobile-activity']) {
-      await mobileAction(phone, from);
-      await phone.waitFor(`document.querySelector('[data-testid=mobile-list]')`);
-      await mobileAction(phone, 'mobile-settings');
-      await phone.click('[data-testid=settings-tab-task-manager]');
-      await phone.waitFor(`document.querySelector('${selector}')`);
-      expect(await phone.evaluate(`document.querySelector('${selector} .actions') === null`)).toBe(true);
-      expect(await phone.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true);
-      await phone.evaluate('document.fonts.ready');
-      await phone.screenshot(join(import.meta.dir, '.artifacts', 'task-manager-phone.png'));
-      await phone.click(`${selector} .title`);
-      await phone.waitFor(`document.querySelector('.app.phone-chat') && !document.querySelector('[data-testid=mobile-list]') && !document.querySelector('[data-testid=task-manager]') && document.querySelector('[data-testid=composer-input]')`);
-      expect(await phone.evaluate(`document.querySelector('[data-testid=thread-title]')?.textContent`)).toBe(history.title);
-    }
+    // The task manager is the desktop's: a paired phone's settings list keeps to its essentials.
     await mobileAction(phone, 'mobile-settings');
-    await phone.click('[data-testid=settings-tab-task-manager]');
-    await phone.waitFor(`document.querySelector('${selector}')`);
-    await phone.click('[data-testid=mobile-settings-back]');
-    await phone.waitFor(`document.querySelector('[data-testid=mobile-settings-home]') && !document.querySelector('[data-testid=task-manager]')`);
+    await phone.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
+    expect(await phone.evaluate(`document.querySelector('[data-testid=settings-tab-task-manager]') === null`)).toBe(true);
+    await phone.screenshot(join(import.meta.dir, '.artifacts', 'task-manager-phone.png'));
 
     await desktop.click(`${selector} .actions button`);
     await desktop.click(`${selector} .actions button.danger`);

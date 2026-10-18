@@ -16,13 +16,13 @@ async function capture(name: string) {
   await page.screenshot(join(process.env.BOITE_UPDATE_CAPTURES ?? join(import.meta.dir, '.artifacts'), `app-update-${name}.png`));
 }
 async function machines() {
-  if (await page.evaluate('innerWidth <= 720')) {
-    await mobileAction(page, 'mobile-settings');
-  } else {
-    await page.click(id('nav-settings'));
-  }
-  await page.waitFor(`document.querySelector('${id('settings-tab-machines')}')`);
-  await page.click(id('settings-tab-machines'));
+  // A phone's settings open on the machine itself, which leads to Machines.
+  const phone = await page.evaluate<boolean>('innerWidth <= 720');
+  if (phone) await mobileAction(page, 'mobile-settings');
+  else await page.click(id('nav-settings'));
+  const entry = phone ? 'mobile-settings-connection' : 'settings-tab-machines';
+  await page.waitFor(`document.querySelector('${id(entry)}')`);
+  await page.click(id(entry));
   await page.waitFor(`document.querySelector('${id('machines-page')}')`);
 }
 async function updates(phase: string, nightly = false) {

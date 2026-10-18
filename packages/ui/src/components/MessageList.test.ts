@@ -1320,3 +1320,34 @@ test('a place read inside a long message is saved by message with its row, and o
   // The store asks the core for the page around a message: the anchor names it, never a row.
   expect(live.readingPositions.get('t-heavy')?.anchor).toEqual({ id: giant.id, offset: -30, row: first });
 });
+
+test('a phone keeps the buttons under the last prompt and answer, shows another prompt\'s on a tap and offers no fork', async ({ ready }) => {
+  window.localStorage.clear();
+  vi.stubGlobal('matchMedia', (media: string) => Object.assign(new EventTarget(), { media, matches: media.includes('max-width: 720px'), onchange: null, addListener() {}, removeListener() {} }));
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  const { store: live } = await ready({ delayMs: 0, long: true });
+  await live.open('t-long');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+
+  const prompts = () => [...document.querySelectorAll<HTMLElement>('article.message.user')];
+  const last = prompts().at(-1)!, earlier = prompts().at(-2)!;
+  expect(last.hasAttribute('data-latest')).toBe(true);
+  expect(earlier.hasAttribute('data-latest')).toBe(false);
+  expect(document.querySelector('article.message.assistant[data-latest] [data-testid=message-actions]')).not.toBeNull();
+  expect(document.querySelector('[data-testid=message-fork]')).toBeNull();
+
+  const bubble = () => earlier.querySelector<HTMLElement>('.bubble')!;
+  bubble().click(); flushSync();
+  expect(earlier.hasAttribute('data-revealed')).toBe(true);
+  // Its own buttons keep the row; a second tap on the bubble, or one anywhere else, puts it away.
+  earlier.querySelector<HTMLButtonElement>('[data-testid=message-copy]')!.click(); flushSync();
+  expect(earlier.hasAttribute('data-revealed')).toBe(true);
+  bubble().click(); flushSync();
+  expect(earlier.hasAttribute('data-revealed')).toBe(false);
+  bubble().click(); flushSync();
+  document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); flushSync();
+  expect(earlier.hasAttribute('data-revealed')).toBe(false);
+});

@@ -581,9 +581,12 @@ export const strings = {
     computer: 'Connected computer',
     pairAgain: 'Add again',
     settingsDevice: 'This phone',
-    settingsPhone: 'App & notifications',
+    settingsPhone: 'Notifications',
+    settingsPrivacy: 'Privacy',
+    settingsMachine: 'Machine',
     settingsBack: 'Back to settings',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activity', project: 'Choose project',
+    waitingElsewhere: '{count} waiting for you',
     search: 'Find a conversation', noActivity: 'No agents need your attention.', noThreads: 'No matching conversations.'
   },
   machines: {
@@ -1335,6 +1338,7 @@ export const strings = {
     /** The header's button: it shows or hides the panel, whatever surface is in it. */
     panel: 'Panel',
     panelHint: 'Browser, files and tools beside this conversation',
+    panelMenu: 'Browser, files and tools',
     terminalHint: "Terminal in this thread's folder",
     cwd: 'Working directory',
     model: 'Model',

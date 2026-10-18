@@ -29,7 +29,7 @@ afterAll(async () => {
 }, 30_000);
 
 test('a phone with no key is added again from Machines with a pasted link and sees its threads', async () => {
-  await page.waitFor(`document.querySelector('${id('mobile-menu')}')`);
+  await page.waitFor(`document.querySelector('${id('mobile-header')}')`);
   await mobileAction(page, 'mobile-settings');
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
   await page.click(id('settings-tab-machines'));
@@ -64,7 +64,7 @@ test('a phone with no key is added again from Machines with a pasted link and se
 
   // The device key is this phone's own: a reload needs no link.
   await page.reload();
-  await page.waitFor(`document.querySelector('${id('mobile-menu')}')`);
+  await page.waitFor(`document.querySelector('${id('mobile-header')}')`);
   await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`[...document.querySelectorAll('${id('mobile-list')} .thread')].some(row => row.textContent.includes('Seen once paired'))`);
 }, 60_000);

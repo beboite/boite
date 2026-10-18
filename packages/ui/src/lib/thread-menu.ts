@@ -17,6 +17,11 @@ interface ThreadMenuOptions {
   /** Omitted where pull requests have no manual refresh action. */
   prLoading?: boolean;
   tools?: MenuItem[];
+  /**
+   * A phone's menu: pin, rename, the view's tools, archive and delete. A new
+   * title by the agent, a move, the path and the pull request stay on the desktop.
+   */
+  phone?: boolean;
 }
 
 /** The same action groups in row, title and phone menus, with Archive available on every thread that can be kept. */
@@ -25,6 +30,21 @@ export function threadMenuItems(store: Store, thread: ThreadSummary, options: Th
   // An incognito conversation lives on its own screen only: nothing pins, files
   // or moves it, and deleting it is what leaving does anyway.
   const kept = !thread.incognito;
+  if (options.phone) {
+    const items: MenuItem[] = [
+      ...(kept ? [{ id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin, glyph: thread.pinned ? PinOff : Pin }] : []),
+      { id: 'rename', label: strings.common.rename, glyph: PencilLine },
+      ...(options.tools ?? []),
+      ...entrustItems(store, thread),
+      ...(kept ? [
+        separator('sep-archive'),
+        ...(options.showDone ? [{ id: 'done', label: strings.sidebar.markDone, glyph: Check, disabled: !canMarkDone(store, thread) }] : []),
+        { id: 'archive', label: strings.sidebar.archive, glyph: Archive }
+      ] : [])
+    ];
+    if (canDeleteThread(thread)) items.push(separator('sep-delete'), { id: 'delete', label: strings.common.delete, glyph: Trash2, danger: true });
+    return items;
+  }
   const items: MenuItem[] = [
     ...(options.open === undefined ? [] : [{ id: 'open', label: strings.common.open, glyph: MessageSquare, disabled: options.open }]),
     ...(kept ? [

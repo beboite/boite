@@ -2096,6 +2096,9 @@ input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; 
   .settings .page > .group-heading { margin-top: 28px; }
   .settings .page .row { flex-wrap: wrap; }
   .settings .page .switch-row { flex-wrap: wrap; gap: 12px; }
+  /* Buttons under the last prompt and answer, or the message tapped (lib/message-reveal.svelte.ts). A settled prompt's ticks go with them; a pending one keeps its own. */
+  .message[data-reveal]:not([data-latest]):not([data-revealed]) .message-actions,
+  .message[data-reveal]:not([data-latest]):not([data-revealed]) .receipts.settled { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

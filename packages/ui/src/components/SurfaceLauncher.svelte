@@ -106,4 +106,9 @@
     top: 8px;
     right: 8px;
   }
+
+  /* A phone has no keyboard to press the letter with. */
+  @media (max-width: 720px) {
+    .card .kbd { display: none; }
+  }
 </style>

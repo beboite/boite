@@ -1,3 +1,4 @@
+import { newMobileThread } from './lib/mobile.ts';
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -81,7 +82,7 @@ async function capture(page: BrowserPage, name: string): Promise<void> {
 }
 
 async function newDraft(page: BrowserPage, phone: boolean): Promise<void> {
-  if (phone) { await page.click('[data-testid=mobile-menu]'); await page.click('[data-testid=mobile-menu-new]'); }
+  if (phone) await newMobileThread(page);
   else await page.click('[data-testid=new-thread]');
   await page.waitFor('document.querySelector("[data-testid=draft-empty]") && document.querySelector("[data-testid=composer-input]")?.value === ""');
 }

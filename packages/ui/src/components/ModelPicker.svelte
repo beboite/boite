@@ -182,14 +182,13 @@
   });
 
   // The effort has a chip of its own in the composer, so this one names the
-  // model and the account only: one place says the level.
+  // model and the account only: one place says the level. A phone drops the account.
   let label = $derived.by(() => {
     if (!choice || !provider) return strings.composer.noProvider;
     const model = store.modelOf(choice);
-    const name = model && isNamedModel(model) ? model.name : strings.composer.picker;
-    const siblings = store.accountsOf(provider.id);
-    return siblings.length > 1 && account ? `${name} · ${account.label}` : name;
+    return model && isNamedModel(model) ? model.name : strings.composer.picker;
   });
+  let accountLabel = $derived(provider && account && store.accountsOf(provider.id).length > 1 ? account.label : '');
 
   let currentModels = $derived(shownModels.filter((m) => !m.legacy));
   let legacyModels = $derived(shownModels.filter((m) => m.legacy));
@@ -331,7 +330,7 @@
     {:else}
       <Sparkles size={14} strokeWidth={1.75} />
     {/if}
-    <span class="label ui-label">{label}</span>
+    <span class="label ui-label"><span class="model-name">{label}</span>{#if accountLabel}<span class="account-name"> · {accountLabel}</span>{/if}</span>
     <ChevronDown size={12} strokeWidth={2} />
   </button>
   {/if}

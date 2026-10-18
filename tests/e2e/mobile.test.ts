@@ -2,15 +2,15 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startUi } from './lib/ui.ts';
+import { mobileAction, newMobileThread as newThreadFromList, openMobilePanel } from './lib/mobile.ts';
 
 let server: { close(): Promise<void> };
 let page: BrowserPage;
 async function navigateMobile(destination: string) {
-  await page.click('[data-testid=mobile-menu]');
-  await page.click('[data-testid=' + destination + ']');
+  await mobileAction(page, destination);
 }
 async function newMobileThread() {
-  await navigateMobile('mobile-menu-new');
+  await newThreadFromList(page);
 }
 async function capture(name: string) {
   const settled = await page.evaluate<{ timedOut: boolean; fonts: FontFaceSetLoadStatus; animations: Array<{ playState: AnimationPlayState; currentTime: number | null; endTime: number }> }>(`(async () => {
@@ -39,22 +39,23 @@ beforeAll(async () => {
   server = await startUi(port);
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&machines=1`, experiments: ['resident-agents'] });
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.waitFor(`document.querySelector('[data-testid=mobile-menu]')`);
+  await page.waitFor(`document.querySelector('[data-testid=mobile-header]')`);
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
-test('phone settings expose owner protection and keep paired devices out of remote administration', async () => {
+test('phone settings hold this phone and the machine, the same for a paired device, with no remote administration', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
   await navigateMobile('mobile-settings');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
-  expect(await page.evaluate(`document.querySelector('[data-testid=settings-tab-resources]') !== null && document.querySelector('[data-testid=settings-tab-keyboard]') === null`)).toBe(true);
-  await page.click('[data-testid=settings-tab-resources]');
-  await page.waitFor(`document.querySelector('[data-testid=setting-memory-protection]')`);
-  await page.click('[data-testid=mobile-settings-back]');
+  const rows = `[...document.querySelectorAll('[data-testid=mobile-settings-home] .row')].map(row => row.dataset.testid)`;
+  const expected = ['mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy', 'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-archived'];
+  expect(await page.evaluate<string[]>(rows)).toEqual(expected);
+  expect(await page.evaluate(`document.querySelector('[data-testid=settings-tab-resources]') === null && document.querySelector('[data-testid=settings-tab-keyboard]') === null`)).toBe(true);
   await page.evaluate(`(() => { const store=__boiteTest.workspace.active; store.client.becomes('session'); store.principal='session'; })()`);
-  await page.waitFor(`document.querySelector('[data-testid=settings-tab-resources]') === null`);
+  await page.waitFor(`__boiteTest.workspace.active.owner === false`);
+  expect(await page.evaluate<string[]>(rows)).toEqual(expected);
   await page.evaluate(`(() => { const store=__boiteTest.workspace.active; store.client.becomes('owner'); store.principal='owner'; })()`);
-  await page.waitFor(`document.querySelector('[data-testid=settings-tab-resources]')`);
+  await page.waitFor(`__boiteTest.workspace.active.owner === true`);
   await capture('phone-settings-home-dark.png');
   await page.click('[data-testid=mobile-settings-phone]');
   await page.waitFor(`document.querySelector('[data-testid=phone-settings]')`);
@@ -62,7 +63,7 @@ test('phone settings expose owner protection and keep paired devices out of remo
   await capture('phone-settings-notifications.png');
   await page.evaluate('history.back()');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
-  await page.click('[data-testid=settings-tab-machines]');
+  await page.click('[data-testid=mobile-settings-connection]');
   await page.waitFor(`document.querySelector('[data-testid=group-card]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid=browser-origins]') === null`)).toBe(true);
   await capture('phone-settings-machines.png');
@@ -97,7 +98,7 @@ test('phone navigates conversations, activity and settings without a sidebar', a
   await capture('mobile-chat.png');
   expect(await page.evaluate(`document.querySelector('[data-testid=mobile-header]').getBoundingClientRect().bottom <= document.querySelector('[data-testid=timeline]').getBoundingClientRect().top`)).toBe(true);
   await navigateMobile('mobile-activity');
-  await page.waitFor(`document.querySelector('[data-testid=mobile-list] h1')?.textContent === 'Activity'`);
+  await page.waitFor(`document.querySelector('[data-testid=mobile-header] strong')?.textContent === 'Activity' && !document.querySelector('[data-testid=mobile-list] h1')`);
   await capture('mobile-activity.png');
   await navigateMobile('mobile-settings');
   await page.waitFor(`document.querySelector('[data-testid=settings]')`);
@@ -278,20 +279,20 @@ test('the panel sheet, Agents and Settings keep clear of a notch and the status 
   await page.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 47, bottom: 34, left: 0, right: 0 } });
   try {
     const top = (selector: string) => page.evaluate<number>(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().top`);
-    await page.click('[data-testid=panel-toggle]');
+    await openMobilePanel(page);
     await page.waitFor(`document.querySelector('[data-testid=panel-close]')`);
     expect(await top('[data-testid=right-panel] header')).toBeGreaterThanOrEqual(47);
     await capture('mobile-safe-panel.png');
     await page.click('[data-testid=panel-close]');
     await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
     await navigateMobile('mobile-agents');
-    // The agents list opens on the Threads and Agents switch, the row nearest the notch.
+    // The agents list opens on its tools row, the row nearest the notch: the menu holds Threads and Agents.
     await page.waitFor(`document.querySelector('.agents-page .agents-rail .rail-head')`);
     expect(await top('.agents-page .agents-rail .rail-head')).toBeGreaterThanOrEqual(47);
     await capture('mobile-safe-agents.png');
     await navigateMobile('mobile-settings');
-    await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home] h1')`);
-    expect(await top('[data-testid=mobile-settings-home] h1')).toBeGreaterThanOrEqual(47);
+    await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home] h2')`);
+    expect(await top('[data-testid=mobile-settings-home] h2')).toBeGreaterThanOrEqual(47);
     await capture('mobile-safe-settings.png');
   } finally {
     await page.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
@@ -348,17 +349,17 @@ test('a phone pins and archives a thread without a right-click, from the header 
   const id = await page.evaluate<string>('__boiteTest.workspace.active.openThread.id');
   const trigger = await page.evaluate<{ width: number; height: number }>(`(() => { const r = document.querySelector('[data-testid=thread-menu-trigger]').getBoundingClientRect(); return { width: r.width, height: r.height }; })()`);
   expect(trigger.height).toBeGreaterThanOrEqual(44);
-  // The single header shares its width with Back, browser and navigation controls.
+  // The header is Back and this one menu: no panel, terminal or navigation button beside the title.
   expect(trigger.width).toBeGreaterThanOrEqual(100);
-  expect(await page.evaluate(`['terminal-toggle'].map(id => document.querySelector('[data-testid=' + id + ']')?.offsetParent ?? null)`)).toEqual([null]);
+  expect(await page.evaluate(`['terminal-toggle', 'panel-toggle'].map(id => document.querySelector('[data-testid=' + id + ']')?.offsetParent ?? null)`)).toEqual([null, null]);
+  expect(await page.evaluate(`document.querySelector('[data-testid=mobile-header] [data-testid=mobile-menu]')`)).toBeNull();
   await page.click('[data-testid=thread-menu-trigger]');
   await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
-  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['pin', 'archive', 'rename', 'retitle', 'move', 'copy', 'find', 'agents', 'coordination', 'terminal', 'delete']);
-  // The entry reads the same with or without subagents, as on the desktop title menu.
-  expect(await page.evaluate(`document.querySelector('[data-testid=thread-menu-trigger-menu] [data-value=agents]').textContent.trim()`)).toBe('Subagents');
+  // Subagents shows only on a thread that has some; the desktop's other rows stay there.
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['panel', 'pin', 'rename', 'find', 'archive', 'delete']);
   await capture('mobile-thread-menu.png');
-  await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
-  await page.waitFor(`document.querySelector('[data-testid=right-panel]') && __boiteTest.workspace.active.panel.active?.kind === 'agents'`);
+  await page.click('[data-testid=thread-menu-trigger-menu] [data-value=panel]');
+  await page.waitFor(`document.querySelector('[data-testid=right-panel]')`);
   await page.click('[data-testid=panel-close]');
   await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
   await page.click('[data-testid=thread-menu-trigger]');
@@ -410,7 +411,7 @@ test('a phone header shows the label of a draft and a truncated French title at 
     const title = await page.evaluate<{ visible: number; full: number }>(`(() => { const t = document.querySelector('[data-testid=thread-menu-trigger] .title-text'); return { visible: t.getBoundingClientRect().width, full: t.scrollWidth }; })()`);
     await capture('mobile-title-fr-360.png');
     expect(title.visible).toBeGreaterThanOrEqual(80);
-    expect(await page.evaluate(`document.querySelector('[data-testid=thread-menu-trigger]').getBoundingClientRect().right <= document.querySelector('[data-testid=mobile-menu]').getBoundingClientRect().left`)).toBe(true);
+    expect(await page.evaluate(`document.querySelector('[data-testid=thread-menu-trigger]').getBoundingClientRect().right <= innerWidth`)).toBe(true);
   } finally {
     await page.evaluate(`localStorage.setItem('boite.locale', 'en')`);
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -433,24 +434,22 @@ test('Back returns from a conversation to the list and closes the context popup,
   await page.click('[data-testid=context-trigger]');
   await page.waitFor(`document.querySelector('[data-testid=context-popup]')`);
   await back('[data-testid=context-popup]');
-  await page.click('[data-testid=panel-toggle]');
-  await page.waitFor(`document.querySelector('[data-testid=right-panel]')`);
+  await openMobilePanel(page);
   await back('[data-testid=right-panel]');
+  await page.evaluate('history.back()');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-list]')`);
+  expect(await page.evaluate<string>('location.origin')).toBe(origin);
   // The project sheet pops its own entry while the picker pushes one.
-  await page.click('[data-testid=mobile-menu]');
-  await page.click('[data-testid=mobile-menu-project]');
+  await page.click('[data-testid=mobile-project]');
   await page.click('[data-value="add-project"]');
   await page.waitFor(`document.querySelector('[data-testid=project-picker]')`);
   await Bun.sleep(400);
   await back('[data-testid=project-picker]');
-  expect(await page.evaluate(`!!document.querySelector('[data-testid=chat]') && !document.querySelector('[data-testid=mobile-list]')`)).toBe(true);
-  await page.evaluate('history.back()');
-  await page.waitFor(`document.querySelector('[data-testid=mobile-list]')`);
-  expect(await page.evaluate<string>('location.origin')).toBe(origin);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid=mobile-list]')`)).toBe(true);
   // Closing the panel by its button pops its own entry: the next Back still reaches the list.
   await page.click('[data-testid=mobile-list] .thread');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
-  await page.click('[data-testid=panel-toggle]');
+  await openMobilePanel(page);
   await page.click('[data-testid=panel-close]');
   await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
   await Bun.sleep(300);
@@ -491,7 +490,7 @@ test('every phone control on the chat, the panel, the list and Appearance takes 
     expect(await page.evaluate(`matchMedia('(pointer: coarse)').matches`)).toBe(true);
     await capture('mobile-message-actions-touch.png');
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
-    await page.click('[data-testid=panel-toggle]');
+    await openMobilePanel(page);
     await page.waitFor(`document.querySelector('[data-testid=panel-launcher]')`);
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
     await page.click('[data-testid=launch-changes]');

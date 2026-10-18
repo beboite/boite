@@ -1,12 +1,10 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { Activity, ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, Minimize2, Monitor, Palette, Mic, ShieldCheck, Stethoscope } from '@lucide/svelte';
+  import { ArchiveRestore, ArrowLeft, Bell, ChevronRight, Coins, Gauge, Lock, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
-  import ConversationSwitches from './ConversationSwitches.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
-  import { openTour } from '../lib/onboarding.svelte';
   import AppearancePage from './AppearancePage.svelte';
   import ExperimentsPage from './ExperimentsPage.svelte';
   import DiagnosticsPage from './DiagnosticsPage.svelte';
@@ -28,6 +26,8 @@
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   let phone = $state(false);
+  /** The analytics switches, on a screen of their own beside the notifications. */
+  let privacy = $state(false);
   /**
    * The phone has no General page, so the archive, which lives there on the
    * desktop, gets a page of its own; a jump to the desktop's card (the palette,
@@ -39,9 +39,10 @@
   /** The one card of the desktop's Advanced page that is about conversations, not about the machine. */
   let compactPage = $derived(store.owner && store.settingsTab === 'advanced' && store.settingsSection?.id === 'auto-compact');
   let page = $derived((store.owner && (store.settingsTab === 'brain' || store.settingsTab === 'resources' || store.settingsTab === 'diagnostics')) || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'task-manager' || store.settingsTab === 'experiments'
-    ? store.settingsTab : phone ? 'phone' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : compactPage ? 'auto-compact' : 'home');
+    ? store.settingsTab : phone ? 'phone' : privacy ? 'privacy' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : compactPage ? 'auto-compact' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
+    : page === 'privacy' ? strings.mobile.settingsPrivacy
     : page === 'archived' ? strings.settings.archived.heading
     : page === 'worktrees' ? strings.settings.worktrees.heading
     : page === 'auto-compact' ? strings.settings.autoCompact
@@ -53,6 +54,7 @@
     : page === 'experiments' ? strings.settings.tabs.experiments : strings.settings.tabs.machines);
   /** The page's own title and its info mark step aside for the bar, so the bar carries the mark. */
   let info = $derived(page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}`
+    : page === 'privacy' ? strings.telemetry.description
     : page === 'experiments' ? strings.settings.experiments.intro : '');
   let detail = $derived(page !== 'home');
   $effect(() => { if (detail) return mobileOverlay(back); });
@@ -60,7 +62,9 @@
   $effect(() => {
     if (page === 'phone' && store.connection === 'ready') void store.loadSessions();
   });
-  function back() { phone = false; archived = false; store.showSettings(); }
+  function back() { phone = false; privacy = false; archived = false; store.showSettings(); }
+  /** Usage and Limits are one screen on a phone, two tabs of it. */
+  let quota = $derived(page === 'usage' || page === 'limits');
 
   // A settings card in a conversation opened this page to show one card: scroll to it and light it up.
   $effect(() => {
@@ -74,12 +78,8 @@
 <div class="mobile-settings settings" data-testid="settings">
   {#key page}
   {#if page === 'home'}
+    <!-- The header already says Settings: the screen opens on its two groups, what this phone keeps and what the machine runs. -->
     <div class="home" data-testid="mobile-settings-home">
-      <div class="brand"><img src="./icons/icon.svg" alt="" width="32" height="32" /><div><strong>Boite</strong><span>{strings.mobile.settingsDevice}</span></div></div>
-      <h1>{strings.settings.heading}</h1>
-      <button class="ghost machine-link" data-testid="mobile-settings-connection" onclick={() => store.showSettings('machines')}>
-        <Monitor size={20} /><span><strong>{machine?.label ?? strings.machines.heading}</strong><small class:ready={store.connection === 'ready'}>{store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[store.connection]}</small></span><ChevronRight size={18} />
-      </button>
       <section aria-labelledby="phone-preferences">
         <h2 id="phone-preferences">{strings.mobile.settingsDevice}</h2>
         <div class="rows">
@@ -89,54 +89,27 @@
           <button class="ghost row" data-testid="settings-tab-appearance" onclick={() => store.showSettings('appearance')}>
             <Palette size={20} /><span class="ui-label">{strings.settings.tabs.appearance}</span><ChevronRight size={18} />
           </button>
-          <button class="ghost row" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>
-            <Compass size={20} /><span class="ui-label">{strings.onboarding.replay}</span><ChevronRight size={18} />
+          <button class="ghost row" data-testid="mobile-settings-privacy" onclick={() => { privacy = true; }}>
+            <Lock size={20} /><span class="ui-label">{strings.mobile.settingsPrivacy}</span><ChevronRight size={18} />
           </button>
-          <!-- Experiments are kept per device, so the phone turns its own on. -->
-          <button class="ghost row" data-testid="settings-tab-experiments" onclick={() => store.showSettings('experiments')}>
-            <FlaskConical size={20} /><span class="ui-label">{strings.settings.tabs.experiments}</span><ChevronRight size={18} />
-          </button>
-          <ConversationSwitches mobile />
         </div>
       </section>
-      <section aria-labelledby="remote-machines">
-        <h2 id="remote-machines">{strings.machines.heading}</h2>
+      <section aria-labelledby="remote-machine">
+        <h2 id="remote-machine">{strings.mobile.settingsMachine}</h2>
         <div class="rows">
-          <button class="ghost row" data-testid="settings-tab-machines" onclick={() => store.showSettings('machines')}>
-            <Monitor size={20} /><span class="ui-label">{strings.settings.tabs.machines}</span><ChevronRight size={18} />
-          </button>
-          {#if store.owner}<button class="ghost row" data-testid="settings-tab-brain" onclick={() => store.showSettings('brain')}><Brain size={20} /><span class="ui-label">{strings.brain.heading}</span><ChevronRight size={18} /></button>{/if}
-          <button class="ghost row" data-testid="settings-tab-voice" onclick={() => store.showSettings('voice')}>
-            <Mic size={20} /><span class="ui-label">{strings.speech.heading}</span><ChevronRight size={18} />
+          <!-- The machine itself leads to the group's machines and their updates. -->
+          <button class="ghost row machine-link" data-testid="mobile-settings-connection" onclick={() => store.showSettings('machines')}>
+            <Monitor size={20} /><span><strong class="ui-label">{machine?.label ?? strings.machines.heading}</strong><small class:ready={store.connection === 'ready'}>{store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[store.connection]}</small></span><ChevronRight size={18} />
           </button>
           <button class="ghost row" data-testid="settings-tab-usage" onclick={() => store.showSettings('usage')}>
             <Coins size={20} /><span class="ui-label">{strings.usage.heading}</span><ChevronRight size={18} />
           </button>
-          <button class="ghost row" data-testid="settings-tab-limits" onclick={() => store.showSettings('limits')}>
-            <Gauge size={20} /><span class="ui-label">{strings.usage.limits}</span><ChevronRight size={18} />
+          <button class="ghost row" data-testid="settings-tab-voice" onclick={() => store.showSettings('voice')}>
+            <Mic size={20} /><span class="ui-label">{strings.speech.heading}</span><ChevronRight size={18} />
           </button>
-          <button class="ghost row" data-testid="settings-tab-task-manager" onclick={() => store.showSettings('task-manager')}>
-            <Activity size={20} /><span class="ui-label">{strings.taskManager.title}</span><ChevronRight size={18} />
-          </button>
-          {#if store.owner}
-            <button class="ghost row" data-testid="settings-tab-resources" onclick={() => store.showSettings('resources')}>
-              <ShieldCheck size={20} /><span class="ui-label">{strings.settings.tabs.resources}</span><ChevronRight size={18} />
-            </button>
-          {/if}
           <button class="ghost row" data-testid="mobile-settings-archived" onclick={() => { archived = true; }}>
             <ArchiveRestore size={20} /><span class="ui-label">{strings.settings.archived.heading}</span><ChevronRight size={18} />
           </button>
-          {#if store.owner}
-            <button class="ghost row" data-testid="mobile-settings-worktrees" onclick={() => store.showSettings('general', 'worktrees')}>
-              <Monitor size={20} /><span class="ui-label">{strings.settings.worktrees.heading}</span><ChevronRight size={18} />
-            </button>
-            <button class="ghost row" data-testid="mobile-settings-auto-compact" onclick={() => store.showSettings('advanced', 'auto-compact')}>
-              <Minimize2 size={20} /><span class="ui-label">{strings.settings.autoCompact}</span><ChevronRight size={18} />
-            </button>
-            <button class="ghost row" data-testid="settings-tab-diagnostics" onclick={() => store.showSettings('diagnostics')}>
-              <Stethoscope size={20} /><span class="ui-label">{strings.diagnostics.heading}</span><ChevronRight size={18} />
-            </button>
-          {/if}
         </div>
       </section>
     </div>
@@ -146,6 +119,12 @@
       <h1>{#if page === 'limits'}<QuotaMachineScope {store} fallback={title} />{:else}{title}{/if}{#if info}<InfoTip topic={title} text={info} testid="mobile-settings-info" />{/if}</h1>
     </header>
     <div class="detail" data-testid="mobile-settings-detail">
+      {#if quota}
+        <div class="tabs" role="tablist" aria-label={strings.usage.heading} data-testid="mobile-usage-tabs">
+          <button type="button" role="tab" class="tab" class:on={page === 'usage'} aria-selected={page === 'usage'} data-testid="mobile-usage-tab-usage" onclick={() => store.showSettings('usage')}><Coins size={15} /><span class="ui-label">{strings.usage.heading}</span></button>
+          <button type="button" role="tab" class="tab" class:on={page === 'limits'} aria-selected={page === 'limits'} data-testid="mobile-usage-tab-limits" onclick={() => store.showSettings('limits')}><Gauge size={15} /><span class="ui-label">{strings.usage.limits}</span></button>
+        </div>
+      {/if}
       {#if page === 'brain' && store.owner}
         <BrainPage {store} />
       {:else if page === 'phone'}
@@ -155,12 +134,13 @@
             <p class="scope" data-testid="mobile-settings-scope">{[workspace.machines.length > 1 ? (machine?.label ?? store.endpointUrl ?? strings.connection.current) : null, store.connection === 'ready' ? null : strings.connection[store.connection]].filter(Boolean).join(' · ')}</p>
           {/if}
           <PhoneSettings {store} showServerSettings={false} />
-          <TelemetrySettings {store} />
         </div>
+      {:else if page === 'privacy'}
+        <div class="page phone-page privacy-page"><TelemetrySettings {store} /></div>
       {:else if page === 'voice'}
         <VoiceSettings {store} readOnly />
       {:else if page === 'appearance'}
-        <AppearancePage {store} />
+        <AppearancePage {store} phone />
       {:else if page === 'usage'}
         <UsagePage {store} />
       {:else if page === 'limits'}
@@ -192,19 +172,13 @@
 <style>
   .mobile-settings { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .home, .detail { animation: fade var(--dur-2) var(--ease-out-quint); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-  .home { padding: 20px 16px; }
-  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; }
-  .brand img { border-radius: var(--radius-md); }
-  .brand strong { font-size: var(--text-md); }
-  .brand span { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); margin-top: 2px; }
-  h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; margin: 0; }
-  .machine-link { width: 100%; height: auto; min-height: 72px; display: flex; align-items: center; gap: 12px; text-align: left; padding: 14px; margin-top: 20px; background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); }
-  .machine-link > span { flex: 1; min-width: 0; }
-  .machine-link strong { display: block; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); color: var(--color-foreground); }
-  .machine-link small { display: block; font-size: var(--text-xs); margin-top: 5px; color: var(--color-muted-foreground); }
+  .home { padding: 16px; }
+  /* The group's first row is the machine itself: its name over its connection. */
+  .machine-link { min-height: 64px; }
+  .machine-link strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .machine-link small { display: block; margin-top: 6px; font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
   .machine-link small.ready { color: var(--color-success); }
-  .machine-link :global(svg) { flex: none; }
-  section { margin-top: 28px; }
+  section + section { margin-top: 28px; }
   h2 { font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); margin: 0 0 8px; }
   p { font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; margin: 8px 0 12px; }
   .rows { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface); }
@@ -215,9 +189,16 @@
   .row :global(svg) { flex: none; color: var(--color-muted-foreground); }
   header { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
   header .icon { width: 44px; min-height: 44px; }
-  header h1 { font-size: var(--text-md); }
+  header h1 { margin: 0; font-size: var(--text-md); font-weight: 600; }
   header.limits h1 { flex: 1; min-width: 0; margin-right: 54px; }
   .phone-page { padding: 16px; }
+  /* Usage and Limits: two tabs of one screen, in one track, the chosen one filled. */
+  .tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; margin: 16px 16px 0; padding: 2px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); }
+  .tab { min-width: 0; min-height: var(--touch-target); gap: 8px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; color: var(--color-muted-foreground); font-size: var(--text-sm); font-weight: 500; transition: background var(--dur-2) var(--ease-out-quint), color var(--dur-2) var(--ease-out-quint); }
+  .tab.on { background: var(--color-foreground); border-color: var(--color-foreground); color: var(--color-on-foreground); }
+  .tab :global(svg) { flex: none; }
+  /* The bar carries the page's name and its "i": the card's own heading steps aside. */
+  .privacy-page :global(.card > h2) { display: none; }
   .scope { overflow-wrap: anywhere; margin-top: 0; }
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
