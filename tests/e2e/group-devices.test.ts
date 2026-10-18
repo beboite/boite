@@ -164,7 +164,7 @@ test('a phone installed from one machine scans the code of another and lists and
   const added = await b.call('group.addDevice', {});
   expect(added.url.startsWith(`${originB}/?grant=`)).toBe(true);
   const video = join(scratch, 'code.y4m');
-  writeFileSync(video, codeVideo(added.url.split('#')[0]!));
+  writeFileSync(video, await codeVideo(added.url.split('#')[0]!));
 
   phone = await BrowserPage.launch({
     url: `${originA}/`,

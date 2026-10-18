@@ -1128,7 +1128,9 @@ test('a waiting question takes the composer as its free answer, with the card pi
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   await type('one question please');
   press('Enter');
-  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
+  // The question takes the composer only once the typing pause has run out:
+  // a budget counted in attempts of at least 2 ms each, well past that pause.
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null, TYPING_PAUSE_MS);
   expect(input().placeholder).toBe('Write your answer');
   expect(query('[data-testid=composer-send]').getAttribute('aria-label')).toBe('Send the answer');
   expect(pendingCard().querySelector('[data-testid=question-reply-hint]')).not.toBeNull();

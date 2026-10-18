@@ -4,12 +4,39 @@
  * The chosen accent marks interactive controls; status colours stay separate.
  */
 
+/*
+ * Geist and Geist Mono, variable on wght, cut like the faces below into latin
+ * and latin extended, plus a third file holding every other glyph of the font
+ * (Greek, Cyrillic, Vietnamese, fractions), so no character changes face. The
+ * latin cut also carries the arrows, key, box drawing, block and geometric
+ * symbols (U+2190-27BF) the UI and the terminal draw.
+ */
+
 @font-face {
   font-family: 'Geist';
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url('/fonts/Geist-Variable.woff2') format('woff2');
+  src: url('/fonts/Geist-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2190-27BF, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/Geist-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/Geist-rest.woff2') format('woff2');
+  unicode-range: U+02D8-02D9, U+02DB, U+0300-0303, U+0306-0307, U+0309-030C, U+0312, U+031B, U+0323, U+0326-0328, U+0335-0338, U+039B, U+03A9, U+03BB-03BC, U+03C0, U+03C9, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-0493, U+0496-0497, U+049A-049B, U+04A2-04A3, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0, U+04CF, U+04D8-04D9, U+04E2-04E3, U+04E8-04E9, U+04EE-04EF, U+0E3F, U+1EA0-1EF1, U+2070, U+2074-2079, U+2080-2089, U+2116-2117, U+2153-2155, U+215B-215E, U+3003, U+301C, U+F8FF, U+FB01-FB02;
 }
 
 @font-face {
@@ -17,7 +44,26 @@
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
+  src: url('/fonts/GeistMono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2190-27BF, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/GeistMono-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/GeistMono-rest.woff2') format('woff2');
+  unicode-range: U+02D8-02D9, U+02DB, U+0300-0303, U+0306-0307, U+0309-030C, U+0312, U+031B, U+0323, U+0326-0328, U+0335-0338, U+039B, U+03A9, U+03BB-03BC, U+03C0, U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-0493, U+0496-0497, U+049A-049B, U+04A2-04A3, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04C0, U+04CF, U+04D8-04D9, U+04E2-04E3, U+04E8-04E9, U+04EE-04EF, U+0E3F, U+1EA0-1EF1, U+2070, U+2074-2079, U+2080-2089, U+2107, U+2116-2117, U+2153-2155, U+215B-215E, U+3003, U+301C, U+F8FF;
 }
 
 /*
@@ -2055,3 +2101,8 @@ input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; 
 @media (prefers-reduced-motion: reduce) {
   input[type=checkbox][role=switch], input[type=checkbox][role=switch]::after, .switch, .switch::after { transition: none; }
 }
+
+/* The page instead of the app when no catalogue could load (`lib/boot-failure.ts`). */
+.boot-failure { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; max-width: 520px; padding: 32px 24px; color: var(--color-foreground); }
+.boot-failure p { margin: 0; line-height: 1.5; }
+.boot-failure button { min-height: var(--control); padding: 0 14px; border-radius: var(--radius-md); }

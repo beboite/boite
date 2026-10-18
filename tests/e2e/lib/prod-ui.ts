@@ -21,8 +21,9 @@ const UI_INPUTS = [
  * `?fake=1` loads under `import.meta.env.DEV` alone, and Svelte's dev runtime
  * metadata. A child of `bun test` inherits `NODE_ENV=test`, and Vite then
  * builds in development mode while still printing "building for production".
- * The production build emits a `fake-client-*.js` chunk nothing imports, so a
- * file name alone proves nothing.
+ * The production build resolves the fake client to an empty module
+ * (`dropFakeClient` in `packages/ui/vite.config.ts`), so any mention of it
+ * marks a development bundle.
  */
 export function developmentMarkers(files: { name: string; text: string }[]): string[] {
   const found: string[] = [];

@@ -64,7 +64,8 @@ that touched more than four discussions lists four and a line that opens the
 rest.
 
 A row opens the Discussions tab in the right panel on that discussion, scrolled
-to the first letter of the burst, which flashes once. The tab lists every
+to its first letter in that burst, which flashes once, or at its end when that
+letter is gone. The tab lists every
 discussion of the thread, the most recent first, with the same title, tag,
 place and last words. Opening one shows the back and forth: what reaches this
 thread's agent sits on the right in the accent color, like the user's prompts;
@@ -73,7 +74,8 @@ typed sits on the right under "You", a subagent's result is labelled "Result",
 and the letters of the agent the project is entrusted to keep that agent's color
 and name on the left. Letters of one
 side a few minutes apart share one time stamp, a silence of twenty minutes gets
-a line of its own, and a reply to an earlier letter quotes it. Two checkmarks
+a line of its own, and a reply to a letter other than the one just before it
+quotes it. Two checkmarks
 mark an outgoing letter that was received or delivered; an unconfirmed, expired or
 rejected letter shows that state, and a tap shows the reason. The header names
 the other agent, its model and what it declared it works on, and opens its
@@ -193,7 +195,10 @@ agent the project is entrusted to, same project, another project or machine), `f
 `from.machine` when it is elsewhere, `from.agent`, `from.branch`,
 `from.status` and `from.about`, what it works on. `about` is the sender's
 declared resources; a sender on the same core without any falls back to the
-first request of its conversation, cut to 200 characters. Another machine
+first request of its conversation, cut to 200 characters. That sender is a
+contact the recipient may already read with `boite agents read`; a letter from
+the agent a project is entrusted to gets no fallback, since that agent's
+conversation holds the user's other work. Another machine
 shares its resources only, never its chat. A reply carries `inReplyTo.yours`,
 the start of the recipient's own message it answers. The core id hash, the
 mode and the timestamps stay out. When the context is still unclear, the

@@ -43,7 +43,7 @@ test('a phone scans the code of Add a device: another code leaves the camera ope
     const added = await owner.call('group.addDevice', {});
     const video = join(scratch, 'code.y4m');
     // The camera first shows a code that is no link to add a device, then the real one.
-    writeFileSync(video, codeVideo('https://example.com/not-a-link-to-add-a-device'));
+    writeFileSync(video, await codeVideo('https://example.com/not-a-link-to-add-a-device'));
     page = await BrowserPage.launch({
       url: `${url}/?core=${encodeURIComponent(machine.url)}`,
       windowSize: { width: 390, height: 844 },
@@ -67,7 +67,7 @@ test('a phone scans the code of Add a device: another code leaves the camera ope
     await page.click(id('qr-scanner-close'));
     await page.waitFor(`!document.querySelector('${id('qr-scanner')}')`);
     expect(await page.evaluate(`globalThis.__scanStream.getTracks().every(track => track.readyState === 'ended')`)).toBe(true);
-    writeFileSync(video, codeVideo(added.url.split('#')[0]!));
+    writeFileSync(video, await codeVideo(added.url.split('#')[0]!));
     await page.click(id('machine-scan'));
     await page.waitFor(`document.querySelector('${id('qr-scanner')}')`);
     await page.waitFor(`globalThis.__boiteTest.workspace.machines[0]?.store.connection === 'ready' && !document.querySelector('${id('qr-scanner')}')`, 30_000);

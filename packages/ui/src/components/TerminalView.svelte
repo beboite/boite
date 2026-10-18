@@ -4,7 +4,7 @@
   import '@xterm/xterm/css/xterm.css';
   import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
-  import type { TerminalSession } from '../lib/terminal-session.svelte';
+  import { TerminalSession } from '../lib/terminal-session.svelte';
   import TerminalFind from './TerminalFind.svelte';
   import TerminalHistory from './TerminalHistory.svelte';
 
@@ -35,7 +35,7 @@
   onMount(() => {
     const node = host;
     if (!node) return;
-    const session = store.terminalSession(id, start);
+    const session = store.terminalSession(id, start, TerminalSession);
     screen = session;
     session.mount(node, { autofocus, onexit: (code) => onexit?.(code) });
     return () => {

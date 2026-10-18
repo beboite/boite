@@ -181,12 +181,20 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 599,800 |
-| UI files, excluding `.br` and `.gz` copies | 5,161,500 |
+| UI entry chunk | 490,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,850,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,417,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the UI runtime change merged with `origin/main` at `9ffdb977`
+(the lean boot) measures 489,501 entry bytes, 4,849,560 UI bytes and
+4,413,067 core JavaScript bytes after fresh `bun run build:ui` and
+`bun run build:core` on Windows, against 486,005 and 4,725,790 that the lean
+boot measured: 3,496 entry bytes and 123,770 UI bytes more, of which the
+highlight worker is 114,882. The entry and UI limits rise to 490,000 and
+4,850,000; the core limits stay.
 
 On 2026-10-18, the UI runtime change merged with `origin/main` at `15fdbb81`
 measures 598,199 entry bytes and 5,159,382 UI bytes after fresh
@@ -209,6 +217,28 @@ making that reader the only source of a terminal's status and directory to
 5,160,658. Holding only its reports while a snapshot is on its way, in
 `terminal-status.ts`, brings it to 5,161,378. The entry and UI limits rise to
 599,800 and 5,161,500; the core limits stay.
+
+On 2026-10-18, the lean boot merged with `origin/main` at `2be13d45`
+(message pictures as file tickets and the media wire) measures 486,005 entry
+bytes, 4,725,790 UI bytes and 4,412,394 core JavaScript bytes after fresh
+`bun run build:ui` and `bun run build:core` on Windows. The entry limit rises
+to 487,000, about a kilobyte above it; the other limits stay.
+
+On 2026-10-18, the lean boot merged with `origin/main` at `57d41e70`, which
+refreshes the UI dependencies, measures 485,472 entry bytes, 4,724,812 UI
+bytes and 4,408,525 core JavaScript bytes after fresh `bun run build:ui` and
+`bun run build:core` on Windows. The entry limit rises to 486,500,
+a kilobyte above it; the other limits stay.
+
+On 2026-10-18, the lean boot on `origin/main` at `b611c01f` measures 484,682
+entry bytes and 4,723,056 UI bytes after a fresh `bun run build:ui` on
+Windows, against 595,295 and 5,036,764 for `b611c01f` built the same way:
+English left the entry for a chunk of its own, nine components the first frame
+does not draw load lazily, the fake client resolves to an empty module, Geist
+ships as latin, latin-ext and rest subsets and the onboarding clip is
+re-encoded at 15 fps; a notice and a retry cover a catalogue or a lazy part
+that fails to load. The limits fall to 485,800 and 4,727,000; the core
+limits stay. [Performance](performance.md#static-files) has the boot files.
 
 On 2026-10-18, removing a purged or erased thread's Claude transcripts and
 muting new audio sessions on Core Audio's notice, rebased on `b611c01f`,

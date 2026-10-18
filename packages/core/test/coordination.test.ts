@@ -145,6 +145,10 @@ test('delivery wakes the recipient once, preserves system provenance and does no
   // A letter whose sender carries no resources (an older row, a terse peer) still says who wrote it.
   const terse = { ...letter, from: { ...letter.from, resources: undefined as unknown as string } };
   expect(letterPrompt([terse], senderContext(h.core, dest(h, b).coreId, b))).toContain('"relation":"same project"');
+  // With no resources, a peer the recipient may read is described by its first request; the agent a project is entrusted to is not.
+  h.core.journal.putMessage({ id: 'msg_opening', threadId: a, turnId: 'trn_opening', role: 'user', parts: [{ type: 'text', text: 'Rotate the staging VM keys' }], state: 'complete', createdAt: 1 });
+  expect(letterPrompt([terse], senderContext(h.core, dest(h, b).coreId, b))).toContain('"about":"Rotate the staging VM keys"');
+  expect(letterPrompt([{ ...terse, origin: 'resident' }], senderContext(h.core, dest(h, b).coreId, b))).not.toContain('"about"');
   // A corrupt sender row loses the context, never the letter, and the log says why.
   const context = senderContext(h.core, dest(h, b).coreId, b);
   h.core.journal.db.query("UPDATE coordination_letters SET data = '{' WHERE id = ? AND direction = 'out'").run(reply.id);

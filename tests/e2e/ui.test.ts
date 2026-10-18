@@ -31,7 +31,7 @@ const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png')
 const IMPORT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-import.png');
 const EXPERIMENTS_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-experiments.png');
 /** The cache `public/sw.js` opens, before the build appends its id; every other cache is deleted on activate. */
-const UI_CACHE_PREFIX = 'boite-ui-v4-';
+const UI_CACHE_PREFIX = 'boite-ui-v6-';
 
 let core: RunningCore;
 let page: BrowserPage;
@@ -846,7 +846,9 @@ test(
     const entries = await page.evaluate<string[]>(cachedPaths);
     expect(entries).toContain('/');
     expect(entries.filter((path) => path.startsWith('/assets/')).length).toBeGreaterThan(0);
-    // The browser reads English (`--lang=en-US`): the French catalogue the inline locale map names is never stored.
+    // The browser reads English (`--lang=en-US`): the install stored the English
+    // catalogue the app cannot mount without, and never the French one.
+    expect(entries.filter((path) => path.startsWith('/assets/strings.en-'))).toHaveLength(1);
     expect(entries.filter((path) => path.startsWith('/assets/strings.fr-'))).toEqual([]);
 
     // The core goes away, and the reload has nothing but that cache to load from.

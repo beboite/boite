@@ -9,7 +9,7 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { countsOf, turnFileTree, turnLineCounts, type TurnDiff, type TurnFile, type TurnFileNode } from '../lib/turn-files';
-  import DiffView from './DiffView.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import { chatPrefs } from '../lib/chat-prefs.svelte';
 
   /**
@@ -101,7 +101,7 @@
       {#if loading}<p data-testid="turn-diff-loading">{strings.app.loading}</p>{/if}
       {#if loadError}<p role="alert">{loadError}</p>{/if}
       {#each diffs as doc, index (index)}
-        <DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {doc} />
+        <Deferred part={parts.DiffView}>{#snippet children(DiffView)}<DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {doc} />{/snippet}</Deferred>
       {/each}
     </div>
   {/if}

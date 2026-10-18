@@ -644,7 +644,7 @@ phone on the LAN gets the gzip.
 Every static answer outside `/assets/` carries an `ETag` and a `Last-Modified` of the variant sent,
 so revalidating the shell, `sw.js` or the manifest is a 304 without a body.
 Fonts and icons are fresh for a day: a phone on plain http has no service
-worker and would otherwise fetch the two default faces, 144 KB, on every load.
+worker and would otherwise fetch the two default faces, 118 KB, on every load.
 A view is gzipped once when it is published and sent compressed to a client
 that reads gzip. The [2026-10-15 report](../bench/results/2026-10-15-perf-media.md)
 has the bytes before and after.
@@ -671,8 +671,73 @@ Day labels and clock times in an agent conversation reuse one
 `Intl.DateTimeFormat` per language (`lib/format.ts`), as hover titles already
 did: `toLocaleString` with a locale builds a new formatter per call.
 
-The French catalogue and the quota window are chunks of their own too, so an
-English page does not download or parse either (`docs/language.md`).
+Every catalogue and the quota window are chunks of their own too, so a page
+downloads and parses only the language it speaks (`docs/language.md`). Nine
+components the first frame does not draw load the same way
+(`lib/deferred-parts.ts`, the terminal drawer and, outside the shell, the
+phone's navigation, which the boot screen waits for): the image viewer, the
+diff, the quota overview, the coordination panel, the updates notice, the
+robot face and the dictation button, prefetched in the idle pass. The
+dictation button draws a disabled microphone of the same size until its chunk
+lands. `qrcode` loads when a code is drawn. The modules the boot shares with a
+lazy chunk are one `boot` chunk (a Rolldown `codeSplitting` group in
+`vite.config.ts`), because the core speaks HTTP/1.1 and a browser fetches six
+files at a time. Geist and Geist Mono ship as latin, latin-ext and rest
+subsets with their weight axis; the mono latin cut carries the arrows and box
+drawing a terminal draws.
+
+A part whose chunk has not landed says it is loading, one whose chunk failed
+offers a retry, and every failed part asks again when the browser is back
+online (`components/Deferred.svelte`). Chromium keeps a failed `import()` for
+the life of the page, so a retry that fails at once loads a fresh page when
+the core answers (`lib/retry-load.ts`, `tests/e2e/chunk-retry.test.ts`). A change waiting for permission cannot
+be allowed before its diff shows. When no catalogue loads at all, the page
+draws a notice with a retry in place of the app (`lib/boot-failure.ts`), and
+the service worker precaches the catalogue of the language the page last
+spoke, so an installed phone still opens offline.
+
+On 2026-10-18 on Windows, `bun run build:ui` of `b611c01f` and of this
+change. The static rows count what `index.html` names plus the device's
+catalogue, gzip at level 9 and brotli at 11:
+
+| Measure | Before | After |
+| --- | ---: | ---: |
+| Entry chunk | 595,295 | 484,682 |
+| UI files, excluding `.br` and `.gz` | 5,036,764 | 4,723,056 |
+| Files `index.html` names, English device | 65 | 6 |
+| Their raw bytes, English | 1,597,482 | 1,381,747 |
+| Their gzip bytes, English | 482,282 | 405,875 |
+| Their brotli bytes, English | 405,523 | 336,131 |
+| Files `index.html` names, French device | 66 | 6 |
+| Their raw bytes, French | 1,748,228 | 1,401,950 |
+| Their gzip bytes, French | 532,196 | 411,337 |
+| Their brotli bytes, French | 448,185 | 341,227 |
+
+The page fetches more than that before it is usable. The cold boot to
+`.app.ready` was measured on the same day with a real core (`tests/e2e/lib/core.ts`)
+serving each build and a fresh headless Chromium profile per run, the request
+graph read from the page's Resource Timing up to the frame where `.app.ready`
+appears: five runs per row, medians, transferred bytes as the browser counts
+them (headers included). The slow link is 150 ms of latency, 1.6 Mbit/s down
+and 750 kbit/s up (`Network.emulateNetworkConditions`).
+
+| Cold boot to ready, slow link | Before | After |
+| --- | ---: | ---: |
+| English: time | 3,963 ms | 3,006 ms |
+| English: requests | 72 | 19 |
+| English: bytes | 586,774 | 480,634 |
+| French: time | 4,171 ms | 3,028 ms |
+| French: requests | 73 | 19 |
+| French: bytes | 629,736 | 485,730 |
+
+Of the 19 requests after the change, 9 are scripts: the entry, the runtime,
+the `boot` chunk, the catalogue, the phone navigation the boot screen waits
+for outside the shell with a module it shares, the dictation button with its
+recorder, and the interaction experiments; the rest are styles, the two
+fonts, the manifest and the icons. The slow link's runs vary by under 260 ms.
+Without throttling both builds reach ready in 148 to 547 ms on this machine,
+a spread wider than any difference between them, and the idle prefetch starts
+before the ready frame and adds four requests.
 
 The service worker still asks the core for the app shell first, but waits
 2.5 s at most before serving the cached one; the late answer is stored for the

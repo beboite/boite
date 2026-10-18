@@ -1,6 +1,7 @@
 import { RpcErrorCode, isThreadTerminal, threadTerminalId, type KeybindingCommand, type RpcEvents, type TerminalState, type ThreadId, type ThreadTerminal } from '@boite/contracts';
 import { RpcFailure } from '../client';
-import { TerminalSession, type TerminalStart } from '../terminal-session.svelte';
+// A type only: xterm's screen class rides in the terminal view's chunk, which hands it over.
+import type { TerminalSession, TerminalStart } from '../terminal-session.svelte';
 import {
   MAX_PANES, activeTab, addTab, firstLayout, nextPane, panesOf, parseLayout, reconcile, removePane, resizePanes, splitPane, terminalIdOf,
   type SplitDirection, type TerminalLayout
@@ -37,11 +38,15 @@ export class Terminals {
 
   constructor(private readonly ctx: StoreContext) {}
 
-  /** The screen of this shell, made the first time. `start` attaches to the shell or starts it. */
-  terminalSession(id: string, start: TerminalStart): TerminalSession {
+  /**
+   * The screen of this shell, made the first time. `start` attaches to the
+   * shell or starts it. `Session` is the class itself, which the terminal view
+   * passes, so the screen's code stays out of the first chunk.
+   */
+  terminalSession(id: string, start: TerminalStart, Session: typeof TerminalSession): TerminalSession {
     let session = this.sessions.get(id);
     if (session === undefined) {
-      session = new TerminalSession(this.ctx.store, id, start, () => {
+      session = new Session(this.ctx.store, id, start, () => {
         if (this.sessions.get(id) === session) this.sessions.delete(id);
         this.screens++;
       });
