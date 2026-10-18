@@ -36,6 +36,8 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 /// until the ready line came, so 10 ms costs nothing, and at 120 ms the window
 /// opened 60 ms late on average for a core that is up in about as long.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// How often a caller waiting past its patience reads `core.starting.json`.
+const STARTING_POLL: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Serialize)]
 pub struct CoreEndpoint {
@@ -286,25 +288,31 @@ fn publish(slot: &(Mutex<Slot>, Condvar), outcome: Result<Resolved, String>) {
 }
 
 /// Waits up to `patience` for the resolution, longer while `starting` says the
-/// core announced long work before it serves (`STARTING_CAP` at most).
+/// core announced long work before it serves (`STARTING_CAP` at most), and
+/// `patience` again from the last time it said so, as `resolve_core` does.
 fn wait_for_endpoint(slot: &(Mutex<Slot>, Condvar), patience: Duration, starting: &dyn Fn() -> bool) -> Result<Settled, String> {
     let (lock, ready) = slot;
     let begun = Instant::now();
-    let mut deadline = begun + patience;
+    let mut announced = begun;
     let mut guard = lock
         .lock()
         .map_err(|_| "the core state is poisoned".to_string())?;
 
     while !guard.done {
         let now = Instant::now();
-        if now >= deadline {
-            if begun.elapsed() >= STARTING_CAP || !starting() {
+        let mut wait = (announced + patience).saturating_duration_since(now);
+        if now >= begun + patience {
+            if begun.elapsed() < STARTING_CAP && starting() {
+                announced = now;
+            }
+            wait = (announced + patience).saturating_duration_since(now);
+            if wait.is_zero() {
                 return Err("no core answered within the start timeout".to_string());
             }
-            deadline = now + patience;
+            wait = wait.min(STARTING_POLL);
         }
         let (next, _) = ready
-            .wait_timeout(guard, deadline - now)
+            .wait_timeout(guard, wait)
             .map_err(|_| "the core state is poisoned".to_string())?;
         guard = next;
     }

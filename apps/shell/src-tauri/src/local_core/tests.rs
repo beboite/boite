@@ -11,7 +11,7 @@ use std::process::{Child, Command, Stdio};
 /// `POST /shutdown`; `fail` exits at once with a reason on stderr, as the
 /// real core does on a held lock; `hang` never answers; `compact` announces
 /// its work in `core.starting.json` until the time its test wrote in
-/// `compact-until`, however long Bun took to start, then serves.
+/// `compact-until`, however long Bun took to start, then serves 300 ms later.
 const FAKE_CORE: &str = r#"
 const [version, mode] = process.argv.slice(2);
 const dir = process.argv[process.argv.indexOf('--data-dir') + 1];
@@ -24,6 +24,8 @@ if (mode === 'compact') {
   await Bun.write(status, JSON.stringify({ pid: process.pid, phase: 'compacting', startedAt: Date.now(), bytes: 1 }));
   await Bun.sleep(Math.max(0, Number(await Bun.file(`${dir}/compact-until`).text()) - Date.now()));
   (await import('node:fs')).rmSync(status);
+  // The real core opens its journal between the end of that work and `core.json`.
+  await Bun.sleep(300);
 }
 if (mode === 'serve' || mode === 'compact') {
   const token = 'test-token';

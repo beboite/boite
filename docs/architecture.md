@@ -151,7 +151,9 @@ it (`journal/vacuum.ts`): with free pages over a quarter of the file and over
 auto-vacuum, checks the copy, syncs it and renames it over the journal. The
 shell waits past its start timeout while that file names a live core, the run
 that wrote it by pid and start as for `core.json` (a crash leaves the file,
-and a later process may get the pid), and the
+and a later process may get the pid), and a whole timeout after it last saw
+the file, since the core still opens its journal before it writes
+`core.json`. The
 window says the history is being compacted. From then on the compaction ticks
 give free pages back with `PRAGMA incremental_vacuum`, down to 16 MiB kept for
 later writes, and no VACUUM is needed again. The VACUUM runs before the

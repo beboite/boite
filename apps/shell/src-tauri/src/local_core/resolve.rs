@@ -141,6 +141,7 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
     };
 
     let started = Instant::now();
+    let mut announced = started;
     loop {
         if let Some(reason) = exited_early(state) {
             return Err(reason);
@@ -160,9 +161,16 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
                 }
             }
         }
-        // Past the timeout only while the core says it is still at work before serving.
-        if started.elapsed() >= launch.timeout && (started.elapsed() >= STARTING_CAP || read_starting(&launch.directory).is_none()) {
-            break;
+        // Past the timeout while the core says it is still at work before
+        // serving, and for a whole timeout after it last said so: once that
+        // work ends it still opens its journal before it writes `core.json`.
+        if started.elapsed() >= launch.timeout {
+            if started.elapsed() < STARTING_CAP && read_starting(&launch.directory).is_some() {
+                announced = Instant::now();
+            }
+            if announced.elapsed() >= launch.timeout {
+                break;
+            }
         }
         std::thread::sleep(POLL_INTERVAL);
     }
