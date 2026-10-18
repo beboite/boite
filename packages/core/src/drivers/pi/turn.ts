@@ -40,6 +40,8 @@ export class PiTurn {
   usage: Usage | null = null;
   /** The prompt cache lifetime of the last request that named one. */
   cacheLife: PromptCacheLife | null = null;
+  /** When the last assistant message started streaming, a little after its request left (`TurnResult.cacheAt`). */
+  requestAt: number | null = null;
   decided = false;
   isStopped = false;
   settled = false;
@@ -133,6 +135,7 @@ export class PiTurn {
       error: this.error ?? undefined,
       ...(this.diagnosticError === undefined ? {} : { diagnosticError: this.diagnosticError }),
       promptCache: this.cacheLife,
+      ...(this.requestAt === null ? {} : { cacheAt: this.requestAt }),
     });
   }
 

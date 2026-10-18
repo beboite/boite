@@ -65,6 +65,34 @@ test('Claude Agent tools reach Team while child text remains on its sidechain', 
 });
 
 describe('claude driver', () => {
+  test('the prompt cache clock starts at the last main-loop request, not at a subagent one or the turn end', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    let mainAt = 0;
+    scripted((fake) => {
+      void (async () => {
+        fake.emit(init('sess-clock'));
+        mainAt = Date.now();
+        fake.emit(streamEvent('sess-clock', { type: 'message_start', message: { id: 'msg_1' } }));
+        fake.emit(sdk({
+          type: 'assistant', session_id: 'sess-clock', parent_tool_use_id: null,
+          message: { id: 'msg_1', role: 'assistant', model: 'claude-opus-5', content: [{ type: 'text', text: 'pong' }], usage: { input_tokens: 5, cache_creation_input_tokens: 900, cache_creation: { ephemeral_5m_input_tokens: 900, ephemeral_1h_input_tokens: 0 } } },
+        }));
+        await Bun.sleep(100);
+        fake.emit(sdk({ type: 'stream_event', session_id: 'sess-clock', parent_tool_use_id: 'toolu_task', event: { type: 'message_start', message: { id: 'msg_sub' } } }));
+        await Bun.sleep(100);
+        fake.emit(success('sess-clock'));
+        fake.end();
+      })();
+    });
+    expect(await runTurn(client, threadId, 'ping')).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    const cache = thread.promptCache!;
+    expect(cache.ttlSeconds).toBe(300);
+    expect(cache.at).toBeGreaterThanOrEqual(mainAt);
+    expect(cache.at).toBeLessThan(mainAt + 80);
+    expect(thread.turns.at(-1)!.finishedAt! - cache.at).toBeGreaterThanOrEqual(150);
+  });
   test('a scripted turn maps deltas, the tool pair, the usage and the session id', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

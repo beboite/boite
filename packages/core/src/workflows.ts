@@ -664,7 +664,7 @@ export class Workflows {
       this.mutate(run.id, current => { current.delivered = true; });
       return;
     }
-    if (BUSY.includes(root.status)) return;
+    if (BUSY.includes(root.status)) { this.core.threads.cacheKeepalive.yieldTo(root.id); return; }
     const display = `Workflow "${run.name}" ${run.status === 'done' ? 'finished' : 'failed'}`;
     try {
       this.handTo(root, this.summary(run), display);

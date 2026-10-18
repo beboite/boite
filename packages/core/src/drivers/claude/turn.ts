@@ -113,6 +113,12 @@ export class ClaudeTurn {
   private contextTokens: number | null = null;
   /** The lifetime of the last cache write the main loop made in this turn. */
   private cacheLife: PromptCacheLife | null = null;
+  /**
+   * When the main loop's last API message started: its `message_start`, or the
+   * first snapshot of a message that streamed nothing. A little after the
+   * request left, by the time to the first token (`TurnResult.cacheAt`).
+   */
+  private requestAt: number | null = null;
   /** An `authentication_failed` frame waiting for the result that says whether it was a 401 or a 403. */
   private authFrame: { content: unknown } | null = null;
   private status: TurnResult['status'] = 'done';
@@ -147,6 +153,7 @@ export class ClaudeTurn {
   /** `ultrathink` is not an option of the CLI: the word in the prompt is what asks for it. */
   promptText(): string {
     const text = this.ctx.prompt;
+    // A keepalive keeps the word: another thinking budget would miss the cached messages.
     if (this.ctx.turn.execution?.operation === 'compact') return text;
     if (this.ctx.thread.effort !== PROMPT_EFFORT) return text;
     return text.length === 0 ? PROMPT_EFFORT : `${text} ${PROMPT_EFFORT}`;
@@ -175,6 +182,7 @@ export class ClaudeTurn {
       usage: this.usage,
       error: this.error ?? undefined,
       promptCache: this.cacheLife,
+      ...(this.requestAt !== null ? { cacheAt: this.requestAt } : {}),
       ...(this.sessionLost ? { sessionLost: true } : {}),
       ...(this.status === 'error' && this.refusal ? { refusal: this.refusal } : {}),
       ...(this.sessionId !== null && this.lastEntry !== null ? { checkpoint: { sessionId: this.sessionId, entry: this.lastEntry } } : {}),
@@ -256,6 +264,7 @@ export class ClaudeTurn {
   private handleStream(event: StreamEvent): void {
     switch (event.type) {
       case 'message_start':
+        this.requestAt = Date.now();
         this.apiMessageId = event.message?.id ?? '';
         this.streamedText = '';
         this.streamedThinking = '';
@@ -375,6 +384,7 @@ export class ClaudeTurn {
     if (logs && apiId !== this.blocksOf) {
       this.startBlocks(apiId);
       this.apiModel = body?.model ?? null;
+      this.requestAt = Date.now();
     }
     const carried = requestTokens(body?.usage);
     if (carried !== null) this.contextTokens = carried;
