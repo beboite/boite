@@ -18,6 +18,7 @@ import { WorkflowLog } from './workflow-log.ts';
 import { pauseHold } from './delegation/pauses.ts';
 import { listTemplates, removeTemplate, saveTemplate } from './workflows/templates.ts';
 import { planError, text } from './workflows/validation.ts';
+import { NOT_STARTED, failureNotice, unnoticed } from './workflows/notices.ts';
 
 export { registerWorkflowMethods } from './workflows/register.ts';
 
@@ -32,7 +33,6 @@ const SUMMARY_CHARS = 10000;
 const BUSY = ['queued', 'running', 'waiting'];
 const ended = (status: WorkflowStepStatus) => status === 'done' || status === 'failed' || status === 'skipped' || status === 'stopped';
 const broken = (status: WorkflowStepStatus) => status === 'failed' || status === 'stopped';
-const NOT_STARTED = 'Not started: another step of the run failed';
 const INTERRUPTED = 'Interrupted by a core restart';
 
 function clip(value: string, max: number): string {
@@ -70,7 +70,8 @@ export class Workflows {
   constructor(private readonly core: Core) {
     this.log = new WorkflowLog(core);
     for (const row of core.journal.db.query('SELECT * FROM workflow_steps').all() as StepRow[]) this.stepOf.set(row.thread_id, { runId: row.run_id, key: row.step_key });
-    for (const run of this.runsWhere("status IN ('done', 'failed', 'paused') AND json_extract(data, '$.delivered') = 0")) this.trackDelivery(run);
+    // A running one may hold a failure its root was not told yet: its root's next turn end tells it.
+    for (const run of this.runsWhere("status IN ('done', 'failed', 'paused', 'running') AND json_extract(data, '$.delivered') = 0")) this.trackDelivery(run);
     // An interrupted step waits on its own thread, so a resume runs it again with the interruption in its prompt.
     // After a handoff, the run goes on once the server listens (`resumeAfterRestart`), as its conversation does.
     // A core that died resumes no paid work by itself: the run waits for its agent or its owner.
@@ -123,7 +124,7 @@ export class Workflows {
   }
   private trackDelivery(run: WorkflowRun): void {
     const ids = this.undelivered.get(run.rootThreadId);
-    if (run.delivered === false && (run.status === 'done' || run.status === 'failed' || run.status === 'paused')) {
+    if (run.delivered === false && (run.status === 'done' || run.status === 'failed' || run.status === 'paused' || unnoticed(run).length > 0)) {
       if (ids) ids.add(run.id);
       else this.undelivered.set(run.rootThreadId, new Set([run.id]));
     } else if (ids?.delete(run.id) && !ids.size) this.undelivered.delete(run.rootThreadId);
@@ -475,6 +476,7 @@ export class Workflows {
     }
     if (changed) this.save(run);
     if (run.status === 'done' || run.status === 'failed') this.deliver(run.id);
+    else if (unnoticed(run).length > 0) this.noticeFailures(run.id);
   }
 
   /** A node ends with its executions; after a failure, one with nothing running ends too. */
@@ -517,8 +519,8 @@ export class Workflows {
       // their own, and the result waits for the conversation's next turn. Only a Stop holds them.
       // The root finished a turn of its own: an undelivered result may go now.
       if (!this.undelivered.has(turn.threadId)) return;
-      const pending = this.runsWhere("root_id = ? AND status IN ('done', 'failed') AND json_extract(data, '$.delivered') = 0", turn.threadId);
-      if (pending.length) setTimeout(() => { for (const run of pending) this.deliver(run.id); }, 0).unref?.();
+      const pending = this.runsWhere("root_id = ? AND status IN ('done', 'failed', 'running') AND json_extract(data, '$.delivered') = 0", turn.threadId);
+      if (pending.length) setTimeout(() => { for (const run of pending) run.status === 'running' ? this.noticeFailures(run.id) : this.deliver(run.id); }, 0).unref?.();
       return;
     }
     let correction = false, cut = false;
@@ -665,15 +667,7 @@ export class Workflows {
     if (BUSY.includes(root.status)) return;
     const display = `Workflow "${run.name}" ${run.status === 'done' ? 'finished' : 'failed'}`;
     try {
-      const prompt = this.summary(run);
-      if (root.agentSessionId) {
-        const session = this.core.workforce.session(root.id);
-        this.core.workforce.records.transaction(() => {
-          this.core.delegation.reserveTurn(root.id, 'delegation');
-          this.core.workforce.resident.enqueue(session.agentId, prompt, session.scope);
-        });
-        this.core.workforce.changed();
-      } else this.core.threads.startTurn(root.id, prompt, [], undefined, 'delegation', undefined, undefined, display);
+      this.handTo(root, this.summary(run), display);
       this.mutate(run.id, current => { current.delivered = true; current.deliveryError = null; });
     } catch (error) {
       // Said on the run, so the panel shows why the summary is held rather than waiting in silence.
@@ -681,6 +675,33 @@ export class Workflows {
       this.core.log('warn', `workflow ${run.id} result not delivered: ${reason}`);
       this.mutate(run.id, current => current.deliveryError === reason ? false : void (current.deliveryError = reason));
     }
+  }
+
+  /** The steps that failed while others run, told to the root once it is idle (its next finished turn retries). */
+  private noticeFailures(runId: string): void {
+    const run = this.load(runId), failed = run ? unnoticed(run) : [];
+    const root = run && failed.length > 0 ? this.core.journal.getThread(run.rootThreadId) : null;
+    if (!run || !root || root.archived || BUSY.includes(root.status)) return;
+    const notice = failureNotice(run, failed);
+    try {
+      this.handTo(root, notice.prompt, notice.display);
+      this.mutate(run.id, current => { current.failuresNoticed = [...current.failuresNoticed ?? [], ...notice.keys]; });
+    } catch (error) {
+      this.core.log('warn', `workflow ${run.id} failure not told to ${root.id}: ${messageOf(error)}`);
+    }
+  }
+
+  /** One turn of the root carrying a prompt: a persistent agent's queued work, or a thread's turn. */
+  private handTo(root: ThreadSummary, prompt: string, display: string): void {
+    if (root.agentSessionId) {
+      const session = this.core.workforce.session(root.id);
+      this.core.workforce.records.transaction(() => {
+        this.core.delegation.reserveTurn(root.id, 'delegation');
+        // The team's current episode: a new one waits until every subagent of the root is idle.
+        this.core.workforce.resident.enqueue(session.agentId, prompt, session.scope, this.core.journal.getSetting(`delegation-episode:${root.id}`) as string | undefined);
+      });
+      this.core.workforce.changed();
+    } else this.core.threads.startTurn(root.id, prompt, [], undefined, 'delegation', undefined, undefined, display);
   }
 
   /** A held summary goes again once the owner resumes the team. */

@@ -143,6 +143,12 @@ export interface WorkflowRun {
    * ends a turn or its delegation settings change. Absent on older runs.
    */
   deliveryError?: string | null;
+  /**
+   * The failed executions the root was already told about while other steps
+   * still ran, as `key@finishedAt`: a new failure, or the same step failing
+   * again after a retry, is told once more. Absent on older runs.
+   */
+  failuresNoticed?: string[];
   usage: Usage;
   createdAt: Timestamp;
   updatedAt: Timestamp;
