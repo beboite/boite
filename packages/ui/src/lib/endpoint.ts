@@ -152,6 +152,20 @@ export async function fromTauri(): Promise<Endpoint | null> {
   }
 }
 
+/** What the local core does before it serves, as the shell reads it from `core.starting.json`. */
+export interface ShellStarting { phase: string; startedAt: number; bytes: number }
+
+/** The long work the shell's core announced before serving, or null: none, or a shell without the command. */
+export async function shellStarting(): Promise<ShellStarting | null> {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const result = await invoke<ShellStarting | null>('core_starting');
+    return result !== null && typeof result === 'object' && typeof result.phase === 'string' ? result : null;
+  } catch {
+    return null;
+  }
+}
+
 function fromOrigin(): Endpoint | null {
   // The phone app's page is no machine's: nothing to connect to until a machine is added.
   if (appPage()) return null;

@@ -334,6 +334,26 @@ describe('journal streaming', () => {
     expect(writes().rows).toBe(2);
   });
 
+  test('a large part is compared by its fields: one changed character of an output of the same length is written', () => {
+    const output = 'x'.repeat(1 << 20);
+    const part = (text: string, extra = {}) => ({ type: 'tool', toolId: 't', name: 'Bash', input: {}, output: text, status: 'done', ...extra }) as MessagePart;
+    journal.putMessage(streaming('msg_big'));
+    journal.setMessagePart('msg_big', 0, part(output));
+    journal.persistMessages();
+    const writes = countWrites();
+    // Equal copies, not the same object: nothing to write.
+    journal.setMessagePart('msg_big', 0, part(output.split('').join('')));
+    journal.persistMessages();
+    expect(writes()).toEqual({ rows: 0, side: 0 });
+    journal.setMessagePart('msg_big', 0, part(`${output.slice(0, -1)}y`));
+    journal.persistMessages();
+    expect(writes()).toEqual({ rows: 0, side: 1 });
+    journal.setMessagePart('msg_big', 0, part(`${output.slice(0, -1)}y`, { summary: 'ran' }));
+    journal.persistMessages();
+    expect(writes()).toEqual({ rows: 0, side: 2 });
+    expect(journal.streamingMessage('msg_big')?.parts[0]).toEqual(part(`${output.slice(0, -1)}y`, { summary: 'ran' }));
+  });
+
   test('schema 35 adds streaming_parts and drops the background index its longer siblings cover', () => {
     journal.db.exec(`DROP TABLE streaming_parts;
       CREATE INDEX background_observations_thread ON background_observations(thread_id);

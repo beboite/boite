@@ -14,10 +14,11 @@ import type {
   Turn,
 } from '@boite/contracts';
 import { isNativeAgentPart } from './journal/native-agent-parts.ts';
-import { TRAIL_ONLY, trailOf } from './journal/trail.ts';
+import { TRAIL_ONLY, UNWRITTEN, pruneOldEvents, pruneTrail, rewindTrailCursor, trailOf } from './journal/trail.ts';
+import { analyze, staleStatistics } from './journal/statistics.ts';
 import { hydrate, hydratePart } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
-import { ProcessRows } from './journal/processes.ts';
+import { PROCESS_COLUMNS, PROCESS_FROM, ProcessRows } from './journal/processes.ts';
 import { runWrite } from './journal/statements.ts';
 import { WAL_LIMIT_BYTES, WalCheckpoints, type WalCheckpointOptions } from './journal/wal-checkpoints.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
@@ -149,21 +150,23 @@ export class Journal {
     return this.closed;
   }
 
-  /**
-   * Looks at the `limit` oldest events and deletes those written before
-   * `before`; 0 means nothing old is left at the front. Only the front is read,
-   * never the whole table: ids grow with time. Nothing replays events but
-   * `openAsyncQuestions`, since the projections are written in the same transaction. The newest agents
-   * event stays, because its id is the agents revision and must never go back.
-   */
+  /** Events written before `before` among the `limit` oldest (`journal/trail.ts`); 0 when none is left at the front. */
   pruneEvents(before: number, limit: number): number {
-    if (this.closed) return 0;
-    return this.db
-      .query(
-        `DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT ?) AND ts < ?
-           AND id IS NOT (SELECT MAX(id) FROM events WHERE type IN ('agents.record', 'agents.limits'))`,
-      )
-      .run(limit, before).changes;
+    return this.closed ? 0 : pruneOldEvents(this.db, before, limit);
+  }
+
+  /** Trail events written before `before`, walked forward from `afterId` (`journal/trail.ts`). */
+  pruneTrail(afterId: number, before: number, limit: number): { through: number; done: boolean } {
+    return this.closed ? { through: afterId, done: true } : pruneTrail(this.db, afterId, before, limit);
+  }
+
+  /** The `ANALYZE` statements stale now, to run one per tick (`journal/statistics.ts`). */
+  staleStatistics(all = false): string[] {
+    return this.closed ? [] : staleStatistics(this.db, all);
+  }
+
+  analyze(statement: string): void {
+    if (!this.closed) analyze(this.db, statement);
   }
 
   countEvents(type?: string): number {
@@ -359,13 +362,14 @@ export class Journal {
     // table keyed by thread is cleared here, events included, so a removed
     // project's prompts and tool output leave the disk.
     this.db.transaction(() => {
-      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'streaming_parts', 'media_previews', 'media_displays', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
+      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'streaming_parts', 'media_previews', 'media_displays', 'processes', 'command_lines', 'coordination_letters', 'coordination_wakes', 'events']) {
         const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
         for (const id of threadIds) query.run(id);
       }
+      rewindTrailCursor(this.db);
       for (const id of threadIds) {
         // A conversation's terminals use separate process groups and trace keys.
-        this.db.query("DELETE FROM processes WHERE thread_id = 'terminal:' || ?1 OR (thread_id > 'terminal:' || ?1 || ':' AND thread_id < 'terminal:' || ?1 || ';')").run(id);
+        for (const table of ['processes', 'command_lines']) this.db.query(`DELETE FROM ${table} WHERE thread_id = 'terminal:' || ?1 OR (thread_id > 'terminal:' || ?1 || ':' AND thread_id < 'terminal:' || ?1 || ';')`).run(id);
         this.db.query('DELETE FROM delegated_agents WHERE thread_id = ? OR root_id = ?').run(id, id);
         this.db.query('DELETE FROM delegation_messages WHERE root_id = ? OR sender_id = ? OR recipient_id = ?').run(id, id, id);
         this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);
@@ -816,7 +820,7 @@ export class Journal {
 
   listProcesses(threadId: string, limit: number): ProcessRecord[] {
     const rows = this.db
-      .query('SELECT * FROM processes WHERE thread_id = ? ORDER BY started_at DESC LIMIT ?')
+      .query(`SELECT ${PROCESS_COLUMNS} FROM ${PROCESS_FROM} WHERE p.thread_id = ? ORDER BY p.started_at DESC LIMIT ?`)
       .all(threadId, limit) as ProcessRow[];
     return rows.map(toProcess);
   }
@@ -827,9 +831,10 @@ export class Journal {
    * call would otherwise add rows for the life of the install.
    */
   forgetProcessesWithoutThread(threadId: string): void {
-    this.db
-      .query('DELETE FROM processes WHERE thread_id = ? AND NOT EXISTS (SELECT 1 FROM threads WHERE id = ?)')
-      .run(threadId, threadId);
+    if (this.db.query('SELECT 1 FROM threads WHERE id = ?').get(threadId) !== null) return;
+    this.db.transaction(() => {
+      for (const table of ['processes', 'command_lines']) this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`).run(threadId);
+    })();
   }
 
   // -- accounts -------------------------------------------------------------
@@ -884,6 +889,8 @@ export class Journal {
   }
 
   private writeEvent(event: JournalEvent): void {
+    // The message row holds what these said: one INSERT per part change bought nothing.
+    if (UNWRITTEN.has(event.type)) return;
     const payload = TRAIL_ONLY.has(event.type) ? trailOf(event.payload) : event.payload;
     this.db
       .query('INSERT INTO events (thread_id, ts, type, version, payload) VALUES (?, ?, ?, ?, ?)')

@@ -2,10 +2,11 @@ import type { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import type { MessagePart } from '@boite/contracts';
 import { nativeAgentPartSql } from './native-agent-parts.ts';
-import { createPartBlobs } from './part-blobs.ts';
+import { addPartBlobCodecs, createPartBlobs } from './part-blobs.ts';
+import { createCommandLines } from './processes.ts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 36;
+export const SCHEMA_VERSION = 37;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -435,6 +436,14 @@ export function migrate(db: Database, file: string): { from: number; to: number 
   if (!db.query("SELECT 1 FROM pragma_table_info('turns') WHERE name = 'agent_totals'").get()) {
     db.exec('ALTER TABLE turns ADD COLUMN agent_totals TEXT;');
     version = 36;
+  }
+  // Part values compressed with zstd, tool outputs from 4 KiB moved out, and
+  // command lines stored once (`part-blobs.ts`, `processes.ts`). Older rows
+  // keep reading as they are; a background pass converts them (`retention.ts`).
+  if (version < 37) {
+    if (!hasColumn('part_blobs', 'codec')) addPartBlobCodecs(db);
+    createCommandLines(db, !hasColumn('processes', 'command_id'));
+    version = 37;
   }
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
