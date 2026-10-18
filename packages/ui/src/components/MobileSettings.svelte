@@ -150,7 +150,7 @@
       {:else if page === 'resources' && store.owner}
         <ResourcesPage {store} />
       {:else if page === 'experiments'}
-        <ExperimentsPage />
+        <ExperimentsPage {store} />
       {:else if page === 'diagnostics' && store.owner}
         <DiagnosticsPage {store} {onopenthread} />
       {:else if page === 'worktrees'}
