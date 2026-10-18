@@ -298,6 +298,32 @@ fn a_core_compacting_its_journal_is_waited_on_past_the_timeout_and_says_so() {
 }
 
 #[test]
+fn a_caller_waits_a_whole_patience_past_the_last_time_the_resolution_saw_the_core_at_work() {
+    // The resolution saw the core at work at 700 ms; the core then opens its
+    // journal and serves at 1.35 s, past the caller's own patience of 1 s.
+    // A caller that counted from its own start alone gave up at 1 s.
+    let slot = std::sync::Arc::new((Mutex::new(Slot::default()), Condvar::new()));
+    let resolver = {
+        let slot = slot.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(700));
+            slot.0.lock().unwrap().announced = Some(Instant::now());
+            std::thread::sleep(Duration::from_millis(650));
+            let endpoint = CoreEndpoint { url: "http://127.0.0.1:1".to_string(), token: "t".to_string() };
+            publish(&slot, Ok((endpoint, None, health::CoreStart::default())));
+        })
+    };
+    let outcome = wait_for_endpoint(&slot, Duration::from_secs(1)).unwrap().outcome;
+    resolver.join().unwrap();
+    assert!(outcome.is_ok(), "{:?}", outcome.err());
+    // Nothing seen: the caller gives up at its patience.
+    let idle = (Mutex::new(Slot::default()), Condvar::new());
+    let started = Instant::now();
+    assert!(wait_for_endpoint(&idle, Duration::from_millis(200)).is_err());
+    assert!(started.elapsed() >= Duration::from_millis(200));
+}
+
+#[test]
 fn a_settled_core_whose_pid_now_names_a_later_process_is_stale() {
     // This test's own process stands for the one that got the dead core's number.
     let pid = std::process::id();

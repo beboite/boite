@@ -167,6 +167,9 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<Resolved, String> {
         if started.elapsed() >= launch.timeout {
             if started.elapsed() < STARTING_CAP && read_starting(&launch.directory).is_some() {
                 announced = Instant::now();
+                if let Ok(mut slot) = state.slot.0.lock() {
+                    slot.announced = Some(announced);
+                }
             }
             if announced.elapsed() >= launch.timeout {
                 break;

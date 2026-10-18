@@ -26,7 +26,7 @@ pub(crate) use locate::resolve_data_dir;
 use locate::{core_command, CoreCommand};
 use resolve::resolve_core;
 use spawn::Spawned;
-use starting::{read_starting, Starting, STARTING_CAP};
+use starting::{read_starting, Starting};
 
 /// How long a core the shell started gets to answer. A warm start takes about
 /// a second; the first start of a freshly installed sidecar, scanned by the
@@ -36,8 +36,6 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 /// until the ready line came, so 10 ms costs nothing, and at 120 ms the window
 /// opened 60 ms late on average for a core that is up in about as long.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
-/// How often a caller waiting past its patience reads `core.starting.json`.
-const STARTING_POLL: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Serialize)]
 pub struct CoreEndpoint {
@@ -58,6 +56,10 @@ struct Slot {
     /// Bumped each time a new resolution starts, so that of several callers
     /// who find the same dead core only the first starts another.
     generation: u64,
+    /// The last time that resolution, past its timeout, saw the core announce
+    /// work before it serves (`core.starting.json`). Callers follow it rather
+    /// than read the file themselves.
+    announced: Option<Instant>,
 }
 
 /// Everything a start of the core depends on, decided once when the app is
@@ -224,8 +226,7 @@ impl Settled {
 /// callers only the first to see the dead core resolves; the others wait for it.
 fn current_endpoint(state: &CoreState) -> Result<CoreEndpoint, String> {
     let patience = state.launch.patience();
-    let starting = || read_starting(&state.launch.directory).is_some();
-    let settled = wait_for_endpoint(&state.slot, patience, &starting)?;
+    let settled = wait_for_endpoint(&state.slot, patience)?;
     reap_child(state);
     if !settled.stale() {
         return settled.outcome;
@@ -241,7 +242,7 @@ fn current_endpoint(state: &CoreState) -> Result<CoreEndpoint, String> {
             serde_json::json!({ "pid": settled.pid, "generation": settled.generation + 1 }));
         publish(&state.slot, resolve_core(state));
     }
-    wait_for_endpoint(&state.slot, patience, &starting)?.outcome
+    wait_for_endpoint(&state.slot, patience)?.outcome
 }
 
 /// Collects the exit of a core this shell started, if it exited. On Linux and
@@ -287,29 +288,22 @@ fn publish(slot: &(Mutex<Slot>, Condvar), outcome: Result<Resolved, String>) {
     ready.notify_all();
 }
 
-/// Waits up to `patience` for the resolution, longer while `starting` says the
-/// core announced long work before it serves (`STARTING_CAP` at most), and
-/// `patience` again from the last time it said so, as `resolve_core` does.
-fn wait_for_endpoint(slot: &(Mutex<Slot>, Condvar), patience: Duration, starting: &dyn Fn() -> bool) -> Result<Settled, String> {
+/// Waits up to `patience` for the resolution, and `patience` past the last
+/// time the resolution saw the core announce work before it serves
+/// (`Slot::announced`): the resolver waits a whole timeout past that moment,
+/// so a caller gives up only after it does.
+fn wait_for_endpoint(slot: &(Mutex<Slot>, Condvar), patience: Duration) -> Result<Settled, String> {
     let (lock, ready) = slot;
     let begun = Instant::now();
-    let mut announced = begun;
     let mut guard = lock
         .lock()
         .map_err(|_| "the core state is poisoned".to_string())?;
 
     while !guard.done {
-        let now = Instant::now();
-        let mut wait = (announced + patience).saturating_duration_since(now);
-        if now >= begun + patience {
-            if begun.elapsed() < STARTING_CAP && starting() {
-                announced = now;
-            }
-            wait = (announced + patience).saturating_duration_since(now);
-            if wait.is_zero() {
-                return Err("no core answered within the start timeout".to_string());
-            }
-            wait = wait.min(STARTING_POLL);
+        let from = guard.announced.map_or(begun, |announced| announced.max(begun));
+        let wait = (from + patience).saturating_duration_since(Instant::now());
+        if wait.is_zero() {
+            return Err("no core answered within the start timeout".to_string());
         }
         let (next, _) = ready
             .wait_timeout(guard, wait)
