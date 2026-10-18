@@ -991,11 +991,15 @@ export interface ContextUse {
  * How long the provider keeps the conversation's prompt prefix cached after the
  * last turn. A request inside that time reads the prefix from the cache at a
  * fraction of the input price; after it, the provider processes the whole
- * context again. Every hit restarts the clock, so `at` is the end of the turn
+ * context again. Every hit restarts the clock, so `at` belongs to the turn
  * that last touched the cache, not the turn that first wrote it.
  */
 export interface PromptCache {
-  /** When the turn that last used the cache finished. */
+  /**
+   * When the turn that last used the cache sent its last main-loop request,
+   * as the driver reports it (`TurnResult.cacheAt`), or when that turn
+   * finished for a driver that reports none.
+   */
   at: Timestamp;
   /** Seconds the prefix is kept after `at`. */
   ttlSeconds: number;
@@ -1343,9 +1347,11 @@ export type TurnExecution = Pick<ThreadSummary,
    * the agent carries on (`docs/restart-handoff.md`).
    * `pull-request`: a pull request the agent watches needs a look; the turn
    * carries what changed (`threads.watchPullRequest`).
+   * `keepalive`: a minimal turn the core sent so the prompt cache stays warm
+   * while the thread waits on its agents (`cacheKeepalive`); always `automatic`.
    */
-  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume' | 'pull-request';
-  /** A `compact` the core opened by the `autoCompact` setting, not one the user asked for. */
+  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume' | 'pull-request' | 'keepalive';
+  /** A `compact` the core opened by the `autoCompact` setting, or a `keepalive`: not one the user asked for. */
   automatic?: true;
 };
 
@@ -1443,7 +1449,7 @@ export function notifiesOnFinish(
 ): boolean {
   if (turn.status !== 'done' && turn.status !== 'error') return false;
   if (thread.parentThreadId) return false;
-  if (turn.execution?.operation === 'compact') return false;
+  if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return false;
   if (turn.status === 'error') return true;
   if (thread.agentSessionId) return false;
   return activeChildren === 0;
@@ -2298,6 +2304,13 @@ export interface Settings {
    * or missing: never, each agent keeps its own behaviour. Missing on older cores.
    */
   autoCompact?: AutoCompact | null;
+  /**
+   * Experimental: while a thread of the user's waits on its delegated agents
+   * or workflows, the core sends a minimal turn before its prompt cache lapses
+   * so their result is read from the cache (`docs/prompt-cache.md`). Null or
+   * missing: off. Missing on older cores.
+   */
+  cacheKeepalive?: CacheKeepalive | null;
   /**
    * The models the user starred, one list for all of the owner's machines:
    * each client keeps the newest one it saw by `at` and writes it to every
@@ -5259,8 +5272,8 @@ export const HELLO_ACCEPTED = ['thread.load'] as const;
 export type HelloAccepted = (typeof HELLO_ACCEPTED)[number];
 
 export { attachmentError, answerAttachmentError } from './attachment-validation.ts';
-export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, MODEL_FAVORITES_MAX, checkSettingsPatch, compareModelFavorites, keepLaterFavorites, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
-import type { AutoCompact } from './settings-validation.ts';
+export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, CACHE_KEEPALIVE_HOURS, MODEL_FAVORITES_MAX, checkSettingsPatch, compareModelFavorites, keepLaterFavorites, type AutoCompact, type AutoCompactMoment, type CacheKeepalive, type SettingsPatchCheck } from './settings-validation.ts';
+import type { AutoCompact, CacheKeepalive } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export {

@@ -90,6 +90,17 @@ export interface AutoCompact {
   moments: AutoCompactMoment[];
 }
 
+/** The bounds of `CacheKeepalive.hours`, and what the setting offers first. */
+export const CACHE_KEEPALIVE_HOURS = { min: 1, max: 24, default: 12 } as const;
+
+export interface CacheKeepalive {
+  /**
+   * How long a thread's prompt cache is kept warm while it waits on its
+   * delegated agents or workflows, counted from the end of its last turn.
+   */
+  hours: number;
+}
+
 const NUMERIC_KEYS = ['warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetPercent', 'memoryReserveMb'] as const;
 const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'asyncQuestions', 'shortAnswers', 'toolSummaries', 'agentLogAccess', 'autoResumeLimitedThreads'] as const;
 /** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
@@ -275,6 +286,14 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       return { ok: false, field: 'autoCompact', message: `autoCompact.moments must list at least one of ${MOMENTS.join(', ')}` };
     }
     next.autoCompact = { tokens: tokens as number | null, moments: MOMENTS.filter((moment) => moments.includes(moment)) };
+  }
+  if (patch.cacheKeepalive !== undefined && patch.cacheKeepalive !== null) {
+    const { hours } = (typeof patch.cacheKeepalive === 'object' ? patch.cacheKeepalive : {}) as Partial<CacheKeepalive>;
+    const HOURS = CACHE_KEEPALIVE_HOURS;
+    if (!Number.isInteger(hours) || hours! < HOURS.min || hours! > HOURS.max) {
+      return { ok: false, field: 'cacheKeepalive', message: `cacheKeepalive must be null or { hours }, an integer between ${HOURS.min} and ${HOURS.max}` };
+    }
+    next.cacheKeepalive = { hours: hours! };
   }
   if (patch.modelFavorites !== undefined) {
     const favorites = checkModelFavorites(patch.modelFavorites);
