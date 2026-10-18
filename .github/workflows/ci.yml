@@ -116,7 +116,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      # Core data directories, worktrees and Chrome profiles go to the runner's
+      # temp drive (D: on Windows), as in the E2E shards (docs/ci.md#build-cost).
       - run: bun run --cwd packages/core test
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
 
   web:
     name: Type checks and UI tests
