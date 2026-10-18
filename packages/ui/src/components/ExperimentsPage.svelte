@@ -1,10 +1,14 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import GoalTrackerSetting from './GoalTrackerSetting.svelte';
+  import type { Store } from '../lib/store.svelte';
   import { untrack } from 'svelte';
   import { EXPERIMENT_IDS, readExperiments, setExperiment, type ExperimentId } from '../lib/experiments';
   import { experimentCopy } from '../lib/experiment-copy';
   import { strings } from '../lib/strings';
 
+  /** The machine the page's core settings belong to: the `/goal2` checklist model is one of them. */
+  let { store }: { store?: Store } = $props();
   const uid = $props.id();
 
   let copy = $derived(experimentCopy());
@@ -38,6 +42,9 @@
           onchange={(event) => toggle(id, event.currentTarget.checked)}
         />
       </label>
+      {#if id === 'goal2' && enabled.includes(id) && store?.settings}
+        <GoalTrackerSetting {store} />
+      {/if}
     {/each}
   </section>
 </div>

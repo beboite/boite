@@ -182,3 +182,54 @@ test('a reviewed goal past its five reviews counts the extra round in the total'
   render({ tasks: [], loop: null, goal: { objective: 'Fix it', status: 'paused', blocked: true, iterations: 6, error: null, review: { phase: 'working', maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 5, verdicts } } });
   expect(document.querySelector('[data-testid=activity-goal-reviews]')!.textContent).toContain('Review 6 of 6 · Partial');
 });
+
+test('a reviewed goal\'s checklist takes the task line, counts what is done without dropped items and shows where an item came from', async () => {
+  const store = render({ tasks: tasks(), loop: null, goal: { objective: 'Fix the parser and add a test', status: 'active', iterations: 3, error: null,
+    review: { phase: 'working', maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] },
+    checklist: { threadId: 'tracker-1', phase: 'idle', model: 'claude/claude-opus-5-5', effort: 'medium', error: null, items: [
+      { id: 1, text: 'Fix the parser', source: 'Fix the parser', status: 'done' },
+      { id: 2, text: 'Add a test', source: 'add a test', status: 'open', bounced: 2 },
+      { id: 3, text: 'Rename the module', source: 'rename it', status: 'cancelled' },
+      { id: 4, text: 'Keep the old API', source: 'keep the old API please', status: 'open', added: true },
+    ] } } });
+  const open = vi.spyOn(store, 'open').mockResolvedValue(undefined as never);
+  // The user's list, not the agent's own plan: its first open item and its count.
+  expect(toggle().dataset.checklist).toBe('true');
+  expect(toggle().textContent).toContain('Add a test');
+  expect(toggle().textContent).toContain('1/3 done');
+  expect(toggle().textContent).not.toContain('Check the result');
+  toggle().click();
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=goal-checklist-item]')).not.toBeNull());
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid=goal-checklist-item]')];
+  expect(rows.map(row => [row.dataset.status, row.dataset.held ?? null, row.textContent?.trim()])).toEqual([
+    ['done', null, 'Fix the parser'],
+    ['open', 'true', 'Add a test'],
+    ['cancelled', null, 'Rename the module'],
+    ['open', null, 'Keep the old API added'],
+  ]);
+  expect(rows[1]!.querySelector('[role=img]')!.getAttribute('aria-label')).toBe('Sent back twice; the review decides');
+  expect(document.querySelector('[data-testid=activity-tasks]')).toBeNull();
+  rows[3]!.querySelector<HTMLButtonElement>('button')!.click();
+  flushSync();
+  expect(document.querySelector('[data-testid=goal-checklist-source]')!.textContent).toBe('You wrote: "keep the old API please"');
+  document.querySelector<HTMLButtonElement>('[data-testid=goal-checklist-open]')!.click();
+  expect(open).toHaveBeenCalledWith('tracker-1');
+});
+
+test('the checklist line says when its tracker reads, and why there is no list', async () => {
+  const goal = (phase: 'idle' | 'writing' | 'checking', items: number, error: string | null = null): ThreadActivity => ({ tasks: [], loop: null, goal: { objective: 'Ship it', status: 'active', iterations: 1, error: null,
+    review: { phase: 'working', maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] },
+    checklist: { threadId: null, phase, model: null, effort: null, error, items: Array.from({ length: items }, (_, i) => ({ id: i + 1, text: `Item ${i + 1}`, source: '', status: 'open' as const })) } } });
+  const line = () => toggle().querySelector('.current')!;
+  render(goal('writing', 0));
+  expect(line().textContent).toBe('Writing the checklist');
+  expect(line().classList.contains('busy')).toBe(true);
+  unmount(view!, { outro: false });
+  render(goal('checking', 2));
+  expect(line().textContent).toBe('Checking the last turn');
+  unmount(view!, { outro: false });
+  render(goal('idle', 0, 'The tracker wrote an empty checklist.'));
+  expect(line().textContent).toBe('No checklist');
+  toggle().click();
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=goal-checklist-error]')!.textContent).toBe('The tracker wrote an empty checklist.'));
+});

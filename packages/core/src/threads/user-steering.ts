@@ -74,6 +74,8 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
       runner.answerAfter.set(turnId, message.createdAt);
       saveThread(core, threads.require(threadId), 'thread.userInput');
     })());
+    // A `/goal2`'s checklist reads what the user adds, drops or changes.
+    core.activity.userMessage(threadId, prompt);
     return { accepted: true };
   } catch (error) {
     throw refused(`delivery of this message is unconfirmed: ${messageOf(error)}`, { reason: 'delivery-uncertain', threadId });

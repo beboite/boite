@@ -181,12 +181,23 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 490,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,860,100 |
+| UI entry chunk | 493,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,874,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,439,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,462,500 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the `/goal2` checklist rebased on `origin/main` at `feccdfcd`
+measures 492,794 entry bytes, 4,873,810 UI bytes and 4,462,301 core
+JavaScript bytes with `measure()` after fresh `bun run build:ui` and
+`bun run build:core` on Linux, against 490,175, 4,859,521 and 4,438,396 for
+that main as #590 and #592 measured it. The tracker, its prompts, its route
+and the model read before a reviewer or a tracker starts add 23,905 core
+bytes. The list itself loads outside the entry chunk; the entry keeps the goal
+bar's checklist line and the new English sentences (2,619 bytes), and the UI
+total adds the list, the model row and both languages (14,289 bytes). The
+three limits rise to 493,000, 4,874,000 and 4,462,500.
 
 On 2026-10-18, the lighter sidebar project headers (PR #592) merged with
 `origin/main` at `36ef9a81` measure 4,859,521 UI bytes with `measure()` after

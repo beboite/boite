@@ -687,6 +687,8 @@ export class ThreadStore {
       accepted.dismissal?.();
       // His own message puts the agent back to work, so a pause left by Stop or a restart ends with it.
       if (!activity && !operation && !startedBy) this.core.coordination.resumeForUser(threadId);
+      // A `/goal2`'s checklist reads what the user adds, drops or changes.
+      if (!activity && !operation && !startedBy && !nativeCommandPrompt(prompt)) this.core.activity.userMessage(threadId, prompt);
     });
     this.autoCompact.cancel(threadId);
     this.core.scheduler.enqueue(turn, thread.accountId);

@@ -207,7 +207,8 @@ cancel it. A goal continues through scheduled turns until the agent emits
 `[BOITE_GOAL_COMPLETE]` on its own line. The prompt requests that marker only
 after verification. `[BOITE_GOAL_BLOCKED]`, an error or Escape pauses it.
 With the Reviewed goals experiment, `/goal2` turns that marker into a claim
-that a fresh reviewer conversation must pass ([experiments](experiments.md#reviewed-goals)).
+that a fresh reviewer conversation must pass, and keeps a checklist of the
+user's requests that each turn hears ([experiments](experiments.md#the-checklist)).
 A blocked goal is marked `blocked`: the bar asks for an answer, and the user's
 next message, other than a native `/command`, resumes the goal once that reply's
 turn ends. Escape also pauses a loop between runs. The activity bar has pause, resume,

@@ -3,6 +3,7 @@
   import type { Todo } from '@boite/contracts';
   import { watchStatus } from '../lib/pull-request-watch';
   import InfoTip from './InfoTip.svelte';
+  import GoalChecklist from './GoalChecklistLoader.svelte';
   import { time } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -68,6 +69,10 @@
               <span class="state ui-label-box" class:live={activity.goal.status === 'active'}><span class="ui-label">{strings.activity[activity.goal.status]}</span></span>
             {/if}
           </div>
+          <!-- A `/goal2`'s checklist: what the user asked for, under the goal it belongs to. -->
+          {#if activity.goal.checklist && (activity.goal.checklist.items.length > 0 || activity.goal.checklist.error)}
+            <div class="goal-checklist" data-testid="tasks-checklist"><GoalChecklist {store} checklist={activity.goal.checklist} /></div>
+          {/if}
         {/if}
         {#if activity?.loop}
           <div class="line" data-testid="tasks-loop">
@@ -295,6 +300,11 @@
   section {
     flex: none;
     min-width: 0;
+  }
+
+  /* Indented under the goal's target icon, the way the bar's details sit under its toggle. */
+  .goal-checklist {
+    padding-inline-start: 14px;
   }
 
   .head {

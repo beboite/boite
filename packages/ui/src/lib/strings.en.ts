@@ -1237,6 +1237,23 @@ export const strings = {
     noHistory: 'No completed iterations yet',
     allTasksDone: 'All tasks completed',
     waitingTasks: 'Waiting for next task',
+    /** A `/goal2`'s checklist: what the user asked for, kept by another model. */
+    checklist: 'Checklist',
+    checklistWriting: 'Writing the checklist',
+    checklistUpdating: 'Reading your message',
+    checklistChecking: 'Checking the last turn',
+    checklistAllDone: 'Everything you asked for is done',
+    checklistCount: '{done}/{total} done',
+    checklistUnavailable: 'No checklist',
+    checklistAdded: 'added',
+    checklistChanged: 'changed',
+    checklistOpen: 'To do',
+    checklistDone: 'Done',
+    checklistDropped: 'Dropped',
+    checklistHeld: 'Sent back twice; the review decides',
+    checklistSource: 'You wrote: {source}',
+    openChecklist: 'Open the checklist conversation',
+    checklistLoadFailed: 'The checklist could not load.',
     stopped: 'Stopped',
     running: 'Running',
     done: 'Done',
@@ -2530,7 +2547,16 @@ export const strings = {
       drop: 'Drop the whip'
     },
     previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
-    goal2: { title: 'Reviewed goals', hint: 'Adds /goal2: when the agent says the goal is done, a new conversation that has not seen its work checks it and answers pass, partial or fail. Anything but a pass goes back to the agent, for up to five reviews' },
+    goal2: {
+      title: 'Reviewed goals',
+      hint: 'Adds /goal2: another model writes the checklist of everything you asked for, updates it when you add or change something and, after each turn of the agent, tells it what is still open. When the agent says the goal is done, a new conversation that has not seen its work checks it and answers pass, partial or fail. Anything but a pass goes back to the agent, for up to five reviews',
+      trackerModel: 'Checklist model',
+      trackerModelHint: 'Writes the checklist from your messages and checks it after every turn of the agent, on this machine. Automatic picks Opus at medium or Sol at high, the conversation\'s own agent first, else the conversation\'s model. A small model drops and inverts requests on long prompts.',
+      trackerAuto: 'Automatic',
+      trackerAutoHint: 'Opus medium or Sol high',
+      trackerEffort: 'Reasoning of the checklist model',
+      trackerEffortDefault: 'Default'
+    },
     themeGrain: {
       title: 'Grain theme',
       hint: 'A grainy ground fading from light grey at the top left to black at the bottom right'

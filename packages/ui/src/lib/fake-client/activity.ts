@@ -5,6 +5,7 @@ import { RpcFailure } from '../client';
 import { refusal } from './shared';
 import { workflowAnswer, workflowChild } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
+import { checking, checkTurn, startChecklist, stopChecklist } from './checklist';
 
 /**
  * The in-memory reviewer of a `/goal2`: a child conversation that answers
@@ -90,6 +91,8 @@ function scheduleActivity(ctx: FakeContext, threadId: string, delay = 0): void {
       if (activity.loop?.status === 'active') scheduleActivity(ctx, threadId, Math.max(0, (activity.loop.nextRunAt ?? Date.now()) - Date.now()));
       return;
     }
+    // A check of the last turn decides what the next turn hears, or whether a claim goes back.
+    if (kind === 'goal' && checking(thread)) return;
     if (kind === 'goal' && thread.activity?.goal?.review?.phase === 'reviewing') { startReview(ctx, thread); return; }
     const review = kind === 'goal' ? thread.activity?.goal?.review : undefined;
     try {
@@ -144,6 +147,7 @@ export function finishActivityTurn(ctx: FakeContext, turn: Turn): void {
         else goal.status = 'complete';
         ctx.publishActivity(thread);
       }
+      if (goal?.checklist && goal.status !== 'complete') { checkTurn(ctx, thread, () => scheduleActivity(ctx, thread.id, 250)); return; }
       scheduleActivity(ctx, thread.id, 250);
     }
   }
@@ -178,9 +182,10 @@ function setGoal(ctx: FakeContext, thread: Thread, activity: ThreadActivity, goa
   const error = validateGoal(thread, goal);
   if (error) throw error;
   stopReview(ctx, thread);
+  stopChecklist(ctx, thread);
   activity.goal = goal === null ? null : {
     objective: goal.objective.trim(), status: 'active', iterations: 0, error: null,
-    ...(goal.review ? { review: { phase: 'working' as const, maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] } } : {}),
+    ...(goal.review ? { review: { phase: 'working' as const, maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] }, checklist: { threadId: null, phase: 'idle' as const, items: [], model: null, effort: null, error: null } } : {}),
   };
 }
 
@@ -260,6 +265,7 @@ export function activityMethods(ctx: FakeContext) {
       if (params.loop !== undefined) setLoop(activity, params.loop);
       updateActivityAttachments(ctx, thread, params, attachments);
       thread.activity = activity;
+      if (params.goal?.review) startChecklist(ctx, thread);
       ctx.publishActivity(thread);
       scheduleActivity(ctx, thread.id);
       return structuredClone(activity);
@@ -268,6 +274,7 @@ export function activityMethods(ctx: FakeContext) {
       const thread = ctx.thread(params.threadId);
       const activity = validateControl(thread, params);
       if (params.kind === 'goal' && params.action !== 'resume') stopReview(ctx, thread);
+      if (params.kind === 'goal' && (params.action === 'remove' || params.action === 'complete')) stopChecklist(ctx, thread);
       applyControl(activity, params);
       if (params.action === 'remove' || params.action === 'complete') {
         const key = `${thread.id}:${params.kind}`;

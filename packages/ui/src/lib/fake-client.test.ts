@@ -939,6 +939,23 @@ test('a fake reviewed goal fails its first review, works on the finding and pass
   expect(thread.messages.filter(m => m.role === 'user').map(m => m.parts[0]?.type === 'text' && m.parts[0].text)).toEqual(['/goal2 Rename the empty state', '/goal2 Rename the empty state']);
 });
 
+test('a fake reviewed goal keeps a checklist and sends a claim back while items stay open', async ({ createClient }) => {
+  vi.useFakeTimers();
+  const client = await createClient({ delayMs: 1 });
+  const { id: threadId } = await newThread(client);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Rename the empty state, add a test and update the docs. Keep the old label', review: true } });
+  await vi.runAllTimersAsync();
+  const thread = await client.call('threads.get', { threadId });
+  const goal = thread.activity!.goal!;
+  // One item per clause, two ticked per turn: the first claim went back with two still open.
+  expect(goal.checklist!.items.map(item => [item.text, item.status, item.bounced ?? 0])).toEqual([
+    ['Rename the empty state', 'done', 0], ['Add a test', 'done', 0], ['Update the docs', 'done', 1], ['Keep the old label', 'done', 1],
+  ]);
+  expect(goal).toMatchObject({ status: 'complete', iterations: 3, checklist: { phase: 'idle', error: null } });
+  expect(goal.review!.verdicts.map(v => v.verdict)).toEqual(['fail', 'pass']);
+  expect((await client.call('threads.get', { threadId: goal.checklist!.threadId! })).parentThreadId).toBe(threadId);
+});
+
 test('a task list set after the fake claim, before its review starts, still gets a verdict', async ({ createClient }) => {
   vi.useFakeTimers();
   const client = await createClient({ delayMs: 1 });

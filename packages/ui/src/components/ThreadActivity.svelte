@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
-  import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Settings2, ShieldQuestion, Target, X } from '@lucide/svelte';
+  import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListChecks, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Settings2, ShieldQuestion, Target, X } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
@@ -12,6 +12,7 @@
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import { settingHeading } from '../lib/setting-requests';
   import AgentSettingCard from './AgentSettingCardLoader.svelte';
+  import GoalChecklist from './GoalChecklistLoader.svelte';
 
   let { store, reserveInComposer = false, onroom }: {
     store: Store;
@@ -93,6 +94,22 @@
     const last = review.verdicts.at(-1);
     // Each reply after the five-review stop allows one more, so the round can pass the total.
     return last ? `${fill(strings.activity.reviewRoundOf, { round: String(last.round), total: String(Math.max(review.maxRounds, last.round)) })} · ${strings.activity[last.verdict]}` : '';
+  });
+  /*
+   * A `/goal2`'s checklist takes the bar's task line: the user's requests, not
+   * the agent's own plan, which stays in the Tasks panel. Dropped items count
+   * for nothing.
+   */
+  let checklist = $derived(goal?.checklist ?? null);
+  let tracked = $derived(!!checklist && (checklist.items.length > 0 || checklist.phase !== 'idle' || checklist.error !== null));
+  let listed = $derived(checklist?.items.filter((item) => item.status !== 'cancelled') ?? []);
+  let ticked = $derived(listed.filter((item) => item.status === 'done').length);
+  let checklistLine = $derived.by(() => {
+    if (!checklist) return '';
+    if (checklist.phase === 'writing') return checklist.items.length ? strings.activity.checklistUpdating : strings.activity.checklistWriting;
+    if (checklist.phase === 'checking') return strings.activity.checklistChecking;
+    if (!checklist.items.length) return strings.activity.checklistUnavailable;
+    return listed.find((item) => item.status === 'open')?.text ?? strings.activity.checklistAllDone;
   });
   const detailsId = $props.id();
 
@@ -320,24 +337,28 @@
         </div>
       {/if}
     {/each}
-    {#if tasks.length || loop || verdicts.length}
+    {#if tracked || tasks.length || loop || verdicts.length}
       <button type="button" class="ghost tasks-toggle" aria-expanded={expanded} aria-controls={detailsId}
-        data-testid="activity-tasks-toggle" onclick={() => (expanded = !expanded)}
+        data-testid="activity-tasks-toggle" data-checklist={tracked || undefined} onclick={() => (expanded = !expanded)}
         onkeydown={(event) => { if (event.key === 'Escape') { expanded = false; event.stopPropagation(); } }}>
         <span class="toggle-line">
-          <ListTodo size={16} />
-          <span class="current ui-label">{tasks.length ? current : loop ? strings.activity.history : strings.activity.reviews}</span>
-          {#if tasks.length}<span class="count ui-label">{fill(strings.activity.taskCount, { done: String(done), total: String(tasks.length) })}</span>{/if}
+          {#if tracked}<ListChecks size={16} />{:else}<ListTodo size={16} />{/if}
+          <span class="current ui-label" class:busy={tracked && checklist?.phase !== 'idle'}>{tracked ? checklistLine : tasks.length ? current : loop ? strings.activity.history : strings.activity.reviews}</span>
+          {#if tracked && listed.length}<span class="count ui-label" data-testid="activity-checklist-count">{fill(strings.activity.checklistCount, { done: String(ticked), total: String(listed.length) })}</span>
+          {:else if !tracked && tasks.length}<span class="count ui-label">{fill(strings.activity.taskCount, { done: String(done), total: String(tasks.length) })}</span>{/if}
           <ChevronDown size={16} class={expanded ? 'turned' : ''} />
         </span>
         <!-- Inside the toggle so its hover fill covers the bar and the card's air
              is the same above the first line and under the bar. The count
              already says it in words, the bar only draws it. -->
-        {#if tasks.length}<progress max={tasks.length} value={done} aria-hidden="true"></progress>{/if}
+        {#if tracked && listed.length}<progress max={listed.length} value={ticked} aria-hidden="true"></progress>
+        {:else if !tracked && tasks.length}<progress max={tasks.length} value={done} aria-hidden="true"></progress>{/if}
       </button>
       <div class="disclosure-fold" class:open={expanded} inert={!expanded}>
         <div id={detailsId}>
-          {#if tasks.length}
+          {#if tracked && checklist}
+            <GoalChecklist {store} {checklist} />
+          {:else if tasks.length}
             <ul data-testid="activity-tasks">
               {#each tasks as task (task.id)}
                 <li class:done={task.status === 'completed'}>
@@ -445,6 +466,8 @@
   .task-mark[data-status='completed'] { color: var(--color-success); }
   .task-mark[data-status='in_progress'] { color: var(--color-live); }
   .done { color: var(--color-muted-foreground); }
+  /* The tracker is reading: the line breathes until it answers. */
+  .current.busy { animation: pulse 1.8s var(--loop-ease-in-out-54) infinite var(--loops); }
   .history li { display: block; border-top: 1px solid var(--color-border); padding-block: 8px; }
   .run-heading { display: flex; justify-content: space-between; gap: 12px; }
   .history p { margin: 4px 0 0; white-space: pre-wrap; }
@@ -471,6 +494,6 @@
     .blocker { align-items: flex-start; }
     .waiting-dot { margin-top: 7px; }
   }
-  :global(html[data-motion='reduced']) .waiting-dot, :global(html[data-motion='reduced']) .verdict::before { animation: none; }
-  @media (prefers-reduced-motion: reduce) { .waiting-dot, .verdict::before { animation: none; } .activity, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
+  :global(html[data-motion='reduced']) .waiting-dot, :global(html[data-motion='reduced']) .verdict::before, :global(html[data-motion='reduced']) .current.busy { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .waiting-dot, .verdict::before, .current.busy { animation: none; } .activity, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
 </style>
