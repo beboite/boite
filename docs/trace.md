@@ -82,7 +82,9 @@ belongs to the global job on the same port; the Worker drops that job's copy of
 every start and exit and posts only its memory budget alert. A process that
 already exited may have no readable identity and stay outside the trace while
 its CPU remains in job totals. Console hosts are similarly excluded from trace
-rows and load while remaining in totals. Terminating a job requires explicit
+rows and load while remaining in totals, known by their image name or, when
+that read fails on a host caught as it starts, by the program their command
+line starts. Terminating a job requires explicit
 exit reconciliation because the port may report only the empty-job event.
 
 `process.started` and `process.exited` carry the available PID, parent PID,

@@ -84,6 +84,18 @@ const EVENTS_NOTE =
  */
 const CONSOLE_HOSTS = new Set(['conhost.exe', 'openconsole.exe']);
 
+/**
+ * Whether a process is a console host, by its image name or, when that read
+ * fails, the program its command line starts: a host caught as it starts can
+ * refuse QueryFullProcessImageNameW and still show `\??\...\conhost.exe 0x4`
+ * (Windows CI, 2026-10-18), and it then entered the trace as `unknown`.
+ */
+export function consoleHost(exe: string | null, commandLine: string | null): boolean {
+  if (exe !== null) return CONSOLE_HOSTS.has(baseName(exe));
+  const program = commandLine === null ? null : /^\s*(?:"([^"]+)"|(\S+))/.exec(commandLine);
+  return program !== null && CONSOLE_HOSTS.has(baseName(program[1] ?? program[2] ?? ''));
+}
+
 function loadKernel32() {
   return dlopen('kernel32.dll', {
     CreateJobObjectW: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
@@ -756,8 +768,9 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
     sink?.started(threadId, pid, { exe: 'unknown', commandLine: null, parentPid: null });
     return;
   }
-  const exe = imageNameOf(api, handle) ?? 'unknown';
-  if (CONSOLE_HOSTS.has(baseName(exe))) {
+  const exe = imageNameOf(api, handle);
+  const commandLine = commandLineOf(api, handle);
+  if (consoleHost(exe, commandLine)) {
     ignored.add(pid);
     api.close(handle);
     return;
@@ -765,8 +778,8 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
   const identity = creationIdentityOf(api, handle);
   tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });
   sink?.started(threadId, pid, {
-    exe,
-    commandLine: commandLineOf(api, handle),
+    exe: exe ?? 'unknown',
+    commandLine,
     parentPid: parentPidOf(api, handle),
     ...identity,
   });

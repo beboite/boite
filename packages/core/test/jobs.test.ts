@@ -3,7 +3,7 @@ import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
 import { RpcErrorCode } from '@boite/contracts';
 import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
-import { cpuRateOfGlobalJob, memoryLimitOfJob, releaseThreadJob, sampleThreadJob } from '../src/platform/windows/jobs.ts';
+import { consoleHost, cpuRateOfGlobalJob, memoryLimitOfJob, releaseThreadJob, sampleThreadJob } from '../src/platform/windows/jobs.ts';
 import { jobPacketAction, MSG_JOB_MEMORY_LIMIT, MSG_NEW_PROCESS } from '../src/platform/windows/jobs-packets.ts';
 import { resolveMemoryLimits } from '../src/memory-limits.ts';
 import { processPlatform } from '../src/platform/index.ts';
@@ -269,6 +269,15 @@ describeWindows('windows job objects', () => {
     harness.core.procs.killTree(threadId);
     await child.exited;
   }, 30000);
+});
+
+test('a console host whose image name could not be read is still left out of the trace by its command line', () => {
+  // The process a CI run caught: opened, its command line read, its image name refused.
+  expect(consoleHost(null, String.raw`\??\C:\Windows\system32\conhost.exe 0x4`)).toBe(true);
+  expect(consoleHost(String.raw`C:\Windows\System32\OpenConsole.exe`, null)).toBe(true);
+  expect(consoleHost(null, String.raw`"C:\Program Files\conhost.exe tools\bun.exe" -e 1`)).toBe(false);
+  expect(consoleHost(String.raw`C:\bun\bun.exe`, 'conhost.exe 0x4')).toBe(false);
+  expect(consoleHost(null, null)).toBe(false);
 });
 
 describe('the jobs Worker packet filter', () => {
