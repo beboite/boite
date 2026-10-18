@@ -13,7 +13,10 @@ const single = {
 };
 
 let dir = '';
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  if (dir) rmSync(dir, { recursive: true, force: true });
+  dir = '';
+});
 
 function repo() {
   dir = mkdtempSync(join(tmpdir(), 'split-catalogues-'));
