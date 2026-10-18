@@ -165,7 +165,7 @@
     if (!anchor || !viewport?.isConnected || pinned || navigationTarget || promptTarget) return;
     const delta = anchors.drift(viewport, anchor);
     if (delta === null) return;
-    if (Math.abs(delta) > 1) { viewport.scrollTop += delta; scrollTop = viewport.scrollTop; }
+    if (Math.abs(delta) >= 0.5) { viewport.scrollTop += delta; scrollTop = viewport.scrollTop; }
     anchors.current = anchor;
   }
   function releaseAnchor() { anchors.restoring = false; }

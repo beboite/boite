@@ -142,7 +142,8 @@ export async function loadKeepingReader(
   if (!view) return added;
   const node = view.querySelector<HTMLElement>(`[data-mid="${CSS.escape(kept.id)}"]`);
   const drift = node ? node.getBoundingClientRect().top - view.getBoundingClientRect().top - kept.offset : 0;
-  if (Math.abs(drift) > 1) view.scrollTop += drift;
+  // Row heights are summed rounded to whole pixels: what they leave, half a pixel or more, still shows.
+  if (Math.abs(drift) >= 0.5) view.scrollTop += drift;
   // The window was put where the rows say the reader is; the page says where it is.
   moved(view.scrollTop);
   return added;

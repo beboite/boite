@@ -131,4 +131,17 @@ describe('history gaps', () => {
     expect(await loadKeepingReader(async (landing) => { landing(); return 3; }, () => undefined, hold, async () => {}, moved)).toBe(3);
     expect(hold).toHaveBeenCalledTimes(2);
   });
+
+  test('a page that leaves the reader under a pixel off, from rows measured in whole pixels, still puts it back', async () => {
+    const view = document.createElement('div');
+    const row = document.createElement('article');
+    row.dataset['mid'] = 'm-2';
+    view.append(row);
+    let rowTop = 20;
+    view.getBoundingClientRect = () => ({ top: 0, bottom: 600 }) as DOMRect;
+    row.getBoundingClientRect = () => ({ top: rowTop, bottom: rowTop + 80 }) as DOMRect;
+    // Rounded row heights add up 0.6 px short of the drawn ones: the reader would see its text move a pixel.
+    await loadKeepingReader(async (landing) => { landing(); rowTop = 20.6; return 3; }, () => view, () => {}, async () => {}, () => {});
+    expect(view.scrollTop).toBeCloseTo(0.6);
+  });
 });
