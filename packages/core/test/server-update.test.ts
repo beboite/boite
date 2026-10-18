@@ -10,6 +10,7 @@ import { applyServerUpdate, clearStaleUpdates, recoverServerUpdate, UNSAVED_DATA
 import { linuxServerUpdates, unitWord } from '../src/platform/linux-server-update.ts';
 import type { ServerUpdatePlan, ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { echoThread, holdAccountTurns, startTestCore, waitFor } from './harness.ts';
+import { lockDataDir } from '../src/main.ts';
 
 /** A publisher key and a Minisign packet over `bytes`, in the shape Tauri publishes. */
 function publisher() {
@@ -369,7 +370,7 @@ test('with the data on another filesystem, an update reserves room there for the
   }
 });
 
-test('a rollback whose data restore fails still starts the previous installation, and the recovery puts the data back', async () => {
+test('a rollback whose data restore fails after the new version ran keeps the server stopped until the recovery puts the data back', async () => {
   const f = await updateFixture();
   writeFileSync(join(f.operation, 'admitted'), f.id);
   const spare = 1024;
@@ -382,34 +383,115 @@ test('a rollback whose data restore fails still starts the previous installation
   } };
   try {
     await expect(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk, health: async () => null })).rejects.toThrow('EIO');
-    expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
+    // The previous core would open the data the rejected one migrated: nothing starts it.
+    expect(f.controls).toEqual(['stop', 'start', 'stop']);
     expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('old executable');
-    expect(f.result().error).toContain('the previous version was restored but not yet its data (EIO');
+    expect(f.result().error).toContain('the previous data could not be put back yet (EIO');
+    expect(f.result().error).toContain('the server stays stopped');
     expect(existsSync(join(f.backup, 'data', 'journal.db'))).toBe(true);
-    // Not finished: the recovery that follows the worker's exit retries the data.
+    // Recorded for a start after a power cut, and not finished: the recovery that follows the worker's exit retries.
+    expect(JSON.parse(readFileSync(`${f.data}.rollback.json`, 'utf8')).id).toBe(f.id);
     expect(existsSync(join(f.operation, 'finished'))).toBe(false);
     await recoverServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, health: async () => null });
     f.expectPrevious();
     expect(f.controls.at(-1)).toBe('start');
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(false);
     expect(existsSync(f.operation)).toBe(false);
   } finally { f.stop(); }
 });
 
-test('a core starting after a power cut interrupted a rollback swap puts the previous data back before opening it', async () => {
+test('a rollback whose only failure is deleting the used snapshot starts the previous version and finishes', async () => {
+  const f = await updateFixture();
+  writeFileSync(join(f.operation, 'admitted'), f.id);
+  const spare = 1024;
+  const need = snapshotSize(f.data) + spare;
+  const low = lowDisk(f.root, { root: need, data: need }, { data: 'data' });
+  const disk: Partial<UpdateDisk> = { ...low.disk, rename: (source, target) => {
+    if (target.endsWith('.consumed')) throw Object.assign(new Error(`EIO: i/o error, rename '${source}'`), { code: 'EIO' });
+    low.disk.rename!(source, target);
+  } };
+  try {
+    await expect(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk, health: async () => null })).rejects.toThrow('healthy');
+    f.expectPrevious();
+    expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
+    expect(existsSync(join(f.operation, 'finished'))).toBe(true);
+  } finally { f.stop(); }
+});
+
+/** A rollback a power cut stopped: its record, and the restored copy beside the data or the snapshot still in the backup. */
+function cutRollback(f: Awaited<ReturnType<typeof updateFixture>>, moved: boolean, id = f.id) {
+  const restored = `${f.data}.restore-${id}`;
+  const snapshot = join(f.root, `.boite-backup-${id}`, 'data');
+  cpSync(f.data, moved ? restored : snapshot, { recursive: true, filter: (source) => !source.includes('checkpoints') });
+  if (moved) renameSync(join(f.data, 'checkpoints'), join(restored, 'checkpoints'));
+  writeFileSync(`${f.data}.rollback.json`, JSON.stringify({ id, snapshot }));
+  writeFileSync(join(f.data, 'pairing.json'), 'new run changed pairing');
+  return { restored, snapshot };
+}
+
+const prepare = (dataDir: string) => mkdirSync(dataDir, { recursive: true });
+
+for (const moved of [true, false]) test(`a core starting after a power cut cut off a rollback ${moved ? 'swap' : 'copy'} puts the previous data back before opening it, once`, async () => {
   const f = await updateFixture();
   try {
-    // The snapshot is back beside the data and took the live checkpoints; the rejected data is still in place.
-    const restored = `${f.data}.restore-${f.id}`;
-    cpSync(f.data, restored, { recursive: true, filter: (source) => !source.includes('checkpoints') });
-    renameSync(join(f.data, 'checkpoints'), join(restored, 'checkpoints'));
-    writeFileSync(join(f.data, 'pairing.json'), 'new run changed pairing');
+    const { snapshot } = cutRollback(f, moved);
     // Imported as the startup does, so a release without it fails here rather than at load.
-    const { finishInterruptedRestore } = await import('../src/server-update/restore.ts');
-    expect(finishInterruptedRestore(f.data)).toBe(f.id);
+    const { openDataDir } = await import('../src/server-update/restore.ts');
+    openDataDir(f.data, prepare)();
     f.expectPrevious();
     expect(readFileSync(join(`${f.data}.failed-${f.id}`, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
     expect(f.result().error).toContain('rollback was cut off');
-    expect(finishInterruptedRestore(f.data)).toBeNull();
+    expect(existsSync(snapshot)).toBe(false);
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(false);
+    // The next start finds nothing to do.
+    writeFileSync(join(f.data, 'pairing.json'), 'paired after the recovery');
+    openDataDir(f.data, prepare)();
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('paired after the recovery');
+  } finally { f.stop(); }
+});
+
+test('a starting core never moves the data under a live core, and older restores never replay over a completed one', async () => {
+  const f = await updateFixture();
+  try {
+    const { openDataDir } = await import('../src/server-update/restore.ts');
+    cutRollback(f, true);
+    // An older interrupted rollback's copy, and one whose name is no valid id.
+    const older = uuid('1');
+    cpSync(`${f.data}.restore-${f.id}`, `${f.data}.restore-${older}`, { recursive: true });
+    writeFileSync(join(`${f.data}.restore-${older}`, 'pairing.json'), 'older restore pairing');
+    utimesSync(`${f.data}.restore-${older}`, new Date(2030, 0, 1), new Date(2030, 0, 1));
+    mkdirSync(`${f.data}.restore-junk`);
+    // A live core (a process that is not this one, wrote the lock after it started) holds the data.
+    writeFileSync(join(f.data, 'core.lock'), JSON.stringify({ pid: process.ppid, startedAt: Date.now() }));
+    const live = (dataDir: string) => lockDataDir(dataDir, () => 0, () => 0, () => null);
+    expect(() => openDataDir(f.data, prepare, live)).toThrow('another core is already running');
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('new run changed pairing');
+    rmSync(join(f.data, 'core.lock'));
+    // Gone, the recorded restore goes in, not the one with the newest date, and every other is set aside.
+    openDataDir(f.data, prepare)();
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('test pairing survives');
+    expect(readdirSync(f.root).filter(name => name.startsWith('data.restore-'))).toEqual([]);
+    expect(readFileSync(join(`${f.data}.unused-restore-${older}`, 'pairing.json'), 'utf8')).toBe('older restore pairing');
+    writeFileSync(join(f.data, 'pairing.json'), 'paired after the recovery');
+    openDataDir(f.data, prepare)();
+    expect(readFileSync(join(f.data, 'pairing.json'), 'utf8')).toBe('paired after the recovery');
+  } finally { f.stop(); }
+});
+
+test('a recorded restore that cannot go in is set aside, and the core starts on its data as it was, every time', async () => {
+  const f = await updateFixture();
+  try {
+    const { openDataDir } = await import('../src/server-update/restore.ts');
+    writeFileSync(`${f.data}.restore-${f.id}`, 'not a directory');
+    writeFileSync(`${f.data}.rollback.json`, JSON.stringify({ id: f.id, snapshot: join(f.backup, 'data') }));
+    for (let start = 0; start < 2; start++) {
+      openDataDir(f.data, prepare)();
+      f.expectPrevious();
+      expect(existsSync(join(f.data, 'checkpoints', 'thr_a', 'object'))).toBe(true);
+    }
+    expect(f.result().error).toContain('could not put the previous data back');
+    expect(readFileSync(`${f.data}.unused-restore-${f.id}`, 'utf8')).toBe('not a directory');
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(false);
   } finally { f.stop(); }
 });
 
@@ -454,6 +536,7 @@ for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`
         renameSync(f.install, join(f.operation, 'failed-installation'));
         renameSync(join(f.backup, 'installation'), f.install);
         const restored = `${f.data}.restore-${f.id}`;
+        writeFileSync(`${f.data}.rollback.json`, JSON.stringify({ id: f.id, snapshot: join(f.backup, 'data') }));
         if (point === 'restore') renameSync(join(f.backup, 'data'), restored);
         else {
           cpSync(join(f.backup, 'data'), restored, { recursive: true });
@@ -471,6 +554,7 @@ for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`
     expect(f.result().error).toBe('Server update failed; the previous version was restored. The update worker ended before it finished (oom-kill, killed, KILL)');
     // A snapshot cut short goes, and so does one that became the data again; one never used stays with the failure.
     expect(existsSync(f.backup)).toBe(point === 'switch');
+    expect(existsSync(`${f.data}.rollback.json`)).toBe(false);
     expect(existsSync(f.operation)).toBe(false);
     expect(existsSync(link)).toBe(false);
   } finally { f.stop(); }
@@ -516,7 +600,7 @@ test('the next update clears what a worker of this installation cut off with its
     if (record === 'plan') writeFileSync(join(path, 'plan.json'), JSON.stringify({ installation: { directory: installation } }));
     return path;
   };
-  const backup = (c: string, part: 'data' | 'data.partial', installation: string | null) => {
+  const backup = (c: string, part: 'data' | 'data.partial' | 'data.consumed', installation: string | null) => {
     const path = join(root, `.boite-backup-${uuid(c)}`);
     mkdirSync(join(path, part), { recursive: true });
     if (installation) writeFileSync(join(path, 'backup.json'), JSON.stringify({ installation, at: 1 }));
@@ -533,9 +617,12 @@ test('the next update clears what a worker of this installation cut off with its
     operation('d', 'owner', other); backup('d', 'data.partial', other);
     writeFileSync(join(root, `.boite-recover-${uuid('d')}`), '');
     operation('e', null);
+    // A rollback put this snapshot back and was killed while it deleted the used copy.
+    writeFileSync(join(operation('f', 'owner'), 'finished'), ''); backup('f', 'data.consumed', install);
+    writeFileSync(join(root, `.boite-backup-${uuid('f')}`, 'data.consumed', 'journal.db'), 'used journal');
     clearStaleUpdates(root, install);
     expect(readdirSync(root).sort()).toEqual([`.boite-backup-${uuid('b')}`, `.boite-backup-${uuid('d')}`, `.boite-recover-${uuid('d')}`,
-      `.boite-update-${uuid('b')}`, `.boite-update-${uuid('d')}`, `.boite-update-${uuid('e')}`, 'install']);
+      `.boite-update-${uuid('b')}`, `.boite-update-${uuid('d')}`, `.boite-update-${uuid('e')}`, `.boite-update-${uuid('f')}`, 'install']);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

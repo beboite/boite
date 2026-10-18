@@ -200,10 +200,14 @@ left the service stopped. Every step is a rename that a resumed rollback
 picks up, so the data directory is either the new data or the restored one.
 Across filesystems the copy takes its final name only once complete, and its
 source is renamed aside before it is deleted, so a half-deleted snapshot never
-passes for a backup. If the data cannot be put back (an I/O error, a disk
-another process filled), the previous installation still starts, the status
-says the data is not restored yet, and the recovery below retries it.
-The rejected data stays beside it as `<data>.failed-<id>`, without the stores
+passes for a backup. The previous installation starts only once the data is
+back, or when the new version never ran on it; failing to delete the used
+snapshot does not hold it back. If the data cannot be put back (an I/O error, a
+disk another process filled) after the new version ran, the service stays
+stopped, since the previous core would open data the new one migrated. The
+reason goes in `server-update-result.json` in the data directory and the job's
+journal, and the recovery below retries the restore. Once the data is back the
+server's update status reports the failed update. The rejected data stays beside it as `<data>.failed-<id>`, without the stores
 the snapshot left out, which move back with the restored data.
 Pairings and conversations survive; clients reconnect normally.
 Backups remain private beside the installation as `.boite-backup-<id>`, each
@@ -225,16 +229,28 @@ and anything else is rolled back as above before the service starts again.
 The recovery runs from a hard link of the job's executable,
 `.boite-recover-<id>`, which it deletes when done. If the recovery itself
 never ran, as after a power cut, the next update deletes the unfinished
-operation directory and the incomplete snapshot it left. It only deletes
+operation directory and the incomplete snapshot it left, a half-deleted
+used one (`data.consumed`) included. It only deletes
 those of its own installation: each operation directory holds an
 `owner.json` naming the installation from the moment it exists, so a second
 installation in the same folder never deletes an update another one is
 running. An operation or snapshot that names no installation is left alone.
-A power cut during the rollback's swap leaves the previous data, complete, as
-`<data>.restore-<id>` beside the data directory, and the service starts at
-boot with no recovery running. The core finishes that swap at startup, before
-it opens anything in the data directory, keeps the rejected data as
-`<data>.failed-<id>` and reports the interrupted rollback in its update status.
+A rollback writes `<data>.rollback.json`, naming its operation and snapshot,
+before it moves any data, and removes it once the swap is complete. A power cut
+in between leaves no recovery running, and the service starts at boot. Every
+core start off Windows holds `<data>.maintenance.lock` beside the data
+directory from that check until it has taken the data directory's own lock,
+and the job and its recovery hold it while they restore, so neither moves the
+data under the other. A start that finds the record, with no live core on the
+data, finishes that operation's restore before it opens anything: it uses the
+`<data>.restore-<id>` the record names, never the newest one on disk, keeps the
+rejected data as `<data>.failed-<id>` and reports the interrupted rollback in
+its update status. A snapshot it cannot copy back stops the start, and the
+next one retries. After a completed swap, every other `<data>.restore-*`
+beside the data directory is renamed to `<data>.unused-restore-*`, so no later
+start replays an older copy. A restore that cannot go in (a file in its place,
+a failed rename) is undone and set aside the same way, with its record, and the
+core starts on its data as it was, with the reason in its update status.
 
 From a terminal on the server, the same owner actions need no thread:
 

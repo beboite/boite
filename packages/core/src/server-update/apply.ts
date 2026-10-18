@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { unzipSync } from 'fflate';
 import { recoveryLink, type ServerUpdatePlan, type ServerUpdatePlatform } from './types.ts';
-import { swapRestored, UNSAVED_DATA } from './restore.ts';
+import { restoreSnapshot, UNSAVED_DATA } from './restore.ts';
 
 export { UNSAVED_DATA };
 
@@ -149,45 +149,6 @@ async function becomesHealthy(plan: ServerUpdatePlan, platform: ServerUpdatePlat
 }
 
 /**
- * Puts the data snapshot back, keeping the stores it leaves out. The snapshot
- * moves into place rather than being copied: the update checked room for one
- * copy, and a second one once failed the rollback of a disk left with only
- * the spare, with the service stopped. Every step is a rename that checks
- * what the previous one left, so a restore cut short resumes, and the data
- * directory is only ever the new data or the restored one.
- */
-function restoreData(plan: ServerUpdatePlan, snapshot: string, disk: UpdateDisk): void {
-  const restored = `${plan.dataDir}.restore-${plan.id}`;
-  // The swap renames the data aside before the restored copy in: with neither left to do, it is done.
-  if (!existsSync(restored) && !existsSync(`${plan.dataDir}.failed-${plan.id}`)) {
-    if (!existsSync(snapshot)) return;
-    moveTree(snapshot, restored, disk);
-  }
-  if (existsSync(restored)) swapRestored(plan.dataDir, plan.id);
-  // A copy across filesystems leaves its source, which a kill can have left half deleted.
-  discard(snapshot);
-}
-
-/** Renames a used tree aside before deleting it, so one cut short never passes for a complete one. */
-function discard(path: string): void {
-  if (existsSync(path)) renameSync(path, `${path}.consumed`);
-  rmSync(`${path}.consumed`, { recursive: true, force: true });
-}
-
-/**
- * Renames `source` to `target`. Across filesystems, which the update reserved
- * room for, a complete copy takes the target's name; the caller discards the source.
- */
-function moveTree(source: string, target: string, disk: UpdateDisk): void {
-  try { disk.rename(source, target); return; }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error; }
-  const partial = `${target}.partial`;
-  rmSync(partial, { recursive: true, force: true });
-  disk.copy(source, partial);
-  renameSync(partial, target);
-}
-
-/**
  * Restores the previous installation and data, then starts the service. It
  * reads where the update stood from the disk, not from the worker's memory,
  * so the recovery of a killed worker runs it too and resumes from there.
@@ -207,19 +168,26 @@ async function rollBack(plan: ServerUpdatePlan, directory: string, platform: Ser
   if (touched || await platform.mainPid(service) === plan.originalPid) await platform.control(service, 'stop');
   if (installed && !existsSync(failedInstallation)) renameSync(root, failedInstallation);
   if (existsSync(previous) && !existsSync(root)) renameSync(previous, root);
-  // A data restore that fails (an I/O error, a disk filled by something else) still starts the previous
-  // installation: the snapshot is untouched until its copy is complete, and the recovery retries the data.
-  let unrestored: unknown = null;
-  if (installed) try { restoreData(plan, join(backup, 'data'), disk); } catch (error) { unrestored = error; }
+  // A new version in place has run on the live data, or will have: the recovery starts one it finds stopped.
+  if (installed) {
+    try {
+      // The snapshot moves back rather than being copied: the update checked room for one copy, and a
+      // second one once failed the rollback of a disk left with only the spare, with the service stopped.
+      restoreSnapshot(plan.dataDir, { id: plan.id, snapshot: join(backup, 'data') }, disk);
+    } catch (error) {
+      // The previous core would open the data the rejected one migrated, and the restore that follows
+      // would discard whatever it accepted: the service stays stopped, and the recovery or the next start retries.
+      try {
+        writeResult(plan, `Server update failed and the previous data could not be put back yet (${error instanceof Error ? error.message : String(error)}); the server stays stopped until it is. ${reason}`);
+      } catch { /* The data directory may be the one that failed to move. */ }
+      throw error;
+    }
+  }
   // A copy cut short (a full disk, a kill) frees its space, and a snapshot that became the data leaves the backup empty;
   // a snapshot never used stays with the failure.
   if (!existsSync(join(backup, 'data'))) rmSync(backup, { recursive: true, force: true });
-  try {
-    writeResult(plan, unrestored ? `Server update failed; the previous version was restored but not yet its data (${unrestored instanceof Error ? unrestored.message : String(unrestored)}). ${reason}`
-      : touched ? `Server update failed; the previous version was restored. ${reason}` : `Server update was not installed. ${reason}`);
-  } catch (error) { if (!unrestored) throw error; }
+  writeResult(plan, touched ? `Server update failed; the previous version was restored. ${reason}` : `Server update was not installed. ${reason}`);
   await platform.control(service, 'start');
-  if (unrestored) throw unrestored;
   writeFileSync(join(directory, FINISHED), '', { mode: 0o600 });
 }
 
