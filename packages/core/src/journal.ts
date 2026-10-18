@@ -554,6 +554,9 @@ export class Journal {
     this.db.query('INSERT OR IGNORE INTO native_agent_messages (message_id, thread_id) SELECT ?, ? FROM native_agent_messages WHERE message_id = ?')
       .run(copy.id, copy.threadId, sourceId);
     copyStoredParts(this.db, sourceId, copy);
+    // Its pictures' copies come along, so the fork draws them without making them again.
+    this.db.query('INSERT OR IGNORE INTO media_displays (message_id, part_index, thread_id, data) SELECT ?, part_index, ?, data FROM media_displays WHERE message_id = ?')
+      .run(copy.id, copy.threadId, sourceId);
   }
 
   getMessage(messageId: string): Message | null {

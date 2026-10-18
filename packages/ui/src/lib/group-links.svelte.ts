@@ -1,6 +1,7 @@
 import { untrack } from 'svelte';
 import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, withoutTrailingSlashes, type Group, type GroupCore } from '@boite/contracts';
-import { WsClient } from './client';
+import { WsClient, type SocketFactory, type SocketLike } from './client';
+import { browserSocket } from './ws-client-utils';
 import { deviceKey } from './device-key';
 import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, rememberGroupAddresses, removeBrought, signsFor, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
@@ -10,8 +11,13 @@ import type { Machine, Workspace } from './workspace.svelte';
 const RETRY_MS = 60_000;
 const RETRY_MAX_MS = 15 * 60_000;
 const PROBE_MS = 4000;
-/** At start, how long the machines paired by hand are given to answer before a held key is used as it was left. */
+/** At start, how long a machine paired by hand is given to open a socket before a held key is used as it was left. */
 const VOUCH_WAIT_MS = 3000;
+/**
+ * A machine paired by hand whose socket opened is on: its answer is waited for this long from the
+ * question, a slow start included, before a held key is used as it was left.
+ */
+const ANSWER_WAIT_MS = 15_000;
 
 /** Why a machine of the group is not connected from this client. */
 export type GroupLinkState =
@@ -31,19 +37,52 @@ export interface GroupLinkOptions {
   ask?: (endpoint: Endpoint, patience: number) => Promise<Group | null | undefined>;
   /** Replaces `VOUCH_WAIT_MS` in tests. */
   patience?: number;
+  /** The sockets `ask` opens by default. Replaced in tests, which have no network. */
+  socket?: SocketFactory;
 }
 
-/** One question to a machine paired by hand, on a socket made for it and closed with the answer. */
-function askGroup(endpoint: Endpoint, patience: number): Promise<Group | null | undefined> {
+/** `socket` as it is, with `opened` told each time it opens, before the client sends its hello. */
+function watched(socket: SocketLike, opened: () => void): SocketLike {
+  return {
+    send: (data) => socket.send(data),
+    close: () => socket.close(),
+    get onopen() { return socket.onopen; },
+    set onopen(handler) { socket.onopen = handler === null ? null : () => { opened(); handler(); }; },
+    get onmessage() { return socket.onmessage; },
+    set onmessage(handler) { socket.onmessage = handler; },
+    get onclose() { return socket.onclose; },
+    set onclose(handler) { socket.onclose = handler; },
+    get onerror() { return socket.onerror; },
+    set onerror(handler) { socket.onerror = handler; }
+  };
+}
+
+/**
+ * One question to a machine paired by hand, on a socket made for it and closed with the answer.
+ * Only a machine that opens no socket within `patience` is taken for off. One that opened is on,
+ * and its answer is waited for up to `ANSWER_WAIT_MS`: giving up on it sooner would send a held key
+ * to an address that machine may say is no longer its member's.
+ */
+function askGroup(endpoint: Endpoint, patience: number, socket: SocketFactory): Promise<Group | null | undefined> {
+  let opened = false;
+  const wait = Math.max(patience, ANSWER_WAIT_MS);
   const client = new WsClient({
     url: endpoint.url, token: endpoint.token, paired: endpoint.paired === true || endpoint.signs !== undefined, reconnect: false,
+    socketFactory: (url) => watched(socket(url), () => { opened = true; }),
+    // A slow hello is that slow answer too: the client's own 10 s must not give up on it first.
+    openDeadline: () => wait,
     // A machine this device's key opens answers a signed hello.
     ...(endpoint.signs === undefined ? {} : { signer: { key: deviceKey, coreId: endpoint.signs } })
   });
-  return Promise.race([
-    client.connect().then(() => client.call('group.get', {})).catch(() => undefined),
-    new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), patience))
-  ]).finally(() => client.close());
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  return new Promise<Group | null | undefined>((resolve) => {
+    timers.push(setTimeout(() => { if (!opened) resolve(undefined); }, patience));
+    timers.push(setTimeout(() => resolve(undefined), wait));
+    void client.connect().then(() => client.call('group.get', {})).then(resolve, () => resolve(undefined));
+  }).finally(() => {
+    for (const timer of timers) clearTimeout(timer);
+    client.close();
+  });
 }
 
 export { usableAddresses };
@@ -134,7 +173,8 @@ export class GroupLinks {
     this.#secure = options.secure ?? (() => window.location.protocol === 'https:');
     this.#now = options.now ?? Date.now;
     this.#patience = options.patience ?? VOUCH_WAIT_MS;
-    this.#ask = options.ask ?? askGroup;
+    const socket = options.socket ?? browserSocket;
+    this.#ask = options.ask ?? ((endpoint, patience) => askGroup(endpoint, patience, socket));
   }
 
   /**

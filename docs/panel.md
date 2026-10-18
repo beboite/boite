@@ -68,12 +68,6 @@ unsaved file drafts. A machine that has not connected keeps its own layouts.
 [Automatic merged-PR archive](machines.md#merged-pr-conversations) documents
 the archive conditions.
 
-A conversation whose panel nobody opened or closed yet shows it open on its
-launcher, at the panel's width, when the window is at least 1200 px wide
-(`PANEL_AUTO_OPEN`); narrower, where the panel would lie over the chat, it waits
-to be asked for. Closing it is remembered per conversation, and a surface an
-agent opens replaces the launcher. Closing the last tab shuts the panel.
-
 A panel with no tab yet opens on the surface the device starts with, Files or
 Changes, or on its launcher. The tour's first question sets it and Settings,
 Appearance, Workspace changes it ([onboarding.md](onboarding.md)). Settings,
@@ -236,7 +230,13 @@ unsaved edits included.
 Text files and diffs choose syntax highlighting from the file extension or
 the file's reported language. Highlight.js loads its core and each requested
 grammar on demand. Unknown languages and texts over 200,000 characters remain
-plain text. The editor keeps its selection, caret and scroll in a textarea
+plain text. A text from 20,000 characters (`WORKER_FROM`) goes through its
+grammar in a worker (`lib/code-highlight.worker.ts`, 112 KB before
+compression, fetched with the first such text), which carries the grammars in
+its own file and sets up only those a text needs; a shorter one stays on the
+page, where posting it would
+cost more than the run. A worker that cannot start leaves every text to the
+page. The editor keeps its selection, caret and scroll in a textarea
 over the colored text. Diffs render additions in green and deletions in red,
 including the text, line numbers and signs; unchanged context keeps syntax
 colors. Multiline tokens retain their color across folded context. A diff

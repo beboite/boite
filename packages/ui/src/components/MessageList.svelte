@@ -14,7 +14,7 @@
   import DelegationActivity from './DelegationActivity.svelte';
   import { teamLaunches } from '../lib/delegation-progress';
   import UserMessage from './UserMessage.svelte';
-  import ImageViewer from './ImageViewer.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import { provideViewerHost, type Gallery } from '../lib/media-gallery';
   import AssistantMessage from './AssistantMessage.svelte';
   import MoveMarker from './MoveMarker.svelte';
@@ -754,7 +754,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = rows[0]?.gap ? Math.max(0, (totals(rows)[1] ?? 0) - viewport.clientHeight) : 0; pinned = false; loadAbove(viewport); } }} />{/if}
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} use:selectionClicks {onscroll} ontouchstart={press} onpointerdown={press} onpointerover={(event) => { pointed = pointedTurn(event); }} onpointerleave={() => { pointed = null; }} onkeydown={releaseNavigation} style:padding-top="{20 + promptLead}px" style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline" data-media-gallery>
+  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} use:selectionClicks {onscroll} ontouchstart={press} onpointerdown={press} onpointerover={(event) => { pointed = pointedTurn(event); }} onpointerleave={() => { pointed = null; }} onkeydown={releaseNavigation} style:padding-top="{20 + promptLead}px" style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline" data-media-gallery data-scroll-root>
     <div class="column" bind:this={column}>
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}<p class="loading-older" data-testid="loading-older">{strings.chat.loadingOlder}</p>{/if}
@@ -833,7 +833,7 @@
     </button>
   {/if}
 </div>
-{#if viewing}<ImageViewer items={viewing.items} index={viewing.index} onclose={() => { viewing = null; releaseHeld(); }} />{/if}
+{#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer} floating>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={() => { viewing = null; releaseHeld(); }} />{/snippet}</Deferred>{/if}
 
 <style>
   .timeline-wrap {

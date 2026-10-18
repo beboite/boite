@@ -1,8 +1,8 @@
 import { qrMatrix } from '../../../packages/ui/src/lib/qr.ts';
 
 /** One frame of raw YUV 4:2:0 video, the QR code of `text` black on white in its middle: what Chromium's fake camera plays. */
-export function codeVideo(text: string, width = 640, height = 480): Uint8Array {
-  const modules = qrMatrix(text);
+export async function codeVideo(text: string, width = 640, height = 480): Promise<Uint8Array> {
+  const modules = await qrMatrix(text);
   const scale = Math.floor((height * 0.8) / modules.length);
   const left = Math.floor((width - modules.length * scale) / 2), top = Math.floor((height - modules.length * scale) / 2);
   const luma = new Uint8Array(width * height).fill(235);

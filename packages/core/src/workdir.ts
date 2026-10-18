@@ -479,6 +479,25 @@ function fileIdentity(path: string): string | null {
 }
 
 /**
+ * Bytes the core holds rather than a file it can open: a picture's copy or
+ * original, read from the journal when the route is asked. The bytes behind
+ * a key never change, so the route lets a client cache them for good.
+ */
+export interface HeldBytes {
+  data: Uint8Array;
+  mime: string;
+  name?: string;
+  /** Kept by no cache: a picture of an incognito conversation, which leaves nothing behind. */
+  noStore?: true;
+}
+
+interface BytesTicket {
+  key: string;
+  read: () => HeldBytes | null;
+  expiresAt: number;
+}
+
+/**
  * The tickets the file route answers. Random, held in memory, bound to one
  * absolute path and good for `FILE_TICKET_TTL_MS`: a url that ends up in a
  * screenshot or a log opens nothing ten minutes later, and no client ever
@@ -486,6 +505,9 @@ function fileIdentity(path: string): string | null {
  */
 export class FileTickets {
   private readonly held = new Map<string, FileTicketTarget & { expiresAt: number; identity: string | null }>();
+  private readonly bytesHeld = new Map<string, BytesTicket>();
+  /** The live ticket of each key, so a part asked again keeps its address and the client's HTTP cache. */
+  private readonly bytesKeys = new Map<string, string>();
 
   mint(path: string, mime: string, now = Date.now(), name?: string, identity?: string, view = false): string {
     this.sweep(now);
@@ -520,9 +542,42 @@ export class FileTickets {
     return { path: entry.path, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}), ...(entry.view ? { view: true as const } : {}) };
   }
 
+  /**
+   * A ticket for bytes `read` gives when the route is asked, null once they
+   * are gone (a deleted thread). `key` names what they are; while its ticket
+   * lives the same one comes back, renewed, so its address stays the same.
+   */
+  mintBytes(key: string, read: () => HeldBytes | null, now = Date.now()): string {
+    this.sweep(now);
+    const live = this.bytesKeys.get(key);
+    const entry = live === undefined ? undefined : this.bytesHeld.get(live);
+    if (live !== undefined && entry !== undefined) {
+      entry.expiresAt = now + FILE_TICKET_TTL_MS;
+      return live;
+    }
+    const ticket = newToken();
+    this.bytesHeld.set(ticket, { key, read, expiresAt: now + FILE_TICKET_TTL_MS });
+    this.bytesKeys.set(key, ticket);
+    return ticket;
+  }
+
+  /** What a bytes ticket opens, renewing it, or null when it is not one, has expired or its bytes are gone. */
+  bytes(ticket: string, now = Date.now()): HeldBytes | null {
+    this.sweep(now);
+    const entry = this.bytesHeld.get(ticket);
+    if (entry === undefined) return null;
+    // A picture still drawn keeps its address: a ticket lives ten minutes past its last use.
+    entry.expiresAt = now + FILE_TICKET_TTL_MS;
+    const found = entry.read();
+    if (found === null) this.dropBytes(ticket, entry);
+    return found;
+  }
+
   /** Drop every ticket. A revoked session must not keep a bearer URL alive. */
   forgetAll(): void {
     this.held.clear();
+    this.bytesHeld.clear();
+    this.bytesKeys.clear();
   }
 
   /** Drop tickets for files under `root`. Artifact tickets live outside a project cwd, so they stay. */
@@ -572,6 +627,14 @@ export class FileTickets {
     for (const [ticket, entry] of this.held) {
       if (entry.expiresAt <= now) this.held.delete(ticket);
     }
+    for (const [ticket, entry] of this.bytesHeld) {
+      if (entry.expiresAt <= now) this.dropBytes(ticket, entry);
+    }
+  }
+
+  private dropBytes(ticket: string, entry: BytesTicket): void {
+    this.bytesHeld.delete(ticket);
+    if (this.bytesKeys.get(entry.key) === ticket) this.bytesKeys.delete(entry.key);
   }
 }
 

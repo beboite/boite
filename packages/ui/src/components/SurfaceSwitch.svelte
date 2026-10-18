@@ -19,7 +19,7 @@
 
   const stores = $derived(workspace.machines.length ? workspace.machines.map(machine => machine.store) : [store]);
   const on = $derived(experimentOn('resident-agents'));
-  const threads = $derived(on ? workingThreads(stores) : { count: 0, waiting: false });
+  const threads = $derived(on ? workingThreads(stores) : { count: 0, subagents: 0, waiting: false });
   const agents = $derived(on ? agentsAtWork(stores) : { count: 0, waiting: false });
 
   // Every machine's agents snapshot stays loaded while the switch is drawn, so the Agents count is current from either side.
@@ -36,10 +36,11 @@
   });
 </script>
 
-{#snippet badge(work: WorkCount, testid: string)}
+{#snippet badge(work: WorkCount & { subagents?: number }, testid: string)}
   {#if work.count > 0}
-    {@const label = fill(work.waiting ? strings.sidebar.surfaceWaiting : strings.sidebar.surfaceWorking, { count: String(work.count) })}
-    <span class="count" class:waiting={work.waiting} data-testid={testid} data-count={work.count} data-waiting={work.waiting} title={label} aria-label={label}>
+    {@const head = fill(work.waiting ? strings.sidebar.surfaceWaiting : strings.sidebar.surfaceWorking, { count: String(work.count) })}
+    {@const label = work.subagents ? `${head}\n${fill(work.subagents === 1 ? strings.sidebar.surfaceSubagentsOne : strings.sidebar.surfaceSubagentsMany, { count: String(work.subagents) })}` : head}
+    <span class="count" class:waiting={work.waiting} data-testid={testid} data-count={work.count} data-subagents={work.subagents ?? 0} data-waiting={work.waiting} title={label} aria-label={label}>
       <span class="pulse" aria-hidden="true"></span><span class="ui-label">{work.count}</span>
     </span>
   {/if}

@@ -72,19 +72,30 @@
     return container.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top + scrollRoot.scrollTop;
   }
   function refresh(): void {
+    if (frame !== null) cancelAnimationFrame(frame);
+    frame = null;
     if (!scrollRoot || !container) return;
     top = scrollRoot.scrollTop - offset();
     height = scrollRoot.clientHeight || 600;
     located = true;
+  }
+  /**
+   * A resize, a size change and every threshold the rows cross all ask for the
+   * same reading: one per frame. A scroll reads at once: the browser sends it
+   * once a frame already, and the rows it brings are drawn in that frame.
+   */
+  let frame: number | null = null;
+  function schedule(): void {
+    frame ??= requestAnimationFrame(() => { frame = null; refresh(); });
   }
   $effect(() => {
     const root = scrollRoot;
     if (!root || !container || !active) return;
     refresh();
     root.addEventListener('scroll', refresh, { passive: true });
-    window.addEventListener('resize', refresh);
+    window.addEventListener('resize', schedule);
     window.addEventListener('pointerdown', outsidePointer, true);
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(refresh);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
     observer?.observe(root);
     observer?.observe(container);
     // A list also moves without a scroll or a resize: rows above it leave or grow. Its own size does not change, so
@@ -92,10 +103,15 @@
     // A list taller than the viewport keeps the same visible share while it moves, so the drawn rows are watched too:
     // the ones on screen change their share with any move.
     placement = typeof IntersectionObserver === 'undefined' ? null
-      : new IntersectionObserver(refresh, { root, threshold: Array.from({ length: 21 }, (_, step) => step / 20) });
+      : new IntersectionObserver(schedule, { root, threshold: Array.from({ length: 21 }, (_, step) => step / 20) });
     placement?.observe(container);
-    for (const node of placed) placement?.observe(node);
-    return () => { root.removeEventListener('scroll', refresh); window.removeEventListener('resize', refresh); window.removeEventListener('pointerdown', outsidePointer, true); observer?.disconnect(); placement?.disconnect(); placement = null; };
+    for (const node of placed.keys()) placement?.observe(node);
+    return () => {
+      root.removeEventListener('scroll', refresh); window.removeEventListener('resize', schedule); window.removeEventListener('pointerdown', outsidePointer, true);
+      observer?.disconnect(); placement?.disconnect(); placement = null;
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = null;
+    };
   });
   $effect(() => {
     const present = new Set(keys);
@@ -103,12 +119,15 @@
   });
   /** Watches where the list and its drawn rows sit in the viewport; drawn rows join it as they mount. */
   let placement: IntersectionObserver | null = null;
-  const placed = new Set<Element>();
+  /** Each drawn row and how it reads its height. One observer sizes them all, not one per row. */
+  const placed = new Map<Element, (size?: number) => void>();
+  const sizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver((entries) => {
+    for (const entry of entries) placed.get(entry.target)?.(entry.borderBoxSize?.[0]?.blockSize);
+  });
+  $effect(() => () => sizes?.disconnect());
   function measure(element: HTMLDivElement, key: string) {
-    placed.add(element);
-    placement?.observe(element);
-    const read = () => {
-      const value = element.getBoundingClientRect().height;
+    const read = (size?: number) => {
+      const value = size ?? element.getBoundingClientRect().height;
       if (!(value > 0)) return;
       const previous = heights.get(key) ?? estimate;
       if (Math.abs(previous - value) < 0.5) return;
@@ -118,10 +137,11 @@
       heights.set(key, value);
       revision++;
     };
+    placed.set(element, read);
+    placement?.observe(element);
     read();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read);
-    observer?.observe(element);
-    return { destroy: () => { observer?.disconnect(); placed.delete(element); placement?.unobserve(element); } };
+    sizes?.observe(element);
+    return { destroy: () => { sizes?.unobserve(element); placed.delete(element); placement?.unobserve(element); } };
   }
   function focusables(element: Element): HTMLElement[] {
     return [...element.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]')]

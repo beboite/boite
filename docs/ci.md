@@ -160,26 +160,113 @@ regressions set `BOITE_CI_INSTALLER_REQUIRED=1`, so missing NSIS or generated
 fixtures fail rather than skip. Unsupported local runs keep intentional skips.
 The tested installer becomes the release artifact.
 
+The shipped shell uses fat LTO over one codegen unit. Its final step is serial:
+on 2026-10-17, recompiling only the shell crate took 8 min 57 s with fat LTO and
+10 min 18 s with thin LTO on the shared 8-thread development machine, against
+1 min 32 s with Cargo's defaults (`bun run --cwd apps/shell tauri build
+--no-bundle`). `Cargo.toml` therefore keeps Cargo's release defaults, and
+`desktop.yml` sets `CARGO_PROFILE_RELEASE_LTO=fat` and
+`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1` only on the steps that build a shipped
+shell (the Windows installer, the Debian package, the macOS bundle) and only
+when `sign-updates` is on: the nightly and a release. Other steps and runs set
+`false` and `16`, Cargo's defaults, so `test:shell --release` keeps them even in
+a release run. Both desktop jobs get 60 minutes instead of 35 when publishing.
+The cache is saved from `main`, so a publishing run also
+compiles its dependencies with LTO, an estimated 7 to 8 minutes more per
+platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
+2026-10-17, four alternating local runs of the old and new command, median
+5.4 s against 3.4 s, and a 105 MB write less.
+
 `scripts/ci/budgets.ts` reads [budgets.json](../scripts/ci/budgets.json):
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 596,500 |
-| UI files, excluding `.br` and `.gz` copies | 5,038,000 |
+| UI entry chunk | 490,500 |
+| UI files, excluding `.br` and `.gz` copies | 4,855,400 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,429,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,417,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-18, the journal compaction (schema 36: zstd values, per-thread
-command lines, the paced background passes in `journal/retention.ts` and
-`journal/processes.ts`, and the start-time VACUUM in `journal/vacuum.ts`)
-rebased on `15fdbb81` measures 5,037,590 UI bytes and 4,428,853 core
-JavaScript bytes after fresh `bun run build:ui` and `bun run build:core` on
-Windows, against 5,036,808 and 4,408,525 for that main: the window's
-compacting state adds 782 UI bytes and the journal code 20,328 core bytes. The
-UI and core JavaScript limits rise to 5,038,000 and 4,429,000; the other
-limits stay.
+On 2026-10-18, the tool summaries setting on `origin/main` at `150d7bb6`
+measures 489,501 entry bytes, 4,854,418 UI bytes and 4,413,357 core
+JavaScript bytes with `measure()` after fresh `bun run build:ui` and
+`bun run build:core` on Windows, the same UI bytes Windows CI measured. Its
+switch and English/French sentences put the UI 518 bytes over its limit,
+which rises to 4,855,400; the other limits stay.
+
+On 2026-10-18, the UI runtime change merged with `origin/main` at `7eaaf9c7`
+(the group vet, on the slow draft journal and the lean boot) measures 489,501
+entry bytes, 4,852,925 UI bytes and 4,413,077 core JavaScript bytes with
+`measure()` after fresh `bun run build:ui` and `bun run build:core` on
+Windows, against 486,005 and 4,727,998 that main measured: 3,496 entry bytes
+and 124,927 UI bytes more, of which the highlight worker is 114,882. The rest
+is the change's terminal status reader with its overflow seams and the model
+cache's held write. Reading a snapshot that ends on a bare ESC brings the UI
+to 4,853,016. The entry and UI limits rise to 490,500 and 4,853,900,
+about a kilobyte above; the core limits stay.
+
+On 2026-10-18, the group vet merged with `origin/main` at `8868384d` (the
+slow draft journal) measures 486,005 entry bytes, 4,727,998 UI bytes and
+4,413,077 core JavaScript bytes with `measure()` after fresh `bun run build:ui`
+and `bun run build:core` on Windows, 583 UI bytes over that main. The UI limit
+rises to 4,729,000; the other limits stay.
+
+On 2026-10-18, the slow draft journal merged with `origin/main` at `9ffdb977`
+(the lean boot) measures 486,005 entry bytes, 4,727,415 UI bytes and
+4,413,077 core JavaScript bytes with `measure()` after fresh `bun run build:ui`
+and `bun run build:core` on Windows. The UI limit rises to 4,728,000; the
+other limits stay.
+
+On 2026-10-18, the UI runtime change merged with `origin/main` at `15fdbb81`
+measures 598,199 entry bytes and 5,159,382 UI bytes after fresh
+`bun run build:ui` and `bun run build:core` on Windows, against 595,295 and
+5,036,764 for that main on the same machine. The highlight worker
+(`code-highlight.worker.ts`) is 114,882 bytes: Vite builds a worker as a bundle
+of its own, so it carries highlight.js and every grammar the page already loads
+lazily. It is fetched with the first text of 20,000 characters or more, never at
+startup ([panel](panel.md)). Composer thumbnails, the resting second clock,
+the shared list and picture observers, the hidden terminal's release with the
+scanner that reads its marks meanwhile, and the worker's fallback add the
+other 7,736 UI bytes, 2,904 of them in the entry; core JavaScript measures
+4,412,886 bytes on both sides. Merged again with `origin/main` at `47c10e36`
+(message pictures as file tickets, the lean install), the tree measures
+599,526 entry bytes, 5,160,249 UI bytes and 4,412,366 core JavaScript bytes
+after fresh builds the same way, 1,327 entry bytes more than before the merge,
+close to the 1,283 that main's ticket and relay choice measured. Reading the
+terminal's sequences as xterm.js 6 ends them brings the UI to 5,160,535, and
+making that reader the only source of a terminal's status and directory to
+5,160,658. Holding only its reports while a snapshot is on its way, in
+`terminal-status.ts`, brings it to 5,161,378. Those measures
+predate the lean boot; the newest note sets the limits.
+
+On 2026-10-18, the lean boot merged with `origin/main` at `2be13d45`
+(message pictures as file tickets and the media wire) measures 486,005 entry
+bytes, 4,725,790 UI bytes and 4,412,394 core JavaScript bytes after fresh
+`bun run build:ui` and `bun run build:core` on Windows. The entry limit rises
+to 487,000, about a kilobyte above it; the other limits stay.
+
+On 2026-10-18, the lean boot merged with `origin/main` at `57d41e70`, which
+refreshes the UI dependencies, measures 485,472 entry bytes, 4,724,812 UI
+bytes and 4,408,525 core JavaScript bytes after fresh `bun run build:ui` and
+`bun run build:core` on Windows. The entry limit rises to 486,500,
+a kilobyte above it; the other limits stay.
+
+On 2026-10-18, the lean boot on `origin/main` at `b611c01f` measures 484,682
+entry bytes and 4,723,056 UI bytes after a fresh `bun run build:ui` on
+Windows, against 595,295 and 5,036,764 for `b611c01f` built the same way:
+English left the entry for a chunk of its own, nine components the first frame
+does not draw load lazily, the fake client resolves to an empty module, Geist
+ships as latin, latin-ext and rest subsets and the onboarding clip is
+re-encoded at 15 fps; a notice and a retry cover a catalogue or a lazy part
+that fails to load. The limits fall to 485,800 and 4,727,000; the core
+limits stay. [Performance](performance.md#static-files) has the boot files.
+
+On 2026-10-18, the group vet's two-phase wait (`group-links.svelte.ts`) and
+the vet client's own open deadline (`ws-client.ts`), on `origin/main` at
+`2be13d45`, measure 5,038,322 UI bytes in the Windows desktop job of CI, 598
+more than the 5,037,724 that main measures after a fresh `bun run build:ui` on
+Windows. The UI limit rises to 5,039,000; the other limits stay.
 
 On 2026-10-18, removing a purged or erased thread's Claude transcripts and
 muting new audio sessions on Core Audio's notice, rebased on `b611c01f`,
@@ -195,6 +282,31 @@ background adoption pass and 50-turn retention in `checkpoint-store.ts` and
 `origin/main` at `0990d9ab` measures 4,412,886 core JavaScript bytes after a
 fresh `bun run build:core` on Windows, against 4,400,530 for that main, 12,356
 more. The core JavaScript limit rises to 4,413,000; the other limits stay.
+
+On 2026-10-17, sending message pictures as file tickets with a 320 px
+thumbnail copy, on `origin/main` at `b611c01f`, measures 596,578 UI entry
+bytes, 5,037,588 UI bytes and 4,394,594 core JavaScript bytes with `measure()`
+from `scripts/ci/budgets.ts` after fresh `bun run build:ui` and `bun run
+build:core` on Windows, against 595,295, 5,036,764 and 4,390,768 for that main
+built the same way. The store's ticket and relay choice adds 1,283 entry bytes
+and 824 UI bytes; the byte tickets, the thumbnail copy and its fallbacks add
+3,826 core bytes, none of them in `main.js`. The entry, UI and core limits
+rise to 596,700, 5,038,000 and 4,395,000.
+
+On 2026-10-18, message pictures as file tickets merged with `origin/main` at
+`10f16a25` (the transcript purge and the checkpoint store) measure 596,578 UI
+entry bytes, 5,037,588 UI bytes and 4,416,712 core JavaScript bytes after fresh
+`bun run build:ui` and `bun run build:core` on Windows, against 4,412,886 core
+bytes for that main: the same 3,826. The core JavaScript limit rises to
+4,417,000; the entry and UI limits stay at 596,700 and 5,038,000.
+
+On 2026-10-18, a slow draft journal (the late read, its notice and the
+attachments it resolves, in `lib/store/drafts.svelte.ts` and
+`lib/draft-journal.ts`) merged with `origin/main` at `2be13d45` measures
+5,039,331 UI bytes with `measure()` after a fresh `bun run build:ui` on
+Windows, against 5,037,724 for those two files at that main, 1,607 more; the
+entry chunk stays at 596,622. The UI limit rises to 5,040,000; the other
+limits stay.
 
 On 2026-10-17, PR #566 merged with `origin/main` at `b6ae659a`, which brings
 the thread links and agent mail direction (PR #562), measures 595,205 entry

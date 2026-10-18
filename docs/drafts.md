@@ -55,6 +55,19 @@ New text also reaches its synchronous entry backup while a read is still
 pending, so cancelling the connection retains that input. The device waits to
 read older entries before writing a complete durable journal; `flushDrafts`
 reports failure until that read has succeeded.
+A journal that is only slow is not a failure. Each journal operation waits
+three seconds for IndexedDB to open, but the open itself has no deadline: a
+cold WebView2 profile on a busy machine can take longer. When the first read
+times out, the device starts from the synchronous backup and reads again while
+the open carries on, then restores the durable text into the inputs nobody
+typed in. An attachment the backup held only by its ID gets its bytes back
+from the journal in every input, so the next checkpoint keeps them. The
+storage error shows when the journal refuses, or is still
+silent after ten seconds, unless another error is showing; a journal that
+answers later clears that notice, but not a refused backup reported meanwhile,
+and the reads stop after about a minute (`lib/store/drafts.svelte.ts`). Until then, a
+refused synchronous backup is reported at once, since nothing else holds that
+text.
 The browser can close the journal's IndexedDB connection on its own (storage
 pressure, site data cleared, a frozen tab). A `close` or `versionchange` event
 drops the cached connection, and a read or write whose transaction is refused

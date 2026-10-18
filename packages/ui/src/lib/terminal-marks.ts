@@ -56,6 +56,111 @@ export function parseFileUrl(data: string): string | null {
   }
 }
 
+/** The directory of Windows Terminal's `9;"C:\path"` report (OSC 9;9), `''` for an empty one, null for another OSC 9. */
+export function parseConEmuCwd(data: string): string | null {
+  return /^9;"?(.*?)"?$/.exec(data)?.[1] ?? null;
+}
+
+/** The directory an OSC 633, 7 or 9 reports, or null when it reports none. */
+export function reportedCwd(code: number, data: string): string | null {
+  const cwd = code === 633 ? parseCwdProperty(data) : code === 7 ? parseFileUrl(data) : code === 9 ? parseConEmuCwd(data) : null;
+  return cwd === null || cwd.length === 0 ? null : cwd;
+}
+
+/** Longer than this, an OSC is not a mark or a directory: it is skipped to its end. */
+export const MAX_OSC = 4096;
+/** Outside a sequence: ESC, or the C1 OSC introducer. */
+const OSC_START = /[\x1b\x9d]/g;
+/** Inside one: the C0 controls and the C1 string terminator. */
+const OSC_CONTROL = /[\x00-\x1f\x9c]/g;
+
+/**
+ * The OSC sequences in a shell's raw output, read as xterm.js 6 reads them
+ * (`EscapeSequenceParser`), so a session follows its marks with or without
+ * an xterm: each `<code>;<data>` goes to `onOsc` when BEL, ESC (ST's first
+ * byte or any other escape) or C1 ST ends it, a sequence split across chunks
+ * included. CAN and SUB cancel it; other C0 controls inside it are dropped.
+ */
+export class OscScanner {
+  /** What came after `ESC ]` so far, or null outside a sequence. */
+  #data: string | null = null;
+  #skip = false;
+  /** The last character was an ESC: a `]` after it opens a sequence. */
+  #escape = false;
+
+  constructor(private readonly onOsc: (code: number, data: string) => void) {}
+
+  /** True inside a sequence, or right after an ESC that may open one: the next chunk continues it. */
+  get open(): boolean {
+    return this.#data !== null || this.#escape;
+  }
+
+  /** Right after an ESC outside a sequence: only a `]` next opens one. */
+  get escaped(): boolean {
+    return this.#escape;
+  }
+
+  feed(chunk: string): void {
+    let at = 0;
+    while (at < chunk.length) {
+      if (this.#escape) {
+        this.#escape = false;
+        if (chunk[at] === ']') {
+          at++;
+          this.#open();
+        }
+        continue;
+      }
+      if (this.#data === null) {
+        OSC_START.lastIndex = at;
+        const start = OSC_START.exec(chunk);
+        if (start === null) return;
+        at = start.index + 1;
+        if (chunk[start.index] === '\x1b') this.#escape = true;
+        else this.#open();
+        continue;
+      }
+      OSC_CONTROL.lastIndex = at;
+      const control = OSC_CONTROL.exec(chunk);
+      const stop = control === null ? chunk.length : control.index;
+      if (!this.#skip) {
+        this.#data += chunk.slice(at, stop);
+        if (this.#data.length > MAX_OSC) {
+          this.#data = '';
+          this.#skip = true;
+        }
+      }
+      if (control === null) return;
+      at = stop + 1;
+      const code = chunk.charCodeAt(stop);
+      if (code === 0x18 || code === 0x1a) {
+        this.#data = null;
+        this.#skip = false;
+      } else if (code === 0x07 || code === 0x9c || code === 0x1b) {
+        this.#end();
+        // ST is ESC then `\`: the backslash is an escape of its own, and adds nothing.
+        if (code === 0x1b) this.#escape = true;
+      }
+    }
+  }
+
+  #open(): void {
+    this.#data = '';
+    this.#skip = false;
+  }
+
+  #end(): void {
+    const data = this.#data ?? '';
+    const skip = this.#skip;
+    this.#data = null;
+    this.#skip = false;
+    const cut = data.indexOf(';');
+    const head = cut === -1 ? data : data.slice(0, cut);
+    if (skip || !/^\d+$/.test(head)) return;
+    this.onOsc(Number(head), cut === -1 ? '' : data.slice(cut + 1));
+  }
+}
+
 /** The last part of a path, Windows or POSIX: what a tab shows. A root stays whole. */
 export function baseName(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, '');

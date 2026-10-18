@@ -107,9 +107,13 @@ there. A step's result is collected once its worktree is kept or removed.
 
 ## Failure, stop and restart
 
-A failed step stops new launches. Steps already running finish, the executions
-that never launched read stopped ("Not started"), then the run fails and its
-summary goes back to the conversation. `boite workflow retry <run-id> <step>`
+A failed step stops new launches. The parent hears of it at once, in a turn
+of its own once it is idle, with the error, the steps still running and the
+retry command: it can retry the step without waiting for the others. A step
+the owner stopped in its own conversation is told the same way, and each
+failure is told once. Steps already running finish, the executions that never
+launched read stopped ("Not started"), then the run fails and its summary goes
+back to the conversation. `boite workflow retry <run-id> <step>`
 runs the failed executions again in their own conversations, with the previous
 error in the prompt; an execution whose conversation was archived since gets a
 new one. The executions held back as "Not started" wait again with it, in any

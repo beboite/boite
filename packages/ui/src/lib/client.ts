@@ -113,6 +113,8 @@ export interface WsClientOptions {
   reconnect?: boolean;
   /** Milliseconds before reconnect attempt `n`, zero based. */
   backoff?: (attempt: number) => number;
+  /** Milliseconds attempt `n`, zero based, has to open its socket and have its hello answered. `openDeadline` by default. */
+  openDeadline?: (attempt: number) => number;
 }
 
 /** True once `client` is ready again, false when it closes or `waitMs` passes first. */

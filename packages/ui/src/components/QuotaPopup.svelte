@@ -3,7 +3,7 @@
   import type { AccountQuota } from '@boite/contracts';
   import type { Snippet } from 'svelte';
   import { fill, strings } from '../lib/strings';
-  import QuotaOverview from './QuotaOverview.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
 
   let { rows, loading, completed, error = '', outdated = false, owner = true, order = [], reorder, refresh, connect, settings, close, title, testPrefix = 'quota' }: {
     rows: AccountQuota[] | null;
@@ -47,7 +47,8 @@
     {:else if rows === null}
       <p class="muted" role="status">{strings.quotas.loading}</p>
     {:else if !(error && rows.length === 0)}
-      <QuotaOverview {rows} {loading} {completed} {connect} {order} onreorder={reorder} />
+      {@const shown = rows}
+      <Deferred part={parts.QuotaOverview}>{#snippet children(QuotaOverview)}<QuotaOverview rows={shown} {loading} {completed} {connect} {order} onreorder={reorder} />{/snippet}</Deferred>
     {/if}
   </section>
   <footer>

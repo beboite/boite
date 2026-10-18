@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot, CircleAlert, CloudOff, GitPullRequest, LoaderCircle, Radar } from '@lucide/svelte';
+  import { CircleAlert, CloudOff, GitPullRequest, LoaderCircle, Radar } from '@lucide/svelte';
   import { pullRequestWatchWaits, type ThreadSummary } from '@boite/contracts';
   import { backgroundLabel } from '../lib/background';
   import { secondClock } from '../lib/clock.svelte';
@@ -77,7 +77,8 @@
     const many = (one: string, other: string, n: number) => n === 1 ? one : fill(other, { count: String(n) });
     const atWork = count > 0 ? many(strings.sidebar.state.subagentsOne, strings.sidebar.state.subagentsMany, count) : null;
     const asks = asking > 0 ? many(strings.sidebar.state.subagentsAskingOne, strings.sidebar.state.subagentsAskingMany, asking) : null;
-    return { shown: count > 0 ? count : asking, asking: asking > 0, label: [atWork, asks].filter(Boolean).join('\n') };
+    const shown = count > 0 ? count : asking;
+    return { shown, asking: asking > 0, text: many(strings.sidebar.state.subagentsShortOne, strings.sidebar.state.subagentsShortMany, shown), label: [atWork, asks].filter(Boolean).join('\n') };
   });
 </script>
 
@@ -91,13 +92,13 @@
 {:else}
   <span class="when state {kind}" data-testid="thread-state" data-state={kind} title={label} aria-label={label}>
     {#if kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.working}</span>
-    {:else if kind === 'delegating'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label" data-testid="thread-state-text">{spent ?? strings.sidebar.state.delegating}</span>
+    {:else if kind === 'delegating'}<span class="ui-label" data-testid="thread-state-text">{spent ?? strings.sidebar.state.delegating}</span>
     {:else if kind === 'monitoring'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.monitoring}</span>
     {:else if kind === 'background'}<span class="dot pulse" aria-hidden="true"></span><span class="ui-label">{spent ?? strings.sidebar.state.background}</span>
     {:else if kind === 'watching'}<GitPullRequest size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.watching}</span>
     {:else if kind === 'interrupted'}<CircleAlert size={11} aria-hidden="true" /><span class="ui-label">{strings.sidebar.state.interrupted}</span>
     {:else}<span class="ui-label">{label}</span>{/if}
-    {#if chip}<span class="agents" class:asking={chip.asking} data-testid="thread-subagents" data-count={chip.shown} role="img" title={chip.label} aria-label={chip.label}><Bot size={11} aria-hidden="true" /><span class="ui-label">{chip.shown}</span></span>{/if}
+    {#if chip}<span class="agents" class:asking={chip.asking} class:pulse={kind === 'delegating'} data-testid="thread-subagents" data-count={chip.shown} role="img" title={chip.label} aria-label={chip.label}><span class="ui-label">{chip.text}</span></span>{/if}
   </span>
 {/if}
 
@@ -146,9 +147,8 @@
   .agents {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
     height: 16px;
-    padding: 0 4px;
+    padding: 0 5px;
     margin-left: 2px;
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, currentColor 14%, transparent);
@@ -167,6 +167,7 @@
     flex: none;
     animation: spin 1s steps(60) infinite var(--loops);
   }
+  /* Waiting on its sub-agents, the chip itself breathes: no second robot beside it. */
   .state :global(.pulse) {
     flex: none;
     animation: pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops);

@@ -289,6 +289,10 @@ describe('a plugin download on a slow link', () => {
 });
 
 describe('plugins from a git URL', () => {
+  // Every inspection runs five gits through the registry. On Windows runners the id test
+  // takes 2.0 to 2.3 s, but one inspection took 19.2 s and two tests passed 30 s while
+  // spawn-heavy files (procs, prepared-drivers) ran beside them.
+  const GIT_URL_TEST_MS = 90_000;
   test('inspect reads the manifest at the commit, add installs it, uninstall takes back everything it wrote', async () => {
     harness = await startTestCore(); const client = await harness.connect();
     harness.core.plugins.allowLocalSources = true;
@@ -340,7 +344,7 @@ describe('plugins from a git URL', () => {
     expect(existsSync(dir)).toBe(false);
     expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots', 'douane']);
     await expect(client.call('plugins.install', { id: 'seat-pool' })).rejects.toThrow('unknown plugin');
-  }, 30_000);
+  }, GIT_URL_TEST_MS);
 
   test('a refused manifest comes back as a preview with the file, the field and what was expected, never installable', async () => {
     harness = await startTestCore(); const client = await harness.connect();
@@ -375,7 +379,7 @@ describe('plugins from a git URL', () => {
     harness.core.plugins.allowLocalSources = false;
     await expect(client.call('plugins.inspect', { url: extra.path })).rejects.toThrow('plugin url must be an https URL');
     expect(readdirSync(join(harness.dataDir, 'plugins'))).toEqual([]);
-  }, 30_000);
+  }, GIT_URL_TEST_MS);
 
   test('the next inspection sweeps a fetch directory left behind, and leaves a running one alone', async () => {
     harness = await startTestCore(); const client = await harness.connect();
@@ -389,7 +393,7 @@ describe('plugins from a git URL', () => {
 
     await client.call('plugins.inspect', { url: repository('sweep', manifest({})).path });
     expect(readdirSync(root).sort()).toEqual(['.fetch-running']);
-  }, 30_000);
+  }, GIT_URL_TEST_MS);
 
   test('an id added from one URL is not taken over by another', async () => {
     harness = await startTestCore(); const client = await harness.connect();
@@ -404,7 +408,7 @@ describe('plugins from a git URL', () => {
     expect(preview.previewId).toBeNull();
     expect(preview.rejected?.field).toBe('id');
     expect(preview.rejected?.expected).toContain(`already used by the plugin from ${first.path}`);
-  }, 30_000);
+  }, GIT_URL_TEST_MS);
 
   test('a first install that fails leaves no files, stays listed with its error, and retries or goes', async () => {
     harness = await startTestCore(); const client = await harness.connect();
@@ -425,7 +429,7 @@ describe('plugins from a git URL', () => {
     expect(harness.core.plugins.state('seat-pool')).toMatchObject({ status: 'installed', source: { commit: repo.commit } });
     await client.call('plugins.uninstall', { id: 'seat-pool' });
     expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots', 'douane']);
-  }, 30_000);
+  }, GIT_URL_TEST_MS);
 
   test('an installed.json the core no longer accepts is listed as rejected: it can be removed, never run', async () => {
     harness = await startTestCore(); const client = await harness.connect();

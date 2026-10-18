@@ -611,7 +611,9 @@ branch; inspect the running UI over CDP for installation claims.
 `bun run stage:core` builds and stages the core. Staging copies artifacts into
 the bundler resources and beside a release shell. On Windows the sidecar is
 Bun's baseline runtime, with `core/main.js` and split chunks in the adjacent
-`core/` directory. Other platforms use the compiled core. Windows verifies the
+`core/` directory, so `stage:core` runs `build:core` there and compiles no
+`boite-core.exe`; a bench that times the compiled core on Windows needs
+`bun run build:core:exe` first. Other platforms use the compiled core. Windows verifies the
 runtime archive's SHA-256 and executable signature and caches it under
 `node_modules/.cache` for the running Bun version.
 
@@ -918,9 +920,8 @@ palette notices ship in `packages/ui/public/theme-licenses.txt`.
 Text and code faces are device preferences. Bundled variable fonts carry OFL
 licences under `public/fonts`; only selected Unicode ranges load, and the
 service worker precaches default faces. `lib/fonts.ts` and the boot script apply
-and preload preferences before the first paint; the code face is preloaded only
-on a window of 1200 px or more, where an untouched conversation's panel opens
-on its launcher and draws mono key hints. System choices use installed
+both preferences before the first paint and preload the selected text face; the
+code face loads when mono text first draws. System choices use installed
 fonts. In the shell, `Ctrl+=`, `Ctrl+-` and `Ctrl+0` control WebView zoom from
 50% to 200%, restored before the window appears. The panel browser has separate
 zoom; plain browsers keep their native shortcut behavior.

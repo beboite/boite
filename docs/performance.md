@@ -471,6 +471,41 @@ when the core advertises `chunkedAnswers`.
   (`store/display-images.ts`). The client keeps 120 copies and 24 M characters
   of them at most, since a GIF or an original can weigh several MB, and drops
   them when the Store switches to another machine.
+- A prompt's thumbnail asks for `thumb`, a WebP at quality 75 and at most
+  320 px, made once from the kept 1,280 px copy (or the original when there is
+  none) and kept in `media_displays` beside it, so it leaves with its thread.
+  `ChatImage.svelte` asks for it while the box's longer side times
+  `devicePixelRatio` stays within 320 px: a 16:9 tile of 88 px is 313 device
+  pixels on a 2x screen and takes it, a 3x phone or a panorama takes the
+  1,280 px copy. Pictures in an answer and the viewer keep the larger copy and
+  the original.
+- The copies the timeline draws come as `ticket` addresses on the core's
+  file route rather than base64 in a JSON frame: the `<img>` loads
+  `/file/<ticket>` itself, with `immutable` caching, and the same part keeps
+  the same ticket while it lives, so the browser cache answers a scroll back.
+  Each load renews the ticket, so it dies ten minutes after its last use; one
+  that no longer loads (an expired ticket, a restarted core) is asked again
+  once. An incognito conversation's tickets answer `no-store` instead, so no
+  disk cache outlives it, and a copy the journal could not keep comes as
+  base64, since the route would have nothing to read. The desktop shell
+  through another member's relay keeps base64: its policy admits `/file/`
+  only at a machine's own address. The core also answers an original by
+  ticket, but the viewer, a download and an edit still fetch it as base64:
+  they hand its bytes to the part.
+  `bun run bench/media-wire.ts --browser` on 2026-10-17, ten 1920 by 1080
+  PNG screenshots of 1.77 MB, medians of 5:
+
+  | link | answers | down KB | ms to pictures | Chromium decode ms |
+  | --- | --- | ---: | ---: | ---: |
+  | loopback | base64 large copies (before) | 1,762 | 110 | 93 |
+  | loopback | ticket, thumbnail copies | 86 | 19 | 12 |
+  | remote, 150 ms RTT, 8 Mbit/s (`--rtt 150 --rate 1000000 --remote`) | base64 large copies (before) | 1,327 | 1,611 | 93 |
+  | remote, 150 ms RTT, 8 Mbit/s | ticket, thumbnail copies | 86 | 525 | 364 |
+
+  The remote decode column counts the fetches, one more round trip than
+  base64: at 150 ms with no rate cap, ticketed thumbnails took 488 ms against
+  299 ms for base64 large copies, and ticketed large copies gain no bytes over
+  deflated base64 (1,325 against 1,327 KB) while taking that round trip.
 - A light read first makes the blurs of the messages around its page that no
   read looked at before, waiting 1.5 s at most. It does this before the page is
   read, never between the read and the answer, so the answer still holds every
@@ -626,7 +661,7 @@ phone on the LAN gets the gzip.
 Every static answer outside `/assets/` carries an `ETag` and a `Last-Modified` of the variant sent,
 so revalidating the shell, `sw.js` or the manifest is a 304 without a body.
 Fonts and icons are fresh for a day: a phone on plain http has no service
-worker and would otherwise fetch the two default faces, 144 KB, on every load.
+worker and would otherwise fetch the two default faces, 118 KB, on every load.
 A view is gzipped once when it is published and sent compressed to a client
 that reads gzip. The [2026-10-15 report](../bench/results/2026-10-15-perf-media.md)
 has the bytes before and after.
@@ -653,8 +688,73 @@ Day labels and clock times in an agent conversation reuse one
 `Intl.DateTimeFormat` per language (`lib/format.ts`), as hover titles already
 did: `toLocaleString` with a locale builds a new formatter per call.
 
-The French catalogue and the quota window are chunks of their own too, so an
-English page does not download or parse either (`docs/language.md`).
+Every catalogue and the quota window are chunks of their own too, so a page
+downloads and parses only the language it speaks (`docs/language.md`). Nine
+components the first frame does not draw load the same way
+(`lib/deferred-parts.ts`, the terminal drawer and, outside the shell, the
+phone's navigation, which the boot screen waits for): the image viewer, the
+diff, the quota overview, the coordination panel, the updates notice, the
+robot face and the dictation button, prefetched in the idle pass. The
+dictation button draws a disabled microphone of the same size until its chunk
+lands. `qrcode` loads when a code is drawn. The modules the boot shares with a
+lazy chunk are one `boot` chunk (a Rolldown `codeSplitting` group in
+`vite.config.ts`), because the core speaks HTTP/1.1 and a browser fetches six
+files at a time. Geist and Geist Mono ship as latin, latin-ext and rest
+subsets with their weight axis; the mono latin cut carries the arrows and box
+drawing a terminal draws.
+
+A part whose chunk has not landed says it is loading, one whose chunk failed
+offers a retry, and every failed part asks again when the browser is back
+online (`components/Deferred.svelte`). Chromium keeps a failed `import()` for
+the life of the page, so a retry that fails at once loads a fresh page when
+the core answers (`lib/retry-load.ts`, `tests/e2e/chunk-retry.test.ts`). A change waiting for permission cannot
+be allowed before its diff shows. When no catalogue loads at all, the page
+draws a notice with a retry in place of the app (`lib/boot-failure.ts`), and
+the service worker precaches the catalogue of the language the page last
+spoke, so an installed phone still opens offline.
+
+On 2026-10-18 on Windows, `bun run build:ui` of `b611c01f` and of this
+change. The static rows count what `index.html` names plus the device's
+catalogue, gzip at level 9 and brotli at 11:
+
+| Measure | Before | After |
+| --- | ---: | ---: |
+| Entry chunk | 595,295 | 484,682 |
+| UI files, excluding `.br` and `.gz` | 5,036,764 | 4,723,056 |
+| Files `index.html` names, English device | 65 | 6 |
+| Their raw bytes, English | 1,597,482 | 1,381,747 |
+| Their gzip bytes, English | 482,282 | 405,875 |
+| Their brotli bytes, English | 405,523 | 336,131 |
+| Files `index.html` names, French device | 66 | 6 |
+| Their raw bytes, French | 1,748,228 | 1,401,950 |
+| Their gzip bytes, French | 532,196 | 411,337 |
+| Their brotli bytes, French | 448,185 | 341,227 |
+
+The page fetches more than that before it is usable. The cold boot to
+`.app.ready` was measured on the same day with a real core (`tests/e2e/lib/core.ts`)
+serving each build and a fresh headless Chromium profile per run, the request
+graph read from the page's Resource Timing up to the frame where `.app.ready`
+appears: five runs per row, medians, transferred bytes as the browser counts
+them (headers included). The slow link is 150 ms of latency, 1.6 Mbit/s down
+and 750 kbit/s up (`Network.emulateNetworkConditions`).
+
+| Cold boot to ready, slow link | Before | After |
+| --- | ---: | ---: |
+| English: time | 3,963 ms | 3,006 ms |
+| English: requests | 72 | 19 |
+| English: bytes | 586,774 | 480,634 |
+| French: time | 4,171 ms | 3,028 ms |
+| French: requests | 73 | 19 |
+| French: bytes | 629,736 | 485,730 |
+
+Of the 19 requests after the change, 9 are scripts: the entry, the runtime,
+the `boot` chunk, the catalogue, the phone navigation the boot screen waits
+for outside the shell with a module it shares, the dictation button with its
+recorder, and the interaction experiments; the rest are styles, the two
+fonts, the manifest and the icons. The slow link's runs vary by under 260 ms.
+Without throttling both builds reach ready in 148 to 547 ms on this machine,
+a spread wider than any difference between them, and the idle prefetch starts
+before the ready frame and adds four requests.
 
 The service worker still asks the core for the app shell first, but waits
 2.5 s at most before serving the cached one; the late answer is stored for the
@@ -914,6 +1014,105 @@ layout, not the loops, sets the cost. Headless Chrome follows no monitor, so
 its frame rate stands for a fast one; at 60 Hz the staircases save little in
 front and the rest still saves the whole cost. Not measured in WebView2.
 [Report](../bench/results/2026-10-17-ui-at-rest.md).
+
+### What a page left running holds
+
+Beyond the loops, a page left open kept a few costs that nothing on screen
+needed:
+
+- The model cache was rewritten in `localStorage` on every probe answer, and a
+  restore serialized the provider and account lists three times to compare
+  them. `saveModels` now writes at most once a second, the last state, and on
+  `pagehide`; `restoreModels` compares the lists field by field (`sameJson`).
+  A `thread.load` sample, one per working thread at each load report, found its
+  row with `Array.find` through the store's proxy; `Threads.rowOf` reads the
+  row's position from an id index and checks the id there, so a row replaced
+  in place is still found, and builds the index again when the list is
+  replaced, grows or moves.
+- A composer tile drew its picture as a `data:` URL, the whole picture decoded
+  for a 56 by 42 tile, with a multi-megabyte string in the DOM.
+  `lib/attachment-previews.svelte.ts` makes one WebP thumbnail at twice the
+  tile's size when the picture is attached, and the enlarged preview draws the
+  bytes through an object URL; each URL is revoked when its picture leaves the
+  prompt. What is sent does not change.
+- A hidden terminal kept its xterm and its WebGL context. It now loses the
+  context through `WEBGL_lose_context` as it leaves the page (xterm's addon
+  only removes its canvas, which holds the context until a collection), and
+  drops the whole xterm after five minutes hidden
+  ([terminal](terminal.md#the-screen)).
+- Every row of a windowed list had its own `ResizeObserver`, and every
+  threshold an `IntersectionObserver` crossed read the list's place again. The
+  rows of a list share one observer, and those notifications read the layout
+  once a frame. Deferred pictures and files had one `IntersectionObserver`
+  each, rooted at an ancestor found by reading `getComputedStyle` up the tree;
+  `lib/on-view.ts` shares one observer per scrolling root and margin, and the
+  timeline marks itself `data-scroll-root`.
+- A text from 20,000 characters goes through its grammar in a worker
+  ([panel](panel.md)).
+
+The second clock (`lib/clock.svelte.ts`), which the working rows read for
+their elapsed time, keeps ticking at rest and stops only while the page is
+hidden: a window left visible beside another application is at rest and
+still shows its times.
+
+`bun bench/ui-at-rest.ts --only working --runs 3 --wait 120`, 2026-10-17,
+headless Chrome on ANGLE Direct3D 11 (RTX 5080), `?fake=1&working=16` with
+nobody at the PC, 6 s windows, the base being `1c168fd6` and the heap read
+after 120 s. After is measured again on 2026-10-18, merged with `origin/main`
+at `9ffdb977`, with the second clock ticking at rest:
+
+| Measure | Base | After |
+| --- | --- | --- |
+| Frames/s | 2.7 to 3.0 | 2.8 to 3.0 |
+| Renderer ms/s | 10 to 15 | 8 |
+| GPU ms/s | 6 to 7 | 4 |
+| Renderer main thread ms/s | 5 to 7 | 4 |
+| Long tasks since load | 2 to 4 (191 to 740 ms) | 0 to 1 (0 to 51 ms) |
+| JS heap, MiB | 9.9 to 14.5 | 11.2 to 13.8 |
+
+The long tasks are the page's load, which this change does not touch and the
+lean boot on main shortened, and the heap stays within run-to-run noise.
+
+With five terminals opened then hidden, `bun bench/ui-at-rest.ts --only
+"hidden terminals"` (2026-10-18, xterm on WebGL, the base being `origin/main`
+at `b611c01f`) counts the contexts still live, neither lost nor collected,
+before the window's two forced collections and after them:
+
+| Run | Base | After |
+| --- | --- | --- |
+| `--runs 2`, window 1 s after hiding | 5 live, then 5; heap 12.5 and 16.4 MiB | 0 live, then 0; heap 10.2 and 10.1 MiB |
+| `--wait 310`, window 310 s after hiding | 5 live, then 5; heap 12.9 MiB | 0 live, then 0; heap 12.5 MiB |
+
+The base keeps every hidden screen's context; after, each is lost as its
+screen leaves the page. Past five minutes the xterms are gone too, which
+moves the heap by less than its run-to-run spread.
+
+`bun bench/ui-frames.ts --only "<scenario>" --runs 3`, 2026-10-17, headless
+Chrome at 1280 by 890:
+
+| Scenario | Base | After |
+| --- | --- | --- |
+| Large file highlight, grammar on the main thread | 108 to 242 ms | 0 to 2 ms |
+| Large file highlight, long tasks | 2 to 3 (2,706 to 5,423 ms) | 1 to 2 (204 to 616 ms) |
+| Typing with a 1920 by 1080 PNG attached, key p95 | 16.7 to 17.6 ms | 16.0 to 17.5 ms |
+| Typing with a 1920 by 1080 PNG attached, long tasks | 0 | 0 |
+| The same picture, as the tile decodes it | 1920 by 1080 | 149 by 84 |
+| Long thread scroll, long tasks | 2 (112 ms) | 0 |
+| Heavy thread jumps, long tasks | 0 to 2 in 8 runs (0 to 147 ms) | 0 in the last 4 runs, 2 to 5 (117 to 436 ms) in 4 earlier ones |
+
+The picture rows are from 2026-10-18 with the base at `15fdbb81`: the bench
+draws a 1920 by 1080 PNG in the page from a fixed seed, 1,311,112 base64
+characters, and waits for the tile to show it. Typing costs the same on both
+sides; what the thumbnail changes is the picture the tile keeps decoded, about
+7.9 MiB of pixels on the base against 49 KiB after. An earlier version of this
+table compared bytes the decoder rejected, so neither side drew a picture.
+
+The large file task left after the change is the browser building 23,000
+highlighted nodes, not script. The heavy thread jumps scenario is noisy on both
+sides; in its profiles the long tasks are rows mounting (`innerHTML` and the
+scroll anchor's layout read in `remember`), none of it code this change
+touched, and yielding from script would not split them, so nothing yields
+there.
 
 ## What a long day holds
 

@@ -65,12 +65,42 @@ test('a measured height change above the viewport preserves the conversation und
   const retained = root.querySelector<HTMLElement>('[data-window-key="machine:0"]')!;
   expect(retained).not.toBeNull();
   Object.defineProperty(retained, 'getBoundingClientRect', { value: () => new DOMRect(0, -root.scrollTop, 280, 120) });
-  for (const observer of callbacks) if (observer.nodes.has(retained)) observer.callback([], {} as ResizeObserver);
+  for (const observer of callbacks) if (observer.nodes.has(retained)) observer.callback([{ target: retained } as unknown as ResizeObserverEntry], {} as ResizeObserver);
   root.dispatchEvent(new Event('scroll')); await settle();
   expect(root.scrollTop).toBe(1680);
   expect(root.querySelector('[data-row-id="machine:40"]')).not.toBeNull();
 });
 
+
+test('the drawn rows share one size observer, and a burst of placement changes reads the layout once a frame', async () => {
+  let observers = 0;
+  globalThis.ResizeObserver = class {
+    constructor() { observers++; }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+  let moved: IntersectionObserverCallback | undefined;
+  globalThis.IntersectionObserver = class {
+    constructor(callback: IntersectionObserverCallback) { moved = callback; }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof IntersectionObserver;
+  const root = fixture(1000); await settle();
+  const rows = root.querySelectorAll('[data-window-key]').length;
+  expect(rows).toBeGreaterThan(10);
+  // One for the list and its root, one for every row, however many are drawn.
+  expect(observers).toBe(2);
+
+  const reads = vi.mocked(HTMLElement.prototype.getBoundingClientRect);
+  reads.mockClear();
+  for (let burst = 0; burst < 5; burst++) moved!([], {} as IntersectionObserver);
+  expect(reads).not.toHaveBeenCalled();
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  // The list's place against its root: two rectangles, once.
+  expect(reads.mock.calls.length).toBe(2);
+});
 
 test('many small project lists leave offscreen groups as spacers and remain reachable', async () => {
   const root = document.createElement('div'); document.body.append(root);
@@ -115,6 +145,8 @@ test('a project list that rows above it pushed into view draws its rows instead 
       for (const [node, previous] of observer.shares) { const next = share(node); if (next !== previous) { changed = true; observer.shares.set(node, next); } }
       if (changed) observer.callback([], {} as IntersectionObserver);
     }
+    // The list reads where it is on the next frame, once for every notification.
+    await new Promise(resolve => requestAnimationFrame(resolve));
     await settle();
   };
   const drawn = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('[data-row-id]')].map(node => Number(node.dataset.rowId));

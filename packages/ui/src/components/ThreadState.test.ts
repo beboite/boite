@@ -24,7 +24,7 @@ function draw(thread: Partial<Shown>, subagents: WorkingChildren | null = null):
   return document.body.firstElementChild as HTMLElement;
 }
 
-test('a parent whose turn ended waits on its working sub-agents with the monitor sign', () => {
+test('a parent whose turn ended waits on its working sub-agents, its count written out', () => {
   vi.useFakeTimers({ now: NOW });
   const children = [
     { id: 'child-1', parentThreadId: 'parent', status: 'running', runningSince: NOW - 90_000 },
@@ -39,7 +39,9 @@ test('a parent whose turn ended waits on its working sub-agents with the monitor
 
   const state = draw({ status: 'idle', unread: true, backgroundWork: { kinds: ['shell'], since: NOW } }, working.get('parent' as ThreadId)!);
   expect(state.dataset['state']).toBe('delegating');
-  expect(state.querySelector('svg')).not.toBeNull();
+  // The written-out chip breathes in place of a second sign: the row reads "1m 30s  2 agents".
+  expect(state.querySelector('[data-testid=thread-subagents]')?.classList.contains('pulse')).toBe(true);
+  expect(state.textContent?.replace(/\s+/g, ' ').trim()).toBe('1m 30s 2 agents');
   expect(state.getAttribute('title')).toBe('Waiting on 2 sub-agents\n1m 30s');
   // Its own turn or a question for the user still come first.
   expect(threadState({ status: 'running', unread: false }, 2)).toBe('working');
@@ -109,7 +111,7 @@ test('a parent at work shows its sub-agents on a chip, and one whose child asks 
   const working = draw({ status: 'running', runningSince: NOW - 65_000 }, { count: 2, since: NOW - 30_000, asking: 0 });
   expect(working.dataset['state']).toBe('working');
   const chip = working.querySelector<HTMLElement>('[data-testid=thread-subagents]')!;
-  expect(chip.textContent).toBe('2');
+  expect(chip.textContent).toBe('2 agents');
   expect(chip.getAttribute('aria-label')).toBe('2 sub-agents at work');
   expect(chip.classList.contains('asking')).toBe(false);
   unmount(running!, { outro: false });

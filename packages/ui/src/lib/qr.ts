@@ -1,4 +1,7 @@
-import { create, toString as render } from 'qrcode';
+/**
+ * `qrcode` is loaded when a code is drawn, not with the module: only Add a
+ * device draws one, and the Settings chunk that carries it is prefetched at idle.
+ */
 
 /**
  * A pairing link as an inline SVG: black modules on white, no margin of its
@@ -6,6 +9,7 @@ import { create, toString as render } from 'qrcode';
  * purpose, a phone camera reads that in either theme.
  */
 export async function qrSvg(text: string): Promise<string> {
+  const { toString: render } = await import('qrcode');
   const svg = await render(text, {
     type: 'svg',
     margin: 0,
@@ -16,7 +20,8 @@ export async function qrSvg(text: string): Promise<string> {
 }
 
 /** The same code as rows of modules, dark being true: what a test draws to show a camera. */
-export function qrMatrix(text: string): boolean[][] {
+export async function qrMatrix(text: string): Promise<boolean[][]> {
+  const { create } = await import('qrcode');
   const { modules } = create(text, { errorCorrectionLevel: 'M' });
   return Array.from({ length: modules.size }, (_, row) => Array.from({ length: modules.size }, (_, column) => modules.get(row, column) === 1));
 }

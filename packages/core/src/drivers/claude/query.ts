@@ -159,7 +159,11 @@ export const THINKING_DISPLAY_FLAG = 'thinking-display';
  */
 export const TOOL_SUMMARIES_ENV = 'CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES';
 
-/** The environment of a conversation's CLI: `childEnv`, plus the tool summaries the timeline labels its calls with. */
-export function agentEnv(accountEnv: Record<string, string>): Record<string, string | undefined> {
-  return { ...childEnv(accountEnv), [TOOL_SUMMARIES_ENV]: '1' };
+/**
+ * The environment of a conversation's CLI: `childEnv`, plus the tool summaries
+ * the timeline labels its calls with when the owner turned them on
+ * (`Settings.toolSummaries`). Without them a run reads as its counted calls.
+ */
+export function agentEnv(accountEnv: Record<string, string>, toolSummaries = false): Record<string, string | undefined> {
+  return toolSummaries ? { ...childEnv(accountEnv), [TOOL_SUMMARIES_ENV]: '1' } : childEnv(accountEnv);
 }

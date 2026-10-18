@@ -94,12 +94,14 @@ test('a deferred file shows its size and fetches the owning conversation only wh
 });
 
 test("an agent's deferred picture shows its blur, then its light copy near the screen, and its original only when clicked, in one box", async () => {
-  const callbacks: IntersectionObserverCallback[] = [];
+  const observers: { callback: IntersectionObserverCallback; nodes: Set<Element> }[] = [];
   const native = globalThis.IntersectionObserver;
   globalThis.IntersectionObserver = class {
-    constructor(callback: IntersectionObserverCallback) { callbacks.push(callback); }
-    observe() {}
-    disconnect() {}
+    nodes = new Set<Element>();
+    constructor(callback: IntersectionObserverCallback) { observers.push({ callback, nodes: this.nodes }); }
+    observe(node: Element) { this.nodes.add(node); }
+    unobserve(node: Element) { this.nodes.delete(node); }
+    disconnect() { this.nodes.clear(); }
   } as unknown as typeof IntersectionObserver;
   try {
     const loadDisplayImage = vi.fn(async () => 'data:image/webp;base64,COPY');
@@ -119,7 +121,7 @@ test("an agent's deferred picture shows its blur, then its light copy near the s
     // Far from the screen, nothing is fetched.
     expect(loadDisplayImage).not.toHaveBeenCalled();
 
-    for (const callback of callbacks) callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    for (const { callback, nodes } of observers) callback([...nodes].map(target => ({ target, isIntersecting: true }) as IntersectionObserverEntry), {} as IntersectionObserver);
     await vi.waitFor(() => expect(document.querySelector('[data-testid=artifact-copy]')?.getAttribute('src')).toBe('data:image/webp;base64,COPY'));
     expect(loadDisplayImage).toHaveBeenCalledWith('thread', 'message', 0, 'image/png');
     expect(loadMessageAttachment).not.toHaveBeenCalled();

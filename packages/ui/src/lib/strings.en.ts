@@ -91,6 +91,7 @@ export const strings = {
     keys: {
       asyncQuestions: 'Let agents ask without stopping',
       shortAnswers: 'Short answers',
+      toolSummaries: 'Tool summaries (Claude)',
       titleModel: 'Title model',
       threadDoneRetentionDays: 'Delete done threads after',
       threadDeletionRetentionDays: 'Purge deleted threads after',
@@ -901,6 +902,8 @@ export const strings = {
     /** The count beside Threads or Agents in that switch: what works now, and whether something there needs the user. */
     surfaceWorking: '{count} at work',
     surfaceWaiting: '{count} at work, something needs you',
+    surfaceSubagentsOne: 'including 1 subagent',
+    surfaceSubagentsMany: 'including {count} subagents',
     /** The two ways the display options can list threads. */
     projectsView: 'Projects',
     recentView: 'Recent',
@@ -996,6 +999,9 @@ export const strings = {
       /** The chip a parent's row carries while its delegated agents work, in every state. */
       subagentsOne: '1 sub-agent at work',
       subagentsMany: '{count} sub-agents at work',
+      /** The chip's own words, its count written out: the full sentence stays in its title. */
+      subagentsShortOne: '1 agent',
+      subagentsShortMany: '{count} agents',
       /** The same chip once a sub-agent asks the user something: the parent reads Needs you. */
       subagentsAskingOne: '1 sub-agent needs you',
       subagentsAskingMany: '{count} sub-agents need you',
@@ -2394,6 +2400,8 @@ export const strings = {
     asyncQuestionsHint: 'Teaches agents the boite ask command when a session starts. Codex already asks this way.',
     shortAnswers: 'Short answers',
     shortAnswersHint: 'Asks every agent, on every message, for the result first in a few plain sentences, without preamble, recap or running commentary. Facts, numbers and commands stay.',
+    toolSummaries: 'Tool summaries (Claude)',
+    toolSummariesHint: 'Claude labels each batch of tool calls in one line instead of counting them. Each label is one request to its small model, Haiku, billed to the thread\'s account. Applies when a Claude process starts.',
     titleModel: 'Title model',
     titleModelHint: 'Names a thread after its first answer. Automatic uses the thread\'s own agent on its small model.',
     titleModelAuto: 'Automatic',
@@ -2830,6 +2838,14 @@ export const strings = {
     fast: 'Fast'
   },
 
+  /** A part of the app kept in a chunk of its own (`components/Deferred.svelte`), and the phone's navigation (App.svelte). */
+  parts: {
+    loading: 'Loading',
+    failed: 'This part of Boite did not load.',
+    navigationFailed: 'The navigation did not load.',
+    dictationFailed: 'Dictation did not load. Try again'
+  },
+
   common: {
     none: 'none',
     unknown: 'unknown',
@@ -2973,8 +2989,3 @@ export const strings = {
 } as const;
 
 export type Strings = typeof strings;
-
-/** `fill('New thread in {project}', { project: 'boite' })`. */
-export function fill(template: string, values: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] ?? match);
-}

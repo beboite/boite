@@ -121,6 +121,33 @@ Unicode 11 widths keep emoji and East Asian text at the two cells the shell
 counts. The end-to-end pages run the DOM renderer, whose rows they read, unless
 a test asks for `terminalGpu`. Hiding the drawer or switching threads detaches its element;
 reopening reuses the screen, scrollback, selection and full-screen program state.
+A detached screen gives its WebGL context back at once (Chromium keeps sixteen
+at most): xterm's addon only removes its canvas, so the screen loses the
+context itself through `WEBGL_lose_context`. It takes a new one when it shows
+again, which draws it once. After
+five minutes detached (`HIDDEN_RELEASE_MS`) the whole xterm goes and the shell
+keeps running; shown again, the screen is drawn from the core's snapshot, so its
+scrollback is the snapshot's 256 KiB rather than 10,000 lines, and its selection
+and find matches start over. The shell's exit is still heard while released.
+Its status and directory never come from xterm: for the session's whole life,
+`ShellStatusReader` (`terminal-status.ts`) reads the OSC 133, 633, 7 and 9;9
+sequences from the raw output with `OscScanner` (`terminal-marks.ts`), ending
+each where xterm.js 6 does, so a hidden tab's dot turns red or stops spinning
+when its command ends. The status starts from the first snapshot, and again
+after the socket dropped, on a parser of its own: until that snapshot lands,
+the output waits, up to the 256 Ki characters a snapshot holds, and the seed
+parses what is newer than the snapshot as its continuation, so a sequence the
+snapshot leaves open still ends. Output that leaves that buffer is kept as
+what it changes: the phase it leads to from each phase it could start from,
+the last command's status and the newest directory, each with its sequence.
+It also keeps how it starts, as the rest of a sequence: the characters
+`OscScanner` counts there (C0 controls are dropped uncounted) up to the first
+that ends it, at most `MAX_OSC` + 2, and its first raw character, which
+decides whether a snapshot ending on a bare ESC opens a sequence. When all of it follows the snapshot and
+the snapshot leaves a sequence open, they end that sequence on the snapshot's
+parser before the summary applies. After the seed each event is read as it arrives, once. xterm parses later than
+the output arrives, so a mark it had only queued when the tab was released
+still counts; its own handlers draw the dots on the lines and nothing else.
 
 Reloading, opening another window or reconnecting replays the 256 KiB snapshot.
 Truncation prefers a nearby line boundary. Output arriving before the response is

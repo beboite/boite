@@ -22,9 +22,9 @@
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
   /** A switch saves when it flips, as every other switch in Settings does; a refusal puts it back. */
-  async function toggle(key: 'asyncQuestions' | 'shortAnswers', input: HTMLInputElement) {
+  async function toggle(key: 'asyncQuestions' | 'shortAnswers' | 'toolSummaries', input: HTMLInputElement) {
     const ok = await store.saveSettings({ [key]: input.checked });
-    if (!ok) input.checked = store.settings?.[key] ?? !input.checked;
+    if (!ok) input.checked = store.settings?.[key] ?? (key === 'toolSummaries' ? false : true);
   }
 </script>
 
@@ -57,6 +57,13 @@
         </span>
         <input id="{uid}-short" aria-labelledby="{uid}-short-name" type="checkbox" role="switch" data-testid="setting-short-answers"
           checked={store.settings?.shortAnswers ?? true} disabled={!store.settings} onchange={(event) => void toggle('shortAnswers', event.currentTarget)} />
+      </label>
+      <label for="{uid}-tool-summaries" class="switch-row">
+        <span class="text ui-label-box">
+          <span class="ui-label" id="{uid}-tool-summaries-name">{strings.settings.toolSummaries}</span><InfoTip topic={strings.settings.toolSummaries} text={strings.settings.toolSummariesHint} />
+        </span>
+        <input id="{uid}-tool-summaries" aria-labelledby="{uid}-tool-summaries-name" type="checkbox" role="switch" data-testid="setting-tool-summaries"
+          checked={store.settings?.toolSummaries ?? false} disabled={!store.settings} onchange={(event) => void toggle('toolSummaries', event.currentTarget)} />
       </label>
       {#if store.settings}<TitleModelSetting {store} />{/if}
     {/if}

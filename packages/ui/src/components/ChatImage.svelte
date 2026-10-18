@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { imageSize, type Message } from '@boite/contracts';
+  import { DISPLAY_THUMB_MAX, imageSize, type Message } from '@boite/contracts';
   import { onView } from '../lib/on-view';
   import { fill, strings } from '../lib/strings';
   import { transferBytes } from '../lib/format';
@@ -49,10 +49,14 @@
   // request runs or after one succeeded; a failed one asks again the next
   // time it nears the screen. The original comes only when opened.
   let asked = false;
+  let retried = false;
+  /** The size the copy was asked at, the one to forget if its address breaks. */
+  let small = false;
   function load(): void {
     if (asked || original !== null) return;
     asked = true;
-    store.loadDisplayImage(threadId, messageId, partIndex, image.mimeType).then((url) => {
+    small = thumbFits();
+    store.loadDisplayImage(threadId, messageId, partIndex, image.mimeType, small).then((url) => {
       copy = url;
       failed = false;
     }, (error: unknown) => {
@@ -60,6 +64,32 @@
       asked = false;
       store.reportError(error, 'minor');
     });
+  }
+
+  /**
+   * Whether the thumbnail's copy (`DISPLAY_THUMB_MAX` on its longer side) is
+   * sharp in this box on this screen. The picture covers the box, so its
+   * longer side is drawn at the larger of the two scales, in device pixels.
+   * 16:9 at 88 px needs 313 on a 2x screen, so the small copy; 469 on a 3x
+   * phone, so the large one. A picture of unknown size takes the large one.
+   */
+  function thumbFits(): boolean {
+    if (size === null) return false;
+    const drawn = Math.max(width / size.width, tile / size.height) * Math.max(size.width, size.height);
+    return drawn * (window.devicePixelRatio || 1) <= DISPLAY_THUMB_MAX;
+  }
+
+  /** A copy's address that stopped loading (a ticket the core forgot) is asked for again, once. */
+  function broke(): void {
+    if (original === null && copy !== null && !copy.startsWith('data:') && !retried) {
+      retried = true;
+      store.forgetDisplayImage(threadId, messageId, partIndex, small);
+      copy = null;
+      asked = false;
+      load();
+      return;
+    }
+    failed = true;
   }
 </script>
 
@@ -79,7 +109,7 @@
     <span class="waiting" aria-hidden="true">{image.bytes ? fill(strings.chat.partLoading, { size: transferBytes(image.bytes) }) : ''}</span>
   {/if}
   {#if src}
-    <img class="picture" data-testid="image-part" {src} alt={image.alt ?? ''} decoding="async" onload={() => (shown = true)} onerror={() => (failed = true)} />
+    <img class="picture" data-testid="image-part" {src} alt={image.alt ?? ''} decoding="async" onload={() => (shown = true)} onerror={broke} />
   {/if}
 </span>
 

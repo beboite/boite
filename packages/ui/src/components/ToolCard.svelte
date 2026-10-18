@@ -9,7 +9,7 @@
   import { describeTool, fileName } from '../lib/tool-summary';
   import { toolErrorPreview } from '../lib/tool-error';
   import { diffCountsOf } from '../lib/diff';
-  import DiffView from './DiffView.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import DocumentView from './DocumentView.svelte';
   import { chatPrefs } from '../lib/chat-prefs.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -219,7 +219,7 @@
             {/if}
             <div class="diffs">
               {#each diffs as doc, index (index)}
-                <div data-testid="tool-document" data-kind="diff"><DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {doc} {headless} /></div>
+                <div data-testid="tool-document" data-kind="diff"><Deferred part={parts.DiffView}>{#snippet children(DiffView)}<DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {doc} {headless} />{/snippet}</Deferred></div>
               {/each}
             </div>
             {#if others.length > 0}

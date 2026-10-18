@@ -97,6 +97,7 @@ export const fr: Translation = {
     keys: {
       asyncQuestions: 'Laisser les agents demander sans s\'arrêter',
       shortAnswers: 'Réponses courtes',
+      toolSummaries: 'Résumés des outils (Claude)',
       titleModel: 'Modèle des titres',
       threadDoneRetentionDays: 'Supprimer les conversations terminées après',
       threadDeletionRetentionDays: 'Purger les conversations supprimées après',
@@ -889,6 +890,8 @@ export const fr: Translation = {
     agents: 'Agents',
     surfaceWorking: '{count} au travail',
     surfaceWaiting: '{count} au travail, quelque chose vous attend',
+    surfaceSubagentsOne: 'dont 1 sous-agent',
+    surfaceSubagentsMany: 'dont {count} sous-agents',
     projectsView: 'Projets',
     recentView: 'Récent',
     displayView: 'Affichage',
@@ -974,6 +977,8 @@ export const fr: Translation = {
       delegatingMany: 'Attend {count} sous-agents',
       subagentsOne: '1 sous-agent au travail',
       subagentsMany: '{count} sous-agents au travail',
+      subagentsShortOne: '1 agent',
+      subagentsShortMany: '{count} agents',
       subagentsAskingOne: '1 sous-agent vous attend',
       subagentsAskingMany: '{count} sous-agents vous attendent',
       monitoring: 'Surveille',
@@ -2265,6 +2270,8 @@ export const fr: Translation = {
     asyncQuestionsHint: 'Apprend la commande boite ask aux agents au début d\'une session. Codex pose déjà ses questions ainsi.',
     shortAnswers: 'Réponses courtes',
     shortAnswersHint: 'Demande à chaque agent, à chaque message, le résultat d\'abord en quelques phrases simples, sans préambule, récapitulatif ni commentaire en cours de route. Les faits, les chiffres et les commandes restent.',
+    toolSummaries: 'Résumés des outils (Claude)',
+    toolSummariesHint: 'Claude décrit chaque série d\'appels d\'outils en une ligne au lieu de les compter. Chaque ligne est une requête à son petit modèle, Haiku, facturée au compte de la conversation. S\'applique au démarrage d\'un processus Claude.',
     titleModel: 'Modèle des titres',
     titleModelHint: 'Nomme une conversation après sa première réponse. Automatique prend l\'agent de la conversation sur son petit modèle.',
     titleModelAuto: 'Automatique',
@@ -2687,6 +2694,13 @@ export const fr: Translation = {
     ultra: 'Ultra',
     ultrathink: 'Ultrathink',
     fast: 'Rapide'
+  },
+
+  parts: {
+    loading: 'Chargement',
+    failed: "Cette partie de Boite n'a pas pu se charger.",
+    navigationFailed: "La navigation n'a pas pu se charger.",
+    dictationFailed: "La dictée n'a pas pu se charger. Réessayer"
   },
 
   common: {

@@ -25,7 +25,8 @@ test('the tab lists one discussion per conversation, opens its back and forth li
   const store = new Store();
   store.coordination = { self, config: { mode: 'brief', resources: '', remote: true, paused: false }, messages: letters, sent: 1, sendLimit: null, wakes: 0, wakeLimit: null };
   const panel = new RightPanelStore().for('messages-test');
-  panel.openMessages();
+  // The tab remembers a discussion the core has since pruned: it lands on the list.
+  panel.openMessages('here/pruned-thread');
   const context = {
     get coordination() { return store.coordination; }, delegation: null, threads: [], projects: [],
     openThread: { id: self.threadId }, loadCoordination: vi.fn()
@@ -80,4 +81,28 @@ test('the tab lists one discussion per conversation, opens its back and forth li
   rows()[0]!.click();
   flushSync();
   expect(panel.active).toMatchObject({ peer: undefined });
+});
+
+test('a discussion opened on a letter still on its way lands on it when it arrives', async () => {
+  const self = { coreId: 'local-core', threadId: 't-current' };
+  const remote = { coreId: 'remote-core', threadId: 't-deploy' };
+  const from = { ...remote, title: 'Deployment agent', machine: 'Build PC', resources: '', status: 'idle' as const, mode: 'brief' as const };
+  const letter = (id: string, createdAt: number): AgentLetter => ({ id, from, to: self, toTitle: 'Current agent', text: `Text ${id}`, createdAt, expiresAt: 1000, replyTo: null, status: 'delivered', error: null });
+  const store = new Store();
+  store.coordination = { self, config: { mode: 'brief', resources: '', remote: true, paused: false }, messages: [letter('earlier', 10)], sent: 0, sendLimit: null, wakes: 0, wakeLimit: null };
+  const panel = new RightPanelStore().for('late-letter-test');
+  panel.openMessages('remote-core/t-deploy', 'late');
+  const context = {
+    get coordination() { return store.coordination; }, delegation: null, threads: [], projects: [],
+    openThread: { id: self.threadId }, loadCoordination: vi.fn()
+  } as unknown as Store;
+  component = mount(AgentMessagesSurface, { target: document.body, props: { store: context, panel, get surface() { return panel.active!; } } });
+  flushSync();
+  await tick();
+  expect(document.querySelector('[data-testid=agent-discussion-view]')).not.toBeNull();
+  store.coordination!.messages.push(letter('late', 20));
+  flushSync();
+  await tick();
+  flushSync();
+  expect(document.querySelector('[data-letter-id="late"]')?.classList.contains('flash')).toBe(true);
 });
