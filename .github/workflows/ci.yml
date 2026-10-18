@@ -231,14 +231,14 @@ jobs:
           path: tests/e2e/.artifacts/stress/
           retention-days: 7
 
-  # Sizes are measured on Linux for every commit that can change them. Main
-  # keeps them as the bundle-sizes artifact; a pull request compares itself
-  # with its base's and with the last published build plus 2 %
-  # (docs/ci.md#bundle-size). Rerun this job alone after editing the body.
+  # A pull request's sizes, measured on Linux against its base's, which
+  # bundle-size.yml keeps for every main commit, and against the last
+  # published build plus 2 % (docs/ci.md#bundle-size). Rerun this job alone
+  # after editing the body.
   size:
     name: Bundle size
     needs: changes
-    if: needs.changes.outputs.desktop == 'true'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -256,14 +256,7 @@ jobs:
       - run: bun run build:core
       - name: Measure
         run: bun scripts/ci/budgets.ts measure .artifacts/bundle-sizes/bundle-sizes.json
-      - uses: ./.github/actions/upload-artifact
-        with:
-          name: bundle-sizes
-          path: .artifacts/bundle-sizes/bundle-sizes.json
-          if-no-files-found: error
-          retention-days: 90
       - name: Compare with the base and the ceiling
-        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -368,6 +361,7 @@ jobs:
       - name: Require all applicable checks
         env:
           RESULTS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
         run: |
           python3 - <<'PY'
           import json, os
@@ -375,7 +369,7 @@ jobs:
           assert jobs['changes']['result'] == 'success', jobs
           for name in ('core', 'web', 'telemetry', 'e2e-types', 'stress', 'size', 'desktop', 'server', 'android'):
               output = {'e2e-types': 'e2eTypes', 'size': 'desktop'}.get(name, name)
-              required = jobs['changes']['outputs'][output] == 'true'
+              required = jobs['changes']['outputs'][output] == 'true' and (name != 'size' or os.environ['EVENT'] == 'pull_request')
               assert jobs[name]['result'] == ('success' if required else 'skipped'), jobs
           e2e_required = jobs['changes']['outputs']['desktop'] == 'true' and jobs['changes']['outputs']['e2e'] == 'true'
           assert jobs['e2e']['result'] == ('success' if e2e_required else 'skipped'), jobs

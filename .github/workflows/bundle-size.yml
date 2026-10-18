@@ -1,0 +1,38 @@
+name: bundle size
+
+# Measures every main commit for pull requests to compare with
+# (docs/ci.md#bundle-size). One light job, never cancelled by the next push,
+# so a pull request's base almost always has its `bundle-sizes` artifact and
+# no pull request builds its base again.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bundle-size-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    name: Measure main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun run build:ui
+      - run: bun run build:core
+      - name: Measure
+        run: bun scripts/ci/budgets.ts measure .artifacts/bundle-sizes/bundle-sizes.json
+      - uses: ./.github/actions/upload-artifact
+        with:
+          name: bundle-sizes
+          path: .artifacts/bundle-sizes/bundle-sizes.json
+          if-no-files-found: error
+          retention-days: 90

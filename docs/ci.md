@@ -32,7 +32,7 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | Core, contracts, dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
-Every selection that includes desktop also runs [Bundle size](#bundle-size).
+A pull request whose selection includes desktop also runs [Bundle size](#bundle-size).
 
 The changes job always installs frozen dependencies, runs `bun audit`, local
 link checks, `bun test scripts/ci ./bench ./apps/shell/scripts`, architecture
@@ -190,22 +190,23 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 ### Bundle size
 
-The `Bundle size` job in `ci.yml` builds the UI and the core on Linux for any
-change the desktop build covers and measures four sizes with
+`bundle-size.yml` builds the UI and the core on Linux for every push to main,
+one job that the next push never cancels, and measures four sizes with
 `scripts/ci/budgets.ts`: the UI entry chunk, the UI files without their `.br`
 and `.gz` copies, the core `dist/main.js`, and all emitted core JavaScript with
-lazy chunks and workers, excluding native binaries and source maps. Every run
-keeps them 90 days as the `bundle-sizes` artifact. No file in the repository
+lazy chunks and workers, excluding native binaries and source maps. It keeps
+them 90 days as the `bundle-sizes` artifact. The `Bundle size` job in `ci.yml`
+measures a pull request the same way when the desktop build covers its change. No file in the repository
 holds a limit, so a pull request never edits a shared one to grow.
 
 A pull request is checked twice:
 
-- Against its base: the sizes main's CI kept for the base commit, or the base
-  built in the same job when that run was cancelled or skipped. A measure
+- Against its base: the sizes `bundle-size.yml` kept for the base commit, or
+  the base built in the same job when that run is missing or still going. A measure
   growing more than 0.1 % fails until the pull request body explains it under
   a `## Bundle size` heading. The body is read when the job runs: after
   editing it, rerun the failed jobs (`gh run rerun <run-id> --failed`).
-- Against a ceiling: the sizes main's CI measured for the newest published
+- Against a ceiling: the sizes `bundle-size.yml` kept for the newest published
   nightly or release, plus 2 %. A reason does not lift it; only publishing
   does, so a pull request over it waits for the next nightly or shrinks.
 

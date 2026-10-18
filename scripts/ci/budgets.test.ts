@@ -38,14 +38,14 @@ test('measures all emitted core JavaScript including workers and lazy chunks, ex
 });
 
 const base: Sizes = { uiEntryChunk: 500_000, uiDist: 5_000_000, coreBundle: 1_000_000, coreJavaScript: 4_000_000 };
-const reference = { sizes: base, source: '`a1b2c3d4` (main CI artifact)' };
+const reference = { sizes: base, source: '`a1b2c3d4` (main bundle-sizes artifact)' };
 
 test('growth up to 0.1 % passes without a reason, more needs one in the body', () => {
   expect(judge({ ...base, uiDist: base.uiDist + 5_000 }, reference, undefined, undefined).errors).toEqual([]);
   const grown = { ...base, uiEntryChunk: base.uiEntryChunk + 501, coreBundle: base.coreBundle - 10_000 };
   const [error, ...rest] = judge(grown, reference, undefined, undefined).errors;
   expect(rest).toEqual([]);
-  expect(error).toContain('uiEntryChunk +501 bytes (0.10 %) over `a1b2c3d4` (main CI artifact)');
+  expect(error).toContain('uiEntryChunk +501 bytes (0.10 %) over `a1b2c3d4` (main bundle-sizes artifact)');
   expect(error).toContain('"## Bundle size" heading in the pull request body');
   expect(error).not.toContain('coreBundle');
   expect(judge(grown, reference, undefined, 'the palette strings load with the entry').errors).toEqual([]);
@@ -74,10 +74,10 @@ test('reads the reason under a Bundle size heading, ignoring comments and empty 
   expect(verdict.report).not.toContain('<img');
 });
 
-test('takes measurements only from a ci push run on main of this repository', () => {
+test('takes measurements only from a bundle size push run on main of this repository', () => {
   const sha = 'a'.repeat(40);
-  const ci = { id: 1, path: '.github/workflows/ci.yml', head_sha: sha, head_branch: 'main', event: 'push', repository: { id: 7 }, head_repository: { id: 7 } };
-  expect(mainRun([{ ...ci, id: 2, event: 'pull_request' }, { ...ci, id: 3, path: '.github/workflows/nightly.yml' }, { ...ci, id: 4, head_repository: { id: 8 } }, ci], sha)?.id).toBe(1);
+  const ci = { id: 1, path: '.github/workflows/bundle-size.yml', head_sha: sha, head_branch: 'main', event: 'push', repository: { id: 7 }, head_repository: { id: 7 } };
+  expect(mainRun([{ ...ci, id: 2, event: 'pull_request' }, { ...ci, id: 3, path: '.github/workflows/ci.yml' }, { ...ci, id: 4, head_repository: { id: 8 } }, ci], sha)?.id).toBe(1);
   expect(mainRun([{ ...ci, head_branch: 'feature' }], sha)).toBeUndefined();
 });
 

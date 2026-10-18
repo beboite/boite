@@ -5,9 +5,9 @@
  * fail a pull request. No file in the repository holds a limit
  * (docs/ci.md#bundle-size):
  *
- * - a pull request is measured against its base, which main's CI measured and
- *   kept as the `bundle-sizes` artifact (or this job builds when that run was
- *   cancelled). A measure growing more than 0.1 % needs a `## Bundle size`
+ * - a pull request is measured against its base, which bundle-size.yml
+ *   measured on its push to main and kept as the `bundle-sizes` artifact (or
+ *   this job builds when that run is missing). A measure growing more than 0.1 % needs a `## Bundle size`
  *   section in the pull request body;
  * - the ceiling is the last published build (a nightly or a release) plus 2 %,
  *   so only publishing raises it.
@@ -109,7 +109,7 @@ export function bodyReason(body: string | null | undefined): string | undefined 
 
 export interface Reference {
   sizes: Sizes;
-  /** Where the sizes come from, for the report: "`a1b2c3d4` (main CI)". */
+  /** Where the sizes come from, for the report: "`a1b2c3d4` (main)". */
   source: string;
 }
 
@@ -148,13 +148,13 @@ export function judge(head: Sizes, base: Reference | undefined, limit: Reference
   return { report: [...rows, '', ...notes].join('\n'), errors };
 }
 
-// GitHub lookups. Every measurement comes from a `ci` push run on main of this
+// GitHub lookups. Every measurement comes from a `bundle size` push run on main of this
 // repository: a pull request's own artifact cannot stand in for its base or the ceiling.
 
 interface Run { id: number; path: string; head_sha: string; head_branch: string | null; event: string; repository: { id: number }; head_repository: { id: number } | null }
 
 export function mainRun(runs: Run[], sha: string): Run | undefined {
-  return runs.find((run) => run.path === '.github/workflows/ci.yml' && run.event === 'push' && run.head_branch === 'main'
+  return runs.find((run) => run.path === '.github/workflows/bundle-size.yml' && run.event === 'push' && run.head_branch === 'main'
     && run.head_sha === sha && run.head_repository?.id === run.repository.id);
 }
 
@@ -179,7 +179,7 @@ function run(command: string[], cwd?: string) {
   if (result.exitCode !== 0) throw new Error(`${command.join(' ')}: exit ${result.exitCode}`);
 }
 
-/** The sizes main's CI measured at `sha`, or undefined when it has none (cancelled, skipped, expired). */
+/** The sizes bundle-size.yml measured at `sha`, or undefined when it has none (cancelled, skipped, expired). */
 async function mainMeasurement(sha: string): Promise<Sizes | undefined> {
   const { workflow_runs } = await api<{ workflow_runs: Run[] }>(`actions/runs?head_sha=${sha}&branch=main&event=push&per_page=20`);
   const found = mainRun(workflow_runs, sha);
@@ -211,8 +211,8 @@ async function check(headFile: string) {
 
   const fromMain = await mainMeasurement(baseSha);
   const base: Reference = fromMain
-    ? { sizes: fromMain, source: `\`${short(baseSha)}\` (main CI artifact)` }
-    : { sizes: buildBase(baseSha), source: `\`${short(baseSha)}\` (built here: main CI kept no measurement)` };
+    ? { sizes: fromMain, source: `\`${short(baseSha)}\` (main bundle-sizes artifact)` }
+    : { sizes: buildBase(baseSha), source: `\`${short(baseSha)}\` (built here: main kept no measurement)` };
 
   let limit: Reference | undefined;
   const releases = publishedCommits(await api<Parameters<typeof publishedCommits>[0]>('releases?per_page=20'));
