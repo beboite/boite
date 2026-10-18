@@ -1,5 +1,5 @@
 /** Permission requests and questions: asked by a turn, answered by the user. */
-import { RpcErrorCode, agentSettingAnswerText, checkSettingRequest, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { RpcErrorCode, agentSettingAnswerText, checkClientPreferences, checkSettingRequest, experimentOf, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { checkAnswer, checkAsk } from './checks';
 import { QUESTION_OPTIONS, QUESTION_TEXT } from './conversation';
@@ -139,10 +139,15 @@ function agentSettingText(ctx: FakeContext, setting: AgentSettingAsk, answer: Qu
   return agentSettingAnswerText(setting, answer, (value) => JSON.stringify(setting.key === 'projects' && Array.isArray(value) ? value.map((id) => names.get(String(id)) ?? id) : value ?? null));
 }
 
-/** As the core's `settleSettings`: a change card closes once its setting left the value it was asked from. */
-export function settleSettings(ctx: FakeContext, settings: Settings): void {
+/**
+ * As the core's `settleSettings` and `settleClient`: a change card closes once
+ * its setting left the value it was asked from. `experiments` settles the
+ * experiment cards only, as an app's report does.
+ */
+export function settleSettings(ctx: FakeContext, settings: Settings, experiments = false): void {
   for (const [questionId, pending] of [...ctx.pendingQuestions]) {
-    const answer = pending.request.setting === undefined ? null : settledSetting(pending.request.setting, settings);
+    const setting = pending.request.setting;
+    const answer = setting === undefined || (experiments && (setting.kind !== 'change' || experimentOf(setting.key) === null)) ? null : settledSetting(setting, settings, ctx.clientPreferences);
     if (answer === null) continue;
     ctx.pendingQuestions.delete(questionId);
     pending.resolve(answer);
@@ -155,7 +160,7 @@ export function requestSetting(ctx: FakeContext, thread: Thread, turn: Turn, par
   const checked = checkSettingRequest(params, ctx.settings, (patch) => {
     const result = checkSettingsPatch(patch);
     return result.ok ? { ok: true, patch: result.patch } : { ok: false, message: result.message, field: result.field };
-  }, open);
+  }, open, ctx.clientPreferences);
   if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.Refused, message: checked.message, data: checked.data });
   return { questionId: askSetting(ctx, thread, turn, checked.reason, checked.options, checked.setting), setting: checked.setting };
 }
@@ -322,7 +327,17 @@ export function requestMethods(ctx: FakeContext) {
       if (!turn) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the thread has no turn to ask in yet', data: { threadId: params.threadId } });
       return requestSetting(ctx, thread, turn, params);
     },
-    'agent.settings': async () => readSettings(ctx.settings),
+    'agent.settings': async () => ({
+      app: ctx.clientPreferences === null ? null : { language: ctx.clientPreferences.language, device: null, client: null },
+      settings: readSettings(ctx.settings, ctx.clientPreferences),
+    }),
+    'client.preferences': async (params) => {
+      const checked = checkClientPreferences(params);
+      if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
+      ctx.clientPreferences = checked.preferences;
+      settleSettings(ctx, ctx.settings, true);
+      return { ok: true };
+    },
     'questions.skip': async (params) => {
       const pending = ctx.pendingQuestions.get(params.questionId);
       if (!pending) throw ctx.notFound('question', params.questionId);

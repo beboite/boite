@@ -13,6 +13,8 @@ import {
   type SettingAsk,
   type SettingRequestParams,
   checkSettingRequest,
+  experimentOf,
+  type ClientPreferences,
   settingAnswerText,
   settledSetting,
   type ThreadId,
@@ -256,7 +258,7 @@ export class ThreadCards {
         const field = (error.data as { field?: unknown } | undefined)?.field;
         return { ok: false, message: error.message, field: typeof field === 'string' ? field : 'value' };
       }
-    }, open);
+    }, open, this.core.clients.current());
     if (!checked.ok) throw refused(checked.message, checked.data);
     const { reason, setting, options } = checked;
     const { questionId } = this.drawAsync(thread, { text: reason, options, allowText: false, multiple: false, async: true, setting });
@@ -269,7 +271,12 @@ export class ThreadCards {
    * when it holds the proposed value and as changed when it holds another.
    */
   settleSettings(next: Settings): void {
-    this.settle(request => (request.setting === undefined ? null : settledSetting(request.setting, next)), 'a settings change');
+    this.settle(request => (request.setting === undefined ? null : settledSetting(request.setting, next, this.core.clients.current())), 'a settings change');
+  }
+
+  /** The app agents read reported new preferences: every experiment card whose switch moved there settles. */
+  settleClient(preferences: ClientPreferences): void {
+    this.settle(request => (request.setting?.kind !== 'change' || experimentOf(request.setting.key) === null ? null : settledSetting(request.setting, this.core.settings.get(), preferences)), 'an app change');
   }
 
   /**

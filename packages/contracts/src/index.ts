@@ -1561,6 +1561,8 @@ export interface ArtifactContent { url: string; bytes: number; mimeType: string;
 export interface SentFrom {
   client: 'shell' | 'pwa';
   device: string | null;
+  /** The language the app spoke when the prompt left it (`client.preferences`); unset when it had not said. */
+  language?: AppLanguage;
 }
 
 /** The longest `hello` `client.device` the core keeps. */
@@ -4260,10 +4262,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'agent.projects': { params: { threadId: ThreadId }; result: AgentProject[] };
   /**
-   * The settings an agent may ask about (`REQUESTABLE_SETTINGS`), each with
-   * its value and the page it sits on, so it reads before it proposes.
+   * The settings an agent may ask about (`REQUESTABLE_SETTINGS`, then the
+   * experiments of the app the user last used), each with its value, the page
+   * it sits on and its name in that app, so it reads before it proposes. `app`
+   * says which language the user reads Boite in.
    */
-  'agent.settings': { params: { threadId: ThreadId }; result: SettingReading[] };
+  'agent.settings': { params: { threadId: ThreadId }; result: SettingsReading };
   /**
    * The agent registers an existing folder as a project, as the owner does
    * from the sidebar, so `agent.spawn` and `agent.move` can name it. `path` is
@@ -4970,6 +4974,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'subscriptionProxy.move': { params: { ids: string[]; managementToken?: string | null; target?: GatewayMoveTarget }; result: { outcomes: GatewayMoveOutcome[] } };
   'settings.set': { params: Partial<Settings>; result: Settings };
+  /**
+   * The app says its language, the experiments it has on and the names it
+   * gives settings, after each hello and on every change. Agents read them
+   * from the app the user last used (`agent.settings`), and a card about an
+   * experiment settles when that app reports it changed.
+   */
+  'client.preferences': { params: ClientPreferences; result: { ok: true } };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };
   /**
@@ -5277,12 +5288,14 @@ import type { AutoCompact, CacheKeepalive } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export {
-  REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
-  checkSettingRequest, effectiveSetting, isRequestableSetting, isSettingsPage, readSettings, sameSetting, settingAnswerText, settledSetting,
-  type RequestableSetting, type SettingAsk, type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck,
-  type SettingRequestParams, type SettingsPage,
+  APP_LANGUAGES, CLIENT_LABELS_MAX, CLIENT_LABEL_CHARS, EXPERIMENT_IDS, REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
+  checkClientPreferences, checkSettingRequest, currentSetting, effectiveSetting, experimentOf, isExperimentId, isRequestableSetting, isSettingsPage, readSettings,
+  sameClientPreferences, sameSetting, settingAnswerText, settledSetting,
+  type AppLanguage, type ClientPreferences, type ExperimentId, type ExperimentSettingKey, type RequestableKey, type RequestableSetting, type SettingAsk,
+  type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck, type SettingRequestParams, type SettingsPage,
+  type SettingsReading,
 } from './setting-requests.ts';
-import type { SettingAsk, SettingReading, SettingRequestParams } from './setting-requests.ts';
+import type { AppLanguage, ClientPreferences, SettingAsk, SettingRequestParams, SettingsReading } from './setting-requests.ts';
 export {
   AGENT_PROJECTS_MAX, AGENT_RUN_MINUTES, AGENT_SETTING_KEYS, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,
   normalizeAgentSetting, settledAgentSetting,

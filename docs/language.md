@@ -10,6 +10,11 @@ way, a storage a browser refuses, a stored value from a build that had more
 languages, a sentence one catalogue is missing, ends in English rather than in
 an error.
 
+Each app also tells the cores it is connected to which language it speaks,
+with its experiments and the names it gives settings (`client.preferences`,
+[cli.md](cli.md)). An agent then names a setting the way the user's screen
+does, and the note ahead of a prompt says which language the app shows.
+
 ## Picking one
 
 Settings, Appearance, at the top: System, English, Français. The first screen

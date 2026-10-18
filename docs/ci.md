@@ -182,11 +182,23 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 492,200 |
-| UI files, excluding `.br` and `.gz` copies | 4,868,600 |
+| UI files, excluding `.br` and `.gz` copies | 4,871,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,478,300 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,483,200 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, settings cards that draw their switch in the chat, with the
+app's language, experiments and setting names reported to the core
+(`client.preferences`), measure 488,751 entry bytes, 4,872,018 UI bytes and
+4,483,970 core JavaScript bytes with `measure()` after fresh `bun run
+build:ui` and `bun run build:core` on Linux, against 492,112, 4,869,093 and
+4,479,099 for `origin/main` at `80c2da06` on the same machine: the entry loses
+3,361 bytes, the UI gains 2,925 and the core 4,871 (the client preferences
+book, the experiment checks and the CLI's app line). Linux reads that main
+about 1,100 UI and 1,300 core bytes above the Windows figures below, so the UI
+and core JavaScript limits rise by the measured growth to 4,871,500 and
+4,483,200; the entry limit stays.
 
 On 2026-10-18, keeping the prompt cache warm (PR #594) merged with
 `origin/main` at `3a19eb57` measures 491,872 entry bytes, 4,867,996 UI bytes

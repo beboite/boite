@@ -70,7 +70,7 @@ export const strings = {
     open: 'Open Settings',
     refuse: 'Refuse',
     dismiss: 'Dismiss',
-    sensitiveHint: 'This one changes from Settings, beside its explanation. The card closes once it is changed.',
+    sensitiveHint: 'Check this one before changing it: it guards this computer, its history or its files.',
     guestHint: 'Only the computer running Boite can change this setting.',
     elsewhere: 'This is in the Settings of the computer running Boite.',
     loadFailed: 'This settings card did not load.',

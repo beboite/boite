@@ -1,18 +1,21 @@
 <script lang="ts">
   import { ArrowRight, Settings2, ShieldAlert } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import type { QuestionAnswer, Settings, SettingAsk } from '@boite/contracts';
+  import { currentSetting, experimentOf, type QuestionAnswer, type Settings, type SettingAsk } from '@boite/contracts';
+  import { readExperiments, setExperiment, subscribeExperiments } from '../lib/experiments';
   import { keepFocus } from '../lib/focus';
-  import { settingHeading, settingLabel, settingPlaceText, settingsReachable, settingValueText } from '../lib/setting-requests';
+  import { settingHeading, settingHint, settingLabel, settingPlaceText, settingsReachable, settingValueText } from '../lib/setting-requests';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import InfoTip from './InfoTip.svelte';
 
   /**
    * A settings card an agent put in the conversation (`boite settings
-   * request|open`). It writes nothing by itself: Apply goes through
-   * `settings.set` like the Settings page, and the core closes the card once
-   * the setting moved, whoever moved it. A sensitive setting has no Apply; the
-   * card opens its page instead.
+   * request|open`). A change is made right here: a true-or-false setting
+   * draws its switch, any other value an Apply. The switch or Apply goes
+   * through `settings.set` like the Settings page, or flips this device's
+   * experiment, and the core closes the card once the setting moved, whoever
+   * moved it.
    */
   let {
     store,
@@ -36,27 +39,50 @@
     respond: (optionId: 'refuse' | 'open') => Promise<unknown>;
   } = $props();
 
+  const uid = $props.id();
   let busy = $state(false);
   /** The same test Settings makes to draw the phone's own page (`SettingsShell.svelte`). */
   const narrow = new MediaQuery('(max-width: 720px)');
   const phone = $derived(narrow.current && window.__TAURI_INTERNALS__ === undefined);
 
   const change = $derived(setting.kind === 'change' ? setting : null);
-  const canApply = $derived(change !== null && !change.sensitive && store.owner);
+  /** An experiment is this device's own switch, which any of the user's devices flips for itself. */
+  const experiment = $derived(change === null ? null : experimentOf(change.key));
+  let experiments = $state(readExperiments());
+  $effect(() => subscribeExperiments((enabled) => { experiments = enabled; }));
+  /** True or false: the card draws the switch itself. */
+  const toggle = $derived(change !== null && typeof change.value === 'boolean');
+  /** What the switch shows now, from this device or the core's settings. */
+  const now = $derived(change === null ? null : experiment !== null ? experiments.includes(experiment) : (store.settings === null ? change.previous : currentSetting(change.key, store.settings, null)));
+  const canApply = $derived(change !== null && (experiment !== null || store.owner));
   /** This client's Settings has the card: Show and Open land on it rather than on Home. */
   const reachable = $derived(settingsReachable(setting, { owner: store.owner, phone }));
   const place = $derived(settingPlaceText(setting, store.providers));
   const heading = $derived(settingHeading(setting));
+  const label = $derived(change ? settingLabel(change.key) : '');
+  const hint = $derived(change ? settingHint(change.key) : null);
 
   function value(raw: unknown): string {
     return change ? settingValueText(change.key, raw, store.providers) : '';
   }
 
-  async function apply(): Promise<void> {
-    if (!change || busy) return;
+  /** The core settles the card when the value lands; until then it stays busy. */
+  async function apply(next: unknown): Promise<boolean> {
+    if (!change || busy || !canApply) return false;
     busy = true;
-    // The core settles the card when the value lands; until then it stays busy.
-    if (!(await store.saveSettings({ [change.key]: change.value } as Partial<Settings>))) busy = false;
+    if (experiment !== null) {
+      // The app reports the switch to the core, which settles the card.
+      setExperiment(experiment, next === true);
+      return true;
+    }
+    if (await store.saveSettings({ [change.key]: next } as Partial<Settings>)) return true;
+    busy = false;
+    return false;
+  }
+
+  async function flip(input: HTMLInputElement): Promise<void> {
+    const wanted = input.checked;
+    if (!(await apply(wanted))) input.checked = now === true;
   }
 
   function show(): void {
@@ -82,7 +108,7 @@
   function subject(given: QuestionAnswer | null): string {
     if (!change) return place;
     const shown = given?.optionIds[0] === 'applied' ? change.value : given?.optionIds[0] === 'changed' ? given.value : change.previous;
-    return `${settingLabel(change.key)}: ${value(shown)}`;
+    return `${label}: ${value(shown)}`;
   }
 </script>
 
@@ -105,9 +131,14 @@
     {/if}
     <p class="reason" data-testid="setting-reason">{text}</p>
 
-    {#if change}
+    {#if change && toggle}
+      <div class="delta toggle" data-testid="setting-toggle">
+        <span class="name ui-label-box"><span class="ui-label" id="{uid}-name">{label}</span>{#if hint}<InfoTip topic={label} text={hint} />{/if}</span>
+        <input type="checkbox" role="switch" aria-labelledby="{uid}-name" data-testid="setting-switch" checked={now === true} disabled={busy || !canApply} onchange={(event) => flip(event.currentTarget)} />
+      </div>
+    {:else if change}
       <div class="delta" data-testid="setting-delta">
-        <span class="name">{settingLabel(change.key)}</span>
+        <span class="name">{label}</span>
         <span class="values">
           <span class="old" data-testid="setting-previous">{value(change.previous)}</span>
           <ArrowRight size={14} strokeWidth={1.75} aria-label={strings.settingRequest.to} />
@@ -116,7 +147,7 @@
       </div>
     {/if}
     <p class="place ui-label" data-testid="setting-place">{place}</p>
-    {#if change && !store.owner}
+    {#if change && !canApply}
       <p class="hint" data-testid="setting-guest-hint">{strings.settingRequest.guestHint}</p>
     {:else if !reachable && !canApply}
       <p class="hint" data-testid="setting-elsewhere-hint">{strings.settingRequest.elsewhere}</p>
@@ -131,12 +162,12 @@
         {/if}
         <button type="button" class="ghost" data-testid="setting-refuse" disabled={busy} onmousedown={keepFocus} onclick={() => answerWith('refuse')}><span class="ui-label">{strings.settingRequest.dismiss}</span></button>
       {:else}
-        {#if canApply}
-          <button type="button" class="primary" data-testid="setting-apply" disabled={busy} onmousedown={keepFocus} onclick={apply}><span class="ui-label">{strings.settingRequest.apply}</span></button>
+        {#if canApply && !toggle}
+          <button type="button" class="primary" data-testid="setting-apply" disabled={busy} onmousedown={keepFocus} onclick={() => apply(change?.value)}><span class="ui-label">{strings.settingRequest.apply}</span></button>
         {/if}
         <!-- A paired device has no owner's page to show it on, and a phone lacks some cards. -->
-        {#if store.owner && reachable}
-          <button type="button" class={canApply ? 'ghost' : 'primary'} data-testid="setting-show" onmousedown={keepFocus} onclick={show}><span class="ui-label">{canApply ? strings.settingRequest.show : strings.settingRequest.open}</span></button>
+        {#if canApply && reachable}
+          <button type="button" class="ghost" data-testid="setting-show" onmousedown={keepFocus} onclick={show}><span class="ui-label">{strings.settingRequest.show}</span></button>
         {/if}
         <button type="button" class="ghost" data-testid="setting-refuse" disabled={busy} onmousedown={keepFocus} onclick={() => answerWith('refuse')}><span class="ui-label">{strings.settingRequest.refuse}</span></button>
       {/if}
@@ -183,6 +214,7 @@
     font-size: var(--text-sm);
   }
   .name { min-width: 0; overflow-wrap: anywhere; }
+  .toggle { flex-wrap: nowrap; }
   .values { display: inline-flex; align-items: center; gap: 8px; color: var(--color-subtle); min-width: 0; }
   .old { color: var(--color-muted-foreground); text-decoration: line-through; overflow-wrap: anywhere; }
   .new { color: var(--color-accent); font-weight: 600; overflow-wrap: anywhere; }

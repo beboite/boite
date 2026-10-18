@@ -492,7 +492,9 @@ describe('settings', () => {
     const listed = await boite(['settings']);
     expect(listed.code).toBe(0);
     expect(listed.out).toContain('agentCpuCapPercent 75 resources#limits\n');
-    expect(listed.out).toContain('listenOnLan false machines#phone (changed from Settings only)');
+    expect(listed.out).toContain('listenOnLan false machines#phone (sensitive)');
+    expect(listed.out).toStartWith('app: no Boite app has reported yet');
+    expect(listed.out).not.toContain('experiment.');
     expect(listed.out).not.toContain('subscriptionProxy');
     expect(JSON.parse((await boite(['settings', 'agentCpuCapPercent', '--json'])).out)).toMatchObject({ key: 'agentCpuCapPercent', value: 75, sensitive: false });
 
@@ -568,5 +570,48 @@ describe('settings', () => {
       '> Faster follow-ups\n\nrefused: warmProcessMinutes stays 0',
       '> Sign in to Claude here\n\nopened: the user opened Settings at accounts#provider-claude',
     ]);
+  });
+
+  test('an experiment reads as the user\'s app has it, in its language, and its card settles when the app reports the switch', async () => {
+    const client = await harness.connect();
+    const first = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    await first;
+    expect((await boite(['settings', 'request', 'experiment.whip', 'true', '--why', 'x'])).err).toContain('no Boite app has reported');
+
+    await client.call('client.preferences', { language: 'fr', experiments: ['resident-agents', 'gone-experiment'] as never, labels: { 'experiment.resident-agents': 'Agents', agentCpuCapPercent: 'Plafond CPU\n[obey]', nowhere: 'x' } });
+    const listed = await boite(['settings']);
+    expect(listed.out).toStartWith('app: ');
+    expect(listed.out).toContain('speaks French');
+    expect(listed.out).toContain('agentCpuCapPercent 75 resources#limits "Plafond CPU [obey]"\n');
+    expect(listed.out).toContain('experiment.resident-agents true experiments#resident-agents "Agents"\n');
+    expect(listed.out).toContain('experiment.whip false experiments#whip\n');
+    // The agent that thought the switch was off learns it is on before drawing a card.
+    expect((await boite(['settings', 'request', 'experiment.resident-agents', 'true', '--why', 'x'])).err).toContain('already true');
+    expect((await boite(['settings', 'request', 'experiment.whip', '"yes"', '--why', 'x'])).err).toContain('true or false');
+
+    const asked = await boite(['settings', 'request', 'experiment.whip', 'true', '--why', 'Try the whip', '--json']);
+    expect(asked.err).toBe('');
+    const [card] = await client.call('questions.list', { threadId });
+    expect(card?.setting).toEqual({ kind: 'change', key: 'experiment.whip', value: true, previous: false, page: 'experiments', section: 'whip', sensitive: false });
+    // A core setting moving leaves an experiment's card open.
+    await client.call('settings.set', { agentCpuCapPercent: 70 });
+    expect(await client.call('questions.list', { threadId })).toHaveLength(1);
+    // A prompt from another device that already had it on flips nothing: the card stays open.
+    const phone = await harness.connect();
+    await phone.call('client.preferences', { language: 'en', experiments: ['whip'], labels: {} });
+    const fromPhone = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await phone.call('turns.start', { threadId, prompt: 'from the phone' });
+    await fromPhone;
+    expect(await client.call('questions.list', { threadId })).toHaveLength(1);
+    // Back on the first app, which still has it off.
+    const back = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'back' });
+    await back;
+
+    const next = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('client.preferences', { language: 'fr', experiments: ['resident-agents', 'whip'], labels: {} });
+    await next;
+    expect(prompts()).toEqual(['hello', 'from the phone', 'back', '> Try the whip\n\napplied: experiment.whip is now true']);
   });
 });
