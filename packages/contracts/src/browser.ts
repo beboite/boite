@@ -28,6 +28,13 @@ export type BrowserAction =
   /** `maxBytes` caps the chunk; cores from before 100 MB recordings read 512 KiB at a time. */
   | { kind: 'recording-read'; recordingId: string; offset: number; maxBytes?: number }
   | { kind: 'recording-discard'; recordingId: string }
+  /** The conversation's downloads, whatever tab made them: see `BrowserDownload`. */
+  | { kind: 'downloads' }
+  /** Waits until the download is no longer in progress, `BROWSER_WAIT_MAX_MS` at most. */
+  | { kind: 'download-wait'; downloadId: string; timeoutMs?: number }
+  /** A finished download's bytes, in chunks of `BROWSER_DOWNLOAD_CHUNK_BYTES` at most. */
+  | { kind: 'download-read'; downloadId: string; offset: number; maxBytes?: number }
+  | { kind: 'download-discard'; downloadId: string }
   /**
    * `selector` is an `@eN` ref from the last snapshot, a CSS selector matching
    * one element, or `text=...`. `count: 2` double-clicks.
@@ -74,6 +81,52 @@ export interface BrowserReply {
   screenshot?: { mime: 'image/png'; base64: string };
   recording?: BrowserRecording;
   frame?: RemoteBrowserFrame;
+  /** Downloads that began while the command ran, the user's in the panel included. */
+  downloads?: BrowserDownload[];
+}
+/**
+ * A file the agent browser downloaded. It lands in a quarantine folder of the
+ * core under a random name with no extension, never in a project, and leaves
+ * it only when an agent copies it out (`download-read`), without the execute
+ * bit. `url` drops the query and fragment, which can carry tokens. `kind`
+ * comes from the file's first bytes and its name, the riskier of the two, and
+ * `warning` says what to check before using it.
+ */
+export interface BrowserDownload {
+  id: string; name: string; url: string;
+  state: 'downloading' | 'done' | 'canceled' | 'failed';
+  bytes: number; totalBytes?: number; startedAt: number;
+  sha256?: string; kind?: BrowserDownloadKind; warning?: string; reason?: string;
+}
+export type BrowserDownloadKind = 'executable' | 'script' | 'archive' | 'document' | 'image' | 'media' | 'text' | 'other';
+/** One download larger than this is cancelled. */
+export const BROWSER_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 1024;
+/** What the quarantine of one machine holds at most, all conversations together: a download past it is cancelled. */
+export const BROWSER_DOWNLOADS_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+/** Downloads one conversation keeps; the oldest finished one goes for a new one. */
+export const BROWSER_DOWNLOADS_PER_THREAD = 20;
+/** One `download-read` reply, as a recording's. */
+export const BROWSER_DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
+/** A download nobody copied out is removed this long after it ended. */
+export const BROWSER_DOWNLOAD_KEEP_MS = 60 * 60 * 1000;
+const DOWNLOAD_ID = /^dl-[a-f0-9]{12}$/;
+
+/**
+ * A file name safe to create in any folder on any OS: the last path part, no
+ * control or reserved characters, no leading dot, at most 200 characters.
+ */
+export function browserDownloadName(raw: unknown): string {
+  const base = (String(raw ?? '').split(/[\\/]/).pop() ?? '').slice(0, 1000);
+  let name = base.replace(/[\u0000-\u001f\u007f<>:"|?*]/g, '_');
+  // Dots and spaces at either end, trimmed by index: an anchored regex is quadratic on a long run of them.
+  const edge = (char: string) => char === '.' || /\s/.test(char);
+  let start = 0, end = name.length;
+  while (start < end && edge(name[start]!)) start++;
+  while (end > start && edge(name[end - 1]!)) end--;
+  name = name.slice(start, end);
+  if (/^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(name)) name = `_${name}`;
+  if (name.length > 200) { const dot = name.lastIndexOf('.'); const ext = dot > 0 && name.length - dot <= 16 ? name.slice(dot) : ''; name = name.slice(0, 200 - ext.length) + ext; }
+  return name || 'download';
 }
 /** Recordings are MP4. Desktops from before codecs could be chosen made WebM where H.264 was missing. */
 export const BROWSER_RECORDING_TYPES = { 'video/mp4': 'mp4', 'video/webm': 'webm' } as const;
@@ -237,6 +290,14 @@ function checkRecording(action: BrowserAction & { kind: 'recording-discard' | 'r
   return action.maxBytes === undefined || (Number.isSafeInteger(action.maxBytes) && action.maxBytes > 0 && action.maxBytes <= BROWSER_RECORDING_CHUNK_BYTES) ? null : `recording maxBytes must be an integer from 1 to ${BROWSER_RECORDING_CHUNK_BYTES}`;
 }
 
+function checkDownload(action: BrowserAction & { kind: 'download-wait' | 'download-read' | 'download-discard' }): string | null {
+  if (typeof action.downloadId !== 'string' || !DOWNLOAD_ID.test(action.downloadId)) return 'downloadId must come from browser downloads';
+  if (action.kind === 'download-wait') return action.timeoutMs === undefined || (Number.isInteger(action.timeoutMs) && action.timeoutMs >= 100 && action.timeoutMs <= BROWSER_WAIT_MAX_MS) ? null : `download wait timeout must be an integer from 100 to ${BROWSER_WAIT_MAX_MS} ms`;
+  if (action.kind === 'download-discard') return null;
+  if (!Number.isSafeInteger(action.offset) || action.offset < 0 || action.offset > BROWSER_DOWNLOAD_MAX_BYTES) return 'download offset must be an integer within the download';
+  return action.maxBytes === undefined || (Number.isSafeInteger(action.maxBytes) && action.maxBytes > 0 && action.maxBytes <= BROWSER_DOWNLOAD_CHUNK_BYTES) ? null : `download maxBytes must be an integer from 1 to ${BROWSER_DOWNLOAD_CHUNK_BYTES}`;
+}
+
 function checkNoInput(): string | null {
   return null;
 }
@@ -288,6 +349,10 @@ const ACTION_CHECKS: BrowserActionChecks = {
   'recording-stop': checkNoInput,
   'recording-discard': checkRecording,
   'recording-read': checkRecording,
+  'downloads': checkNoInput,
+  'download-wait': checkDownload,
+  'download-read': checkDownload,
+  'download-discard': checkDownload,
   'status': checkNoInput,
   'profiles': checkNoInput,
   'screenshot': checkNoInput,
