@@ -1,0 +1,54 @@
+{
+  "tests": [
+    {
+      "file": "packages/core/test/browser-sharing.test.ts",
+      "test": "a viewer on another device watches and drives the tab, and hears it come and go",
+      "reason": "failed 14 first attempts that passed on rerun (macOS x64 8, macOS arm64 3, Linux x64 3), 2026-10-16 to 10-18"
+    },
+    {
+      "file": "packages/core/test/browser-sharing.test.ts",
+      "test": "a recording keeps every picture of a page that draws slower than the take",
+      "reason": "failed 4 first attempts that passed on rerun (macOS arm64), 2026-10-16 to 10-18"
+    },
+    {
+      "file": "packages/core/test/browser-sharing.test.ts",
+      "test": "a viewer of a still page gets no new picture until the page draws, and the frame it holds stays usable",
+      "reason": "failed 3 first attempts that passed on rerun (macOS arm64), 2026-10-16 to 10-18"
+    },
+    {
+      "file": "packages/core/test/browser-sharing.test.ts",
+      "test": "a recording is an MP4 made in the browser itself, and one left running when the turn ends is thrown away",
+      "reason": "failed 3 first attempts that passed on rerun (macOS arm64), 2026-10-16 to 10-18"
+    },
+    {
+      "file": "packages/core/test/browser.test.ts",
+      "test": "an agent drives a page with agent-browser commands: refs, forms, dialogs and covered elements",
+      "reason": "failed 3 first attempts that passed on rerun (macOS arm64), 2026-10-16 to 10-18"
+    },
+    {
+      "file": "packages/core/test/cli.test.ts",
+      "test": "skipping async questions neither steers running work nor starts a later turn",
+      "reason": "failed 4 first attempts that passed on rerun (macOS arm64 2, Linux x64 2), 2026-10-16 to 10-18"
+    },
+    {
+      "file": "packages/core/test/jobs-forget.test.ts",
+      "test": "thread jobs of forgotten threads > an id minted per call leaves no Job Object behind once the registry forgets it",
+      "reason": "failed 4 first attempts that passed on rerun (Windows), 2026-10-16 to 10-18"
+    },
+    {
+      "file": "tests/e2e/coordination-bridge-live.test.ts",
+      "test": "the owner app relays signed reads, preserves directional grants on reload, and displays actual turn activity",
+      "reason": "failed 8 first attempts that passed on rerun, its lazy UI chunks getting no response for 15 s, 2026-10-16 to 10-18"
+    },
+    {
+      "file": "tests/e2e/drafts-overlays.test.ts",
+      "test": "drafts survive reload and composer menus stay above the chrome",
+      "reason": "failed 5 first attempts that passed on rerun, 2026-10-16 to 10-18"
+    },
+    {
+      "file": "tests/e2e/machines.test.ts",
+      "test": "one invitation groups two real cores: the page connects the second by itself, and a paired phone reaches both",
+      "reason": "failed 4 first attempts that passed on rerun, 2026-10-16 to 10-18"
+    }
+  ]
+}

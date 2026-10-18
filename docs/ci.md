@@ -102,8 +102,17 @@ a running publication finishes, while newer pending work can supersede older
 pending work.
 
 Artifact uploads retry once, replacing a name reserved by the failed attempt.
-A second failure fails the job. Tests and builds are not retried, with one
-exception. `scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
+A second failure fails the job. Tests and builds are not retried, with two
+exceptions. Tests listed in `scripts/ci/quarantine.json` with their reason run
+once more, alone and in a fresh process, when they fail in the core suite or
+an E2E shard (`scripts/ci/flaky.ts`); the job fails if they fail again, and the
+retry leaves a warning on the run. The retry only happens when every failure
+of that file (core) or shard (E2E) is quarantined and bun named each one: a
+crash, a timed-out file or any other failing test fails at once. The list
+started on 2026-10-18 from the 80 runs that passed on rerun since 2026-10-16:
+tests that failed at least three first attempts. A fixed test leaves the list;
+`flaky.test.ts` fails when an entry no longer exists in its file.
+`scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
 three attempts at most, when hdiutil reports `Resource busy`. That runner
 fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 37213994348 and cost a rerun. Before retrying, it detaches what the failed
