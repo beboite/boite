@@ -11,7 +11,7 @@ vi.mock('@tauri-apps/plugin-opener', () => import('../test/opener'));
  * jsdom has no WebGL: this addon counts the contexts a screen takes and gives
  * back. Like xterm's, its dispose removes its canvas and leaves the context be.
  */
-const contexts = vi.hoisted(() => ({ made: 0, disposed: 0, lost: 0 }));
+const contexts = vi.hoisted(() => ({ made: 0, disposed: 0, lost: 0, loss: null as (() => void) | null }));
 vi.mock('@xterm/addon-webgl', () => ({
   WebglAddon: class {
     canvas: HTMLCanvasElement | null = null;
@@ -22,7 +22,7 @@ vi.mock('@xterm/addon-webgl', () => ({
       term.element.append(this.canvas);
     }
     dispose() { this.canvas?.remove(); contexts.disposed++; }
-    onContextLoss() { return { dispose() {} }; }
+    onContextLoss(listener: () => void) { contexts.loss = listener; return { dispose() {} }; }
   }
 }));
 
@@ -35,7 +35,7 @@ test('a hidden terminal gives its WebGL context back at once and its xterm after
   toggle();
   await waitFor(drawn);
   expect(query('[data-testid=terminal]').dataset['gpu']).toBe('webgl');
-  expect(contexts).toEqual({ made: 1, disposed: 0, lost: 0 });
+  expect(contexts).toMatchObject({ made: 1, disposed: 0, lost: 0 });
   const element = query('[data-testid=terminal] .terminal-screen');
 
   // Out of the page, the screen holds no context; back, a new one draws what it kept.
@@ -43,10 +43,10 @@ test('a hidden terminal gives its WebGL context back at once and its xterm after
   const attach = vi.spyOn(store, 'openTerminal');
   toggle();
   await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
-  expect(contexts).toEqual({ made: 1, disposed: 1, lost: 1 });
+  expect(contexts).toMatchObject({ made: 1, disposed: 1, lost: 1 });
   toggle();
   await waitFor(drawn);
-  expect(contexts).toEqual({ made: 2, disposed: 1, lost: 1 });
+  expect(contexts).toMatchObject({ made: 2, disposed: 1, lost: 1 });
   expect(attach).not.toHaveBeenCalled();
 
   // Hidden for HIDDEN_RELEASE_MS, the xterm goes too: shown again, it is drawn from the core's snapshot.
@@ -63,7 +63,21 @@ test('a hidden terminal gives its WebGL context back at once and its xterm after
   expect(attach).toHaveBeenCalledTimes(1);
   expect(attach.mock.calls[0]?.[0]).toBe(threadId);
   expect(query('[data-testid=terminal] .terminal-screen')).toBe(element);
-  expect(contexts).toEqual({ made: 3, disposed: 2, lost: 2 });
+  expect(contexts).toMatchObject({ made: 3, disposed: 2, lost: 2 });
+
+  // A screen whose context the browser took falls back to the DOM, and asks for
+  // no other, drawn again after a release included.
+  contexts.loss!();
+  await waitFor(() => query('[data-testid=terminal]').dataset['gpu'] === 'dom');
+  timers.mockClear();
+  toggle();
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
+  (timers.mock.calls.find(([, delay]) => delay === HIDDEN_RELEASE_MS)?.[0] as () => void)();
+  toggle();
+  await waitFor(drawn);
+  expect(attach).toHaveBeenCalledTimes(2);
+  expect(query('[data-testid=terminal]').dataset['gpu']).toBe('dom');
+  expect(contexts.made).toBe(3);
 
   // A released tab still hears its shell. The command's end comes while the
   // hidden xterm has only queued it (xterm parses on a later task) and the

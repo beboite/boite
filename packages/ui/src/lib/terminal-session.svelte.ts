@@ -177,6 +177,8 @@ export class TerminalSession {
   #webgl: { dispose(): void } | null = null;
   #webglLost: { dispose(): void } | null = null;
   #WebglAddon: (new () => { dispose(): void; onContextLoss: (listener: () => void) => { dispose(): void } }) | null = null;
+  /** WebGL failed or lost its context: the session asks for it no more, a screen drawn again after a release included. */
+  #gpuRefused = false;
   #host: HTMLElement | null = null;
   #onexit: TerminalMount['onexit'];
   #wantsFocus = false;
@@ -430,7 +432,7 @@ export class TerminalSession {
       import('@xterm/addon-web-links'),
       import('@xterm/addon-search').catch(() => null),
       import('@xterm/addon-unicode11').catch(() => null),
-      readTerminalGpu() ? import('@xterm/addon-webgl').catch(() => null) : null,
+      readTerminalGpu() && !this.#gpuRefused ? import('@xterm/addon-webgl').catch(() => null) : null,
       fontReady(family)
     ]);
     this.#WebglAddon = webgl?.WebglAddon ?? null;
@@ -671,12 +673,17 @@ export class TerminalSession {
         if (this.#webgl === addon) this.#webgl = null;
         this.gpu = false;
         // Do not ask again: a browser out of contexts would lose the next one too.
-        this.#WebglAddon = null;
+        this.#refuseGpu();
       });
     } catch {
-      this.#WebglAddon = null;
-      this.gpu = false;
+      this.#refuseGpu();
     }
+  }
+
+  #refuseGpu(): void {
+    this.#gpuRefused = true;
+    this.#WebglAddon = null;
+    this.gpu = false;
   }
 
   /** The element is in the page: open xterm in it the first time, fit, attach, focus. */
