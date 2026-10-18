@@ -1,10 +1,14 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import CacheKeepaliveSettings from './CacheKeepaliveSettings.svelte';
   import { untrack } from 'svelte';
   import { EXPERIMENT_IDS, readExperiments, setExperiment, type ExperimentId } from '../lib/experiments';
   import { experimentCopy } from '../lib/experiment-copy';
   import { strings } from '../lib/strings';
+  import type { Store } from '../lib/store.svelte';
 
+  /** The switches of this device; with a store, the core's experiments below them. */
+  let { store }: { store?: Store } = $props();
   const uid = $props.id();
 
   let copy = $derived(experimentCopy());
@@ -40,4 +44,6 @@
       </label>
     {/each}
   </section>
+
+  {#if store}<CacheKeepaliveSettings {store} />{/if}
 </div>

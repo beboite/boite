@@ -36,7 +36,8 @@ export const PORTABLE_SETTINGS = [
   'asyncQuestions',
   'shortAnswers',
   'toolSummaries',
-  'autoCompact'
+  'autoCompact',
+  'cacheKeepalive'
 ] as const satisfies readonly (keyof Settings)[];
 
 /** One machine as the sync sees it: its connection and what its store last listed. */

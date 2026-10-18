@@ -239,6 +239,13 @@ export interface TurnResult {
    */
   promptCache?: PromptCacheLife | null;
   /**
+   * When the turn's last request of its own main loop went to the model, the
+   * moment its prompt cache was last written or read. A subagent's requests
+   * are not counted: they cache another prefix. Absent when the driver cannot
+   * see requests; the core then counts from the turn's end (`promptCacheOf`).
+   */
+  cacheAt?: number;
+  /**
    * The agent no longer has the native session the turn asked to resume (a
    * transcript cleaned up, deleted or never copied, an ACP `session/load`
    * refused), and the turn wrote nothing. Only that specific refusal sets it,
