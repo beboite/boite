@@ -29,6 +29,25 @@ export function linkedPullRequestUrls(journal: Journal, threadId: string, reposi
   return urls;
 }
 
+/**
+ * The head branches of the open PRs that live conversations linked, as last
+ * read from GitHub. Archived and deleted conversations claim nothing.
+ */
+export function openLinkedBranches(journal: Journal): Set<string> {
+  const rows = journal.db.query(`SELECT settings.value AS value FROM settings JOIN threads ON settings.key = '${PREFIX}' || threads.id
+    WHERE threads.archived = 0 AND threads.id NOT IN (SELECT thread_id FROM thread_deletions)`).all() as { value: string }[];
+  const branches = new Set<string>();
+  for (const { value } of rows) {
+    let stored: unknown;
+    try { stored = JSON.parse(value); } catch { continue; }
+    if (!Array.isArray(stored)) continue;
+    for (const entry of stored as { state?: unknown; head?: unknown }[]) {
+      if (entry?.state === 'OPEN' && typeof entry.head === 'string' && entry.head.length > 0) branches.add(entry.head);
+    }
+  }
+  return branches;
+}
+
 /** Explicit links belong to the conversation, including when its checkout moves. */
 export class LinkedPullRequests {
   private queues = new Map<string, Promise<unknown>>();
