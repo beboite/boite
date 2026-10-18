@@ -35,6 +35,7 @@ export const PORTABLE_SETTINGS = [
   'reapOrphans',
   'asyncQuestions',
   'shortAnswers',
+  'toolSummaries',
   'autoCompact'
 ] as const satisfies readonly (keyof Settings)[];
 
