@@ -185,9 +185,10 @@ const CONSOLE_HOSTS = new Set(['conhost.exe', 'openconsole.exe']);
 export function consoleHost(exe: string | null, commandLine: string | null): boolean {
   if (exe !== null) return CONSOLE_HOSTS.has(baseName(exe));
   if (commandLine === null) return false;
-  const host = `${(process.env.SystemRoot ?? 'C:\\Windows').toLowerCase()}\\system32\\conhost.exe`;
-  const line = commandLine.trimStart().toLowerCase().replace(/^"/, '').replace(/^\\\?\?\\|^\\\\\?\\/, '');
-  return line.startsWith(host) && (line.length === host.length || /^["\s]/.test(line.slice(host.length)));
+  // The program is the quoted path whole, else the text up to the first blank, which is what Windows itself runs.
+  const program = /^\s*(?:"([^"]*)"|(\S+))/.exec(commandLine);
+  const path = (program?.[1] ?? program?.[2] ?? '').toLowerCase().replace(/^\\\?\?\\|^\\\\\?\\/, '');
+  return path === `${(process.env.SystemRoot ?? 'C:\\Windows').toLowerCase()}\\system32\\conhost.exe`;
 }
 
 function baseName(path: string): string {

@@ -280,6 +280,7 @@ test('a console host whose image name could not be read is still left out of the
   // Only the system's own host: a real process whose path holds the name stays in the trace.
   expect(consoleHost(null, String.raw`C:\Tools\conhost.exe helpers\worker.exe --run`)).toBe(false);
   expect(consoleHost(null, String.raw`C:\Windows\System32\conhost.exe.bak\worker.exe`)).toBe(false);
+  expect(consoleHost(null, String.raw`"C:\Windows\System32\conhost.exe tools\worker.exe" --run`)).toBe(false);
   expect(consoleHost(null, String.raw`"C:\Program Files\conhost.exe tools\bun.exe" -e 1`)).toBe(false);
   expect(consoleHost(String.raw`C:\bun\bun.exe`, 'conhost.exe 0x4')).toBe(false);
   expect(consoleHost(null, null)).toBe(false);
