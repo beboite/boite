@@ -18,6 +18,38 @@ export const fixtureBridge = {
   },
 };
 
+/**
+ * `BOITE_E2E_TRACE=1`: the preview server times every request, and a failing
+ * page's trace (`lib/cdp.ts`) says which ones it still owes and which took
+ * over a second, to tell a server that never answered from a browser that
+ * never read the answer.
+ */
+const traced = { open: new Map<number, { url: string; at: number }>(), slow: [] as string[], next: 0, served: 0 };
+const requestTrace = {
+  name: 'boite-e2e-request-trace',
+  configurePreviewServer(server: { middlewares: { use(handler: (req: { url?: string }, res: { once(event: 'close', listener: () => void): void }, next: () => void) => void): void } }) {
+    server.middlewares.use((req, res, next) => {
+      const id = traced.next++, at = Date.now(), url = req.url ?? '?';
+      traced.open.set(id, { url, at });
+      res.once('close', () => {
+        traced.open.delete(id);
+        traced.served++;
+        const ms = Date.now() - at;
+        if (ms > 1_000) { traced.slow.push(`${url} ${ms} ms`); if (traced.slow.length > 10) traced.slow.shift(); }
+      });
+      next();
+    });
+  },
+};
+if (process.env.BOITE_E2E_TRACE === '1') {
+  (globalThis as { __boiteUiTrace?: () => string }).__boiteUiTrace = () => {
+    const now = Date.now();
+    const open = [...traced.open.values()].map(request => `${request.url} for ${now - request.at} ms`).slice(0, 8);
+    return `${traced.served} served; open: ${open.length ? open.join(', ') : 'none'}; over 1 s: ${traced.slow.length ? traced.slow.join(', ') : 'none'}`;
+  };
+}
+const previewPlugins = process.env.BOITE_E2E_TRACE === '1' ? [requestTrace] : [];
+
 /** Build fake-client fixtures once in CI, keeping cold transforms outside browser interaction deadlines. */
 export async function startUi(port: number, options: { development?: boolean } = {}): Promise<{ close(): Promise<void> }> {
   const address = { host: '127.0.0.1', port, strictPort: true };
@@ -25,14 +57,14 @@ export async function startUi(port: number, options: { development?: boolean } =
   if (shared && !options.development) {
     // Built once by `lib/warm.ts` before a parallel run.
     if (!existsSync(join(shared, 'index.html'))) throw new Error(`BOITE_E2E_FAKE_UI=${shared} holds no index.html; build it with bun tests/e2e/lib/warm.ts ${shared}`);
-    return preview({ root, build: { outDir: resolve(shared) }, preview: address, clearScreen: false });
+    return preview({ root, plugins: previewPlugins, build: { outDir: resolve(shared) }, preview: address, clearScreen: false });
   }
   if (process.env.BOITE_E2E_PREBUILT_UI === '1' && !options.development) {
     // Production intentionally excludes ?fake=1. This separate test bundle
     // enables it without changing the UI staged in the installer.
     fixtureBuild ??= build({ root, plugins: [fixtureBridge], define: { 'import.meta.env.DEV': 'true' }, build: { outDir: fixtureDir, emptyOutDir: true }, logLevel: 'warn' });
     await fixtureBuild;
-    return preview({ root, build: { outDir: fixtureDir }, preview: address, clearScreen: false });
+    return preview({ root, plugins: previewPlugins, build: { outDir: fixtureDir }, preview: address, clearScreen: false });
   }
   return startDevUi(port);
 }

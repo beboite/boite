@@ -91,6 +91,8 @@ export async function connect(url: string, token: string, options: ConnectOption
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   let nextId = 1;
   let closed = false;
+  /** Why the socket closed, so a later call names the code instead of only saying it is closed. */
+  let closedBy: SocketClosedError | null = null;
 
   const send = (method: string, params: unknown, waitMs = options.requestTimeoutMs ?? 120_000): Promise<unknown> => {
     const id = nextId;
@@ -143,6 +145,7 @@ export async function connect(url: string, token: string, options: ConnectOption
   socket.addEventListener('close', (event: CloseEvent) => {
     closed = true;
     const error = new SocketClosedError(event.code, event.reason);
+    if (!ownerClosed) closedBy = error;
     for (const waiter of pending.values()) waiter.reject(error);
     pending.clear();
     for (const watcher of [...watchers]) {
@@ -200,7 +203,7 @@ export async function connect(url: string, token: string, options: ConnectOption
     threadId: hello.threadId ?? null,
     device: hello.device ?? null,
     async call<M extends RpcMethodName>(method: M, params: RpcMethods[M]['params']): Promise<RpcMethods[M]['result']> {
-      if (closed) throw new Error('the client is closed');
+      if (closed) throw new Error(closedBy ? `the client is closed: ${closedBy.message}` : 'the client is closed');
       const wait = method === 'delegation.wait' && options.requestTimeoutMs === undefined
         ? Math.min(3_600_000, Math.max(0, (params as RpcMethods['delegation.wait']['params']).timeoutMs ?? 600_000)) + 5000
         : undefined;
@@ -222,7 +225,7 @@ export async function connect(url: string, token: string, options: ConnectOption
     ): Promise<RpcEvents[E]> {
       return new Promise<RpcEvents[E]>((resolve, reject) => {
         if (closed) {
-          reject(new Error('the client is closed'));
+          reject(new Error(closedBy ? `the client is closed: ${closedBy.message}` : 'the client is closed'));
           return;
         }
         const watcher = {

@@ -10,12 +10,19 @@
  */
 
 import { fstatSync } from 'node:fs';
+import { loadavg } from 'node:os';
 
 type Listener = (params: Record<string, unknown>, sessionId: string | undefined) => void;
 interface Waiting { resolve(value: Record<string, unknown>): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout>; method: string }
 
 /** What a command may take before the page is called stuck. */
 const COMMAND_TIMEOUT_MS = 30_000;
+/**
+ * `BOITE_CDP_TRACE=1` (CI flake loops): a timed-out command also says how many
+ * bytes of the browser's answers sit unread on the replies descriptor, the
+ * machine's load, and whether the browser still answers `Browser.getVersion`.
+ */
+const TRACE = process.env.BOITE_CDP_TRACE === '1';
 
 export class CdpError extends Error {}
 
@@ -26,6 +33,10 @@ export class Cdp {
   #waiting = new Map<number, Waiting>();
   #listeners = new Map<string, Set<Listener>>();
   #closed: Error | null = null;
+  /** When the last message from the browser arrived, for a timeout to say how long it has been quiet. */
+  #heardAt = performance.now();
+  /** Bytes waiting unread on the replies descriptor, under `BOITE_CDP_TRACE` and the pipe only. */
+  #unread: (() => number | null) | null = null;
   readonly closed: Promise<void>;
 
   private constructor(write: (text: string) => void, stop: () => void) {
@@ -88,6 +99,7 @@ export class Cdp {
       writer = await connect({ fd: commands, socket: { data() {}, drain: flush, close: ended, error: ended } });
     } catch (error) { reader.end(); throw error; }
     flush(writer);
+    if (TRACE) cdp.#unread = await unreadBytes(replies);
     return cdp;
   }
 
@@ -123,7 +135,10 @@ export class Cdp {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#waiting.delete(id);
-        reject(new CdpError(`the browser did not answer ${method} within ${Math.round(timeoutMs / 1000)} seconds`));
+        const quiet = `the last message from the browser came ${Math.round(performance.now() - this.#heardAt)} ms ago`;
+        const error = (detail: string) => new CdpError(`the browser did not answer ${method} within ${Math.round(timeoutMs / 1000)} seconds; ${quiet}${detail}`);
+        if (!TRACE || method === 'Browser.getVersion') { reject(error('')); return; }
+        void this.#trace().then(detail => reject(error(detail)));
       }, timeoutMs);
       this.#waiting.set(id, { resolve: resolve as (value: Record<string, unknown>) => void, reject, timer, method });
       this.#write(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
@@ -143,7 +158,19 @@ export class Cdp {
     this.#stop();
   }
 
+  /** What `BOITE_CDP_TRACE` adds to a timeout: unread bytes, load, and a browser-level probe. */
+  async #trace(): Promise<string> {
+    const unread = this.#unread?.();
+    const started = performance.now();
+    const probe = await this.send('Browser.getVersion', {}, undefined, 5_000)
+      .then(() => `answered in ${Math.round(performance.now() - started)} ms`, (error: Error) => error.message.split(';')[0]);
+    const after = this.#unread?.();
+    const bytes = unread === undefined || unread === null ? 'unread bytes unknown' : `${unread} bytes unread before the probe, ${after} after`;
+    return `; trace: ${bytes}, load ${loadavg().map(n => n.toFixed(1)).join(' ')}, Browser.getVersion ${probe}`;
+  }
+
   #receive(text: string): void {
+    this.#heardAt = performance.now();
     let message: { id?: number; method?: string; params?: Record<string, unknown>; result?: Record<string, unknown>; error?: { message?: string }; sessionId?: string };
     try { message = JSON.parse(text); } catch { return; }
     if (typeof message.id === 'number') {
@@ -166,6 +193,24 @@ export class Cdp {
     for (const waiting of this.#waiting.values()) { clearTimeout(waiting.timer); waiting.reject(error); }
     this.#waiting.clear();
   }
+}
+
+/**
+ * Peeks the bytes a socket holds without reading them, `recv(MSG_PEEK |
+ * MSG_DONTWAIT)` through libc. Bytes there while a command times out mean the
+ * browser answered and nobody read it; none mean the browser stayed silent.
+ */
+async function unreadBytes(fd: number): Promise<(() => number | null) | null> {
+  if (process.platform !== 'darwin' && process.platform !== 'linux') return null;
+  try {
+    const { dlopen, FFIType, ptr } = await import('bun:ffi');
+    const libc = dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
+      recv: { args: [FFIType.i32, FFIType.ptr, FFIType.u64, FFIType.i32], returns: FFIType.i64 },
+    });
+    const buffer = new Uint8Array(1 << 20);
+    const flags = 0x2 | (process.platform === 'darwin' ? 0x80 : 0x40);
+    return () => { const n = Number(libc.symbols.recv(fd, ptr(buffer), buffer.length, flags)); return n < 0 ? 0 : n; };
+  } catch { return null; }
 }
 
 function concat(parts: Uint8Array[], size: number): Uint8Array {

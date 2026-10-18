@@ -55,4 +55,6 @@ test('a core that goes away rejects a pending event wait at once', async () => {
   await wait;
   expect((caught as Error).message).toStartWith('the socket closed');
   expect(Date.now() - started).toBeLessThan(4000);
+  // A later call names how the core hung up, not only that the client is closed.
+  await expect(client.call('threads.list', {})).rejects.toThrow('the client is closed: the socket closed (1001: "core stopping")');
 });

@@ -112,6 +112,18 @@ crash, a timed-out file or any other failing test fails at once. The list
 started on 2026-10-18 from the 80 runs that passed on rerun since 2026-10-16:
 tests that failed at least three first attempts. A fixed test leaves the list;
 `flaky.test.ts` fails when an entry no longer exists in its file.
+The `flake-loop` workflow measures a flaky test before and after its fix. It
+runs on a pull request that carries the `flake-loop` label, or by hand: the
+quarantined browser files four at a time on macOS arm64, macOS Intel and
+Linux, `cli.test.ts` four copies at a time on every OS, and
+`coordination-bridge-live.test.ts` alone and within E2E shard 3 on Windows.
+`scripts/ci/flake-loop.ts` counts each test's passes and failures over the
+runs, prints the error of each failure and writes a table to the job summary.
+`BOITE_CDP_TRACE=1` makes a core DevTools timeout say how many bytes of the
+browser's answers sat unread, the load and whether `Browser.getVersion` still
+answered; `BOITE_E2E_TRACE=1` makes an E2E timeout or lost browser say how the
+devtools socket closed, whether Chrome still ran, the test process's event
+loop delays and what the UI server still owed.
 `scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
 three attempts at most, when hdiutil reports `Resource busy`. That runner
 fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly

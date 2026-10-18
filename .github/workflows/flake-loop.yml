@@ -1,0 +1,127 @@
+name: flake-loop
+
+# Runs flaky tests many times on the runners where they fail, with timing
+# traces, to find a cause and to prove a fix (docs/ci.md#checks). A pull
+# request runs it once it carries the `flake-loop` label.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Runs per job.
+        type: number
+        default: 10
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flake-loop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNS: ${{ inputs.runs || 10 }}
+
+jobs:
+  browser:
+    name: Core browser files (${{ matrix.name }})
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, name: macOS arm64 }
+          - { os: macos-15-intel, name: macOS x64 }
+          - { os: ubuntu-24.04, name: Linux x64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    env:
+      BOITE_CDP_TRACE: '1'
+      FLAKE_LOOP_TITLE: Core browser files, ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun scripts/ci/flake-loop.ts --runs "$RUNS" --parallel 4 --cwd packages/core --out flake-loop test/browser-sharing.test.ts test/browser.test.ts test/browser-sleep.test.ts test/browser-profile-lifecycle.test.ts
+      - uses: ./.github/actions/upload-artifact
+        if: always()
+        with:
+          name: flake-loop-browser-${{ matrix.os }}
+          path: flake-loop/
+
+  cli:
+    name: cli.test.ts (${{ matrix.name }})
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, name: Linux x64 }
+          - { os: macos-15, name: macOS arm64 }
+          - { os: windows-2025, name: Windows x64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      FLAKE_LOOP_TITLE: cli.test.ts, ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      # Four copies at once load the runner as the core suite's four workers do.
+      - shell: bash
+        run: bun scripts/ci/flake-loop.ts --runs "$((RUNS * 2))" --parallel 4 --cwd packages/core --out flake-loop test/cli.test.ts test/cli.test.ts test/cli.test.ts test/cli.test.ts
+      - uses: ./.github/actions/upload-artifact
+        if: always()
+        with:
+          name: flake-loop-cli-${{ matrix.os }}
+          path: flake-loop/
+
+  e2e:
+    name: E2E coordination bridge (${{ matrix.mode }})
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [alone, shard 3]
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      BOITE_E2E_PREBUILT_UI: '1'
+      BOITE_E2E_FAKE_UI: tests/e2e/.artifacts/fake-ui
+      BOITE_E2E_TRACE: '1'
+      FLAKE_LOOP_TITLE: E2E coordination bridge, ${{ matrix.mode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun run build:ui
+      - run: bun tests/e2e/lib/warm.ts --build-only $env:BOITE_E2E_FAKE_UI
+      # Same temp drive as the E2E job in ci.yml.
+      - name: Prepare end-to-end tests
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: bun tests/e2e/lib/warm.ts --prebuilt $env:BOITE_E2E_FAKE_UI
+      - name: Loop
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          MODE: ${{ matrix.mode }}
+        run: |
+          if ($env:MODE -eq 'alone') {
+            $files = @('tests/e2e/coordination-bridge-live.test.ts'); $runs = [int]$env:RUNS * 3
+          } else {
+            $files = @(bun scripts/ci/e2e-shards.ts 3 3); $runs = [math]::Max(1, [int]([int]$env:RUNS / 4))
+          }
+          if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw 'No E2E files to loop' }
+          $together = @(if ($env:MODE -eq 'alone') { } else { '--together' })
+          bun scripts/ci/flake-loop.ts --runs $runs --out flake-loop @together @files
+      - uses: ./.github/actions/upload-artifact
+        if: always()
+        with:
+          name: flake-loop-e2e-${{ matrix.mode == 'alone' && 'alone' || 'shard3' }}
+          path: flake-loop/

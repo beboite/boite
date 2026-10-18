@@ -25,6 +25,23 @@ const PROBE_TIMEOUT_MS = 5_000;
 /** How long a failed attach waits for its launcher's diagnosis. */
 const DIAGNOSIS_TIMEOUT_MS = 20_000;
 const WAIT_DIAGNOSTIC_TIMEOUT_MS = 250;
+/**
+ * `BOITE_E2E_TRACE=1` (CI flake loops): a timeout or a lost browser also says
+ * when devtools last spoke, how the socket closed, whether Chrome still runs,
+ * how late this process's event loop ran and what the UI server still owes.
+ */
+const TRACE = process.env.BOITE_E2E_TRACE === '1';
+/** Event loop delays over 50 ms in this process, as [when, ms], the last 30 s kept. */
+const loopLag: [number, number][] = [];
+if (TRACE) {
+  let last = performance.now();
+  setInterval(() => {
+    const now = performance.now(), late = now - last - 100;
+    last = now;
+    if (late > 50) loopLag.push([now, Math.round(late)]);
+    while (loopLag.length > 0 && now - loopLag[0]![0] > 30_000) loopLag.shift();
+  }, 100).unref();
+}
 /** What a page that left an evaluate hanging is doing: frames drawn in a second, fonts and animations still pending. */
 const HUNG_PAGE = `new Promise((resolve) => {
   let frames = 0;
@@ -163,6 +180,10 @@ export class BrowserPage {
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #closed = false;
+  /** When devtools last sent anything, and how its socket closed. */
+  #heardAt = performance.now();
+  #closedBy: string | null = null;
+  #stderr: () => string = () => '';
   #pageErrors: string[] = [];
   /** Requests the page sent and has not finished loading, reported when a wait times out. */
   #requests = new Map<string, { url: string; at: number; answered: boolean }>();
@@ -182,7 +203,8 @@ export class BrowserPage {
     socket.addEventListener('message', (event: MessageEvent) => {
       this.#receive(typeof event.data === 'string' ? event.data : '');
     });
-    socket.addEventListener('close', () => {
+    socket.addEventListener('close', (event: CloseEvent) => {
+      this.#closedBy = `code ${event.code}${event.reason ? ` ${JSON.stringify(event.reason)}` : ''}, ${Math.round(performance.now() - this.#heardAt)} ms after the last message`;
       for (const pending of this.#pending.values()) {
         clearTimeout(pending.timer);
         pending.reject(new Error('the devtools socket closed, the browser exited or was killed (bun test kills every process a file started when one of its tests or hooks times out)'));
@@ -274,6 +296,7 @@ export class BrowserPage {
       const target = await waitForPageTarget(port, '', proc, true);
       const socket = await openSocket(target);
       page = new BrowserPage(socket, proc, ownsUserDataDir ? userDataDir : null, watch);
+      page.#stderr = () => stderr;
       open.add(page);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
@@ -387,7 +410,7 @@ export class BrowserPage {
         .catch(() => 'the page did not answer either: its main thread is busy');
       throw new Error(`${error.message}
 Page: ${state}
-In flight: ${JSON.stringify(this.#inFlight())}`);
+In flight: ${JSON.stringify(this.#inFlight())}${this.#trace()}`);
     })) as {
       result?: { value?: unknown };
       exceptionDetails?: {
@@ -415,7 +438,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     const deadline = Date.now() + timeoutMs;
     let last = '';
     while (Date.now() < deadline) {
-      if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw new Error('the browser is closed');
+      if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw new Error(`the browser is closed${this.#trace()}`);
       try {
         const remaining = Math.max(1, deadline - Date.now());
         const ok = await this.evaluate<boolean>(`(async () => !!(await (${expression})))()`, Math.min(CALL_TIMEOUT_MS, remaining));
@@ -427,10 +450,10 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
       }
       await Bun.sleep(Math.min(POLL_MS, Math.max(0, deadline - Date.now())));
     }
-    if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw new Error('the browser is closed');
+    if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw new Error(`the browser is closed${this.#trace()}`);
     // A separate, bounded grace preserves useful diagnostics after the condition consumes its budget.
     const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`, WAIT_DIAGNOSTIC_TIMEOUT_MS).catch(() => 'page diagnostic timed out');
-    throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
+    throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}\nFailed requests: ${JSON.stringify(this.#networkFailures)}${this.#trace()}`);
   }
 
   async navigate(url: string): Promise<void> {
@@ -566,6 +589,20 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     else if (this.#userDataDir !== null) await removeDirectory(this.#userDataDir);
   }
 
+  /** What `BOITE_E2E_TRACE` adds to a failure, on its own lines; empty without it. */
+  #trace(): string {
+    if (!TRACE) return '';
+    const now = performance.now();
+    const lags = loopLag.filter(([at]) => now - at < 30_000).map(([at, ms]) => `${ms} ms ${Math.round((now - at) / 1000)} s ago`);
+    const ui = (globalThis as { __boiteUiTrace?: () => string }).__boiteUiTrace?.() ?? 'not traced';
+    const stderr = this.#stderr().trim().split('\n').slice(-12).join('\n');
+    return `\nTrace: last devtools message ${Math.round(now - this.#heardAt)} ms ago; socket ${this.#closedBy ?? `state ${this.#socket.readyState}`}; browser ${this.#proc === null ? 'attached' : this.#proc.exitCode === null ? `pid ${this.#proc.pid} running` : `exited ${this.#proc.exitCode} (signal ${this.#proc.signalCode})`}
+Test loop delays over 50 ms in 30 s: ${lags.length ? lags.slice(-8).join(', ') : 'none'}
+UI server: ${ui}
+Browser stderr tail:
+${stderr || '(empty)'}`;
+  }
+
   /** What a stalled page is still waiting on: whether the server never answered or the body never arrived. */
   #inFlight(): string[] {
     const now = Date.now();
@@ -574,6 +611,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
   }
 
   #receive(raw: string): void {
+    this.#heardAt = performance.now();
     if (raw === '') return;
     let frame: { id?: unknown; method?: string; params?: { exceptionDetails?: { text?: string; exception?: { description?: string } }; requestId?: string; request?: { url?: string }; response?: { status?: number }; errorText?: string }; result?: unknown; error?: { message?: string } };
     try {
