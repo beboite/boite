@@ -1,5 +1,6 @@
+import { createServer, type Socket } from 'node:net';
 import { expect, test } from 'bun:test';
-import { BrowserPage } from './lib/cdp.ts';
+import { BrowserPage, freePort, probeDebuggingPort } from './lib/cdp.ts';
 
 test.each(['ready', 'delayed', 'explicit-blank'] as const)('attach chooses the requested committed target (%s)', async mode => {
   let lists = 0;
@@ -27,3 +28,23 @@ test.each(['ready', 'delayed', 'explicit-blank'] as const)('attach chooses the r
     expect(attached).toEqual([mode === 'explicit-blank' ? '/blank' : '/app']);
   } finally { await page?.close(); await server.stop(true); }
 });
+
+test('the failure probe tells a closed port at once from one that accepts and never answers', async () => {
+  const closed = await freePort();
+  let startedAt = Date.now();
+  expect(await probeDebuggingPort(closed)).toBe('TCP ECONNREFUSED');
+  expect(Date.now() - startedAt).toBeLessThan(2_000);
+
+  const held: Socket[] = [];
+  const silent = createServer(socket => { held.push(socket); });
+  await new Promise<void>(resolve => silent.listen(0, '127.0.0.1', resolve));
+  try {
+    startedAt = Date.now();
+    const answer = await probeDebuggingPort((silent.address() as { port: number }).port);
+    expect(answer).toStartWith('accepts TCP; /json/list gave nothing in');
+    expect(Date.now() - startedAt).toBeLessThan(8_000);
+  } finally {
+    for (const socket of held) socket.destroy();
+    await new Promise(resolve => silent.close(resolve));
+  }
+}, 15_000);
