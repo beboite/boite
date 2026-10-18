@@ -130,13 +130,17 @@ keeps running; shown again, the screen is drawn from the core's snapshot, so its
 scrollback is the snapshot's 256 KiB rather than 10,000 lines, and its selection
 and find matches start over. The shell's exit is still heard while released.
 Its status and directory never come from xterm: for the session's whole life,
-`OscScanner` (`terminal-marks.ts`) reads the OSC 133, 633, 7 and 9;9 sequences
-from the raw output, ending each where xterm.js 6 does, so a hidden tab's dot
-turns red or stops spinning when its command ends. It starts from the first
-snapshot, again after the socket dropped, and reads each output event once by
-its sequence. xterm parses later than the output arrives, so a mark it had
-only queued when the tab was released still counts; its own handlers draw the
-dots on the lines and nothing else.
+`ShellStatusReader` (`terminal-status.ts`) reads the OSC 133, 633, 7 and 9;9
+sequences from the raw output with `OscScanner` (`terminal-marks.ts`), ending
+each where xterm.js 6 does, so a hidden tab's dot
+turns red or stops spinning when its command ends. It reads each output event
+as it arrives. The status starts from the first snapshot, and again after the
+socket dropped: until that snapshot lands, the scanner keeps only the prompt,
+run and end marks and the newest directory report, each with the sequence of
+its event, and the seed applies those the snapshot does not hold, however much
+output came meanwhile. xterm parses later than the output arrives, so a mark
+it had only queued when the tab was released still counts; its own handlers
+draw the dots on the lines and nothing else.
 
 Reloading, opening another window or reconnecting replays the 256 KiB snapshot.
 Truncation prefers a nearby line boundary. Output arriving before the response is

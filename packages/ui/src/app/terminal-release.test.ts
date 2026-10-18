@@ -1,4 +1,5 @@
 import { expect, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import type { FakeClient } from '../lib/fake-client';
 import { store } from '../lib/store.svelte';
 import { HIDDEN_RELEASE_MS } from '../lib/terminal-session.svelte';
@@ -92,4 +93,34 @@ test('a hidden terminal gives its WebGL context back at once and its xterm after
   expect(element.childElementCount).toBe(0);
   timers.mockRestore();
   attach.mockRestore();
+
+  // Back from a dropped socket, the shell floods while its snapshot is on the
+  // way: a command's end the snapshot does not hold still counts, however much
+  // output follows it before the snapshot lands.
+  const second = store.terminalLayout(threadId)!.active;
+  shell.emitTerminalOutput(second, '\x1b]133;A\x07PS> \x1b]133;B\x07\x1b]133;C\x07');
+  await waitFor(() => store.terminalScreen(second)?.running === true);
+  let land!: () => void;
+  const landed = new Promise<void>((resolve) => { land = resolve; });
+  let taken!: () => void;
+  const snapshot = new Promise<void>((resolve) => { taken = resolve; });
+  const open = store.openTerminal.bind(store);
+  const reopen = vi.spyOn(store, 'openTerminal').mockImplementation(async (...args) => {
+    const state = await open(...args);
+    taken();
+    await landed;
+    return state;
+  });
+  store.connection = 'connecting';
+  flushSync();
+  store.connection = 'ready';
+  flushSync();
+  await snapshot;
+  expect(reopen).toHaveBeenCalledTimes(1);
+  shell.emitTerminalOutput(second, '\x1b]133;D;1\x07\r\n');
+  for (let line = 0; line < 1000; line++) shell.emitTerminalOutput(second, `line ${line}\r\n`);
+  land();
+  await waitFor(() => store.terminalScreen(second)?.running === false);
+  expect(store.terminalScreen(second)?.lastExit).toBe(1);
+  reopen.mockRestore();
 });

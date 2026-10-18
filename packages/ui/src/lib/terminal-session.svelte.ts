@@ -13,7 +13,8 @@
  * the core's snapshot, its last 256 Ki characters
  * of output. The shell runs on meanwhile. Its status and directory never
  * come from xterm: the session reads them from the raw output for its whole
- * life, so the tab's dot stays true whether a screen exists or not.
+ * life (`terminal-status.ts`), so the tab's dot stays true whether a screen
+ * exists or not.
  *
  * The screen draws on the GPU (WebGL) and falls back to xterm's DOM renderer
  * when the browser refuses a context or loses it. A shell started with the
@@ -31,7 +32,8 @@ import type { RpcEvents, TerminalShell, TerminalState } from '@boite/contracts';
 import { TERMINAL_COMMANDS, isMac } from './keybindings';
 import { openExternal } from './links';
 import { readTerminalCursor, readTerminalGpu } from './terminal-cursor';
-import { OscScanner, clearLineKeys, parseConEmuCwd, parseCwdProperty, parseFileUrl, parsePromptMark } from './terminal-marks';
+import { clearLineKeys, parseConEmuCwd, parsePromptMark } from './terminal-marks';
+import { ShellStatusReader } from './terminal-status';
 import type { Store } from './store.svelte';
 
 export type TerminalStart = (cols: number, rows: number) => Promise<TerminalState | null>;
@@ -50,8 +52,6 @@ const FONT_SIZE = 13;
 const SCROLLBACK = 10_000;
 /** Commands whose dots are kept: older ones scrolled out of the buffer long ago. */
 const MAX_MARKS = 1000;
-/** Output events kept for the scanner while a snapshot is on its way. */
-const MAX_EARLY = 1000;
 /** How long a screen out of the page keeps its xterm before the core's snapshot is all it needs. */
 export const HIDDEN_RELEASE_MS = 5 * 60_000;
 
@@ -205,20 +205,12 @@ export class TerminalSession {
   #screenCleanups: (() => void)[] = [];
   #releaseTimer: ReturnType<typeof setTimeout> | null = null;
   #listening = false;
-  /**
-   * The only reader of the shell's status and directory: `running`,
-   * `lastExit` and `cwd` come from it for the session's whole life, xterm or
-   * not, so a release never hands anything over. xterm's own handlers draw the
-   * dots. Seeded with the first snapshot, then fed each output event once.
-   */
-  readonly #scanner = new OscScanner((code, data) => this.#report(code, data));
-  /** False until the scanner read a snapshot, or again after the socket dropped: output waits in `#early`. */
-  #seeded = false;
-  #early: RpcEvents['terminal.output'][] = [];
-  /** The last output sequence the scanner read. */
-  #seen: number | undefined;
-  /** Where the last command is for the scanner: at its prompt, running, or neither. */
-  #phase: 'idle' | 'prompt' | 'running' = 'idle';
+  /** The only reader of `running`, `lastExit` and `cwd`, so a release never hands anything over. */
+  readonly #status = new ShellStatusReader({
+    running: (running) => { this.running = running; },
+    exit: (code) => { this.lastExit = code; },
+    cwd: (path) => { this.cwd = path; }
+  });
   #marks: CommandMark[] = [];
   #query = '';
   #windows = false;
@@ -513,10 +505,7 @@ export class TerminalSession {
       this.#listening = true;
       // The status and the directory are read here, whether a screen draws the output or not.
       this.#cleanups.push(client.on('terminal.output', (event) => {
-        if (event.id !== this.id) return;
-        if (this.#seeded) this.#read(event);
-        // The oldest waiting output is in the snapshot the seed will read anyway.
-        else if (this.#early.push(event) > MAX_EARLY) this.#early.shift();
+        if (event.id === this.id) this.#status.read(event.data, event.sequence);
       }));
       this.#cleanups.push(client.on('terminal.exited', (event) => {
         if (event.id !== this.id) return;
@@ -566,49 +555,6 @@ export class TerminalSession {
     // Windows Terminal's own cwd report, `9;9;"C:\path"`; another OSC 9 is a notification.
     const conemu = term.parser.registerOscHandler(9, (data) => parseConEmuCwd(data) !== null);
     this.#screenCleanups.push(() => { prompt.dispose(); properties.dispose(); fileUrl.dispose(); conemu.dispose(); });
-  }
-
-  /** One output event, unless the snapshot the scanner read already held it. */
-  #read(event: RpcEvents['terminal.output']): void {
-    if (event.sequence !== undefined && this.#seen !== undefined && event.sequence <= this.#seen) return;
-    this.#scanner.feed(event.data);
-    if (event.sequence !== undefined) this.#seen = event.sequence;
-  }
-
-  /** Reads the shell's status from `output`, a snapshot, then from the output that came after it. */
-  #seed(output: string, sequence: number | undefined): void {
-    this.#scanner.reset();
-    this.#phase = 'idle';
-    this.running = false;
-    this.#seen = undefined;
-    this.#scanner.feed(output);
-    this.#seen = sequence;
-    this.#seeded = true;
-    const early = this.#early;
-    this.#early = [];
-    for (const event of early) this.#read(event);
-  }
-
-  /** One OSC of the shell's output: its command status and its directory. */
-  #report(code: number, data: string): void {
-    if (code === 133) {
-      const mark = parsePromptMark(data);
-      if (mark?.kind === 'prompt') {
-        this.#phase = 'prompt';
-        this.running = false;
-      } else if (mark?.kind === 'run' && this.#phase === 'prompt') {
-        this.#phase = 'running';
-        this.running = true;
-      } else if (mark?.kind === 'done') {
-        this.running = false;
-        if (this.#phase !== 'running') return;
-        this.#phase = 'idle';
-        this.lastExit = mark.exit;
-      }
-      return;
-    }
-    const cwd = code === 633 ? parseCwdProperty(data) : code === 7 ? parseFileUrl(data) : code === 9 ? parseConEmuCwd(data) : null;
-    if (cwd !== null && cwd.length > 0) this.cwd = cwd;
   }
 
   #onMark(term: Terminal, mark: ReturnType<typeof parsePromptMark> & object): void {
@@ -759,7 +705,7 @@ export class TerminalSession {
     this.#attaching = true;
     this.#pending = [];
     // Output was lost with the socket: the scanner reads the shell again from the snapshot.
-    if (this.#stale) this.#seeded = false;
+    if (this.#stale) this.#status.unseed();
     const state = await this.start(term.cols, term.rows);
     if (this.#disposed || run !== this.#run) return;
     this.#attaching = false;
@@ -778,7 +724,7 @@ export class TerminalSession {
     this.#stale = this.store.connection !== 'ready';
     this.shell = state.shell ?? null;
     this.cwd ??= state.cwd;
-    if (!this.#seeded) this.#seed(state.output, state.sequence);
+    if (!this.#status.seeded) this.#status.seed(state.output, state.sequence);
     this.#windows = state.windowsPty !== undefined;
     // The store may have started the shell at a default size before this screen
     // was measured, and joins that request here: the shell is told the real one.

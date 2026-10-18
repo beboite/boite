@@ -61,6 +61,12 @@ export function parseConEmuCwd(data: string): string | null {
   return /^9;"?(.*?)"?$/.exec(data)?.[1] ?? null;
 }
 
+/** The directory an OSC 633, 7 or 9 reports, or null when it reports none. */
+export function reportedCwd(code: number, data: string): string | null {
+  const cwd = code === 633 ? parseCwdProperty(data) : code === 7 ? parseFileUrl(data) : code === 9 ? parseConEmuCwd(data) : null;
+  return cwd === null || cwd.length === 0 ? null : cwd;
+}
+
 /** Longer than this, an OSC is not a mark or a directory: it is skipped to its end. */
 const MAX_OSC = 4096;
 /** Outside a sequence: ESC, or the C1 OSC introducer. */
@@ -131,13 +137,6 @@ export class OscScanner {
   #open(): void {
     this.#data = '';
     this.#skip = false;
-  }
-
-  /** Forgets a sequence in progress: the next chunk starts on fresh output. */
-  reset(): void {
-    this.#data = null;
-    this.#skip = false;
-    this.#escape = false;
   }
 
   #end(): void {
