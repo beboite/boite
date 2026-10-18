@@ -181,12 +181,20 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 490,500 |
+| UI entry chunk | 491,500 |
 | UI files, excluding `.br` and `.gz` copies | 4,860,100 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,448,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the draft heading that names the machine measures 491,122
+entry bytes after a fresh `bun run build:ui` on Linux, against 490,185 for
+`95862236` built the same way: 937 bytes for the machine's icon and name in
+the desktop sentence and after the phone's project chip. Main measured
+478.9 KB of 479.0 KB on Windows, so the entry limit rises to 491,500. The text
+faces Geist, Figtree and DM Sans leave the bundle (about 236 KB of woff2);
+the other limits stay.
 
 On 2026-10-18, the server update rollback merged with `origin/main` at
 `feccdfcd` measures 4,447,509 core JavaScript bytes with `measure()` after a
