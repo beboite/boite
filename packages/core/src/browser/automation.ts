@@ -13,6 +13,8 @@ export interface AgentPage {
   /** Dialogs raised during the agent's commands, oldest first, at most 20. */
   dialogs: BrowserDialog[];
   dialogPolicy: { accept: boolean; text: string | null };
+  /** Downloads this tab's frames began: a navigation that turned into one ends there. */
+  downloads?: number;
 }
 
 /** The kinds this module runs; the others belong to the browser itself. */
@@ -64,13 +66,15 @@ async function begin(page: AgentPage): Promise<PageState> {
  * load event: a page whose image or script never finishes would hold every
  * command until its deadline.
  */
-export async function awaitDocument(page: AgentPage, token: string | undefined, deadlineMs = 10_000): Promise<{ state: PageState | null; loading: boolean }> {
+export async function awaitDocument(page: AgentPage, token: string | undefined, deadlineMs = 10_000, downloads = page.downloads): Promise<{ state: PageState | null; loading: boolean }> {
   const deadline = Date.now() + deadlineMs;
   let last: PageState | null = null;
   while (Date.now() < deadline) {
     const now = await state(page);
     if (now) last = now;
     if (now && now.token !== token && now.ready !== 'loading' && now.url !== 'about:blank') return { state: now, loading: false };
+    // The navigation became a download: the page stays as it is.
+    if (now && page.downloads !== downloads) return { state: now, loading: false };
     await sleep(80);
   }
   return { state: last, loading: true };
@@ -86,7 +90,7 @@ export async function documentToken(page: AgentPage): Promise<string | undefined
  * DOM. A navigation shows itself within `quietMs` by the old page's
  * `beforeunload` or by a new document.
  */
-async function settle(page: AgentPage, before: PageState, dialogs: number, quietMs = 300): Promise<BrowserActionResult> {
+async function settle(page: AgentPage, before: PageState, dialogs: number, quietMs = 300, downloads = page.downloads): Promise<BrowserActionResult> {
   let navigating = false;
   const until = Date.now() + quietMs;
   await sleep(40);
@@ -101,7 +105,7 @@ async function settle(page: AgentPage, before: PageState, dialogs: number, quiet
     const now = await state(page);
     return { ok: true, ...(now && now.url !== before.url ? { url: now.url, title: now.title } : {}), ...asked };
   }
-  const { state: after, loading } = await awaitDocument(page, before.token);
+  const { state: after, loading } = await awaitDocument(page, before.token, undefined, downloads);
   if (after && after.token === before.token) {
     // The page began to leave and stayed: a download, a cancelled or a same-document navigation.
     return { ok: true, ...(after.url !== before.url ? { url: after.url, title: after.title } : {}), ...(loading ? { note: 'the page started to navigate and has not changed yet' } : {}), ...asked };
@@ -220,14 +224,14 @@ export async function automate(page: AgentPage, tabId: string, action: BrowserAc
     case 'get': return reply(await run(page, `return K.get(${js(action.what)}, ${js(action.selector ?? null)}, ${js(action.name ?? null)})`));
     case 'click': case 'press': case 'check': case 'uncheck': case 'select': case 'fill': case 'type': {
       const before = await begin(page);
-      const dialogs = page.dialogs.length;
+      const dialogs = page.dialogs.length, downloads = page.downloads;
       let note: string | undefined, value: unknown;
       if (action.kind === 'click') note = await click(page, action.selector, action.count ?? 1);
       else if (action.kind === 'check' || action.kind === 'uncheck') note = await check(page, action.selector, action.kind === 'check');
       else if (action.kind === 'select') value = await run(page, `return K.select(${js(action.selector)}, ${js(action.values)})`);
       else if (action.kind === 'fill' || action.kind === 'type') note = await write(page, action.kind, action.selector, action.text);
       else if (action.kind === 'press') await press(page, action.key);
-      const result = await settle(page, before, dialogs);
+      const result = await settle(page, before, dialogs, undefined, downloads);
       return reply({ ...result, ...(note ? { note } : {}), ...(value === undefined ? {} : { value }) });
     }
     case 'hover': {
@@ -242,9 +246,9 @@ export async function automate(page: AgentPage, tabId: string, action: BrowserAc
     case 'wait': return reply(await wait(page, action));
     case 'history': {
       const before = await begin(page);
-      const dialogs = page.dialogs.length;
+      const dialogs = page.dialogs.length, downloads = page.downloads;
       await evaluate(page, action.direction === 'back' ? 'history.back()' : action.direction === 'forward' ? 'history.forward()' : 'location.reload()');
-      return reply(await settle(page, before, dialogs, 800));
+      return reply(await settle(page, before, dialogs, 800, downloads));
     }
     case 'dialog': {
       if (action.decision === 'status') return reply({ next: page.dialogPolicy.accept ? 'accept' : 'dismiss', recent: page.dialogs });

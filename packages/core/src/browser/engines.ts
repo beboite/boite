@@ -30,6 +30,8 @@ export class BrowserEngines {
     private scope: string,
     private targets: (engine: Engine) => void,
     private drop: (id: string) => void,
+    /** The download quarantine folder, made on first use (`browser/downloads.ts`), and what to tell it when a browser ends. */
+    private downloads: { prepare(): string; lost(engine: Engine): void },
   ) {}
 
   holdsIdentityDir(dir: string): boolean { return this.#identities.holds(dir); }
@@ -108,7 +110,10 @@ export class BrowserEngines {
       const saved = profile === PRIVATE_BROWSER_PROFILE ? [] : readSavedCookies(dir);
       if (saved.length) await cdp.send('Storage.setCookies', { cookies: saved }).catch(error => this.core.log('warn', `the saved cookies of browser profile ${profile} were refused: ${error instanceof Error ? error.message : String(error)}`));
       await cdp.send('Target.setDiscoverTargets', { discover: true });
-      await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {});
+      // Downloads go to the quarantine under their guid, never under a name the page chose.
+      // A browser that cannot report them refuses them, as before downloads were kept.
+      await cdp.send('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: this.downloads.prepare(), eventsEnabled: true })
+        .catch(() => cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {}));
       const engine: Engine = { key: profile, profile, hosted: false, dir, cdp, kill, exited: started.exited, tabs: new Set(), throwaway: profile === PRIVATE_BROWSER_PROFILE, identity };
       this.targets(engine);
       if (!engine.throwaway) engine.saveEvery = setInterval(() => { if (engine.tabs.size) void this.saveCookies(engine); }, COOKIE_SAVE_EVERY_MS);
@@ -134,6 +139,7 @@ export class BrowserEngines {
     const current = this.pending.get(engine.key);
     void current?.then(value => { if (value === engine) this.pending.delete(engine.key); }, () => {});
     this.#stopTimers(engine);
+    this.downloads.lost(engine);
     for (const id of [...engine.tabs]) this.drop(id);
     engine.cdp.close(); engine.kill();
     if (engine.throwaway) void engine.exited.then(() => this.removeDir(engine.dir));

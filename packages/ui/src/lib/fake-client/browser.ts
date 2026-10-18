@@ -71,6 +71,9 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     if (params.tabId !== undefined && (typeof params.tabId !== 'string' || !TAB_ID.test(params.tabId))) throw refusal('browser tabId must come from browser status or open');
     const browser = browsers.get(threadId);
     if (action.kind === 'status') return { value: { available: true, tabs: tabsOf(browser) } };
+    // The demo browser downloads nothing.
+    if (action.kind === 'downloads') return { value: { downloads: [] } };
+    if (action.kind.startsWith('download-')) throw refusal(`no download ${(action as { downloadId: string }).downloadId} in this conversation; browser downloads lists them`);
     if (action.kind === 'profiles') {
       const { profiles, defaultId } = browserProfilesOf(ctx.settings);
       return { value: { default: defaultId, profiles: [{ id: DEFAULT_BROWSER_PROFILE, name: 'Default', kept: true }, ...profiles.map(profile => ({ id: profile.id, name: profile.name, kept: true })), { id: PRIVATE_BROWSER_PROFILE, name: 'Private', kept: false }] } };

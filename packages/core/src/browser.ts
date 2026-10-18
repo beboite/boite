@@ -17,6 +17,7 @@ import {
   DEFAULT_BROWSER_PROFILE,
   DEFAULT_BROWSER_RECORDING_CODEC,
   DEFAULT_BROWSER_RECORDING_FRAME_RATE,
+  BROWSER_DOWNLOAD_CHUNK_BYTES,
   findBrowserProfile,
   PRIVATE_BROWSER_PROFILE,
   type AgentBrowserStatus,
@@ -46,6 +47,7 @@ import { SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
 import { screenTurns, takeTurn } from './browser/frames.ts';
 import { automate, awaitDocument, documentToken, PAGE_ACTIONS } from './browser/automation.ts';
 import { sleepState, TabSleep } from './browser/sleep.ts';
+import { BrowserDownloads } from './browser/downloads.ts';
 
 /** The process scope of the agent browser's own processes, in the trace and the registry. */
 export const BROWSER_SCOPE = 'system:browser';
@@ -57,6 +59,8 @@ const TABS_MAX = 24;
  * never finishes; agent-browser's commands work on the DOM.
  */
 const DOM_WAIT_MS = 10_000;
+/** How long a navigation the browser turned into a download waits for that download to be listed. */
+const DOWNLOAD_BEGIN_MS = 2000;
 /** A capture still running after this long lets the next capture of its tab go: one stuck in the browser never freezes the tab's frames. */
 const SCREEN_TURN_MS = 5000;
 const HISTORY_MAX = 100;
@@ -69,6 +73,7 @@ export class AgentBrowser {
   readonly #engines: BrowserEngines;
   readonly #remote: RemoteDrive;
   readonly #host = new BrowserHost();
+  readonly #downloads: BrowserDownloads;
   #tabs = new Map<string, Tab>();
   /** Per conversation, its tabs in opening order and the active one. */
   #threads = new Map<ThreadId, { order: string[]; active: string | null }>();
@@ -88,8 +93,9 @@ export class AgentBrowser {
 
   constructor(core: Core, private findBrowser = findChromium) {
     this.#core = core;
+    this.#downloads = new BrowserDownloads(() => core.dataDir, message => core.log('warn', message));
     this.#engines = new BrowserEngines(core, this.#host, () => this.findBrowser(), this.#machine, BROWSER_SCOPE,
-      engine => this.#targets(engine), id => this.#drop(id));
+      engine => this.#targets(engine), id => this.#drop(id), this.#downloads);
     this.#remote = new RemoteDrive({
       require: threadId => core.threads.require(threadId), status: params => this.status(params),
       tabOf: (threadId, tabId) => this.#tabOf(threadId, tabId),
@@ -192,6 +198,8 @@ export class AgentBrowser {
     engine.cdp.on('Target.targetCreated', params => void this.#adopt(engine, params.targetInfo as { targetId: string; type: string; openerId?: string; url: string }));
     engine.cdp.on('Target.targetDestroyed', params => this.#gone(engine, String(params.targetId)));
     engine.cdp.on('Target.targetInfoChanged', params => this.#info(engine, params.targetInfo as { targetId: string; url: string; title: string }));
+    // A desktop app's webview keeps its own download handling.
+    if (!engine.hosted) this.#downloads.watch(engine, frameId => [...engine.tabs].map(id => this.#tabs.get(id)).find(tab => tab && (tab.targetId === frameId || tab.frames.has(frameId))) ?? null);
   }
 
   // ---------- tabs ----------
@@ -201,16 +209,20 @@ export class AgentBrowser {
     const tab: Tab = {
       id: `browser:${crypto.randomUUID()}`, threadId, engine, targetId, sessionId, url, title: '',
       preset: null, orientation: 'portrait', colorScheme: 'system', diagnostics: [], dropped: 0, history: [], requests: new Map(),
-      recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], acting: false, sleep: sleepState(),
+      recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], frames: new Set(), acting: false, sleep: sleepState(),
       page: {
         send: (method, params = {}, timeoutMs) => engine.cdp.send(method, params, sessionId, timeoutMs),
-        dialogs: [], dialogPolicy: { accept: true, text: null },
+        dialogs: [], dialogPolicy: { accept: true, text: null }, downloads: 0,
       },
     };
     const on = (method: string, listener: (params: Record<string, unknown>) => void) =>
       tab.off.push(engine.cdp.on(method, (params, session) => { if (session === sessionId) listener(params); }));
     watchPage(tab, on, (accept, promptText) => void engine.cdp.send('Page.handleJavaScriptDialog', { accept, ...(promptText === undefined ? {} : { promptText }) }, sessionId).catch(() => {}),
       url => { tab.url = url; this.#remote.stale(tab); this.#changed(threadId); this.#engines.saveCookiesSoon(engine); });
+    on('Page.frameAttached', params => { if (tab.frames.size < 500) tab.frames.add(String(params.frameId)); });
+    on('Page.frameNavigated', params => { const frame = params.frame as { id: string }; if (tab.frames.size < 500) tab.frames.add(String(frame.id)); });
+    // A frame moving to another process (`swap`) is still the page's: only a removed one goes.
+    on('Page.frameDetached', params => { if (params.reason !== 'swap') tab.frames.delete(String(params.frameId)); });
     // Before its first request: the page, its workers and its requests say what a browser with a window says.
     if (engine.identity) await engine.cdp.send('Emulation.setUserAgentOverride', { userAgent: engine.identity.userAgent, userAgentMetadata: engine.identity.metadata }, sessionId).catch(() => {});
     // Nothing reads response bodies (`Network.getResponseBody`): Chromium keeps none for this tab.
@@ -309,7 +321,14 @@ export class AgentBrowser {
 
   async #navigate(tab: Tab, url: string): Promise<BrowserReply> {
     const token = await documentToken(tab.page);
-    const reply = await tab.engine.cdp.send<{ errorText?: string; loaderId?: string }>('Page.navigate', { url }, tab.sessionId);
+    const seq = this.#downloads.seq;
+    const reply = await tab.engine.cdp.send<{ errorText?: string; loaderId?: string; isDownload?: boolean }>('Page.navigate', { url }, tab.sessionId);
+    if (reply.isDownload) {
+      // The address is a file: the page stays where it was and the file goes to the quarantine.
+      await this.#downloads.began(tab.threadId, seq, DOWNLOAD_BEGIN_MS);
+      const at = tab.url || 'about:blank';
+      return { tabId: tab.id, url: at, title: tab.title, value: { ok: true, url: at, title: tab.title, note: `${url} is a download; the page did not change` } };
+    }
     if (reply.errorText) throw refused(`${url} could not be opened: ${reply.errorText}`);
     // A move within the same document has no loader and no new DOM to wait for.
     const { state, loading } = reply.loaderId ? await awaitDocument(tab.page, token, DOM_WAIT_MS) : { state: null, loading: false };
@@ -333,16 +352,29 @@ export class AgentBrowser {
     this.#watch();
     const previous = this.#queues.get(threadId) ?? Promise.resolve();
     let at = performance.now(); // Reset when the command runs: the wait behind the thread's previous one is not its time.
-    const run = previous.catch(() => {}).then(() => { at = performance.now(); return this.#run(threadId, params.tabId, action); });
+    const run = previous.catch(() => {}).then(() => { at = performance.now(); return this.#withDownloads(threadId, action, () => this.#run(threadId, params.tabId, action)); });
     run.catch(() => this.#core.logs.debug(`browser ${action.kind} failed after ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.command-failed', threadId, durationMs: performance.now() - at, data: { action: action.kind } }));
     this.#queues.set(threadId, run);
     void run.finally(() => { if (this.#queues.get(threadId) === run) this.#queues.delete(threadId); }).catch(() => {});
     return run;
   }
 
+  /** A reply names the downloads that began while its command ran, so the agent learns of a file it did not ask for. */
+  async #withDownloads(threadId: ThreadId, action: BrowserAction, run: () => Promise<BrowserReply>): Promise<BrowserReply> {
+    if (action.kind === 'downloads' || action.kind.startsWith('download-')) return run();
+    const seq = this.#downloads.seq;
+    const reply = await run();
+    const begun = this.#downloads.since(threadId, seq);
+    return begun.length ? { ...reply, downloads: begun } : reply;
+  }
+
   async #run(threadId: ThreadId, tabId: string | undefined, action: BrowserAction): Promise<BrowserReply> {
     this.#require(threadId);
     switch (action.kind) {
+      case 'downloads': return { value: { downloads: this.#downloads.list(threadId) } };
+      case 'download-wait': return { value: await this.#downloads.wait(threadId, action.downloadId, action.timeoutMs ?? 10_000) };
+      case 'download-read': return { value: this.#downloads.read(threadId, action.downloadId, action.offset, action.maxBytes ?? BROWSER_DOWNLOAD_CHUNK_BYTES) };
+      case 'download-discard': this.#downloads.discard(threadId, action.downloadId); return { value: { ok: true } };
       case 'status': {
         const found = this.findBrowser();
         const available = found.path !== null || this.#host.attached;
@@ -608,6 +640,7 @@ export class AgentBrowser {
 
   /** The conversation was archived or removed: its tabs close, its recordings with them. */
   release(threadId: ThreadId): void {
+    this.#downloads.release(threadId);
     const state = this.#threads.get(threadId);
     if (!state) return;
     for (const id of [...state.order]) {
@@ -632,5 +665,6 @@ export class AgentBrowser {
     this.#remote.close();
     const engines = await Promise.all([...this.#engines.pending.values()].map(pending => pending.catch(() => null)));
     await Promise.all(engines.map(engine => engine ? this.#engines.shut(engine) : undefined));
+    this.#downloads.close();
   }
 }

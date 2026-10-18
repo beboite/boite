@@ -130,7 +130,8 @@ limits, so a burst of windows opened at once stops at the limit too. Nobody can 
 One raised while an agent command runs follows `dialog accept|dismiss`
 (accept until told otherwise) and is listed in that command's output; any
 other alert is accepted and a confirm or prompt declined, so a person acting in
-the panel never confirms by accident. All are noted in the diagnostics. Downloads are refused. Archiving or removing the
+the panel never confirms by accident. All are noted in the diagnostics. Downloads go to a
+[quarantine](#downloads). Archiving or removing the
 conversation closes its tabs.
 
 ### A tab nobody uses sleeps
@@ -233,6 +234,45 @@ the connection ends the relay, and the next tab opens in the core's own
 browser again. Other clients of the conversation, a phone or another machine,
 still watch a hosted tab as frames, taken through the app. The Linux and
 macOS apps do not host; their webviews have no DevTools channel to relay.
+
+## Downloads
+
+A page can download a file, for the agent or for the user acting in the
+panel. The browser the core starts writes it into `<data dir>/browser-downloads`
+under a random name with no extension (`Browser.setDownloadBehavior`
+`allowAndName`), never under the name the page offered and never in a
+project, so nothing lands where it could be run or opened by accident.
+`browser/downloads.ts` keeps the list:
+
+- A download belongs to the conversation whose tab (or one of its frames)
+  began it. A frame no conversation owns has its download cancelled.
+- The reply of the command that started one lists it, so the agent learns of a
+  file it did not expect. A click that downloads ends when the download begins,
+  not at the 10 s a navigation is given, and `open` of an address that is a
+  file leaves the page where it was instead of failing.
+- At most 1 GiB per file and 2 GiB in the whole quarantine of a machine; past
+  either, the browser cancels it. The size is checked at each progress event
+  Chrome sends, about every 500 ms, so a file can pass the cap by what arrives
+  in that time; a finished file over it is removed. A conversation keeps 20, the oldest finished
+  one going for a new one.
+- When it ends the core reads its sha256 and its first 512 bytes. Its `kind`
+  is the riskier of what the bytes and the name say (executable, script,
+  archive, document, image, media, text, other), and `warning` tells the agent
+  what to check: a program or a script is never run unless the user asked for
+  that exact file, an archive is unpacked into its own empty folder, a picture
+  whose bytes are a program is flagged as disguised. The address is kept without
+  its query and fragment, which can carry tokens.
+- `boite browser download save <id> [path]` copies it into the working
+  directory or a folder under it, never through a link that leaves it, in 4 MB chunks, with
+  mode 644 so never executable, under a cleaned name (no path, no reserved
+  character, no leading dot) that never replaces a file, checks the sha256,
+  then removes it from the quarantine.
+- An unsaved download goes an hour after it ends, when its conversation is
+  archived or removed, and with the core: the folder is emptied at the first
+  browser start and when the core closes.
+
+A tab the desktop app hosts in a webview keeps that webview's own download
+handling: the core sees none of those downloads.
 
 ## Recording
 

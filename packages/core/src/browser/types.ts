@@ -53,6 +53,8 @@ export interface Tab {
   /** Captures and page size changes of this tab take turns (`frames.ts`, `takeTurn`). */
   screen: ScreenTurns;
   off: Array<() => void>;
+  /** Its page's frames, so a download a frame begins is the conversation's (`downloads.ts`). */
+  frames: Set<string>;
   /** An agent command is running: the dialogs it raises follow `page.dialogPolicy`. */
   acting: boolean;
   page: AgentPage;
