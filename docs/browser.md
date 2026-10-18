@@ -104,6 +104,32 @@ tab's cookies are never saved. A core killed outright keeps what was saved
 last, so a sign-in whose tab is still open is at most 30 seconds from the
 disk.
 
+### Signing in
+
+A sign-in belongs to the profile, not to the conversation: every
+conversation of the machine opens its tabs in the same default profile, one
+browser process shared by all of them, so a site signed in once is signed in
+for each, and after a restart. An agent that meets a login page asks once,
+on a card: `boite browser login <url> [<url>...] --why <text>` (`browser.signIn`)
+names up to 6 pages, the reason, and the profile, the default one unless
+`--profile <name>` names another; a private tab keeps nothing, so it is
+refused. The card is drawn without stopping the turn, like `boite ask`, and a
+second ask for a site that an open card already names returns that card. An
+address with a user name or password in it is refused: it would sit on the
+card and in the journal.
+
+The card lists each site with an **Open** button. Open
+(`browser.signInOpen`) shows that page in the conversation's browser, in the
+card's profile, and brings the panel's Browser surface forward, live without
+the cover since the user asked for it; a tab of the conversation already on
+that site comes forward instead of a second one. The user signs in there by
+hand, in the panel, as in any browser. **Signed in** tells the agent, which
+reads which sites and which profile to open them in, and **Skip** closes the
+card. The agent never sees what was typed: the card carries no field, and
+only the user's clicks and keys reach the page. The answer comes from the
+user, not from the site: if the page still asks for a login, the agent says
+so rather than asking again.
+
 ### Copying a desktop profile's sign-ins
 
 The desktop's own browser keeps its profiles in WebView2, on the PC. The
@@ -386,6 +412,12 @@ page. It can act in the page as a person would, signed-in
 sites included: pair only devices you would give that. `browser.remoteChanged`
 goes to the clients subscribed to the conversation.
 
+`browser.signIn` is the conversation's own agent's: it draws a card on its own
+thread and opens nothing. `browser.signInOpen` is the user's, the owner's or a
+paired phone subscribed to the conversation, and opens only a page an open card
+of that conversation names; an agent token does not have it. A sign-in card
+never goes to a delegated agent's parent: it is the owner's to answer.
+
 On Linux and macOS the core speaks the DevTools protocol to the browser over
 `--remote-debugging-pipe` on the browser's descriptors 3 and 4, which
 `procs.spawn` opens with `extraPipes`. Bun makes each a socket pair, and the
@@ -420,6 +452,13 @@ stubbed, that a command arriving during a freeze runs after the wake, and that
 a held or closed tab never sleeps, and that a running turn holds an unused
 tab only 5 minutes. `AgentBrowserSurface.test.ts` checks that the desktop app
 reports a hosted tab it shows, only while its window is visible. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
+`browser-sign-in.test.ts` checks the sign-in card: its address rules, the CLI,
+who may open its pages, a second ask reusing the card, and, with a real
+browser, a local login form filled through the panel's input that sets an
+HttpOnly session cookie, after which another conversation of the machine
+opens signed in, after a restart of every browser process too.
+`SignInCard.test.ts` checks the card on the fake client: Open showing the
+page in the panel, Signed in reaching the agent, Skip closing the card.
 `tests/e2e/agent-browser-core.test.ts` runs the whole path on a real core: the
 owner's desktop at 1280 × 900 and a paired phone at 390 × 844 see the cover,
 show the page and tap it, and the tap reaches the page. `browser-remote.test.ts`

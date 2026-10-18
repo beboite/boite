@@ -3,7 +3,7 @@ import { refusal } from './shared';
 import { fakeBrowserScreen, type FakePage } from './browser-screen';
 import type { FakeContext, FakeMethods } from './context';
 
-type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteSelection' | 'browser.remoteStatus' | 'browser.remoteWatch' | 'browser.hostAttach' | 'browser.hostDetach' | 'browser.hostReply';
+type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteSelection' | 'browser.remoteStatus' | 'browser.remoteWatch' | 'browser.hostAttach' | 'browser.hostDetach' | 'browser.hostReply' | 'browser.signInOpen';
 
 /** `selected`: the typed text is selected, by a double click or select-all, until the next click or key. */
 interface Tab extends FakePage { tabId: string; profile: string; history: string[]; historyIndex: number; at: number; selected?: boolean }
@@ -127,6 +127,20 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
 
   return {
     'browser.command': command,
+    // The card's Open: a page the agent named, in the card's profile; a tab already on that site comes forward.
+    'browser.signInOpen': async ({ threadId, questionId, site }) => {
+      watching(threadId);
+      const ask = ctx.pendingQuestions.get(questionId)?.request;
+      if (!ask?.signIn || ask.threadId !== threadId) throw refusal('this sign-in card is closed');
+      const page = Number.isInteger(site) ? ask.signIn.sites[site] : undefined;
+      if (!page) throw refusal(`the sign-in card names ${ask.signIn.sites.length} pages`);
+      const host = (url: string) => { try { return new URL(url).host; } catch { return null; } };
+      const there = browsers.get(threadId)?.tabs.find(tab => tab.profile === ask.signIn!.profile && host(tab.url) === host(page.url));
+      const reply = there
+        ? await command({ threadId, tabId: there.tabId, action: { kind: 'activate' } })
+        : await command({ threadId, action: { kind: 'open', url: page.url, profile: ask.signIn.profile } });
+      return { tabId: reply.tabId! };
+    },
     // The demo core has no desktop app on its machine to host tabs: they stay its own, shown as frames.
     'browser.hostAttach': async () => { throw refusal('only the desktop app on this machine, signed in as the owner, can host the agent browser'); },
     'browser.hostDetach': async () => ({ ok: true as const }),

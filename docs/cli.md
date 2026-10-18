@@ -87,6 +87,15 @@ tab closes. `tab list` names each tab's profile, `tab new <url>` opens another,
 `tab <id>` makes one current and `--tab <id>` aims a single command at it. The
 agent cannot select a tab from another conversation.
 
+A profile keeps its sign-ins for every conversation of the machine, so the
+agent opens the site first. A page that still asks to sign in gets
+`boite browser login <url> [<url>...] --why "<reason>"` (`--profile <name>`
+for another profile): a card asks the user once, without stopping, with an
+Open button per page, and prints `requested: <id>`, or `already asked: <id>`
+while a card for those sites is open. The user signs in in the panel, and the
+answer arrives as a message, like `boite ask`. Never ask for a password in the
+chat. See [browser](browser.md#signing-in).
+
 `snapshot -i` lists the page's interactive elements with refs:
 `- textbox "Email" [ref=e3]`, `- button "Continue" [ref=e5]`. Without `-i` it
 adds headings, text and the containers around them; `-c` drops the containers,

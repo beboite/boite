@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
-  import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Settings2, ShieldQuestion, Target, X } from '@lucide/svelte';
+  import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, KeyRound, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Settings2, ShieldQuestion, Target, X } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
@@ -10,6 +10,7 @@
   import { ignoreQuestions, releaseWaiting, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
+  import SignInCard from './SignInCardLoader.svelte';
   import { settingHeading } from '../lib/setting-requests';
   import AgentSettingCard from './AgentSettingCardLoader.svelte';
 
@@ -177,11 +178,11 @@
     {#if shown}
       <div class="questions" data-testid="activity-questions" data-count={asked.length}>
         <div class="activity-row question-row">
-          {#if shown.setting}<Settings2 size={16} />{:else if shown.agentSetting}<Bot size={16} />{:else}<MessageCircleQuestionMark size={16} />{/if}
+          {#if shown.setting}<Settings2 size={16} />{:else if shown.signIn}<KeyRound size={16} />{:else if shown.agentSetting}<Bot size={16} />{:else}<MessageCircleQuestionMark size={16} />{/if}
           <button type="button" class="ghost objective question-toggle" aria-expanded={questionOpen}
             title={questionOpen ? strings.activity.questionFold : strings.activity.questionUnfold} data-testid="activity-question-toggle"
             onclick={() => (questionOpen = !questionOpen)}>
-            <span class="question-line ui-label">{questionOpen ? (shown.setting ? settingHeading(shown.setting) : shown.agentSetting ? fill(strings.agentSettingRequest.heading, { name: shown.agentSetting.agentName }) : strings.chat.questionAsyncHeading) : shown.text}</span>
+            <span class="question-line ui-label">{questionOpen ? (shown.setting ? settingHeading(shown.setting) : shown.signIn ? strings.signInRequest.heading : shown.agentSetting ? fill(strings.agentSettingRequest.heading, { name: shown.agentSetting.agentName }) : strings.chat.questionAsyncHeading) : shown.text}</span>
             <ChevronDown size={16} class={questionOpen ? 'turned' : ''} />
           </button>
           {#if replyOf(store, shown.id).replying}
@@ -206,7 +207,20 @@
                 {#if child}
                   {@render fromChild(child, 'activity-subagent-question')}
                 {/if}
-                {#if question.agentSetting}
+                {#if question.signIn}
+                <SignInCard
+                  {store}
+                  threadId={question.threadId}
+                  questionId={question.id}
+                  text={question.text}
+                  signIn={question.signIn}
+                  answer={null}
+                  pending
+                  docked
+                  respond={(optionId) => store.answerQuestion(question.threadId, question.id, [optionId])}
+                  skip={() => store.skipQuestion(question.threadId, question.id)}
+                />
+                {:else if question.agentSetting}
                 <AgentSettingCard
                   {store}
                   threadId={question.threadId}

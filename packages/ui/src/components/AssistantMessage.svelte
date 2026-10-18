@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot, CircleAlert, FishingHook, MessageCircleQuestionMark, Settings2 } from '@lucide/svelte';
+  import { Bot, CircleAlert, FishingHook, KeyRound, MessageCircleQuestionMark, Settings2 } from '@lucide/svelte';
   import { showDockedQuestion } from '../lib/question-dock.svelte';
   import { replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import type { Account, MemoryEvent, Message } from '@boite/contracts';
@@ -12,6 +12,7 @@
   import PlanCard from './PlanCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
+  import SignInCard from './SignInCardLoader.svelte';
   import AgentSettingCard from './AgentSettingCardLoader.svelte';
   import Prose from './Prose.svelte';
   import ChatFile from './ChatFile.svelte';
@@ -131,10 +132,22 @@
       {:else if part.type === 'question' && part.async === true && (part.answer ?? null) === null && store.pendingQuestions.some((q) => q.id === part.questionId)}
         <!-- Waiting in the dock above the composer: here only a line that brings it up. -->
         <button type="button" class="ghost docked-question" data-testid="question-docked" title={strings.chat.questionOpen} onclick={() => showDockedQuestion(part.questionId)}>
-          {#if part.setting}<Settings2 size={15} strokeWidth={1.75} />{:else if part.agentSetting}<Bot size={15} strokeWidth={1.75} />{:else}<MessageCircleQuestionMark size={15} strokeWidth={1.75} />{/if}
+          {#if part.setting}<Settings2 size={15} strokeWidth={1.75} />{:else if part.signIn}<KeyRound size={15} strokeWidth={1.75} />{:else if part.agentSetting}<Bot size={15} strokeWidth={1.75} />{:else}<MessageCircleQuestionMark size={15} strokeWidth={1.75} />{/if}
           <span class="docked-text ui-label">{part.text}</span>
           <span class="docked-hint ui-label">{strings.chat.questionDocked}</span>
         </button>
+      {:else if part.type === 'question' && part.signIn}
+        <SignInCard
+          {store}
+          threadId={message.threadId}
+          questionId={part.questionId}
+          text={part.text}
+          signIn={part.signIn}
+          answer={part.answer ?? null}
+          pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
+          respond={(optionId) => store.answerQuestion(message.threadId, part.questionId, [optionId])}
+          skip={() => store.skipQuestion(message.threadId, part.questionId)}
+        />
       {:else if part.type === 'question' && part.agentSetting}
         <AgentSettingCard
           {store}

@@ -8,6 +8,8 @@ export * from './diagnostics';
 export * from './pull-requests';
 export * from './browser';
 export * from './browser-remote';
+export * from './sign-in';
+import type { SignInAsk } from './sign-in';
 export * from './mobile-devices';
 export * from './agents';
 export * from './workflows';
@@ -1640,6 +1642,8 @@ export type MessagePart =
       setting?: SettingAsk;
       /** An agent setting card: see `QuestionRequest.agentSetting`. */
       agentSetting?: AgentSettingAsk;
+      /** A sign-in card: see `QuestionRequest.signIn`. */
+      signIn?: SignInAsk;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is
@@ -1963,6 +1967,11 @@ export interface QuestionRequest {
    * `text` is its reason. Always asynchronous.
    */
   agentSetting?: AgentSettingAsk;
+  /**
+   * A sign-in card (`browser.signIn`): the agent needs the user signed in to
+   * these sites in the agent browser. `text` is its reason. Always asynchronous.
+   */
+  signIn?: SignInAsk;
   createdAt: Timestamp;
 }
 

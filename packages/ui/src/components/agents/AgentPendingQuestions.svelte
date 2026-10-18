@@ -5,14 +5,15 @@
   import { fill, strings } from '../../lib/strings';
   import AgentSettingCard from '../AgentSettingCardLoader.svelte';
   import SettingRequestCard from '../SettingRequestCardLoader.svelte';
+  import SignInCard from '../SignInCardLoader.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
 
   /**
    * The cards a persistent agent's hidden session threads wait on, drawn in its
    * conversation: nobody opens those threads, so a question or a settings card
-   * asked there would stay out of sight. An agent setting card and a settings
-   * card draw as they do in a thread; a plain question takes the compact look
-   * of a decision the agent asked for.
+   * asked there would stay out of sight. An agent setting card, a settings
+   * card and a sign-in card draw as they do in a thread; a plain question
+   * takes the compact look of a decision the agent asked for.
    */
   let { view, scope }: { view: AgentsView; scope: AgentScope } = $props();
   const store = $derived(view.store);
@@ -43,7 +44,10 @@
 </script>
 
 {#each asked as question (question.id)}
-  {#if question.agentSetting}
+  {#if question.signIn}
+    <SignInCard {store} threadId={question.threadId} questionId={question.id} text={question.text} signIn={question.signIn} answer={null} pending
+      respond={optionId => store.answerQuestion(question.threadId, question.id, [optionId])} skip={() => store.skipQuestion(question.threadId, question.id)} />
+  {:else if question.agentSetting}
     <AgentSettingCard {store} threadId={question.threadId} questionId={question.id} text={question.text} setting={question.agentSetting} answer={null} pending
       respond={optionId => store.answerQuestion(question.threadId, question.id, [optionId])} />
   {:else if question.setting}

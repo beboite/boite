@@ -15,6 +15,7 @@ import {
   checkSettingRequest,
   settingAnswerText,
   settledSetting,
+  signInAnswerText,
   type ThreadId,
   type ThreadSummary,
   type Turn,
@@ -384,6 +385,7 @@ export class ThreadCards {
       ...(ask.async === true ? { async: true } : {}),
       ...(ask.setting === undefined ? {} : { setting: ask.setting }),
       ...(ask.agentSetting === undefined ? {} : { agentSetting: ask.agentSetting }),
+      ...(ask.signIn === undefined ? {} : { signIn: ask.signIn }),
       createdAt: Date.now(),
     };
     let resolve: (answer: QuestionAnswer | null) => void = () => undefined;
@@ -504,6 +506,7 @@ export const ASK_INSTRUCTIONS = '\n\nBoite: to ask the user something without st
 /** What the agent reads for an answer: the labels picked, then what the user typed. */
 function answerTextOf(request: QuestionRequest, answer: QuestionAnswer): string {
   if (request.setting !== undefined) return settingAnswerText(request.setting, answer);
+  if (request.signIn !== undefined) return signInAnswerText(request.signIn);
   const labels = answer.optionIds.map(id => request.options.find(option => option.id === id)?.label ?? id);
   return [labels.join(', '), answerText(answer)].filter(line => line.length > 0).join('\n');
 }

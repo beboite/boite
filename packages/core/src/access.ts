@@ -123,6 +123,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['agent.move', 'its own thread into a project the owner already registered, applied when its turn ends; never another thread, never a folder the owner did not add'],
   ['panel.open', 'showing the user a file, a diff or a page instead of pasting it into the transcript'],
   ['browser.command', 'the headless browser its own conversation has on this machine, which it could start from its shell anyway; never another conversation\'s tabs'],
+  ['browser.signIn', 'a sign-in card on its own thread naming the pages it needs the user signed in to; the user signs in, the agent never sees a password'],
   ['devices.list', 'the simulators and emulators its SDK lists on this machine; adb and xcrun are already within its shell\'s reach'],
   ['devices.open', 'booting one of them and showing it in its own conversation\'s Device panel'],
   ['devices.sessions', 'what its own conversation\'s Device panel has open, to wait for a boot'],

@@ -1,5 +1,6 @@
 import { RPC_MAX_FRAME_BYTES } from './attachment-limits';
 import type { RemoteBrowserFrame, RemoteBrowserInput, RemoteBrowserSelection, RemoteBrowserUnchanged, RemoteFrameOptions } from './browser-remote';
+import type { SignInAsk, SignInRequestParams } from './sign-in';
 /**
  * The agent's browser runs on the machine that runs its conversation: the core
  * starts a headless Chromium there and drives it over the DevTools protocol.
@@ -225,6 +226,21 @@ export interface BrowserRpcMethods {
    */
   'browser.hostAttach': { params: Record<string, never>; result: { ok: true } };
   'browser.hostDetach': { params: Record<string, never>; result: { ok: true } };
+  /**
+   * The agent's sign-in card (`boite browser login`), asked without stopping
+   * like `questions.ask`, with `reason` as its text. A card already open in
+   * the thread for the same profile that names every one of these sites is
+   * returned again (`reused`) rather than drawn twice. The agent reads `done`,
+   * or nothing when the user skips it.
+   */
+  'browser.signIn': { params: SignInRequestParams; result: { questionId: string; signIn: SignInAsk; reused: boolean } };
+  /**
+   * From the card's Open button, on the owner's client or a phone subscribed
+   * to the conversation: opens site `site` of the open card `questionId` in
+   * the conversation's browser, in the card's profile. Only an address the
+   * agent put on the card opens, so a phone still names none of its own.
+   */
+  'browser.signInOpen': { params: { threadId: string; questionId: string; site: number }; result: { tabId: string } };
   /** DevTools messages (answers and events) from the host's webviews of one profile, in order. */
   'browser.hostReply': { params: { profile: string; messages: string[] }; result: { ok: true } };
 }

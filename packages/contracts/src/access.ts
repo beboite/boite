@@ -75,6 +75,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'browser.remoteFrame', 'browser.remoteInput', // Only the subscribed conversation's agent browser; taps, keys and http(s) addresses, no scripts or host paths.
   'browser.remoteSelection', // The text selected in that same page, password fields excluded: what the frames already show, as text.
   'browser.remoteStatus', // The subscribed conversation's agent tabs (address and title) and whether this machine has a browser.
+  'browser.signInOpen', // Opens a page the agent named on an open sign-in card of the subscribed conversation, in that card's profile; the phone names no address.
   // The Device panel on a phone. The core acts only on simulators and emulators its SDK lists, for the subscribed
   // conversation, runs no command a device names and returns no host path: what the phone could ask of the agent.
   'devices.list', 'devices.sessions', 'devices.frame', 'devices.input', 'devices.open', 'devices.close', 'devices.screenshot',
