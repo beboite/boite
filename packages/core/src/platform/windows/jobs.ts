@@ -21,6 +21,7 @@ import {
 } from './job-limits.ts';
 import {
   commandLineOf,
+  consoleHost,
   cpuMsOf,
   createdAtOfPid,
   creationIdentityOf,
@@ -76,25 +77,6 @@ const INSPECT_ACCESS = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_TER
 
 const EVENTS_NOTE =
   'every process a thread launches, direct or not, is in its Job Object; exact start and exit events';
-
-/**
- * Windows puts a console host in the job as soon as a child's output is piped.
- * It is the OS attaching a console, not something the thread asked for, so it
- * stays out of the trace and out of the load.
- */
-const CONSOLE_HOSTS = new Set(['conhost.exe', 'openconsole.exe']);
-
-/**
- * Whether a process is a console host, by its image name or, when that read
- * fails, the program its command line starts: a host caught as it starts can
- * refuse QueryFullProcessImageNameW and still show `\??\...\conhost.exe 0x4`
- * (Windows CI, 2026-10-18), and it then entered the trace as `unknown`.
- */
-export function consoleHost(exe: string | null, commandLine: string | null): boolean {
-  if (exe !== null) return CONSOLE_HOSTS.has(baseName(exe));
-  const program = commandLine === null ? null : /^\s*(?:"([^"]+)"|(\S+))/.exec(commandLine);
-  return program !== null && CONSOLE_HOSTS.has(baseName(program[1] ?? program[2] ?? ''));
-}
 
 function loadKernel32() {
   return dlopen('kernel32.dll', {
@@ -783,11 +765,6 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
     parentPid: parentPidOf(api, handle),
     ...identity,
   });
-}
-
-function baseName(path: string): string {
-  const cut = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
-  return (cut === -1 ? path : path.slice(cut + 1)).toLowerCase();
 }
 
 function onProcessExited(threadId: string, pid: number): void {
