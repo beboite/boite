@@ -1,7 +1,8 @@
 /**
  * What the core reads from one process handle: name, parent, command line, exit
- * code, CPU time, memory and I/O. Plain reads over whatever Win32 surface is
- * passed in, so the job lifecycle in jobs.ts keeps only its own state.
+ * code, CPU time, memory and I/O, and whether those name a console host. Plain
+ * reads over whatever Win32 surface is passed in, so the job lifecycle in
+ * jobs.ts keeps only its own state.
  */
 
 /** The handle reads jobs.ts's native surface offers. */
@@ -164,4 +165,33 @@ export function workingSetOf(api: ProcessReads, handle: number): { workingSet: n
     workingSet: Number(view.getBigUint64(OFF_WORKING_SET, true)),
     peak: Number(view.getBigUint64(OFF_PEAK_WORKING_SET, true)),
   };
+}
+
+/**
+ * Windows puts a console host in the job as soon as a child's output is piped.
+ * It is the OS attaching a console, not something the thread asked for, so it
+ * stays out of the trace and out of the load.
+ */
+const CONSOLE_HOSTS = new Set(['conhost.exe', 'openconsole.exe']);
+
+/**
+ * Whether a process is a console host, by its image name or, when that read
+ * fails, by a command line that starts the system's own `conhost.exe`: a host
+ * caught as it starts can refuse QueryFullProcessImageNameW and still show
+ * `\??\C:\Windows\system32\conhost.exe 0x4` (Windows CI, 2026-10-18), and it
+ * then entered the trace as `unknown`. Only that full path counts: an unquoted
+ * `C:\Tools\conhost.exe helpers\worker.exe` is a real process.
+ */
+export function consoleHost(exe: string | null, commandLine: string | null): boolean {
+  if (exe !== null) return CONSOLE_HOSTS.has(baseName(exe));
+  if (commandLine === null) return false;
+  // The program is the quoted path whole, else the text up to the first blank, which is what Windows itself runs.
+  const program = /^\s*(?:"([^"]*)"|(\S+))/.exec(commandLine);
+  const path = (program?.[1] ?? program?.[2] ?? '').toLowerCase().replace(/^\\\?\?\\|^\\\\\?\\/, '');
+  return path === `${(process.env.SystemRoot ?? 'C:\\Windows').toLowerCase()}\\system32\\conhost.exe`;
+}
+
+function baseName(path: string): string {
+  const cut = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+  return (cut === -1 ? path : path.slice(cut + 1)).toLowerCase();
 }
