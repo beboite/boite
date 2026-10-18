@@ -322,7 +322,7 @@ export const strings = {
   activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
   stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
 },
-  artifacts: { viewReplay: 'Play again', viewExpand: 'View full size', viewCollapse: 'Close full size', loadImage: 'Load image', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', videoFailed: 'This device cannot play this video. Download it to watch it in another app.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+  artifacts: { viewReplay: 'Play again', viewExpand: 'View full size', viewCollapse: 'Close full size', loadImage: 'Load image', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', videoFailed: 'This device cannot play this video. Download it to watch it in another app.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ambiguous: (name: string, paths: string) => `${name} names several files: ${paths}`, ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
 
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
@@ -1488,6 +1488,10 @@ export const strings = {
     movePendingHide: 'Hide what the agent will be told',
     /** A line of the timeline: the agent moved its own thread with `boite thread move`. */
     movedByAgent: 'Moved by the agent to {project}',
+    /** A line of the timeline: Boite pinged the cached prompt while the thread waits on its agents. */
+    keepalive: 'Prompt cache kept warm',
+    keepaliveMany: 'Prompt cache kept warm {count} times',
+    keepaliveRunning: 'Keeping the prompt cache warm',
     /** Above the first prompt of a thread another thread's agent started with `boite thread new`. */
     startedByAgent: 'Started by the agent of {title} in {project}',
     /** Above the first prompt of a thread another agent started: the prompt is that agent's, not the user's. */
@@ -2354,6 +2358,11 @@ export const strings = {
     experiments: {
       intro: 'These are unfinished and can change or disappear.'
     },
+    cacheKeepalive: 'Keep the prompt cache warm',
+    cacheKeepaliveHint: 'While a conversation waits on its agents or workflows, Boite sends a one-word turn shortly before the provider drops its cached prompt, so their result is read at the cached price. Each ping counts as usage. A ping that misses the cache ends the pings.',
+    cacheKeepaliveHours: 'For at most',
+    cacheKeepaliveHoursHint: 'Counted from the end of the conversation\'s last turn. Pings also stop when the agents finish, when you write or stop, and after as many pings as one cache miss would cost.',
+    cacheKeepaliveUnit: 'hours',
     material: 'Window material',
     workspace: 'Workspace',
     startIn: 'The app opens on',

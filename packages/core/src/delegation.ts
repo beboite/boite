@@ -544,10 +544,17 @@ export class Delegation {
       if (letter.error === `Awaiting provider turn ${turnId}`) this.update(letter, success ? 'delivered' : 'uncertain', success ? null : 'Provider turn did not complete; not retried automatically');
     }
   }
+  /** Whether results wait in the thread's inbox, about to open its next turn. */
+  hasMail(threadId: string): boolean {
+    return this.inbox(threadId).length > 0;
+  }
   private async deliver(threadId: string): Promise<void> {
     if (this.delivering.has(threadId) || this.closed) return;
     const thread = this.core.journal.getThread(threadId);
-    if (!thread || thread.archived || ['queued', 'waiting'].includes(thread.status) || (thread.status === 'error' && (!thread.parentThreadId || this.stopped.has(threadId)))) return;
+    if (!thread || thread.archived) return;
+    // A cache keepalive in the way stops, and its `turn.finished` brings the result back here (`threads/cache-keepalive.ts`).
+    if ((thread.status === 'queued' || thread.status === 'running') && this.inbox(threadId).length > 0 && this.core.threads.cacheKeepalive.yieldTo(threadId)) return;
+    if (['queued', 'waiting'].includes(thread.status) || (thread.status === 'error' && (!thread.parentThreadId || this.stopped.has(threadId)))) return;
     const letters = this.inbox(threadId);
     if (!letters.length) return;
     this.delivering.add(threadId);

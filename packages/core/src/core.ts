@@ -487,6 +487,7 @@ export class Core {
     this.group.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
+    this.threads.cacheKeepalive.close();
     this.threads.limitResumes.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
     return this.#drainPromise;
@@ -515,6 +516,7 @@ export class Core {
     await this.pullRequestWatches.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
+    this.threads.cacheKeepalive.close();
     this.threads.limitResumes.close();
     await this.threads.codeCheckpoints.close();
     await this.agentRuntime.close();
