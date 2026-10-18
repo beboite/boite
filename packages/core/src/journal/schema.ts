@@ -5,7 +5,7 @@ import { nativeAgentPartSql } from './native-agent-parts.ts';
 import { createPartBlobs } from './part-blobs.ts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 35;
+export const SCHEMA_VERSION = 36;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -430,6 +430,11 @@ export function migrate(db: Database, file: string): { from: number; to: number 
         PRIMARY KEY (message_id, part_index)) WITHOUT ROWID;
       DROP INDEX IF EXISTS background_observations_thread;`);
     version = 35;
+  }
+  // The agent's own running totals each turn ended on (`Turn.agentTotals`, JSON).
+  if (!db.query("SELECT 1 FROM pragma_table_info('turns') WHERE name = 'agent_totals'").get()) {
+    db.exec('ALTER TABLE turns ADD COLUMN agent_totals TEXT;');
+    version = 36;
   }
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);

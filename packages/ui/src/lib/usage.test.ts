@@ -126,6 +126,10 @@ describe('summarize', () => {
     const older = summarize({ edges: [0, 10], rows: [{ ...row(0, 'codex', 'gpt-6.1-sol', 1, usage(5, 0)), priced: 0 }], threads: [] }, 'cost');
     expect(priceNote(older.models[0]!)).toBe(strings.usage.olderCore);
     expect(formatRate(0.125)).toBe('$0.125');
+    // The Cache column taken apart: a written token costs 40 read ones at these rates.
+    const cached = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 26_670_000_000, cacheWriteTokens: 434_000_000, costUsdEquivalent: null };
+    expect(priceNote({ price: opus, priced: 1, reported: 1, usage: cached })).toBe('Public API rates of claude-opus-5-5, per million tokens: input $4, output $20, cache read $0.2, cache write $8. Cache: 26.7B read ($5,334), 434M written ($3,472).');
+    expect(priceNote({ price: null, priced: 1, reported: 1, usage: cached })).toBe('No public rate matches this model, so the cost is the one its agent reported. Cache: 26.7B read, 434M written.');
   });
 
   test('breaks down by model, largest first, and by day, newest first', () => {

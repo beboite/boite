@@ -457,7 +457,7 @@ export class TurnContexts {
     };
   }
 
-  /** What the agent session this turn resumes already used, summed over its recorded turns. */
+  /** What the agent session this turn resumes already used (`Journal.sessionUsage`). */
   private sessionBefore(thread: ThreadSummary, turnId: TurnId): { costUsd: number; tokens: number } {
     if (thread.sessionId === null) return { costUsd: 0, tokens: 0 };
     return this.core.journal.sessionUsage(thread.id, thread.sessionGeneration ?? 0, turnId);
