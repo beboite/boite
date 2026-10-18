@@ -176,14 +176,18 @@ const CONSOLE_HOSTS = new Set(['conhost.exe', 'openconsole.exe']);
 
 /**
  * Whether a process is a console host, by its image name or, when that read
- * fails, the program its command line starts: a host caught as it starts can
- * refuse QueryFullProcessImageNameW and still show `\??\...\conhost.exe 0x4`
- * (Windows CI, 2026-10-18), and it then entered the trace as `unknown`.
+ * fails, by a command line that starts the system's own `conhost.exe`: a host
+ * caught as it starts can refuse QueryFullProcessImageNameW and still show
+ * `\??\C:\Windows\system32\conhost.exe 0x4` (Windows CI, 2026-10-18), and it
+ * then entered the trace as `unknown`. Only that full path counts: an unquoted
+ * `C:\Tools\conhost.exe helpers\worker.exe` is a real process.
  */
 export function consoleHost(exe: string | null, commandLine: string | null): boolean {
   if (exe !== null) return CONSOLE_HOSTS.has(baseName(exe));
-  const program = commandLine === null ? null : /^\s*(?:"([^"]+)"|(\S+))/.exec(commandLine);
-  return program !== null && CONSOLE_HOSTS.has(baseName(program[1] ?? program[2] ?? ''));
+  if (commandLine === null) return false;
+  const host = `${(process.env.SystemRoot ?? 'C:\\Windows').toLowerCase()}\\system32\\conhost.exe`;
+  const line = commandLine.trimStart().toLowerCase().replace(/^"/, '').replace(/^\\\?\?\\|^\\\\\?\\/, '');
+  return line.startsWith(host) && (line.length === host.length || /^["\s]/.test(line.slice(host.length)));
 }
 
 function baseName(path: string): string {

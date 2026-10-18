@@ -275,7 +275,11 @@ describeWindows('windows job objects', () => {
 test('a console host whose image name could not be read is still left out of the trace by its command line', () => {
   // The process a CI run caught: opened, its command line read, its image name refused.
   expect(consoleHost(null, String.raw`\??\C:\Windows\system32\conhost.exe 0x4`)).toBe(true);
+  expect(consoleHost(null, String.raw`"C:\Windows\System32\conhost.exe" 0x4`)).toBe(true);
   expect(consoleHost(String.raw`C:\Windows\System32\OpenConsole.exe`, null)).toBe(true);
+  // Only the system's own host: a real process whose path holds the name stays in the trace.
+  expect(consoleHost(null, String.raw`C:\Tools\conhost.exe helpers\worker.exe --run`)).toBe(false);
+  expect(consoleHost(null, String.raw`C:\Windows\System32\conhost.exe.bak\worker.exe`)).toBe(false);
   expect(consoleHost(null, String.raw`"C:\Program Files\conhost.exe tools\bun.exe" -e 1`)).toBe(false);
   expect(consoleHost(String.raw`C:\bun\bun.exe`, 'conhost.exe 0x4')).toBe(false);
   expect(consoleHost(null, null)).toBe(false);
