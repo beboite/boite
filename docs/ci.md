@@ -182,7 +182,7 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 490,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,850,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,851,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,417,000 |
 
@@ -193,8 +193,10 @@ On 2026-10-18, the UI runtime change merged with `origin/main` at `9ffdb977`
 4,413,067 core JavaScript bytes after fresh `bun run build:ui` and
 `bun run build:core` on Windows, against 486,005 and 4,725,790 that the lean
 boot measured: 3,496 entry bytes and 123,770 UI bytes more, of which the
-highlight worker is 114,882. The entry and UI limits rise to 490,000 and
-4,850,000; the core limits stay.
+highlight worker is 114,882. Parsing what follows a terminal's snapshot as
+its continuation, with the second clock ticking at rest again, brings the UI
+to 4,850,017. The entry and UI limits rise to 490,000 and 4,851,000; the core
+limits stay.
 
 On 2026-10-18, the UI runtime change merged with `origin/main` at `15fdbb81`
 measures 598,199 entry bytes and 5,159,382 UI bytes after fresh

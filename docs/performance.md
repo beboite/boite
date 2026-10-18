@@ -1003,10 +1003,6 @@ front and the rest still saves the whole cost. Not measured in WebView2.
 Beyond the loops, a page left open kept a few costs that nothing on screen
 needed:
 
-- The second clock (`lib/clock.svelte.ts`), which the working rows read for
-  their elapsed time, ticked every second at rest. It now stops while
-  `data-at-rest` is set and ticks once at once when it clears; the minute
-  clock is unchanged.
 - The model cache was rewritten in `localStorage` on every probe answer, and a
   restore serialized the provider and account lists three times to compare
   them. `saveModels` now writes at most once a second, the last state, and on
@@ -1037,22 +1033,28 @@ needed:
 - A text from 20,000 characters goes through its grammar in a worker
   ([panel](panel.md)).
 
+The second clock (`lib/clock.svelte.ts`), which the working rows read for
+their elapsed time, keeps ticking at rest and stops only while the page is
+hidden: a window left visible beside another application is at rest and
+still shows its times.
+
 `bun bench/ui-at-rest.ts --only working --runs 3 --wait 120`, 2026-10-17,
 headless Chrome on ANGLE Direct3D 11 (RTX 5080), `?fake=1&working=16` with
 nobody at the PC, 6 s windows, the base being `1c168fd6` and the heap read
-after 120 s:
+after 120 s. After is measured again on 2026-10-18, merged with `origin/main`
+at `9ffdb977`, with the second clock ticking at rest:
 
 | Measure | Base | After |
 | --- | --- | --- |
-| Frames/s | 2.7 to 3.0 | 1.8 to 2.0 |
-| Renderer ms/s | 10 to 15 | 5 to 6 |
-| GPU ms/s | 6 to 7 | 2 to 3 |
-| Renderer main thread ms/s | 5 to 7 | 2 to 3 |
-| Long tasks since load | 2 to 4 (191 to 740 ms) | 2 to 3 (148 to 427 ms) |
-| JS heap, MiB | 9.9 to 14.5 | 11.2 to 14.6 |
+| Frames/s | 2.7 to 3.0 | 2.8 to 3.0 |
+| Renderer ms/s | 10 to 15 | 8 |
+| GPU ms/s | 6 to 7 | 4 |
+| Renderer main thread ms/s | 5 to 7 | 4 |
+| Long tasks since load | 2 to 4 (191 to 740 ms) | 0 to 1 (0 to 51 ms) |
+| JS heap, MiB | 9.9 to 14.5 | 11.2 to 13.8 |
 
-The long tasks are the page's load, which this change does not touch, and the
-heap stays within run-to-run noise.
+The long tasks are the page's load, which this change does not touch and the
+lean boot on main shortened, and the heap stays within run-to-run noise.
 
 With five terminals opened then hidden, `bun bench/ui-at-rest.ts --only
 "hidden terminals"` (2026-10-18, xterm on WebGL, the base being `origin/main`
