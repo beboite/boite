@@ -338,8 +338,12 @@ sites included: pair only devices you would give that. `browser.remoteChanged`
 goes to the clients subscribed to the conversation.
 
 On Linux and macOS the core speaks the DevTools protocol to the browser over
-two pipes, `--remote-debugging-pipe` on the browser's descriptors 3 and 4,
-which `procs.spawn` opens with `extraPipes`. No port is open: another process
+`--remote-debugging-pipe` on the browser's descriptors 3 and 4, which
+`procs.spawn` opens with `extraPipes`. Bun makes each a socket pair, and the
+core opens both with `Bun.connect({ fd })`: a `Bun.file(fd).stream()` reader
+on the replies stopped being polled under load (Bun 1.4.2 and 1.4.3 on Linux,
+a one-shot epoll registration never armed again while answers waited in the
+socket), and every command after it timed out. No port is open: another process
 of the machine, another account included, cannot reach the browser through
 it. It can still read the profile folder if its permissions let it, as with
 any browser profile.

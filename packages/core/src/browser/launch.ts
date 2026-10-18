@@ -39,7 +39,7 @@ export async function startChromium(spawn: SpawnBrowser, path: string, dir: stri
     if (piped) {
       const [commands, replies] = spawned.fds ?? [];
       if (commands === undefined || replies === undefined) throw new Error('the browser was started without its DevTools pipes');
-      cdp = Cdp.pipe(commands, replies);
+      cdp = await Cdp.pipe(commands, replies);
     } else cdp = await Cdp.connect(await waitForEndpoint(dir, spawned.exited, timeoutMs));
     // The first answer says the browser is up; a browser that exits first never gives it.
     await Promise.race([
