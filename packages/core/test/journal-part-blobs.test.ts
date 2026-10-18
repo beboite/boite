@@ -2,9 +2,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TOOL_OUTPUT_PREVIEW_CHARS, type Message, type MessagePart } from '@boite/contracts';
+import { TOOL_OUTPUT_PREVIEW_CHARS, previewToolOutputs, type Message, type MessagePart } from '@boite/contracts';
 import { Journal } from '../src/journal.ts';
-import { BLOB_MIN_CHARS, moveInlineValues } from '../src/journal/part-blobs.ts';
+import { BLOB_MIN_CHARS, moveInlineOutputs, moveInlineValues, previewDigests, recodePartBlobs } from '../src/journal/part-blobs.ts';
+import { compactAll, schema36Journal } from './fixtures/journal-schema36.ts';
 
 let dir: string, journal: Journal;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'boite-part-blobs-')); journal = new Journal(join(dir, 'journal.db')); });
@@ -85,7 +86,7 @@ test('a row written before part_blobs keeps its values inline and reads as it wa
   expect(blobRows()).toEqual([]);
 });
 
-test('a row written before part_blobs moves its large values out once, and reads the same', () => {
+test('a row written before part_blobs moves its large values out once, and reads the same', async () => {
   const insert = journal.db.query("INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES (?, 'thr_a', 'trn_a', 'assistant', ?, 'complete', 1)");
   const old: MessagePart[] = [read(0), { type: 'text', text: 'small' }, read(1)];
   insert.run('old', JSON.stringify(old));
@@ -94,14 +95,165 @@ test('a row written before part_blobs moves its large values out once, and reads
   const newBlobs = blobRows();
   const isOpen = () => false;
   // A message still streaming waits for a later pass.
-  expect(moveInlineValues(journal.db, 0, () => true)).toBe(-1);
+  expect(await moveInlineValues(journal.db, 0, () => true)).toBe(-1);
   expect(journal.db.query("SELECT parts FROM messages WHERE id = 'old'").get()).toEqual({ parts: JSON.stringify(old) });
 
-  const first = moveInlineValues(journal.db, 0, isOpen)!;
+  const first = (await moveInlineValues(journal.db, 0, isOpen))!;
   expect(first).toBe(journal.messageRowid('thr_a', 'old')!);
   expect(rowBytes('old')).toBeLessThan(2_000);
   expect(journal.getMessage('old')?.parts).toEqual(old);
   // Rows in the new shape are small and never picked; nothing is left.
-  expect(moveInlineValues(journal.db, first, isOpen)).toBeNull();
+  expect(await moveInlineValues(journal.db, first, isOpen)).toBeNull();
   expect(blobRows().filter(row => (row as { messageId: string }).messageId === 'new')).toEqual(newBlobs);
+});
+
+const codecs = () => journal.db.query(`SELECT message_id AS messageId, part_index AS partIndex, field, codec, typeof(data) AS type, preview IS NOT NULL AS preview, chars
+  FROM part_blobs ORDER BY message_id, part_index, field`).all();
+const toolPart = (output: string, status: 'done' | 'running' = 'done'): Extract<MessagePart, { type: 'tool' }> =>
+  ({ type: 'tool', toolId: `t-${output.length}`, name: 'Bash', input: { command: 'ls' }, inputText: '{"command":"ls"}', output, status });
+
+test('values are stored compressed or as text, and every read path gives them back whole', () => {
+  const image: MessagePart = { type: 'image', mimeType: 'image/png', data: screenshot(9), alt: null };
+  const parts: MessagePart[] = [read(0), image, { ...read(1), status: 'running' }];
+  journal.putMessage({ id: 'msg_a', threadId: 'thr_a', turnId: 'trn_a', role: 'assistant', parts, state: 'complete', createdAt: 1 });
+  expect(codecs()).toEqual([
+    { messageId: 'msg_a', partIndex: 0, field: 'output', codec: 1, type: 'blob', preview: 1, chars: screenshot(0).length },
+    { messageId: 'msg_a', partIndex: 1, field: 'data', codec: 1, type: 'blob', preview: 0, chars: screenshot(9).length },
+    { messageId: 'msg_a', partIndex: 2, field: 'output', codec: 1, type: 'blob', preview: 1, chars: screenshot(1).length },
+  ]);
+  const bytes = (journal.db.query('SELECT SUM(length(data)) AS n FROM part_blobs').get() as { n: number }).n;
+  expect(bytes).toBeLessThan(screenshot(0).length / 10);
+
+  const everyRead = (id: string) => {
+    expect(journal.getMessage(id)?.parts).toEqual(parts);
+    const page = journal.listMessagePage('thr_a', { limit: 10, toolPreviews: true }).messages.find(message => message.id === id)!;
+    // A finished output reads as its preview, a running one whole, an image whole.
+    expect(page.parts).toEqual([{ ...read(0), output: screenshot(0).slice(0, TOOL_OUTPUT_PREVIEW_CHARS), outputDeferred: true }, image, parts[2]!]);
+    expect(journal.messagePart(id, 0)?.part).toEqual(parts[0]);
+    expect(journal.messagePart(id, 1)?.part).toEqual(image);
+  };
+  everyRead('msg_a');
+  // A value stored as text, as before schema 37, reads the same everywhere.
+  for (const [index, value] of [[0, screenshot(0)], [1, screenshot(9)], [2, screenshot(1)]] as const) {
+    journal.db.query('UPDATE part_blobs SET data = ?, codec = 0, preview = NULL, chars = NULL WHERE message_id = ? AND part_index = ?').run(value, 'msg_a', index);
+  }
+  everyRead('msg_a');
+  // A copy keeps each value as it is stored.
+  journal.db.query("UPDATE part_blobs SET data = ?, codec = 1, preview = ?, chars = ? WHERE message_id = 'msg_a' AND part_index = 0")
+    .run(Bun.zstdCompressSync(Buffer.from(screenshot(0))), screenshot(0).slice(0, TOOL_OUTPUT_PREVIEW_CHARS), screenshot(0).length);
+  journal.copyMessage('msg_a', { id: 'msg_b', threadId: 'thr_a', turnId: 'trn_b', state: 'complete' });
+  expect((codecs() as { messageId: string; codec: number }[]).filter(row => row.messageId === 'msg_b').map(row => row.codec)).toEqual([1, 0, 0]);
+  everyRead('msg_b');
+});
+
+test('a tool output moves out from 4 KiB, and a page reads it whole up to the inline size', () => {
+  const small = toolPart('x'.repeat(3_000)), medium = toolPart('medium output line\n'.repeat(300)), large = toolPart('large output line\n'.repeat(1_200));
+  journal.putMessage({ id: 'msg_a', threadId: 'thr_a', turnId: 'trn_a', role: 'assistant', parts: [small, medium, large], state: 'complete', createdAt: 1 });
+  expect((codecs() as { partIndex: number; field: string }[]).map(row => [row.partIndex, row.field])).toEqual([[1, 'output'], [2, 'output']]);
+  expect(rowBytes('msg_a')).toBeLessThan(4_000);
+  expect(journal.getMessage('msg_a')?.parts).toEqual([small, medium, large]);
+  // Under `TOOL_OUTPUT_INLINE_CHARS` the page carries the output as an inline one would be; past it, the preview.
+  const page = journal.listMessagePage('thr_a', { limit: 10, toolPreviews: true }).messages[0]!;
+  expect(page.parts).toEqual([small, medium, { ...large, output: large.output!.slice(0, TOOL_OUTPUT_PREVIEW_CHARS), outputDeferred: true }]);
+  expect(previewToolOutputs([page])).toEqual(previewToolOutputs([{ ...page, parts: [small, medium, large] }]));
+});
+
+test('a schema 36 journal reads the same before and after the background passes, which compress and move its values', async () => {
+  journal.close();
+  const file = join(dir, 'old.db');
+  const old = schema36Journal(file);
+  const big = read(0), medium = toolPart('medium output line\n'.repeat(300)), large = toolPart('large output line\n'.repeat(1_200));
+  // The values of 32 KiB and more in part_blobs as text, smaller outputs inline.
+  old.query("INSERT INTO part_blobs (message_id, part_index, field, thread_id, data, digest) VALUES ('old_a', 0, 'output', 'thr_a', ?, ?)")
+    .run(big.output, Bun.hash(big.output!).toString(36));
+  const insert = old.query("INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES (?, 'thr_a', 'trn_a', 'assistant', ?, 'complete', 1)");
+  insert.run('old_a', JSON.stringify([{ ...big, output: '', $blob: ['output'] }, { type: 'text', text: 'done' }]));
+  insert.run('old_b', JSON.stringify([medium, { type: 'text', text: 'between' }, large]));
+  old.close();
+
+  journal = new Journal(file);
+  expect(journal.schema).toEqual({ from: 36, to: 37 });
+  const before = journal.listMessages('thr_a');
+  const pageBefore = journal.listMessagePage('thr_a', { limit: 10, toolPreviews: true }).messages;
+  const proofBefore = previewDigests.get(pageBefore[0]!.parts[0]!);
+  expect(before.map(message => message.parts)).toEqual([[big, { type: 'text', text: 'done' }], [medium, { type: 'text', text: 'between' }, large]]);
+  expect(codecs()).toEqual([{ messageId: 'old_a', partIndex: 0, field: 'output', codec: 0, type: 'text', preview: 0, chars: null }]);
+
+  await compactAll(journal);
+  expect((codecs() as { messageId: string; partIndex: number; codec: number }[]).map(row => [row.messageId, row.partIndex, row.codec]))
+    .toEqual([['old_a', 0, 1], ['old_b', 0, 1], ['old_b', 2, 1]]);
+  expect(rowBytes('old_b')).toBeLessThan(2_000);
+  expect(journal.listMessages('thr_a')).toEqual(before);
+  const pageAfter = journal.listMessagePage('thr_a', { limit: 10, toolPreviews: true }).messages;
+  expect(previewToolOutputs(pageAfter)).toEqual(previewToolOutputs(pageBefore));
+  // The digest of the whole output is unchanged, and with it a resume proof.
+  expect(previewDigests.get(pageAfter[0]!.parts[0]!)).toBe(proofBefore!);
+  // Finished: a second run finds nothing to do.
+  expect(await compactAll(journal)).toBe(0);
+});
+
+test('a message written while its values were compressed keeps that write, and the next pass moves the new values', async () => {
+  const insert = journal.db.query("INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES ('msg_a', 'thr_a', 'trn_a', 'assistant', ?, 'complete', 1)");
+  const first = toolPart('first output line\n'.repeat(400)), second = toolPart('second output line\n'.repeat(400));
+  insert.run(JSON.stringify([first]));
+  const pass = moveInlineOutputs(journal.db, 0, 1024 * 1024, () => false);
+  // The pass awaits the thread pool; a core of the previous version rewrites the row meanwhile.
+  journal.db.query("UPDATE messages SET parts = ? WHERE id = 'msg_a'").run(JSON.stringify([second]));
+  expect(await pass).toBe(0);
+  expect(journal.getMessage('msg_a')?.parts).toEqual([second]);
+  expect(codecs()).toEqual([]);
+  expect(await moveInlineOutputs(journal.db, 0, 1024 * 1024, () => false)).toBe(journal.messageRowid('thr_a', 'msg_a')!);
+  expect(journal.getMessage('msg_a')?.parts).toEqual([second]);
+  expect(codecs()).toHaveLength(1);
+});
+
+test('a journal closed while its values were compressed ends the pass without touching it', async () => {
+  journal.db.query("INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES ('msg_a', 'thr_a', 'trn_a', 'assistant', ?, 'complete', 1)")
+    .run(JSON.stringify([toolPart('closing output line\n'.repeat(400))]));
+  // As the retention ticks pass it: a closed journal counts as an open message.
+  const pass = moveInlineOutputs(journal.db, 0, 1024 * 1024, () => journal.isClosed());
+  journal.close();
+  // The cursor stays before the row, which the next start moves.
+  expect(await pass).toBe(0);
+});
+
+test('a value that starts with a byte order mark keeps it, compressed or recoded', async () => {
+  const output = `﻿${'BOM output line\n'.repeat(400)}`;
+  const stored = () => (journal.getMessage('msg_a')?.parts[0] as { output: string }).output;
+  journal.putMessage({ id: 'msg_a', threadId: 'thr_a', turnId: 'trn_a', role: 'assistant', parts: [toolPart(output)], state: 'complete', createdAt: 1 });
+  expect((codecs() as { codec: number }[]).map(row => row.codec)).toEqual([1]);
+  expect(stored()).toBe(output);
+  // Stored as text, as a value that does not compress is, it reads and is recoded the same.
+  journal.db.query("UPDATE part_blobs SET data = CAST(? AS TEXT), codec = 0, preview = NULL, chars = NULL WHERE message_id = 'msg_a'").run(Buffer.from(output));
+  expect(stored()).toBe(output);
+  expect(await recodePartBlobs(journal.db, 0, 1024 * 1024)).toBeGreaterThan(0);
+  expect((codecs() as { codec: number }[]).map(row => row.codec)).toEqual([1]);
+  expect(stored()).toBe(output);
+});
+
+test('a message deleted while its values were compressed is never written into the copy that got its rowid', async () => {
+  const insert = journal.db.query("INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES (?, ?, 'trn_a', 'assistant', ?, 'complete', 1)");
+  const output = toolPart('shared output line\n'.repeat(400));
+  insert.run('older', 'thr_kept', JSON.stringify([output]));
+  insert.run('newer', 'thr_gone', JSON.stringify([output]));
+  const newer = journal.messageRowid('thr_gone', 'newer')!;
+  // The pass picks `newer` and awaits the thread pool; meanwhile its thread goes and a fork of `older`, same parts, takes its rowid.
+  const pass = moveInlineOutputs(journal.db, journal.messageRowid('thr_kept', 'older')!, 1024 * 1024, () => false);
+  journal.deleteThreads(['thr_gone']);
+  journal.copyMessage('older', { id: 'fork', threadId: 'thr_fork', turnId: 'trn_f', state: 'complete' });
+  expect(journal.messageRowid('thr_fork', 'fork')).toBe(newer);
+  await pass;
+  expect(journal.getMessage('fork')?.parts).toEqual([output]);
+  expect(journal.db.query("SELECT message_id FROM part_blobs WHERE thread_id = 'thr_gone'").all()).toEqual([]);
+});
+
+test('a value UTF-8 cannot hold as it is stays inline, written or moved, and reads back the same', async () => {
+  // An unpaired surrogate: JSON keeps it as an escape, UTF-8 would turn it into U+FFFD.
+  const output = toolPart(`${'x'.repeat(5_000)}\ud800`);
+  journal.putMessage({ id: 'msg_a', threadId: 'thr_a', turnId: 'trn_a', role: 'assistant', parts: [output], state: 'complete', createdAt: 1 });
+  journal.db.query("INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at) VALUES ('old', 'thr_a', 'trn_a', 'assistant', ?, 'complete', 2)")
+    .run(JSON.stringify([output]));
+  await moveInlineOutputs(journal.db, 0, 1024 * 1024, () => false);
+  expect(codecs()).toEqual([]);
+  for (const id of ['msg_a', 'old']) expect(journal.getMessage(id)?.parts).toEqual([output]);
 });

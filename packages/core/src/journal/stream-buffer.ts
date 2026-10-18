@@ -213,7 +213,7 @@ export class StreamBuffer {
     if (open !== undefined) {
       // A provider that sends the same part again changes nothing to write.
       const current = open.message.parts[partIndex];
-      if (current !== undefined && (current === part || JSON.stringify(current) === JSON.stringify(part))) return;
+      if (current !== undefined && samePart(current, part)) return;
       padInPlace(open.message.parts, partIndex);
       open.message.parts[partIndex] = part;
       open.json[partIndex] = undefined;
@@ -266,7 +266,7 @@ export class StreamBuffer {
     const current = stored[partIndex] == null ? undefined : hydratePart(this.db, messageId, partIndex, stored[partIndex]);
     const next = change(current);
     // An unchanged part leaves the row and its blobs as they are.
-    if (current !== undefined && JSON.stringify(current) === JSON.stringify(next)) return;
+    if (current !== undefined && samePart(current, next)) return;
     padInPlace(stored, partIndex);
     const texts = stored.map(part => JSON.stringify(part ?? null));
     texts[partIndex] = storePart(this.db, { id: messageId, threadId: row.threadId }, partIndex, next);
@@ -404,6 +404,39 @@ export function messageOfError(error: unknown): string {
 
 function padInPlace(parts: MessagePart[], index: number): void {
   while (parts.length <= index) parts.push({ type: 'text', text: '' });
+}
+
+/** The string fields that carry a part's bulk: a tool's output and input, a file's or an image's data. */
+const LARGE_FIELDS = ['output', 'inputText', 'data', 'text'] as const;
+/** Past this many characters, the large fields are compared on their own and left out of the rest's JSON. */
+const LARGE_CHARS = 4 * 1024;
+
+/**
+ * Whether two parts would store the same JSON. Stringifying both on every
+ * update of an open message cost about 3 ms per 1 MiB part; the type, status
+ * and lengths of the large fields tell most changes apart for nothing, the
+ * large strings are compared directly, and only the small rest is stringified.
+ */
+export function samePart(left: MessagePart, right: MessagePart): boolean {
+  if (left === right) return true;
+  const a = left as unknown as Record<string, unknown>, b = right as unknown as Record<string, unknown>;
+  if (a.type !== b.type || a.status !== b.status) return false;
+  let large = false;
+  for (const field of LARGE_FIELDS) {
+    const x = a[field], y = b[field];
+    if (typeof x !== 'string' || typeof y !== 'string') continue;
+    if (x.length !== y.length) return false;
+    if (x.length >= LARGE_CHARS) large = true;
+  }
+  if (!large) return JSON.stringify(left) === JSON.stringify(right);
+  const rest = (value: Record<string, unknown>) => {
+    const copy: Record<string, unknown> = { ...value };
+    for (const field of LARGE_FIELDS) if (typeof copy[field] === 'string' && (copy[field] as string).length >= LARGE_CHARS) copy[field] = true;
+    return JSON.stringify(copy);
+  };
+  if (rest(a) !== rest(b)) return false;
+  // Equal lengths, both large: a direct comparison stops at the first difference.
+  return LARGE_FIELDS.every(field => typeof a[field] !== 'string' || (a[field] as string).length < LARGE_CHARS || a[field] === b[field]);
 }
 
 /** A delta appends to whatever kind of text part sits there: text or thinking. */
