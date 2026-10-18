@@ -528,6 +528,22 @@ test('a failed step stops what never launched and is told to the parent at once,
   expect((await settled(h, threadId, run.id)).status).toBe('done');
 });
 
+test('a step that fails before it has any execution is told to the parent while another step runs', async () => {
+  const { held, prompts } = scripted(ctx => !ctx.thread.parentThreadId ? 'noted' : taskOf(ctx.prompt) === 'list' ? '```json\n{"items": "not a list"}\n```' : { hold: true });
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Open', steps: [
+    { id: 'long', profile: 'fast', task: 'long' },
+    { id: 'list', profile: 'fast', task: 'list', output: { items: 'any' } },
+    { id: 'each', profile: 'fast', forEach: 'list.items', task: 'do {{item}}' },
+  ] }, requestId: 'open' });
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[2]!.status === 'failed');
+  expect(h.core.workflows.get(threadId, run.id).status).toBe('running');
+  // Before, a step with no execution was never told: the parent waited for "long" to end.
+  await waitFor(() => prompts.some(p => p.threadId === threadId && p.prompt.startsWith('Boite workflow step failed') && p.prompt.includes('"step":"each","status":"failed"')));
+  for (const finish of [...held.values()]) finish('ok');
+  expect((await settled(h, threadId, run.id)).status).toBe('failed');
+});
+
 test('retrying the failed step also reopens a parallel step that stopped before it launched', async () => {
   const { held } = scripted(ctx => !ctx.thread.parentThreadId ? 'noted' : taskOf(ctx.prompt) === 'x' ? '```json\n{"items": [1, 2, 3]}\n```' : { hold: true });
   const { h, owner, threadId } = await setup();

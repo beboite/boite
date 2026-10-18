@@ -697,7 +697,8 @@ export class Workflows {
       const session = this.core.workforce.session(root.id);
       this.core.workforce.records.transaction(() => {
         this.core.delegation.reserveTurn(root.id, 'delegation');
-        this.core.workforce.resident.enqueue(session.agentId, prompt, session.scope);
+        // The team's current episode: a new one waits until every subagent of the root is idle.
+        this.core.workforce.resident.enqueue(session.agentId, prompt, session.scope, this.core.journal.getSetting(`delegation-episode:${root.id}`) as string | undefined);
       });
       this.core.workforce.changed();
     } else this.core.threads.startTurn(root.id, prompt, [], undefined, 'delegation', undefined, undefined, display);
