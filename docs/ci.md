@@ -102,8 +102,17 @@ a running publication finishes, while newer pending work can supersede older
 pending work.
 
 Artifact uploads retry once, replacing a name reserved by the failed attempt.
-A second failure fails the job. Tests and builds are not retried, with one
-exception. `scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
+A second failure fails the job. Tests and builds are not retried, with two
+exceptions. Tests listed in `scripts/ci/quarantine.json` with their reason run
+once more, alone and in a fresh process, when they fail in the core suite or
+an E2E shard (`scripts/ci/flaky.ts`); the job fails if they fail again, and the
+retry leaves a warning on the run. The retry only happens when every failure
+of that file (core) or shard (E2E) is quarantined and bun named each one: a
+crash, a timed-out file or any other failing test fails at once. The list
+started on 2026-10-18 from the 80 runs that passed on rerun since 2026-10-16:
+tests that failed at least three first attempts. A fixed test leaves the list;
+`flaky.test.ts` fails when an entry no longer exists in its file.
+`scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
 three attempts at most, when hdiutil reports `Resource busy`. That runner
 fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 37213994348 and cost a rerun. Before retrying, it detaches what the failed
@@ -182,9 +191,9 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 495,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,887,500 |
+| UI files, excluding `.br` and `.gz` copies | 4,888,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,503,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,518,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -212,6 +221,18 @@ After #595 (`origin/main` at `e22bb094`) it measures 495,052 entry bytes, 4,884,
 Linux; the three limits rise to 495,500, 4,885,500 and 4,503,500. The
 reviews' own section in the Tasks panel then brings the UI to 4,887,289 bytes,
 the entry chunk unchanged; the UI limit rises to 4,887,500.
+After automatic resumes (#603, `origin/main` at `2627b39b`) it measures
+495,189 entry bytes, 4,887,689 UI bytes and 4,517,291 core JavaScript bytes on Linux; the three limits rise to 495,500, 4,888,000 and 4,518,000.
+
+On 2026-10-18, automatic resumes (PR #603) merged with `origin/main` at
+`e22bb094` measure 492,249 entry bytes, 4,869,493 UI bytes and 4,493,171 core
+JavaScript bytes with `measure()` after fresh `bun run build:ui` and
+`bun run build:core` on Windows, against 492,112, 4,869,093 and 4,479,099
+recorded below for PR #595: `threads/auto-continue.ts` (the plans, their
+journal record, the crash and background triggers and their prompts) adds
+14,072 core bytes, and the banner's resume wording adds 137 entry and 400 UI
+bytes. The entry and core JavaScript limits rise to 492,300 and 4,493,700; the
+other limits stay.
 
 On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
 492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes
