@@ -198,7 +198,7 @@ export function compactionSteps(journal: Journal): ((now: number) => Promise<Ste
   // passes never make this thread copy its frames (`WalCheckpoints.behind`).
   const unlessBehind = (step: (now: number) => Promise<Step>) => (now: number): Promise<Step> =>
     journal.checkpoints?.behind === true ? Promise.resolve('more') : step(now);
-  return [
+  const steps: ((now: number) => Promise<Step>)[] = [
     // Values of 32 KiB and more of rows written before `part_blobs`, one row per tick.
     () => rowPass(journal, ONE_TIME_PASSES[0], after => moveInlineValues(journal.db, after, isOpen)),
     // Tool outputs of 4 to 32 KiB of rows written before schema 36.
@@ -215,7 +215,8 @@ export function compactionSteps(journal: Journal): ((now: number) => Promise<Ste
     () => intern.run(size => rowPass(journal, ONE_TIME_PASSES[3], after => internOldCommandLines(journal.db, after, size))),
     // Free pages back to the disk, once the journal is in incremental auto-vacuum.
     () => vacuum.run(pages => freePages(journal, pages)),
-  ].map(unlessBehind);
+  ];
+  return steps.map(unlessBehind);
 }
 
 /**
