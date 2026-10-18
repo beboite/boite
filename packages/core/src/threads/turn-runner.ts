@@ -185,6 +185,8 @@ export class TurnRunner {
     if (result.status !== 'done' && !keepalive) this.core.coordination.pause(threadId);
     // A spent subscription window: the thread may resume by itself once it resets (`threads/limit-resume.ts`).
     if (result.status === 'error' && result.refusal?.kind === 'usage-limit' && !next.archived && !keepalive) this.threads.limitResumes.turnFailed(next, finished, result.refusal.resetsAt);
+    // Any other stop before the answer resumes by itself, twice in a row at most (`threads/auto-continue.ts`).
+    this.threads.autoContinue.turnFinished(next, finished, result);
     if (result.status === 'done' && sameSession && !queued.execution?.operation) this.threads.titles.autoRefine(threadId);
     // Compaction plans from the conversation's own turns; a keepalive is not one.
     if (sameSession && !keepalive) this.threads.autoCompact.turnFinished(next, finished);
