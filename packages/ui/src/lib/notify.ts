@@ -10,17 +10,21 @@
  * or the Web Notifications API on a phone, and nothing at all where neither
  * answers. A click on either opens the thread the toast was about. The switch
  * lives in `localStorage` under `boite.notifications`, on by default, per
- * machine like the theme: it is a client's choice, so the core never hears
- * of it.
+ * machine like the theme: it is a client's choice. Under it, each kind
+ * (approvals, questions, finished, errors) can be turned off; the kinds off
+ * live under `boite.notifications.muted`, so a kind added later starts on.
+ * A device with Web Push tells its core the same choice (`pushKinds`), since
+ * the core is the one that sends those.
  */
 
-import { notifiesOnFinish, threadBusy, type NotificationLabel, type ThreadSummary, type Turn } from '@boite/contracts';
+import { NOTIFICATION_KINDS, notifiesOnFinish, threadBusy, type NotificationKind, type NotificationLabel, type ThreadSummary, type Turn } from '@boite/contracts';
 import { PUSH_ENABLED_KEY } from './pwa';
 import { strings } from './strings';
 
 export const NOTIFICATIONS_STORAGE_KEY = 'boite.notifications';
+export const NOTIFICATION_MUTED_STORAGE_KEY = 'boite.notifications.muted';
 
-export type NotifyKind = 'done' | 'error' | 'needs-you';
+export type NotifyKind = NotificationKind;
 
 export interface NotifyDecision {
   kind: NotifyKind;
@@ -29,12 +33,14 @@ export interface NotifyDecision {
   /** `document.hasFocus()` at the time of the event. */
   focused: boolean;
   enabled: boolean;
+  /** The kinds this device keeps. */
+  kinds: readonly NotifyKind[];
 }
 
 /** Requests for input notify wherever the user is; routine news only when looking elsewhere. */
 export function shouldNotify(input: NotifyDecision): boolean {
-  if (!input.enabled) return false;
-  if (input.kind === 'needs-you') return true;
+  if (!input.enabled || !input.kinds.includes(input.kind)) return false;
+  if (input.kind === 'approvals' || input.kind === 'questions') return true;
   if (!input.focused) return true;
   return input.openThreadId !== input.threadId;
 }
@@ -69,6 +75,36 @@ export function writeNotifications(enabled: boolean): void {
   }
 }
 
+/** The kinds this device keeps, every one unless turned off. */
+export function readNotificationKinds(): NotifyKind[] {
+  try {
+    const muted: unknown = JSON.parse(window.localStorage.getItem(NOTIFICATION_MUTED_STORAGE_KEY) ?? '[]');
+    return NOTIFICATION_KINDS.filter((kind) => !Array.isArray(muted) || !muted.includes(kind));
+  } catch {
+    return [...NOTIFICATION_KINDS];
+  }
+}
+
+export function writeNotificationKinds(kinds: readonly NotifyKind[]): void {
+  try {
+    const muted = NOTIFICATION_KINDS.filter((kind) => !kinds.includes(kind));
+    if (muted.length === 0) window.localStorage.removeItem(NOTIFICATION_MUTED_STORAGE_KEY);
+    else window.localStorage.setItem(NOTIFICATION_MUTED_STORAGE_KEY, JSON.stringify(muted));
+  } catch {
+    /* a browser that refuses storage still runs for this session */
+  }
+}
+
+/** What this device's push subscription receives: its kinds, none while the switch is off. */
+export function pushKinds(): NotifyKind[] {
+  return readNotifications() ? readNotificationKinds() : [];
+}
+
+/** Whether two lists hold the same kinds, whatever their order. */
+export function sameKinds(a: readonly NotifyKind[], b: readonly NotifyKind[]): boolean {
+  return a.length === b.length && a.every((kind) => b.includes(kind));
+}
+
 export interface Toast {
   title: string;
   body: string;
@@ -86,7 +122,7 @@ export interface Toast {
  */
 export function toastFor(kind: NotifyKind, threadId: string, title: string, detail: string | null): Toast {
   const body = detail
-    || (kind === 'done' ? strings.notify.done : kind === 'error' ? strings.notify.failed : strings.notify.needsYou);
+    || (kind === 'finished' ? strings.notify.done : kind === 'errors' ? strings.notify.failed : strings.notify.needsYou);
   return { title, body, threadId };
 }
 

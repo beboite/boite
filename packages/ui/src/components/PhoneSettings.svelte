@@ -2,12 +2,14 @@
   import FirewallNotice from './FirewallNotice.svelte';
   import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
+  import NotificationKinds from './NotificationKinds.svelte';
   import LanReach from './LanReach.svelte';
   import TailscaleAccess from './TailscaleAccess.svelte';
   import { untrack } from 'svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { installApp, installed, PUSH_ENABLED_KEY, worker } from '../lib/pwa';
+  import { pushKinds, sameKinds } from '../lib/notify';
   import { parseGroupRelayUrl } from '@boite/contracts';
   import { servesThisPage } from '../lib/endpoint';
   import { appPage } from '../lib/app-origin';
@@ -45,6 +47,8 @@
       key = result.publicKey;
       subscribed = result.subscribed;
       if (!subscribed) localStorage.removeItem(PUSH_ENABLED_KEY);
+      // A choice made while this core was out of reach, or a subscription older than kinds: the device's choice wins.
+      else if (!sameKinds(result.kinds ?? [], pushKinds())) void store.client?.call('push.kinds', { kinds: pushKinds() }).catch(() => undefined);
     }).catch(reason => { if (live) error = String(reason); });
     return () => { live = false; };
   });
@@ -67,7 +71,7 @@
       if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
       const json = subscription.toJSON();
       if (!json.endpoint || !json.keys?.p256dh || !json.keys.auth) throw new Error(strings.phone.subscriptionFailed);
-      await store.client.call('push.subscribe', { endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth } });
+      await store.client.call('push.subscribe', { endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth }, kinds: pushKinds() });
       subscribed = true;
       localStorage.setItem(PUSH_ENABLED_KEY, 'on');
       message = strings.phone.enabled;
@@ -140,6 +144,8 @@
     </details></div>
   {/if}
   {#if !inShell}
+    <!-- The phone's screen: the desktop has these rows under General's switch. -->
+    {#if !showServerSettings}<div class="block" data-testid="phone-notification-kinds"><NotificationKinds {store} mobile /></div>{/if}
     <div class="block">
       {#if standalone}<p class="hint">{strings.phone.installed}</p>
       {:else}

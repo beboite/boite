@@ -1,14 +1,20 @@
-import type { ThreadId } from '@boite/contracts';
+import { parseGroupRelayUrl, type ThreadId } from '@boite/contracts';
+import { appPage } from '../app-origin';
+import { servesThisPage } from '../endpoint';
 import {
   pushCovers,
+  pushKinds,
+  readNotificationKinds,
   readNotifications,
   requestNotificationPermission,
   sendNotification,
   shouldNotify,
   toastFor,
+  writeNotificationKinds,
   writeNotifications,
   type NotifyKind
 } from '../notify';
+import { PUSH_ENABLED_KEY } from '../pwa';
 import { experimentOn } from '../experiments.svelte';
 import type { DropKind } from '../native-drop';
 import { clampSidebar, SIDEBAR_DEFAULT, writeLayout } from '../prefs';
@@ -22,6 +28,8 @@ export class Layout {
   projectPickerOpen = $state(false);
   /** Toasts for threads the user is not looking at, per machine. */
   notifications = $state(readNotifications());
+  /** The kinds of toast and push this device keeps, under that switch. */
+  notificationKinds = $state(readNotificationKinds());
   /** The command palette, `Ctrl+K`. */
   paletteOpen = $state(false);
   /** Set by the palette's Rename: the chat header opens its title field and clears it. */
@@ -140,7 +148,8 @@ export class Layout {
       threadId,
       openThreadId: s.visible ? s.openThread?.id ?? null : null,
       focused: typeof document !== 'undefined' && document.hasFocus() && document.visibilityState === 'visible',
-      enabled: readNotifications()
+      enabled: readNotifications(),
+      kinds: readNotificationKinds()
     });
     if (!go) return;
     const title = s.threads.find((t) => t.id === threadId)?.title ?? strings.app.name;
@@ -158,8 +167,36 @@ export class Layout {
   async setNotifications(enabled: boolean): Promise<void> {
     this.notifications = enabled;
     writeNotifications(enabled);
+    this.syncPushKinds();
     if (!enabled) return;
     const granted = await requestNotificationPermission();
     if (!granted) this.ctx.store.error = strings.settings.notificationsDenied;
+  }
+
+  /** One kind's switch, under the main one. */
+  setNotificationKind(kind: NotifyKind, on: boolean): void {
+    const kinds = readNotificationKinds().filter((k) => k !== kind);
+    writeNotificationKinds(on ? [...kinds, kind] : kinds);
+    this.notificationKinds = readNotificationKinds();
+    this.syncPushKinds();
+  }
+
+  /**
+   * The core sends this device's pushes, so it hears the device's choice. Only
+   * the core that holds the subscription: the one serving this page, or the
+   * machine the phone app shows. The phone's settings screen checks it again
+   * when it reads `push.status`.
+   */
+  private syncPushKinds(): void {
+    const s = this.ctx.store;
+    try {
+      if (localStorage.getItem(PUSH_ENABLED_KEY) !== 'on') return;
+    } catch {
+      return;
+    }
+    const relay = s.endpointUrl === null ? null : parseGroupRelayUrl(s.endpointUrl);
+    if (relay !== null && servesThisPage(relay.member)) return;
+    if (!appPage() && s.endpointUrl && !servesThisPage(s.endpointUrl)) return;
+    void s.client?.call('push.kinds', { kinds: pushKinds() }).catch(() => undefined);
   }
 }

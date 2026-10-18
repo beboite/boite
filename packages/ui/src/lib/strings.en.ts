@@ -2392,6 +2392,8 @@ export const strings = {
     notifications: 'Notify me when a thread finishes or asks something',
     notificationsHint: 'Only for a thread you are not looking at. This machine only.',
     notificationsDenied: 'Notifications are blocked for Boite on this system; allow them in its settings.',
+    notificationKinds: { approvals: 'Approvals', questions: 'Questions', finished: 'Finished', errors: 'Errors' },
+    notificationKindsHint: 'Approvals: permissions, plans and changes to apply. Questions: what an agent asks you. This device only.',
     focusGuard: 'Keep agent windows out of the foreground',
     muteAgents: 'Mute agent audio',
     reapOrphans: 'Stop what agents leave running',

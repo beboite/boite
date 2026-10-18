@@ -278,6 +278,7 @@ export class Store {
   set projectPickerOpen(value) { this.#ctx.layout.projectPickerOpen = value; }
   get notifications() { return this.#ctx.layout.notifications; }
   set notifications(value) { this.#ctx.layout.notifications = value; }
+  get notificationKinds() { return this.#ctx.layout.notificationKinds; }
   get paletteOpen() { return this.#ctx.layout.paletteOpen; }
   set paletteOpen(value) { this.#ctx.layout.paletteOpen = value; }
   get renameRequested() { return this.#ctx.layout.renameRequested; }
@@ -315,6 +316,7 @@ export class Store {
   showAgents(...args: Parameters<Layout['showAgents']>) { return this.#ctx.layout.showAgents(...args); }
   togglePanel(...args: Parameters<Layout['togglePanel']>) { return this.#ctx.layout.togglePanel(...args); }
   setNotifications(...args: Parameters<Layout['setNotifications']>) { return this.#ctx.layout.setNotifications(...args); }
+  setNotificationKind(...args: Parameters<Layout['setNotificationKind']>) { return this.#ctx.layout.setNotificationKind(...args); }
 
   // -------------------------------------------------------------------------
   // Core settings, keyboard and telemetry: store/settings.svelte.ts

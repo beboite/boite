@@ -2263,6 +2263,8 @@ export const fr: Translation = {
     notifications: "Me prévenir quand une conversation se termine ou pose une question",
     notificationsHint: 'Seulement pour une conversation que vous ne regardez pas. Cette machine seulement.',
     notificationsDenied: 'Les notifications sont bloquées pour Boite sur ce système ; autorisez-les dans ses réglages.',
+    notificationKinds: { approvals: 'Approbations', questions: 'Questions', finished: 'Terminés', errors: 'Erreurs' },
+    notificationKindsHint: "Approbations : permissions, plans et changements à appliquer. Questions : ce qu'un agent vous demande. Cet appareil seulement.",
     focusGuard: 'Garder les fenêtres des agents en arrière-plan',
     muteAgents: 'Couper le son des agents',
     reapOrphans: 'Arrêter ce que les agents laissent tourner',
