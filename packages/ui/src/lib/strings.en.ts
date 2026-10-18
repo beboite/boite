@@ -2828,6 +2828,14 @@ export const strings = {
     fast: 'Fast'
   },
 
+  /** A part of the app kept in a chunk of its own (`components/Deferred.svelte`), and the phone's navigation (App.svelte). */
+  parts: {
+    loading: 'Loading',
+    failed: 'This part of Boite did not load.',
+    navigationFailed: 'The navigation did not load.',
+    dictationFailed: 'Dictation did not load. Try again'
+  },
+
   common: {
     none: 'none',
     unknown: 'unknown',
@@ -2971,8 +2979,3 @@ export const strings = {
 } as const;
 
 export type Strings = typeof strings;
-
-/** `fill('New thread in {project}', { project: 'boite' })`. */
-export function fill(template: string, values: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] ?? match);
-}

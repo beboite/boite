@@ -126,6 +126,83 @@ test('an empty landing draft during a failed read preserves unread durable text 
   expect(cleared.composerStates.draft?.text ?? '').toBe('');
 });
 
+test('a journal that opens late restores its text, keeps what was typed meanwhile, and raises no storage error', async () => {
+  const slow = () => new DOMException('Draft journal did not open within 3 seconds', 'TimeoutError');
+  vi.mocked(readDraftJournal).mockRejectedValueOnce(slow()).mockRejectedValueOnce(slow())
+    .mockResolvedValue({ updatedAt: 1, inputs: { 't-trace': { text: 'Saved before the restart', attachments: [], queued: [] } }, drafts: {} });
+  const store = await ready('late-journal');
+  store.editComposerText('t-parser', 'Typed while the journal opened');
+  await vi.waitFor(() => expect(store.draftsReadable).toBe(true));
+  expect(store.composerStates['t-trace']?.text).toBe('Saved before the restart');
+  expect(store.composerStates['t-parser']?.text).toBe('Typed while the journal opened');
+  expect(store.error).toBeNull();
+  expect(await store.flushDrafts()).toBe(true);
+  const checkpoint = vi.mocked(writeDraftJournal).mock.lastCall![1] as { inputs: Record<string, { text: string }> };
+  expect(Object.fromEntries(Object.entries(checkpoint.inputs).map(([id, input]) => [id, input.text])))
+    .toEqual({ 't-trace': 'Saved before the restart', 't-parser': 'Typed while the journal opened' });
+});
+
+test.each([
+  { meanwhile: 'nothing', after: null },
+  { meanwhile: 'a refused backup', after: strings.errors.draftStorage },
+  { meanwhile: 'another error', after: strings.errors.revoked },
+])('a late journal answer clears only the notice it raised, after $meanwhile', async ({ meanwhile, after }) => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.stubGlobal('indexedDB', {}); // Without one, every refused backup raises the toast again by itself.
+  let release!: (value: unknown) => void;
+  vi.mocked(readDraftJournal).mockRejectedValueOnce(new DOMException('Draft journal did not open within 3 seconds', 'TimeoutError'))
+    .mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
+  const store = await ready(`late-notice-${meanwhile}`);
+  if (meanwhile === 'another error') store.error = strings.errors.revoked;
+  vi.advanceTimersByTime(10_000);
+  expect(store.error).toBe(meanwhile === 'another error' ? strings.errors.revoked : strings.errors.draftStorage);
+  const write = meanwhile === 'a refused backup' ? vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); }) : null;
+  try {
+    store.editComposerText('t-trace', 'Typed during the wait');
+    release(null);
+    await vi.waitFor(() => expect(store.draftsReadable).toBe(true));
+    expect(store.error).toBe(after);
+  } finally { write?.mockRestore(); }
+});
+
+test('a journal that never opens is reported once its retries run out', async () => {
+  vi.mocked(readDraftJournal).mockRejectedValue(new DOMException('Draft journal did not open within 3 seconds', 'TimeoutError'));
+  const store = await ready('silent-journal');
+  await vi.waitFor(() => expect(store.error).toBe(strings.errors.draftStorage));
+  expect(store.draftsReadable).toBe(false);
+  // The start's read, then twenty more while the open carries on.
+  expect(vi.mocked(readDraftJournal)).toHaveBeenCalledTimes(1 + 20);
+});
+
+test('a journal that opens late gives back the bytes its backup kept only as IDs, and edits made meanwhile win', async () => {
+  vi.stubGlobal('indexedDB', {}); // The recorder acknowledges the strict durable write, so the backup drops the bytes.
+  const first = await ready('late-assets');
+  const file = (name: string, data: string) => ({ kind: 'file' as const, mimeType: 'text/plain', name, data });
+  first.composerStates['t-trace'] = { text: 'With files', attachments: [file('kept.txt', 'a2VwdA==')],
+    queued: [{ text: 'Queued with a file', attachments: [file('queued.txt', 'cXVldWVk')] }], sending: false, paused: true };
+  flushSync();
+  expect(await first.flushDrafts()).toBe(true);
+  const durable = vi.mocked(writeDraftJournal).mock.lastCall![1];
+  // The backup written after the save holds the files as IDs only: the journal has their bytes.
+  first.editComposerText('t-trace', 'Edited after the save');
+  let release!: (value: unknown) => void;
+  vi.mocked(readDraftJournal).mockRejectedValueOnce(new DOMException('Draft journal did not open within 3 seconds', 'TimeoutError'))
+    .mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
+  const late = await ready('late-assets');
+  expect(late.composerStates['t-trace']?.attachments[0]).toMatchObject({ pendingDraftAsset: expect.any(String) });
+  late.editComposerText('t-trace', 'Typed during the wait');
+  late.composerStates['t-trace']!.queued[0]!.attachments = []; flushSync();
+  release(durable);
+  await vi.waitFor(() => expect(late.draftsReadable).toBe(true));
+  expect(late.composerStates['t-trace']).toMatchObject({ text: 'Typed during the wait', attachments: [{ name: 'kept.txt', data: 'a2VwdA==' }], queued: [{ attachments: [] }] });
+  expect(late.composerStates['t-trace']?.attachments[0]).not.toHaveProperty('pendingDraftAsset');
+  expect(await late.flushDrafts()).toBe(true);
+  const checkpoint = vi.mocked(writeDraftJournal).mock.lastCall![1] as { inputs: Record<string, { attachments: { data?: string }[] }> };
+  expect(checkpoint.inputs['t-trace']?.attachments[0]?.data).toBe('a2VwdA==');
+  vi.mocked(readDraftJournal).mockResolvedValue(checkpoint);
+  expect((await ready('late-assets')).composerStates['t-trace']).toMatchObject({ text: 'Typed during the wait', attachments: [{ data: 'a2VwdA==' }], queued: [{ attachments: [] }] });
+});
+
 test.each([
   { typed: null, parked: false },
   { typed: 'New text while reconnecting', parked: false },

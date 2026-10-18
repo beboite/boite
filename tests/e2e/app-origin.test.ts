@@ -118,7 +118,7 @@ test('the app on an address no machine serves scans one machine\'s code and reac
 
   const added = await b.call('group.addDevice', {});
   const video = join(scratch, 'code.y4m');
-  writeFileSync(video, codeVideo(added.url.split('#')[0]!));
+  writeFileSync(video, await codeVideo(added.url.split('#')[0]!));
   const scanner = await phone(video, [first, second]);
   // No machine is the page's: the app opens on its way in, and nothing else.
   await scanner.waitFor(`document.querySelector('${id('mobile-connect')} ${id('machine-scan')}') && document.querySelector('${id('machine-paste-open')}')`, 30_000);

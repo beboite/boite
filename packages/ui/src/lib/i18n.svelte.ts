@@ -19,16 +19,22 @@
  * import of its own. Components read it through `./strings`, which re-exports
  * it; the catalogues are imported by this file and by nobody else.
  *
- * English is bundled with this file. Every other language is a chunk of its
- * own, so an English screen never downloads French: index.html preloads the
- * one the device speaks (`localePreload` in vite.config.ts), the boot awaits it
- * before the first frame, and a switch in the settings swaps once it landed.
+ * Every language, English included, is a chunk of its own, and a device loads
+ * only the one it speaks: index.html preloads it (`localePreload` in
+ * vite.config.ts), the boot awaits it before the first frame, and a switch in
+ * the settings swaps once the new one landed. A translation's chunk is whole:
+ * the build writes it over English (`catalogue-plugin.ts`), so a sentence it
+ * lacks answers in English without the English chunk.
  */
 
-import { strings as en, fill, type Strings } from './strings.en';
+import type { Strings } from './strings.en';
 
-export { fill };
 export type { Strings };
+
+/** `fill('New thread in {project}', { project: 'boite' })`. */
+export function fill(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] ?? match);
+}
 
 /**
  * The catalogue as a translation sees it: every sentence a plain `string`
@@ -67,17 +73,21 @@ export const DEFAULT_LOCALE: Locale = 'en';
 
 export const LOCALES: readonly Locale[] = ['en', 'fr'];
 
-const LOADERS: Record<Exclude<Locale, 'en'>, () => Promise<Translation>> = {
+const LOADERS: Record<Locale, () => Promise<Translation>> = {
+  en: () => import('./strings.en').then((module) => module.strings),
   fr: () => import('./strings.fr').then((module) => module.fr)
 };
 
-/** The catalogues this page holds so far. A lookup in one not here yet answers English. */
-let catalogues = $state.raw<Partial<Record<Locale, Translation>>>({ en });
+/**
+ * The catalogues this page holds so far. A lookup in one not here yet answers
+ * from English, else from whichever landed: the boot holds at least one.
+ */
+let catalogues = $state.raw<Partial<Record<Locale, Translation>>>({});
 const loading = new Map<Locale, Promise<void>>();
 
 /** Fetches a language once. A failed fetch (offline, cold cache) is tried again on the next ask. */
 export function loadLocale(locale: Locale): Promise<void> {
-  if (catalogues[locale] || locale === 'en') return Promise.resolve();
+  if (catalogues[locale]) return Promise.resolve();
   let pending = loading.get(locale);
   if (!pending) {
     pending = LOADERS[locale]()
@@ -218,7 +228,8 @@ function stamp(): void {
 /**
  * Stores the choice and swaps every sentence on screen in one commit, once the
  * language has loaded: until then the screen stays in the one it speaks. A
- * language that cannot load is still stored, and shows in English meanwhile.
+ * language that cannot load is still stored, and shows in English meanwhile
+ * (or in the one the screen holds, when English cannot load either).
  */
 let latest: LocaleSetting | null = null;
 export function setLocaleSetting(setting: LocaleSetting): Promise<void> {
@@ -235,21 +246,31 @@ export function setLocaleSetting(setting: LocaleSetting): Promise<void> {
     apply();
     return Promise.resolve();
   }
-  return loadLocale(target).then(apply, apply);
+  return loadLocale(target).then(apply, () => loadLocale(DEFAULT_LOCALE).then(apply, apply));
 }
 
-/** Applies the stored language on boot and loads it. `main.ts` awaits it before the first frame. */
+/**
+ * Applies the stored language on boot and loads it, English when it cannot.
+ * `main.ts` awaits it before the first frame, and draws nothing of the app when
+ * it rejects: with no catalogue at all, every sentence would be missing
+ * (`lib/boot-failure.ts` says so and retries instead).
+ */
 export function startLocale(): Promise<void> {
   state.setting = readLocaleSetting();
   stamp();
-  return loadLocale(activeLocale()).catch(() => undefined);
+  return loadLocale(activeLocale()).catch(() => loadLocale(DEFAULT_LOCALE));
+}
+
+/** What answers a key the active catalogue has not got: English, else the catalogue this page holds. */
+function fallback(): Translation | undefined {
+  return catalogues[DEFAULT_LOCALE] ?? Object.values(catalogues)[0];
 }
 
 /**
  * The lookup. `path` is the keys walked so far, so a node is resolved against
- * the active catalogue on every read and falls back to English key by key: a
- * translation missing one sentence shows that sentence in English rather than
- * a dotted path, and never loses the ones around it.
+ * the active catalogue on every read and falls back key by key: a language
+ * that has not landed yet shows the sentence in English (`fallback`) rather
+ * than a dotted path, and never loses the ones around it.
  */
 function resolve(root: unknown, path: readonly string[]): unknown {
   let node: unknown = root;
@@ -274,7 +295,7 @@ function node(path: readonly string[]): object {
   const read = (key: string): unknown => {
     const next = [...path, key];
     const value = resolve(catalogues[activeLocale()], next);
-    return value === undefined ? resolve(en, next) : value;
+    return value === undefined ? resolve(fallback(), next) : value;
   };
 
   const made = new Proxy(Object.create(null) as object, {
@@ -291,9 +312,9 @@ function node(path: readonly string[]): object {
     },
     ownKeys() {
       const active = resolve(catalogues[activeLocale()], path);
-      const fallback = resolve(en, path);
+      const backing = resolve(fallback(), path);
       const keys = new Set<string>();
-      for (const source of [fallback, active]) {
+      for (const source of [backing, active]) {
         if (source !== null && typeof source === 'object') for (const key of Object.keys(source)) keys.add(key);
       }
       return [...keys];

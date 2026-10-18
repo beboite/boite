@@ -13,7 +13,7 @@
   import { galleryFrom, media, viewerHost, type Gallery, type MediaItem } from '../lib/media-gallery';
   import { videoPlayable } from '../lib/video-support';
   import { mediaKey, rememberedSize, rememberSize, type MediaSize } from '../lib/media-size';
-  import ImageViewer from './ImageViewer.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
 
   let { file, store, threadId, messageId, partIndex, path, line, onclose }: {
     file?: Extract<MessagePart, { type: 'file' | 'artifact' }>; store?: Store; threadId?: string; messageId?: string;
@@ -317,7 +317,7 @@
   </div>
   {#if error}<div class="error" role="alert"><p>{error}</p><button type="button" class="ghost small" onclick={load} disabled={loading}><span class="ui-label">{strings.common.retry}</span></button></div>{/if}
 </section>
-{#if viewing}<ImageViewer items={viewing.items} index={viewing.index} onclose={() => viewing = null} />{/if}
+{#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer} floating>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={() => viewing = null} />{/snippet}</Deferred>{/if}
 
 <style>
   .chat-file { margin-block: 10px; max-width: 100%; min-width: 0; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); overflow: hidden; display: flex; flex-direction: column; }

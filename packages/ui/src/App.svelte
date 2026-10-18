@@ -6,7 +6,6 @@
   import { watchAgentBrowser } from './lib/agent-browser-watch';
   import { watchDevices } from './lib/device-watch';
   import { browserProfiles } from './lib/browser-profiles.svelte';
-  import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
   import ChatView from './components/ChatView.svelte';
@@ -26,8 +25,10 @@
   import { installDropNavigationGuard } from './lib/drop-navigation';
   import { QUIT_HOLD_MS } from './lib/quit-hold';
   import { closingStores, confirmedQuitHold, desktopQuit, installQuitGuard } from './lib/shell-quit';
-  import { notificationWords, onNotificationOpen, storeNotificationWords } from './lib/notify';
+  import { notificationWords, onNotificationOpen, storeNotificationWords, storeWorkerLocale } from './lib/notify';
   import { strings } from './lib/strings';
+  import { activeLocale } from './lib/i18n.svelte';
+  import { retryOrReload } from './lib/retry-load';
   import { experimentOn } from './lib/experiments.svelte';
   import { installWhipEscape } from './lib/whip.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
@@ -36,10 +37,11 @@
   import type { Store } from './lib/store.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { prefetchAllowed, prefetchNames, warmPages, whenIdle } from './lib/prefetch';
+  import { mobileNavigation, parts, prefetchParts } from './lib/deferred-parts';
+  import { voice } from './lib/voice-prefs.svelte';
   import { startTheme } from './lib/theme';
   import { appName, appUpdater } from './lib/app-update.svelte';
   import { reportDesktopUpdates } from './lib/desktop-update.svelte';
-  import MobileNavigation from './components/MobileNavigation.svelte';
   import MobileConnect from './components/MobileConnect.svelte';
   import { attentionCount, syncAppBadge } from './lib/badge';
   import { startViewport } from './lib/viewport';
@@ -55,9 +57,22 @@
   import ThreadPreparation from './components/ThreadPreparation.svelte';
 
   let store = $derived(workspace.active);
-  // The machine the window opened on may still give way to one that answers: until then nothing of it is drawn.
-  const booted = $derived(store.booted && !(workspace.waiting && store === workspace.primary));
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  // The phone's navigation (`lib/deferred-parts.ts`). A failed fetch (offline,
+  // cold cache) lets the app draw with a bar that says so and retries, by hand,
+  // when the core answers again or when the browser is back online.
+  function loadMobileNavigation(): void {
+    if (!inShell) void mobileNavigation.load().catch(() => undefined);
+  }
+  loadMobileNavigation();
+  $effect(() => {
+    if (store.connection === 'ready') untrack(loadMobileNavigation);
+  });
+  // The microphone sits in the composer's first frame: its chunk starts with the app too.
+  if (voice.current.enabled) void parts.Dictation.load().catch(() => undefined);
+  // The machine the window opened on may still give way to one that answers: until then nothing of it is drawn.
+  const booted = $derived(store.booted && !(workspace.waiting && store === workspace.primary)
+    && (inShell || mobileNavigation.current !== undefined || mobileNavigation.failed));
   // A page the agent opens brings its browser forward in the panel, on every client (lib/agent-browser-watch.ts).
   $effect(() => {
     const threadId = store.openThread?.id;
@@ -92,7 +107,8 @@
     ImportDialog: () => import('./components/ImportDialog.svelte'),
     ConnectFlow: () => import('./components/ConnectFlow.svelte'),
     Onboarding: () => import('./components/Onboarding.svelte'),
-    // xterm.js and its stylesheet: only once a terminal is asked for.
+    // The drawer, then xterm.js and its stylesheet: only once a terminal is asked for.
+    TerminalDrawer: () => import('./components/TerminalDrawer.svelte'),
     TerminalView: () => import('./components/TerminalView.svelte'),
     PluginUpdateNotice: () => import('./components/PluginUpdateNotice.svelte')
   };
@@ -126,7 +142,7 @@
   // link that can spare the bytes (lib/prefetch.ts). The plugin update notice reads its own list, so it loads on any link.
   $effect(() => {
     if (!store.booted) return;
-    return whenIdle(() => { if (!prefetchAllowed()) return need('PluginUpdateNotice'); needAll(); warmPages(store, experimentOn('resident-agents')); });
+    return whenIdle(() => { if (!prefetchAllowed()) return need('PluginUpdateNotice'); needAll(); prefetchParts(); warmPages(store, experimentOn('resident-agents')); });
   });
   let WhipOverlay = $state<typeof import('./components/WhipOverlay.svelte').default>();
   $effect(() => {
@@ -167,7 +183,10 @@
   });
 
   $effect(() => {
-    if (terminalShown) need('TerminalView');
+    if (terminalShown) {
+      need('TerminalDrawer');
+      need('TerminalView');
+    }
   });
 
   // A drawer left open before a reload or a reconnect opens again, with its tabs and splits.
@@ -330,7 +349,8 @@
     else panelSlot.hide();
   });
   $effect(() => {
-    if (terminalShown) terminalSlot.show();
+    // The drawer opens once its chunk is here, so its opening animation plays whole.
+    if (terminalShown && deferred.TerminalDrawer) terminalSlot.show();
     else {
       // The drawer goes inert as it leaves, which drops the focus on `<body>`:
       // the keyboard goes back to the composer first.
@@ -361,6 +381,7 @@
   $effect(() => {
     if (inShell) return;
     void storeNotificationWords(notificationWords());
+    void storeWorkerLocale(activeLocale());
   });
 
   // Every http(s) link the UI shows goes to the system browser, once, from here.
@@ -491,7 +512,7 @@
 
 </script>
 
-<svelte:window {onkeydown} {onkeyup} {onblur} />
+<svelte:window {onkeydown} {onkeyup} {onblur} ononline={() => { if (mobileNavigation.failed) loadMobileNavigation(); }} />
 
 {#each workspace.machines as machine (machine.id)}
   <ThreadPreparation store={machine.store} visible={machine.store === store && documentVisible && (inShell || mobileScreen === 'chat')} />
@@ -501,7 +522,17 @@
 {/if}
 
 <div class="app" class:shell={inShell} class:ready={booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
-  {#if !inShell && booted}<MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />{/if}
+  {#if !inShell && booted}
+    {#if mobileNavigation.current}
+      {@const MobileNavigation = mobileNavigation.current}
+      <MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />
+    {:else}
+      <p class="mobile-navigation-failed" role="alert" data-testid="mobile-navigation-failed">
+        <span>{strings.parts.navigationFailed}</span>
+        <button type="button" data-testid="mobile-navigation-retry" onclick={() => void retryOrReload(() => mobileNavigation.load())}>{strings.common.retry}</button>
+      </p>
+    {/if}
+  {/if}
   <TitleBar {store} />
 
   <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
@@ -547,7 +578,8 @@
             <ChatView {store} />
           {/key}
         </div>
-        {#if terminalSlot.shown && store.openThread}
+        {#if terminalSlot.shown && store.openThread && deferred.TerminalDrawer}
+          {@const TerminalDrawer = deferred.TerminalDrawer}
           {#key store}
             {#key store.openThread.id}
               <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd}
@@ -783,7 +815,12 @@
     transition: opacity var(--dur-2) var(--ease-out-quint);
   }
 
+  .mobile-navigation-failed { display: none; }
+
   @media (max-width: 720px) {
+    /* The navigation's place when its chunk did not load: it says so, with a retry. */
+    .app:not(.shell) .mobile-navigation-failed { display: flex; grid-row: 1; grid-column: 1; align-items: center; gap: 10px; margin: 0; min-height: 60px; padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left)); border-bottom: 1px solid var(--color-border); color: var(--color-danger); }
+    .mobile-navigation-failed button { flex: none; min-height: 44px; padding: 0 14px; border-radius: var(--radius-md); }
     /* Safari scrolls the document to reveal a focused field even with overflow
        hidden. Anchor the app to the viewport so its header does not leave with it. */
     .app:not(.shell) { position: fixed; left: 0; right: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); overflow: hidden; }
