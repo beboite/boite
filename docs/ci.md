@@ -184,9 +184,15 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 492,200 |
 | UI files, excluding `.br` and `.gz` copies | 4,868,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,478,300 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,482,800 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the quieter pull request watch (PR #600) measures 4,474,421
+core JavaScript bytes on Windows CI at `37d85d19`, against 4,470,067 for its
+base `3a19eb57`: the bot remark rules, the body hashes and the closer read add
+4,354 bytes. With `origin/main` at `80c2da06` at 4,477,807, the core
+JavaScript limit rises to 4,482,800; the other limits stay.
 
 On 2026-10-18, keeping the prompt cache warm (PR #594) merged with
 `origin/main` at `3a19eb57` measures 491,872 entry bytes, 4,867,996 UI bytes
