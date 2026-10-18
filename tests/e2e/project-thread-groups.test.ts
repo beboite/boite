@@ -141,6 +141,16 @@ for (const width of [1280, 390]) {
       await page.evaluate(`(() => { const store = globalThis.__boiteTest.workspace.machines[0].store; store.threads = store.threads.map(t => t.id === 't-building' ? {...t, status:'running', unread:false} : t); })()`);
       await page.waitFor(`document.querySelector('${building}:not(.inactive)')`);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
+      if (width >= 720) {
+        // Unfolding a project whose only conversation is working opens its working list with it.
+        await click(`${building} ${id('project-row')}`);
+        await page.waitFor(`document.querySelector('${building} ${id('project-row')}').getAttribute('aria-expanded') === 'false'`);
+        await click(`${building} ${id('project-row')}`);
+        await page.waitFor(`document.querySelector('${row(building, 't-building')}')`);
+        expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').getAttribute('aria-expanded')`)).toBe('true');
+        await click(`${building} ${id('project-working-toggle')}`);
+        await page.waitFor(`!document.querySelector('${row(building, 't-building')}')`);
+      }
 
       await click(`${first} ${id('project-working-toggle')}`);
       await page.waitFor(`document.querySelector('${row(first, 't-scheduler')}')`);
