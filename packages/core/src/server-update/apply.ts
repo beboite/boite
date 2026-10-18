@@ -33,14 +33,35 @@ function snapshotBytes(dataDir: string): number {
 /** Room left once the snapshot is written, so the restarted server can still write its journal. */
 const SPARE_BYTES = 1024 ** 3;
 
-/** Drops all but the newest `KEPT_BACKUPS` snapshots; a failure here never fails an installed update. */
-function pruneBackups(parent: string): void {
+/** Names the installation a backup belongs to and when it was taken. */
+const BACKUP_MARKER = 'backup.json';
+const BACKUP_NAME = /^\.boite-backup-[a-f0-9-]{36}$/;
+
+/** The installation a backup was taken for and when, or null for a backup this flow did not mark. */
+function backupOwner(path: string): { installation: string; at: number } | null {
   try {
-    const backups = readdirSync(parent, { withFileTypes: true })
-      .filter(entry => entry.isDirectory() && /^\.boite-backup-[a-f0-9-]{36}$/.test(entry.name))
-      .map(entry => ({ path: join(parent, entry.name), at: statSync(join(parent, entry.name)).mtimeMs }))
-      .sort((a, b) => b.at - a.at);
-    for (const old of backups.slice(KEPT_BACKUPS)) rmSync(old.path, { recursive: true, force: true });
+    const owner = JSON.parse(readFileSync(join(path, BACKUP_MARKER), 'utf8')) as { installation?: unknown; at?: unknown };
+    return typeof owner.installation === 'string' && Number.isFinite(owner.at) ? { installation: owner.installation, at: owner.at as number } : null;
+  } catch { return null; }
+}
+
+/**
+ * Keeps this update's snapshot and the newest older ones of the same
+ * installation, `KEPT_BACKUPS` in all. Another installation can share the
+ * folder and the user can keep copies there: a backup whose marker does not
+ * name this installation, an unmarked one included, is never touched. A
+ * failure here never fails an installed update.
+ */
+function pruneBackups(plan: ServerUpdatePlan): void {
+  const parent = dirname(plan.installation.directory);
+  const current = backupOf(plan);
+  try {
+    const backups = readdirSync(parent, { withFileTypes: true }).flatMap(entry => {
+      const path = join(parent, entry.name);
+      const owner = entry.isDirectory() && BACKUP_NAME.test(entry.name) && path !== current ? backupOwner(path) : null;
+      return owner?.installation === plan.installation.directory ? [{ path, at: owner.at }] : [];
+    }).sort((a, b) => b.at - a.at);
+    for (const old of backups.slice(KEPT_BACKUPS - 1)) rmSync(old.path, { recursive: true, force: true });
   } catch { /* The next update prunes again. */ }
 }
 const contains = (parent: string, path: string) => path === parent || path.startsWith(`${parent}/`);
@@ -78,13 +99,33 @@ function verifyStage(directory: string, plan: ServerUpdatePlan): void {
   for (const required of ['boite-core', 'boite', 'ui/index.html']) if (!entries[required]?.length) throw new Error(`Staged update is missing ${required}`);
 }
 
+/** The disk operations whose cost depends on free space; tests replace them to stand for a full disk. */
+export interface UpdateDisk {
+  /** Bytes an unprivileged process may still write on the filesystem holding `path`. */
+  free(path: string): number;
+  copy(source: string, target: string, filter?: (source: string) => boolean): void;
+  rename(source: string, target: string): void;
+  /** The filesystem holding `path`, compared only with another. */
+  device(path: string): number;
+}
+
+const realDisk: UpdateDisk = {
+  free: (path) => { const disk = statfsSync(path); return disk.bavail * disk.bsize; },
+  copy: (source, target, filter) => cpSync(source, target, { recursive: true, dereference: false, errorOnExist: true, force: false, filter }),
+  rename: renameSync,
+  device: (path) => statSync(path).dev,
+};
+
 export interface ApplyOptions {
   health?: (url: string) => Promise<{ ok: boolean; version: string; pid: number } | null>;
   pollMs?: number;
   healthTimeoutMs?: number;
   /** Free space required beyond the snapshot itself. */
   spareBytes?: number;
+  disk?: Partial<UpdateDisk>;
 }
+
+const diskOf = (options: ApplyOptions): UpdateDisk => ({ ...realDisk, ...options.disk });
 
 /** The worker's last word: its result is written and the service is in its final state. */
 const FINISHED = 'finished';
@@ -112,26 +153,40 @@ async function becomesHealthy(plan: ServerUpdatePlan, platform: ServerUpdatePlat
 }
 
 /**
- * Puts the data snapshot back, keeping the stores it leaves out. Each step
- * checks what the previous one left, so a restore cut short resumes.
+ * Puts the data snapshot back, keeping the stores it leaves out. The snapshot
+ * moves into place rather than being copied: the update checked room for one
+ * copy, and a second one once failed the rollback of a disk left with only
+ * the spare, with the service stopped. Every step is a rename that checks
+ * what the previous one left, so a restore cut short resumes, and the data
+ * directory is only ever the new data or the restored one.
  */
-function restoreData(plan: ServerUpdatePlan, snapshot: string): void {
+function restoreData(plan: ServerUpdatePlan, snapshot: string, disk: UpdateDisk): void {
   const restored = `${plan.dataDir}.restore-${plan.id}`;
   const failed = `${plan.dataDir}.failed-${plan.id}`;
-  if (existsSync(failed) && !existsSync(restored)) return;
+  if (!existsSync(restored)) {
+    if (existsSync(failed) || !existsSync(snapshot)) return;
+    moveTree(snapshot, restored, disk);
+  }
   if (existsSync(plan.dataDir)) {
-    if (existsSync(restored)) {
-      // The stores an interrupted restore had already taken go back first.
-      for (const name of UNSAVED_DATA) if (existsSync(join(restored, name)) && !existsSync(join(plan.dataDir, name))) renameSync(join(restored, name), join(plan.dataDir, name));
-      rmSync(restored, { recursive: true, force: true });
-    }
-    // Preserve both the failed data and the snapshot if restoration itself fails.
-    cpSync(snapshot, restored, { recursive: true, dereference: false, errorOnExist: true, force: false });
     // The stores left out of the snapshot move across as they are.
-    for (const name of UNSAVED_DATA) if (existsSync(join(plan.dataDir, name))) renameSync(join(plan.dataDir, name), join(restored, name));
+    for (const name of UNSAVED_DATA) if (existsSync(join(plan.dataDir, name)) && !existsSync(join(restored, name))) renameSync(join(plan.dataDir, name), join(restored, name));
     renameSync(plan.dataDir, failed);
   }
   renameSync(restored, plan.dataDir);
+}
+
+/**
+ * Renames `source` to `target`. Across filesystems, which the update reserved
+ * room for, a complete copy takes the target's name before the source goes.
+ */
+function moveTree(source: string, target: string, disk: UpdateDisk): void {
+  try { disk.rename(source, target); return; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error; }
+  const partial = `${target}.partial`;
+  rmSync(partial, { recursive: true, force: true });
+  disk.copy(source, partial);
+  renameSync(partial, target);
+  rmSync(source, { recursive: true, force: true });
 }
 
 /**
@@ -139,7 +194,7 @@ function restoreData(plan: ServerUpdatePlan, snapshot: string): void {
  * reads where the update stood from the disk, not from the worker's memory,
  * so the recovery of a killed worker runs it too and resumes from there.
  */
-async function rollBack(plan: ServerUpdatePlan, directory: string, platform: ServerUpdatePlatform, reason: string): Promise<void> {
+async function rollBack(plan: ServerUpdatePlan, directory: string, platform: ServerUpdatePlatform, disk: UpdateDisk, reason: string): Promise<void> {
   const root = plan.installation.directory;
   const service = plan.installation.service;
   const backup = backupOf(plan);
@@ -154,10 +209,10 @@ async function rollBack(plan: ServerUpdatePlan, directory: string, platform: Ser
   if (touched || await platform.mainPid(service) === plan.originalPid) await platform.control(service, 'stop');
   if (installed && !existsSync(failedInstallation)) renameSync(root, failedInstallation);
   if (existsSync(previous) && !existsSync(root)) renameSync(previous, root);
-  const snapshot = join(backup, 'data');
-  if (installed && existsSync(snapshot)) restoreData(plan, snapshot);
-  // A copy cut short (a full disk, a kill) frees its space; a complete one stays with the failure.
-  if (!existsSync(snapshot)) rmSync(backup, { recursive: true, force: true });
+  if (installed) restoreData(plan, join(backup, 'data'), disk);
+  // A copy cut short (a full disk, a kill) frees its space, and a snapshot that became the data leaves the backup empty;
+  // a snapshot never used stays with the failure.
+  if (!existsSync(join(backup, 'data'))) rmSync(backup, { recursive: true, force: true });
   writeResult(plan, touched ? `Server update failed; the previous version was restored. ${reason}` : `Server update was not installed. ${reason}`);
   await platform.control(service, 'start');
   writeFileSync(join(directory, FINISHED), '', { mode: 0o600 });
@@ -169,6 +224,7 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
   const directory = dirname(file);
   const backup = backupOf(plan);
   const root = plan.installation.directory;
+  const disk = diskOf(options);
   verifyStage(directory, plan);
   writeFileSync(join(directory, 'ready'), '', { mode: 0o600 });
   while (!existsSync(join(directory, 'admitted'))) {
@@ -183,18 +239,23 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
   try {
     const pid = await platform.mainPid(plan.installation.service);
     if (pid !== 0 && pid !== plan.originalPid) throw new Error('The service restarted before the update; its new process was left untouched');
-    // Checked before the copy: a full disk once stopped the service halfway through it.
+    // Checked before the copy: a full disk once stopped the service halfway through it. A rollback
+    // renames the snapshot back, but across filesystems it copies it beside the data directory.
     const need = snapshotBytes(plan.dataDir) + (options.spareBytes ?? SPARE_BYTES);
-    const disk = statfsSync(dirname(root));
-    const free = disk.bavail * disk.bsize;
-    if (free < need) throw new Error(`Not enough disk space beside ${root} for the backup: ${Math.ceil(need / 1024 ** 2)} MB needed, ${Math.floor(free / 1024 ** 2)} MB free`);
+    const sides = [{ path: dirname(root), shown: root, purpose: 'the backup' }];
+    if (disk.device(dirname(root)) !== disk.device(plan.dataDir)) sides.push({ path: plan.dataDir, shown: plan.dataDir, purpose: 'a rollback' });
+    for (const side of sides) {
+      const free = disk.free(side.path);
+      if (free < need) throw new Error(`Not enough disk space beside ${side.shown} for ${side.purpose}: ${Math.ceil(need / 1024 ** 2)} MB needed, ${Math.floor(free / 1024 ** 2)} MB free`);
+    }
     await platform.control(plan.installation.service, 'stop');
     if (await platform.mainPid(plan.installation.service) !== 0) throw new Error('The server service did not stop');
     // Never copy a live SQLite directory. The whole snapshot also keeps account and pairing state.
     // It takes the name `data` once complete, so a copy cut short is never mistaken for a snapshot.
     mkdirSync(backup, { mode: 0o700 });
-    cpSync(plan.dataDir, join(backup, 'data.partial'), { recursive: true, dereference: false, errorOnExist: true, force: false,
-      filter: (source) => dirname(source) !== plan.dataDir || !UNSAVED_DATA.has(source.slice(plan.dataDir.length + 1)) });
+    writeFileSync(join(backup, BACKUP_MARKER), JSON.stringify({ installation: root, at: Date.now() }), { mode: 0o600 });
+    disk.copy(plan.dataDir, join(backup, 'data.partial'),
+      (source) => dirname(source) !== plan.dataDir || !UNSAVED_DATA.has(source.slice(plan.dataDir.length + 1)));
     renameSync(join(backup, 'data.partial'), join(backup, 'data'));
     verifyStage(directory, plan);
     renameSync(root, join(backup, 'installation'));
@@ -203,10 +264,10 @@ export async function applyServerUpdate(file: string, platform: ServerUpdatePlat
     if (!await becomesHealthy(plan, platform, options)) throw new Error('The updated server did not become healthy within 30 seconds');
     writeResult(plan, null);
     writeFileSync(join(directory, FINISHED), '', { mode: 0o600 });
-    pruneBackups(dirname(root));
+    pruneBackups(plan);
   } catch (error) {
     failed = true;
-    await rollBack(plan, directory, platform, error instanceof Error ? error.message : String(error));
+    await rollBack(plan, directory, platform, disk, error instanceof Error ? error.message : String(error));
     throw error;
   } finally {
     // Failure artifacts and backups remain private, with the complete error in the helper's journal.
@@ -244,12 +305,12 @@ export async function recoverServerUpdate(file: string, platform: ServerUpdatePl
       if (await platform.mainPid(plan.installation.service) === 0) await platform.control(plan.installation.service, 'start');
       if (await becomesHealthy(plan, platform, options)) {
         writeResult(plan, null);
-        pruneBackups(dirname(root));
+        pruneBackups(plan);
         rmSync(directory, { recursive: true, force: true });
         return;
       }
     }
-    await rollBack(plan, directory, platform, `The update worker ended before it finished (${workerExit(options.env ?? process.env)})`);
+    await rollBack(plan, directory, platform, diskOf(options), `The update worker ended before it finished (${workerExit(options.env ?? process.env)})`);
     // The staged bundle and payload serve nothing once the service runs again; the result keeps the reason.
     rmSync(directory, { recursive: true, force: true });
   } finally { rmSync(recoveryLink(file), { force: true }); }

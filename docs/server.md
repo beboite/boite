@@ -186,12 +186,26 @@ threads down 2 min 25 s for 8.9 GB, and filled its disk once mid-copy; a
 rollback keeps the live ones. Before stopping the service, the job checks that
 the disk holds the snapshot plus 1 GB; otherwise it starts the untouched
 server again, since the core stops itself once it admits the update, with the
-reason in its status. A copy cut short is deleted. Health must
-report the target version and that service's new PID within 30 seconds.
+reason in its status. When the data directory sits on another filesystem than
+the installation, the same room is checked beside the data directory too,
+since a rollback must then copy the snapshot across. A copy cut short is
+deleted. Health must report the target version and that service's new PID
+within 30 seconds.
 Failure restores both the previous installation and its data snapshot before
-restarting. Pairings and conversations survive; clients reconnect normally.
-Backups remain private beside the installation as `.boite-backup-<id>`; a
-successful update keeps the two newest and deletes the older ones.
+restarting. The snapshot is renamed back into place, never copied a second
+time, so a rollback needs no room beyond what the update checked: a second
+copy once failed the rollback of a disk left with only the spare 1 GB and
+left the service stopped. Every step is a rename that a resumed rollback
+picks up, so the data directory is either the new data or the restored one.
+The rejected data stays beside it as `<data>.failed-<id>`, without the stores
+the snapshot left out, which move back with the restored data.
+Pairings and conversations survive; clients reconnect normally.
+Backups remain private beside the installation as `.boite-backup-<id>`, each
+with a `backup.json` naming its installation. A successful update keeps its
+own and the newest older one of the same installation, and deletes that
+installation's older ones. It never touches a backup another installation in
+the same folder made, or one without that marker, older releases' included:
+remove those by hand.
 Failure artifacts also remain for diagnosis; inspect them before removing them.
 
 The job runs under `MemoryHigh=1G`, which throttles it, rather than a hard
@@ -205,7 +219,9 @@ and anything else is rolled back as above before the service starts again.
 The recovery runs from a hard link of the job's executable,
 `.boite-recover-<id>`, which it deletes when done. If the recovery itself
 never ran, as after a power cut, the next update deletes the unfinished
-operation directory and the incomplete snapshot it left.
+operation directory and the incomplete snapshot it left. A rollback cut off
+that way after the snapshot moved back leaves the previous data as
+`<data>.restore-<id>` beside the data directory; nothing deletes it.
 
 From a terminal on the server, the same owner actions need no thread:
 

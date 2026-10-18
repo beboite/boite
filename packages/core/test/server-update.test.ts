@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test';
 import { generateKeyPairSync, createHash, randomBytes, sign } from 'node:crypto';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { zipSync } from 'fflate';
 import { Database } from 'bun:sqlite';
 import { downloadPayload, verifyPayload, unpackPayload } from '../src/server-update/release.ts';
-import { applyServerUpdate, clearStaleUpdates, recoverServerUpdate } from '../src/server-update/apply.ts';
+import { applyServerUpdate, clearStaleUpdates, recoverServerUpdate, UNSAVED_DATA, type UpdateDisk } from '../src/server-update/apply.ts';
 import { linuxServerUpdates, unitWord } from '../src/platform/linux-server-update.ts';
 import type { ServerUpdatePlan, ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { echoThread, holdAccountTurns, startTestCore, waitFor } from './harness.ts';
@@ -240,24 +240,70 @@ async function updateFixture() {
     stop: () => rmSync(root, { recursive: true, force: true }) };
 }
 
+const uuid = (c: string) => `${c.repeat(8)}-${c.repeat(4)}-${c.repeat(4)}-${c.repeat(4)}-${c.repeat(12)}`;
+
+const treeSize = (path: string): number => {
+  const info = lstatSync(path);
+  return info.isDirectory() ? readdirSync(path).reduce((sum, name) => sum + treeSize(join(path, name)), 0) : info.isFile() ? info.size : 0;
+};
+
+/** Bytes the update snapshot copies out of `data`. */
+const snapshotSize = (data: string) => readdirSync(data).filter(name => !UNSAVED_DATA.has(name)).reduce((sum, name) => sum + treeSize(join(data, name)), 0);
+
+/**
+ * Filesystems with `free[device]` bytes left. A path's device is the one
+ * `devices` names for its first segment under `root`, `root` otherwise; a copy
+ * past the room left fails as a full disk does, a rename across devices as the kernel refuses it.
+ */
+function lowDisk(root: string, free: Record<string, number>, devices: Record<string, string> = {}) {
+  const left = { ...free };
+  const device = (path: string) => devices[path.slice(root.length + 1).split(/[\\/]/)[0]!.replace(/\.(restore|failed)-.*$/, '')] ?? 'root';
+  const disk: Partial<UpdateDisk> = {
+    free: (path) => left[device(path)]!,
+    device: (path) => device(path) === 'root' ? 1 : 2,
+    copy: (source, target, filter) => {
+      cpSync(source, target, { recursive: true, filter });
+      const bytes = treeSize(target);
+      if (bytes > left[device(target)]!) {
+        rmSync(target, { recursive: true, force: true });
+        throw Object.assign(new Error(`ENOSPC: no space left on device, copy '${source}'`), { code: 'ENOSPC' });
+      }
+      left[device(target)]! -= bytes;
+    },
+    rename: (source, target) => {
+      if (device(source) !== device(target)) throw Object.assign(new Error(`EXDEV: cross-device link not permitted, rename '${source}'`), { code: 'EXDEV' });
+      renameSync(source, target);
+    },
+  };
+  return { disk, left };
+}
+
 const APPLY_CASES = {
-  installs: 'installs the complete bundle and checks the new process health',
-  fails: 'restores the previous binary, SQLite journal and pairing on a failed restart',
+  installs: 'installs the complete bundle, checks the new process health and prunes only its own backups',
+  fails: 'restores the previous binary, SQLite journal and pairing on a failed restart, on a disk left with only the spare room it checked',
   full: 'restarts the untouched server when the disk cannot hold the backup',
 } as const;
 for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper ${APPLY_CASES[mode]}`, async () => {
   const fails = mode === 'fails';
   const f = await updateFixture();
-  // Two older snapshots: a successful update keeps the newest two in all.
-  const older = ['bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc'].map((name, index) => {
-    const path = join(f.root, `.boite-backup-${name}`);
-    mkdirSync(path); utimesSync(path, new Date(2026, 0, 1 + index), new Date(2026, 0, 1 + index));
+  // Two older snapshots of this installation: a successful update keeps the newest two in all.
+  const backup = (c: string, installation: string | null, day: number) => {
+    const path = join(f.root, `.boite-backup-${uuid(c)}`);
+    mkdirSync(path);
+    if (installation) writeFileSync(join(path, 'backup.json'), JSON.stringify({ installation, at: new Date(2026, 0, day).getTime() }));
+    utimesSync(path, new Date(2026, 0, day), new Date(2026, 0, day));
     return path;
-  });
+  };
+  const older = [backup('b', f.install, 1), backup('c', f.install, 2)];
+  // Newer backups another installation in the same folder made, and one the user made, are not this update's to prune.
+  const foreign = [backup('d', join(f.root, 'other-install'), 3), backup('e', join(f.root, 'other-install'), 4), backup('f', null, 5)];
   writeFileSync(join(f.operation, 'admitted'), f.id);
+  const spare = 1024;
+  // A failed restart finds only the spare room the update checked: the snapshot took the rest.
+  const low = lowDisk(f.root, { root: snapshotSize(f.data) + spare });
   try {
     const run = applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35,
-      spareBytes: mode === 'full' ? Number.MAX_SAFE_INTEGER : 0,
+      spareBytes: mode === 'full' ? Number.MAX_SAFE_INTEGER : fails ? spare : 0, disk: fails ? low.disk : undefined,
       health: async () => fails ? null : { ok: true, version: '2.1.0', pid: 456 } });
     if (mode === 'full') {
       await expect(run).rejects.toThrow('Not enough disk space');
@@ -270,7 +316,9 @@ for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper $
       await expect(run).rejects.toThrow('healthy');
       f.expectPrevious();
       expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
-      expect(older.every(path => existsSync(path))).toBe(true);
+      // The snapshot moved back instead of being copied a second time.
+      expect(low.left.root).toBe(spare);
+      expect([...older, ...foreign].every(path => existsSync(path))).toBe(true);
       // The failure stays for diagnosis, marked as handled for the recovery and the next update.
       expect(existsSync(join(f.operation, 'finished'))).toBe(true);
     } else {
@@ -282,14 +330,41 @@ for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper $
       expect(existsSync(join(f.backup, 'data', 'checkpoints'))).toBe(false);
       expect(existsSync(join(f.backup, 'data.partial'))).toBe(false);
       expect(f.controls).toEqual(['stop', 'start']);
-      // The oldest snapshot goes; this one and the newest older one stay.
+      // The oldest snapshot of this installation goes; this one and the newest older one stay, and nobody else's is touched.
       expect(older.map(path => existsSync(path))).toEqual([false, true]);
+      expect(foreign.every(path => existsSync(path))).toBe(true);
+      expect(JSON.parse(readFileSync(join(f.backup, 'backup.json'), 'utf8')).installation).toBe(f.install);
     }
     // The recovery that follows any worker exit has nothing left to do.
     const controls = f.controls.length;
     await recoverServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35 });
     expect(f.controls.length).toBe(controls);
   } finally { f.stop(); }
+});
+
+test('with the data on another filesystem, an update reserves room there for the rollback copy, which a failed restart then uses', async () => {
+  const spare = 1024;
+  for (const roomy of [false, true]) {
+    const f = await updateFixture();
+    writeFileSync(join(f.operation, 'admitted'), f.id);
+    const need = snapshotSize(f.data) + spare;
+    const low = lowDisk(f.root, { root: need, data: roomy ? need : need - 1 }, { data: 'data' });
+    try {
+      const run = applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk: low.disk, health: async () => null });
+      if (!roomy) {
+        await expect(run).rejects.toThrow(`Not enough disk space beside ${f.data} for a rollback`);
+        expect(f.controls).toEqual(['stop', 'start']);
+        expect(existsSync(f.backup)).toBe(false);
+        continue;
+      }
+      await expect(run).rejects.toThrow('healthy');
+      f.expectPrevious();
+      expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
+      // A rename cannot cross filesystems: one copy each way, each within the room checked.
+      expect(low.left).toEqual({ root: spare, data: spare });
+      expect(existsSync(f.backup)).toBe(false);
+    } finally { f.stop(); }
+  }
 });
 
 /**
@@ -302,7 +377,7 @@ const KILLED_AT = {
   health: 'while the new version was starting, and it never became healthy',
   // A version the worker rejected stays rejected, even if it answers health once restarted.
   rejected: 'between stopping the rejected version and moving it aside',
-  restore: 'during its own rollback, once the restored data had been copied',
+  restore: 'during its own rollback, once the snapshot had moved back and taken the live checkpoints',
 } as const;
 for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`the recovery of a worker killed ${KILLED_AT[point]} restores the previous version and starts it`, async () => {
   const f = await updateFixture();
@@ -330,9 +405,8 @@ for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`
         renameSync(f.install, join(f.operation, 'failed-installation'));
         renameSync(join(f.backup, 'installation'), f.install);
         const restored = `${f.data}.restore-${f.id}`;
-        cpSync(join(f.backup, 'data'), restored, { recursive: true });
+        renameSync(join(f.backup, 'data'), restored);
         renameSync(join(f.data, 'checkpoints'), join(restored, 'checkpoints'));
-        renameSync(f.data, `${f.data}.failed-${f.id}`);
       }
     }
     f.controls.length = 0;
@@ -342,8 +416,8 @@ for (const point of Object.keys(KILLED_AT) as (keyof typeof KILLED_AT)[]) test(`
     expect(f.controls.at(-1)).toBe('start');
     expect(f.state.pid).toBe(456);
     expect(f.result().error).toBe('Server update failed; the previous version was restored. The update worker ended before it finished (oom-kill, killed, KILL)');
-    // A snapshot cut short goes; a complete one stays with the failure.
-    expect(existsSync(f.backup)).toBe(point !== 'copy');
+    // A snapshot cut short goes, and so does one that became the data again; one never used stays with the failure.
+    expect(existsSync(f.backup)).toBe(point === 'switch');
     expect(existsSync(f.operation)).toBe(false);
     expect(existsSync(link)).toBe(false);
   } finally { f.stop(); }
