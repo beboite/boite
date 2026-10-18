@@ -93,7 +93,8 @@ keeps, and stops writing `message.part` and `artifact.published` events
 `processes` went from 1,149 to 519 MiB, `events` from 748 to 188 MiB,
 `part_blobs` from 1,864 to 1,452 MiB and `messages` from 393 to 238 MiB. The
 passes did 86 s of work in ticks 250 ms apart, with a p99 event loop block of
-35 ms or less per step and one 1.4 s block on the largest value. The next
+35 ms or less in every row pass and one 1.4 s block on the largest value; the
+statistics after the prune ran as one 497 ms tick. The next
 start found 1,622 MiB of free pages and ran the one VACUUM: 60.8 s, the file
 from 4,176 to 2,164 MiB, then incremental auto-vacuum; the start after it
 checked in 3 ms. The page the app reads, with tool previews, reads a

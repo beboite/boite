@@ -78,8 +78,9 @@ not turn.
 86 s of work in all, spread over 56 minutes of wall time by the 250 ms gaps.
 Compression runs off the main thread (`Bun.zstdCompress`), so the main
 thread only reads and writes rows: the p99 block is 35 ms or less in every
-step. The one 1,363 ms block is the
-recode tick that met the journal's largest value. 6,593 ticks waited on the
+row pass. The one 1,363 ms block is the recode tick that met the journal's
+largest value. The statistics after the prune are one `ANALYZE` on the main
+thread, 497 ms. 6,593 ticks waited on the
 WAL checkpoints, and no checkpoint ran on the main thread.
 
 The first start on the copy, migration to schema 36 included, opened the

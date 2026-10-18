@@ -106,3 +106,22 @@ test('a VACUUM that failed is tried again a day later, three times in all, not a
   expect(vacuumAtStart(dir, message => errors.push(message), when)).not.toBeNull();
   expect(existsSync(join(dir, VACUUM_FAILED_FILE))).toBe(false);
 });
+
+test('a record cut short counts from when it was written, and one dated ahead of a clock set back counts from now', () => {
+  const record = join(dir, VACUUM_FAILED_FILE);
+  journalWithFreePages(12 * MiB);
+  // A start died while writing it.
+  fs.writeFileSync(record, '{"attempts":1,');
+  const written = statSync(record).mtimeMs;
+  expect(vacuumAtStart(dir, () => {}, when, null, written + 60 * 60 * 1000)).toBeNull();
+  expect(vacuumAtStart(dir, () => {}, when, null, written + VACUUM_RETRY.afterMs + 1)).not.toBeNull();
+
+  rmSync(file());
+  journalWithFreePages(12 * MiB);
+  const now = 5_000_000_000;
+  // Written while the clock ran ten years ahead.
+  fs.writeFileSync(record, JSON.stringify({ attempts: 1, at: now + 3650 * VACUUM_RETRY.afterMs }));
+  expect(vacuumAtStart(dir, () => {}, when, null, now)).toBeNull();
+  expect(vacuumAtStart(dir, () => {}, when, null, now + VACUUM_RETRY.afterMs / 2)).toBeNull();
+  expect(vacuumAtStart(dir, () => {}, when, null, now + VACUUM_RETRY.afterMs)).not.toBeNull();
+});

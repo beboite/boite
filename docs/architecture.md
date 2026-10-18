@@ -161,7 +161,9 @@ would miss the writes made during the copy. A VACUUM that does not finish (an
 error, a kill) leaves the journal as it was and its attempt in
 `journal.vacuum-failed.json`: a later start tries again only a day after the
 last attempt, three attempts in all, so a failure that repeats does not cost
-every start the whole copy. A VACUUM that took the journal's place removes the
+every start the whole copy. A file cut short counts as one attempt made when
+it was last written, and an attempt dated after the clock (set back since)
+counts from that start. A VACUUM that took the journal's place removes the
 file.
 
 A process trace row names its command line through `command_lines`, which holds

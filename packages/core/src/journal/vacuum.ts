@@ -83,8 +83,14 @@ export function vacuumAtStart(dataDir: string, onError: (message: string) => voi
     // A copy a stopped start left behind.
     rmSync(copy, { force: true });
     rmSync(status, { force: true });
-    const before = earlierAttempt(failed, now);
+    const before = earlierAttempt(failed);
     attempts = before?.attempts ?? 0;
+    if (before !== null && before.at > now) {
+      // Recorded under a clock that has since gone back: the day counts from
+      // now, written down so that it does not slide at every start.
+      writeFileSync(failed, JSON.stringify({ attempts, at: now }));
+      return null;
+    }
     if (before !== null && (attempts >= VACUUM_RETRY.attempts || now - before.at < VACUUM_RETRY.afterMs)) return null;
     plan = vacuumPlan(file, when);
   } catch (error) {
@@ -113,7 +119,8 @@ export function vacuumAtStart(dataDir: string, onError: (message: string) => voi
     try { fsyncSync(handle); } finally { closeSync(handle); }
     for (const suffix of ['-wal', '-shm']) rmSync(`${file}${suffix}`, { force: true });
     renameSync(copy, file);
-    rmSync(failed, { force: true });
+    // In incremental auto-vacuum now, so `vacuumPlan` says no whatever a record left here says.
+    try { rmSync(failed, { force: true }); } catch { /* See above. */ }
     return { ...plan, afterBytes: statSync(file).size, ms: performance.now() - started };
   } catch (error) {
     const left = VACUUM_RETRY.attempts - attempts - 1;
@@ -126,15 +133,16 @@ export function vacuumAtStart(dataDir: string, onError: (message: string) => voi
   }
 }
 
-/** The attempt `VACUUM_FAILED_FILE` records, or null for none or one that cannot be read. */
-function earlierAttempt(path: string, now: number): { attempts: number; at: number } | null {
+/** The attempt `VACUUM_FAILED_FILE` records, or null for none. */
+function earlierAttempt(path: string): { attempts: number; at: number } | null {
   if (!existsSync(path)) return null;
   try {
     const { attempts, at } = JSON.parse(readFileSync(path, 'utf8')) as { attempts?: unknown; at?: unknown };
     if (typeof attempts === 'number' && Number.isInteger(attempts) && attempts > 0 && typeof at === 'number' && Number.isFinite(at)) return { attempts, at };
-  } catch { /* Read as one attempt made now, below. */ }
-  // Unreadable: a start died while writing it, so an attempt began.
-  return { attempts: 1, at: now };
+  } catch { /* Read from the file itself, below. */ }
+  // Unreadable or cut short: a start died while writing it, so an attempt
+  // began when the file was last written, a time that stays put.
+  return { attempts: 1, at: statSync(path).mtimeMs };
 }
 
 /** The copy has the schema, the mode and the rows of the tables a start reads first. */
