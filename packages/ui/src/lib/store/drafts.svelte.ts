@@ -132,6 +132,7 @@ export class Drafts {
     const assets = journalAssets(durable);
     this.#storedAssetIds = new Set(assets.keys());
     for (const [id, bytes] of assets) this.#assetIds.set(bytes, id);
+    this.#resolvePending(assets);
     this.#revision = Math.max(this.#revision, typeof data?.updatedAt === 'number' && Number.isFinite(data.updatedAt) ? data.updatedAt : 0);
     if (!data || typeof data !== 'object') return;
     for (const [id, input] of Object.entries(data.inputs ?? {})) {
@@ -159,6 +160,26 @@ export class Drafts {
       this.ctx.composer.composerStates.draft = saved.input;
       s.draft = current.worktreeExplicit ? { ...current, id: saved.draft.id, ...(saved.draft.createdAt === undefined ? {} : { createdAt: saved.draft.createdAt }) } : { ...saved.draft };
     }
+  }
+
+  /**
+   * Gives each attachment kept as an ID while the journal was unread the bytes
+   * the journal holds, in inputs that are not vacant and so are not restored.
+   * Text and attachments changed meanwhile stay. The cached entry goes: its
+   * backup line reads the same without the bytes, so the next checkpoint
+   * would keep the bare ID and overwrite the record that holds them.
+   */
+  #resolvePending(assets: Map<string, string>): void {
+    if (!assets.size) return;
+    const open = this.ctx.store.draft;
+    const inputs = [
+      ...Object.entries(this.ctx.composer.composerStates).map(([id, input]) =>
+        [id !== 'draft' ? entryKey('inputs', id) : open ? entryKey('drafts', draftKey(open)) : '', input] as const),
+      ...Object.entries(this.saved).map(([id, entry]) => [entryKey('drafts', id), entry.input] as const)
+    ];
+    // Keys first: the open draft and its saved entry can share one input.
+    for (const [key, input] of inputs) if (input && pendingFiles(input).some(file => assets.has(unresolvedAssetId(file)!))) this.#entries.delete(key);
+    for (const [, input] of inputs) if (input) resolvePending(input, assets);
   }
 
   /**
@@ -548,6 +569,19 @@ function attachments(value: unknown, assets: Map<string, string>): Attachment[] 
       ...(data === undefined ? { pendingDraftAsset: item.assetId } : {}) };
     return [attachment];
   });
+}
+
+const pendingFiles = (input: Input) => [...input.attachments, ...input.queued.flatMap(item => item.attachments)].filter(file => unresolvedAssetId(file) !== undefined);
+
+function resolvePending(input: Input, assets: Map<string, string>): void {
+  const resolve = (files: Attachment[]) => files.map(file => {
+    const data = assets.get(unresolvedAssetId(file) ?? '');
+    if (data === undefined) return file;
+    const { pendingDraftAsset: _id, ...rest } = file as DraftAttachment;
+    return { ...rest, data };
+  });
+  if (input.attachments.some(file => assets.has(unresolvedAssetId(file) ?? ''))) input.attachments = resolve(input.attachments);
+  for (const item of input.queued) if (item.attachments.some(file => assets.has(unresolvedAssetId(file) ?? ''))) item.attachments = resolve(item.attachments);
 }
 
 function journalAssets(value: unknown): Map<string, string> {
