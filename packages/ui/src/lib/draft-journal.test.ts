@@ -27,6 +27,24 @@ test.each(['read', 'write'] as const)('a committed %s waits for completion when 
   await expect(pending).resolves.toEqual(operation === 'read' ? request.result : undefined);
 });
 
+test('an open slower than one wait fails that call as a timeout and serves the next from the same request', async () => {
+  vi.useFakeTimers();
+  const request = { result: { text: 'Kept' } };
+  const transaction = { oncomplete: null as (() => void) | null, onabort: null as (() => void) | null, error: null,
+    objectStore: () => ({ get: () => { Promise.resolve().then(() => transaction.oncomplete?.()); return request; } }), abort: vi.fn() };
+  const opening = { result: { transaction: () => transaction, close: vi.fn() }, onsuccess: null as (() => void) | null, transaction: null };
+  const open = vi.fn(() => opening);
+  vi.stubGlobal('indexedDB', { open });
+  const { readDraftJournal } = await import('./draft-journal');
+  const first = readDraftJournal('fixture').catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(await first).toMatchObject({ name: 'TimeoutError' });
+  const second = readDraftJournal('fixture');
+  opening.onsuccess?.();
+  await expect(second).resolves.toEqual(request.result);
+  expect(open).toHaveBeenCalledOnce();
+});
+
 test('a stalled durable write aborts and rejects instead of holding flush forever', async () => {
   vi.useFakeTimers();
   const transaction = {

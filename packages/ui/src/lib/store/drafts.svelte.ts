@@ -43,6 +43,12 @@ const newDraft = (projectId: string | null, worktree: boolean): Draft => ({ id: 
 const DURABLE_DELAY_MS = 800;
 /** Typing that never pauses still reaches the durable journal this often. */
 const DURABLE_MAX_WAIT_MS = 5000;
+/** How long a journal that is slow to open stays quiet before the user is told it cannot save. */
+const LATE_JOURNAL_MS = 10_000;
+/** Each read waits three seconds on the open: about a minute before giving up. */
+const LATE_JOURNAL_ATTEMPTS = 20;
+/** The journal timed out rather than refused: the open is still under way. */
+const slow = (error: unknown) => error instanceof DOMException && error.name === 'TimeoutError';
 
 /** Device-local unsent text. Each host and data directory owns a separate journal. */
 export class Drafts {
@@ -86,46 +92,14 @@ export class Drafts {
     try { local = JSON.parse(localStorage.getItem(this.#key) ?? 'null'); } catch { /* Try the durable journal. */ }
     const generation = ++this.#generation;
     try {
-      let readable = true;
-      const durable = await readDraftJournal(this.#key).catch(() => { readable = false; return null; }) as Journal | null;
+      let readable = true, late = false;
+      const durable = await readDraftJournal(this.#key).catch((error: unknown) => { readable = false; late = slow(error); return null; }) as Journal | null;
       if (generation !== this.#generation) return;
       this.#durableReady = readable;
       this.#writeFailed = !readable;
-      if (!readable) s.error = strings.errors.draftStorage;
-      const previous = durable && (durable.updatedAt ?? 0) >= (local?.updatedAt ?? 0) ? durable
-        : local?.incomplete && durable ? { ...local, inputs: { ...durable.inputs, ...local.inputs }, drafts: { ...durable.drafts, ...local.drafts } } : local;
-      const data = overlayBackup(this.#key!, previous);
-      const assets = journalAssets(durable);
-      this.#storedAssetIds = new Set(assets.keys());
-      for (const [id, bytes] of assets) this.#assetIds.set(bytes, id);
-      this.#revision = typeof data?.updatedAt === 'number' && Number.isFinite(data.updatedAt) ? data.updatedAt : 0;
-      if (data && typeof data === 'object') {
-        for (const [id, input] of Object.entries(data.inputs ?? {})) {
-          const restored = restoreInput(input, assets);
-          if (restored && vacant(this.ctx.composer.composerStates[id])) this.ctx.composer.composerStates[id] = restored;
-        }
-        for (const [key, value] of Object.entries(data.drafts ?? {})) {
-          const entry = value as Partial<SavedDraft> | null;
-          if (!entry?.draft || (entry.draft.projectId !== null && typeof entry.draft.projectId !== 'string')) continue;
-          const input = restoreInput(entry.input, assets);
-          const createdAt = entry.draft.createdAt;
-          const parked = typeof entry.parked === 'number' && Number.isFinite(entry.parked) ? entry.parked : 0;
-          // The journal key is the id, a legacy project key included.
-          if (input && vacant(this.saved[key]?.input)) this.saved[key] = {
-            draft: { id: key, projectId: entry.draft.projectId, worktree: entry.draft.worktree === true, worktreeExplicit: true,
-              ...(typeof createdAt === 'number' && Number.isFinite(createdAt) ? { createdAt } : {}) },
-            choice: null, input, parked
-          };
-        }
-        // A landing draft nobody wrote in becomes the project's latest saved
-        // draft, id included, so one input never shows as two drafts.
-        const current = s.draft;
-        const saved = current && (this.saved[draftKey(current)] ?? this.#latest(current.projectId));
-        if (current && saved && vacant(this.ctx.composer.composerStates.draft)) {
-          this.ctx.composer.composerStates.draft = saved.input;
-          s.draft = current.worktreeExplicit ? { ...current, id: saved.draft.id, ...(saved.draft.createdAt === undefined ? {} : { createdAt: saved.draft.createdAt }) } : { ...saved.draft };
-        }
-      }
+      if (!readable && !late) s.error = strings.errors.draftStorage;
+      this.#restore(local, durable);
+      if (late) void this.#awaitJournal(generation);
     } catch { /* An unavailable or malformed journal leaves the current session usable. */ }
     this.#hydrated = true;
     this.persist();
@@ -147,6 +121,108 @@ export class Drafts {
       window.removeEventListener('pagehide', leave);
       document.removeEventListener('visibilitychange', hidden);
     };
+  }
+
+  /** Restores the journal into vacant inputs: anything typed before it arrived keeps priority. */
+  #restore(local: Journal & { incomplete?: boolean } | null | undefined, durable: Journal | null): void {
+    const s = this.ctx.store;
+    const previous = durable && (durable.updatedAt ?? 0) >= (local?.updatedAt ?? 0) ? durable
+      : local?.incomplete && durable ? { ...local, inputs: { ...durable.inputs, ...local.inputs }, drafts: { ...durable.drafts, ...local.drafts } } : local ?? null;
+    const data = overlayBackup(this.#key!, previous);
+    const assets = journalAssets(durable);
+    this.#storedAssetIds = new Set(assets.keys());
+    for (const [id, bytes] of assets) this.#assetIds.set(bytes, id);
+    this.#resolvePending(assets);
+    this.#revision = Math.max(this.#revision, typeof data?.updatedAt === 'number' && Number.isFinite(data.updatedAt) ? data.updatedAt : 0);
+    if (!data || typeof data !== 'object') return;
+    for (const [id, input] of Object.entries(data.inputs ?? {})) {
+      const restored = restoreInput(input, assets);
+      if (restored && vacant(this.ctx.composer.composerStates[id])) this.ctx.composer.composerStates[id] = restored;
+    }
+    for (const [key, value] of Object.entries(data.drafts ?? {})) {
+      const entry = value as Partial<SavedDraft> | null;
+      if (!entry?.draft || (entry.draft.projectId !== null && typeof entry.draft.projectId !== 'string')) continue;
+      const input = restoreInput(entry.input, assets);
+      const createdAt = entry.draft.createdAt;
+      const parked = typeof entry.parked === 'number' && Number.isFinite(entry.parked) ? entry.parked : 0;
+      // The journal key is the id, a legacy project key included.
+      if (input && vacant(this.saved[key]?.input)) this.saved[key] = {
+        draft: { id: key, projectId: entry.draft.projectId, worktree: entry.draft.worktree === true, worktreeExplicit: true,
+          ...(typeof createdAt === 'number' && Number.isFinite(createdAt) ? { createdAt } : {}) },
+        choice: null, input, parked
+      };
+    }
+    // A landing draft nobody wrote in becomes the project's latest saved
+    // draft, id included, so one input never shows as two drafts.
+    const current = s.draft;
+    const saved = current && (this.saved[draftKey(current)] ?? this.#latest(current.projectId));
+    if (current && saved && vacant(this.ctx.composer.composerStates.draft)) {
+      this.ctx.composer.composerStates.draft = saved.input;
+      s.draft = current.worktreeExplicit ? { ...current, id: saved.draft.id, ...(saved.draft.createdAt === undefined ? {} : { createdAt: saved.draft.createdAt }) } : { ...saved.draft };
+    }
+  }
+
+  /**
+   * Gives each attachment kept as an ID while the journal was unread the bytes
+   * the journal holds, in inputs that are not vacant and so are not restored.
+   * Text and attachments changed meanwhile stay. The cached entry goes: its
+   * backup line reads the same without the bytes, so the next checkpoint
+   * would keep the bare ID and overwrite the record that holds them.
+   */
+  #resolvePending(assets: Map<string, string>): void {
+    if (!assets.size) return;
+    const open = this.ctx.store.draft;
+    const inputs = [
+      ...Object.entries(this.ctx.composer.composerStates).map(([id, input]) =>
+        [id !== 'draft' ? entryKey('inputs', id) : open ? entryKey('drafts', draftKey(open)) : '', input] as const),
+      ...Object.entries(this.saved).map(([id, entry]) => [entryKey('drafts', id), entry.input] as const)
+    ];
+    // Keys first: the open draft and its saved entry can share one input.
+    for (const [key, input] of inputs) if (input && pendingFiles(input).some(file => assets.has(unresolvedAssetId(file)!))) this.#entries.delete(key);
+    for (const [, input] of inputs) if (input) resolvePending(input, assets);
+  }
+
+  /**
+   * The journal answered the first read too late. Its open carries on, so the
+   * read is tried again; meanwhile the synchronous backup holds what is typed.
+   * Only a journal still silent after LATE_JOURNAL_MS, or one that fails, is
+   * reported: four Windows CI shells showed "could not save your draft" from
+   * their first second while nothing had failed but time. The answer clears
+   * only the notice's own toast: never another error, nor one a refused
+   * backup raised meanwhile.
+   */
+  async #awaitJournal(generation: number): Promise<void> {
+    const key = this.#key!;
+    const s = this.ctx.store;
+    let noticed = false;
+    const notice = setTimeout(() => {
+      if (generation !== this.#generation || this.#durableReady || s.error) return;
+      s.error = strings.errors.draftStorage;
+      noticed = true;
+    }, LATE_JOURNAL_MS);
+    try {
+      for (let attempt = 1; ; attempt++) {
+        let durable: Journal | null;
+        try { durable = await readDraftJournal(key) as Journal | null; }
+        catch (error) {
+          if (generation !== this.#generation) return;
+          if (slow(error) && attempt < LATE_JOURNAL_ATTEMPTS) continue;
+          throw error;
+        }
+        if (generation !== this.#generation) return;
+        let local;
+        try { local = JSON.parse(localStorage.getItem(key) ?? 'null'); } catch { /* The journal alone. */ }
+        this.#restore(local, durable);
+        this.#durableReady = true;
+        this.#writeFailed = false;
+        if (noticed && s.error === strings.errors.draftStorage && !this.#backupFailed && !this.#failedEntries.size) s.error = null;
+        this.#changed = true;
+        this.persist();
+        return;
+      }
+    } catch {
+      if (generation === this.#generation) s.error = strings.errors.draftStorage;
+    } finally { clearTimeout(notice); }
   }
 
   stop(): void {
@@ -337,7 +413,8 @@ export class Drafts {
         // Each atomic entry includes its own revision; null is a deletion tombstone.
         // The old complete v1 backup remains available throughout migration.
         try { localStorage.setItem(`${this.#key}:entry:${key}`, `{"updatedAt":${updatedAt},"value":${serialized}}`); entry.backedUp = true; }
-        catch { if (typeof indexedDB === 'undefined') this.ctx.store.error = strings.errors.draftStorage; }
+        // Without a journal, or while a late one is still opening, the backup is the only copy.
+        catch { if (typeof indexedDB === 'undefined' || (this.#hydrated && !this.#durableReady)) this.ctx.store.error = strings.errors.draftStorage; }
         this.#changed = true;
         if (!this.#collecting) this.#checkpoint();
       });
@@ -499,6 +576,19 @@ function attachments(value: unknown, assets: Map<string, string>): Attachment[] 
       ...(data === undefined ? { pendingDraftAsset: item.assetId } : {}) };
     return [attachment];
   });
+}
+
+const pendingFiles = (input: Input) => [...input.attachments, ...input.queued.flatMap(item => item.attachments)].filter(file => unresolvedAssetId(file) !== undefined);
+
+function resolvePending(input: Input, assets: Map<string, string>): void {
+  const resolve = (files: Attachment[]) => files.map(file => {
+    const data = assets.get(unresolvedAssetId(file) ?? '');
+    if (data === undefined) return file;
+    const { pendingDraftAsset: _id, ...rest } = file as DraftAttachment;
+    return { ...rest, data };
+  });
+  if (input.attachments.some(file => assets.has(unresolvedAssetId(file) ?? ''))) input.attachments = resolve(input.attachments);
+  for (const item of input.queued) if (item.attachments.some(file => assets.has(unresolvedAssetId(file) ?? ''))) item.attachments = resolve(item.attachments);
 }
 
 function journalAssets(value: unknown): Map<string, string> {

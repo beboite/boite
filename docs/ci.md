@@ -182,11 +182,17 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 487,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,727,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,728,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,417,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-18, the slow draft journal merged with `origin/main` at `9ffdb977`
+(the lean boot) measures 486,005 entry bytes, 4,727,415 UI bytes and
+4,413,077 core JavaScript bytes with `measure()` after fresh `bun run build:ui`
+and `bun run build:core` on Windows. The UI limit rises to 4,728,000; the
+other limits stay.
 
 On 2026-10-18, the lean boot merged with `origin/main` at `2be13d45`
 (message pictures as file tickets and the media wire) measures 486,005 entry
@@ -241,6 +247,14 @@ entry bytes, 5,037,588 UI bytes and 4,416,712 core JavaScript bytes after fresh
 `bun run build:ui` and `bun run build:core` on Windows, against 4,412,886 core
 bytes for that main: the same 3,826. The core JavaScript limit rises to
 4,417,000; the entry and UI limits stay at 596,700 and 5,038,000.
+
+On 2026-10-18, a slow draft journal (the late read, its notice and the
+attachments it resolves, in `lib/store/drafts.svelte.ts` and
+`lib/draft-journal.ts`) merged with `origin/main` at `2be13d45` measures
+5,039,331 UI bytes with `measure()` after a fresh `bun run build:ui` on
+Windows, against 5,037,724 for those two files at that main, 1,607 more; the
+entry chunk stays at 596,622. The UI limit rises to 5,040,000; the other
+limits stay.
 
 On 2026-10-17, PR #566 merged with `origin/main` at `b6ae659a`, which brings
 the thread links and agent mail direction (PR #562), measures 595,205 entry

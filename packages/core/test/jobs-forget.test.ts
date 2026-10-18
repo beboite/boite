@@ -15,17 +15,69 @@ const onWindows = process.platform === 'win32';
 const describeWindows = onWindows ? describe : describe.skip;
 
 const k32 = onWindows
-  ? dlopen('kernel32.dll', {
-      GetCurrentProcess: { args: [], returns: FFIType.ptr },
-      GetProcessHandleCount: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
+  ? dlopen('kernel32.dll', { GetCurrentProcess: { args: [], returns: FFIType.ptr } }).symbols
+  : null;
+const nt = onWindows
+  ? dlopen('ntdll.dll', {
+      NtQueryInformationProcess: { args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.u32, FFIType.ptr], returns: FFIType.i32 },
+      NtQueryObject: { args: [FFIType.u64, FFIType.u32, FFIType.ptr, FFIType.u32, FFIType.ptr], returns: FFIType.i32 },
     }).symbols
   : null;
 
-function handleCount(): number {
-  if (k32 === null) return 0;
-  const out = new Uint32Array(1);
-  k32.GetProcessHandleCount(k32.GetCurrentProcess(), ptr(out));
-  return out[0] ?? 0;
+const PROCESS_HANDLE_SNAPSHOT = 51;
+const OBJECT_TYPE_INFORMATION = 2;
+const STATUS_INFO_LENGTH_MISMATCH = -1073741820;
+const typeNames = new Map<number, string>();
+
+function typeNameOf(handle: bigint): string {
+  if (nt === null) return '?';
+  const buffer = new Uint8Array(1024);
+  if (nt.NtQueryObject(handle, OBJECT_TYPE_INFORMATION, ptr(buffer), buffer.length, null) !== 0) return '?';
+  // A UNICODE_STRING first: its length in bytes, then a pointer into this buffer.
+  const view = new DataView(buffer.buffer);
+  const start = Number(view.getBigUint64(8, true)) - Number(ptr(buffer));
+  return new TextDecoder('utf-16le').decode(buffer.subarray(start, start + view.getUint16(0, true)));
+}
+
+/**
+ * This process's handles by kernel object type. A total count also moves with
+ * Bun's own worker threads and the subprocess wrappers its collector frees
+ * late, neither of which is a Job Object: on a loaded runner Bun 1.4.3 held 22
+ * more after 20 spawns with no job left.
+ */
+function handlesByType(): Map<string, number> {
+  const counts = new Map<string, number>();
+  if (nt === null || k32 === null) return counts;
+  for (let size = 1 << 16; ; size *= 2) {
+    const buffer = new Uint8Array(size);
+    const status = nt.NtQueryInformationProcess(k32.GetCurrentProcess(), PROCESS_HANDLE_SNAPSHOT, ptr(buffer), size, null);
+    if (status === STATUS_INFO_LENGTH_MISMATCH) continue;
+    if (status !== 0) throw new Error(`the handle snapshot failed with status ${status}`);
+    // PROCESS_HANDLE_SNAPSHOT_INFORMATION: a count, a reserved word, then 40-byte entries.
+    const view = new DataView(buffer.buffer);
+    const count = Number(view.getBigUint64(0, true));
+    for (let index = 0; index < count; index += 1) {
+      const at = 16 + index * 40;
+      const typeIndex = view.getUint32(at + 28, true);
+      let name = typeNames.get(typeIndex);
+      if (name === undefined) {
+        name = typeNameOf(view.getBigUint64(at, true));
+        typeNames.set(typeIndex, name);
+      }
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return counts;
+  }
+}
+
+function handlesAbove(before: Map<string, number>): Record<string, number> {
+  const now = handlesByType();
+  const above: Record<string, number> = {};
+  for (const name of new Set([...before.keys(), ...now.keys()])) {
+    const delta = (now.get(name) ?? 0) - (before.get(name) ?? 0);
+    if (delta !== 0) above[name] = delta;
+  }
+  return above;
 }
 
 const FORGET_MS = 100;
@@ -94,7 +146,7 @@ describeWindows('thread jobs of forgotten threads', () => {
     await waitForState('warm-up job was not forgotten', () => threadJobCount() === 0);
     const jobsBefore = threadJobCount();
     Bun.gc(true);
-    const handlesBefore = handleCount();
+    const handlesBefore = handlesByType();
 
     for (let index = 0; index < SPAWNS; index += 1) {
       const id = `plugin:fetch:${index}`;
@@ -105,21 +157,20 @@ describeWindows('thread jobs of forgotten threads', () => {
     await waitForState('minted processes remain live', () => ids.every((id) => procs.liveCount(id) === 0));
 
     await waitForState('minted jobs were not forgotten', () => threadJobCount() === jobsBefore);
-    // Bun owns a process handle until the exited subprocess is collected.
-    // Collect those wrappers before comparing kernel counts; a leaked native
-    // Job Object cannot be reclaimed by Bun's garbage collector.
-    // A loaded runner finalizes those wrappers late: 5 s expired on Windows CI
-    // with no job left, so the wait is longer and its failure says the count.
+    // The kernel assertion: not one Job Object handle above the baseline. No
+    // collection is needed, Bun's collector never owns a Job Object.
+    const above = handlesAbove(handlesBefore);
+    expect(above.Job ?? 0, `handles above the baseline after ${SPAWNS} spawns: ${JSON.stringify(above)}`).toBe(0);
+    // A process handle the jobs module kept would stay too. Bun owns one per
+    // subprocess until the wrapper is collected, so those get a collection.
     try {
       await waitFor(() => {
         Bun.gc(true);
-        return handleCount() - handlesBefore < SPAWNS / 2;
+        return (handlesAbove(handlesBefore).Process ?? 0) < SPAWNS / 2;
       }, 20000);
     } catch (cause) {
-      throw new Error(`${handleCount() - handlesBefore} handles above the baseline after ${SPAWNS} spawns; ${threadJobCount()} thread jobs`, { cause });
+      throw new Error(`handles above the baseline after ${SPAWNS} spawns: ${JSON.stringify(handlesAbove(handlesBefore))}`, { cause });
     }
-    // Preserve the kernel assertion: one leaked Job Object per id still fails.
-    expect(handleCount() - handlesBefore).toBeLessThan(SPAWNS / 2);
   }, 30000);
 
   test('the drain Worker sleeps until a packet and stops as soon as it is asked', async () => {

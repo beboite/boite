@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startCore } from '../../../tests/e2e/lib/core.ts';
+import { removeDir } from '../src/fs-retry.ts';
 
 const entry = join(import.meta.dir, '../src/main.ts');
 let dir: string;
@@ -14,7 +15,15 @@ beforeEach(() => {
   mkdirSync(dataDir);
 });
 
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+// Every child here has exited before its test ends: spawnSync returns after it,
+// and each core is awaited through `exited` or `stop`. Windows can still refuse
+// the directory for a moment (EBUSY on runners on 2026-10-15 and 2026-10-18,
+// right after the compiled core shut down), and Bun's rm tries only once.
+afterEach(async () => {
+  const left: string[] = [];
+  await removeDir(dir, (message) => left.push(message), 50);
+  expect(left).toEqual([]);
+});
 
 test.each(['cli', 'pair', 'update-apply', 'update-recover'])('%s reaches its command path without loading the server runtime', (command) => {
   const guard = join(dir, 'runtime-guard.ts');

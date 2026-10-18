@@ -106,20 +106,31 @@ test('shutdown cancels persistence backoff without replaying the turn', async ()
   const h = await startTestCore();
   const putTurn = h.core.journal.putTurn.bind(h.core.journal);
   let failures = 0;
+  let attemptsWhileStopping = 0;
   h.core.journal.putTurn = turn => {
-    if (turn.status === 'done') { failures++; throw new Error('terminal unavailable'); }
+    if (turn.status === 'done') {
+      failures++;
+      if (h.core.stopping) attemptsWhileStopping++;
+      throw new Error('terminal unavailable');
+    }
     putTurn(turn);
   };
+  const record = spyOn(h.core.logs, 'record');
   try {
     const client = await h.connect();
     const { threadId } = await echoThread(h, client);
     await client.call('turns.start', { threadId, prompt: 'shutdown' });
     await waitFor(() => failures > 0);
-    const started = Date.now();
+    // No wall clock: a stalled Windows runner took 5.3 s to stop here while
+    // the next three tests, which have no backoff, took 6.4, 6.1 and 2.8 s
+    // against 0.4 s. A backoff that kept sleeping tries once more after the
+    // core began stopping, and keeps the drain waiting to its deadline.
     await h.stop();
-    expect(Date.now() - started).toBeLessThan(1000);
+    expect(attemptsWhileStopping).toBe(0);
+    const drained = record.mock.calls.find(([, , context]) => context?.event === 'scheduler.drain.finished');
+    expect(drained?.[2]?.data).toEqual({ running: 1, left: 0 });
     expect(h.core.scheduler.state().running).toHaveLength(0);
-  } finally { h.core.journal.putTurn = putTurn; await h.stop(); }
+  } finally { h.core.journal.putTurn = putTurn; record.mockRestore(); await h.stop(); }
 });
 
 
