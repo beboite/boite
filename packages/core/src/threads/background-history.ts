@@ -96,8 +96,11 @@ export class BackgroundHistory {
     return true;
   }
 
-  /** Call once during core recovery, before clients can subscribe. Never resumes native work. */
-  interruptLive(at = Date.now()): void {
+  /**
+   * Call once during core recovery, before clients can subscribe. Never
+   * resumes native work. Returns the threads whose work it marked interrupted.
+   */
+  interruptLive(at = Date.now()): ThreadId[] {
     const rows = this.journal.db.query("SELECT payload FROM background_observations WHERE json_extract(payload, '$.state') = 'running'").all() as { payload: string }[];
     const byThread = new Map<ThreadId, BackgroundTaskObservation[]>();
     for (const row of rows) {
@@ -110,5 +113,6 @@ export class BackgroundHistory {
         for (const task of live) this.put({ ...task, state: 'cancelled', reason: 'core-restarted', observedAt: at, finishedAt: at });
       });
     }
+    return [...byThread.keys()];
   }
 }
