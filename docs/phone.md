@@ -367,10 +367,11 @@ A browser under the floor fails to parse the app, so `main.ts` never runs. An
 inline script in `index.html` notices on `load` and writes one sentence in the
 page instead: this browser cannot start Boite, and the versions it needs. A
 browser that has `Array.prototype.at`, `Object.hasOwn`, `structuredClone` and
-`oklch()`, which Safari 15.4 and Chrome 111 are the first to have together, lost
-a chunk on the way instead (offline, a dropped connection): the page says the
-app could not load, offers Try again, and loads again by itself once the
-browser is back online.
+`oklch()`, which Safari 15.4 and Chrome 111 are the first to have together,
+failed before the entry ran instead, most often on a chunk lost on the way
+(offline, a dropped connection), sometimes on a startup module that threw: the
+page says the app could not load, offers Try again, and loads again by itself
+once the browser is back online.
 
 ## Pictures and videos
 

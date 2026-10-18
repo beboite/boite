@@ -34,7 +34,8 @@ function noticeFor(language: string, floor = false) {
   const online = handler('online');
   listen.mockRestore();
   const alert = document.querySelector('#app [role=alert]');
-  return { text: alert?.querySelector('p')?.textContent ?? '', button: alert?.querySelector('button') ?? null, online, reload };
+  // The sentence is the notice's first node whatever holds it, so a script that drew the wrong one fails here, not on a missing element.
+  return { text: alert?.firstChild?.textContent ?? '', button: alert?.querySelector('button') ?? null, online, reload };
 }
 
 afterEach(() => {

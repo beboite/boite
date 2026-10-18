@@ -189,9 +189,9 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-18, the boot notice that tells a lost chunk from an old browser,
-on `origin/main` at `ee9f9ac8`, measures 4,856,783 UI bytes with `measure()`
-after a fresh `bun run build:ui` on Windows, against 4,854,887 for that main:
-its sentences, retry button and feature probe add 1,896 bytes to
+on `origin/main` at `a791c298`, measures 4,856,869 UI bytes with `measure()`
+after a fresh `bun run build:ui` on Windows, against 4,854,887 for main at
+`ee9f9ac8`: its sentences, retry button and feature probe add 1,982 bytes to
 `index.html`. The UI limit rises to 4,857,800; the other limits stay.
 
 On 2026-10-18, the tool summaries setting on `origin/main` at `150d7bb6`

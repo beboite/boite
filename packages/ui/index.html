@@ -91,9 +91,10 @@
     </script>
     <!-- main.ts sets the flag first; a page that loaded without it never ran the app.
          A browser under the floor (Safari 15.4, Chrome 111: docs/phone.md) fails to
-         parse it, and says so. A browser that has what the floor has lost a chunk on
-         the way (offline, a dropped connection): it offers to load again, and does
-         so by itself once the browser is back online. The catalogues never loaded,
+         parse it, and says so. A browser that has what the floor has failed before
+         the entry ran, most often on a chunk lost on the way (offline, a dropped
+         connection), sometimes on a module that threw: it offers to load again, and
+         does so by itself once the browser is back online. The catalogues never loaded,
          so each sentence is here once per language of LOCALES;
          src/lib/boot-notice.test.ts checks that. -->
     <script>
