@@ -3,7 +3,7 @@ import { basename, dirname, join } from 'node:path';
 import type { ThreadRewind, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, refused } from '../errors.ts';
-import { collectSharedBlobs, contains, restoreFiles, same, snapshot, workspaceRoot, type FileChange, type FileSnapshot, type SnapshotCache } from './checkpoint-files.ts';
+import { collectSharedBlobs, contains, overlap, restoreFiles, same, snapshot, workspaceRoot, type FileChange, type FileSnapshot, type SnapshotCache } from './checkpoint-files.ts';
 import { decodeManifest, encodeManifest, StoreMigration, trimFolder } from './checkpoint-store.ts';
 
 type FileResult = NonNullable<ThreadRewind['files']>;
@@ -119,13 +119,13 @@ export class CodeCheckpoints {
     try { root = await workspaceRoot(thread.cwd); } catch { return; }
     const checkpoint: Checkpoint = { root, messages: [...this.core.journal.walkTurnMessages(thread.id, turnId, { blobs: false })].filter(message => message.role === 'user').map(message => message.id) };
     this.assertAvailable(root);
-    for (const other of this.active.values()) {
-      if (contains(root, other.checkpoint.root) || contains(other.checkpoint.root, root)) {
-        checkpoint.reason = other.checkpoint.reason = 'turns ran concurrently in the same workspace';
-      }
-    }
+    // Registered first: a turn that starts while this one compares sees it.
+    const others = [...this.active.values()];
     this.active.set(turnId, { threadId: thread.id, turnId, checkpoint });
     try {
+      for (const other of others) {
+        if (await overlap(root, other.checkpoint.root)) checkpoint.reason = other.checkpoint.reason = 'turns ran concurrently in the same workspace';
+      }
       this.pruned ??= this.prune();
       await this.pruned;
       await this.trims.get(thread.id);
@@ -168,11 +168,18 @@ export class CodeCheckpoints {
     try { root = await workspaceRoot(thread.cwd); }
     catch (error) { return cut({ status: 'unavailable', count: 0, reason: `the working directory is unavailable: ${messageOf(error)}` }); }
     this.assertAvailable(root);
-    if ([...this.active.values()].some(active => contains(root, active.checkpoint.root) || contains(active.checkpoint.root, root))) {
-      throw refused('another turn is working in this project; stop it before restoring files', { field: 'cwd', path: root, reason: 'turn-in-flight' });
-    }
+    // Held before comparing, so no turn starts here while the files are restored.
     this.restoring.add(root);
     try {
+      // A turn still working here (a sub-agent winding down after a Stop, a
+      // second conversation) ran beside the removed ones, so their checkpoint
+      // is not exact, and restoring would write under that agent. The edit
+      // still goes through; only the files stay as they are.
+      for (const active of [...this.active.values()]) {
+        if (await overlap(root, active.checkpoint.root)) {
+          return cut({ status: 'unavailable', count: 0, reason: 'another turn is working in this folder; files were left as they are', busy: true });
+        }
+      }
       const { files, changes } = await this.restore(thread, root, turnIds, messageId);
       try { return cut(files); }
       catch (error) {

@@ -205,7 +205,7 @@ test('a failure while cutting messages rolls the restored files back', async () 
   expect(h.core.threads.get(threadId).messages.filter(message => message.role === 'user')).toHaveLength(1);
 });
 
-test('overlapping turns cannot restore each other\'s files, and an active workspace refuses a rewind', async () => {
+test('overlapping turns cannot restore each other\'s files, and an edit beside a working turn leaves the files alone', async () => {
   await writeFile(join(cwd, 'app.ts'), 'initial');
   const thread = h.core.threads.require(threadId);
   const other = await client.call('threads.create', { projectId: thread.projectId!, providerId: 'echo', accountId: thread.accountId });
@@ -215,12 +215,16 @@ test('overlapping turns cannot restore each other\'s files, and an active worksp
     if (prompt.includes('held')) { entered = true; await held.promise; }
     else await writeFile(join(cwd, 'app.ts'), 'parallel');
   };
-  const first = await run('initial');
+  await run('initial');
+  const second = await run('second');
   const pending = await client.call('turns.start', { threadId: other.id, prompt: 'held' });
   try {
     await waitFor(() => entered);
-    await expect(client.call('threads.rewind', { threadId, messageId: first })).rejects.toThrow('another turn');
-    expect(h.core.threads.get(threadId).messages.some(message => message.id === first)).toBe(true);
+    // A sub-agent still stopping, or another conversation, works in this folder.
+    const beside = await client.call('threads.rewind', { threadId, messageId: second });
+    expect(beside.files).toMatchObject({ status: 'unavailable', busy: true });
+    expect(h.core.threads.get(threadId).messages.some(message => message.id === second)).toBe(false);
+    expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('parallel');
     const overlap = await run('parallel');
     held.resolve();
     await waitFor(() => h.core.journal.getTurn(pending.id)?.finishedAt != null);
@@ -229,6 +233,35 @@ test('overlapping turns cannot restore each other\'s files, and an active worksp
     expect(rewound.files?.reason).toContain('concurrently');
     expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('parallel');
   } finally { held.resolve(); }
+});
+
+test('a turn in a worktree nested in the project neither blocks nor spoils a rewind of the main checkout', async () => {
+  expect((await git(h.core, threadId, cwd, ['init', '--quiet'])).code).toBe(0);
+  await writeFile(join(cwd, '.gitignore'), '.boite/\n');
+  await writeFile(join(cwd, 'app.ts'), 'initial');
+  expect((await git(h.core, threadId, cwd, ['add', '.'])).code).toBe(0);
+  expect((await git(h.core, threadId, cwd, ['commit', '--quiet', '-m', 'initial'])).code).toBe(0);
+  const nested = join(cwd, '.boite', 'worktrees', 'wt-child');
+  expect((await git(h.core, threadId, cwd, ['worktree', 'add', '--quiet', '-b', 'child', nested])).code).toBe(0);
+  const thread = h.core.threads.require(threadId);
+  const child = await client.call('threads.create', { projectId: thread.projectId!, providerId: 'echo', accountId: thread.accountId });
+  h.core.journal.putThread({ ...h.core.threads.require(child.id), cwd: nested });
+  const held = Promise.withResolvers<void>();
+  let entered = false;
+  change = async prompt => {
+    if (prompt.includes('held')) { entered = true; await held.promise; }
+    else await writeFile(join(cwd, 'app.ts'), prompt);
+  };
+  await run('kept');
+  const pending = await client.call('turns.start', { threadId: child.id, prompt: 'held' });
+  try {
+    await waitFor(() => entered);
+    const edited = await run('removed');
+    const rewound = await client.call('threads.rewind', { threadId, messageId: edited });
+    expect(rewound.files).toEqual({ status: 'restored', count: 1 });
+    expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('kept');
+  } finally { held.resolve(); }
+  await waitFor(() => h.core.journal.getTurn(pending.id)?.finishedAt != null);
 });
 
 test('permanently removing a project removes its private file checkpoints', async () => {

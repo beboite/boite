@@ -1883,8 +1883,12 @@ export interface ThreadRewind {
    * carrying the kept history, as a change of account does.
    */
   session: 'native' | 'seeded';
-  /** File changes restored before the cut. Missing on older cores. */
-  files?: { status: 'restored' | 'unchanged' | 'unavailable'; count: number; reason?: string };
+  /**
+   * File changes restored before the cut. Missing on older cores. `busy`:
+   * another turn was working in the same folder, so the files were left as
+   * they are and only the messages were rewound.
+   */
+  files?: { status: 'restored' | 'unchanged' | 'unavailable'; count: number; reason?: string; busy?: true };
 }
 
 // ---------------------------------------------------------------------------

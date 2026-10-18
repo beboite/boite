@@ -33,6 +33,38 @@ export function contains(root: string, path: string): boolean {
   return child === '' || (!isAbsolute(child) && child !== '..' && !child.startsWith(`..${sep}`));
 }
 
+/**
+ * Whether turns in these two folders can change the same snapshot file. A
+ * folder inside another shares its files unless the outer snapshot leaves it
+ * out: a repository or worktree of its own under a git workspace (git lists it
+ * as one directory entry), or a skipped folder in a plain walk.
+ */
+export async function overlap(a: string, b: string): Promise<boolean> {
+  if (contains(a, b)) return !await leftOut(resolve(a), resolve(b));
+  if (contains(b, a)) return !await leftOut(resolve(b), resolve(a));
+  return false;
+}
+
+async function leftOut(root: string, path: string): Promise<boolean> {
+  const parts = relative(root, path).split(sep).filter(Boolean);
+  if (!await insideGit(root)) return parts.some(part => SKIP.has(part));
+  for (let depth = 1; depth <= parts.length; depth += 1) {
+    if (parts[depth - 1] === '.git' || await exists(join(root, ...parts.slice(0, depth), '.git'))) return true;
+  }
+  return false;
+}
+
+async function insideGit(folder: string): Promise<boolean> {
+  for (let current = folder; ; current = dirname(current)) {
+    if (await exists(join(current, '.git'))) return true;
+    if (dirname(current) === current) return false;
+  }
+}
+
+async function exists(path: string): Promise<boolean> {
+  try { await lstat(path); return true; } catch { return false; }
+}
+
 export function same(a: FileEntry | undefined, b: FileEntry | undefined): boolean {
   return a?.hash === b?.hash && a?.mode === b?.mode && a?.link === b?.link && a?.unbacked === b?.unbacked;
 }
