@@ -991,11 +991,15 @@ export interface ContextUse {
  * How long the provider keeps the conversation's prompt prefix cached after the
  * last turn. A request inside that time reads the prefix from the cache at a
  * fraction of the input price; after it, the provider processes the whole
- * context again. Every hit restarts the clock, so `at` is the end of the turn
+ * context again. Every hit restarts the clock, so `at` belongs to the turn
  * that last touched the cache, not the turn that first wrote it.
  */
 export interface PromptCache {
-  /** When the turn that last used the cache finished. */
+  /**
+   * When the turn that last used the cache sent its last main-loop request,
+   * as the driver reports it (`TurnResult.cacheAt`), or when that turn
+   * finished for a driver that reports none.
+   */
   at: Timestamp;
   /** Seconds the prefix is kept after `at`. */
   ttlSeconds: number;

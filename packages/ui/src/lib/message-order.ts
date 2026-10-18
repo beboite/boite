@@ -1,4 +1,4 @@
-import type { Message, Turn } from '@boite/contracts';
+import { queueOrder, type Message, type Turn } from '@boite/contracts';
 import { viewPart } from './inline-view';
 
 /**
@@ -46,6 +46,9 @@ export function filesLast(timeline: Message[], turns: readonly Pick<Turn, 'id' |
 }
 
 const pinging = (turn: Pick<Turn, 'execution'> | undefined) => turn?.execution?.operation === 'keepalive';
+type Pinged = Pick<Turn, 'id' | 'queuedAt' | 'execution'>;
+/** The turns in the order they were queued, whatever order a store merge left them in. */
+const queued = (turns: readonly Pinged[]) => [...turns].sort(queueOrder);
 
 /**
  * `timeline` with each of Boite's cache pings as one line: its opening
@@ -53,20 +56,21 @@ const pinging = (turn: Pick<Turn, 'execution'> | undefined) => turn?.execution?.
  * by another one leaves the line to the last of them, which
  * `keepaliveRun` counts. The same array comes back when there is no ping.
  */
-export function quietKeepalives(timeline: Message[], turns: readonly Pick<Turn, 'id' | 'execution'>[]): Message[] {
+export function quietKeepalives(timeline: Message[], turns: readonly Pinged[]): Message[] {
+  if (!turns.some(pinging)) return timeline;
   const merged = new Set<string>(), pings = new Set<string>();
-  turns.forEach((turn, index) => {
+  queued(turns).forEach((turn, index, ordered) => {
     if (!pinging(turn)) return;
     pings.add(turn.id);
-    if (pinging(turns[index + 1])) merged.add(turn.id);
+    if (pinging(ordered[index + 1])) merged.add(turn.id);
   });
-  if (pings.size === 0) return timeline;
   return timeline.filter((message) => !pings.has(message.turnId) || (message.role === 'system' && !merged.has(message.turnId)));
 }
 
 /** How many pings in a row end with this one: the count its line says. */
-export function keepaliveRun(turns: readonly Pick<Turn, 'id' | 'execution'>[], turnId: string): number {
-  let index = turns.findIndex((turn) => turn.id === turnId), count = 0;
-  while (index >= 0 && pinging(turns[index])) { count += 1; index -= 1; }
+export function keepaliveRun(turns: readonly Pinged[], turnId: string): number {
+  const ordered = queued(turns);
+  let index = ordered.findIndex((turn) => turn.id === turnId), count = 0;
+  while (index >= 0 && pinging(ordered[index])) { count += 1; index -= 1; }
   return Math.max(count, 1);
 }

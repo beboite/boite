@@ -33,8 +33,9 @@ test('a running turn shows each file where it came, and a user upload or a page 
 });
 
 test('each cache ping is its opening line, and pings in a row leave one line that counts them', () => {
-  const turn = (id: string, ping = false) => ({ id, ...(ping ? { execution: { operation: 'keepalive' as const } } : {}) }) as Parameters<typeof keepaliveRun>[0][number];
-  const turns = [turn('a'), turn('p1', true), turn('p2', true), turn('b'), turn('p3', true)];
+  const turn = (id: string, queuedAt: number, ping = false) => ({ id, queuedAt, ...(ping ? { execution: { operation: 'keepalive' as const } } : {}) }) as Parameters<typeof keepaliveRun>[0][number];
+  // Out of order, as a store merge may leave them: queue time decides.
+  const turns = [turn('p3', 5, true), turn('b', 4), turn('p2', 3, true), turn('a', 1), turn('p1', 2, true)];
   const timeline = [
     message('u1', 'a', 'text', 'user'), message('a1', 'a'),
     message('s1', 'p1', 'text', 'system'), message('o1', 'p1'),
@@ -45,5 +46,5 @@ test('each cache ping is its opening line, and pings in a row leave one line tha
   expect(quietKeepalives(timeline, turns).map(row => row.id)).toEqual(['u1', 'a1', 's2', 'u2', 's3']);
   expect([keepaliveRun(turns, 'p2'), keepaliveRun(turns, 'p3'), keepaliveRun(turns, 'a')]).toEqual([2, 1, 1]);
   // No ping: the same array.
-  expect(quietKeepalives(timeline, [turn('a')])).toBe(timeline);
+  expect(quietKeepalives(timeline, [turn('a', 1)])).toBe(timeline);
 });

@@ -2347,7 +2347,7 @@ export const strings = {
       intro: 'These are unfinished and can change or disappear.'
     },
     cacheKeepalive: 'Keep the prompt cache warm',
-    cacheKeepaliveHint: 'While a conversation waits on its agents or workflows, Boite sends a one-word turn shortly before the provider drops its cached prompt, so their result is read at the cached price. Each ping counts as usage. A ping that misses the cache stops it.',
+    cacheKeepaliveHint: 'While a conversation waits on its agents or workflows, Boite sends a one-word turn shortly before the provider drops its cached prompt, so their result is read at the cached price. Each ping counts as usage. A ping that misses the cache ends the pings.',
     cacheKeepaliveHours: 'For at most',
     cacheKeepaliveHoursHint: 'Counted from the end of the conversation\'s last turn. Pings also stop when the agents finish, when you write or stop, and after as many pings as one cache miss would cost.',
     cacheKeepaliveUnit: 'hours',
