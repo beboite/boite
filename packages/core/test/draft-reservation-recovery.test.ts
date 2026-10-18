@@ -377,7 +377,7 @@ test('cleanup deadline stops the registered git tree before returning and preser
   });
   try {
     await expect(h.core.worktrees.remove('cleanup_timeout', project, { path: join(project.path, 'unused'), branch: 'boite/unused' }, 1500))
-      .rejects.toThrow('git cleanup did not finish');
+      .rejects.toThrow(/^git reflog show .* did not finish within/);
     expect(existsSync(marker)).toBe(true);
     const pid = Number(readFileSync(marker, 'utf8'));
     await waitFor(() => {
