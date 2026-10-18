@@ -1036,9 +1036,12 @@ export const fr: Translation = {
   },
 
   palette: {
-    placeholder: 'Cherchez une conversation, ou tapez une commande',
+    placeholder: 'Cherchez une conversation, un projet ou une commande',
+    projects: 'Projets',
+    /** Extra words a project row answers to: picking one starts a thread there. */
+    newThreadWords: 'nouvelle conversation démarrer brouillon new thread',
+    find: 'Chercher dans cette conversation',
     terminal: 'Afficher ou masquer le terminal',
-    threads: 'Conversations',
     commands: 'Commandes',
     empty: 'Rien ne correspond.',
     hint: 'Entrée pour ouvrir, Échap pour fermer',
@@ -2384,7 +2387,7 @@ export const fr: Translation = {
       pin: 'Épingler ou désépingler cette conversation',
       reopenThread: 'Rouvrir la dernière conversation archivée',
       copyAnswer: 'Copier la dernière réponse',
-      find: 'Chercher dans cette conversation',
+      find: 'Chercher dans cette conversation, ou choisir le projet d\'une nouvelle',
       terminalNew: 'Nouveau terminal',
       terminalSplit: 'Diviser le terminal à droite',
       terminalSplitVertical: 'Diviser le terminal en bas',

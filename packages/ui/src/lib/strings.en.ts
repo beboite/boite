@@ -1079,9 +1079,12 @@ export const strings = {
   },
 
   palette: {
-    placeholder: 'Search threads, or type a command',
+    placeholder: 'Search threads, projects or commands',
+    projects: 'Projects',
+    /** Extra words a project row answers to: picking one starts a thread there. */
+    newThreadWords: 'new thread start draft',
+    find: 'Find in this thread',
     terminal: 'Show or hide the terminal',
-    threads: 'Threads',
     commands: 'Commands',
     empty: 'Nothing matches.',
     hint: 'Enter to open, Esc to close',
@@ -2517,7 +2520,7 @@ export const strings = {
       pin: 'Pin or unpin this thread',
       reopenThread: 'Reopen the thread archived last',
       copyAnswer: 'Copy the last answer',
-      find: 'Find in this thread',
+      find: 'Find in this thread, or pick a new thread\'s project',
       terminalNew: 'New terminal',
       terminalSplit: 'Split the terminal right',
       terminalSplitVertical: 'Split the terminal down',
