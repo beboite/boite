@@ -502,10 +502,10 @@ les agents"`). The list is `REQUESTABLE_SETTINGS` in
 "Agents"`); credentials, account ids and browser profiles are not in it.
 
 Language, experiments and names come from the apps: each says them after every
-hello and on every change (`client.preferences`, a paired phone included). The
-core keeps them per socket, in memory only, and reads the app that last sent a
-prompt or changed one of them; once that app's socket closes, the next app to
-report takes its place. The language also rides on each prompt
+hello and on every change (`client.preferences`, a paired phone included), with
+an id it keeps on the device (`boite.appId`). The core keeps them in memory
+only, and reads the app that last sent a prompt or changed one of them; once
+that app's socket closes, the next app to report takes its place. The language also rides on each prompt
 (`SentFrom.language`), so the one-line note on where a prompt came from says
 `which shows Boite in French` when a session starts and when the language
 changes. Before any app reported, the first line says so and no experiment is
@@ -526,7 +526,12 @@ included, draws its switch showing the value now; any other value shows the
 current value struck through, the proposed one and Apply. The switch and Apply
 call `settings.set`, the call the Settings page makes, so only the owner can
 use them; an experiment's switch flips the device's own experiment, which any
-of the user's devices may do, and that app's next report settles the card.
+of the user's devices may do, and stays free while the core has not heard it.
+An experiment's card settles when an app flips that switch since its last
+report, compared by the app's id so a reconnect still counts, or when the app
+it was asked from reports another value, a flip made offline or across a
+restart. Another app that merely has a different value, a language change or a
+core setting moving settles nothing.
 Show in Settings stays as a secondary button for whoever can apply. A paired
 device answers a core setting's card with Refuse only. An open card's Open
 Settings is offered to any client whose Settings draws that card. No button to Settings appears where the card is

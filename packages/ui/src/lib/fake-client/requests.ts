@@ -1,5 +1,5 @@
 /** Permission requests and questions: asked by a turn, answered by the user. */
-import { RpcErrorCode, agentSettingAnswerText, checkClientPreferences, checkSettingRequest, experimentOf, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { RpcErrorCode, agentSettingAnswerText, checkClientPreferences, checkSettingRequest, settledExperiment, type ClientPreferences, type ExperimentId, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { checkAnswer, checkAsk } from './checks';
 import { QUESTION_OPTIONS, QUESTION_TEXT } from './conversation';
@@ -140,14 +140,14 @@ function agentSettingText(ctx: FakeContext, setting: AgentSettingAsk, answer: Qu
 }
 
 /**
- * As the core's `settleSettings` and `settleClient`: a change card closes once
- * its setting left the value it was asked from. `experiments` settles the
- * experiment cards only, as an app's report does.
+ * As the core's `settleSettings`, or `settleClient` with `report`: a core
+ * setting's card closes once its setting left the value it was asked from, an
+ * experiment's once an app flipped its switch.
  */
-export function settleSettings(ctx: FakeContext, settings: Settings, experiments = false): void {
+export function settleSettings(ctx: FakeContext, settings: Settings, report?: { preferences: ClientPreferences; before: readonly ExperimentId[] | null }): void {
   for (const [questionId, pending] of [...ctx.pendingQuestions]) {
     const setting = pending.request.setting;
-    const answer = setting === undefined || (experiments && (setting.kind !== 'change' || experimentOf(setting.key) === null)) ? null : settledSetting(setting, settings, ctx.clientPreferences);
+    const answer = setting === undefined ? null : report ? settledExperiment(setting, report.preferences, report.before) : settledSetting(setting, settings);
     if (answer === null) continue;
     ctx.pendingQuestions.delete(questionId);
     pending.resolve(answer);
@@ -334,8 +334,10 @@ export function requestMethods(ctx: FakeContext) {
     'client.preferences': async (params) => {
       const checked = checkClientPreferences(params);
       if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
+      const before = ctx.clientApps.get(checked.preferences.app)?.experiments ?? null;
+      ctx.clientApps.set(checked.preferences.app, checked.preferences);
       ctx.clientPreferences = checked.preferences;
-      settleSettings(ctx, ctx.settings, true);
+      settleSettings(ctx, ctx.settings, { preferences: checked.preferences, before });
       return { ok: true };
     },
     'questions.skip': async (params) => {

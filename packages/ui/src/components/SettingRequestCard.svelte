@@ -69,12 +69,14 @@
   /** The core settles the card when the value lands; until then it stays busy. */
   async function apply(next: unknown): Promise<boolean> {
     if (!change || busy || !canApply) return false;
-    busy = true;
     if (experiment !== null) {
-      // The app reports the switch to the core, which settles the card.
+      // The app reports the flip to the core, which settles the card. The
+      // switch stays free: it shows this device, and a flip that settles
+      // nothing (offline, an old core) must not leave it stuck.
       setExperiment(experiment, next === true);
       return true;
     }
+    busy = true;
     if (await store.saveSettings({ [change.key]: next } as Partial<Settings>)) return true;
     busy = false;
     return false;

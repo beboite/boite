@@ -144,7 +144,10 @@ test('the app tells its core the language and experiments it has, and an experim
     expect(document.getElementById(toggle.getAttribute('aria-labelledby')!)?.textContent).toBe('Whip');
 
     toggle.click();
+    flushSync();
     expect(JSON.parse(localStorage.getItem('boite.experiments')!)).toEqual(['resident-agents', 'whip']);
+    // This device's switch is never held: a flip the core does not hear yet must not freeze it.
+    expect(toggle.disabled).toBe(false);
     await vi.waitFor(() => expect(store.pendingQuestions.some((question) => question.id === questionId)).toBe(false));
     await vi.waitFor(() => expect(store.openThread!.messages.some((message) => message.role === 'user' && message.parts.some((part) => part.type === 'text' && part.text === '> Try the whip\n\napplied: experiment.whip is now true'))).toBe(true));
   } finally {

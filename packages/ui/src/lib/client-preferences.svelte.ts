@@ -1,6 +1,6 @@
 /*
  * What this app tells each core it is connected to about itself
- * (`client.preferences`): the language it speaks, the experiments it has on
+ * (`client.preferences`): an id kept on the device, the language it speaks, the experiments it has on
  * and the names it gives settings in that language. An agent then reads the
  * screen the user reads (`boite settings`), and a card about an experiment
  * settles once this app reports the switch moved. Sent after every hello and
@@ -12,7 +12,25 @@ import type { ObservableClient } from './client';
 import { experimentCopy } from './experiment-copy';
 import { readExperiments, subscribeExperiments } from './experiments';
 import { activeLocale } from './i18n.svelte';
+import { secureId } from './secure-id';
 import { settingLabel, settingsPageLabel } from './setting-requests';
+
+const APP_ID_KEY = 'boite.appId';
+let appId: string | null = null;
+
+/** This device's id across reconnects and restarts; one per page when storage is refused. */
+function deviceAppId(): string {
+  if (appId !== null) return appId;
+  try {
+    const stored = localStorage.getItem(APP_ID_KEY);
+    if (stored !== null && /^[A-Za-z0-9_-]{8,64}$/.test(stored)) return (appId = stored);
+    appId = secureId();
+    localStorage.setItem(APP_ID_KEY, appId);
+  } catch {
+    appId ??= secureId();
+  }
+  return appId;
+}
 
 export function clientPreferences(): ClientPreferences {
   const copy = experimentCopy();
@@ -20,7 +38,7 @@ export function clientPreferences(): ClientPreferences {
   for (const key of REQUESTABLE_SETTING_KEYS) labels[key] = settingLabel(key);
   for (const id of EXPERIMENT_IDS) labels[`experiment.${id}`] = copy[id].title;
   for (const page of SETTINGS_PAGES) labels[page] = settingsPageLabel(page);
-  return { language: activeLocale(), experiments: readExperiments(), labels };
+  return { app: deviceAppId(), language: activeLocale(), experiments: readExperiments(), labels };
 }
 
 /** Reports to `client` while `current` holds. Returns what stops it. */

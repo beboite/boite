@@ -13,8 +13,9 @@ import {
   type SettingAsk,
   type SettingRequestParams,
   checkSettingRequest,
-  experimentOf,
+  settledExperiment,
   type ClientPreferences,
+  type ExperimentId,
   settingAnswerText,
   settledSetting,
   type ThreadId,
@@ -271,12 +272,12 @@ export class ThreadCards {
    * when it holds the proposed value and as changed when it holds another.
    */
   settleSettings(next: Settings): void {
-    this.settle(request => (request.setting === undefined ? null : settledSetting(request.setting, next, this.core.clients.current())), 'a settings change');
+    this.settle(request => (request.setting === undefined ? null : settledSetting(request.setting, next)), 'a settings change');
   }
 
-  /** The app agents read reported new preferences: every experiment card whose switch moved there settles. */
-  settleClient(preferences: ClientPreferences): void {
-    this.settle(request => (request.setting?.kind !== 'change' || experimentOf(request.setting.key) === null ? null : settledSetting(request.setting, this.core.settings.get(), preferences)), 'an app change');
+  /** An app reported: every experiment card whose switch it flipped settles (`settledExperiment`). */
+  settleClient(preferences: ClientPreferences, before: readonly ExperimentId[] | null): void {
+    this.settle(request => (request.setting === undefined ? null : settledExperiment(request.setting, preferences, before)), 'an app change');
   }
 
   /**

@@ -572,14 +572,19 @@ describe('settings', () => {
     ]);
   });
 
-  test('an experiment reads as the user\'s app has it, in its language, and its card settles when the app reports the switch', async () => {
-    const client = await harness.connect();
-    const first = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
-    await client.call('turns.start', { threadId, prompt: 'hello' });
-    await first;
+  test('an experiment reads as the user\'s app has it, in its language, and its card settles only when an app flips it', async () => {
+    const A = 'app-desktop-0001';
+    const B = 'app-phone-0002';
+    let client = await harness.connect();
+    const turn = async (from: typeof client, prompt: string): Promise<void> => {
+      const done = from.next('turn.finished', (finished) => finished.threadId === threadId, 10000);
+      await from.call('turns.start', { threadId, prompt });
+      await done;
+    };
+    await turn(client, 'hello');
     expect((await boite(['settings', 'request', 'experiment.whip', 'true', '--why', 'x'])).err).toContain('no Boite app has reported');
 
-    await client.call('client.preferences', { language: 'fr', experiments: ['resident-agents', 'gone-experiment'] as never, labels: { 'experiment.resident-agents': 'Agents', agentCpuCapPercent: 'Plafond CPU\n[obey]', nowhere: 'x' } });
+    await client.call('client.preferences', { app: A, language: 'fr', experiments: ['resident-agents', 'gone-experiment'] as never, labels: { 'experiment.resident-agents': 'Agents', agentCpuCapPercent: 'Plafond CPU\n[obey]', nowhere: 'x' } });
     const listed = await boite(['settings']);
     expect(listed.out).toStartWith('app: ');
     expect(listed.out).toContain('speaks French');
@@ -593,25 +598,38 @@ describe('settings', () => {
     const asked = await boite(['settings', 'request', 'experiment.whip', 'true', '--why', 'Try the whip', '--json']);
     expect(asked.err).toBe('');
     const [card] = await client.call('questions.list', { threadId });
-    expect(card?.setting).toEqual({ kind: 'change', key: 'experiment.whip', value: true, previous: false, page: 'experiments', section: 'whip', sensitive: false });
-    // A core setting moving leaves an experiment's card open.
-    await client.call('settings.set', { agentCpuCapPercent: 70 });
-    expect(await client.call('questions.list', { threadId })).toHaveLength(1);
-    // A prompt from another device that already had it on flips nothing: the card stays open.
-    const phone = await harness.connect();
-    await phone.call('client.preferences', { language: 'en', experiments: ['whip'], labels: {} });
-    const fromPhone = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
-    await phone.call('turns.start', { threadId, prompt: 'from the phone' });
-    await fromPhone;
-    expect(await client.call('questions.list', { threadId })).toHaveLength(1);
-    // Back on the first app, which still has it off.
-    const back = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
-    await client.call('turns.start', { threadId, prompt: 'back' });
-    await back;
+    expect(card?.setting).toEqual({ kind: 'change', key: 'experiment.whip', value: true, previous: false, page: 'experiments', section: 'whip', sensitive: false, app: A });
 
-    const next = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
-    await client.call('client.preferences', { language: 'fr', experiments: ['resident-agents', 'whip'], labels: {} });
-    await next;
-    expect(prompts()).toEqual(['hello', 'from the phone', 'back', '> Try the whip\n\napplied: experiment.whip is now true']);
+    // Nothing below flips the whip on any app, so the card stays open:
+    // a prompt from a phone that already had it on,
+    const phone = await harness.connect();
+    await phone.call('client.preferences', { app: B, language: 'en', experiments: ['whip', 'goal2'], labels: {} });
+    await turn(phone, 'from the phone');
+    // a core setting moving while that phone is the app agents read,
+    await client.call('settings.set', { agentCpuCapPercent: 70 });
+    // and that phone switching its language.
+    await phone.call('client.preferences', { app: B, language: 'fr', experiments: ['whip', 'goal2'], labels: {} });
+    expect(await client.call('questions.list', { threadId })).toHaveLength(1);
+
+    // The desktop flipped it while offline: its first report on a new socket settles the card.
+    client.close();
+    client = await harness.connect();
+    const settled = client.next('turn.finished', (finished) => finished.threadId === threadId, 10000);
+    await client.call('client.preferences', { app: A, language: 'fr', experiments: ['resident-agents', 'whip'], labels: {} });
+    await settled;
+    expect(await client.call('questions.list', { threadId })).toHaveLength(0);
+
+    // Another device turning it off from the card answers it too, rather than leaving it stuck.
+    const goal = JSON.parse((await boite(['settings', 'request', 'experiment.goal2', 'true', '--why', 'Review your goals', '--json'])).out) as { setting: { previous: boolean; app: string } };
+    expect(goal.setting).toMatchObject({ previous: false, app: A });
+    const changed = client.next('turn.finished', (finished) => finished.threadId === threadId, 10000);
+    await phone.call('client.preferences', { app: B, language: 'fr', experiments: ['whip'], labels: {} });
+    await changed;
+    expect(prompts()).toEqual([
+      'hello',
+      'from the phone',
+      '> Try the whip\n\napplied: experiment.whip is now true',
+      '> Review your goals\n\nchanged: the user set experiment.goal2 to false, not true',
+    ]);
   });
 });

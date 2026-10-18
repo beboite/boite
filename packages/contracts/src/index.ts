@@ -5296,8 +5296,8 @@ import type { AutoCompact, CacheKeepalive } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export {
-  APP_LANGUAGES, CLIENT_LABELS_MAX, CLIENT_LABEL_CHARS, EXPERIMENT_IDS, REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
-  checkClientPreferences, checkSettingRequest, currentSetting, effectiveSetting, experimentOf, isExperimentId, isRequestableSetting, isSettingsPage, readSettings,
+  APP_LANGUAGES, CLIENT_APP_PATTERN, CLIENT_LABELS_MAX, CLIENT_LABEL_CHARS, EXPERIMENT_IDS, REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
+  checkClientPreferences, checkSettingRequest, settledExperiment, currentSetting, effectiveSetting, experimentOf, isExperimentId, isRequestableSetting, isSettingsPage, readSettings,
   sameClientPreferences, sameSetting, settingAnswerText, settledSetting,
   type AppLanguage, type ClientPreferences, type ExperimentId, type ExperimentSettingKey, type RequestableKey, type RequestableSetting, type SettingAsk,
   type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck, type SettingRequestParams, type SettingsPage,

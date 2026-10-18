@@ -333,7 +333,7 @@ export class Core {
     this.#stopMoves = scheduleInlineValueMoves(this.journal, (message) => this.log('error', message));
     this.router = new Router();
     this.settings = new SettingsStore(this);
-    this.clients = new ClientPreferencesBook(preferences => this.threads.cards.settleClient(preferences));
+    this.clients = new ClientPreferencesBook((preferences, before) => this.threads.cards.settleClient(preferences, before));
     this.providers = new ProviderRegistry(this.dataDir);
     this.providers.loadSwitches(this.journal.getSetting(PROVIDER_SWITCHES));
     this.accounts = new AccountStore(this);

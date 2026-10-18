@@ -47,10 +47,10 @@ test('the agent hears which app sent a prompt when its session starts and when t
     // The shell on this machine's loopback is named by the core.
     expect(await send(here, 'six')).toContain(`the Boite desktop app on the computer ${JSON.stringify(hostname())}.`);
     // Once the app says its language, the agent hears it, and again when the user switches it.
-    await here.call('client.preferences', { language: 'fr', experiments: [], labels: {} });
+    await here.call('client.preferences', { app: 'app-here-0001', language: 'fr', experiments: [], labels: {} });
     expect(await send(here, 'six-fr')).toContain(`the Boite desktop app on the computer ${JSON.stringify(hostname())}, which shows Boite in French.`);
     expect(await send(here, 'six-fr again')).not.toContain(NOTE);
-    await here.call('client.preferences', { language: 'en', experiments: [], labels: {} });
+    await here.call('client.preferences', { app: 'app-here-0001', language: 'en', experiments: [], labels: {} });
     expect(await send(here, 'six-en')).toContain('which shows Boite in English.');
 
     let users = h.core.journal.listMessages(threadId).filter(m => m.role === 'user').map(m => m.parts[0]);
