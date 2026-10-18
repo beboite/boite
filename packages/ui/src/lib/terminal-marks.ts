@@ -68,7 +68,7 @@ export function reportedCwd(code: number, data: string): string | null {
 }
 
 /** Longer than this, an OSC is not a mark or a directory: it is skipped to its end. */
-const MAX_OSC = 4096;
+export const MAX_OSC = 4096;
 /** Outside a sequence: ESC, or the C1 OSC introducer. */
 const OSC_START = /[\x1b\x9d]/g;
 /** Inside one: the C0 controls and the C1 string terminator. */
@@ -89,6 +89,11 @@ export class OscScanner {
   #escape = false;
 
   constructor(private readonly onOsc: (code: number, data: string) => void) {}
+
+  /** True inside a sequence, or right after an ESC that may open one: the next chunk continues it. */
+  get open(): boolean {
+    return this.#data !== null || this.#escape;
+  }
 
   feed(chunk: string): void {
     let at = 0;

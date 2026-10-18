@@ -62,4 +62,36 @@ describe('ShellStatusReader', () => {
     status.read('2\x07', 14);
     expect(seen).toMatchObject({ running: false, exits: [7, 2] });
   });
+
+  it('ends a sequence the snapshot leaves open with output that then left the buffer', () => {
+    const flood = (status: ShellStatusReader) => {
+      for (let sequence = 12; sequence < 20; sequence++) status.read('x'.repeat(64 * 1024), sequence);
+      status.read('\x1b]133;A\x07$ \x1b]133;B\x07\x1b]133;C\x07', 20);
+    };
+    const exit = reader();
+    exit.status.read('1\x07', 11);
+    flood(exit.status);
+    exit.status.seed(`${RUNNING}\x1b]133;D;`, 10);
+    expect(exit.seen).toMatchObject({ running: true, exits: [1] });
+
+    const cwd = reader();
+    cwd.status.read('dir\x07', 11);
+    flood(cwd.status);
+    cwd.status.seed('\x1b]633;P;Cwd=/new/', 10);
+    expect(cwd.seen.cwd).toBe('/new/dir');
+  });
+
+  it('ends a sequence that output leaving the buffer left open with the output still in it', () => {
+    const exit = reader();
+    exit.status.read(`${'x'.repeat(256 * 1024)}\x1b]133;D;`, 11);
+    exit.status.read('1\x07', 12);
+    exit.status.seed(RUNNING, 10);
+    expect(exit.seen).toMatchObject({ running: false, exits: [1] });
+
+    const cwd = reader();
+    cwd.status.read(`${'x'.repeat(256 * 1024)}\x1b]633;P;Cwd=/new/`, 11);
+    cwd.status.read('dir\x07', 12);
+    cwd.status.seed(RUNNING, 10);
+    expect(cwd.seen.cwd).toBe('/new/dir');
+  });
 });

@@ -4,7 +4,7 @@
  * (`terminal-session.svelte.ts`). xterm's own handlers only draw the dots.
  */
 
-import { OscScanner, parsePromptMark, reportedCwd, type ShellMark } from './terminal-marks';
+import { MAX_OSC, OscScanner, parsePromptMark, reportedCwd, type ShellMark } from './terminal-marks';
 
 /**
  * Output kept while a snapshot is on its way, in characters: as much as the
@@ -36,11 +36,24 @@ interface Overflow {
   scanner: OscScanner;
   /** The sequence of the event being read. */
   reading: number | undefined;
+  /** The first event that left the buffer: `null` when it had no sequence. */
+  first: number | null | undefined;
   newest: number | undefined;
   unsequenced: boolean;
+  /**
+   * The first characters that left the buffer, enough to end a sequence the
+   * snapshot leaves open or to run past `MAX_OSC`, which the overflow's own
+   * parser, started on them, read as text.
+   */
+  lead: string;
+  /** Characters that left the buffer, `lead` included. */
+  chars: number;
   phases: Record<Phase, { phase: Phase; exit?: { sequence: number | undefined; code: number | null } }>;
   cwd?: { sequence: number | undefined; path: string };
 }
+
+/** What ends a sequence in progress (`OscScanner`): BEL, ESC, C1 ST, CAN and SUB. */
+const OSC_END = /[\x07\x1b\x9c\x18\x1a]/;
 
 export interface ShellStatus {
   running(running: boolean): void;
@@ -98,7 +111,7 @@ export class ShellStatusReader {
     this.status.running(false);
     this.#scanner = this.#newScanner();
     this.#scanner.feed(output);
-    if (overflow !== null && (overflow.unsequenced || newer(overflow.newest))) {
+    if (overflow !== null && (overflow.unsequenced || newer(overflow.newest)) && !this.#stitch(overflow, newer(overflow.first ?? undefined))) {
       // Output newer than the snapshot left the buffer: what it said, then the parser where it stopped.
       const followed = overflow.phases[this.#phase];
       this.#phase = followed.phase;
@@ -109,6 +122,23 @@ export class ShellStatusReader {
     }
     this.#seen = sequence;
     for (const event of early) this.read(event.data, event.sequence);
+  }
+
+  /**
+   * Ends a sequence the snapshot leaves open with the overflow's first
+   * characters, when all of the overflow follows the snapshot: the overflow's
+   * parser read them as text. True when the overflow was nothing but the rest
+   * of that sequence, and the snapshot's parser goes on from there.
+   */
+  #stitch(overflow: Overflow, follows: boolean): boolean {
+    if (!follows || !this.#scanner.open) return false;
+    const end = overflow.lead.search(OSC_END);
+    if (end >= 0) {
+      this.#scanner.feed(overflow.lead.slice(0, end + 1));
+      return false;
+    }
+    this.#scanner.feed(overflow.lead);
+    return overflow.chars === overflow.lead.length;
   }
 
   #keep(data: string, sequence: number | undefined): void {
@@ -125,13 +155,18 @@ export class ShellStatusReader {
     const overflow = this.#overflow ??= {
       scanner: this.#newScanner(),
       reading: undefined,
+      first: sequence ?? null,
       newest: undefined,
       unsequenced: false,
+      lead: '',
+      chars: 0,
       phases: { idle: { phase: 'idle' }, prompt: { phase: 'prompt' }, running: { phase: 'running' } }
     };
     overflow.reading = sequence;
     if (sequence === undefined) overflow.unsequenced = true;
     else overflow.newest = Math.max(overflow.newest ?? sequence, sequence);
+    if (overflow.lead.length <= MAX_OSC) overflow.lead += data.slice(0, MAX_OSC + 1 - overflow.lead.length);
+    overflow.chars += data.length;
     overflow.scanner.feed(data);
   }
 
