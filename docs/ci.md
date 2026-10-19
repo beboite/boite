@@ -200,7 +200,7 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 495,500 |
 | UI files, excluding `.br` and `.gz` copies | 4,888,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,518,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,518,500 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -230,6 +230,15 @@ reviews' own section in the Tasks panel then brings the UI to 4,887,289 bytes,
 the entry chunk unchanged; the UI limit rises to 4,887,500.
 After automatic resumes (#603, `origin/main` at `2627b39b`) it measures
 495,189 entry bytes, 4,887,689 UI bytes and 4,517,291 core JavaScript bytes on Linux; the three limits rise to 495,500, 4,888,000 and 4,518,000.
+After the wait for a new process's command line (#616, `origin/main` at
+`68033379`) it measures 4,518,270 core JavaScript bytes on Linux, the UI
+unchanged; the core JavaScript limit rises to 4,518,500.
+
+On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
+4,494,324 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,493,506 for that main: the wait
+for a new process's command line (`whenCommandLineReads`) adds 818 bytes. The
+core JavaScript limit rises to 4,494,400; the other limits stay.
 
 On 2026-10-18, automatic resumes (PR #603) merged with `origin/main` at
 `e22bb094` measure 492,249 entry bytes, 4,869,493 UI bytes and 4,493,171 core
