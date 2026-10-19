@@ -3,7 +3,10 @@ name: ci
 on:
   push:
     branches: [main]
+  # A draft runs the Linux checks; ready_for_review starts the full run, and
+  # converted_to_draft cancels one in progress (changes.ts).
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
   workflow_call:
     secrets:
@@ -81,6 +84,7 @@ jobs:
       - id: filter
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DRAFT: ${{ github.event.pull_request.draft == true }}
           GH_TOKEN: ${{ github.token }}
           FORCE_CHECKS: ${{ inputs.force || github.ref_type == 'tag' || (github.event_name != 'push' && github.event_name != 'pull_request') }}
         run: bun scripts/ci/changes.ts
@@ -329,7 +333,9 @@ jobs:
     uses: ./.github/workflows/android.yml
 
   required:
-    name: CI required
+    # A draft's gate has another name: a green `CI required` on a head is a
+    # full run, which branch protection may trust after the PR turns ready.
+    name: ${{ github.event.pull_request.draft == true && 'CI draft' || 'CI required' }}
     if: always()
     needs: [changes, core, web, telemetry, e2e-types, stress, desktop, e2e, server, android]
     runs-on: ubuntu-24.04
