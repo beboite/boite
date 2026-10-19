@@ -1528,4 +1528,4 @@ The [dated runtime measurements](../bench/results/2026-09-29-resources.md#runtim
 retain the Windows compiled-versus-signed startup results, baseline comparison
 and account-change bundle sizes. No corresponding Linux/macOS startup gain
 was measured. Current emitted-size checks live in
-[CI](ci.md#bundle-size).
+[CI](ci.md#bundle-growth).

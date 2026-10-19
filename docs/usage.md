@@ -290,7 +290,7 @@ million tokens for the text models Anthropic, OpenAI, Google, xAI, DeepSeek,
 Moonshot, Z.ai, MiniMax, Mistral, Alibaba and Meta released since 2025, with
 the date it was generated. Each model is four numbers (input, output, cache
 read, cache write) because the table ships in the core bundle, whose size CI
-checks ([bundle size](ci.md#bundle-size)). `bun scripts/model-rates.ts` regenerates it from
+checks ([bundle growth](ci.md#bundle-growth)). `bun scripts/model-rates.ts` regenerates it from
 [models.dev](https://models.dev), the catalogue OpenCode prices with; a path
 argument reads a saved copy instead. `packages/core/src/pricing/index.ts`
 matches a model and computes the cost.

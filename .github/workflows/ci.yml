@@ -239,7 +239,7 @@ jobs:
 
   # A pull request's sizes, measured on Linux against its base's, which
   # bundle-size.yml keeps for every main commit, and against the last
-  # published build plus 2 % (docs/ci.md#bundle-size). Rerun this job alone
+  # published build plus 2 % (docs/ci.md#bundle-growth). Rerun this job alone
   # after editing the body.
   size:
     name: Bundle size
