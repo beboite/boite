@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { join, resolve, sep } from 'node:path';
+import { resolve, sep } from 'node:path';
 import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, ProviderInstall, ProviderSelfUpdate, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { forgetProbes } from '../drivers/index.ts';
@@ -8,6 +8,8 @@ import { notFound, refused } from '../errors.ts';
 import type { InstallOutcome } from './install.ts';
 import { npmCli, npmInstallOf, unwritableDir, type NpmCommand } from './npm.ts';
 import { profileFor, resolveCommand, type ResolvedCommand } from './resolve.ts';
+import { BACKGROUND_LIMIT_MS, backgroundHolders, resumeCut } from './update-background.ts';
+import { readReadings, readSkips, writeReadings, writeSkips, type Entry } from './update-readings.ts';
 import { resumeAfterUpdate, resumePostponed, resumeUnwaited, type Resume } from './update-resume.ts';
 import { readVersion, recheckVersions } from './versions.ts';
 import { forgetWhich } from './which.ts';
@@ -40,9 +42,6 @@ const PIPE_GRACE_MS = 2_000;
 const CHECK_PARALLEL = 2;
 /** An agent's own updater. A managed update has no such limit: its download stops by itself on a dead connection. */
 const UPDATE_TIMEOUT_MS = 15 * 60 * 1000;
-const SKIPS_FILE = 'harness-updates.json';
-/** The last check's readings, so a restart shows them without spawning anything. */
-const READINGS_FILE = 'harness-versions.json';
 
 /** The synthetic thread an update's processes are traced under. */
 export function updateThreadId(providerId: ProviderId): string {
@@ -57,30 +56,26 @@ export function inside(dir: string, path: string): boolean {
   return fold(path).startsWith(fold(dir.endsWith(sep) ? dir : dir + sep));
 }
 
-interface Entry {
-  route: HarnessUpdate['route'];
-  current: string | null;
-  latest: string | null;
-  state: HarnessUpdate['state'];
-  message: string | null;
-  checkedAt: number | null;
-  /** The program this reading came from. Null in a reading kept by an older build. */
-  program: string | null;
-}
-
 /**
- * An update asked for while turns of its agent run. `pause`: each running turn
- * pauses at its next tool boundary. `idle`: the pause limit passed, the paused
- * turns went on, and the update waits for none to run. `run`: the updater runs,
+ * An update asked for while agents of its provider work. `background`: an
+ * automatic update waits for the work agents at rest still run in the
+ * background, turns going on meanwhile. `pause`: each running turn pauses at
+ * its next tool boundary. `idle`: the pause limit passed, the paused turns
+ * went on, and the update waits for none to run. `run`: the updater runs,
  * and the scheduler holds the agent's queued turns until it is done.
  */
 interface Drain {
   target: Target;
   before: Entry;
-  phase: 'pause' | 'idle' | 'run';
+  phase: 'background' | 'pause' | 'idle' | 'run';
   limit: ReturnType<typeof setTimeout> | null;
   resume: ReturnType<typeof Promise.withResolvers<Resume | null>>;
   waitingFor: number;
+  /** Set once background work no longer holds the update: asked by hand, or past the background limit. */
+  forced: boolean;
+  bound: ReturnType<typeof setTimeout> | null;
+  /** The agents released with background work still running, and that work, resumed after the update. */
+  cut: Map<ThreadId, string>;
 }
 
 interface Target {
@@ -156,20 +151,22 @@ export class HarnessUpdates {
   private readonly drains = new Map<ProviderId, Drain>();
   /** When the last whole check finished, kept across restarts. */
   private lastCheckAt: number | null = null;
-  /** Test seams: the registry read, npm's own CLI, the only providers a check may touch, how long a version read and a pause may take. */
+  /** Test seams: the registry read, npm's own CLI, the only providers a check may touch, how long a version read, a pause and background work may take. */
   npmLatest: (name: string) => Promise<string> = npmLatest;
   npmCli: () => NpmCommand | null = npmCli;
   only: ReadonlySet<ProviderId> | null = null;
   versionTimeoutMs = VERSION_TIMEOUT_MS;
   pauseLimitMs = PAUSE_LIMIT_MS;
+  backgroundLimitMs = BACKGROUND_LIMIT_MS;
 
   constructor(private readonly core: Core) {
-    this.skips = this.readSkips();
-    this.readReadings();
+    const log = (level: 'warn', message: string): void => core.log(level, message);
+    this.skips = readSkips(core.dataDir, log);
+    this.lastCheckAt = readReadings(core.dataDir, this.entries, log);
     core.providers.installs.onSettled((outcome) => this.installSettled(outcome));
-    // A turn that ends may be the last one an update waits for.
+    // A turn that ends, or background work that ends, may be the last thing an update waits for.
     core.bus.onAny((name) => {
-      if (name === 'turn.finished' && this.drains.size > 0) setTimeout(() => this.advanceAll(), 0);
+      if ((name === 'turn.finished' || name === 'thread.background') && this.drains.size > 0) setTimeout(() => this.advanceAll(), 0);
     });
   }
 
@@ -239,6 +236,7 @@ export class HarnessUpdates {
     for (const id of this.entries.keys()) this.core.procs.killTree(updateThreadId(id));
     for (const drain of this.drains.values()) {
       if (drain.limit !== null) clearTimeout(drain.limit);
+      if (drain.bound !== null) clearTimeout(drain.bound);
       drain.resume.resolve(null);
     }
     this.drains.clear();
@@ -261,7 +259,12 @@ export class HarnessUpdates {
     return this.checking;
   }
 
-  async update(providerId: ProviderId): Promise<HarnessUpdate> {
+  /**
+   * `automatic`: the periodic check asked, not the owner. Such an update also
+   * waits, up to the background limit, for the work agents of the provider
+   * still run in the background; one asked by hand goes on at once.
+   */
+  async update(providerId: ProviderId, automatic = false): Promise<HarnessUpdate> {
     this.assertOpen();
     const target = this.targetOf(providerId);
     if (target === null) throw refused(`${providerId} has no update Boite can run on this machine`, { providerId });
@@ -289,11 +292,17 @@ export class HarnessUpdates {
       });
     }
     // Turns of this agent in flight pause between two tool calls rather than refuse the update.
-    const drain: Drain = { target, before: entry, phase: 'pause', limit: null, resume: Promise.withResolvers(), waitingFor: 0 };
+    const held = automatic && backgroundHolders(this.core, providerId).size > 0;
+    const drain: Drain = { target, before: entry, phase: held ? 'background' : 'pause', limit: null, resume: Promise.withResolvers(), waitingFor: 0, forced: !automatic, bound: null, cut: new Map() };
     this.drains.set(providerId, drain);
     this.entries.set(providerId, { ...entry, state: 'updating', message: null });
-    for (const threadId of this.runningThreads(providerId)) this.core.threads.runner.requestPause(threadId, providerId);
-    drain.waitingFor = this.waitingFor(providerId);
+    // Work an agent starts in the background later holds it too, never past the limit.
+    if (automatic) {
+      drain.bound = setTimeout(() => this.force(providerId), this.backgroundLimitMs);
+      drain.bound.unref?.();
+    }
+    if (!held) for (const threadId of this.runningThreads(providerId)) this.core.threads.runner.requestPause(threadId, providerId);
+    drain.waitingFor = this.waitingFor(providerId, drain);
     // `advance` logs only a change of this count: the first wait is said here.
     if (drain.waitingFor > 0) logUpdate(this.core, providerId, 'waiting', { running: drain.waitingFor });
     this.emit();
@@ -345,7 +354,7 @@ export class HarnessUpdates {
     if (current === null) throw notFound('provider update', providerId);
     if (version === null) delete this.skips[providerId];
     else this.skips[providerId] = version;
-    this.writeSkips();
+    writeSkips(this.core.dataDir, this.skips);
     this.emit();
     return this.describe(providerId)!;
   }
@@ -379,7 +388,7 @@ export class HarnessUpdates {
         for (const update of this.snapshot()) {
           if (!update.pending) continue;
           // A turn in flight pauses at its next tool boundary for it, and goes on after.
-          await this.update(update.providerId).catch((error: unknown) => {
+          await this.update(update.providerId, true).catch((error: unknown) => {
             this.core.log('warn', `automatic update of ${update.providerId}: ${error instanceof Error ? error.message : String(error)}`);
           });
         }
@@ -703,20 +712,30 @@ export class HarnessUpdates {
     return [...threads];
   }
 
-  /** The running turns of this provider that have not paused: what the updater waits for. */
-  private waitingFor(providerId: ProviderId): number {
-    return this.runningThreads(providerId).filter((threadId) => !this.core.threads.runner.isPaused(threadId)).length;
+  /**
+   * What the updater waits for: the running turns of this provider that have
+   * not paused, and, until the update is forced, the agents at rest whose
+   * background work still runs.
+   */
+  private waitingFor(providerId: ProviderId, drain: Drain): number {
+    const turns = this.runningThreads(providerId).filter((threadId) => !this.core.threads.runner.isPaused(threadId)).length;
+    return turns + (drain.forced ? 0 : backgroundHolders(this.core, providerId).size);
   }
 
   private advanceAll(): void {
     for (const id of [...this.drains.keys()]) this.advance(id);
   }
 
-  /** Starts the updater once no turn of the provider runs unpaused, or says how many it still waits for. */
+  /** Starts the updater once no turn of the provider runs unpaused and no background work holds it, or says how many it still waits for. */
   private advance(providerId: ProviderId): void {
     const drain = this.drains.get(providerId);
     if (drain === undefined || drain.phase === 'run' || this.closed) return;
-    const waiting = this.waitingFor(providerId);
+    // The background work ended or stopped holding the update: the turns in flight pause for it now.
+    if (drain.phase === 'background' && (drain.forced || backgroundHolders(this.core, providerId).size === 0)) {
+      drain.phase = 'pause';
+      for (const threadId of this.runningThreads(providerId)) this.core.threads.runner.requestPause(threadId, providerId);
+    }
+    const waiting = this.waitingFor(providerId, drain);
     if (waiting > 0) {
       if (waiting !== drain.waitingFor) {
         logUpdate(this.core, providerId, 'waiting', { running: waiting });
@@ -728,7 +747,11 @@ export class HarnessUpdates {
     drain.phase = 'run';
     drain.waitingFor = 0;
     if (drain.limit !== null) clearTimeout(drain.limit);
+    if (drain.bound !== null) clearTimeout(drain.bound);
     drain.limit = null;
+    drain.bound = null;
+    // What the release below ends in the background: those agents are resumed once the update is done.
+    drain.cut = backgroundHolders(this.core, providerId);
     // A running program cannot be replaced, and a warm session is one: a paused turn's included.
     for (const thread of this.core.journal.listThreads()) {
       if (thread.providerId === providerId) this.core.threads.releaseAgent(thread.id);
@@ -747,9 +770,22 @@ export class HarnessUpdates {
         const entry = this.entries.get(providerId);
         drain.resume.resolve(this.closed || this.core.stopping ? null
           : resumeAfterUpdate(drain.target.descriptor.name, drain.before.current, entry?.current ?? null, entry?.state === 'failed'));
+        if (this.closed || this.core.stopping) return;
+        // The agents whose background work the release ended pick it up again, on the new version.
+        resumeCut(this.core, drain.cut, drain.target.descriptor.name);
         // The turns queued while the updater ran start now, on the new version.
-        if (!this.closed && !this.core.stopping) this.core.scheduler.retry();
+        this.core.scheduler.retry();
       });
+  }
+
+  /** The background limit passed: work still running stops holding the update, and its agents are resumed after it. */
+  private force(providerId: ProviderId): void {
+    const drain = this.drains.get(providerId);
+    if (drain === undefined || drain.phase === 'run') return;
+    drain.bound = null;
+    drain.forced = true;
+    this.core.log('info', `${drain.target.descriptor.name}: background work still running after ${Math.round(this.backgroundLimitMs / 60000)} min; the update goes on and resumes those agents after it`);
+    this.advance(providerId);
   }
 
   /**
@@ -823,66 +859,9 @@ export class HarnessUpdates {
     if (this.closed || this.core.stopping) throw refused('the core is stopping; agent updates are closed');
   }
 
-  private readSkips(): Record<string, string> {
-    const file = join(this.core.dataDir, SKIPS_FILE);
-    if (!existsSync(file)) return {};
-    try {
-      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { skipped?: unknown };
-      const out: Record<string, string> = {};
-      if (typeof parsed.skipped === 'object' && parsed.skipped !== null) {
-        for (const [key, value] of Object.entries(parsed.skipped)) if (typeof value === 'string') out[key] = value;
-      }
-      return out;
-    } catch (error) {
-      this.core.log('warn', `${file}: unreadable, expected {"skipped": {"<provider id>": "<version>"}}; no version is skipped (${error instanceof Error ? error.message : String(error)})`);
-      return {};
-    }
-  }
-
-  /** Loads the last check's readings. A missing or broken file is no reading: the next check makes one. */
-  private readReadings(): void {
-    const file = join(this.core.dataDir, READINGS_FILE);
-    if (!existsSync(file)) return;
-    try {
-      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { checkedAt?: unknown; readings?: unknown };
-      if (typeof parsed.checkedAt === 'number' && Number.isFinite(parsed.checkedAt)) this.lastCheckAt = Math.min(parsed.checkedAt, Date.now());
-      if (typeof parsed.readings !== 'object' || parsed.readings === null) return;
-      const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
-      for (const [id, raw] of Object.entries(parsed.readings as Record<string, Record<string, unknown> | null>)) {
-        if (typeof raw !== 'object' || raw === null || (raw['route'] !== 'self' && raw['route'] !== 'managed')) continue;
-        const failed = raw['state'] === 'failed';
-        this.entries.set(id as ProviderId, {
-          route: raw['route'],
-          current: text(raw['current']),
-          latest: text(raw['latest']),
-          // A check or an update the last run left half done is only its last reading now.
-          state: failed ? 'failed' : 'idle',
-          message: failed ? text(raw['message']) : null,
-          checkedAt: typeof raw['checkedAt'] === 'number' ? raw['checkedAt'] : null,
-          program: text(raw['program']),
-        });
-      }
-    } catch (error) {
-      this.core.log('warn', `${file}: unreadable, expected {"checkedAt": <ms>, "readings": {"<provider id>": {...}}}; the next check reads again (${error instanceof Error ? error.message : String(error)})`);
-    }
-  }
-
   private writeReadings(): void {
     if (this.closed || this.core.stopping) return;
-    const readings: Record<string, Entry> = {};
-    for (const [id, entry] of this.entries) {
-      if (entry.state === 'checking' || entry.state === 'updating') continue;
-      readings[id] = entry;
-    }
-    try {
-      writeFileSync(join(this.core.dataDir, READINGS_FILE), `${JSON.stringify({ checkedAt: this.lastCheckAt, readings }, null, 2)}\n`);
-    } catch (error) {
-      this.core.log('warn', `writing ${READINGS_FILE}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  private writeSkips(): void {
-    writeFileSync(join(this.core.dataDir, SKIPS_FILE), `${JSON.stringify({ skipped: this.skips }, null, 2)}\n`);
+    writeReadings(this.core.dataDir, this.entries, this.lastCheckAt, (level, message) => this.core.log(level, message));
   }
 }
 
