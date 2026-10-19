@@ -89,7 +89,7 @@ test("settings home keeps every tile's words inside it and centres its column", 
   const port = await freePort();
   const server = await startUi(port);
   const page = await BrowserPage.launch({
-    url: `http://127.0.0.1:${port}/?fake=1&open=recent`,
+    url: `http://127.0.0.1:${port}/?fake=1&open=recent&machines=1`,
     windowSize: { width: 1440, height: 900 },
   });
   try {
@@ -119,6 +119,24 @@ test("settings home keeps every tile's words inside it and centres its column", 
       expect({ width, heights: layout.heights }).toEqual({ width, heights: [layout.heights[0]] });
       if (width >= 1440) expect(Math.abs(layout.left - layout.right)).toBeLessThanOrEqual(2);
     }
+    // A page with its own root styles (Machines, a machine's settings) centres the same way.
+    await page.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 900, deviceScaleFactor: 1, mobile: false });
+    const centred = async (selector: string) => {
+      const sides = JSON.parse(String(await page.evaluate(`(() => {
+        const frame = document.querySelector('.settings section.framed').getBoundingClientRect();
+        const box = document.querySelector('${selector}').getBoundingClientRect();
+        return JSON.stringify([box.left - frame.left, frame.right - box.right]);
+      })()`)));
+      expect({ selector, off: Math.abs(sides[0] - sides[1]) <= 2 }).toEqual({ selector, off: true });
+    };
+    await page.click("[data-testid=settings-tab-machines]");
+    await page.waitFor('document.querySelector("[data-testid=machines-page] > section")');
+    await centred("[data-testid=machines-page] > section");
+    await page.click("[data-testid=machine-details-toggle]");
+    await page.waitFor('!document.querySelector("[data-testid=machine-settings-open]")?.closest("[inert]")');
+    await page.click("[data-testid=machine-settings-open]");
+    await page.waitFor('document.querySelector("[data-testid=machine-settings] > header")');
+    await centred("[data-testid=machine-settings] > header");
   } finally {
     await page.close();
     await server.close();

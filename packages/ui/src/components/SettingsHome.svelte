@@ -213,9 +213,10 @@
   }
   .tile:hover .glyph { color: var(--color-foreground); }
 
-  /* Room for a label and a status line on every tile, so a tile with nothing
-     to report stands as tall as one that has. */
-  .text { display: grid; align-content: start; gap: 2px; width: 100%; min-width: 0; min-height: calc(var(--text-base) * 1.3 + 2px + var(--text-sm) * 1.35); }
+  /* Room for a label and two status lines on every tile ("3 machines · 10
+     paired devices" takes two at a quarter of the column), so a tile with
+     nothing to report stands as tall as one that has. */
+  .text { display: grid; align-content: start; gap: 2px; width: 100%; min-width: 0; min-height: calc(var(--text-base) * 1.3 + 2px + var(--text-sm) * 1.35 * 2); }
   .label { font-size: var(--text-base); font-weight: 500; line-height: 1.3; overflow-wrap: break-word; }
   .status { font-size: var(--text-sm); line-height: 1.35; color: var(--color-muted-foreground); overflow-wrap: break-word; }
   .status.call { color: var(--color-accent); }

@@ -1376,12 +1376,20 @@ tr:last-child td {
   overflow: auto;
 }
 
-/* The 880 px column stands in the middle of a wide window rather than against
-   its left edge. The gutter is reserved on both sides, so a scrollbar does not
-   push the column off centre. */
 .settings .page {
-  padding: 36px max(clamp(20px, 4vw, 64px), calc((100% - var(--settings-width)) / 2));
-  scrollbar-gutter: stable both-edges;
+  padding: 36px clamp(20px, 4vw, 64px);
+}
+
+/* A page's root stands its 880 px column in the middle of a wide window rather
+   than against its left edge, whatever padding the page sets itself. The
+   gutter is reserved on both sides, so a scrollbar does not push the column
+   off centre. A page nested in another (a machine's settings) is not moved,
+   and a narrow window keeps each page's own padding. */
+@media (min-width: 721px) {
+  .settings .framed > :is(.page, .machine-settings) {
+    padding-inline: max(clamp(20px, 4vw, 64px), calc((100% - var(--settings-width)) / 2));
+    scrollbar-gutter: stable both-edges;
+  }
 }
 
 .settings .page > header {
