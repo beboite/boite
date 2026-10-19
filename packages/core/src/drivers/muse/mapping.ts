@@ -24,6 +24,7 @@ import type {
 import { AGENT_OWN_MODEL, COMMAND_TOOL_NAME, EFFORTS, MODE_POSTURE } from './protocol.ts';
 import { MspError } from './rpc.ts';
 import { answerText } from '../../attachments.ts';
+export { questionTextOf } from '../../attachments.ts';
 
 // ---------------------------------------------------------------------------
 // Mapping helpers
@@ -166,12 +167,6 @@ export function choiceFor(choices: ApprovalChoice[], answer: 'allow' | 'deny' | 
   return pick(['denied', 'deniedPolicyAmendment']);
 }
 
-export function questionTextOf(entry: MuseQuestion): string {
-  const header = textOf(entry.header).trim();
-  const body = textOf(entry.question).trim();
-  if (header.length > 0 && body.length > 0 && header !== body) return `${header}: ${body}`;
-  return body.length > 0 ? body : header;
-}
 
 /** Muse options have a label and no id: the label is the id, which is what goes back. */
 export function optionsOf(raw: MuseQuestion['options']): QuestionOption[] {

@@ -30,7 +30,7 @@ const newestFirst = (a: AgentRecord, b: AgentRecord) => b.updatedAt - a.updatedA
 const byCreation = (a: AgentRecord, b: AgentRecord) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 function unique<T extends AgentRecord>(records: T[]): T[] { const seen = new Set<string>(); return records.filter(r => !seen.has(r.id) && !!seen.add(r.id)); }
 /** The frozen instructions stay in the core and in the run's own thread. */
-const attachmentsKey = (messageId: string) => `agents:attachments:${messageId}`;
+const heldKey = (messageId: string) => `agents:attachments:${messageId}`;
 /** What a message shows of an attachment: never its bytes. */
 const describe = ({ kind, mimeType, name, data }: Attachment): AgentMessageAttachment => ({ kind, mimeType, name, bytes: decodedBytes(data) });
 function summary({ context: { instructions: _instructions, ...context }, ...run }: AgentRun): AgentRunSummary { return { ...run, context }; }
@@ -265,7 +265,7 @@ export class AgentStore {
     const target = this.requireScope(params.scope);
     if (!['agent', 'group'].includes(target.kind)) throw refused('scope: messages belong to a direct conversation or a group');
     // A message may be only what the user attached, as a prompt may.
-    const body = text(params.text, 'text', 32000, Array.isArray(params.attachments) && params.attachments.length > 0);
+    const body = text(params.text, 'text', 32000, !!params.attachments?.length);
     const session = params.threadId ? this.session(params.threadId) : null;
     if (session) this.assertScope(session, target, 'messages');
     const actor = session?.agentId ?? 'owner';
@@ -277,7 +277,7 @@ export class AgentStore {
     const parent = params.replyTo ? this.records.get('message', params.replyTo) : null;
     if (parent && !sameScope(parent.scope, target)) throw refused('replyTo: message belongs to another conversation');
     const attachments = params.attachments ?? [];
-    const problem = session && attachments.length ? { message: 'attachments: only the user sends them' } : answerAttachmentError(attachments);
+    const problem = session && attachments.length ? { message: 'attachments: the user\'s alone' } : answerAttachmentError(attachments);
     if (problem) throw refused(problem.message, problem.data);
     // Undefined when there are none, so JSON leaves the field out.
     const described = attachments.length ? attachments.map(describe) : undefined;
@@ -288,7 +288,7 @@ export class AgentStore {
       const recipients = recipientIds.length ? recipientIds : session || group?.mode === 'mentions' ? [] : group?.mode === 'autonomous' ? available.slice(0, 1) : available;
       const message = this.records.create('message', { scope: target, senderId: session?.agentId ?? null, text: body, recipientIds: recipients, replyTo: parent?.id ?? null, episodeId, sourceRunId: current?.runId ?? null, attachments: described });
       // The bytes wait beside the snapshot until every recipient's turn took them.
-      if (described) this.core.journal.setSetting(attachmentsKey(message.id), attachments);
+      if (described) this.core.journal.setSetting(heldKey(message.id), attachments);
       this.deliver(message);
       return message;
     });
@@ -314,11 +314,11 @@ export class AgentStore {
    */
   attachmentsFor(work: AgentWork): Attachment[] {
     if (!work.messageId || work.prompt !== this.records.get('message', work.messageId).text) return [];
-    return (this.core.journal.getSetting(attachmentsKey(work.messageId)) as Attachment[] | undefined) ?? [];
+    return (this.core.journal.getSetting(heldKey(work.messageId)) as Attachment[] | undefined) ?? [];
   }
   /** Lets a message's attachments go once no recipient's work can start again: every delivery processed, cancelled or over the limit. */
   releaseAttachments(messageId: string | null): void {
-    if (messageId && this.records.find('delivery', 'messageId', [messageId]).every(d => ['processed', 'cancelled', 'limited'].includes(d.status))) this.core.journal.deleteSetting(attachmentsKey(messageId));
+    if (messageId && this.records.find('delivery', 'messageId', [messageId]).every(d => ['processed', 'cancelled', 'limited'].includes(d.status))) this.core.journal.deleteSetting(heldKey(messageId));
   }
 
   /**

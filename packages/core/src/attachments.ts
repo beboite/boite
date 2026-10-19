@@ -106,6 +106,14 @@ export function answerText(answer: QuestionAnswer): string {
   return [answer.text ?? '', answerNotes.get(answer) ?? ''].filter(part => part.length > 0).join('\n\n');
 }
 
+/** What a question asks, as Codex and Muse send it: its header before its body when the two differ. */
+export function questionTextOf(entry: { header?: string; question?: string }): string {
+  const header = typeof entry.header === 'string' ? entry.header.trim() : '';
+  const body = typeof entry.question === 'string' ? entry.question.trim() : '';
+  if (header.length > 0 && body.length > 0 && header !== body) return `${header}: ${body}`;
+  return body.length > 0 ? body : header;
+}
+
 /** All drivers read files through their existing local tools; images retain native payloads. */
 export function prepareAttachments(dataDir: string, input: { prompt: string; attachments: Attachment[] }): { prompt: string; attachments: ImageAttachment[] } {
   const files = input.attachments.filter(file => file.kind === 'file');
