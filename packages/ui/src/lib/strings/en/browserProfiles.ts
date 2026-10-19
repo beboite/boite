@@ -1,0 +1,31 @@
+export const strings = {
+
+  browserProfiles: {
+    /** The card in Settings, General: agent control and the profiles below it. */
+    card: 'Built-in browser',
+    heading: 'Browser profiles',
+    hint: 'Each profile keeps its own cookies, storage and sign-ins in the built-in browser, and keeps them after a restart. A private tab keeps nothing once the last private tab closes.',
+    default: 'Default',
+    private: 'Private',
+    profile: 'Browser profile: {name}',
+    newTabIn: 'New tab in {name}',
+    newPrivateTab: 'New private tab',
+    manage: 'Manage browser profiles',
+    isDefault: 'Opens new tabs',
+    makeDefault: 'Open new tabs here',
+    renameLabel: 'New name for {name}',
+    addLabel: 'New profile name',
+    addPlaceholder: 'Work, Personal…',
+    add: 'Add profile',
+    invalidName: 'Choose a name of 1 to 40 characters that no other profile uses, other than Default or Private.',
+    tooMany: 'At most {count} browser profiles.',
+    deleteTitle: 'Delete the profile {name}?',
+    deleteBody: 'Its open tabs close, and its cookies, storage and sign-ins are erased from this computer. This cannot be undone.',
+    deleteFailed: 'The profile was removed, but its data could not be erased: {reason}',
+    copySignIns: 'Copy sign-ins to agents',
+    copySignInsHint: 'Send the cookies of {name} to the agent browser of a machine, into the same profile',
+    copied: '{count} cookies of {name} copied to {machine}.',
+    copiedNone: '{name} holds no cookie to copy.',
+    copyFailed: 'The sign-ins could not be copied: {reason}'
+  }
+} as const;
