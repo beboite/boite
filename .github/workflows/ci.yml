@@ -61,6 +61,7 @@ jobs:
       core: ${{ steps.filter.outputs.core }}
       web: ${{ steps.filter.outputs.web }}
       desktop: ${{ steps.filter.outputs.desktop }}
+      shellRust: ${{ steps.filter.outputs.shellRust }}
       server: ${{ steps.filter.outputs.server == 'true' && !inputs.skip-server }}
       android: ${{ steps.filter.outputs.android }}
       e2e: ${{ steps.filter.outputs.e2e }}
@@ -116,7 +117,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      # Core data directories, worktrees and Chrome profiles go to the runner's
+      # temp drive (D: on Windows), as in the E2E shards (docs/ci.md#build-cost).
       - run: bun run --cwd packages/core test
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
 
   web:
     name: Type checks and UI tests
@@ -246,6 +252,8 @@ jobs:
       APPLE_API_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.APPLE_API_PRIVATE_KEY || '' }}
     with:
       platforms: ${{ needs.changes.outputs.portable }}
+      # Only apps/shell, two embedded page scripts and shared inputs reach them (changes.ts).
+      rust-tests: ${{ needs.changes.outputs.shellRust == 'true' }}
       sign-updates: ${{ inputs.sign-updates == true }}
       native-e2e: ${{ needs.changes.outputs.e2e == 'true' }}
     permissions:

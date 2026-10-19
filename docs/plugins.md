@@ -196,7 +196,9 @@ The environment is the core's, minus every variable the core gives an agent
 The app connects to `BOITE_CORE_URL` with `BOITE_TOKEN` as an owner client.
 Its `hello` names the client `plugin`, not `shell`: the core then adds no
 "sent from the desktop app" note to its prompts and refuses it as the agent
-browser's host.
+browser's host. A thread it subscribes to is not on anyone's screen: a turn
+that ends there still marks the thread unread, and `panel.open` still answers
+`shown: false` when no window has it open.
 
 Exits and stops:
 
