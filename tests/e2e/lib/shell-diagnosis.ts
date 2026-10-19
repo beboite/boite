@@ -1,5 +1,9 @@
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { BrowserPage } from './cdp.ts';
+
+/** The webview exposes its page target before the IPC bridge is injected. */
+export const TAURI_READY = "typeof window.__TAURI_INTERNALS__?.invoke === 'function'";
 
 /** The newest records of `<dataDir>/logs/shell.0.ndjson` a diagnosis prints. */
 const SHELL_LOG_RECORDS = 60;
@@ -8,6 +12,17 @@ const SHELL_LOG_TAIL_BYTES = 256 * 1024;
 const MESSAGE_CHARS = 300;
 /** How long PowerShell gets to list the shell's process tree. */
 const PROCESS_TREE_TIMEOUT_MS = 10_000;
+/** The newest `shell.webview.*` records a page that never got its bridge reports, from the same tail. */
+const WEBVIEW_RECORDS = 40;
+/** How long each devtools question of that report may take: the page may be what hangs. */
+const PROBE_TIMEOUT_MS = 3_000;
+const TARGETS_CHARS = 4_000;
+
+/** A hidden shell a test drives: its debugging port, data directory and pid. */
+export interface ShellUnderTest { port: number; dataDir: string; pid: number }
+
+/** What a diagnosis asks the system, which a test can make fail. */
+export interface DiagnosisProbes { processTree?: (shellPid: number) => Promise<string> }
 
 /**
  * What a hidden shell that never exposed its page left behind: the end of its
@@ -20,15 +35,93 @@ const PROCESS_TREE_TIMEOUT_MS = 10_000;
  * uploads.
  */
 export async function describeShell(dataDir: string, shellPid: number, failure = ''): Promise<string> {
-  const text = `Shell ${shellPid} log (newest ${SHELL_LOG_RECORDS} records of ${join(dataDir, 'logs', 'shell.0.ndjson')}):\n${shellLogTail(dataDir)}\n`
-    + `Shell ${shellPid} process tree: ${await processTree(shellPid)}`;
-  const artifacts = join(import.meta.dir, '..', '.artifacts');
-  mkdirSync(artifacts, { recursive: true });
-  writeFileSync(join(artifacts, `shell-${shellPid}-diagnosis.txt`), failure === '' ? text : `${failure}\n${text}`);
+  const text = await shellReport(dataDir, shellPid);
+  writeArtifact(`shell-${shellPid}-diagnosis.txt`, failure === '' ? text : `${failure}\n${text}`);
   return text;
 }
 
-function shellLogTail(dataDir: string): string {
+/**
+ * Waits for the shell page's IPC bridge (`TAURI_READY`). A page that never
+ * gets it fails with what the attach did not show: the target the test
+ * attached to, `/json/list` at the failure, the frame and its navigation
+ * history as devtools reports them, the shell's `shell.webview.*` records
+ * (`shell.webview.page-load` started and finished), its log tail and process
+ * tree. The text also goes to `tests/e2e/.artifacts/shell-<pid>-not-ready.txt`,
+ * which the desktop job uploads as `desktop-failure-captures`.
+ */
+export async function waitForShellPage(page: BrowserPage, shell: ShellUnderTest, timeoutMs = 15_000, probes: DiagnosisProbes = {}): Promise<void> {
+  try {
+    await page.waitFor(TAURI_READY, timeoutMs);
+  } catch (error) {
+    // The wait's failure is what the caller needs: a diagnosis that fails, or
+    // cannot be saved, adds a line to it and never takes its place.
+    const failure = errorText(error);
+    const report = await notReadyReport(page, shell, probes.processTree ?? processTree)
+      .catch((diagnosisError: unknown) => `The diagnosis failed: ${errorText(diagnosisError)}`);
+    const text = `${failure}\n${report}`;
+    const name = `shell-${shell.pid}-not-ready.txt`;
+    let unsaved = '';
+    try {
+      writeArtifact(name, text);
+    } catch (writeError) {
+      unsaved = `\nCould not write the artifact ${name}: ${errorText(writeError)}`;
+    }
+    throw new Error(`${text}${unsaved}`, { cause: error });
+  }
+}
+
+async function notReadyReport(page: BrowserPage, shell: ShellUnderTest, tree: (shellPid: number) => Promise<string>): Promise<string> {
+  const ask = (method: string) => page.send(method, {}, PROBE_TIMEOUT_MS).then(
+    result => JSON.stringify(result),
+    (error: unknown) => `(no answer: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)})`,
+  );
+  const [targets, frames, history, shellText] = await Promise.all([
+    fetch(`http://127.0.0.1:${shell.port}/json/list`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
+      .then(response => response.text())
+      .then(
+        text => text.replace(/\s+/g, ' ').slice(0, TARGETS_CHARS),
+        (error: unknown) => `(no answer: ${error instanceof Error ? error.message : String(error)})`,
+      ),
+    ask('Page.getFrameTree'),
+    ask('Page.getNavigationHistory'),
+    shellReport(shell.dataDir, shell.pid, tree),
+  ]);
+  const records = shellRecords(shell.dataDir);
+  const webview = typeof records === 'string'
+    ? records
+    : records.filter(record => record.event.startsWith('shell.webview.')).slice(-WEBVIEW_RECORDS).map(record => record.text).join('\n') || '  (none)';
+  return [
+    `Attached target: ${JSON.stringify(page.target)}`,
+    `/json/list of port ${shell.port} now: ${targets}`,
+    `Page.getFrameTree: ${frames}`,
+    `Page.getNavigationHistory: ${history}`,
+    `Shell ${shell.pid} webview records (newest ${WEBVIEW_RECORDS} shell.webview.* of the log tail):`,
+    webview,
+    shellText,
+  ].join('\n');
+}
+
+async function shellReport(dataDir: string, shellPid: number, tree = processTree): Promise<string> {
+  const records = shellRecords(dataDir);
+  const tail = typeof records === 'string' ? records : records.slice(-SHELL_LOG_RECORDS).map(record => record.text).join('\n');
+  // A missing or blocked PowerShell makes `Bun.spawn` throw: the log tail stays.
+  const listing = await tree(shellPid).catch((error: unknown) => `(could not list it: ${errorText(error)})`);
+  return `Shell ${shellPid} log (newest ${SHELL_LOG_RECORDS} records of ${join(dataDir, 'logs', 'shell.0.ndjson')}):\n${tail}\n`
+    + `Shell ${shellPid} process tree: ${listing}`;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function writeArtifact(name: string, text: string): void {
+  const artifacts = join(import.meta.dir, '..', '.artifacts');
+  mkdirSync(artifacts, { recursive: true });
+  writeFileSync(join(artifacts, name), text);
+}
+
+/** The records of the log's tail, each with its event and printed line; a string says why there are none. */
+function shellRecords(dataDir: string): Array<{ event: string; text: string }> | string {
   const path = join(dataDir, 'logs', 'shell.0.ndjson');
   if (!existsSync(path)) return '  (none: the shell never started its log)';
   let lines: string[];
@@ -37,15 +130,17 @@ function shellLogTail(dataDir: string): string {
   } catch (error) {
     return `  (unreadable: ${error instanceof Error ? error.message : String(error)})`;
   }
-  return lines.slice(-SHELL_LOG_RECORDS).map((line) => {
+  return lines.map((line) => {
     try {
-      const record = JSON.parse(line) as { at?: number; level?: string; event?: string; message?: string; runId?: string };
+      const record = JSON.parse(line) as { at?: number; level?: string; event?: string; message?: string; runId?: string; data?: Record<string, unknown> };
       const at = typeof record.at === 'number' ? new Date(record.at).toISOString().slice(11, 23) : '?';
-      return `  ${at} ${record.runId?.slice(0, 8) ?? '?'} ${record.level ?? '?'} ${record.event ?? '?'} ${(record.message ?? '').slice(0, MESSAGE_CHARS)}`;
+      // `shell.webview.page-load` says started or finished only in its data.
+      const data = record.data !== undefined && Object.keys(record.data).length > 0 ? ` ${JSON.stringify(record.data).slice(0, MESSAGE_CHARS)}` : '';
+      return { event: record.event ?? '?', text: `  ${at} ${record.runId?.slice(0, 8) ?? '?'} ${record.level ?? '?'} ${record.event ?? '?'} ${(record.message ?? '').slice(0, MESSAGE_CHARS)}${data}` };
     } catch {
-      return `  ${line.slice(0, MESSAGE_CHARS)}`;
+      return { event: '?', text: `  ${line.slice(0, MESSAGE_CHARS)}` };
     }
-  }).join('\n');
+  });
 }
 
 /** The last `SHELL_LOG_TAIL_BYTES` of a file, its first partial line dropped. */
