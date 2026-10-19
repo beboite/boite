@@ -225,9 +225,17 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 492,300 |
 | UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,494,900 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,495,400 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-19, PR #627 merged with `origin/main` at `de93f43a` measures
+4,495,104 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,494,827 for that main: waiting for
+a cancelled sign-in's own processes to leave the registry (`waitForExit`) adds
+277 bytes. PR #628, which leaves out a console host whose name only reads
+after its start, adds 275 more on top of both (4,495,379). The core JavaScript
+limit rises to 4,495,400 to cover the two; the other limits stay.
 
 On 2026-10-19, PR #622 merged with `origin/main` at `68033379` measures
 4,494,650 core JavaScript bytes with the same rule after a fresh
