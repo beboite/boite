@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { requestLog } from './ui-requests.ts';
 
 const root = join(import.meta.dir, '../../../packages/ui');
 const requireUi = createRequire(join(root, 'package.json'));
@@ -25,14 +26,14 @@ export async function startUi(port: number, options: { development?: boolean } =
   if (shared && !options.development) {
     // Built once by `lib/warm.ts` before a parallel run.
     if (!existsSync(join(shared, 'index.html'))) throw new Error(`BOITE_E2E_FAKE_UI=${shared} holds no index.html; build it with bun tests/e2e/lib/warm.ts ${shared}`);
-    return preview({ root, build: { outDir: resolve(shared) }, preview: address, clearScreen: false });
+    return preview({ root, plugins: [requestLog], build: { outDir: resolve(shared) }, preview: address, clearScreen: false });
   }
   if (process.env.BOITE_E2E_PREBUILT_UI === '1' && !options.development) {
     // Production intentionally excludes ?fake=1. This separate test bundle
     // enables it without changing the UI staged in the installer.
     fixtureBuild ??= build({ root, plugins: [fixtureBridge], define: { 'import.meta.env.DEV': 'true' }, build: { outDir: fixtureDir, emptyOutDir: true }, logLevel: 'warn' });
     await fixtureBuild;
-    return preview({ root, build: { outDir: fixtureDir }, preview: address, clearScreen: false });
+    return preview({ root, plugins: [requestLog], build: { outDir: fixtureDir }, preview: address, clearScreen: false });
   }
   return startDevUi(port);
 }
@@ -45,7 +46,7 @@ export async function startUi(port: number, options: { development?: boolean } =
  * hook gets.
  */
 export async function startDevUi(port: number): Promise<{ close(): Promise<void> }> {
-  const server = await createServer({ root, plugins: [fixtureBridge], server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
+  const server = await createServer({ root, plugins: [fixtureBridge, requestLog], server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
   try {
     await server.listen();
     await transformAll(server, '/src/main.ts');

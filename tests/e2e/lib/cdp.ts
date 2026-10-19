@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import type { Subprocess } from 'bun';
 import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
+import { uiServerSide } from './ui-requests.ts';
 import { TextSocket } from './ws-client.ts';
 
 /**
@@ -103,6 +104,31 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface InFlight {
+  url: string;
+  /** When its devtools event reached us, which can be after the server answered it. */
+  at: number;
+  /** When Chrome sent it (`wallTime`), on the same clock as `Date.now()`. */
+  wall?: number;
+  answered: boolean;
+  frameId?: string;
+  loaderId?: string;
+  sent?: number;
+  headers?: number;
+  cache?: boolean;
+}
+
+/** One process of `SystemInfo.getProcessInfo`, CPU time in seconds since it started. */
+interface ProcessInfo { type: string; id: number; cpuTime: number }
+
+/**
+ * `BOITE_E2E_HANG_STACK=1` turns the debugger on in every page, so a page whose
+ * main thread runs JavaScript past an evaluate's deadline reports where. Off by
+ * default: `Debugger.enable` waits for that thread like any other call, so it
+ * cannot be sent once the page hangs, and on it reports every script parsed.
+ */
+const HANG_STACK = process.env.BOITE_E2E_HANG_STACK === '1';
+
 export interface BrowserOptions {
   url: string;
   executable?: string;
@@ -166,9 +192,25 @@ export class BrowserPage {
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #closed = false;
+  /**
+   * Set once devtools sent a message that is not JSON. Chrome never does: the
+   * socket lost its frame alignment, so replies may be gone and every later
+   * call fails with this instead of waiting out its timeout.
+   */
+  #fault: string | null = null;
   #pageErrors: string[] = [];
-  /** Requests the page sent and has not finished loading, reported when a wait times out. */
-  #requests = new Map<string, { url: string; at: number; answered: boolean }>();
+  /**
+   * Requests the page's current documents sent and have not finished loading,
+   * reported when a wait times out. `sent` and `headers` are the network
+   * service's own events, which reach devtools from the browser process even
+   * while the renderer's main thread is blocked and Blink reports nothing.
+   */
+  #requests = new Map<string, InFlight>();
+  /** Network-service events that came before the request they belong to. */
+  #early = new Map<string, { sent?: number; headers?: number }>();
+  /** The debugging port of the browser this page runs in, for the processes' CPU. */
+  #debugPort: number | null = null;
+  #paused: ((frames: string) => void) | null = null;
   /** Completed failures would otherwise disappear from the timeout's in-flight list. */
   #networkFailures: string[] = [];
   errors(): string[] { return [...this.#pageErrors]; }
@@ -278,10 +320,12 @@ export class BrowserPage {
       const target = await waitForPageTarget(port, '', proc, true);
       const socket = await openSocket(target);
       page = new BrowserPage(socket, target, proc, ownsUserDataDir ? userDataDir : null, watch);
+      page.#debugPort = port;
       open.add(page);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
       await page.send('Network.enable', {});
+      await page.#enableHangProbes();
       if (options.showTour !== true) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
       if (options.terminalGpu !== true) {
         // Only on a fresh profile: a test that turns the GPU on and reloads keeps its choice.
@@ -321,6 +365,7 @@ export class BrowserPage {
     try {
       const target = await waitForPageTarget(port, urlIncludes);
       page = new BrowserPage(await openSocket(target), target, null, null);
+      page.#debugPort = port;
       return await page.#prepareAttached();
     } catch (error) {
       await page?.close().catch(() => undefined);
@@ -334,6 +379,7 @@ export class BrowserPage {
   async #prepareAttached(): Promise<BrowserPage> {
     await this.send('Page.enable', {});
     await this.send('Runtime.enable', {});
+    await this.#enableHangProbes();
     // The page booted before we got here, on a profile as new as the data
     // directory it sits in: it read "never seen" already. Record the tour and
     // boot it again, once, so every later reload finds the record too.
@@ -355,6 +401,7 @@ export class BrowserPage {
   /** The one place raw devtools JSON is handled. */
   send(method: string, params: Record<string, unknown>, timeoutMs = CALL_TIMEOUT_MS): Promise<unknown> {
     if (this.#closed) return Promise.reject(new Error('the browser is closed'));
+    if (this.#fault !== null) return Promise.reject(new Error(this.#fault));
     // A send on a closed socket is dropped without an error, and each call then
     // waited out its whole timeout: after `bun test` killed the browser of a
     // file whose test timed out, every later test of that file spent 20 s on a
@@ -389,9 +436,9 @@ export class BrowserPage {
       if (timeoutMs !== undefined || !(error instanceof Error) || !error.message.includes('timed out')) throw error;
       const state = await this.send('Runtime.evaluate', { expression: HUNG_PAGE, returnByValue: true, awaitPromise: true }, 3_000)
         .then((result) => JSON.stringify((result as { result?: { value?: unknown } }).result?.value))
-        .catch(() => 'the page did not answer either: its main thread is busy');
+        .catch(() => null);
       throw new Error(`${error.message}
-Page: ${state}
+Page: ${state === null ? `the page did not answer either: its main thread is busy\n${await this.#busyReport()}` : state}
 In flight: ${JSON.stringify(this.#inFlight())}`);
     })) as {
       result?: { value?: unknown };
@@ -571,19 +618,133 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     else if (this.#userDataDir !== null) await removeDirectory(this.#userDataDir);
   }
 
+  async #enableHangProbes(): Promise<void> {
+    if (HANG_STACK) await this.send('Debugger.enable', {});
+  }
+
+  /**
+   * What holds a page whose main thread left a call unanswered, asked of what
+   * still answers. `Performance.getMetrics` is dispatched as a V8 interrupt, so
+   * it answers while JavaScript runs and waits like any call while the thread
+   * is in a layout, a synchronous IPC or a native wait (Edge 155, a busy loop
+   * against a synchronous XHR). The browser endpoint gives each process's CPU.
+   * The probes run side by side: about a second, up to 5 s when the browser
+   * endpoint answers slowly (its fetch, upgrade and two calls have 1 s each).
+   */
+  async #busyReport(): Promise<string> {
+    const asked = Date.now();
+    const [again, inScript, cpu] = await Promise.all([
+      this.send('Runtime.evaluate', { expression: '1' }, 1_000).then(() => Date.now() - asked, () => null),
+      this.send('Performance.getMetrics', {}, 1_000).then(() => Date.now() - asked, () => null),
+      this.#processCpu(),
+    ]);
+    const lines = [
+      again !== null
+        ? `Main thread: answered again ${again} ms later`
+        : inScript === null
+          ? 'Main thread: not in JavaScript: Performance.getMetrics, a V8 interrupt, got no answer in 1 s either (a layout, a synchronous IPC or a native wait)'
+          : `Main thread: running JavaScript: Performance.getMetrics, a V8 interrupt, answered in ${inScript} ms`,
+      `CPU over 1 s: ${cpu}`,
+    ];
+    if (HANG_STACK && again === null) lines.push(`Stack: ${await this.#pausedStack()}`);
+    return lines.join('\n');
+  }
+
+  /** Where the running script is, through the debugger `HANG_STACK` turned on at launch. */
+  async #pausedStack(): Promise<string> {
+    const paused = new Promise<string>((resolve) => { this.#paused = resolve; });
+    try {
+      await this.send('Debugger.pause', {}, 1_000);
+      return await Promise.race([paused, Bun.sleep(1_000).then(() => 'no pause within 1 s')]);
+    } catch (error) {
+      return `Debugger.pause failed: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.#paused = null;
+      await this.send('Debugger.resume', {}, 1_000).catch(() => undefined);
+    }
+  }
+
+  /** CPU seconds per second of each process of the browser, over one second. */
+  async #processCpu(): Promise<string> {
+    if (this.#debugPort === null) return 'no browser endpoint';
+    let socket: TextSocket | undefined;
+    try {
+      const version = await (await fetch(`http://127.0.0.1:${this.#debugPort}/json/version`, { signal: AbortSignal.timeout(1_000) })).json() as { webSocketDebuggerUrl?: string };
+      if (version.webSocketDebuggerUrl === undefined) return 'the browser endpoint has no socket';
+      const browser = socket = await TextSocket.connect(version.webSocketDebuggerUrl, 1_000);
+      const replies = new Map<number, (processes: ProcessInfo[]) => void>();
+      browser.onMessage((text) => {
+        const message = JSON.parse(text) as { id?: number; result?: { processInfo?: ProcessInfo[] } };
+        if (message.id !== undefined) replies.get(message.id)?.(message.result?.processInfo ?? []);
+      });
+      const processes = (id: number) => new Promise<ProcessInfo[]>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('SystemInfo.getProcessInfo timed out')), 1_000);
+        replies.set(id, (found) => { clearTimeout(timer); resolve(found); });
+        browser.send(JSON.stringify({ id, method: 'SystemInfo.getProcessInfo', params: {} }));
+      });
+      const before = await processes(1);
+      const started = performance.now();
+      await Bun.sleep(1_000);
+      const after = await processes(2);
+      const seconds = (performance.now() - started) / 1_000;
+      const used = after.map((process) => ({ process, rate: (process.cpuTime - (before.find((candidate) => candidate.id === process.id)?.cpuTime ?? 0)) / seconds }));
+      const busy = used.filter(({ rate }) => rate >= 0.05).map(({ process, rate }) => `${process.type} ${process.id} ${rate.toFixed(2)}`);
+      return `${busy.join(', ') || 'no process'} at 0.05 s/s or more, ${used.length - busy.length} below`;
+    } catch (error) {
+      return `could not read it: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      socket?.close();
+    }
+  }
+
   /** What a stalled page is still waiting on: whether the server never answered or the body never arrived. */
   #inFlight(): string[] {
     const now = Date.now();
-    return [...this.#requests.values()].filter((request) => now - request.at > 1_000).slice(0, 10)
-      .map((request) => `${request.url} ${request.answered ? 'answered, body pending' : 'no response'} for ${now - request.at} ms`);
+    return [...this.#requests.values()].filter((request) => now - (request.wall ?? request.at) > 1_000).slice(0, 10).map((request) => {
+      const sentAt = request.wall ?? request.at;
+      const wire = request.cache ? 'served from the cache'
+        : request.headers !== undefined ? `the network service had its headers by ${request.headers - sentAt} ms after it was sent`
+          : request.sent !== undefined ? 'the network service sent it and has no headers'
+            : 'nothing from the network service (not sent, or a service worker holds it)';
+      const server = uiServerSide(request.url, request.wall ?? null, request.at);
+      return `${request.url} ${request.answered ? 'answered, body pending' : 'no response'} for ${now - sentAt} ms: ${wire}${server === null ? '' : `; ${server}`}`;
+    });
+  }
+
+  /** Fails what waits and what comes next with the message devtools sent, then hangs up. */
+  #protocolFault(raw: string): void {
+    if (this.#fault !== null) return;
+    this.#fault = `devtools sent a message that is not JSON (${raw.length} chars: ${JSON.stringify(raw.slice(0, 120))}): the socket lost its frames, so replies and network events may be missing`;
+    for (const pending of this.#pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(this.#fault));
+    }
+    this.#pending.clear();
+    this.#socket.close(1002);
   }
 
   #receive(raw: string): void {
     if (raw === '') return;
-    let frame: { id?: unknown; method?: string; params?: { exceptionDetails?: { text?: string; exception?: { description?: string } }; requestId?: string; request?: { url?: string }; response?: { status?: number }; errorText?: string }; result?: unknown; error?: { message?: string } };
+    let frame: {
+      id?: unknown;
+      method?: string;
+      params?: {
+        exceptionDetails?: { text?: string; exception?: { description?: string } };
+        requestId?: string; frameId?: string; loaderId?: string; wallTime?: number; request?: { url?: string }; response?: { status?: number }; errorText?: string;
+        frame?: { id: string; loaderId: string };
+        callFrames?: { functionName: string; url: string; location: { lineNumber: number; columnNumber: number } }[];
+      };
+      result?: unknown;
+      error?: { message?: string };
+    };
     try {
       frame = JSON.parse(raw) as typeof frame;
     } catch {
+      // Bun's WebSocket client did this on the E2E runner: misaligned, it handed
+      // over pieces of frames, and dropping them silently lost the replies and
+      // network events inside. Each call then timed out, its probe too, and the
+      // page read as "main thread busy" with its lazy chunks "no response".
+      this.#protocolFault(raw);
       return;
     }
     if (typeof frame.id !== 'number') {
@@ -592,11 +753,44 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
         this.#pageErrors.push(detail?.exception?.description ?? detail?.text ?? 'unknown page exception');
         if (this.#pageErrors.length > 10) this.#pageErrors.shift();
       }
+      if (frame.method === 'Debugger.paused') {
+        const frames = (frame.params?.callFrames ?? []).slice(0, 8)
+          .map((call) => `${call.functionName || '(anonymous)'} ${call.url}:${call.location.lineNumber + 1}:${call.location.columnNumber + 1}`).join(' < ');
+        // A pause nobody asked for, a `debugger` statement, must not freeze the page.
+        if (this.#paused !== null) this.#paused(frames || 'paused outside any script');
+        else void this.send('Debugger.resume', {}).catch(() => undefined);
+        return;
+      }
+      if (frame.method === 'Page.frameNavigated') {
+        // Chrome sends nothing more about the requests of a document a
+        // navigation replaced: they would read as unanswered forever.
+        const navigated = frame.params?.frame;
+        if (navigated !== undefined) {
+          for (const [key, request] of this.#requests) if (request.frameId === navigated.id && request.loaderId !== navigated.loaderId) this.#requests.delete(key);
+        }
+        return;
+      }
       const id = frame.params?.requestId;
       if (id !== undefined) {
         const url = frame.params?.request?.url ?? '';
-        if (frame.method === 'Network.requestWillBeSent' && !url.startsWith('data:')) this.#requests.set(id, { url, at: Date.now(), answered: false });
-        else if (frame.method === 'Network.responseReceived') {
+        if (frame.method === 'Network.requestWillBeSent' && !url.startsWith('data:')) {
+          const early = this.#early.get(id);
+          this.#early.delete(id);
+          const wallTime = frame.params?.wallTime;
+          this.#requests.set(id, { url, at: Date.now(), wall: typeof wallTime === 'number' ? wallTime * 1_000 : undefined, answered: false, frameId: frame.params?.frameId, loaderId: frame.params?.loaderId, ...early });
+        } else if (frame.method === 'Network.requestWillBeSentExtraInfo' || frame.method === 'Network.responseReceivedExtraInfo') {
+          // The browser process sends these, and not always after Blink's own event.
+          const step = frame.method === 'Network.requestWillBeSentExtraInfo' ? 'sent' : 'headers';
+          const request = this.#requests.get(id);
+          if (request !== undefined) request[step] ??= Date.now();
+          else {
+            if (this.#early.size > 500) this.#early.clear();
+            this.#early.set(id, { ...this.#early.get(id), [step]: Date.now() });
+          }
+        } else if (frame.method === 'Network.requestServedFromCache') {
+          const request = this.#requests.get(id);
+          if (request !== undefined) request.cache = true;
+        } else if (frame.method === 'Network.responseReceived') {
           const request = this.#requests.get(id);
           if (request) request.answered = true;
           if ((frame.params?.response?.status ?? 0) >= 400) this.#recordNetworkFailure(id, `HTTP ${frame.params?.response?.status}`);
