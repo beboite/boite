@@ -18,7 +18,9 @@
     replying = false,
     submit,
     skip,
-    onwrite
+    onwrite,
+    page,
+    onopen
   }: {
     text: string;
     options: QuestionOption[];
@@ -43,6 +45,9 @@
     skip?: () => unknown;
     /** Hands the composer to this question, when another one or an ordinary message has it. */
     onwrite?: () => void;
+    /** The page asked with `boite ask --open`, and what its Open button does. */
+    page?: string;
+    onopen?: () => unknown;
   } = $props();
 
   let sent = $state(false);
@@ -165,6 +170,9 @@
 
     {#if pending}
       <div class="actions">
+        {#if page && onopen}
+          <button type="button" class="ghost" data-testid="question-open" title={page} onmousedown={keepFocus} onclick={onopen}><span class="ui-label">{strings.chat.questionOpenPage}</span></button>
+        {/if}
         {#if skip}
           <button type="button" class="ghost" data-testid="question-skip" disabled={sent} onmousedown={keepFocus} onclick={pass}><span class="ui-label">{strings.chat.questionSkip}</span></button>
         {/if}

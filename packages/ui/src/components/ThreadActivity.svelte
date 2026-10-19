@@ -9,6 +9,7 @@
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
   import { ignoreQuestions, releaseWaiting, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import QuestionCard from './QuestionCard.svelte';
+  import { openQuestionPage } from '../lib/question-page';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import { settingHeading } from '../lib/setting-requests';
   import AgentSettingCard from './AgentSettingCardLoader.svelte';
@@ -263,6 +264,8 @@
                   submit={() => sendAnswer(store, question)}
                   skip={() => store.skipQuestion(question.threadId, question.id)}
                   onwrite={child ? undefined : () => writeAnswer(store, question.id)}
+                  page={question.open?.url}
+                  onopen={() => openQuestionPage(store, question.threadId, question.id)}
                 />
                 {/if}
               </div>

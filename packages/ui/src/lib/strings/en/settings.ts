@@ -178,7 +178,7 @@ export const strings = {
     asyncQuestions: 'Let agents ask without stopping',
     asyncQuestionsHint: 'Teaches agents the boite ask command when a session starts. Codex already asks this way.',
     shortAnswers: 'Short answers',
-    shortAnswersHint: 'Asks every agent, on every message, for the result first in a few plain sentences, without preamble, recap or running commentary. Facts, numbers and commands stay.',
+    shortAnswersHint: 'Asks every agent, on every message, to work silently and write only when done or when it needs you: the result first in a few plain sentences, without preamble or recap. Facts, numbers and commands stay. Also turns off Claude\'s own progress reminder when a Claude process starts.',
     toolSummaries: 'Tool summaries (Claude)',
     toolSummariesHint: 'Claude labels each batch of tool calls in one line instead of counting them. Each label is one request to its small model, Haiku, billed to the thread\'s account. Applies when a Claude process starts.',
     titleModel: 'Title model',

@@ -205,6 +205,30 @@ describe('claude driver', () => {
     expect(options.env?.CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES).toBeUndefined();
   });
 
+  test('short answers silence the CLI\'s own reminder to report progress mid-turn; turned off, the CLI decides', async () => {
+    const client = await harness.connect();
+    // The test core starts with short answers off.
+    await client.call('settings.set', { shortAnswers: true });
+    const quiet = await claudeThread(client);
+    scripted((fake) => {
+      fake.emit(init('sess-quiet'));
+      fake.emit(success('sess-quiet'));
+      fake.end();
+    });
+    expect(await runTurn(client, quiet, 'hello')).toBe('done');
+    expect(calls.at(-1)!.options.env?.CLAUDE_CODE_SILENT_TURN_REMINDER).toBe('0');
+
+    await client.call('settings.set', { shortAnswers: false });
+    const chatty = await claudeThread(client);
+    scripted((fake) => {
+      fake.emit(init('sess-chatty'));
+      fake.emit(success('sess-chatty'));
+      fake.end();
+    });
+    expect(await runTurn(client, chatty, 'hello')).toBe('done');
+    expect(calls.at(-1)!.options.env?.CLAUDE_CODE_SILENT_TURN_REMINDER).toBeUndefined();
+  });
+
   test('the CLI is asked for summarized thinking and tool summaries, and a summary labels the calls it names', async () => {
     const client = await harness.connect();
     await client.call('settings.set', { toolSummaries: true });

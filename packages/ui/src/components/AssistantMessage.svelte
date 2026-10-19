@@ -11,6 +11,7 @@
   import PermissionCard from './PermissionCard.svelte';
   import PlanCard from './PlanCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
+  import { openQuestionPage } from '../lib/question-page';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import AgentSettingCard from './AgentSettingCardLoader.svelte';
   import Prose from './Prose.svelte';
@@ -178,6 +179,8 @@
           submit={() => asked !== undefined && sendAnswer(store, asked)}
           skip={() => store.skipQuestion(message.threadId, part.questionId)}
           onwrite={() => writeAnswer(store, part.questionId)}
+          page={part.open?.url}
+          onopen={() => openQuestionPage(store, message.threadId, part.questionId)}
         />
       {:else if part.type === 'compaction'}
         <div class="compaction" data-testid="compaction-part" data-trigger={part.trigger}>

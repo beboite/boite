@@ -526,7 +526,7 @@ export class ClaudeSession {
 
   private cliEnv(ctx: SessionContext): Record<string, string | undefined> {
     const mode = ctx.thread.contextMode ?? null;
-    const env = agentEnv(ctx.accountEnv, ctx.toolSummaries === true);
+    const env = agentEnv(ctx.accountEnv, ctx.toolSummaries === true, ctx.shortAnswers === true);
     return mode === null ? env : {
       ...env,
       [CONTEXT_ENV]: mode.label,

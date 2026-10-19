@@ -94,6 +94,7 @@ export class TurnContexts {
       systemGuide: this.systemGuide(thread, provider),
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
+      shortAnswers: this.core.settings.get().shortAnswers !== false,
       log: (level, message, context) => {
         if (context?.kind === 'provider-output') noteStderr(threadId, message);
         this.core.log(level, message, { ...context, source: provider.id, threadId });
@@ -365,6 +366,7 @@ export class TurnContexts {
       accountEnv: env,
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
+      shortAnswers: this.core.settings.get().shortAnswers !== false,
       emit,
       reportProgress: progress,
       reportProviderEvent: () => this.threads.progress.contact(threadId, turn.id),

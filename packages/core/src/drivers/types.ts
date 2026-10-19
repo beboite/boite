@@ -71,6 +71,8 @@ export interface QuestionAsk {
   setting?: SettingAsk;
   /** An agent setting card (`agents.settings.request`), always asynchronous. */
   agentSetting?: AgentSettingAsk;
+  /** A page the card opens (`boite ask --open`). */
+  open?: { url: string };
 }
 
 /**
@@ -138,6 +140,8 @@ export interface TurnContext {
   warmProcessMinutes: number;
   /** Claude labels each batch of tool calls, one small-model request each (`Settings.toolSummaries`). Absent means off. */
   toolSummaries?: boolean;
+  /** The agent is asked to stay quiet until its answer (`Settings.shortAnswers`); Claude's own progress reminder goes off. Absent means off. */
+  shortAnswers?: boolean;
   emit: EmitSink;
   log(level: 'info' | 'warn' | 'error', message: string, context?: CoreLogContext): void;
   /**
@@ -219,7 +223,7 @@ export interface TurnContext {
 /** Native session setup without a prompt, a turn or a message sink. */
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
-  'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'toolSummaries' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
+  'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'toolSummaries' | 'shortAnswers' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
   'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota' | 'lazyMcp'>;
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
