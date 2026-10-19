@@ -29,10 +29,12 @@ const TOOLS = ['messages', 'missions', 'memory', 'artifacts', 'decisions', 'rout
 const newestFirst = (a: AgentRecord, b: AgentRecord) => b.updatedAt - a.updatedAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 const byCreation = (a: AgentRecord, b: AgentRecord) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 function unique<T extends AgentRecord>(records: T[]): T[] { const seen = new Set<string>(); return records.filter(r => !seen.has(r.id) && !!seen.add(r.id)); }
-/** The frozen instructions stay in the core and in the run's own thread. */
 const heldKey = (messageId: string) => `agents:attachments:${messageId}`;
+/** A message's attachments and the agents whose turn already took them. */
+type Held = { attachments: Attachment[]; given: string[] };
 /** What a message shows of an attachment: never its bytes. */
 const describe = ({ kind, mimeType, name, data }: Attachment): AgentMessageAttachment => ({ kind, mimeType, name, bytes: decodedBytes(data) });
+/** The frozen instructions stay in the core and in the run's own thread. */
 function summary({ context: { instructions: _instructions, ...context }, ...run }: AgentRun): AgentRunSummary { return { ...run, context }; }
 type Reader<K extends AgentHistoryKind> = { filters: RecentFilter[]; keep: (record: AgentEntities[K]) => boolean };
 
@@ -281,15 +283,18 @@ export class AgentStore {
     if (problem) throw refused(problem.message, problem.data);
     // Undefined when there are none, so JSON leaves the field out.
     const described = attachments.length ? attachments.map(describe) : undefined;
-    const result = this.records.command(actor, params.requestId, { method: 'send', target, body, recipientIds, replyTo: params.replyTo ?? null, attachments: described }, () => {
+    // The fingerprint hashes the bytes: the same request id with another file of the same size is refused.
+    const result = this.records.command(actor, params.requestId, { method: 'send', target, body, recipientIds, replyTo: params.replyTo ?? null, attachments: described && attachments }, () => {
       const current = session ? this.currentWork(session.threadId) : null;
       const episodeId = current?.episodeId ?? parent?.episodeId ?? newId('episode_');
       const available = allowed.filter(id => this.records.get('profile', id).status !== 'archived');
       const recipients = recipientIds.length ? recipientIds : session || group?.mode === 'mentions' ? [] : group?.mode === 'autonomous' ? available.slice(0, 1) : available;
       const message = this.records.create('message', { scope: target, senderId: session?.agentId ?? null, text: body, recipientIds: recipients, replyTo: parent?.id ?? null, episodeId, sourceRunId: current?.runId ?? null, attachments: described });
       // The bytes wait beside the snapshot until every recipient's turn took them.
-      if (described) this.core.journal.setSetting(heldKey(message.id), attachments);
+      if (described) this.core.journal.setSetting(heldKey(message.id), { attachments, given: [] });
       this.deliver(message);
+      // Nobody to deliver to, or every delivery over the limit: nothing will ever take them.
+      this.releaseHeld(message.id);
       return message;
     });
     this.changed(); return result;
@@ -309,15 +314,23 @@ export class AgentStore {
 
   /**
    * What the user attached to the message a piece of work answers, for its
-   * turn. Only the delivery itself carries them: a decision's continuation or
-   * a resume rewrites the prompt and finds them already in the thread.
+   * turn, until a turn of that agent took them: a decision's continuation or
+   * a resume after it finds them in the thread.
    */
   attachmentsFor(work: AgentWork): Attachment[] {
-    if (!work.messageId || work.prompt !== this.records.get('message', work.messageId).text) return [];
-    return (this.core.journal.getSetting(heldKey(work.messageId)) as Attachment[] | undefined) ?? [];
+    const held = this.heldFor(work);
+    return held && !held.given.includes(work.agentId) ? held.attachments : [];
+  }
+  /** The agent's turn took the attachments of the message its work answers. */
+  markGiven(work: AgentWork): void {
+    const held = this.heldFor(work);
+    if (held) this.core.journal.setSetting(heldKey(work.messageId!), { ...held, given: [...held.given, work.agentId] });
+  }
+  private heldFor(work: AgentWork): Held | undefined {
+    return work.messageId ? this.core.journal.getSetting(heldKey(work.messageId)) as Held | undefined : undefined;
   }
   /** Lets a message's attachments go once no recipient's work can start again: every delivery processed, cancelled or over the limit. */
-  releaseAttachments(messageId: string | null): void {
+  releaseHeld(messageId: string | null): void {
     if (messageId && this.records.find('delivery', 'messageId', [messageId]).every(d => ['processed', 'cancelled', 'limited'].includes(d.status))) this.core.journal.deleteSetting(heldKey(messageId));
   }
 
@@ -445,7 +458,7 @@ export class AgentStore {
       for (const d of this.records.find('delivery', 'workId', [work.id])) this.records.update('delivery', d.id, d.revision, { ...d, status: action === 'cancel' ? 'cancelled' : 'pending' });
       const prompt = status === 'pending' ? `${work.prompt}\n\nResuming after an interruption. Inspect previous results and filesystem changes before repeating actions. Continue only unfinished work.\nOwner instructions: ${note || 'Continue from the last known state.'}` : work.prompt;
       const next = this.records.update('work', work.id, work.revision, { ...work, status, taskGeneration, prompt, error: null, runId: status === 'pending' ? null : work.runId });
-      if (status === 'cancelled') this.releaseAttachments(work.messageId);
+      if (status === 'cancelled') this.releaseHeld(work.messageId);
       return next;
     });
     if (threadId && ['pause', 'cancel'].includes(action)) this.core.threads.stopTurn(threadId);

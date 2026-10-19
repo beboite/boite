@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { AgentCommand, ImageAttachment } from '@boite/contracts';
+import { stringify } from '../tool-text.ts';
 import { resolveDataDir } from '../../paths.ts';
 import { ANTHROPIC_DEFAULT, openAiCacheLife } from '../../prompt-cache.ts';
 import type { PromptCacheLife, SessionContext } from '../types.ts';
@@ -82,15 +83,6 @@ export function contentText(value: unknown): string | null {
   return parts.length === 0 ? null : parts.join('\n');
 }
 
-function stringify(value: unknown): string | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value) ?? null;
-  } catch {
-    return String(value);
-  }
-}
 
 /**
  * Where this thread's transcript lives: its own directory under the account's

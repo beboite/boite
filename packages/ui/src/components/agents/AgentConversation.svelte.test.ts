@@ -228,3 +228,28 @@ test('the conversation types into the thread composer: attach and dictation stay
   expect(realStore.composerStates['agent:agent:a-ada']).toMatchObject({ text: '', attachments: [] });
   delete realStore.composerStates['agent:agent:a-ada'];
 });
+
+test('a retry keeps its request id only for the same bytes: another file of the same size is a new message', async () => {
+  vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
+  const call = vi.fn().mockResolvedValue(null);
+  const view = {
+    seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
+    store: useStore(), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
+  };
+  mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
+  await settle();
+  const file = (text: string) => ({ kind: 'file', mimeType: 'text/plain', data: btoa(text), name: 'notes.txt' } as const);
+  const sendWith = async (attachment: ReturnType<typeof file>) => {
+    realStore.composerStates['agent:agent:a-ada'] = { text: 'Read it', attachments: [attachment], queued: [], sending: false, paused: false };
+    await settle();
+    document.querySelector<HTMLButtonElement>('[data-testid="composer-send"]')!.click();
+    await settle();
+  };
+  await sendWith(file('first'));
+  await sendWith(file('first'));
+  await sendWith(file('other'));
+  const ids = call.mock.calls.map(c => (c[1] as { requestId: string }).requestId);
+  expect(ids[1]).toBe(ids[0]);
+  expect(ids[2]).not.toBe(ids[0]);
+  delete realStore.composerStates['agent:agent:a-ada'];
+});

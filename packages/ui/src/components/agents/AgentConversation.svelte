@@ -118,14 +118,20 @@
 
   async function send(text: string, attachments: Attachment[]): Promise<boolean> {
     const recipientIds = scope.kind === 'agent' ? [scope.id] : recipients;
-    // The same message sent again after a lost answer keeps its request id, so the core takes it once.
-    const signature = JSON.stringify([text, recipientIds, attachments.map(a => [a.kind, a.name, a.data.length])]);
+    // The same message sent again after a lost answer keeps its request id, so the core takes it once; other bytes are another message.
+    const signature = JSON.stringify([text, recipientIds, attachments.map(a => [a.kind, a.name, contentHash(a.data)])]);
     try {
       if (!request || request.signature !== signature) request = { signature, id: secureId() };
       const sent = await view.call('agents.message.send', { scope, text, recipientIds, requestId: request.id, ...(attachments.length ? { attachments } : {}) });
       if (sent) { request = null; return true; }
     } catch (error) { view.error = errorText(error); }
     return false;
+  }
+  /** FNV-1a over the base64 text: enough to tell a replaced file from a retried one. */
+  function contentHash(data: string): string {
+    let hash = 0x811c9dc5;
+    for (let at = 0; at < data.length; at++) hash = Math.imul(hash ^ data.charCodeAt(at), 0x01000193);
+    return `${data.length}:${(hash >>> 0).toString(36)}`;
   }
   async function stopWork() {
     const work = running;
