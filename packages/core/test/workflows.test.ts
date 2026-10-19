@@ -111,6 +111,9 @@ test('a plan runs as child threads: output feeds a fan-out, a false condition sk
   expect(prompts.filter(p => p.threadId === threadId && p.prompt.includes('Boite workflow')).length).toBe(1);
   await waitFor(() => h.core.workflows.get(threadId, run.id).delivered);
   expect(h.core.delegation.get(threadId).turnsUsed).toBe(5);
+  // A done run puts its steps' conversations away as done.
+  const steps = done.nodes.flatMap(n => n.instances).map(i => h.core.threads.require(i.threadId!));
+  expect(steps.map(step => [step.archived, step.doneAt != null])).toEqual(steps.map(() => [true, true]));
   // A retried start is the same run.
   expect((await owner.call('workflows.start', { threadId, plan: REVIEW, requestId: 'review-1' })).id).toBe(run.id);
   await expect(owner.call('workflows.start', { threadId, plan: { ...REVIEW, name: 'Other' }, requestId: 'review-1' })).rejects.toThrow('different content');
