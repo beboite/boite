@@ -7,7 +7,6 @@
  * index.
  */
 import { strings as subscriptionProxy } from './strings/en/subscriptionProxy';
-import { strings as signInRequest } from './strings/en/signInRequest';
 import { strings as settingRequest } from './strings/en/settingRequest';
 import { strings as agentSettingRequest } from './strings/en/agentSettingRequest';
 import { strings as remoteBrowser } from './strings/en/remoteBrowser';
@@ -95,7 +94,6 @@ import { strings as onboarding } from './strings/en/onboarding';
 
 export const strings = {
   ...subscriptionProxy,
-  ...signInRequest,
   ...settingRequest,
   ...agentSettingRequest,
   ...remoteBrowser,

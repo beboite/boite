@@ -1,6 +1,5 @@
 import type { ThreadLink } from './agent-door';
 import type { AgentSettingAsk } from './agent-setting-requests.ts';
-import type { SignInAsk } from './sign-in.ts';
 import type { ImageMimeType } from './attachment-limits.ts';
 import type { NativeAgentUpdate } from './delegation';
 import type { MessageId, ProjectId, RequestId, ThreadId, Timestamp, TurnId } from './ids';
@@ -198,8 +197,8 @@ export type MessagePart =
       setting?: SettingAsk;
       /** An agent setting card: see `QuestionRequest.agentSetting`. */
       agentSetting?: AgentSettingAsk;
-      /** A sign-in card: see `QuestionRequest.signIn`. */
-      signIn?: SignInAsk;
+      /** A page to open: see `QuestionRequest.open`. */
+      open?: { url: string };
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is

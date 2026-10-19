@@ -143,6 +143,7 @@ export const fr: Translation = {
     questionAnswered: 'Répondu',
     questionCancelled: 'Cette question n’attend plus de réponse',
     questionSkip: 'Passer',
+    questionOpenPage: 'Ouvrir',
     questionReplying: 'Écrivez votre réponse dans le champ de message en bas, avec photos ou fichiers si besoin.',
     questionWrite: 'Répondre par écrit',
     questionDocked: 'Attend votre réponse au-dessus du champ de message',

@@ -27,11 +27,6 @@ const SHOP = `<!doctype html><title>Shop</title>
 <div id="cover" style="position:absolute;left:0;top:400px;width:200px;height:60px;background:#ccc">Cover</div>
 <p id="note">Free delivery</p>`;
 
-// A site that signs in with a form: an HttpOnly session cookie with no expiry, the kind a browser never writes to disk.
-const LOGIN = `<!doctype html><title>Sign in</title>
-<style>body{margin:0;font:16px sans-serif} input{position:absolute;left:100px;width:240px;height:32px}</style>
-<form method="post" action="/session"><input id="user" name="user" style="top:100px" autocomplete="username"><input id="pass" name="pass" type="password" style="top:160px" autocomplete="current-password"><button style="position:absolute;left:100px;top:220px">Sign in</button></form>`;
-
 export const DOWNLOAD_SCRIPT = '#!/bin/sh\necho downloaded\n';
 export const DOWNLOAD_PROGRAM = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(126)]);
 
@@ -57,14 +52,6 @@ export function createBrowserFixture() {
       if (path === '/later') return later.response.then(() => new Response('released'));
       if (path === '/later/done') { later.complete(); return new Response('done'); }
       if (path === '/sent') return new Response(`<title>Sent</title><h1>Thanks ${new URL(request.url).searchParams.get('name')}</h1>`, { headers: { 'content-type': 'text/html' } });
-      if (path === '/login') return new Response(LOGIN, { headers: { 'content-type': 'text/html' } });
-      if (path === '/session' && request.method === 'POST') return request.formData().then(form => form.get('pass') === 'open sesame'
-        ? new Response(null, { status: 303, headers: { location: '/account', 'set-cookie': `sid=${encodeURIComponent(String(form.get('user')))}; Path=/; HttpOnly; SameSite=Lax` } })
-        : new Response('<title>Wrong password</title>', { status: 401, headers: { 'content-type': 'text/html' } }));
-      if (path === '/account') {
-        const sid = /(?:^|; )sid=([^;]+)/.exec(request.headers.get('cookie') ?? '')?.[1];
-        return new Response(`<title>${sid ? `Signed in as ${decodeURIComponent(sid)}` : 'Signed out'}</title>`, { headers: { 'content-type': 'text/html' } });
-      }
       if (path === '/popup') return new Response('<title>Popup</title>popup', { headers: { 'content-type': 'text/html' } });
       // Files a page offers for download: a script, and a program that names itself a picture.
       if (path === '/files') return new Response('<title>Files</title><a id="script" href="/download/tool.sh?token=secret">Script</a> <a id="saved" href="/download/notes.txt" download>Notes</a>', { headers: { 'content-type': 'text/html' } });

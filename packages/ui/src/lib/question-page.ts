@@ -1,0 +1,24 @@
+import { errorText } from './errors';
+import { liveViews } from './live-view.svelte';
+import { rightPanel } from './right-panel.svelte';
+import type { Store } from './store.svelte';
+
+/**
+ * Open on a question asked with `boite ask --open`: the page opens in the
+ * thread's browser, as `boite browse` opens it, and the thread's panel shows
+ * it on the Browser tab, live. From the Agents page or another thread, the
+ * thread opens first, so its own panel is the one that shows the page.
+ */
+export async function openQuestionPage(store: Store, threadId: string, url: string): Promise<void> {
+  const client = store.client;
+  if (!client) return;
+  try {
+    if (store.page !== 'chat' || store.openThread?.id !== threadId) { store.showChat(); await store.open(threadId); }
+    await client.call('panel.open', { threadId, surface: { kind: 'browser', url } });
+    const key = store.threadKey(threadId);
+    liveViews.show('agent-browser', key);
+    const panel = rightPanel.for(key);
+    const tab = panel.surfaces.find((surface) => surface.kind === 'agent-browser');
+    if (tab) panel.activate(tab.id); else panel.open('agent-browser');
+  } catch (cause) { store.error = errorText(cause); }
+}

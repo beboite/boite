@@ -18,11 +18,11 @@ import {
   type ExperimentId,
   settingAnswerText,
   settledSetting,
-  signInAnswerText,
   type ThreadId,
   type ThreadSummary,
   type Turn,
 } from '@boite/contracts';
+import { checkSurface } from '../agent.ts';
 import { answerText, attachToAnswer } from '../attachments.ts';
 import type { Core } from '../core.ts';
 import type { PermissionTicket, QuestionAsk, QuestionTicket } from '../drivers/types.ts';
@@ -299,7 +299,7 @@ export class ThreadCards {
    * turn, or under the last one when the agent asks between turns (from a
    * background shell of its own, say), in a message of its own.
    */
-  askAsync(params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean }): { questionId: RequestId } {
+  askAsync(params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean; open?: string }): { questionId: RequestId } {
     const thread = this.threads.require(params.threadId);
     if (thread.archived) throw refused('cannot ask on an archived thread', { threadId: thread.id });
     const text = typeof params.text === 'string' ? params.text.trim() : '';
@@ -309,12 +309,17 @@ export class ThreadCards {
       throw refused('options must be at most 12 labels of 1 to 200 characters', { field: 'options' });
     }
     if (params.multiple !== undefined && typeof params.multiple !== 'boolean') throw refused('multiple must be a boolean', { field: 'multiple' });
+    // The page opens as `boite browse` would open it; a user name or password in it would sit on the card and in the journal.
+    const page = params.open === undefined ? undefined : checkSurface(thread.cwd, { kind: 'browser', url: params.open });
+    const credentials = page?.kind === 'browser' ? new URL(page.url) : null;
+    if (credentials && (credentials.username || credentials.password)) throw refused('open: an address with a user name or password in it is refused', { field: 'open' });
     return this.drawAsync(thread, {
       text,
       options: labels.map((label, index) => ({ id: String(index + 1), label: label.trim() })),
       allowText: true,
       multiple: params.multiple === true && labels.length > 1,
       async: true,
+      ...(page?.kind === 'browser' ? { open: { url: page.url } } : {}),
     });
   }
 
@@ -393,7 +398,7 @@ export class ThreadCards {
       ...(ask.async === true ? { async: true } : {}),
       ...(ask.setting === undefined ? {} : { setting: ask.setting }),
       ...(ask.agentSetting === undefined ? {} : { agentSetting: ask.agentSetting }),
-      ...(ask.signIn === undefined ? {} : { signIn: ask.signIn }),
+      ...(ask.open === undefined ? {} : { open: ask.open }),
       createdAt: Date.now(),
     };
     let resolve: (answer: QuestionAnswer | null) => void = () => undefined;
@@ -514,7 +519,6 @@ export const ASK_INSTRUCTIONS = '\n\nBoite: to ask the user something without st
 /** What the agent reads for an answer: the labels picked, then what the user typed. */
 function answerTextOf(request: QuestionRequest, answer: QuestionAnswer): string {
   if (request.setting !== undefined) return settingAnswerText(request.setting, answer);
-  if (request.signIn !== undefined) return signInAnswerText(request.signIn);
   const labels = answer.optionIds.map(id => request.options.find(option => option.id === id)?.label ?? id);
   return [labels.join(', '), answerText(answer)].filter(line => line.length > 0).join('\n');
 }

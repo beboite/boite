@@ -11,7 +11,6 @@
  */
 import type { Translation } from './i18n.svelte';
 import { fr as subscriptionProxy } from './strings/fr/subscriptionProxy';
-import { fr as signInRequest } from './strings/fr/signInRequest';
 import { fr as settingRequest } from './strings/fr/settingRequest';
 import { fr as agentSettingRequest } from './strings/fr/agentSettingRequest';
 import { fr as remoteBrowser } from './strings/fr/remoteBrowser';
@@ -99,7 +98,6 @@ import { fr as onboarding } from './strings/fr/onboarding';
 
 export const fr: Translation = {
   ...subscriptionProxy,
-  ...signInRequest,
   ...settingRequest,
   ...agentSettingRequest,
   ...remoteBrowser,

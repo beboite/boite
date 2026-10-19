@@ -1,5 +1,5 @@
 /** Permission requests and questions: asked by a turn, answered by the user. */
-import { RpcErrorCode, agentSettingAnswerText, browserProfilesOf, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, SIGN_IN_DONE, SIGN_IN_REASON_MAX, signInAnswerText, signInSites, type SignInAsk, type SignInRequestParams, checkClientPreferences, checkSettingRequest, settledExperiment, type ClientPreferences, type ExperimentId, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { RpcErrorCode, agentSettingAnswerText, checkClientPreferences, checkSettingRequest, settledExperiment, type ClientPreferences, type ExperimentId, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { checkAnswer, checkAsk } from './checks';
 import { QUESTION_OPTIONS, QUESTION_TEXT } from './conversation';
@@ -108,7 +108,7 @@ export function settleQuestion(
       ...(request.async === true ? { async: true } : {}),
       ...(request.setting === undefined ? {} : { setting: request.setting }),
       ...(request.agentSetting === undefined ? {} : { agentSetting: request.agentSetting }),
-      ...(request.signIn === undefined ? {} : { signIn: request.signIn }),
+      ...(request.open === undefined ? {} : { open: request.open }),
       answer
     }
   });
@@ -120,8 +120,8 @@ export function settleQuestion(
  * assistant message of the last turn, and nothing waits on it. The answer
  * comes back as a prompt quoting the question, once the thread is free.
  */
-export function askAsync(ctx: FakeContext, thread: Thread, turn: Turn, running: Message | null, text: string, labels: string[], multiple: boolean): string {
-  return drawAsync(ctx, thread, turn, running, { text, options: labels.map((label, index) => ({ id: String(index + 1), label })), allowText: true, multiple });
+export function askAsync(ctx: FakeContext, thread: Thread, turn: Turn, running: Message | null, text: string, labels: string[], multiple: boolean, open?: string): string {
+  return drawAsync(ctx, thread, turn, running, { text, options: labels.map((label, index) => ({ id: String(index + 1), label })), allowText: true, multiple, ...(open === undefined ? {} : { open: { url: open } }) });
 }
 
 /** The core's `requestSetting`: a settings card, drawn and answered like any card asked without stopping. */
@@ -166,33 +166,12 @@ export function requestSetting(ctx: FakeContext, thread: Thread, turn: Turn, par
   return { questionId: askSetting(ctx, thread, turn, checked.reason, checked.options, checked.setting), setting: checked.setting };
 }
 
-/** As the core's `requestSignIn`: one card per set of sites, never into a private tab. */
-export function requestSignIn(ctx: FakeContext, thread: Thread, turn: Turn, params: SignInRequestParams): { questionId: string; signIn: SignInAsk; reused: boolean } {
-  const refused = (message: string, field: string) => new RpcFailure({ code: RpcErrorCode.Refused, message, data: { field } });
-  const reason = typeof params.reason === 'string' ? params.reason.trim() : '';
-  if (reason.length === 0 || reason.length > SIGN_IN_REASON_MAX) throw refused(`a sign-in card needs a reason of 1 to ${SIGN_IN_REASON_MAX} characters (--why)`, 'reason');
-  const checked = signInSites(params.urls);
-  if (!checked.ok) throw refused(checked.message, 'urls');
-  const { profiles, defaultId } = browserProfilesOf(ctx.settings);
-  const profile = params.profile === undefined ? defaultId : findBrowserProfile(profiles, params.profile);
-  if (profile === null) throw refused(`no browser profile is named ${params.profile}; boite browser profiles lists them`, 'profile');
-  if (profile === PRIVATE_BROWSER_PROFILE) throw refused('a private tab keeps no sign-in: ask in the default profile or a named one', 'profile');
-  for (const pending of ctx.pendingQuestions.values()) {
-    const open = pending.request.signIn;
-    if (pending.request.threadId === thread.id && open?.profile === profile && checked.sites.every((site) => open.sites.some((known) => known.host === site.host))) return { questionId: pending.request.id, signIn: open, reused: true };
-  }
-  const profileName = profile === DEFAULT_BROWSER_PROFILE ? 'Default' : profiles.find((known) => known.id === profile)?.name ?? profile;
-  const signIn: SignInAsk = { sites: checked.sites, profile, profileName };
-  const questionId = drawAsync(ctx, thread, turn, null, { text: reason, options: [{ id: SIGN_IN_DONE, label: 'Signed in' }], allowText: false, multiple: false, signIn });
-  return { questionId, signIn, reused: false };
-}
-
 function drawAsync(
   ctx: FakeContext,
   thread: Thread,
   turn: Turn,
   running: Message | null,
-  asked: { text: string; options: QuestionOption[]; allowText: boolean; multiple: boolean; setting?: SettingAsk; agentSetting?: AgentSettingAsk; signIn?: SignInAsk }
+  asked: { text: string; options: QuestionOption[]; allowText: boolean; multiple: boolean; setting?: SettingAsk; agentSetting?: AgentSettingAsk; open?: { url: string } }
 ): string {
   const questionId = `qst-${++ctx.seq}`;
   const text = asked.text;
@@ -217,12 +196,6 @@ function drawAsync(
       if (answer === null) return;
       if (asked.setting) {
         holdAnswer(ctx, thread, `> ${text}\n\n${settingAnswerText(asked.setting, answer)}`);
-        return;
-      }
-      if (asked.signIn) {
-        holdAnswer(ctx, thread, `> ${text}
-
-${signInAnswerText(asked.signIn)}`);
         return;
       }
       if (asked.agentSetting) {
@@ -346,7 +319,7 @@ export function requestMethods(ctx: FakeContext) {
           data: { threadId: params.threadId }
         });
       }
-      return { questionId: askAsync(ctx, thread, turn, null, asked.text, asked.labels, asked.multiple) };
+      return { questionId: askAsync(ctx, thread, turn, null, asked.text, asked.labels, asked.multiple, params.open) };
     },
     'settings.request': async (params) => {
       const thread = ctx.thread(params.threadId);
@@ -354,13 +327,6 @@ export function requestMethods(ctx: FakeContext) {
       const turn = thread.turns.find((entry) => entry.status === 'running') ?? thread.turns.at(-1);
       if (!turn) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the thread has no turn to ask in yet', data: { threadId: params.threadId } });
       return requestSetting(ctx, thread, turn, params);
-    },
-    'browser.signIn': async (params) => {
-      const thread = ctx.thread(params.threadId);
-      if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot ask on an archived thread', data: { threadId: thread.id } });
-      const turn = thread.turns.find((entry) => entry.status === 'running') ?? thread.turns.at(-1);
-      if (!turn) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the thread has no turn to ask in yet', data: { threadId: params.threadId } });
-      return requestSignIn(ctx, thread, turn, params);
     },
     'agent.settings': async () => ({
       app: ctx.clientPreferences === null ? null : { language: ctx.clientPreferences.language, device: null, client: null },

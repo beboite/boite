@@ -167,6 +167,7 @@ export const strings = {
     questionAnswered: 'Answered',
     questionCancelled: 'No longer waiting for an answer',
     questionSkip: 'Skip',
+    questionOpenPage: 'Open',
     /** The composer is the free field of the question; the card points there. */
     questionReplying: 'Write your answer in the message box below, with any photos or files.',
     questionWrite: 'Answer in writing',

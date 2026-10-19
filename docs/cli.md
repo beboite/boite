@@ -87,15 +87,6 @@ tab closes. `tab list` names each tab's profile, `tab new <url>` opens another,
 `tab <id>` makes one current and `--tab <id>` aims a single command at it. The
 agent cannot select a tab from another conversation.
 
-A profile keeps its sign-ins for every conversation of the machine, so the
-agent opens the site first. A page that still asks to sign in gets
-`boite browser login <url> [<url>...] --why "<reason>"` (`--profile <name>`
-for another profile): a card asks the user once, without stopping, with an
-Open button per page, and prints `requested: <id>`, or `already asked: <id>`
-while a card for those sites is open. The user signs in in the panel, and the
-answer arrives as a message, like `boite ask`. Never ask for a password in the
-chat. See [browser](browser.md#signing-in).
-
 `snapshot -i` lists the page's interactive elements with refs:
 `- textbox "Email" [ref=e3]`, `- button "Continue" [ref=e5]`. Without `-i` it
 adds headings, text and the containers around them; `-c` drops the containers,
@@ -358,7 +349,7 @@ boite diff [file]                open the changes surface, or one file's diff
 boite browse <url>               open the url in a new tab of this conversation's browser (http, https)
 boite open trace|tasks|changes|files [dir]
 boite status                     git status: branch, upstream, one row per change
-boite ask <question> [option ...] [--multiple]
+boite ask <question> [option ...] [--multiple] [--open <url>]
 boite task list|add <text>|start <id>|done <id>|remove <id>|clear
 boite todo list|add <text>|claim <id>
 boite agents list|inbox
@@ -521,7 +512,8 @@ thread does not turn `waiting` and the card stays open after the turn ends.
 A core restart keeps it too: an open card is read back from the journal at
 startup, for as long as events are kept (30 days).
 Each extra argument is an option label; with none the question takes free
-text, and `--multiple` lets the user pick several. The answer reaches the agent
+text, and `--multiple` lets the user pick several. `--open <url>` adds an Open
+button for a page the user must sign in to (docs/browser.md). The answer reaches the agent
 as a message that quotes the question, `> question` then the answer: steered
 into the running turn when the agent takes steering (Codex, pi, Muse, Grok),
 handed to Claude at the main agent's next tool call through the PostToolUse

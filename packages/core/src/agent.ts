@@ -20,7 +20,6 @@ import { registerTodoMethods } from './todos.ts';
 import { existingInside, registerWorkdirMethods, resolveInside } from './workdir.ts';
 import { publishArtifact, readArtifact } from './artifacts.ts';
 import { publishView } from './views.ts';
-import { openSignIn, requestSignIn } from './browser/sign-in.ts';
 
 /** More than a plan, and the tasks surface stops being readable anyway. */
 export const TASKS_MAX = 200;
@@ -210,8 +209,6 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('browser.remoteWatch', (params, { connection }) => core.browser.remoteWatch(params, connection));
   core.router.register('browser.remoteStatus', (params, { connection }) => core.browser.remoteStatus(params, connection));
   core.router.register('browser.command', params => core.browser.command(params));
-  core.router.register('browser.signIn', params => requestSignIn(core, params));
-  core.router.register('browser.signInOpen', (params, { connection }) => openSignIn(core, params, connection));
   core.router.register('browser.importCookies', params => core.browser.importCookies(params));
   core.router.register('browser.hostAttach', (_params, { connection }) => core.browser.hostAttach(connection));
   core.router.register('browser.hostDetach', (_params, { connection }) => core.browser.hostDetach(connection));

@@ -8,7 +8,6 @@ export * from './diagnostics';
 export * from './pull-requests';
 export * from './browser';
 export * from './browser-remote';
-export * from './sign-in';
 export * from './mobile-devices';
 export * from './agents';
 export * from './workflows';

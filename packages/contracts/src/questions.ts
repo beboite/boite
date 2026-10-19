@@ -1,5 +1,4 @@
 import type { AgentSettingAsk } from './agent-setting-requests.ts';
-import type { SignInAsk } from './sign-in.ts';
 import type { ProviderId, RequestId, ThreadId, Timestamp, TurnId } from './ids';
 import type { Attachment } from './messages';
 import type { SettingAsk } from './setting-requests.ts';
@@ -69,11 +68,8 @@ export interface QuestionRequest {
    * `text` is its reason. Always asynchronous.
    */
   agentSetting?: AgentSettingAsk;
-  /**
-   * A sign-in card (`browser.signIn`): the agent needs the user signed in to
-   * these sites in the agent browser. `text` is its reason. Always asynchronous.
-   */
-  signIn?: SignInAsk;
+  /** A page the card opens in the thread's browser (`boite ask --open`), as for a sign-in. */
+  open?: { url: string };
   createdAt: Timestamp;
 }
 
@@ -199,7 +195,7 @@ export interface QuestionsRpcMethods {
    * none makes a free-text question.
    */
   'questions.ask': {
-    params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean };
+    params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean; open?: string };
     result: { questionId: RequestId };
   };
 }
