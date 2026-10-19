@@ -198,14 +198,27 @@ it. `boite pr unwatch [<url|number>]` stops one watch, or all of them.
 The core (`packages/core/src/pull-request-watch.ts`) wakes the conversation
 with one message, a `pull-request` turn, when:
 
-- a check fails, each failure once; a rerun that fails again counts again;
-- every check the base branch requires finished without failing (every check
-  when none is required), including a required check that appears already
-  passed, and never while another run of the same check on that commit still
-  goes;
+- the first check of a head fails; failures after it on that head wait until
+  no CI job runs and go out together as its verdict, unless only an aggregate
+  gate is new (a required job such as `CI required` that started once every
+  other job of its workflow ended); a rerun that fails again counts again;
+- every check the base branch requires passed and no CI job still runs (every
+  job when none is required), once per head; again when a required check
+  appears already passed or after one of them failed. A commit status such as
+  CodeRabbit's holds nothing while it stays pending, unless the base branch
+  requires it or commit statuses are the only checks;
 - someone other than the account `gh` signs in as posts a comment, a review or
-  an inline review comment, replies included, or a bot rewrites one;
-- the branch starts to conflict with its base.
+  an inline review comment, replies included. From a bot, a review counts
+  when it names findings (`Actionable comments posted` above zero, outside
+  diff comments, changes requested), and its summary (CodeRabbit's
+  walkthrough, mtsu-patrol's) only when rewritten to name findings. A bot's
+  other rewrites, an empty review, a reply in a thread that only agrees with
+  the agent's answer ("Thanks for the fix", "I withdraw this finding", with no
+  "but", "still" or "incomplete") and a notice that it will not review (quota,
+  rate limit, review skipped) wake nothing. A body already read, its HTML
+  comments and spacing aside, never wakes twice;
+- the branch starts to conflict with its base;
+- someone other than that account merges or closes the pull request.
 
 The message names each change with its link. A change waits 20 seconds for
 the rest of its burst and for a running turn to end, then everything waiting
@@ -226,8 +239,12 @@ journal settings). A thread at rest with a watch reads as watching, not done,
 in the sidebar. The thread header carries a chip with the watched numbers;
 its menu shows each watch's last status and stops one, on a phone too. The
 owner's Tasks panel lists them the same way. A paired phone may stop a watch,
-never start one. Delegated agents and
-persistent agent sessions cannot watch: their parent or Agents owns the work.
+never start one. A delegated agent watches its own PR like a conversation:
+each wake is its next turn, and that turn's answer goes to its parent as a
+result. Its watches end when it is stopped (its own Stop, `boite delegate
+stop`, its turn failing) and when its parent stops, is archived or is
+removed. Workflow steps, goal reviewers and persistent agent sessions cannot
+watch: their run, their goal or Agents owns the work.
 At most 10 PRs per conversation.
 
 ## How an agent finds the core

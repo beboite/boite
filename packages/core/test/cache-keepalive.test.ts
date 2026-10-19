@@ -14,16 +14,17 @@ const usage = (read: number, write: number): Usage => ({ inputTokens: 5, outputT
 const HIT = usage(1_000, 10), MISS = usage(0, 1_010);
 
 /**
- * A fake agent for the parent and its children. The parent's turns end at
- * once, report a 300 s cache and a last request 100 ms before their end; a
- * ping answers `ok` with the usage `pings` hands it, or waits when `holdPings`.
+ * A fake agent for the parent and its children. The parent's turns end after
+ * `turnMs`, report a 300 s cache and a last request `lastRequestMs` before
+ * their end; a ping answers `ok` with the usage `pings` hands it, or waits
+ * when `holdPings`.
  * A child's turn waits for `finish`.
  */
 async function setup(h: TestCore) {
   const children = new Map<string, () => void>();
   const held = new Map<string, () => void>();
   const prompts: string[] = [];
-  const state = { pings: [] as Usage[], holdPings: false, holdParent: false, losePings: false };
+  const state = { pings: [] as Usage[], holdPings: false, holdParent: false, losePings: false, turnMs: 5, lastRequestMs: 100 };
   const restore = setDriver('echo', { protocol: 'echo', startTurn(ctx: TurnContext) {
     const done = Promise.withResolvers<TurnResult>();
     const answer = (text: string, result: Omit<TurnResult, 'status' | 'sessionId'>) => {
@@ -44,10 +45,10 @@ async function setup(h: TestCore) {
       const finish = () => answer(ping ? 'ok' : 'parent answer', {
         usage: ping ? state.pings.shift() ?? HIT : usage(0, 1_000),
         promptCache: { ttlSeconds: 300, source: 'documented' },
-        cacheAt: Date.now() - 100,
+        cacheAt: Date.now() - state.lastRequestMs,
       });
       if ((ping && state.holdPings) || (!ping && state.holdParent)) held.set(ctx.thread.id, finish);
-      else setTimeout(finish, 5);
+      else setTimeout(finish, state.turnMs);
     }
     return { done: done.promise, stop() { done.resolve({ status: 'stopped', sessionId: 'parent-session', usage: null }); } };
   } });
@@ -106,11 +107,16 @@ describe('cache keepalive', () => {
 
       const child = await s.spawn();
       s.state.holdPings = true;
+      // From its last request the ping is due 50 ms after the turn ends, from
+      // its end 300 ms after: the gap leaves a loaded runner's timers 250 ms.
+      // At 100 ms, a macOS x64 run fired it 118 ms late (main ea79290b).
+      Object.assign(s.state, { turnMs: 300, lastRequestMs: 250 });
       const pinged = s.client.next('turn.started', t => t.threadId === s.threadId && t.execution?.operation === 'keepalive');
       const real = await s.turn();
       const ping = await pinged;
+      Object.assign(s.state, { turnMs: 5, lastRequestMs: 100 });
       const cache = h.core.threads.require(s.threadId).promptCache!;
-      // The clock starts at the last request, 100 ms before the turn ended, not at its end.
+      // The clock starts at the last request, 250 ms before the turn ended, not at its end.
       expect(cache.at).toBeLessThan(real.finishedAt!);
       expect(ping.queuedAt).toBeGreaterThanOrEqual(cache.at + 300);
       expect(ping.queuedAt).toBeLessThan(real.finishedAt! + 300);

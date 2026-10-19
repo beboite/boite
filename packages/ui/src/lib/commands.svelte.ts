@@ -45,7 +45,7 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     items.push(row('pin', open.pinned ? strings.palette.unpin : strings.palette.pin, 'favourite top'));
     items.push(row('rename', strings.palette.rename, 'title'));
     items.push(row('retitle', strings.palette.retitle, 'title agent name'));
-    items.push(row('find', strings.keyboard.commands.find, 'search text ctrl+f'));
+    items.push(row('find', strings.palette.find, 'search text ctrl+f'));
     items.push(row('copy-answer', strings.keyboard.commands.copyAnswer, 'clipboard reply response'));
     items.push(row('panel', strings.palette.panel, 'browser surface'));
     // Following subagents and workflow runs is open to a paired device.
