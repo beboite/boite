@@ -4,8 +4,8 @@
   import { onMount } from 'svelte';
   import { X } from '@lucide/svelte';
   import type { AgentProfile, AgentRuntimeConfig, AgentSelection, DelegationProfile } from '@boite/contracts';
-  import { sameSelection, type AgentsView } from '../../lib/agents.svelte';
-  import { Autosave, typed } from '../../lib/autosave.svelte';
+  import type { AgentsView } from '../../lib/agents.svelte';
+  import { Autosave, typed, whole } from '../../lib/autosave.svelte';
   import type { PickPatch } from '../../lib/store.svelte';
   import { strings } from '../../lib/strings';
   import ModelPicker from '../ModelPicker.svelte';
@@ -15,20 +15,29 @@
 
   let { view, agent }: { view: AgentsView; agent: AgentProfile } = $props();
   let config = $state<AgentRuntimeConfig | null>(null);
-  let form = $state<HTMLFormElement>();
-  /** The route and revision this card last read or saved, to tell its own revisions from another writer's. */
-  let base: { selection: AgentSelection; revision: number } | null = null;
+  /** The configuration and revision this card last read or saved: what its own changes and another writer's are measured against. */
+  let base: { config: AgentRuntimeConfig; revision: number } | null = null;
+  const FIELDS = ['defaultRoute', 'allowedRoutes', 'subagents', 'compactAfterTurns', 'maxRunMinutes', 'autoMemory'] as const;
+  /** Equal values whatever the order of their keys: the core writes a route's keys in its own order. */
+  const canon = (value: unknown) => JSON.stringify(value, (_key, v: unknown) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
+  const same = (a: unknown, b: unknown) => canon(a) === canon(b);
+  /** Read from the data, not the form: a card leaving the page has no form left to ask. */
+  function problem(): string | null {
+    if (!config) return null;
+    const names = [...config.allowedRoutes, ...config.subagents.profiles].every(route => route.name.trim() && route.name.length <= 80);
+    return names && whole(config.compactAfterTurns, 2, 100) && whole(config.maxRunMinutes, 1, 120) ? null : strings.settings.autosave.invalid;
+  }
   const labels = $derived(strings.agents);
   const PERMISSIONS = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'yolo', 'dontAsk'] as const;
   const permissionLabels = $derived<Record<AgentSelection['permissionMode'], string>>({ default: labels.ask, acceptEdits: labels.edits, plan: labels.plan, bypassPermissions: labels.full, yolo: strings.permissionMode.yolo, dontAsk: labels.deny });
   const effort = $derived(config ? view.store.modelOf(config.defaultRoute)?.effort : undefined);
   // Saving never disables the form: a field being typed in keeps its focus.
   const locked = $derived(!view.store.owner);
-  const save = new Autosave(write, () => form?.checkValidity() === false ? strings.settings.autosave.invalid : null);
+  const save = new Autosave(write, problem);
   onMount(() => {
     const revision = agent.revision;
     void view.call('agents.runtime.get', { agentId: agent.id }).then(value => {
-      if (value) base = { selection: value.defaultRoute, revision };
+      if (value) base = { config: $state.snapshot(value) as AgentRuntimeConfig, revision };
       config = value;
     });
     // Leaving the tab sends a change still waiting for a typing pause.
@@ -69,20 +78,31 @@
     } catch (error) { view.error = errorText(error); }
   }
   /**
-   * Sends the whole card as it is now. The editor beside it moves the agent's
-   * revision too: while the agent's route is still the one this card last saw,
-   * the newest revision is used; a route another writer changed keeps the old
-   * revision, so the core refuses the save rather than write over it.
+   * Sends the card as it is now. Another save may have moved the agent since
+   * this card read it, the identity card beside it or another window: each
+   * field this card left alone then takes the stored value, and a field both
+   * changed differently is a conflict the card reports rather than overwrites.
    */
   async function write() {
     if (!config || !base) return;
     const sent = $state.snapshot(config) as AgentRuntimeConfig;
-    const saved = await view.save('agents.runtime.configure', () => {
+    const saved = await view.save('agents.runtime.configure', async () => {
+      const known = base!;
       const latest = view.snapshot?.profiles.find(p => p.id === agent.id);
-      const expectedRevision = latest && base && sameSelection(latest.selection, base.selection) ? latest.revision : base!.revision;
-      return { agentId: agent.id, expectedRevision, config: sent };
+      if (!latest || latest.revision === known.revision) return { agentId: agent.id, expectedRevision: known.revision, config: sent };
+      const stored = await view.store.client!.call('agents.runtime.get', { agentId: agent.id });
+      const merged: Record<string, unknown> = { ...sent };
+      for (const key of FIELDS) {
+        const mine = !same(sent[key], known.config[key]), theirs = !same(stored[key], known.config[key]);
+        if (mine && theirs && !same(sent[key], stored[key])) throw new Error(strings.settings.autosave.conflict);
+        if (!mine) merged[key] = stored[key];
+      }
+      return { agentId: agent.id, expectedRevision: latest.revision, config: merged as unknown as AgentRuntimeConfig };
     });
-    base = { selection: saved.selection, revision: saved.revision };
+    // The core's own copy is the next base, so its key order and trimmed names never read as a change.
+    const stored = await view.store.client?.call('agents.runtime.get', { agentId: agent.id }).catch(() => null);
+    base = { config: stored ?? sent, revision: saved.revision };
+    if (stored && config) for (const key of FIELDS) if (same(config[key], sent[key])) (config as unknown as Record<string, unknown>)[key] = stored[key];
   }
 </script>
 
@@ -98,7 +118,7 @@
 {/snippet}
 
 {#if config}
-  <form class="agents-form" data-testid="agent-runtime" bind:this={form} onsubmit={e => { e.preventDefault(); void save.flush(); }}>
+  <form class="agents-form" data-testid="agent-runtime" onsubmit={e => { e.preventDefault(); void save.flush(); }}>
     <fieldset class="card" disabled={locked}>
       <h2>{labels.defaultModel}<SaveStatus {save} at="default" /></h2>
       <p class="hint">{labels.identityHint}</p>

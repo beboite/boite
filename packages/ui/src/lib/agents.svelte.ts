@@ -1,5 +1,5 @@
 import { errorText } from './errors';
-import type { AgentEntityKind, AgentsSnapshot, RpcParams, RpcResult, AgentsRpcMethods, AgentHistoryCursor, AgentHistoryKind, AgentRecord, AgentsHistoryPage, AgentConversationMessage, AgentMission, AgentScope, AgentTeam, ThreadSummary, AgentSelection as ExecutionSelection } from '@boite/contracts';
+import type { AgentEntityKind, AgentsSnapshot, RpcParams, RpcResult, AgentsRpcMethods, AgentHistoryCursor, AgentHistoryKind, AgentRecord, AgentsHistoryPage, AgentConversationMessage, AgentMission, AgentScope, AgentTeam, ThreadSummary } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import { strings } from './strings';
 import { agentThreadLive } from './agent-directory.svelte';
@@ -41,10 +41,6 @@ export interface AgentChat {
 type Attention = ReturnType<typeof attentionOf>;
 
 export const chatKey = (kind: AgentChatKind, id: string) => `${kind}:${id}`;
-
-/** Whether two agent routes run the same model the same way. */
-export const sameSelection = (a: ExecutionSelection, b: ExecutionSelection) =>
-  a.providerId === b.providerId && a.accountId === b.accountId && a.model === b.model && (a.effort ?? null) === (b.effort ?? null) && a.permissionMode === b.permissionMode;
 
 /** The team each group carries: the oldest team naming it as its discussion. */
 export function teamsByGroup(snapshot: AgentsSnapshot): Map<string, AgentTeam> {
@@ -406,12 +402,13 @@ export class AgentsView {
    * call is pending and it throws when refused. Saves run one at a time, each
    * building its params when its turn comes, after the snapshot the previous
    * save refreshed: two cards of one agent never send the same revision.
+   * Building them may read the core first; a refusal there fails the save.
    */
-  save<M extends keyof AgentsRpcMethods>(method: M, params: () => RpcParams<M>): Promise<RpcResult<M>> {
+  save<M extends keyof AgentsRpcMethods>(method: M, params: () => RpcParams<M> | Promise<RpcParams<M>>): Promise<RpcResult<M>> {
     const run = this.saves.then(async () => {
       const client = this.store.client;
       if (!client || this.disposed) throw new Error(strings.connection.unavailable);
-      const result = await client.call(method, $state.snapshot(params()) as RpcParams<M>);
+      const result = await client.call(method, $state.snapshot(await params()) as RpcParams<M>);
       await this.refresh();
       return result;
     });

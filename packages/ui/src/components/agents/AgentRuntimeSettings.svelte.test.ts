@@ -4,6 +4,7 @@ import type { AgentProfile } from '@boite/contracts';
 import { FakeClient } from '../../lib/fake-client';
 import { Store } from '../../lib/store.svelte';
 import { AgentsView } from '../../lib/agents.svelte';
+import { strings } from '../../lib/strings';
 import AgentRuntimeSettings from './AgentRuntimeSettings.svelte';
 
 const settle = async () => { for (let i = 0; i < 30; i++) { await Promise.resolve(); flushSync(); } };
@@ -122,4 +123,47 @@ test('a route name being cleared is not saved until it is valid again', async ()
   await idle();
   expect(status()?.dataset.state).toBe('saved');
   expect((await client.call('agents.runtime.get', { agentId: agent().id })).allowedRoutes[0]!.name).toBe('Main');
+});
+
+test('a model picked after another writer changed the agent keeps that writer\'s changes and shows them', async () => {
+  const { client, view, agent } = await open();
+  const config = await client.call('agents.runtime.get', { agentId: agent().id });
+  // Another window saves the background settings while this card is open.
+  await client.call('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...config, autoMemory: false, maxRunMinutes: 37 } });
+  await view.refresh();
+  await idle();
+  await pick('claude-sonnet-5-5');
+  await idle();
+  const saved = await client.call('agents.runtime.get', { agentId: agent().id });
+  expect([saved.defaultRoute.model, saved.autoMemory, saved.maxRunMinutes]).toEqual(['claude-sonnet-5-5', false, 37]);
+  expect(status()?.dataset.state).toBe('saved');
+  expect(document.querySelector<HTMLInputElement>('[data-testid=agent-auto-memory]')!.checked).toBe(false);
+});
+
+test('a route name cleared just before the card closes is never sent', async () => {
+  const { client, agent, hide } = await open();
+  const name = document.querySelector<HTMLInputElement>('[data-testid=agent-runtime] .agent-route input')!;
+  name.value = '';
+  name.dispatchEvent(new Event('input', { bubbles: true }));
+  // Leaving within the typing pause sends what waits, once checked.
+  await hide();
+  await idle();
+  expect((await client.call('agents.runtime.get', { agentId: agent().id })).allowedRoutes[0]!.name).toBe('Default');
+});
+
+test('a field changed here and elsewhere to different values is a conflict the card reports, not an overwrite', async () => {
+  const { client, view, agent } = await open();
+  const config = await client.call('agents.runtime.get', { agentId: agent().id });
+  await client.call('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...config, maxRunMinutes: 37 } });
+  await view.refresh();
+  await idle();
+  const minutes = document.querySelectorAll<HTMLInputElement>('[data-testid=agent-runtime] input[type=number]')[1]!;
+  minutes.value = '50';
+  minutes.dispatchEvent(new Event('input', { bubbles: true }));
+  minutes.dispatchEvent(new Event('change', { bubbles: true }));
+  await idle();
+  const engine = document.querySelector<HTMLElement>('[data-testid=agent-runtime] [data-testid=save-status]');
+  expect(engine?.dataset.state).toBe('error');
+  expect(engine!.textContent).toContain(strings.settings.autosave.conflict);
+  expect((await client.call('agents.runtime.get', { agentId: agent().id })).maxRunMinutes).toBe(37);
 });

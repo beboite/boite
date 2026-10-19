@@ -160,6 +160,9 @@ export const SCENARIOS: Record<string, Scenario> = {
     let stale = false;
     try { await env.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: { ...config, defaultRoute: { ...config.defaultRoute, effort: low } } }); } catch { stale = true; }
     check(stale, 'a save on a stale revision was accepted');
+    const blank = { ...config, defaultRoute: { ...config.defaultRoute, effort: high }, allowedRoutes: config.allowedRoutes.map(route => ({ ...route, name: '  ' })) };
+    await refusedWith(env.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: saved.revision, config: blank }), RpcErrorCode.InvalidParams);
+    same((await env.call('agents.runtime.get', { agentId: agent.id })).allowedRoutes.map(route => route.name), config.allowedRoutes.map(route => route.name), 'route names after a blank one');
     same((await env.call('agents.runtime.get', { agentId: agent.id })).defaultRoute.effort, high, 'effort after a stale save');
     // The profile owns the route: a save of the profile is what the runtime reads next.
     await env.call('agents.profile.save', { id: agent.id, expectedRevision: saved.revision, value: { ...saved, selection: { ...saved.selection, effort: low } } });

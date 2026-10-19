@@ -190,6 +190,7 @@ test('create, converse, configure the resident engine and follow background work
   await page.waitFor(`Array.from(document.querySelectorAll('[role="menuitem"]')).some(i => i.textContent.trim() === 'Allow edits')`);
   await page.evaluate(`Array.from(document.querySelectorAll('[role="menuitem"]')).find(i => i.textContent.trim() === 'Allow edits').click()`);
   await page.waitFor(`document.querySelector('[data-testid="agent-runtime"] [data-testid="save-status"]')?.dataset.state === 'saved'`);
+  await page.evaluate(`document.querySelector('[data-testid="agent-runtime"]').scrollIntoView()`);
   await capture('agents-runtime-desktop.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.evaluate(`document.querySelector('[data-testid="agent-runtime"]').scrollIntoView()`);

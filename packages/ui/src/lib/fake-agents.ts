@@ -357,8 +357,14 @@ export class FakeAgents {
     const agent = this.get('profile', p.agentId);
     if (!p.config.defaultRoute.model || !p.config.allowedRoutes.some(r => r.providerId === p.config.defaultRoute.providerId && r.accountId === p.config.defaultRoute.accountId && r.model === p.config.defaultRoute.model)) this.refuse('defaultRoute must be allowed');
     for (const route of [...p.config.allowedRoutes, ...p.config.subagents.profiles]) { const grant = this.grants.find(g => g.accountId === route.accountId); if (grant?.agentIds && !grant.agentIds.includes(agent.id)) this.refuse('account is not granted to this agent'); }
+    // The core's field checks: a route keeps a trimmed name of 1 to 100 characters, and the limits stay whole numbers in range.
+    const invalid = (message: string): never => { throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message }); };
+    for (const route of p.config.allowedRoutes) if (typeof route.name !== 'string' || !route.name.trim() || route.name.length > 100) invalid('route.name: expected 1 to 100 characters');
+    const whole = (value: unknown, field: string, min: number, max: number) => { if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) invalid(`${field}: expected an integer from ${min} to ${max}`); };
+    whole(p.config.compactAfterTurns, 'compactAfterTurns', 2, 100);
+    whole(p.config.maxRunMinutes, 'maxRunMinutes', 1, 120);
     const saved = this.save('profile', { id: agent.id, expectedRevision: p.expectedRevision, value: { ...agent, selection: p.config.defaultRoute } });
-    this.configs.set(agent.id, structuredClone(p.config));
+    this.configs.set(agent.id, structuredClone({ ...p.config, allowedRoutes: p.config.allowedRoutes.map(route => ({ ...route, name: route.name.trim() })) }));
     return saved;
   }
 

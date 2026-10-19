@@ -4,7 +4,7 @@
   import { onMount, untrack } from 'svelte';
   import { Dices, Palette } from '@lucide/svelte';
   import type { AgentEntities, AgentProfile, AgentGroup, AgentTeam, AgentMission, AgentSelection as ExecutionSelection, RpcParams, RpcResult } from '@boite/contracts';
-  import { Autosave, TYPING_MS } from '../../lib/autosave.svelte';
+  import { Autosave, TYPING_MS, whole } from '../../lib/autosave.svelte';
   import { fill, strings } from '../../lib/strings';
   import { confirm } from '../../lib/confirm.svelte';
   import type { AgentEntryKind, AgentsView, AgentSelection } from '../../lib/agents.svelte';
@@ -158,10 +158,16 @@
 
   type Saving = 'agents.profile.save' | 'agents.group.save' | 'agents.team.save' | 'agents.mission.save';
   type Send = <M extends Saving>(method: M, params: () => RpcParams<M>) => Promise<RpcResult<M> | null>;
-  let form = $state<HTMLFormElement>();
   /** The record as the core last returned it to this form. */
   let base = initial.record;
-  const autosave = new Autosave(write, () => form?.checkValidity() === false || !name.trim() ? strings.settings.autosave.invalid : null);
+  /** The fields' own bounds, read from the data: a form leaving the page flushes after its inputs are gone. */
+  function problem(): string | null {
+    const valid = !!name.trim()
+      && (kind !== 'group' || whole(maxTurns, 1, 100) && whole(perAgent, 1, 20))
+      && (kind !== 'mission' || !!objective.trim() && whole(maxTurns, 1, 1000) && whole(minutes, 1, 1440) && (tokens == null || whole(tokens, 1)));
+    return valid ? null : strings.settings.autosave.invalid;
+  }
+  const autosave = new Autosave(write, problem);
   // Leaving the tab sends a change still waiting for a typing pause.
   onMount(() => () => { if (!creating) void autosave.flush(); });
 
@@ -263,7 +269,7 @@
   </fieldset>
 {/snippet}
 
-<form class="agents-form" bind:this={form} onsubmit={event => { event.preventDefault(); if (creating) void create(); else void autosave.flush(); }} oninput={typing} onchange={committed} data-testid="agent-editor">
+<form class="agents-form" onsubmit={event => { event.preventDefault(); if (creating) void create(); else void autosave.flush(); }} oninput={typing} onchange={committed} data-testid="agent-editor">
   <section class="card">
     {#if embedded}<h2>{heading ?? labels.identity}{#if !creating}<SaveStatus save={autosave} />{/if}</h2>{/if}
     {#if kind === 'profile'}

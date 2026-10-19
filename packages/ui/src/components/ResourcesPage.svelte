@@ -7,7 +7,7 @@
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
   import SaveStatus from './SaveStatus.svelte';
-  import { Autosave, toggled, typed } from '../lib/autosave.svelte';
+  import { Autosave, toggled, typed, whole } from '../lib/autosave.svelte';
   import { threadTone } from '../lib/thread-state';
 
   let { store, limitsOnly = false }: { store: Store; limitsOnly?: boolean } = $props();
@@ -20,10 +20,9 @@
   const resources = $derived([...store.resources].sort((a, b) => b.load.memoryBytes - a.load.memoryBytes));
   const memoryEnabled = $derived(store.settings?.memoryProtection !== false);
   let confirming = $state<ThreadId | null>(null);
-  let limits = $state<HTMLFormElement>();
   const limitsSave = new Autosave(async () => {
     if (!await store.saveSettings({ agentCpuCapPercent: cpuCap, ...(memoryEnabled ? { agentMemoryBudgetPercent: memoryBudget, threadMemoryCapMb: memoryCap, memoryReserveMb: memoryReserve } : {}) })) throw new Error('');
-  }, () => limits?.checkValidity() === false ? strings.settings.autosave.invalid : null);
+  }, () => whole(cpuCap, 0, 100) && (!memoryEnabled || whole(memoryBudget, 10, 90) && whole(memoryCap, 0) && whole(memoryReserve, 0)) ? null : strings.settings.autosave.invalid);
   $effect(() => () => void limitsSave.flush());
 
   async function kill(threadId: ThreadId) {
@@ -82,7 +81,7 @@
         if (!await store.saveSettings({ memoryProtection: input.checked })) input.checked = memoryEnabled;
       }} />
     </label>
-    <form bind:this={limits} onsubmit={(event) => { event.preventDefault(); void limitsSave.flush(); }} {...typed(limitsSave)}>
+    <form onsubmit={(event) => { event.preventDefault(); void limitsSave.flush(); }} {...typed(limitsSave)}>
       <label><span class="name"><span class="ui-label">{strings.settings.agentCpuCapPercent}</span><InfoTip topic={strings.settings.agentCpuCapPercent} text={strings.settings.agentCpuCapHint} /></span><input type="number" min="0" max="100" required bind:value={cpuCap} /></label>
       <label><span class="name"><span class="ui-label">{strings.settings.agentMemoryBudgetPercent}</span><InfoTip topic={strings.settings.agentMemoryBudgetPercent} text={strings.settings.agentMemoryBudgetHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.agentMemoryBudgetPercent} data-testid="memory-budget" type="number" min="10" max="90" step="1" required bind:value={memoryBudget} />
         {#if memoryEnabled && store.memory}<span class="hint" data-testid="memory-budget-resolved">{strings.resources.resolved(store.memory.limits.budgetMb)}</span>{/if}

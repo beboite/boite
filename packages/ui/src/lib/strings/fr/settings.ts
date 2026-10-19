@@ -8,6 +8,7 @@ export const fr: Translation = {
       saved: 'Enregistré',
       failed: 'Non enregistré',
       invalid: 'Rien n\'est enregistré tant qu\'un champ est invalide',
+      conflict: 'Modifié ailleurs aussi. Rouvrez cette page pour voir les deux changements.',
       retry: 'Réessayer'
     },
     heading: 'Réglages',

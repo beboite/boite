@@ -89,6 +89,14 @@ export function typed(save: Autosave, at = '') {
   };
 }
 
+/**
+ * A whole number in range. Checks read the form's data, never its elements: a
+ * card leaving the page flushes after its elements are gone.
+ */
+export function whole(value: unknown, min: number, max = Number.MAX_SAFE_INTEGER): boolean {
+  return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
+}
+
 /** A switch that saves when it flips: a refused save puts it back where the core still has it. */
 export async function toggled(input: HTMLInputElement, save: (checked: boolean) => Promise<boolean>): Promise<void> {
   const checked = input.checked;

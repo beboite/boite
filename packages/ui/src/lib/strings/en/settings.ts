@@ -6,6 +6,7 @@ export const strings = {
       saved: 'Saved',
       failed: 'Not saved',
       invalid: 'Not saved until every field is valid',
+      conflict: 'Changed elsewhere too. Reopen this page to see both changes.',
       retry: 'Retry'
     },
     heading: 'Settings',

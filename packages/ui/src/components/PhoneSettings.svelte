@@ -24,13 +24,24 @@
   let publicUrl = $state(untrack(() => store.settings?.publicUrl ?? ''));
   // The field follows the saved value, which the Tailscale switch can change
   // too. Any other setting replaces the settings object without touching it:
-  // an address being typed stays.
+  // an address being typed stays. So does one typed while this field's own
+  // save was on its way: that save coming back is not a value from elsewhere.
   const savedUrl = $derived(store.settings?.publicUrl ?? '');
-  $effect(() => { publicUrl = savedUrl; });
-  const urlSave = new Autosave(
-    () => saved(store.saveSettings({ publicUrl: publicUrl.trim() || null })),
-    () => checkSettingsPatch({ publicUrl: publicUrl.trim() || null }).ok ? null : strings.settings.autosave.invalid
-  );
+  /** The addresses this field sent, as the core stores them. */
+  const sent = new Set<string>();
+  $effect(() => {
+    const next = savedUrl;
+    untrack(() => { if (!sent.delete(next)) publicUrl = next; });
+  });
+  const urlCheck = () => checkSettingsPatch({ publicUrl: publicUrl.trim() || null });
+  const urlSave = new Autosave(async () => {
+    const check = urlCheck();
+    const stored = check.ok ? check.patch.publicUrl ?? '' : '';
+    // Saving what is already saved changes no setting, so no echo comes back to skip.
+    if (stored !== savedUrl) sent.add(stored);
+    try { await saved(store.saveSettings({ publicUrl: publicUrl.trim() || null })); }
+    catch (error) { sent.delete(stored); throw error; }
+  }, () => urlCheck().ok ? null : strings.settings.autosave.invalid);
   $effect(() => () => void urlSave.flush());
   let key = $state('');
   let subscribed = $state(false);
