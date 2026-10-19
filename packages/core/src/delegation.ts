@@ -104,6 +104,7 @@ export class Delegation {
           const previous = this.summaries.get(thread.id);
           this.summaries.set(thread.id, state);
           if (name === 'thread.updated' && previous !== state) this.changed(thread.parentThreadId);
+          if (name === 'thread.updated') this.retireIfDone(thread);
         }
       }
       if (name === 'thread.removed' && !(payload as { undoable?: boolean }).undoable) this.remove((payload as { threadId: string }).threadId);
@@ -169,21 +170,34 @@ export class Delegation {
   beginEpisode(rootId: string, episodeId: string, config: DelegationConfig): boolean {
     if (this.core.journal.getSetting(`delegation-episode:${rootId}`) === episodeId) return true;
     const children = this.rows(rootId).map(row => this.core.threads.require(row.thread_id));
-    // A subagent watching its pull request is still at work: archiving it would end the watch.
-    if (children.some(t => this.busy(t) || (!t.archived && this.core.pullRequestWatches.of(t.id).length > 0)) || this.inbox(rootId).length) return false;
+    if (children.some(t => this.busy(t)) || this.inbox(rootId).length) return false;
     this.core.journal.db.transaction(() => {
       for (const child of children.filter(t => !t.archived)) {
-        this.core.threads.releaseAgent(child.id);
-        const now = Date.now();
-        const archived = { ...child, archived: true, archivedAt: now, updatedAt: now };
-        this.core.journal.putThread(archived);
-        this.core.bus.emit('thread.updated', archived);
+        // A subagent watching its pull request is still at work: it is retired once its last watch ends.
+        if (this.core.pullRequestWatches.of(child.id).length) this.core.journal.setSetting(`delegation-retiring:${child.id}`, episodeId);
+        else this.retire(child);
       }
       this.core.journal.setSetting(`delegation-episode:${rootId}`, episodeId);
       this.core.journal.setSetting(`delegation-turns:${rootId}`, 0);
       this.saveConfig(rootId, config);
     })();
     return true;
+  }
+  /** A subagent a past episode left watching its pull request retires once the watch and its turn are over. */
+  private retireIfDone(thread: ThreadSummary): void {
+    if (this.core.journal.getSetting(`delegation-retiring:${thread.id}`) === undefined) return;
+    if (thread.archived) { this.core.journal.deleteSetting(`delegation-retiring:${thread.id}`); return; }
+    if (this.busy(thread) || this.core.pullRequestWatches.of(thread.id).length) return;
+    this.retire(this.core.threads.require(thread.id));
+  }
+  /** Archives a subagent of a past episode. */
+  private retire(child: ThreadSummary): void {
+    this.core.journal.deleteSetting(`delegation-retiring:${child.id}`);
+    this.core.threads.releaseAgent(child.id);
+    const now = Date.now();
+    const archived = { ...child, archived: true, archivedAt: now, updatedAt: now };
+    this.core.journal.putThread(archived);
+    this.core.bus.emit('thread.updated', archived);
   }
   private rows(rootId: string): AgentRow[] { return this.core.journal.db.query('SELECT * FROM delegated_agents WHERE root_id = ? ORDER BY rowid').all(rootId) as AgentRow[]; }
   private lastTurn(threadId: string): Turn | null {

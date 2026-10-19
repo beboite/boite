@@ -523,20 +523,22 @@ test('a delegated agent watches its pull request: the wake is its turn, its answ
   expect(watches.of(sibling)).toEqual([]);
 });
 
-test('a persistent agent keeps a subagent that still watches its pull request when it takes its next work', async () => {
+test('a persistent agent takes its next work and keeps a subagent that still watches its pull request until the watch ends', async () => {
   const setup = await watchedThread();
   const { threadId, watches } = setup;
   const child = await watchingChild(setup, 'episode');
-  await waitFor(() => harness!.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND status = 'delivered'").get(child, threadId) !== null);
+  const idle = (await setup.owner.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Read the logs', requestId: 'idle' })).thread.id as ThreadId;
+  await settled(idle);
+  await waitFor(() => (harness!.core.journal.db.query("SELECT COUNT(*) AS n FROM delegation_messages WHERE recipient_id = ? AND status = 'delivered'").get(threadId) as { n: number }).n >= 2);
   await settled(threadId);
   const delegation = harness!.core.delegation;
-  // The resident runtime starts each work item through beginEpisode: a fresh episode retires settled subagents.
+  const archived = (id: ThreadId) => harness!.core.journal.getThread(id)?.archived;
+  // The resident runtime starts each work item through beginEpisode: the fresh work runs, the settled subagent retires, the watching one stays.
   const accepted = delegation.beginEpisode(threadId, 'next-work-item', delegation.config(threadId));
-  expect({ accepted, archived: harness!.core.journal.getThread(child)?.archived, watches: watches.of(child).length }).toEqual({ accepted: false, archived: false, watches: 1 });
-  // Once the watch ends, the next work item retires it as before.
+  expect({ accepted, idle: archived(idle), child: archived(child), watches: watches.of(child).length }).toEqual({ accepted: true, idle: true, child: false, watches: 1 });
+  // Its watch over, it retires too.
   watches.unwatch(child);
-  expect(delegation.beginEpisode(threadId, 'next-work-item', delegation.config(threadId))).toBe(true);
-  expect(harness!.core.journal.getThread(child)?.archived).toBe(true);
+  await waitFor(() => archived(child) === true);
 });
 
 test('the parent\'s Stop ends its subagents\' watches, and a workflow step still cannot watch', async () => {
