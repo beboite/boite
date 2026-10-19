@@ -175,14 +175,19 @@ test.skipIf(!python)('the actual required gate rejects failed, cancelled and une
   const script = match[1]!.replace(/^ {10}/gm, '');
   const names = ['core', 'web', 'desktop', 'server', 'android', 'telemetry', 'e2e-types', 'stress', 'e2e'];
   const outputFor = (name: string) => name === 'e2e-types' ? 'e2eTypes' : name;
-  const cases: { jobs: object; success: boolean }[] = [];
+  const cases: { jobs: object; success: boolean; event?: string }[] = [];
   for (const selected of [names, ['web', 'telemetry'], ['desktop', 'e2e-types', 'e2e'], ['web', 'stress'], []]) {
     const outputs = Object.fromEntries(names.map(name => [outputFor(name), String(selected.includes(name))]));
     const jobs = { changes: { result: 'success', outputs }, ...Object.fromEntries(names.map(name => [name, {
       result: selected.includes(name) ? 'success' : 'skipped',
     }])) } as Record<string, { result: string; outputs?: Record<string, string> }>;
+    // The bundle size job runs with desktop, on pull requests only.
+    const desktop = selected.includes('desktop');
+    jobs.size = { result: desktop ? 'success' : 'skipped' };
     cases.push({ jobs, success: true });
-    for (const name of ['changes', ...selected]) {
+    cases.push({ jobs: { ...jobs, size: { result: 'skipped' } }, success: true, event: 'push' });
+    cases.push({ jobs: { ...jobs, size: { result: desktop ? 'skipped' : 'success' } }, success: false });
+    for (const name of ['changes', ...selected, ...(desktop ? ['size'] : [])]) {
       for (const result of ['failure', 'cancelled', 'skipped']) {
         cases.push({ jobs: { ...jobs, [name]: { ...jobs[name], result } }, success: false });
       }
@@ -198,6 +203,7 @@ script = compile(os.environ['GATE_SCRIPT'], 'ci.yml', 'exec')
 cases = json.load(sys.stdin)
 for index, case in enumerate(cases):
     os.environ['RESULTS'] = json.dumps(case['jobs'])
+    os.environ['EVENT'] = case.get('event', 'pull_request')
     try:
         exec(script, {})
         success = True

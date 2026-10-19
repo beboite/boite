@@ -34,6 +34,8 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
+A pull request whose selection includes desktop also runs [Bundle growth](#bundle-growth).
+
 The changes job always installs frozen dependencies, runs `bun audit`, local
 link checks, `bun test scripts/ci ./bench ./apps/shell/scripts`, architecture
 checks and their tests, and translation validation. Changes to workflows,
@@ -222,49 +224,12 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 495,500 |
-| UI files, excluding `.br` and `.gz` copies | 4,889,500 |
+| UI entry chunk | 492,300 |
+| UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,519,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,494,900 |
 
 The total JavaScript measure excludes native binaries and source maps.
-
-On 2026-10-18, the `/goal2` checklist rebased on `origin/main` at `feccdfcd`
-measures 492,794 entry bytes, 4,873,810 UI bytes and 4,462,301 core
-JavaScript bytes with `measure()` after fresh `bun run build:ui` and
-`bun run build:core` on Linux, against 490,175, 4,859,521 and 4,438,396 for
-that main as #590 and #592 measured it. The tracker, its prompts, its route
-and the model read before a reviewer or a tracker starts add 23,905 core
-bytes. The list itself loads outside the entry chunk; the entry keeps the goal
-bar's checklist line and the new English sentences (2,619 bytes), and the UI
-total adds the list, the model row and both languages (14,289 bytes). Merged
-with `origin/main` at `3a19eb57`, after the server update rollback (#588) and
-the journal compaction (#583), it measures 492,969 entry bytes, 4,874,326 UI bytes and 4,494,024 core
-JavaScript bytes on Linux. The three
-limits rise to 493,500, 4,875,500 and 4,494,500. Moving the list from the goal
-bar into the Tasks panel's own section brings the UI to 493,213 entry bytes
-and 4,876,183 UI bytes; the UI limit rises to 4,876,500.
-Merged again with `origin/main` at `80c2da06`, after keeping the prompt cache
-warm (#594), it measures 494,834 entry bytes,
-4,883,819 UI bytes and 4,501,712 core JavaScript bytes on Linux; the
-three limits rise to 495,000, 4,884,000 and 4,502,000.
-After #595 (`origin/main` at `e22bb094`) it measures 495,052 entry bytes, 4,884,876 UI bytes and
-4,502,972 core JavaScript bytes on
-Linux; the three limits rise to 495,500, 4,885,500 and 4,503,500. The
-reviews' own section in the Tasks panel then brings the UI to 4,887,289 bytes,
-the entry chunk unchanged; the UI limit rises to 4,887,500.
-After automatic resumes (#603, `origin/main` at `2627b39b`) it measures
-495,189 entry bytes, 4,887,689 UI bytes and 4,517,291 core JavaScript bytes on Linux; the three limits rise to 495,500, 4,888,000 and 4,518,000.
-After the wait for a new process's command line (#616, `origin/main` at
-`68033379`) it measures 4,518,270 core JavaScript bytes on Linux, the UI
-unchanged; the core JavaScript limit rises to 4,518,500.
-After one catalogue file per part (#614, `origin/main` at `38d5ca2f`), with
-the checklist's sentences moved into `strings/<language>/activity.ts` and
-`experiments.ts`, it measures 495,189 entry bytes and 4,889,347 UI bytes on
-Linux; the UI limit rises to 4,889,500.
-After the roster offer (#622) and WebSockets without permessage-deflate (#623,
-`origin/main` at `de93f43a`) it measures 4,518,700 core JavaScript bytes on
-Linux, the UI unchanged; the core JavaScript limit rises to 4,519,000.
 
 On 2026-10-19, PR #622 merged with `origin/main` at `68033379` measures
 4,494,650 core JavaScript bytes with the same rule after a fresh
@@ -1065,6 +1030,33 @@ total limit 4,070,000; the entry chunk (518,508 bytes) and `main.js` limits are
 unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
+
+### Bundle growth
+
+`bundle-size.yml` builds the UI and the core on Linux for every push to main,
+one job that the next push never cancels, and measures four sizes with
+`scripts/ci/budgets.ts`: the UI entry chunk, the UI files without their `.br`
+and `.gz` copies, the core `dist/main.js`, and all emitted core JavaScript with
+lazy chunks and workers, excluding native binaries and source maps. It keeps
+them 90 days as the `bundle-sizes` artifact. The `Bundle size` job in `ci.yml`
+measures a pull request the same way when the desktop build covers its change. No file in the repository
+holds a limit, so a pull request never edits a shared one to grow:
+`scripts/ci/budgets.json` and the dated size notes above are no longer read.
+
+A pull request is checked twice:
+
+- Against its base: the sizes `bundle-size.yml` kept for the base commit, or
+  the base built in the same job when that run is missing or still going. A measure
+  growing more than 0.1 % fails until the pull request body explains it under
+  a `## Bundle size` heading. The body is read when the job runs: after
+  editing it, rerun the failed jobs (`gh run rerun <run-id> --failed`).
+- Against a ceiling: the sizes `bundle-size.yml` kept for the newest published
+  nightly or release, plus 2 %. A reason does not lift it; only publishing
+  does, so a pull request over it waits for the next nightly or shrinks.
+
+The job summary shows each measure, its base, the growth and the ceiling.
+Reproduce a measurement with `bun run build:ui && bun run build:core &&
+bun scripts/ci/budgets.ts measure sizes.json`.
 
 ### E2E preparation
 
