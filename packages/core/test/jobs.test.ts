@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
+import { existsSync } from 'node:fs';
 import { RpcErrorCode } from '@boite/contracts';
 import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
 import { cpuRateOfGlobalJob, memoryLimitOfJob, releaseThreadJob, sampleThreadJob } from '../src/platform/windows/jobs.ts';
@@ -16,6 +17,8 @@ const onWindows = process.platform === 'win32';
 const describeWindows = onWindows ? describe : describe.skip;
 
 const STILL_ACTIVE = 259;
+/** Git for Windows' MSYS2 bash, the shell Claude Code runs its commands in. */
+const GIT_BASH = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
 const k32 = onWindows
@@ -211,6 +214,49 @@ describeWindows('windows job objects', () => {
     await until('its exit to be reported', () => !procs.liveOf(threadId).some((record) => record.pid === orphan.pid), 5000);
     expect(isRunning(control.pid)).toBe(true);
     expect(isRunning(kept.record.pid)).toBe(true);
+  }, 30000);
+
+  // Git Bash forks a copy of the shell to exec each command, and the copy exits: the script's Windows parent is gone while its shell runs.
+  (existsSync(GIT_BASH) ? test : test.skip)('the orphan sweep keeps a script Git Bash runs while its shell runs, and stops it once the shell is gone', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const procs = harness.core.procs;
+    // The trailing `:` keeps bash from exec'ing the script in place, as a background task's shell does.
+    const shell = procs.spawn(threadId, GIT_BASH, ['-c', '/usr/bin/sh -c "while :; do /usr/bin/sleep 30; done"; :']);
+    const script = (): ProcessRecord | undefined => procs.liveOf(threadId).find((record) => /[\\/]sh\.exe$/i.test(record.exe));
+    const sleep = (): ProcessRecord | undefined => procs.liveOf(threadId).find((record) => /[\\/]sleep\.exe$/i.test(record.exe));
+    await until('the script and its sleep to be reported', () => script() !== undefined && sleep() !== undefined, 10000);
+    const sh = script() as ProcessRecord;
+    const nap = sleep() as ProcessRecord;
+    await until('the fork stubs to exit', () => !procs.liveOf(threadId).some((record) => record.pid === sh.parentPid || record.pid === nap.parentPid), 10000);
+    expect(isRunning(sh.parentPid as number)).toBe(false);
+
+    expect(procs.sweepOrphans(threadId, Date.now() + 60_000)).toEqual([]);
+    expect(isRunning(sh.pid)).toBe(true);
+    expect(isRunning(nap.pid)).toBe(true);
+
+    process.kill(shell.record.pid);
+    await until('the shell to leave the registry', () => !procs.liveOf(threadId).some((record) => record.pid === shell.record.pid), 10000);
+    expect(procs.sweepOrphans(threadId, Date.now() + 60_000).sort()).toEqual([sh.pid, nap.pid].sort());
+    await until('the script to be gone', () => !isRunning(sh.pid) && !isRunning(nap.pid), 5000);
+  }, 30000);
+
+  (existsSync(GIT_BASH) ? test : test.skip)('stopping the thread stops a Git Bash script the orphan sweep keeps', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const procs = harness.core.procs;
+    procs.spawn(threadId, GIT_BASH, ['-c', '/usr/bin/sh -c "while :; do /usr/bin/sleep 30; done"; :']);
+    const script = (): ProcessRecord | undefined => procs.liveOf(threadId).find((record) => /[\\/]sh\.exe$/i.test(record.exe));
+    const sleep = (): ProcessRecord | undefined => procs.liveOf(threadId).find((record) => /[\\/]sleep\.exe$/i.test(record.exe));
+    await until('the script and its sleep to be reported', () => script() !== undefined && sleep() !== undefined, 10000);
+    const sh = script() as ProcessRecord;
+    const nap = sleep() as ProcessRecord;
+    await until('the fork stubs to exit', () => !procs.liveOf(threadId).some((record) => record.pid === sh.parentPid || record.pid === nap.parentPid), 10000);
+    expect(procs.sweepOrphans(threadId, Date.now() + 60_000)).toEqual([]);
+
+    // The thread's job goes whole, whatever the sweep kept.
+    procs.killTree(threadId);
+    await until('the script to be gone', () => !isRunning(sh.pid) && !isRunning(nap.pid), 5000);
   }, 30000);
 
   test('a grandchild that outlives its parent is still traced and still killed', async () => {

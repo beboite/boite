@@ -9,15 +9,18 @@
  * Only worktrees under a folder the core places them in are considered: the
  * project's `.boite/worktrees`, or the shared storage folder of that project.
  * A worktree no thread stands in also needs a `boite/` branch (or a detached
- * head), no draft reservation and an hour since git created it.
+ * head), no draft reservation and an hour since git last touched it. Any
+ * worktree stays while a live thread links an open pull request on its branch:
+ * a delegated worker often runs from another folder and waits on CI there.
  */
 
 import { existsSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import type { Project, ThreadId, ThreadSummary, ThreadWorktreeRemoval } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
+import { openLinkedBranches } from './linked-pull-requests.ts';
 import { withLoad } from './threads/records.ts';
 import { BRANCH_PREFIX, worktreeRoot } from './worktree.ts';
 import { autoRemoveWorktreesKey, worktreeRemovalKey } from './worktree-cleanup-state.ts';
@@ -115,6 +118,7 @@ export class WorktreeCleanup {
     const now = Date.now();
     for (const [key, until] of this.kept) if (until <= now) this.kept.delete(key);
     let holders: Holder[] | null = null;
+    let claimed: Set<string> | null = null;
     for (const project of this.core.journal.listProjects()) {
       if (this.stopped(deadline) || budget.removals === 0) break;
       if (this.core.journal.getSetting(autoRemoveWorktreesKey(project.id)) === false) continue;
@@ -122,7 +126,8 @@ export class WorktreeCleanup {
       if (!existsSync(join(project.path, '.git'))) continue;
       try {
         holders ??= await this.holders();
-        removed.push(...await this.project(project, holders, deadline, budget));
+        claimed ??= openLinkedBranches(this.core.journal);
+        removed.push(...await this.project(project, holders, claimed, deadline, budget));
       } catch (error) {
         // A folder gone or a git that fails here says nothing about the other projects.
         this.core.log('info', `worktree cleanup skipped ${project.name}: ${messageOf(error)}`, { source: 'worktree-cleanup', event: 'worktrees.cleanupSkipped' });
@@ -162,7 +167,7 @@ export class WorktreeCleanup {
     }));
   }
 
-  private async project(project: Project, holders: Holder[], deadline: number, budget: { removals: number; proofs: number }): Promise<WorktreeCleanupResult[]> {
+  private async project(project: Project, holders: Holder[], claimed: Set<string>, deadline: number, budget: { removals: number; proofs: number }): Promise<WorktreeCleanupResult[]> {
     const listed = await this.sweep.listed(project);
     const roots = await this.roots(project);
     const own = await realKey(project.path);
@@ -176,7 +181,7 @@ export class WorktreeCleanup {
       const memo = `${key}\0${worktree.head ?? ''}`;
       if (this.kept.has(memo)) continue;
       const standing = holders.filter((holder) => inside(key, holder.key));
-      if (!(await this.settled(worktree, key, standing, reserved))) continue;
+      if (!(await this.settled(worktree, key, standing, reserved, claimed))) continue;
       const result = await this.settle(project, worktree, standing, budget);
       if (result === null) {
         this.kept.set(memo, Date.now() + KEPT_FOR_MS);
@@ -189,20 +194,18 @@ export class WorktreeCleanup {
   }
 
   /** Nothing live stands in it, and it has been that way long enough. */
-  private async settled(worktree: Listed, key: string, standing: Holder[], reserved: string[]): Promise<boolean> {
+  private async settled(worktree: Listed, key: string, standing: Holder[], reserved: string[], claimed: Set<string>): Promise<boolean> {
     const now = Date.now();
     if (reserved.some((path) => inside(key, path) || inside(path, key))) return false;
+    if (worktree.branch !== null && claimed.has(worktree.branch)) return false;
     if (standing.length > 0) {
       return standing.every((holder) => holder.settledAt !== null && now - holder.settledAt >= this.graceMs
         && this.core.procs.liveCount(holder.id) === 0 && this.core.terminals.threadProcesses(holder.id) === 0);
     }
     // No thread: only a branch the core names, and not one a draft is about to adopt.
     if (worktree.branch !== null && !worktree.branch.startsWith(BRANCH_PREFIX)) return false;
-    try {
-      return now - (await stat(join(worktree.path, '.git'))).mtimeMs >= this.graceMs;
-    } catch {
-      return false;
-    }
+    const touched = await lastTouched(worktree.path);
+    return touched !== null && now - touched >= this.graceMs;
   }
 
   /** The removal when its work is proved safe, else null. */
@@ -234,6 +237,7 @@ export class WorktreeCleanup {
     // A thread that arrived meanwhile is one `removeSettled` sees and refuses.
     const fresh = this.rows(standing.map((holder) => holder.id));
     if (fresh.length < standing.filter((holder) => !holder.deleted).length || fresh.some((holder) => holder.settledAt === null || this.core.procs.liveCount(holder.id) > 0)) return null;
+    if (worktree.branch !== null && openLinkedBranches(this.core.journal).has(worktree.branch)) return null;
     let removal: { branch: string | null; branchDeleted: boolean };
     try {
       removal = await this.sweep.removeSettled(project, worktree.path, merged);
@@ -260,4 +264,29 @@ export class WorktreeCleanup {
     });
     return { projectId: project.id, path: worktree.path, reason, branch: removal.branch, branchDeleted: removal.branchDeleted };
   }
+}
+
+/**
+ * When git last wrote to the worktree: its `.git` file, or the HEAD, index or
+ * HEAD log in its admin folder, which a checkout, a commit or a status refresh
+ * moves. Null when the `.git` file cannot be read.
+ */
+async function lastTouched(path: string): Promise<number | null> {
+  const marker = join(path, '.git');
+  let newest: number;
+  let admin: string | null = null;
+  try {
+    newest = (await stat(marker)).mtimeMs;
+    const gitdir = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(marker, 'utf8'))?.[1];
+    if (gitdir) admin = resolve(path, gitdir);
+  } catch {
+    return null;
+  }
+  if (admin === null) return newest;
+  for (const file of [join(admin, 'HEAD'), join(admin, 'index'), join(admin, 'logs', 'HEAD')]) {
+    try {
+      newest = Math.max(newest, (await stat(file)).mtimeMs);
+    } catch { /* A worktree with no commit yet has no HEAD log. */ }
+  }
+  return newest;
 }
