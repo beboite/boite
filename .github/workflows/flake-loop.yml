@@ -66,31 +66,36 @@ jobs:
           path: flake-loop/
 
   cli:
-    name: cli.test.ts (${{ matrix.name }})
+    name: cli.test.ts (${{ matrix.name }}, Bun ${{ matrix.bun }})
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
     strategy:
       fail-fast: false
       matrix:
+        # The 1002 closes: 1 in 480 runs before #623, 3 in 720 with it, never on Windows. The pinned Bun
+        # against canary and its WebSocket rewrite, ten times longer for a rate that small.
         include:
-          - { os: ubuntu-24.04, name: Linux x64 }
-          - { os: macos-15, name: macOS arm64 }
-          - { os: windows-2025, name: Windows x64 }
+          - { os: ubuntu-24.04, name: Linux x64, bun: pinned }
+          - { os: ubuntu-24.04, name: Linux x64, bun: canary }
+          - { os: macos-15, name: macOS arm64, bun: pinned }
+          - { os: macos-15, name: macOS arm64, bun: canary }
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
-      FLAKE_LOOP_TITLE: cli.test.ts, ${{ matrix.name }}
+      FLAKE_LOOP_TITLE: cli.test.ts, ${{ matrix.name }}, Bun ${{ matrix.bun }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - if: matrix.bun == 'canary'
+        run: bun upgrade --canary && bun --revision
       # Four copies at once load the runner as the core suite's four workers do.
       - shell: bash
-        run: bun scripts/ci/flake-loop.ts --runs "$((RUNS * 2))" --parallel 4 --cwd packages/core --out flake-loop test/cli.test.ts test/cli.test.ts test/cli.test.ts test/cli.test.ts
+        run: bun scripts/ci/flake-loop.ts --runs "$((RUNS * 20))" --parallel 4 --cwd packages/core --out flake-loop test/cli.test.ts test/cli.test.ts test/cli.test.ts test/cli.test.ts
       - uses: ./.github/actions/upload-artifact
         if: always()
         with:
-          name: flake-loop-cli-${{ matrix.os }}
+          name: flake-loop-cli-${{ matrix.os }}-${{ matrix.bun }}
           path: flake-loop/
 
   e2e:
