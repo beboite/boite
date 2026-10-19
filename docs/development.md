@@ -547,8 +547,14 @@ live in `fake-client.parity.test.ts`. A fake path below a directory named
 
 ### Adding an RPC method
 
-1. Add the method's `params` and `result` to `RpcMethods` in
-   `packages/contracts/src/index.ts`, beside its domain's entries.
+1. Add the method's `params` and `result` to its domain's `<Domain>RpcMethods`
+   in `packages/contracts/src/<domain>.ts` (`threads.*` in `ThreadsRpcMethods`
+   of `threads.ts`), and its types beside them. `index.ts` re-exports every
+   domain file and composes `RpcMethods` and `RpcEvents` from them; a new
+   domain is a file there, an `export *` and one line in each `extends`.
+   A branch cut before the split, still editing the single `index.ts`, runs
+   `bun scripts/migrate/split-contracts.ts` once `git merge origin/main`
+   stops: it replays its edits onto the domain files.
 2. Register the core handler in the domain's `register*Methods` function.
    For `threads.*`, use `registerThreadMethods` in
    `packages/core/src/threads/rpc.ts`, called by `packages/core/src/modules.ts`.
