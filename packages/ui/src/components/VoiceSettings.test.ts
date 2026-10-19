@@ -177,3 +177,37 @@ test('new configurations offer three main choices including Whisper Turbo', asyn
   await settle();
   expect(call).toHaveBeenCalledWith('speech.install', { model: 'large-v3-turbo-q5_0' });
 });
+
+test('a path typed while the previous path save is on its way stays in its field and is saved after it, in order', async () => {
+  const sent: SpeechConfig[] = [];
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  show(async (method: string, params?: unknown) => {
+    if (method === 'speech.status') return status({ localReady: true, ready: true });
+    if (method === 'speech.config') return config;
+    if (method === 'speech.configure') {
+      sent.push(params as SpeechConfig);
+      if (sent.length === 1) await held;
+      return status({ localReady: true, ready: true });
+    }
+    throw new Error(`unexpected ${method}`);
+  });
+  await settle();
+  const field = (id: string) => document.querySelector<HTMLInputElement>(`[data-testid="${id}"]`)!;
+  const type = (id: string, value: string) => {
+    field(id).value = value;
+    field(id).dispatchEvent(new Event('input', { bubbles: true }));
+    field(id).dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  type('voice-executable', '/opt/whisper-cli');
+  await settle();
+  type('voice-model-path', '/models/small.bin');
+  await settle();
+  // The second save waits for the first: two answers can never come back in the other order.
+  expect(sent).toHaveLength(1);
+  release();
+  await settle();
+  expect(sent.map(c => [c.executable, c.modelPath])).toEqual([['/opt/whisper-cli', ''], ['/opt/whisper-cli', '/models/small.bin']]);
+  expect(field('voice-model-path').value).toBe('/models/small.bin');
+  expect(field('voice-executable').value).toBe('/opt/whisper-cli');
+});

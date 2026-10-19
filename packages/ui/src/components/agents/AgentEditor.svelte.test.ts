@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { AgentProfile } from '@boite/contracts';
+import type { AgentMission, AgentProfile } from '@boite/contracts';
 import { AgentsView } from '../../lib/agents.svelte';
 import { confirm } from '../../lib/confirm.svelte';
 import { FakeClient } from '../../lib/fake-client';
@@ -136,4 +136,20 @@ test('an agent\'s identity and model, edited side by side in its Settings tab, b
   await idle();
   expect(document.querySelector<HTMLElement>('[data-testid=agent-editor] [data-testid=save-status]')?.dataset.state).toBe('invalid');
   expect(profile().name).toBe('Ada Lovelace');
+});
+
+test('a mission whose stored duration is not a whole number of minutes still saves its other fields', async () => {
+  const mission: AgentMission = { id: 'm-ship', title: 'Ship', objective: 'Ship the build', expectedResult: '', teamId: null, projectId: null, agentIds: [], status: 'open', maxTurns: 6, maxDurationMs: 90_000, maxTokens: null, resourceIds: [], revision: 1, createdAt: 1, updatedAt: 1 };
+  const call = vi.fn(async (_method: string, params: { value: Partial<AgentMission> }) => ({ ...mission, ...params.value, revision: 2 }));
+  const view = { snapshot: { profiles: [], groups: [], teams: [], missions: [mission], resources: [], limits: {} }, store: { accounts: [], providerOf: () => undefined, projects: [] }, call, save: (method: string, params: () => { value: Partial<AgentMission> }) => call(method, params()), pending: false };
+  mounted = mount(AgentEditor, { target: document.body, props: { view: view as unknown as AgentsView, kind: 'mission', record: mission, embedded: true, ondone() {}, oncancel() {} } });
+  await settle();
+  const name = document.querySelector<HTMLInputElement>('[data-testid="agent-name"]')!;
+  name.value = 'Ship it';
+  name.dispatchEvent(new Event('input', { bubbles: true }));
+  name.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  expect(call).toHaveBeenCalledOnce();
+  // The duration goes back as it was stored, not rounded to whole minutes.
+  expect(call.mock.calls[0]![1]).toMatchObject({ value: { title: 'Ship it', maxDurationMs: 90_000 } });
 });

@@ -41,7 +41,8 @@
   /** Read from the data, not the form: a card leaving the page has no form left to ask. */
   function problem(): string | null {
     if (!config) return null;
-    const names = [...config.allowedRoutes, ...config.subagents.profiles].every(route => route.name.trim() && route.name.length <= 80);
+    // The core's own limit: a name it already holds may be longer than the field lets anyone type.
+    const names = [...config.allowedRoutes, ...config.subagents.profiles].every(route => route.name.trim() && route.name.length <= 100);
     return names && whole(config.compactAfterTurns, 2, 100) && whole(config.maxRunMinutes, 1, 120) ? null : strings.settings.autosave.invalid;
   }
   const labels = $derived(strings.agents);

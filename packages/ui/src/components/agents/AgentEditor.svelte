@@ -164,7 +164,7 @@
   function problem(): string | null {
     const valid = !!name.trim()
       && (kind !== 'group' || whole(maxTurns, 1, 100) && whole(perAgent, 1, 20))
-      && (kind !== 'mission' || !!objective.trim() && whole(maxTurns, 1, 1000) && whole(minutes, 1, 1440) && (tokens == null || whole(tokens, 1)));
+      && (kind !== 'mission' || !!objective.trim() && whole(maxTurns, 1, 1000) && whole(Math.round(minutes * 60000), 1000, 86_400_000) && (tokens == null || whole(tokens, 1, 100_000_000)));
     return valid ? null : strings.settings.autosave.invalid;
   }
   const autosave = new Autosave(write, problem);

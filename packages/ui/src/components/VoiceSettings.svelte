@@ -65,14 +65,24 @@
     savedTimer = setTimeout(() => (saved = false), 2400);
   }
 
-  /** Every choice applies at once. Typed keys and paths wait for their own button. */
-  async function apply(patch: Partial<SpeechConfig> = {}, keys: { groqKey?: string; openrouterKey?: string } = {}) {
+  let applying: Promise<unknown> = Promise.resolve();
+  /**
+   * Every choice applies at once, a path when its field loses focus, typed keys with their button.
+   * One write at a time, each sending the fields as they are when its turn comes, so an older answer
+   * never lands after a newer one; a path typed during a write stays, only this write's patch lands.
+   */
+  function apply(patch: Partial<SpeechConfig> = {}, keys: { groqKey?: string; openrouterKey?: string } = {}): Promise<void> {
+    const run = applying.then(() => write(patch, keys));
+    applying = run.catch(() => undefined);
+    return run;
+  }
+  async function write(patch: Partial<SpeechConfig>, keys: { groqKey?: string; openrouterKey?: string }) {
     if (!config || !store.client) return;
     const next = { ...config, ...patch };
     busy = true; saved = false; error = '';
     try {
       status = await store.client.call('speech.configure', { ...next, ...keys });
-      config = next;
+      config = { ...config, ...patch };
       if (keys.groqKey !== undefined) groqKey = '';
       if (keys.openrouterKey !== undefined) openrouterKey = '';
       flash();

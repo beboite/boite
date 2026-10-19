@@ -237,3 +237,17 @@ test('an edit made while a save reads the other writer\'s values to merge them c
 test('an edit made while a merged save is on its way conflicts with the value that save adopted', async () => {
   await editDuringMerge('agents.runtime.configure');
 });
+
+test('a route name stored at the core\'s limit of 100 characters does not hold the card\'s other changes back', async () => {
+  const { client, agent, show, hide } = await open();
+  const config = await client.call('agents.runtime.get', { agentId: agent().id });
+  const long = 'R'.repeat(100);
+  await client.call('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...config, allowedRoutes: config.allowedRoutes.map(route => ({ ...route, name: long })) } });
+  await hide();
+  await show();
+  await pick('claude-sonnet-5-5');
+  await idle();
+  expect(status()?.dataset.state).toBe('saved');
+  const stored = await client.call('agents.runtime.get', { agentId: agent().id });
+  expect([stored.defaultRoute.model, stored.allowedRoutes[0]!.name]).toEqual(['claude-sonnet-5-5', long]);
+});
