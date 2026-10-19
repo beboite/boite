@@ -189,6 +189,12 @@ export class BrowserPage {
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #closed = false;
+  /**
+   * Set once devtools sent a message that is not JSON. Chrome never does: the
+   * socket lost its frame alignment, so replies may be gone and every later
+   * call fails with this instead of waiting out its timeout.
+   */
+  #fault: string | null = null;
   #pageErrors: string[] = [];
   /**
    * Requests the page's current documents sent and have not finished loading,
@@ -392,6 +398,7 @@ export class BrowserPage {
   /** The one place raw devtools JSON is handled. */
   send(method: string, params: Record<string, unknown>, timeoutMs = CALL_TIMEOUT_MS): Promise<unknown> {
     if (this.#closed) return Promise.reject(new Error('the browser is closed'));
+    if (this.#fault !== null) return Promise.reject(new Error(this.#fault));
     // A send on a closed socket is dropped without an error, and each call then
     // waited out its whole timeout: after `bun test` killed the browser of a
     // file whose test timed out, every later test of that file spent 20 s on a
@@ -701,6 +708,18 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     });
   }
 
+  /** Fails what waits and what comes next with the message devtools sent, then hangs up. */
+  #protocolFault(raw: string): void {
+    if (this.#fault !== null) return;
+    this.#fault = `devtools sent a message that is not JSON (${raw.length} chars: ${JSON.stringify(raw.slice(0, 120))}): the socket lost its frames, so replies and network events may be missing`;
+    for (const pending of this.#pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(this.#fault));
+    }
+    this.#pending.clear();
+    this.#socket.close(1002);
+  }
+
   #receive(raw: string): void {
     if (raw === '') return;
     let frame: {
@@ -718,6 +737,11 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     try {
       frame = JSON.parse(raw) as typeof frame;
     } catch {
+      // Bun's WebSocket client did this on the E2E runner: misaligned, it handed
+      // over pieces of frames, and dropping them silently lost the replies and
+      // network events inside. Each call then timed out, its probe too, and the
+      // page read as "main thread busy" with its lazy chunks "no response".
+      this.#protocolFault(raw);
       return;
     }
     if (typeof frame.id !== 'number') {
