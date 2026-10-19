@@ -4,20 +4,32 @@ import { compareRuleset, GATE_JOB, GATE_NAME, jobChecks, loadWorkflow, requiredC
 
 const files = [...new Bun.Glob('*.yml').scanSync(`${import.meta.dir}/../../.github/workflows`)].sort();
 
+// A ruleset that requires these names blocks every pull request once one
+// is renamed, so a rename fails here first: update the ruleset with it.
 test('a pull request reports the same fixed check names whichever jobs run', () => {
   const names = requiredChecks(files);
   for (const name of names) expect(name).not.toContain('${{');
-  expect(names).toContain('PR title');
-  expect(names).toContain('Plan and repository checks');
-  for (const runner of CORE_ALL) expect(names).toContain(`Core tests (${runner.name})`);
-  for (const shard of [1, 2, 3]) expect(names).toContain(`E2E ${shard}/3`);
-  for (const platform of PORTABLE_ALL) expect(names).toContain(`Desktop / ${platform.name}`);
-  expect(names).toEqual(expect.arrayContaining([
-    'Desktop / Windows x64', 'Desktop / Windows x64 Rust tests', 'Server / verify server (amd64)',
-    'Server / verify server (arm64)', 'Android / apk',
-  ]));
-  // labeler.yml runs the base's workflow through pull_request_target.
-  expect(names).not.toContain('labeler');
+  expect(names).toEqual([
+    'Android / apk',
+    'Build UI',
+    ...CORE_ALL.map((runner) => `Core tests (${runner.name})`),
+    ...PORTABLE_ALL.map((platform) => `Desktop / ${platform.name}`),
+    'Desktop / Windows x64',
+    'Desktop / Windows x64 Rust tests',
+    'E2E 1/3',
+    'E2E 2/3',
+    'E2E 3/3',
+    'E2E type check',
+    'PR title',
+    'Plan and repository checks',
+    'Server / verify server (amd64)',
+    'Server / verify server (arm64)',
+    'Stress fixtures',
+    'Telemetry relay tests',
+    'Type checks and UI tests',
+  ].sort());
+  // labeler.yml runs the base's workflow through pull_request_target, so it
+  // is absent; so is the gate, which leaves once the ruleset requires these.
   expect(names).not.toContain(GATE_NAME);
 });
 
