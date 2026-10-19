@@ -6,6 +6,7 @@ import { Core } from '../src/core.ts';
 import { Retirements } from '../src/delegation/retirement.ts';
 import { PullRequestWatches } from '../src/pull-request-watch.ts';
 import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
+import { parseProtection, parseRules, withRequired } from '../src/pull-request-required.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const URL = 'https://github.com/example/repo/pull/7';
@@ -210,6 +211,21 @@ test('CI wakes on its first failure and on its verdict, not on each check that f
   expect(step([{ name: 'jenkins', context: true, status: 'SUCCESS' }])).toEqual([{ kind: 'passed', head, count: 1, required: false }]);
 });
 
+test('the base branch names what it requires through its rulesets and its classic protection, reported or not', () => {
+  expect(parseRules(JSON.stringify([{ type: 'deletion' }, { type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'CI required', integration_id: 15368 }, { context: 'PR title' }] } }]))).toEqual(['CI required', 'PR title']);
+  expect(parseRules('[]')).toEqual([]);
+  expect(parseProtection(JSON.stringify({ protection: { enabled: true, required_status_checks: { enforcement_level: 'everyone', contexts: ['lint'], checks: [{ context: 'build', app_id: null }] } } }))).toEqual(['lint', 'build']);
+  expect(parseProtection(JSON.stringify({ protection: { enabled: false, required_status_checks: { enforcement_level: 'off', contexts: [], checks: [] } } }))).toEqual([]);
+  // A check run matches by its own name, its workflow aside; a context with no check yet waits as GitHub's "Expected".
+  const checks = withRequired(detail([{ name: 'CI required' }, { name: 'test' }]), ['CI required', 'PR title']).checks;
+  expect(checks.map(({ name, status, required, conclusion }) => ({ name, status, required, conclusion }))).toEqual([
+    { name: 'CI / CI required', status: 'passed', required: true, conclusion: 'SUCCESS' },
+    { name: 'CI / test', status: 'passed', required: false, conclusion: 'SUCCESS' },
+    { name: 'PR title', status: 'pending', required: true, conclusion: 'EXPECTED' },
+  ]);
+  expect(evaluate(initialMemory(since), withRequired(detail([{ name: 'CI required' }]), ['CI required', 'PR title']), null).changes).toEqual([]);
+});
+
 test('a burst folds into one set of changes, and failures of an older head drop once the new head passed', () => {
   const merged = mergeChanges(
     [{ kind: 'failed', head: 'old', checks: [{ name: 'test', conclusion: 'FAILURE', url: '' }] }, { kind: 'remarks', remarks: [{ id: 'a', author: 'x', body: '1', url: '', path: null, state: null }] }],
@@ -238,11 +254,16 @@ interface FakeGitHub {
   failure: string | null;
   /** Thrown by the next closer query only, then cleared. */
   closerFailure: string | null;
+  /** The contexts the base branch's rulesets and its classic protection require. */
+  rules: string[];
+  protection: string[];
+  /** Thrown by the reads of what the base branch requires while set. */
+  rulesFailure: string | null;
   calls: string[];
 }
 
 function fakeGitHub(): FakeGitHub {
-  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', closedBy: 'meetsu', failure: null, closerFailure: null, calls: [] };
+  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', closedBy: 'meetsu', failure: null, closerFailure: null, rules: [], protection: [], rulesFailure: null, calls: [] };
 }
 
 /** What `gh` prints for each call a watch makes. */
@@ -266,6 +287,12 @@ async function answer(github: FakeGitHub, args: string[]): Promise<string> {
     return JSON.stringify({ data: { repository: { pullRequest: { state: github.state, mergeable: github.mergeable, headRefOid: github.head, updatedAt: github.updatedAt,
       comments: { totalCount: github.comments.length, nodes: [] }, reviews: { totalCount: github.reviews.length, nodes: [] }, reviewThreads: { totalCount: 0 },
       commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { checkRunCountsByState: [...counts].map(([state, count]) => ({ state, count })), statusContextCountsByState: [] } } } }] } } } } });
+  }
+  if (/^repos\/example\/repo\/(?:rules\/)?branches\//.test(path)) {
+    if (github.rulesFailure) throw new Error(github.rulesFailure);
+    if (path.includes('rules/')) return JSON.stringify(github.rules.length ? [{ type: 'deletion' }, { type: 'required_status_checks', parameters: { required_status_checks: github.rules.map(context => ({ context, integration_id: 15368 })) } }] : []);
+    return JSON.stringify({ name: 'main', protected: true, protection: { enabled: github.protection.length > 0,
+      required_status_checks: { enforcement_level: github.protection.length ? 'non_admins' : 'off', contexts: github.protection, checks: github.protection.map(context => ({ context, app_id: null })) } } });
   }
   const page = Number(/[?&]page=(\d+)/.exec(path)![1]);
   const all = path.includes('/reviews') ? github.reviews : path.includes('pulls/') ? github.inline : github.comments;
@@ -308,7 +335,7 @@ test('a watch reads first without waking, wakes once per change with links, and 
   // A check still runs: the idle row keeps counting from the user's request, like a monitor.
   const summary = () => harness!.core.threads.list({}).find(thread => thread.id === threadId)!;
   expect(summary().requestSince).toBeNumber();
-  expect(github.calls).toEqual(['fingerprint', 'detail', 'issues/7/comments?per_page=100&page=1', 'pulls/7/reviews?per_page=100&page=1', 'pulls/7/comments?per_page=100&page=1']);
+  expect(github.calls).toEqual(['fingerprint', 'detail', 'rules/branches/main?per_page=100', 'branches/main', 'issues/7/comments?per_page=100&page=1', 'pulls/7/reviews?per_page=100&page=1', 'pulls/7/comments?per_page=100&page=1']);
 
   // Nothing moved: one fingerprint per pass, no detail, no wake.
   github.calls = [];
@@ -359,6 +386,93 @@ test('a watch reads first without waking, wakes once per change with links, and 
   expect(harness!.core.pullRequestWatches.of(threadId)).toEqual([]);
   expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toBeUndefined();
   expect(wakes(threadId)).toHaveLength(3);
+});
+
+test('a check the base branch requires holds "passed" back until it reported', async () => {
+  const { owner, threadId, github, watches, drive } = await watchedThread();
+  // beboite/boite's ruleset requires "PR title", done in seconds, and "CI required", created only once every other job ended.
+  github.rules = ['PR title', 'CI required'];
+  const title = { name: 'PR title', workflow: 'pr title', required: true };
+  github.runs = [{ ...title, status: 'IN_PROGRESS', conclusion: '' }];
+  await owner.call('threads.watchPullRequest', { threadId });
+  github.runs = [title];
+  await drive();
+  await settled(threadId);
+  expect(wakes(threadId)).toHaveLength(0);
+  expect(watches.of(threadId)[0]!.seen?.checks).toEqual({ total: 2, running: 1, failed: 0 });
+  github.runs = [title, { name: 'CI required', required: true }];
+  await drive();
+  await settled(threadId);
+  expect(wakes(threadId)).toHaveLength(1);
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('All 2 required checks passed on aaaaaaa.');
+  // Read once per repository and base while it is fresh, the classic protection beside the rulesets.
+  expect(github.calls.filter(call => call.includes('branches/'))).toEqual(['rules/branches/main?per_page=100', 'branches/main']);
+
+});
+
+test('a failed read of what the base branch requires ends nothing and pauses nothing', async () => {
+  const { owner, threadId, github, watches, drive } = await watchedThread();
+  github.rules = ['test', 'CI required'];
+  github.rulesFailure = 'gh: Server Error (HTTP 502)';
+  await owner.call('threads.watchPullRequest', { threadId });
+  github.runs = [{ name: 'test', required: true }];
+  await drive();
+  await settled(threadId);
+  // It goes on with what the checks say of themselves.
+  expect(watches.of(threadId)[0]).toMatchObject({ paused: null, seen: { checks: { total: 1, running: 0, failed: 0 } } });
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('All 1 required check passed on aaaaaaa.');
+});
+
+test('rules that expire or failed are read again while the fingerprint stands still, against the checks already read', async () => {
+  const { owner, threadId, github, watches, drive } = await watchedThread();
+  // "old" is required, then the ruleset swaps it for C, which already passed: nothing on the pull request moves.
+  github.rules = ['A', 'old'];
+  github.runs = [{ name: 'A', required: true }, { name: 'C' }];
+  await owner.call('threads.watchPullRequest', { threadId });
+  github.rules = ['A', 'C'];
+  github.calls = [];
+  const now = Date.now();
+  const driveAt = async (minutes: number) => {
+    const clock = spyOn(Date, 'now').mockReturnValue(now + minutes * 60_000);
+    try { await drive(); } finally { clock.mockRestore(); }
+  };
+  await driveAt(11);
+  await settled(threadId);
+  expect(github.calls.filter(call => call !== 'fingerprint')).toEqual(['rules/branches/main?per_page=100', 'branches/main']);
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('All 2 required checks passed on aaaaaaa.');
+
+  // A failed read is tried again after two minutes, not after the half-hour reread.
+  github.rulesFailure = 'gh: Server Error (HTTP 502)';
+  await driveAt(22);
+  github.rulesFailure = null;
+  github.rules = ['A', 'C', 'B'];
+  github.calls = [];
+  await driveAt(25);
+  expect(github.calls.filter(call => call !== 'fingerprint')).toEqual(['rules/branches/main?per_page=100', 'branches/main']);
+  expect(watches.of(threadId)[0]!.seen?.checks).toEqual({ total: 3, running: 1, failed: 0 });
+});
+
+test('a check the rules stop requiring stops counting as required, even on the checks already read', async () => {
+  const { owner, threadId, github, drive } = await watchedThread();
+  github.rules = ['A', 'B'];
+  github.runs = [{ name: 'A', required: true }, { name: 'B', conclusion: 'FAILURE', required: true }];
+  await owner.call('threads.watchPullRequest', { threadId });
+  // B leaves the ruleset; nothing on the pull request moves.
+  github.rules = ['A'];
+  const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 11 * 60_000);
+  try { await drive(); } finally { clock.mockRestore(); }
+  await settled(threadId);
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('All 1 required check passed on aaaaaaa.');
+});
+
+test('a rate limit on the rules pauses every read like any other', async () => {
+  const { owner, threadId, github, watches } = await watchedThread({ intervalMs: 40, coalesceMs: 0 });
+  github.rulesFailure = 'gh: API rate limit exceeded for user ID 1. (HTTP 403)';
+  await owner.call('threads.watchPullRequest', { threadId });
+  expect(watches.of(threadId)[0]!.paused).toMatchObject({ reason: 'rate-limit' });
+  github.calls = [];
+  await watches.pass();
+  expect(github.calls).toEqual([]);
 });
 
 test('a merge or a close by someone else is told with what still waited, a failed closer read included, then the watch ends', async () => {

@@ -103,6 +103,8 @@ export function parseFingerprint(raw: string): Fingerprint {
 export type CheckStatus = 'pending' | 'passed' | 'failed';
 export interface WatchCheck {
   name: string; status: CheckStatus; conclusion: string; required: boolean; url: string;
+  /** Its name without its workflow: what the base branch's rules call it. */
+  job: string;
   /** A commit status a service posted rather than a CI job: one may stay pending as long as it likes. */
   context: boolean;
   /** The workflow a CI job belongs to, its start and its end: empty for a commit status or what did not happen yet. */
@@ -133,10 +135,11 @@ export function parseDetail(raw: string): WatchDetail {
   const nodes = list(row(row(commit.statusCheckRollup).contexts).nodes).map(row);
   const runs = new Map<string, { check: WatchCheck; at: string }>();
   for (const node of nodes) {
-    let name: string, status: CheckStatus, conclusion: string, url: string, at: string, workflow = '', started = '', finished = '';
+    let name: string, job: string, status: CheckStatus, conclusion: string, url: string, at: string, workflow = '', started = '', finished = '';
     if (node.__typename === 'CheckRun') {
       workflow = text(row(row(row(node.checkSuite).workflowRun).workflow).name, 200);
-      name = workflow ? `${workflow} / ${text(node.name, 200)}` : text(node.name, 200);
+      job = text(node.name, 200);
+      name = workflow ? `${workflow} / ${job}` : job;
       const done = node.status === 'COMPLETED';
       conclusion = done ? text(node.conclusion, 50) : text(node.status, 50);
       status = !done ? 'pending' : FAILED.has(conclusion) ? 'failed' : 'passed';
@@ -145,14 +148,14 @@ export function parseDetail(raw: string): WatchDetail {
       started = text(node.startedAt, 50);
       finished = done ? text(node.completedAt, 50) : '';
     } else if (node.__typename === 'StatusContext') {
-      name = text(node.context, 200);
+      name = job = text(node.context, 200);
       conclusion = text(node.state, 50);
       status = conclusion === 'PENDING' || conclusion === 'EXPECTED' ? 'pending' : FAILED.has(conclusion) ? 'failed' : 'passed';
       url = safeUrl(node.targetUrl);
       at = status === 'pending' ? '9999' : text(node.createdAt, 50);
     } else continue;
     if (!name) continue;
-    const check: WatchCheck = { name, status, conclusion, required: node.isRequired === true, url, context: node.__typename === 'StatusContext', workflow, started, finished };
+    const check: WatchCheck = { name, status, conclusion, required: node.isRequired === true, url, job, context: node.__typename === 'StatusContext', workflow, started, finished };
     const held = runs.get(name);
     if (!held || at > held.at) runs.set(name, { check: { ...check, required: check.required || held?.check.required === true }, at });
     else if (check.required) held.check.required = true;
