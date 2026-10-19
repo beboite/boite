@@ -542,7 +542,7 @@
     flex-wrap: wrap;
   }
 
-  /* The checklist under its goal: how far it got, then each request. */
+  /* The checklist under its goal: how far it got, in the goal bar's colours, then each request. */
   .goal-checklist {
     padding: 2px 0 2px;
   }
@@ -566,8 +566,8 @@
   }
 
   progress::-webkit-progress-bar { background: var(--color-surface-3); }
-  progress::-webkit-progress-value { background: var(--color-success); transition: width var(--dur-3); }
-  progress::-moz-progress-bar { background: var(--color-success); }
+  progress::-webkit-progress-value { background: var(--color-accent); transition: width var(--dur-3); }
+  progress::-moz-progress-bar { background: var(--color-accent); }
 
   @media (prefers-reduced-motion: reduce) { progress::-webkit-progress-value { transition: none; } }
 
