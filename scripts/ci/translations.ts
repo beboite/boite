@@ -75,11 +75,38 @@ export async function loadCatalogues(dir = CATALOGUE_DIR): Promise<{ reference: 
   return { reference, translations };
 }
 
+/**
+ * Each part of English (`strings/en/<part>.ts`) has a file of the same name in
+ * every translation, and each index spreads every part: a part left out of an
+ * index would vanish from the UI without any missing sentence to report.
+ */
+export async function partErrors(dir = CATALOGUE_DIR): Promise<string[]> {
+  const parts = (locale: string) => readdirSync(join(dir, 'strings', locale)).filter((file) => file.endsWith('.ts')).sort();
+  const english = parts('en');
+  const { reference, translations } = await loadCatalogues(dir);
+  const errors: string[] = [];
+  for (const [code, catalogue] of [['en', reference], ...translations] as [string, unknown][]) {
+    const own = code === 'en' ? english : parts(code);
+    for (const file of english.filter((part) => !own.includes(part))) errors.push(`${join(dir, 'strings', code)}: no ${file}, expected one per file of strings/en`);
+    for (const file of own.filter((part) => !english.includes(part))) errors.push(`${join(dir, 'strings', code, file)}: not in strings/en`);
+    for (const file of own.filter((part) => english.includes(part))) {
+      const keys = Object.keys((await import(resolve(dir, 'strings', code, file)))[code === 'en' ? 'strings' : code] ?? {});
+      const index = `${join(dir, `strings.${code}.ts`)}`;
+      for (const key of keys) if (!isNode(catalogue) || !Object.hasOwn(catalogue, key)) errors.push(`${index}: does not spread ${key} from strings/${code}/${file}`);
+    }
+  }
+  return errors;
+}
+
 if (import.meta.main) {
   const release = process.argv.includes('--release');
   const { reference, translations } = await loadCatalogues();
   const total = leaves(reference).length;
   let failed = false;
+  for (const line of await partErrors()) {
+    console.log(`::error title=Catalogue parts::${line}`);
+    failed = true;
+  }
   for (const [code, catalogue] of translations) {
     const file = `${CATALOGUE_DIR}/strings.${code}.ts`;
     const report = compare(reference, catalogue);
