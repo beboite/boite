@@ -1179,7 +1179,7 @@ to 47.2 MiB from minute 1 to 9 (46.8 at minute 9), 28 to 68 messages held and
 Measured on Windows with Bun 1.4.2 on 2026-10-02, using `bun run build:ui`
 for both `83ae9b4` and the browser tools, recording, linked PR review and remote
 preview changes. Totals exclude precompressed `.br` and `.gz` copies, as
-`bun scripts/ci/budgets.ts` does.
+`scripts/ci/budgets.ts` does.
 
 | Build | UI entry | Complete UI |
 | --- | ---: | ---: |
@@ -1241,7 +1241,7 @@ out now that it draws machine icons, and the translations. The entry chunk is
 768 bytes smaller. The total UI budget
 increases from 4,872,000 to 4,898,000 bytes, leaving 9,174 bytes of headroom;
 entry and core limits stay unchanged. Totals exclude precompressed copies, as
-`bun scripts/ci/budgets.ts` does.
+`scripts/ci/budgets.ts` does.
 
 ### Process load pacing and trace rows
 
@@ -1527,5 +1527,5 @@ checksum/signature validation and bundle layout.
 The [dated runtime measurements](../bench/results/2026-09-29-resources.md#runtime-and-bundle-measurements-2026-09-19-to-2026-09-29)
 retain the Windows compiled-versus-signed startup results, baseline comparison
 and account-change bundle sizes. No corresponding Linux/macOS startup gain
-was measured. Current emitted-size limits live in
-[CI](ci.md#build-cost) and `scripts/ci/budgets.json`.
+was measured. Current emitted-size checks live in
+[CI](ci.md#bundle-growth).
