@@ -32,6 +32,26 @@ test('the Windows E2E steps keep Chrome profiles and data directories on the run
   }
 });
 
+test('every E2E shard stops a hung run before its job limit and uploads the report', () => {
+  // A shard cut by its 35 min limit kept no log and no artifact (run
+  // 39321123064): the run must end itself, from a deadline counted from the
+  // job's first step, while the upload step can still run.
+  const workflow = readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8');
+  const e2e = steps('e2e-1');
+  const names = [...e2e.keys()];
+  expect(names[0]).toBe('Note when the job started');
+  expect(e2e.get('Note when the job started')).toContain('BOITE_JOB_STARTED_MS=');
+  const run = e2e.get('Browser and core end-to-end tests') ?? '';
+  const minutes = /bun scripts\/ci\/flaky\.ts --job-started \$env:BOITE_JOB_STARTED_MS --job-minutes (\d+) @files/.exec(run)?.[1];
+  expect(minutes).toBeDefined();
+  for (const job of ['e2e-1', 'e2e-2', 'e2e-3']) {
+    const start = workflow.indexOf(`\n  ${job}:\n`);
+    expect(/timeout-minutes: (\d+)/.exec(workflow.slice(start))?.[1], job).toBe(minutes);
+  }
+  const upload = workflow.slice(workflow.indexOf('name: e2e-${{ env.E2E_SHARD }}-failure-captures') - 300);
+  expect(upload).toMatch(/if: failure\(\) \|\| cancelled\(\)\n\s+with:\n\s+name: e2e-\$\{\{ env\.E2E_SHARD \}\}-failure-captures\n\s+path: tests\/e2e\/\.artifacts\//);
+});
+
 test('every E2E teardown names a deadline of at least 30 s', () => {
   // Bun gives a hook 5 s by default. Closing a browser on the Windows runner
   // took 7 s, and the file failed after all its tests had passed.

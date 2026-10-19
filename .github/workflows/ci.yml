@@ -449,6 +449,11 @@ jobs:
       BOITE_E2E_FAKE_UI: tests/e2e/.artifacts/fake-ui
       E2E_SHARD: 1
     steps: &e2e-steps
+      # The test step stops a run still going 4 min before the job's limit,
+      # which counts from about here, and leaves a report for the failure
+      # captures (scripts/ci/hang-watch.ts, docs/ci.md#hung-test-runs).
+      - name: Note when the job started
+        run: Add-Content $env:GITHUB_ENV "BOITE_JOB_STARTED_MS=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
       # A stale draft run, or a rerun draft run whose planning did not pass,
       # fails here rather than skip (changes job).
       - name: Stop a stale draft run
@@ -488,7 +493,8 @@ jobs:
           $files = @(bun scripts/ci/e2e-shards.ts $env:E2E_SHARD 3)
           if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw 'No browser or core E2E files for this shard' }
           # A quarantined test that fails runs once more (scripts/ci/quarantine.json).
-          bun scripts/ci/flaky.ts @files
+          # --job-minutes is the job's timeout-minutes (e2e-harness.test.ts).
+          bun scripts/ci/flaky.ts --job-started $env:BOITE_JOB_STARTED_MS --job-minutes 35 @files
       - uses: ./.github/actions/upload-artifact
         if: failure() || cancelled()
         with:
