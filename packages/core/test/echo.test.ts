@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ImageAttachment, MessagePart, QuestionAnswer, RpcEvents, ToolDocument } from '@boite/contracts';
 import { echoThread, scriptedClaude, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { connect } from '../src/client.ts';
 
 let harness: TestCore;
 
@@ -787,6 +788,30 @@ describe('echo driver', () => {
     expect((await client.call('threads.get', { threadId })).unread).toBe(true);
     await client.call('threads.markRead', { threadId });
     expect((await client.call('threads.get', { threadId })).unread).toBe(false);
+  });
+
+  test('a desktop-app plugin following a thread is not a reader: its finished turn still reads unread', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    // B.O.T.S subscribes to every thread at work to stream its steps; nobody reads them there.
+    const plugin = await connect(harness.url, harness.token, { client: { name: 'plugin', version: 'test' } });
+    try {
+      await plugin.call('threads.subscribe', { threadId });
+      const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+      await client.call('turns.start', { threadId, prompt: 'followed by a plugin' });
+      await finished;
+      expect((await client.call('threads.get', { threadId })).unread).toBe(true);
+
+      // A window that has the thread open still reads it as it lands.
+      await client.call('threads.markRead', { threadId });
+      await client.call('threads.subscribe', { threadId });
+      const again = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+      await client.call('turns.start', { threadId, prompt: 'read in the window' });
+      await again;
+      expect((await client.call('threads.get', { threadId })).unread).toBe(false);
+    } finally {
+      plugin.close();
+    }
   });
 
   test('a pin is kept in the journal and survives a restart, and pinning twice is not an update', async () => {

@@ -68,6 +68,7 @@ export { CORE_VERSION } from './version.ts';
 
 /** The server tells the core which threads a live socket is watching, and closes sockets on request. */
 export interface SubscriptionSink {
+  /** A window of the owner or a paired device has the thread open; an agent's or a plugin's subscription is no reader. */
   hasSubscribers(threadId: ThreadId): boolean;
   /** Every socket a revoked session holds goes, with the close code the client reads as "pair again". */
   closeSession(sessionId: string): void;
@@ -340,6 +341,8 @@ export class Core {
     attachResourceLog(this);
     this.scheduler = new Scheduler(this);
     this.threads = new ThreadStore(this);
+    // Read before any recovery writes, the team and workflow ones included: whether the previous core died at work within the hour.
+    this.threads.autoContinue.previousRunCut();
     this.drafts = new DraftPreparations(this);
     this.attachmentUploads = new AttachmentUploads(this.dataDir);
     this.quotas = new QuotaStore(this);
@@ -390,10 +393,12 @@ export class Core {
     this.#stopDoneRetention = scheduleDoneRetention(this);
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
-    this.threads.agentState.backgroundHistory.interruptLive();
+    const interrupted = this.threads.agentState.backgroundHistory.interruptLive();
     const recovered = this.threads.recoverStuckTurns();
     // After recovery: a thread a usage limit stopped resumes at its window's reset, across restarts.
     this.threads.limitResumes.start();
+    // What a dead core cut, and any resume planned before it died, goes on (`threads/auto-continue.ts`).
+    this.threads.autoContinue.start(interrupted);
     this.threads.cards.restoreAsyncQuestions();
     phase('startup.recovered', `Previous run recovered, ${recovered} unfinished turns`, { stuckTurns: recovered });
     queueMicrotask(() => {
@@ -477,6 +482,8 @@ export class Core {
    */
   drain(timeoutMs?: number): Promise<void> {
     if (this.#drainPromise !== null) return this.#drainPromise;
+    // Stopped on purpose, not handed over: the next core resumes nothing this one cuts.
+    if (!this.threads.handoff.active) this.threads.autoContinue.noteDeliberateStop();
     this.#stopping = true;
     this.delegation.beginClose();
     this.workflows.beginClose();
@@ -489,6 +496,7 @@ export class Core {
     this.threads.autoCompact.close();
     this.threads.cacheKeepalive.close();
     this.threads.limitResumes.close();
+    this.threads.autoContinue.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
     return this.#drainPromise;
   }
@@ -518,6 +526,7 @@ export class Core {
     this.threads.autoCompact.close();
     this.threads.cacheKeepalive.close();
     this.threads.limitResumes.close();
+    this.threads.autoContinue.close();
     await this.threads.codeCheckpoints.close();
     await this.agentRuntime.close();
     this.workforce.close();

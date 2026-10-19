@@ -24,12 +24,14 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | `apps/shell/` | Windows installer, Rust and native shell E2E; three browser/core E2E shards; portable desktop matrix |
 | `tests/e2e/` | Desktop and E2E checks plus `check:e2e`; `tests/e2e/lib/` also selects stress |
 | `Dockerfile`, `.dockerignore`, `docker/` | Native x64 and ARM64 Docker smoke tests |
-| `packages/ui/` | Full type checks and UI tests, desktop/E2E, Docker and stress |
+| `packages/ui/` | Full type checks and UI tests, desktop/E2E without the shell's Rust tests, Docker and stress; `preview-picker.js` and `preview-highlight.js`, which `browser.rs` embeds, add them |
 | `apps/android/`, `android.yml`, `scripts/ci/android-apk.ts` | Unsigned APK build |
 | `telemetry/` | Full type checks and UI tests plus the existing relay behavior suite |
 | `tests/stress/`, `bench/agent-stress.ts`, `bench/lib/` | Full type checks, UI tests and stress |
 | Other `bench/` files, `scripts/architecture/` | Full type checks and UI tests |
-| Core, contracts, dependencies, shared builds, other workflows and unknown paths | All checks |
+| `packages/core/` | All checks except the shell's Rust tests and the APK |
+| `packages/contracts/` | All checks except the shell's Rust tests |
+| Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
 The changes job always installs frozen dependencies, runs `bun audit`, local
@@ -75,9 +77,14 @@ an Intel-only core failure now shows on the main push.
 
 `desktop.yml` holds the desktop builds: the Windows installer job and one job
 per portable platform, named after it (`Desktop / macOS x64`). `ci.yml` calls
-it with the Rust tests; the nightly calls it without them. On Windows they run
-in `Desktop / Windows x64 Rust tests`, a job of their own beside the installer
-build; portable jobs keep them in line. Only `CI required`
+it with the Rust tests when the `shellRust` plan output is on; the nightly calls
+it without them. On Windows they run in `Desktop / Windows x64 Rust tests`, a
+job of their own beside the installer build; portable jobs keep them in line.
+The tests compile `apps/shell/src-tauri` and the two page scripts `browser.rs`
+embeds, and start inline fake cores, so `shellRust` follows those paths and the
+ones that select every check. 7 of the 100 PRs before 2026-10-19 touched them,
+yet all ran the tests: 3.6 runner minutes on Windows, 3.5 on Apple Silicon and
+0.9 on Linux per green PR run. Only `CI required`
 and `PR title` are required checks, so a display name can change freely, except
 the `release.yml` job names that `server-provenance.ts` checks.
 
@@ -102,8 +109,17 @@ a running publication finishes, while newer pending work can supersede older
 pending work.
 
 Artifact uploads retry once, replacing a name reserved by the failed attempt.
-A second failure fails the job. Tests and builds are not retried, with one
-exception. `scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
+A second failure fails the job. Tests and builds are not retried, with two
+exceptions. Tests listed in `scripts/ci/quarantine.json` with their reason run
+once more, alone and in a fresh process, when they fail in the core suite or
+an E2E shard (`scripts/ci/flaky.ts`); the job fails if they fail again, and the
+retry leaves a warning on the run. The retry only happens when every failure
+of that file (core) or shard (E2E) is quarantined and bun named each one: a
+crash, a timed-out file or any other failing test fails at once. The list
+started on 2026-10-18 from the 80 runs that passed on rerun since 2026-10-16:
+tests that failed at least three first attempts. A fixed test leaves the list;
+`flaky.test.ts` fails when an entry no longer exists in its file.
+`scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
 three attempts at most, when hdiutil reports `Resource busy`. That runner
 fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 37213994348 and cost a rerun. Before retrying, it detaches what the failed
@@ -181,18 +197,29 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 492,200 |
+| UI entry chunk | 492,300 |
 | UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,484,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,498,300 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-18, the quieter pull request watch (PR #600) measures 4,474,421
-core JavaScript bytes on Windows CI at `37d85d19`, against 4,470,067 for its
-base `3a19eb57`: the bot remark rules, the body hashes and the closer read add
-4,354 bytes. Over the 4,479,099 recorded for PR #595 below, the core
-JavaScript limit rises to 4,484,000; the other limits stay.
+On 2026-10-19, the quieter pull request watch (PR #600) merged with
+`origin/main` at `a7fed525` measures 4,498,258 core JavaScript bytes with
+`measure()` after a fresh `bun run build:core` on Windows, against 4,493,171
+recorded below for PR #603: 5,087 bytes more, mostly the watch's bot remark
+rules, body hashes, closer read and aggregate gate. The core JavaScript limit
+rises to 4,498,300; the other limits stay.
+
+On 2026-10-18, automatic resumes (PR #603) merged with `origin/main` at
+`e22bb094` measure 492,249 entry bytes, 4,869,493 UI bytes and 4,493,171 core
+JavaScript bytes with `measure()` after fresh `bun run build:ui` and
+`bun run build:core` on Windows, against 492,112, 4,869,093 and 4,479,099
+recorded below for PR #595: `threads/auto-continue.ts` (the plans, their
+journal record, the crash and background triggers and their prompts) adds
+14,072 core bytes, and the banner's resume wording adds 137 entry and 400 UI
+bytes. The entry and core JavaScript limits rise to 492,300 and 4,493,700; the
+other limits stay.
 
 On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
 492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes
