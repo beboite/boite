@@ -1264,6 +1264,8 @@ export const fr: Translation = {
     retryLimitTitle: 'Limite d\'usage atteinte',
     retryLimitBody: 'Reprise à {time}, une fois la limite réinitialisée, dans {in}.',
     retryLimitCancel: 'Ne pas reprendre',
+    retryContinueTitle: 'Arrêté avant sa réponse',
+    retryContinueBody: 'Reprise automatique dans {time}, reprise {attempt} sur {attempts}.',
     contextDetails: 'Contexte',
     contextInput: 'Entrée',
     contextCache: 'Entrée en cache',

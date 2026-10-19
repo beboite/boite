@@ -1245,11 +1245,14 @@ export interface ThreadSummary {
  * the `attempt`th of `attempts` tries, and the thread stays running meanwhile.
  * `usage-limit`: the subscription window was spent and `autoResumeLimitedThreads`
  * is on; a new turn resumes the thread at `at`, shortly after `resetsAt`, and
- * the plan survives a core restart. `turns.cancelRetry` or Stop cancels either.
+ * the plan survives a core restart. `auto-continue`: a turn stopped before its
+ * answer (an error, a crash, a compaction, interrupted background work); a
+ * new turn resumes the thread at `at`, the `attempt`th of `attempts` resumes
+ * in a row (`docs/restart-handoff.md`). `turns.cancelRetry` or Stop cancels any.
  */
 export interface ThreadRetry {
-  kind: 'capacity' | 'usage-limit';
-  /** The turn the provider refused. */
+  kind: 'capacity' | 'usage-limit' | 'auto-continue';
+  /** The turn the provider refused, or the one that stopped before its answer. */
   turnId: TurnId;
   /** When the core tries again. */
   at: Timestamp;

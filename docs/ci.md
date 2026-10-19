@@ -24,12 +24,14 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | `apps/shell/` | Windows installer, Rust and native shell E2E; three browser/core E2E shards; portable desktop matrix |
 | `tests/e2e/` | Desktop and E2E checks plus `check:e2e`; `tests/e2e/lib/` also selects stress |
 | `Dockerfile`, `.dockerignore`, `docker/` | Native x64 and ARM64 Docker smoke tests |
-| `packages/ui/` | Full type checks and UI tests, desktop/E2E, Docker and stress |
+| `packages/ui/` | Full type checks and UI tests, desktop/E2E without the shell's Rust tests, Docker and stress; `preview-picker.js` and `preview-highlight.js`, which `browser.rs` embeds, add them |
 | `apps/android/`, `android.yml`, `scripts/ci/android-apk.ts` | Unsigned APK build |
 | `telemetry/` | Full type checks and UI tests plus the existing relay behavior suite |
 | `tests/stress/`, `bench/agent-stress.ts`, `bench/lib/` | Full type checks, UI tests and stress |
 | Other `bench/` files, `scripts/architecture/` | Full type checks and UI tests |
-| Core, contracts, dependencies, shared builds, other workflows and unknown paths | All checks |
+| `packages/core/` | All checks except the shell's Rust tests and the APK |
+| `packages/contracts/` | All checks except the shell's Rust tests |
+| Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
 The changes job always installs frozen dependencies, runs `bun audit`, local
@@ -75,9 +77,14 @@ an Intel-only core failure now shows on the main push.
 
 `desktop.yml` holds the desktop builds: the Windows installer job and one job
 per portable platform, named after it (`Desktop / macOS x64`). `ci.yml` calls
-it with the Rust tests; the nightly calls it without them. On Windows they run
-in `Desktop / Windows x64 Rust tests`, a job of their own beside the installer
-build; portable jobs keep them in line. Only `CI required`
+it with the Rust tests when the `shellRust` plan output is on; the nightly calls
+it without them. On Windows they run in `Desktop / Windows x64 Rust tests`, a
+job of their own beside the installer build; portable jobs keep them in line.
+The tests compile `apps/shell/src-tauri` and the two page scripts `browser.rs`
+embeds, and start inline fake cores, so `shellRust` follows those paths and the
+ones that select every check. 7 of the 100 PRs before 2026-10-19 touched them,
+yet all ran the tests: 3.6 runner minutes on Windows, 3.5 on Apple Silicon and
+0.9 on Linux per green PR run. Only `CI required`
 and `PR title` are required checks, so a display name can change freely, except
 the `release.yml` job names that `server-provenance.ts` checks.
 
@@ -190,31 +197,35 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 495,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,883,000 |
+| UI entry chunk | 495,400 |
+| UI files, excluding `.br` and `.gz` copies | 4,883,400 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,485,600 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,500,100 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-19, the sign-in card hosting its browser on the Agents page
-(PR #604, merged with `origin/main` at `ea79290b`) measures 494,720 entry
-bytes and 4,882,434 UI bytes with `measure()` after fresh `bun run build:ui`
-on Windows, against 494,498 and 4,878,952 recorded below: the card chunk
-grows by 1,320 JavaScript and 212 CSS bytes, the browser surface it loads
-splits from the panel's chunk, `lib/thread-holds.ts` shares the hidden
-thread's subscription between cards (467 bytes), and the agents demo seeds a
-sign-in. The UI limit rises to 4,883,000; the other limits stay.
+On 2026-10-19, the sign-in card (PR #604) merged with `origin/main` at
+`75ee7714` measures 494,857 entry bytes, 4,882,834 UI bytes and 4,499,604 core
+JavaScript bytes with `measure()` after fresh `bun run build:ui` and
+`bun run build:core` on Windows, against 492,249, 4,869,493 and 4,493,171
+recorded below for PR #603. The lazy `SignInCard` chunk (its browser hosted
+on the Agents page and `lib/thread-holds.ts`, which shares a hidden thread's
+subscription between cards) and the browser surface it splits from the
+panel's chunk add about 7,500 UI bytes, its loader, card routing and
+contracts about 2,600 entry bytes, the sentences about 1,540; `browser
+login`, `browser/sign-in.ts` and the `browser.signIn` routes add about 6,400
+core bytes. The entry, UI and core JavaScript limits rise to 495,400,
+4,883,400 and 4,500,100; `main.js` stays.
 
-On 2026-10-18, the sign-in card (PR #604) merged with `origin/main` at
-`e22bb094` measures 494,498 entry bytes, 4,878,952 UI bytes and 4,485,124 core
+On 2026-10-18, automatic resumes (PR #603) merged with `origin/main` at
+`e22bb094` measure 492,249 entry bytes, 4,869,493 UI bytes and 4,493,171 core
 JavaScript bytes with `measure()` after fresh `bun run build:ui` and
 `bun run build:core` on Windows, against 492,112, 4,869,093 and 4,479,099
-recorded below for PR #595: the lazy `SignInCard` chunk adds 4,052 JavaScript
-and 1,878 CSS bytes, its loader, card routing and contracts 2,386 entry bytes,
-the sentences about 1,540; `browser login`, `browser/sign-in.ts` and the
-`browser.signIn` routes add 6,025 core bytes. The entry, UI and core JavaScript
-limits rise to 495,000, 4,879,500 and 4,485,600; `main.js` stays.
+recorded below for PR #595: `threads/auto-continue.ts` (the plans, their
+journal record, the crash and background triggers and their prompts) adds
+14,072 core bytes, and the banner's resume wording adds 137 entry and 400 UI
+bytes. The entry and core JavaScript limits rise to 492,300 and 4,493,700; the
+other limits stay.
 
 On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
 492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes
