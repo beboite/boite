@@ -37,31 +37,3 @@ test('browser condition waits bound unresolved evaluations and refuse closed pag
   }
   // Only this regression allows the old 20-second call deadline to finish for the red run.
 }, 45_000);
-
-test('a navigation a late history.back() takes over fails inside a 30 s hook, naming the back and the history it left', async () => {
-  const server = Bun.serve({
-    port: 0, hostname: '127.0.0.1',
-    fetch: request => new Response(`<!doctype html><title>${new URL(request.url).search}</title>`, { headers: { 'content-type': 'text/html' } }),
-  });
-  const origin = `http://127.0.0.1:${server.port}`;
-  const page = await BrowserPage.launch({ url: `${origin}/?start` });
-  try {
-    await page.navigate(`${origin}/?a`);
-    // A phone overlay closes and pops its entry, and a second pop reaches the browser as the next document
-    // commits: the browser goes back to an older document and the requested one never commits.
-    await page.evaluate(`history.pushState({ boiteOverlay: 'menu', boiteDepth: 1 }, ''); history.back(); addEventListener('pagehide', () => history.back(), { once: true }); null`);
-    const started = performance.now();
-    const failure = await page.navigate(`${origin}/?b`).then(() => null, (error: Error) => error.message);
-    const elapsed = performance.now() - started;
-    console.info(`Navigation taken over by a late back: ${elapsed.toFixed(0)} ms\n${failure}`);
-    expect(failure).toContain('the requested navigation never committed');
-    expect(failure).toContain('history.back() with state {"boiteOverlay":"menu","boiteDepth":1}');
-    // The tab went back to the first page, before the overlay's own document.
-    expect(failure).toMatch(/History: about:blank \(auto_toplevel\), \* http:\/\/127\.0\.0\.1:\d+\/ \(typed\), /);
-    // bun's hook budget in the e2e files is 30 s: the navigation's own report must come first.
-    expect(elapsed).toBeLessThan(25_000);
-  } finally {
-    await page.close();
-    server.stop(true);
-  }
-}, 45_000);

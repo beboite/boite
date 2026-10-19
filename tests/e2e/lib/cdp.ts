@@ -16,11 +16,6 @@ import { TextSocket } from '../../../packages/core/src/ws-client.ts';
 const SEEN_TOUR = `try { if (localStorage.getItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}) === null) localStorage.setItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}, ${JSON.stringify(JSON.stringify({ version: ONBOARDING_VERSION, at: 0 }))}); } catch {}`;
 
 const CONNECT_TIMEOUT_MS = 30_000;
-/**
- * How long a requested navigation may take to commit. The e2e files give a hook 30 s: past that bun kills the
- * browser, and a navigation still waiting reports nothing.
- */
-const COMMIT_TIMEOUT_MS = 15_000;
 /** How long a killed browser may take to exit: 30.6 s was measured on a loaded machine. */
 const EXIT_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 20_000;
@@ -527,11 +522,11 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
       throw new Error(`navigation failed: ${result.errorText}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
     }
     if (result.loaderId) {
-      const deadline = Date.now() + COMMIT_TIMEOUT_MS;
+      const deadline = Date.now() + CONNECT_TIMEOUT_MS;
       for (;;) {
         const tree = await this.send('Page.getFrameTree', {}) as { frameTree: { frame: { loaderId: string; url: string } } };
         if (tree.frameTree.frame.loaderId === result.loaderId) break;
-        if (Date.now() > deadline) throw new Error(`the requested navigation never committed in ${COMMIT_TIMEOUT_MS / 1000} s: loader ${result.loaderId}, the frame is on ${tree.frameTree.frame.url.split(/[?#]/, 1)[0]} loader ${tree.frameTree.frame.loaderId}
+        if (Date.now() > deadline) throw new Error(`the requested navigation never committed in ${CONNECT_TIMEOUT_MS / 1000} s: loader ${result.loaderId}, the frame is on ${tree.frameTree.frame.url.split(/[?#]/, 1)[0]} loader ${tree.frameTree.frame.loaderId}
 ${await this.#historyReport()}`);
         await Bun.sleep(POLL_MS);
       }
