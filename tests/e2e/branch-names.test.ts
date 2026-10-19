@@ -74,7 +74,8 @@ test('changes panel and phone conversation list stay within the viewport with an
   await page.click('[data-testid="panel-toggle"]');
   for (const width of [390, 320]) {
     await page.send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: true });
-    expect(await fits('[data-testid="panel-toggle"]')).toBe(true);
+    // A phone's header is Back and the title's menu, which holds the panel.
+    expect(await fits('[data-testid="thread-menu-trigger"]')).toBe(true);
     await mobileAction(page, 'mobile-conversations');
     await page.waitFor(`document.querySelector('[data-testid="mobile-list"] .thread')`);
     expect(await page.evaluate(`(() => {

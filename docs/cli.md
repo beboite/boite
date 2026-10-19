@@ -198,14 +198,30 @@ it. `boite pr unwatch [<url|number>]` stops one watch, or all of them.
 The core (`packages/core/src/pull-request-watch.ts`) wakes the conversation
 with one message, a `pull-request` turn, when:
 
-- a check fails, each failure once; a rerun that fails again counts again;
-- every check the base branch requires finished without failing (every check
-  when none is required), including a required check that appears already
-  passed, and never while another run of the same check on that commit still
-  goes;
+- the first check of a head fails; failures after it on that head wait until
+  no CI job runs and go out together as its verdict, unless only an aggregate
+  gate is new (a required job such as `CI required` that started once every
+  other job of its workflow ended); a rerun that fails again counts again;
+- every check the base branch requires passed and no CI job still runs (every
+  job when none is required), once per head; again when a required check
+  appears already passed or after one of them failed. The base branch's
+  rulesets and classic protection name the required checks in advance: one
+  that has not reported on the head yet, such as `CI required` before the
+  rest of its workflow ended, counts as running, as GitHub's "Expected". A commit status such as
+  CodeRabbit's holds nothing while it stays pending, unless the base branch
+  requires it or commit statuses are the only checks;
 - someone other than the account `gh` signs in as posts a comment, a review or
-  an inline review comment, replies included, or a bot rewrites one;
-- the branch starts to conflict with its base.
+  an inline review comment, replies included. From a bot, a review counts
+  when it names findings (`Actionable comments posted` above zero, outside
+  diff comments, changes requested), and its summary (CodeRabbit's
+  walkthrough, mtsu-patrol's) only when rewritten to name findings. A bot's
+  other rewrites, an empty review, a reply in a thread that only agrees with
+  the agent's answer ("Thanks for the fix", "I withdraw this finding", with no
+  "but", "still" or "incomplete") and a notice that it will not review (quota,
+  rate limit, review skipped) wake nothing. A body already read, its HTML
+  comments and spacing aside, never wakes twice;
+- the branch starts to conflict with its base;
+- someone other than that account merges or closes the pull request.
 
 The message names each change with its link. A change waits 20 seconds for
 the rest of its burst and for a running turn to end, then everything waiting
@@ -216,9 +232,21 @@ mergeability, head, check counts by state, comment and review counts, edits
 and `updatedAt`. Only when it moves does the core read the checks one by one
 (with whether each is required) and the comments, reviews and inline comments,
 100 a page up to 10 pages each; remarks are read again every 30 minutes
-regardless, for edits the fingerprint cannot see. GitHub's rate limit pauses
+regardless, for edits the fingerprint cannot see. What the base branch
+requires costs two REST reads (`rules/branches/<base>` and
+`branches/<base>`) per repository and base every 10 minutes, shared by every
+watch on it; a 404 means nothing is required. Once they answered, the rules
+alone say which checks are required, so a context they drop stops counting at
+once; each check's own `isRequired` stands only while they never answered. The rules are not in the
+fingerprint: when they expire, the next pass reads them even if the
+fingerprint stood still and judges the checks it last read against them, with
+no detail read (one detail read after a restart, which keeps no checks). A
+failed read is logged, keeps the last answer (or the checks' own `isRequired`
+when there is none), is tried again after two minutes and neither pauses nor
+ends the watch; a rate-limited one pauses every read like any other. GitHub's rate limit pauses
 every read, from two minutes doubling up to 15; an unreachable GitHub or a
-missing `gh` pauses that watch the same way. Neither ends it.
+missing `gh` pauses that watch the same way. Neither ends it, even when the
+failed read is the one that asks who merged or closed it.
 
 A watch ends on merge or close, on Stop, on archive or Mark done, on removal
 and on unwatch. It survives a core restart (`pr-watches:<thread>` in the
@@ -226,8 +254,12 @@ journal settings). A thread at rest with a watch reads as watching, not done,
 in the sidebar. The thread header carries a chip with the watched numbers;
 its menu shows each watch's last status and stops one, on a phone too. The
 owner's Tasks panel lists them the same way. A paired phone may stop a watch,
-never start one. Delegated agents and
-persistent agent sessions cannot watch: their parent or Agents owns the work.
+never start one. A delegated agent watches its own PR like a conversation:
+each wake is its next turn, and that turn's answer goes to its parent as a
+result. Its watches end when it is stopped (its own Stop, `boite delegate
+stop`, its turn failing) and when its parent stops, is archived or is
+removed. Workflow steps, goal reviewers and persistent agent sessions cannot
+watch: their run, their goal or Agents owns the work.
 At most 10 PRs per conversation.
 
 ## How an agent finds the core
@@ -491,25 +523,50 @@ unless the "Asynchronous
 questions" setting is off. Codex asks natively (`delivery: "async"`), and
 Boite draws those cards the same way.
 
-`settings` helps a lost user set Boite up. Bare, it lists the settings an agent
-may ask about, one row each: key, value as JSON, the page and card it sits on
-(`agentCpuCapPercent 75 resources#limits`). The list is `REQUESTABLE_SETTINGS`
-in `packages/contracts/src/setting-requests.ts`; credentials, account ids and
-browser profiles are not in it. `settings request <key> <value> --why <text>`
-draws a settings card the same way `ask` draws a question: the agent keeps
-working and the card outlives the turn and a restart. The value is JSON when it
-parses (`60`, `false`, `null`, `["https://a.example"]`) and the bare word
-otherwise. It is refused when the key is not in the list (the refusal lists
-them), when `settings.set` would refuse the value, when the setting already
-holds it, or when a card on that key is already open in the thread.
+`settings` helps a lost user set Boite up. Bare, it starts with the app the
+user last used and the language it speaks (`app: the desktop app on "PC"
+speaks French; ...`), then lists the settings an agent may ask about, one row
+each: key, value as JSON, the page and card it sits on and, quoted, the name
+that app shows (`agentCpuCapPercent 75 resources#limits "Plafond CPU de tous
+les agents"`). The list is `REQUESTABLE_SETTINGS` in
+`packages/contracts/src/setting-requests.ts`, then that app's experiments as
+`experiment.<id>` (`experiment.resident-agents true experiments#resident-agents
+"Agents"`); credentials, account ids and browser profiles are not in it.
 
-The card shows the reason, the setting's name, the current value struck
-through, the proposed one and where it sits in Settings. Apply calls
-`settings.set`, the call the Settings page makes, so only the owner can use it.
-A change card's button to Settings (Show in Settings beside Apply, Open
-Settings without it) also needs the owner, so a paired device answers a change
-card with Refuse only. An open card's Open Settings is offered to any client
-whose Settings draws that card. No button to Settings appears where the card is
+Language, experiments and names come from the apps: each says them after every
+hello and on every change (`client.preferences`, a paired phone included), with
+an id it keeps on the device (`boite.appId`). The core keeps them in memory
+only, and reads the app that last sent a prompt or changed one of them; once
+that app's socket closes, the next app to report takes its place. The language also rides on each prompt
+(`SentFrom.language`), so the one-line note on where a prompt came from says
+`which shows Boite in French` when a session starts and when the language
+changes. Before any app reported, the first line says so and no experiment is
+listed.
+
+`settings request <key> <value> --why <text>` draws a settings card the same
+way `ask` draws a question: the agent keeps working and the card outlives the
+turn and a restart. The value is JSON when it parses (`60`, `false`, `null`,
+`["https://a.example"]`) and the bare word otherwise. It is refused when the
+key is not in the list (the refusal lists them), when `settings.set` would
+refuse the value, when the setting already holds it (`experiment.resident-agents
+is already true`: the agent learns the state before the user has to say it),
+when a card on that key is already open in the thread, and for an experiment
+when the value is not true or false or no app has reported yet.
+
+The card makes the change in the chat. A true-or-false setting, an experiment
+included, draws its switch showing the value now; any other value shows the
+current value struck through, the proposed one and Apply. The switch and Apply
+call `settings.set`, the call the Settings page makes, so only the owner can
+use them; an experiment's switch flips the device's own experiment, which any
+of the user's devices may do, and stays free while the core has not heard it.
+An experiment's card settles when an app flips that switch since its last
+report, compared by the app's id so a reconnect still counts, or when the app
+it was asked from reports another value, a flip made offline or across a
+restart. Another app that merely has a different value, a language change or a
+core setting moving settles nothing.
+Show in Settings stays as a secondary button for whoever can apply. A paired
+device answers a core setting's card with Refuse only. An open card's Open
+Settings is offered to any client whose Settings draws that card. No button to Settings appears where the card is
 missing: a paired device's Settings lacks the owner pages (Providers,
 Plugins, Protection, Brain) and the owner's cards on shared pages (worktrees,
 privacy, execution, browser origins, auto-compact), and a phone browser's
@@ -518,10 +575,11 @@ itself: the core closes every open card whose setting left the value it was
 asked from, whoever moved it, from the card or from the page. The agent then
 reads `applied: <key> is now <value>` or `changed: the user set <key> to
 <value>, not <proposed>`. Refuse sends `refused: <key> stays <value>`. A
-sensitive setting has no Apply: the network ones, the guards that keep agents
-quiet and their memory protection, history retention and where worktrees go.
-Its card opens Settings on the setting's card, which rings once in the accent
-colour, and closes when the user changes it there.
+sensitive setting (the network ones, the guards that keep agents quiet and
+their memory protection, history retention and where worktrees go) is changed
+in the card too, under a red shield, its heading "Sensitive setting" and a
+line asking the user to check it first. Show in Settings opens the setting's
+card, which rings once in the accent colour.
 
 `settings open <page>[#<card>] --why <text>` points at a page for what is not
 one value, a provider login (`accounts#provider-claude`) or a device to add

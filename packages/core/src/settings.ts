@@ -116,7 +116,11 @@ export function localProxy(proxy: SubscriptionProxy, port: number): Subscription
 export function registerSettingsMethods(core: Core): void {
   core.router.register('settings.get', () => core.settings.get());
   core.router.register('settings.set', (params) => core.settings.set(params));
-  core.router.register('agent.settings', () => readSettings(core.settings.get()));
+  core.router.register('agent.settings', () => ({ app: core.clients.app(), settings: readSettings(core.settings.get(), core.clients.current()) }));
+  core.router.register('client.preferences', (params, ctx) => {
+    core.clients.report(ctx.connection, params);
+    return { ok: true } as const;
+  });
   core.router.register('settings.request', (params) => core.threads.cards.requestSetting(params));
 }
 

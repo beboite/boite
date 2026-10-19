@@ -125,7 +125,7 @@
   }
 
   /* A finger takes the full target, as every other phone control does. */
-  @media (pointer: coarse) {
+  @media (pointer: coarse), (max-width: 720px) {
     .message-actions { gap: 0; }
     .act { width: var(--touch-target); height: var(--touch-target); }
   }

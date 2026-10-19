@@ -169,7 +169,7 @@ export class Threads {
       const { thread, ...rewound } = await client.call('threads.rewind', { threadId, messageId });
       if (!this.ctx.currentClient(client, clientGeneration)) return null;
       this.applyRewound(thread);
-      if (rewound.files?.status === 'unavailable') this.ctx.store.error = strings.composer.filesUnavailable;
+      if (rewound.files?.status === 'unavailable') this.ctx.store.error = rewound.files.busy ? strings.composer.filesBusy : strings.composer.filesUnavailable;
       return rewound;
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);

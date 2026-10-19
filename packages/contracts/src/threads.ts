@@ -91,6 +91,8 @@ export interface ThreadProgress {
   phase: 'starting' | 'thinking' | 'compacting' | 'retrying' | 'tool' | 'working' | 'waiting';
   detail: string | null;
   at: Timestamp;
+  /** When the current phase began: `at` of its first event in a row. An older core leaves it out. */
+  since?: Timestamp;
   /** Latest provider signal, including status notifications that do not advance activity. */
   providerAt?: Timestamp | null;
 }
@@ -528,8 +530,12 @@ export interface ThreadRewind {
    * carrying the kept history, as a change of account does.
    */
   session: 'native' | 'seeded';
-  /** File changes restored before the cut. Missing on older cores. */
-  files?: { status: 'restored' | 'unchanged' | 'unavailable'; count: number; reason?: string };
+  /**
+   * File changes restored before the cut. Missing on older cores. `busy`:
+   * another turn was working in the same folder, so the files were left as
+   * they are and only the messages were rewound.
+   */
+  files?: { status: 'restored' | 'unchanged' | 'unavailable'; count: number; reason?: string; busy?: true };
 }
 
 export interface ThreadsRpcMethods {

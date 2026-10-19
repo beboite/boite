@@ -10,7 +10,7 @@ export const fr: Translation = {
     open: 'Ouvrir les Réglages',
     refuse: 'Refuser',
     dismiss: 'Ignorer',
-    sensitiveHint: "Celui-ci se change depuis les Réglages, à côté de son explication. La carte se ferme une fois le réglage changé.",
+    sensitiveHint: "Vérifiez celui-ci avant de le changer : il protège cet ordinateur, son historique ou ses fichiers.",
     guestHint: "Seul l'ordinateur qui fait tourner Boite peut changer ce réglage.",
     elsewhere: "C'est dans les Réglages de l'ordinateur qui fait tourner Boite.",
     loadFailed: "Cette carte de réglage n'a pas chargé.",

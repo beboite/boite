@@ -191,6 +191,11 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   typeQuery('zzz');
   expect(shownValues()).toEqual([]);
   expect(query('[data-testid=draft-project-empty]').textContent).toContain('zzz');
+  // Enter on a query nothing answers takes nothing: the folder row is not its fallback.
+  search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  flushSync();
+  expect(store.projectPickerOpen).toBe(false);
+  expect(document.querySelector('[data-testid=draft-project-menu]')).not.toBeNull();
   typeQuery('BOI');
   expect(shownValues().map((value) => JSON.parse(value!)[1])).toEqual(['p-boite']);
 
@@ -209,6 +214,28 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   await waitFor(() => query('[data-testid=project][data-project-id=p-boite]').querySelector('[data-testid=draft-row]') !== null);
   expect(query('[data-testid=project][data-project-id=p-notes]').querySelector('[data-testid=draft-row]')).toBeNull();
   await waitFor(() => document.activeElement === document.querySelector('[data-testid=composer-input]'));
+
+  // The find chord opens the list from the composer, one word per field
+  // finds the row, and Escape twice gives the keyboard back to the composer.
+  const composer = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', code: 'KeyF', ctrlKey: true, bubbles: true, cancelable: true }));
+  await waitFor(() => document.activeElement === document.querySelector('[data-testid=draft-project-search]'));
+  const again = query<HTMLInputElement>('[data-testid=draft-project-search]');
+  // The list is modal: Tab stays in its search instead of reaching the page behind the scrim.
+  const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+  again.dispatchEvent(tab);
+  expect(tab.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(again);
+  again.value = 'note src';
+  again.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  expect(shownValues().map((value) => JSON.parse(value!)[1])).toEqual(['p-notes']);
+  again.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  flushSync();
+  expect(again.value).toBe('');
+  again.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await waitFor(() => document.querySelector('[data-testid=draft-project-menu]') === null);
+  expect(document.activeElement).toBe(composer);
 
   // Focus back on the trigger, Escape still closes the list.
   const trigger = query<HTMLButtonElement>('[data-testid=draft-project]');

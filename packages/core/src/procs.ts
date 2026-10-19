@@ -11,7 +11,8 @@ import { type KnownProcess, type ProcessIdentity, unseenIdentity } from './proce
 import { killBunChild, stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 import { ResourceCollection } from './resource-usage.ts';
-import { orphansOf } from './process-orphans.ts';
+import { traceWrite } from './trace-writes.ts';
+import { orphansOf, parentAtStart } from './process-orphans.ts';
 import { forgetOnMissing, resolveSpawnCommand, startResolved } from './spawn-command.ts';
 import { BUSY_CPU_PERCENT, IDLE_LOAD_INTERVAL_MS, LOAD_INTERVAL_MS, LoadPace, worthPushing } from './load-pace.ts';
 import { launchOf } from './git/command.ts';
@@ -81,6 +82,8 @@ interface Entry {
   /** Off Windows, the group stop that follows: resolved once the group is gone or SIGKILLed. */
   kill(): void | Promise<void>;
   usage(): { cpuMs: number; peakMemoryBytes: number } | null;
+  /** The parent running when this process started, held after it exits: the sweep reads lineage through it. */
+  parent?: Entry | null;
 }
 
 export const STARTUP_PRIORITY = { ms: 30_000 };
@@ -508,7 +511,9 @@ export class ProcRegistry {
       byPid = new Map();
       this.live.set(threadId, byPid);
     }
-    byPid.set(record.pid, { record, identity, ...control });
+    const entry: Entry = { record, identity, ...control };
+    entry.parent = parentAtStart(byPid, entry);
+    byPid.set(record.pid, entry);
     // Both spawn paths and the job's own grandchild events land here, so this is
     // the one place the guard learns a pid whose windows it has to push back.
     this.platform.pidAdded(threadId, record.pid, !this.shown.has(threadId));
@@ -523,7 +528,7 @@ export class ProcRegistry {
     seen.set(record.pid, { identity, incarnations, recordedAt: record.startedAt });
 
     // The trace row only: a copy in the event log would be read by nothing.
-    this.journal.putProcess(record);
+    traceWrite(this.bus, threadId, () => this.journal.putProcess(record));
     this.bus.emit('process.started', { ...record });
   }
 
@@ -660,11 +665,11 @@ export class ProcRegistry {
     void stop.finally(() => this.stops.delete(stop));
   }
 
-  /** Project removal must wait for exit records before deleting the projection. */
-  async stopAndWait(threadId: ThreadId): Promise<void> {
-    this.killTree(threadId);
+  /** Project removal must wait for exit records before deleting the projection; `waitForExit` waits alone, for `pids` only if given. */
+  async stopAndWait(threadId: ThreadId): Promise<void> { this.killTree(threadId); await this.waitForExit(threadId); }
+  async waitForExit(threadId: ThreadId, pids?: number[]): Promise<void> {
     const deadline = Date.now() + 5000;
-    while (this.liveCount(threadId) > 0) {
+    while (pids ? pids.some((pid) => this.live.get(threadId)?.has(pid)) : this.liveCount(threadId) > 0) {
       if (Date.now() >= deadline) throw new Error(`processes of ${threadId} did not exit within five seconds`);
       await new Promise<void>((resolve) => setTimeout(resolve, 25));
     }
@@ -675,6 +680,8 @@ export class ProcRegistry {
    * reported whose parent exited, or whose parent pid now names a younger
    * process, with everything under it. A parent missing from the registry is
    * looked up in the system first, and one found running there keeps its child.
+   * A parent that is an exited fork of its own (Git Bash) is passed over for
+   * the first live ancestor above it (process-orphans.ts).
    * That is what an interrupted or refused command leaves, since stopping a
    * shell does not stop what it started. The agent and whatever the core spawned
    * have the core as their parent and are never taken. Returns the pids stopped.
@@ -716,7 +723,7 @@ export class ProcRegistry {
       this.sweepTimers.delete(threadId);
       this.sweepOrphans(threadId);
       // A finished turn bounds the thread's trace too (journal/processes.ts).
-      if (!this.journal.isClosed()) this.journal.pruneProcesses(threadId);
+      if (!this.journal.isClosed()) traceWrite(this.bus, threadId, () => this.journal.pruneProcesses(threadId));
     }, this.orphanGraceMs);
     timer.unref();
     this.sweepTimers.set(threadId, timer);
@@ -778,7 +785,7 @@ export class ProcRegistry {
       if (fromJob.peakMemoryBytes !== null) record.peakMemoryBytes = fromJob.peakMemoryBytes;
       if (fromJob.ioBytes !== null) record.ioBytes = fromJob.ioBytes;
     }
-    this.journal.finishProcess(record);
+    traceWrite(this.bus, threadId, () => this.journal.finishProcess(record));
 
     this.bus.emit('process.exited', { ...record });
   }
@@ -805,7 +812,7 @@ export class ProcRegistry {
       // The thread's Job Object too: an id minted per call would otherwise hold
       // one kernel handle for the life of the core.
       this.platform.forget(threadId);
-      if (!this.journal.isClosed()) { this.journal.forgetProcessesWithoutThread(threadId); this.journal.pruneProcesses(threadId); }
+      if (!this.journal.isClosed()) traceWrite(this.bus, threadId, () => { this.journal.forgetProcessesWithoutThread(threadId); this.journal.pruneProcesses(threadId); });
     }, this.forgetDelayMs);
     timer.unref();
     this.forgetTimers.set(threadId, timer);

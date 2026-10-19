@@ -6,6 +6,7 @@ export const fr: Translation = {
     editing: 'Modification d’un message envoyé : l’envoi le remplace, avec tout ce qui suit',
     editingQueued: 'Envoyez ou retirez les messages en attente avant de remplacer un message envoyé.',
     filesUnavailable: "Les messages ont été rembobinés, mais cette modification n'a pas de sauvegarde complète des fichiers. Le code n'a pas pu être restauré.",
+    filesBusy: "Les messages ont été rembobinés. Un autre agent travaille encore dans ce dossier, les fichiers sont donc restés tels quels.",
     editingCancel: 'Arrêter la modification (Échap)',
     replying: 'Réponse à : {question}',
     replyPlaceholder: 'Écrivez votre réponse',

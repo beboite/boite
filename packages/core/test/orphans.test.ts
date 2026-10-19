@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setSystemTime, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -197,6 +197,103 @@ describe('orphan sweep', () => {
     const stopped = procs.sweepOrphans(THREAD, Date.now() + GRACE_MS);
     expect(stopped.sort((a, b) => a - b)).toEqual([103, 104, ...chain]);
     expect(procs.liveOf(THREAD).map((record) => record.pid).sort((a, b) => a - b)).toEqual([100, 101, 105, 2000]);
+  });
+
+  test('a script under a background shell that still runs outlives the fork stubs Git Bash left exited', () => {
+    const sink = job.sink();
+    const exit = { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
+    const born = Date.now() - 1000;
+    const bash = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
+    const sh = 'C:\\Program Files\\Git\\usr\\bin\\sh.exe';
+    // `sh wait.sh` run in the background, as the trace shows it: Git's launcher
+    // starts the MSYS bash, which forks a copy of itself to exec the script.
+    // That copy exits once the script runs, and the script's own fork for
+    // `sleep` does the same.
+    sink.started(THREAD, 130, { exe: 'C:\\Program Files\\Git\\bin\\bash.exe', commandLine: null, parentPid: 100, startedAt: born });
+    sink.started(THREAD, 131, { exe: bash, commandLine: null, parentPid: 130, startedAt: born + 10 });
+    sink.started(THREAD, 132, { exe: bash, commandLine: null, parentPid: 131, startedAt: born + 20 });
+    sink.started(THREAD, 133, { exe: sh, commandLine: null, parentPid: 132, startedAt: born + 30 });
+    sink.exited(THREAD, 132, exit);
+    sink.started(THREAD, 134, { exe: sh, commandLine: null, parentPid: 133, startedAt: born + 40 });
+    sink.started(THREAD, 135, { exe: 'C:\\Program Files\\Git\\usr\\bin\\sleep.exe', commandLine: null, parentPid: 134, startedAt: born + 50 });
+    // An exit event can arrive seconds late: the sweep reads no timing.
+    const late = Date.now() + 6000;
+    setSystemTime(late);
+    try { sink.exited(THREAD, 134, exit); } finally { setSystemTime(); }
+    expect(procs.sweepOrphans(THREAD, late + GRACE_MS).sort()).toEqual([103, 104]);
+
+    // The task's shell goes, though its launcher stays: the script is an orphan now.
+    sink.exited(THREAD, 131, exit);
+    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([133, 135]);
+  });
+
+  test('what an orphan shell ran through a fork stub goes with it', () => {
+    const sink = job.sink();
+    const exit = { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
+    const born = Date.now() - 1000;
+    const bash = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
+    // An interrupted command: the launcher goes, its MSYS bash and the sleep it forked stay.
+    sink.started(THREAD, 140, { exe: 'C:\\Program Files\\Git\\bin\\bash.exe', commandLine: null, parentPid: 100, startedAt: born });
+    sink.started(THREAD, 141, { exe: bash, commandLine: null, parentPid: 140, startedAt: born + 10 });
+    sink.started(THREAD, 142, { exe: bash, commandLine: null, parentPid: 141, startedAt: born + 20 });
+    sink.started(THREAD, 143, { exe: 'C:\\Program Files\\Git\\usr\\bin\\sleep.exe', commandLine: null, parentPid: 142, startedAt: born + 30 });
+    sink.exited(THREAD, 142, exit);
+    sink.exited(THREAD, 140, exit);
+    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104, 141, 143]);
+  });
+
+  test('an exited parent of the same image that is no shell fork leaves an orphan', () => {
+    const sink = job.sink();
+    const node = 'C:\\tools\\node.exe';
+    // A live Node service whose worker started a detached process and quit.
+    sink.started(THREAD, 160, { exe: node, commandLine: null, parentPid: 100, startedAt: 5000 });
+    sink.started(THREAD, 161, { exe: node, commandLine: null, parentPid: 160, startedAt: 5010 });
+    sink.started(THREAD, 162, { exe: node, commandLine: null, parentPid: 161, startedAt: 5020 });
+    sink.exited(THREAD, 161, { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
+    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104, 162]);
+  });
+
+  test('the sleep of a nested bash that was stopped, or exited with 0, is an orphan under the live outer bash', () => {
+    const sink = job.sink();
+    const bash = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
+    const sleep = 'C:\\Program Files\\Git\\usr\\bin\\sleep.exe';
+    const exit = (exitCode: number) => ({ exitCode, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
+    // A live bash whose inner bash loops on `sleep infinity`, each sleep exec'd by a fork.
+    const nested = (first: number, born: number) => {
+      sink.started(THREAD, first, { exe: bash, commandLine: null, parentPid: 100, startedAt: born });
+      sink.started(THREAD, first + 1, { exe: bash, commandLine: null, parentPid: first, startedAt: born + 10 });
+      sink.started(THREAD, first + 2, { exe: bash, commandLine: null, parentPid: first + 1, startedAt: born + 20 });
+      sink.started(THREAD, first + 3, { exe: sleep, commandLine: null, parentPid: first + 2, startedAt: born + 30 });
+      sink.exited(THREAD, first + 2, exit(0));
+    };
+    const now = Date.now();
+    nested(170, now - 1000);
+    nested(180, now - 1000);
+    expect(procs.sweepOrphans(THREAD, now + GRACE_MS).sort()).toEqual([103, 104]);
+
+    // One inner bash is stopped while its sleep runs, the other exits with 0
+    // at once: two exited processes above each sleep, the fork and that bash.
+    sink.exited(THREAD, 171, exit(1));
+    sink.exited(THREAD, 181, exit(0));
+    expect(procs.sweepOrphans(THREAD, now + GRACE_MS).sort()).toEqual([173, 183]);
+  });
+
+  test('a subshell left by a subshell that trapped TERM is kept while the bash above runs, then goes', () => {
+    const sink = job.sink();
+    const bash = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
+    const exit = { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
+    const born = Date.now() - 1000;
+    // `( trap 'exit 0' TERM; ( read ) & wait ) &`, the middle one stopped by
+    // TERM: from Windows it is a fork that exited with 0, so its child stays.
+    sink.started(THREAD, 190, { exe: bash, commandLine: null, parentPid: 100, startedAt: born });
+    sink.started(THREAD, 191, { exe: bash, commandLine: null, parentPid: 190, startedAt: born + 10 });
+    sink.started(THREAD, 192, { exe: bash, commandLine: null, parentPid: 191, startedAt: born + 20 });
+    sink.exited(THREAD, 191, exit);
+    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104]);
+
+    // The first sweep after that bash exits takes it.
+    sink.exited(THREAD, 190, exit);
+    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS)).toEqual([192]);
   });
 
   test('a new turn inside the grace cancels the sweep', async () => {

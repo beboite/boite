@@ -65,9 +65,8 @@ test('a paired device is offered none of the affordances the core refuses it', a
   for (const id of OWNER_ONLY_COMMANDS) expect(commands).not.toContain(id);
   store.paletteOpen = false;
 
-  // The phone's project menu: no Remove, and no transcript import behind it.
-  await showMobileThreads();
-  query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
+  // A paired device's project menu: no Remove, and no transcript import behind it.
+  query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
@@ -75,6 +74,9 @@ test('a paired device is offered none of the affordances the core refuses it', a
   expect(menuValues()).toEqual(['back', 'archive-project']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+  // The phone's own header manages no project at all.
+  await showMobileThreads();
+  expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
 
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=phone-settings]') !== null);
@@ -148,6 +150,9 @@ test('the desktop still has every one of them', async ({ app: _app }) => {
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+  // The phone's own header manages no project at all.
+  await showMobileThreads();
+  expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
 
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=group-add-device]') !== null);

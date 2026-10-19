@@ -5,7 +5,7 @@ import type { NativeAgentUpdate } from './delegation';
 import type { MessageId, ProjectId, RequestId, ThreadId, Timestamp, TurnId } from './ids';
 import type { RpcMethods } from './index';
 import type { QuestionAnswer, QuestionOption } from './questions';
-import type { SettingAsk } from './setting-requests.ts';
+import type { AppLanguage, SettingAsk } from './setting-requests.ts';
 import type { ActivityTurn } from './threads';
 import type { Turn } from './turns';
 import type { InlineView } from './view.ts';
@@ -110,6 +110,8 @@ export interface ArtifactContent { url: string; bytes: number; mimeType: string;
 export interface SentFrom {
   client: 'shell' | 'pwa';
   device: string | null;
+  /** The language the app spoke when the prompt left it (`client.preferences`); unset when it had not said. */
+  language?: AppLanguage;
 }
 
 /** The longest `hello` `client.device` the core keeps. */
@@ -229,6 +231,13 @@ export const INITIAL_MESSAGE_PAGE = 40;
  * page left it, and falls back on the English body.
  */
 export type NotificationLabel = 'done' | 'failed' | 'needsYou' | 'connected';
+/**
+ * What a notification is about, the unit a device turns on or off: a
+ * permission or a change to approve, a question, a finished turn, a failed one.
+ */
+export type NotificationKind = 'approvals' | 'questions' | 'finished' | 'errors';
+/** Every kind, in the order the settings list them. A device that never chose gets them all. */
+export const NOTIFICATION_KINDS: readonly NotificationKind[] = ['approvals', 'questions', 'finished', 'errors'];
 /** A Web Push payload, as the core sends it and the service worker reads it. */
 export interface PushPayload {
   title: string;
@@ -236,6 +245,8 @@ export interface PushPayload {
   threadId: string | null;
   tag: string;
   label?: NotificationLabel;
+  /** What the notification is about; the test notification has none. */
+  kind?: NotificationKind;
   /** The app icon's count after this notification. */
   badge?: number;
   /**
@@ -303,8 +314,12 @@ export interface MessagesRpcMethods {
   'artifacts.preview': { params: { threadId: ThreadId; path: string }; result: { url: string; shown: boolean } };
   'artifacts.previewClose': { params: { threadId: ThreadId; path: string }; result: { ok: true } };
   /** Push credentials are owned by the authenticated pairing, never a caller-supplied session id. */
-  'push.status': { params: Record<string, never>; result: { publicKey: string; subscribed: boolean } };
-  'push.subscribe': { params: { endpoint: string; keys: { p256dh: string; auth: string } }; result: { ok: true } };
+  /** `kinds` is what this device's subscription receives, every kind when it never chose. */
+  'push.status': { params: Record<string, never>; result: { publicKey: string; subscribed: boolean; kinds?: NotificationKind[] } };
+  /** Without `kinds`, the subscription receives every kind. */
+  'push.subscribe': { params: { endpoint: string; keys: { p256dh: string; auth: string }; kinds?: NotificationKind[] }; result: { ok: true } };
+  /** The kinds this device's subscription receives from now on, without subscribing again. An empty list receives nothing. */
+  'push.kinds': { params: { kinds: NotificationKind[] }; result: { ok: true } };
   'push.unsubscribe': { params: Record<string, never>; result: { ok: true } };
   'push.test': { params: Record<string, never>; result: { ok: true } };
   /** Reserve the final workspace and initialize a native session without publishing a conversation or sending text. */

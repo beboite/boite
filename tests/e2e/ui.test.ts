@@ -709,7 +709,7 @@ test(
       expect(stored.signs).toMatch(/^[0-9a-f]{64}$/);
       expect(await phone.evaluate<string>(`JSON.parse(localStorage.getItem('boite.device')).secret`)).toMatch(/^[A-Za-z0-9_-]{43}$/);
       expect(await phone.evaluate<string>('location.search')).toBe('');
-      await phone.waitFor(`document.querySelector('[data-testid=mobile-menu]')`);
+      await phone.waitFor(`document.querySelector('[data-testid=mobile-header]')`);
       await mobileAction(phone, 'mobile-settings');
       await phone.click('[data-testid=mobile-settings-phone]');
       await phone.waitFor(`document.querySelector('[data-testid=phone-settings]')`);

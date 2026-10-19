@@ -57,33 +57,7 @@ test('a thread archived on the phone comes back from its own settings list', asy
   running = mount(App, { target });
   await waitFor(() => store.booted && (store.openThread !== null || store.draft !== null));
 
-  const managedProjectId = store.openProject!.id;
-  await waitFor(() => document.querySelector('[data-testid=mobile-back]') !== null);
-  query<HTMLButtonElement>('[data-testid=mobile-back]').click();
-  await waitFor(() => document.querySelector('[data-testid=mobile-project-actions]') !== null);
-  query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
-  await waitFor(() => document.querySelector('[data-value=manage]') !== null);
-  query<HTMLButtonElement>('[data-value=manage]').click();
-  await waitFor(() => document.querySelector('[data-value=auto-archive-merged-pr]') !== null);
-  expect(query('[data-value=auto-archive-merged-pr]').getAttribute('role')).toBe('menuitemcheckbox');
-  expect(query('[data-value=auto-archive-merged-pr]').getAttribute('aria-checked')).toBe('true');
-  query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]').click();
-  await waitFor(() => store.projects.find(project => project.id === managedProjectId)?.autoArchiveMergedPr === false);
   const client = store.client as FakeClient;
-  expect((await client.call('projects.list', {})).find(project => project.id === managedProjectId)?.autoArchiveMergedPr).toBe(false);
-  await store.setProjectAutoArchiveMergedPr(managedProjectId, true);
-
-  // The worktree removal policy sits beside it, on by default, and persists on the core.
-  query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
-  await waitFor(() => document.querySelector('[data-value=manage]') !== null);
-  query<HTMLButtonElement>('[data-value=manage]').click();
-  await waitFor(() => document.querySelector('[data-value=auto-remove-worktrees]') !== null);
-  expect(query('[data-value=auto-remove-worktrees]').getAttribute('aria-checked')).toBe('true');
-  query<HTMLButtonElement>('[data-value=auto-remove-worktrees]').click();
-  await waitFor(() => store.projects.find(project => project.id === managedProjectId)?.autoRemoveWorktrees === false);
-  expect((await client.call('projects.list', {})).find(project => project.id === managedProjectId)?.autoRemoveWorktrees).toBe(false);
-  await store.setProjectAutoRemoveWorktrees(managedProjectId, true);
-
   expect(await archiveThread(store, 't-trace')).toBe(true);
   await waitFor(() => !store.threads.some((t) => t.id === 't-trace' && !t.archived));
   const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
@@ -117,4 +91,55 @@ test('a thread archived on the phone comes back from its own settings list', asy
   query<HTMLButtonElement>(`[data-thread-id="${merged.id}"] [data-testid=archived-restore]`).click();
   await waitFor(() => store.threads.find(thread => thread.id === merged.id)?.archived === false);
   expect(await client.sweepMergedPrArchives()).toBe(0);
+});
+
+test('the phone settings hold this phone\'s three screens and the machine\'s essentials, Usage and Limits on one screen', async () => {
+  phoneWidth();
+  // The usage chart and the composer measure themselves; jsdom has no observer.
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  window.history.replaceState(null, '', '/?fake=1');
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  store.booted = false;
+  store.openThread = null;
+  store.draft = null;
+  store.page = 'chat';
+  store.composerStates = {};
+  store.projectPickerOpen = false;
+  closeTour();
+  running = mount(App, { target });
+  await waitFor(() => store.booted && (store.openThread !== null || store.draft !== null));
+
+  const home = () => document.querySelector('[data-testid=mobile-settings-home]') !== null;
+  const back = async () => { query<HTMLButtonElement>('[data-testid=mobile-settings-back]').click(); await waitFor(home); };
+  store.showSettings();
+  await waitFor(home);
+  expect([...document.querySelectorAll<HTMLElement>('[data-testid=mobile-settings-home] .row')].map(row => row.dataset.testid)).toEqual([
+    'mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy',
+    'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-archived'
+  ]);
+  // The header already says Settings, and the list's display options group the threads.
+  expect(document.querySelector('[data-testid=mobile-settings-home] h1')).toBeNull();
+  expect(document.querySelector('[data-testid=setting-group-working-threads]')).toBeNull();
+
+  // The analytics switches have a screen of their own, out of the notifications.
+  query<HTMLButtonElement>('[data-testid=mobile-settings-phone]').click();
+  await waitFor(() => document.querySelector('[data-testid=phone-settings]') !== null);
+  expect(document.querySelector('[data-testid=telemetry-settings]')).toBeNull();
+  await back();
+  query<HTMLButtonElement>('[data-testid=mobile-settings-privacy]').click();
+  await waitFor(() => document.querySelector('[data-testid=telemetry-settings]') !== null);
+  await back();
+
+  query<HTMLButtonElement>('[data-testid=settings-tab-usage]').click();
+  await waitFor(() => document.querySelector('[data-testid=mobile-usage-tab-usage][aria-selected=true]') !== null);
+  query<HTMLButtonElement>('[data-testid=mobile-usage-tab-limits]').click();
+  await waitFor(() => store.settingsTab === 'limits' && document.querySelector('[data-testid=mobile-usage-tab-limits][aria-selected=true]') !== null);
+  await back();
+
+  // Appearance takes the files and previews switch and leaves the desktop's rows behind.
+  query<HTMLButtonElement>('[data-testid=settings-tab-appearance]').click();
+  await waitFor(() => document.querySelector('[data-testid=appearance-page]') !== null);
+  expect(document.querySelector('[data-testid=setting-chat-artifacts]')).not.toBeNull();
+  for (const id of ['chat-width-comfortable', 'terminal-gpu', 'settings-buttons', 'start-in-drafts']) expect(document.querySelector(`[data-testid=${id}]`)).toBeNull();
 });

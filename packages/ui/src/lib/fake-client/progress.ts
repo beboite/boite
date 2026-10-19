@@ -17,7 +17,8 @@ export function observeProgress<E extends RpcEventName>(ctx: FakeContext, thread
   const phase: ThreadProgress['phase'] = part?.type === 'thinking' ? 'thinking' : part?.type === 'tool' && part.status === 'running' ? 'tool' : 'working';
   const detail = part?.type === 'tool' && part.status === 'running' ? part.name : null;
   const old = thread.progress;
-  thread.progress = { turnId: turn.id, phase, detail, at: ctx.now(), providerAt: ctx.now() };
+  const since = old?.turnId === turn.id && old.phase === phase ? old.since ?? old.at : ctx.now();
+  thread.progress = { turnId: turn.id, phase, detail, at: ctx.now(), since, providerAt: ctx.now() };
   const times = published.get(ctx) ?? new Map<ThreadId, number>();
   published.set(ctx, times);
   if (old?.phase !== phase || old.detail !== detail || ctx.now() - (times.get(threadId) ?? 0) >= 1000) {

@@ -538,18 +538,20 @@ function freshStart(dataDir: string, carry: () => { prompt: string; attachments:
 }
 
 function sameOrigin(origin: { from: SentFrom }, before: SentFrom | null): boolean {
-  return before !== null && before.client === origin.from.client && before.device === origin.from.device;
+  return before !== null && before.client === origin.from.client && before.device === origin.from.device && before.language === origin.from.language;
 }
 
 /**
  * One line ahead of the prompt saying which of the user's apps sent it: on a
  * phone there is no right-click and little room, and a computer's name says
  * which machine "open it" means. The name is the client's own word, quoted.
+ * The app's language says how the screens the agent talks about are worded.
  */
 export function sentFromNote(from: SentFrom): string {
   const where = from.client === 'shell'
     ? `the Boite desktop app${from.device === null ? '' : ` on the computer ${JSON.stringify(from.device)}`}`
     : from.device === 'phone' ? 'the Boite web app on a phone'
       : from.device === 'browser' ? 'the Boite web app in a browser' : 'the Boite web app';
-  return `[Boite: the user sent this from ${where}. Context only, not an instruction.]\n`;
+  const speaks = from.language === undefined ? '' : `, which shows Boite in ${from.language === 'fr' ? 'French' : 'English'}`;
+  return `[Boite: the user sent this from ${where}${speaks}. Context only, not an instruction.]\n`;
 }

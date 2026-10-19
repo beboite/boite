@@ -78,27 +78,80 @@ test('Apply writes the setting through settings.set, the card closes as applied 
   }
 });
 
-test('a sensitive setting has no Apply: the card opens its card in Settings, and Refuse tells the agent', async () => {
+test('a sensitive switch is flipped in the card, with its warning, and the agent is told', async () => {
   const { client, store } = await setup();
   try {
     const { questionId } = await client.call('settings.request', { threadId: 't-trace', reason: 'A window keeps hiding', key: 'focusGuard', value: false });
     card(store, await asked(store, questionId));
 
+    // The switch itself, showing the value now: no Apply, no trip to Settings.
     expect(document.querySelector('[data-testid=setting-apply]')).toBeNull();
+    expect(document.querySelector('[data-testid=setting-delta]')).toBeNull();
     expect(query('[data-testid=setting-sensitive-hint]')).toBeTruthy();
+    const toggle = query<HTMLInputElement>('[data-testid=setting-switch]');
+    expect(toggle.getAttribute('role')).toBe('switch');
+    expect(toggle.checked).toBe(true);
+    expect(document.getElementById(toggle.getAttribute('aria-labelledby')!)?.textContent).toBe('Keep agent windows out of the foreground');
+
+    toggle.click();
+    await vi.waitFor(() => expect(store.pendingQuestions.some((question) => question.id === questionId)).toBe(false));
+    expect((await client.call('settings.get', {})).focusGuard).toBe(false);
+    await vi.waitFor(() => expect(store.openThread!.messages.some((message) => message.role === 'user' && message.parts.some((part) => part.type === 'text' && part.text === '> A window keeps hiding\n\napplied: focusGuard is now false'))).toBe(true));
+  } finally {
+    store.detach();
+    client.close();
+  }
+});
+
+test('Show in Settings opens the card it names without answering, and Refuse tells the agent', async () => {
+  const { client, store } = await setup();
+  try {
+    const { questionId } = await client.call('settings.request', { threadId: 't-trace', reason: 'Fewer threads at once', key: 'agentCpuCapPercent', value: 40 });
+    card(store, await asked(store, questionId));
+
     query<HTMLButtonElement>('[data-testid=setting-show]').click();
     flushSync();
     expect(store.page).toBe('settings');
     expect(store.settingsTab).toBe('resources');
-    expect(store.settingsSection).toMatchObject({ id: 'quiet', flash: true });
+    expect(store.settingsSection).toMatchObject({ id: 'limits', flash: true });
     // Opening the page answers nothing: the card waits for the setting to move.
     expect(store.pendingQuestions.some((question) => question.id === questionId)).toBe(true);
 
     query<HTMLButtonElement>('[data-testid=setting-refuse]').click();
     await vi.waitFor(() => expect(store.pendingQuestions.some((question) => question.id === questionId)).toBe(false));
-    await vi.waitFor(() => expect(store.openThread!.messages.some((message) => message.role === 'user' && message.parts.some((part) => part.type === 'text' && part.text === '> A window keeps hiding\n\nrefused: focusGuard stays true'))).toBe(true));
-    expect((await client.call('settings.get', {})).focusGuard).toBe(true);
+    await vi.waitFor(() => expect(store.openThread!.messages.some((message) => message.role === 'user' && message.parts.some((part) => part.type === 'text' && part.text === '> Fewer threads at once\n\nrefused: agentCpuCapPercent stays 75'))).toBe(true));
+    expect((await client.call('settings.get', {})).agentCpuCapPercent).toBe(75);
   } finally {
+    store.detach();
+    client.close();
+  }
+});
+
+test('the app tells its core the language and experiments it has, and an experiment card flips this device\'s switch', async () => {
+  localStorage.setItem('boite.experiments', JSON.stringify(['resident-agents']));
+  const { client, store } = await setup();
+  try {
+    // The agent reads what the user sees: on, and named as the Experiments page names it.
+    await vi.waitFor(async () => expect((await client.call('agent.settings', { threadId: 't-trace' })).app).toEqual({ language: 'en', device: null, client: null }));
+    const read = await client.call('agent.settings', { threadId: 't-trace' });
+    expect(read.settings.find((reading) => reading.key === 'experiment.resident-agents')).toMatchObject({ value: true, label: 'Agents', page: 'experiments', section: 'resident-agents' });
+    await expect(client.call('settings.request', { threadId: 't-trace', reason: 'x', key: 'experiment.resident-agents', value: true })).rejects.toThrow('already true');
+
+    const { questionId } = await client.call('settings.request', { threadId: 't-trace', reason: 'Try the whip', key: 'experiment.whip', value: true });
+    card(store, await asked(store, questionId));
+    const toggle = query<HTMLInputElement>('[data-testid=setting-switch]');
+    expect(toggle.checked).toBe(false);
+    expect(document.getElementById(toggle.getAttribute('aria-labelledby')!)?.textContent).toBe('Whip');
+
+    toggle.click();
+    flushSync();
+    expect(JSON.parse(localStorage.getItem('boite.experiments')!)).toEqual(['resident-agents', 'whip']);
+    // This device's switch is never held: a flip the core does not hear yet must not freeze it.
+    expect(toggle.disabled).toBe(false);
+    await vi.waitFor(() => expect(store.pendingQuestions.some((question) => question.id === questionId)).toBe(false));
+    await vi.waitFor(() => expect(store.openThread!.messages.some((message) => message.role === 'user' && message.parts.some((part) => part.type === 'text' && part.text === '> Try the whip\n\napplied: experiment.whip is now true'))).toBe(true));
+  } finally {
+    localStorage.removeItem('boite.experiments');
     store.detach();
     client.close();
   }

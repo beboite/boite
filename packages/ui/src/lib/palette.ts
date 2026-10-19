@@ -4,7 +4,7 @@
  * test and the component only draws.
  */
 
-export type PaletteKind = 'thread' | 'command';
+export type PaletteKind = 'thread' | 'project' | 'command';
 
 export interface PaletteItem {
   id: string;
@@ -16,6 +16,14 @@ export interface PaletteItem {
   keywords?: string;
   /** The second line a list may draw under the label. The palette draws none; the slash menu does. */
   description?: string;
+  /** The heading a row sits under: a thread's project on its machine. Rows without one group by kind. */
+  section?: string;
+}
+
+/** A text a query word may land on, and what landing there costs against the label. */
+export interface SearchField {
+  text: string;
+  penalty?: number;
 }
 
 /** Threads shown before any typing: the most recent ones, whatever the project. */
@@ -81,6 +89,43 @@ export function scoreMatch(query: string, text: string): number | null {
 }
 
 /**
+ * How well a row with these fields answers `query`, null when it does not. The
+ * whole query may land on one field ("port the" on a title); otherwise every
+ * word lands on its own field, the weakest decides, so "boite m2" finds the
+ * project boite on the machine m2 and "trace boite" a thread of boite.
+ */
+export function scoreFields(query: string, fields: readonly SearchField[]): number | null {
+  const best = (needle: string): number | null => {
+    let top: number | null = null;
+    for (const field of fields) {
+      const score = scoreMatch(needle, field.text);
+      if (score !== null) top = Math.max(top ?? -Infinity, score - (field.penalty ?? 0));
+    }
+    return top;
+  };
+  const whole = best(query);
+  const words = fold(query.trim()).split(/\s+/).filter(Boolean);
+  if (words.length < 2) return whole;
+  let worst: number | null = Infinity;
+  for (const word of words) {
+    const score = best(word);
+    if (score === null) { worst = null; break; }
+    worst = Math.min(worst, score);
+  }
+  if (worst === null) return whole;
+  return Math.max(whole ?? -Infinity, worst);
+}
+
+/** A row's fields: its label, then its keywords, then its hint, each a little weaker. */
+function itemFields(item: PaletteItem): SearchField[] {
+  return [
+    { text: item.label },
+    ...(item.keywords === undefined ? [] : [{ text: item.keywords, penalty: 5 }]),
+    ...(item.hint === undefined ? [] : [{ text: item.hint, penalty: 10 }])
+  ];
+}
+
+/**
  * The rows to draw for `query`: every item that matches, best first, ties in
  * the order given. With nothing typed, the items come back as given, cut at
  * the limit, which is where the caller puts its recents.
@@ -89,12 +134,33 @@ export function rankItems(query: string, items: PaletteItem[], limit = PALETTE_L
   if (query.trim().length === 0) return items.slice(0, limit);
   const scored: { item: PaletteItem; score: number; order: number }[] = [];
   items.forEach((item, order) => {
-    const own = scoreMatch(query, item.label);
-    const hint = item.hint === undefined ? null : scoreMatch(query, item.hint);
-    const words = item.keywords === undefined ? null : scoreMatch(query, item.keywords);
-    const best = Math.max(own ?? -1, hint === null ? -1 : hint - 10, words === null ? -1 : words - 5);
-    if (best >= 0) scored.push({ item, score: best, order });
+    const score = scoreFields(query, itemFields(item));
+    if (score !== null && score >= 0) scored.push({ item, score, order });
   });
   scored.sort((a, b) => b.score - a.score || a.order - b.order);
   return scored.slice(0, limit).map((entry) => entry.item);
+}
+
+export interface PaletteSection {
+  /** The rows' `section`, or their kind for rows without one. */
+  id: string;
+  kind: PaletteKind;
+  items: PaletteItem[];
+}
+
+/**
+ * Ranked rows cut into the headings the palette draws: a project's threads
+ * together, then the projects, then the commands. A section stands where its
+ * best row ranked, its rows keep their order inside it, so typing still puts
+ * the best match first and the first row is always the best one.
+ */
+export function sectionRows(ranked: readonly PaletteItem[]): PaletteSection[] {
+  const sections = new Map<string, PaletteSection>();
+  for (const item of ranked) {
+    const id = item.section ?? item.kind;
+    const section = sections.get(id);
+    if (section) section.items.push(item);
+    else sections.set(id, { id, kind: item.kind, items: [item] });
+  }
+  return [...sections.values()];
 }
