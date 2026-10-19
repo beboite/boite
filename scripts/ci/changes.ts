@@ -3,7 +3,7 @@ import { appendFileSync } from 'node:fs';
 // Unknown files run the complete suite. Documentation-only PRs still get the
 // required job, so branch protection never waits for a filtered-out workflow.
 export function affectedChecks(files: string[]) {
-  const checks = { core: false, web: false, desktop: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
+  const checks = { core: false, web: false, desktop: false, shellRust: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
   for (const file of files) {
     if (
       /^(docs\/.*\.md|README\.md|AGENTS\.md|CONTRIBUTING\.md|SECURITY\.md|CODE_OF_CONDUCT\.md|LICENSE)$/.test(file) ||
@@ -14,7 +14,13 @@ export function affectedChecks(files: string[]) {
       // The wrapper loads the UI from the core, so nothing else goes into the APK.
       checks.android = true;
     } else if (file.startsWith('apps/shell/')) {
-      checks.desktop = true;
+      checks.desktop = checks.shellRust = true;
+    } else if (/^packages\/(core|contracts)\//.test(file)) {
+      // The shell's Rust tests compile apps/shell/src-tauri and start inline
+      // fake cores, never this code. The APK build reads APP_ORIGIN from the
+      // contracts and nothing from the core.
+      checks.core = checks.web = checks.desktop = checks.server = checks.telemetry = checks.e2eTypes = checks.stress = true;
+      if (file.startsWith('packages/contracts/')) checks.android = true;
     } else if (file.startsWith('tests/e2e/')) {
       checks.desktop = checks.e2eTypes = true;
       // Stress fixtures use the same isolated core and browser harness.
@@ -23,6 +29,8 @@ export function affectedChecks(files: string[]) {
       checks.server = true;
     } else if (file.startsWith('packages/ui/')) {
       checks.web = checks.desktop = checks.server = checks.stress = true;
+      // browser.rs embeds these two page scripts with include_str!.
+      if (/^packages\/ui\/src\/lib\/preview-(picker|highlight)\.js$/.test(file)) checks.shellRust = true;
     } else if (file.startsWith('telemetry/')) {
       checks.web = checks.telemetry = true;
     } else if (/^(tests\/stress\/|bench\/agent-stress\.ts$|bench\/lib\/)/.test(file)) {
@@ -31,8 +39,8 @@ export function affectedChecks(files: string[]) {
       // The web job type-checks these; the changes job tests architecture scripts.
       checks.web = true;
     } else {
-      // Core and contracts are used by both clients; unknown inputs stay safe.
-      checks.core = checks.web = checks.desktop = checks.server = checks.android = checks.telemetry = checks.e2eTypes = checks.stress = true;
+      // Dependencies, shared builds and unknown inputs stay safe.
+      checks.core = checks.web = checks.desktop = checks.shellRust = checks.server = checks.android = checks.telemetry = checks.e2eTypes = checks.stress = true;
     }
   }
   return checks;

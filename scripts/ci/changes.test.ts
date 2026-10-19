@@ -3,15 +3,38 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { affectedChecks, ciMode, lastGreen, needsCodeChecks, needsWorkflowLint, plan } from './changes.ts';
 
-const none = { core: false, web: false, desktop: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
-const allChecks = { core: true, web: true, desktop: true, server: true, android: true, telemetry: true, e2eTypes: true, stress: true };
+const none = { core: false, web: false, desktop: false, shellRust: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
+const allChecks = { core: true, web: true, desktop: true, shellRust: true, server: true, android: true, telemetry: true, e2eTypes: true, stress: true };
 
 test('checks follow runtime boundaries and combine changed paths', () => {
-  expect(affectedChecks(['apps/shell/src-tauri/src/main.rs'])).toEqual({ ...none, desktop: true });
+  expect(affectedChecks(['apps/shell/src-tauri/src/main.rs'])).toEqual({ ...none, desktop: true, shellRust: true });
   expect(affectedChecks(['Dockerfile'])).toEqual({ ...none, server: true });
   expect(affectedChecks(['packages/ui/src/app.css'])).toEqual({ ...none, web: true, desktop: true, server: true, stress: true });
-  expect(affectedChecks(['packages/core/src/main.ts'])).toEqual(allChecks);
+  expect(affectedChecks(['packages/core/src/main.ts'])).toEqual({ ...allChecks, shellRust: false, android: false });
   expect(affectedChecks(['tests/e2e/ui.test.ts', 'docker/compose.yml'])).toEqual({ ...none, desktop: true, server: true, e2eTypes: true });
+});
+
+test('the shell Rust tests run only for the inputs they compile', () => {
+  // browser.rs embeds two page scripts; the rest of the UI, the core and the contracts never reach the crate.
+  for (const file of ['apps/shell/src-tauri/src/lib.rs', 'apps/shell/src-tauri/Cargo.lock', 'packages/ui/src/lib/preview-picker.js', 'packages/ui/src/lib/preview-highlight.js', '.cargo/config.toml', 'package.json', 'bun.lock']) {
+    expect(affectedChecks([file]).shellRust).toBe(true);
+  }
+  for (const file of ['packages/core/src/main.ts', 'packages/contracts/src/index.ts', 'packages/ui/src/App.svelte', 'packages/ui/src/lib/attention.ts', 'tests/e2e/shell.test.ts', 'Dockerfile']) {
+    const checks = affectedChecks([file]);
+    expect(checks.shellRust).toBe(false);
+    // The desktop builds and their smoke tests still run where the file reaches them.
+    if (file.startsWith('packages/')) expect(checks.desktop).toBe(true);
+  }
+  expect(affectedChecks(['packages/core/src/main.ts', 'apps/shell/src-tauri/src/lib.rs']).shellRust).toBe(true);
+  for (const mode of ['pr', 'warm', 'full'] as const) {
+    expect(plan(affectedChecks(['packages/core/src/main.ts']), mode).shellRust).toBe(false);
+    expect(plan(affectedChecks(['unknown']), mode).shellRust).toBe(true);
+  }
+});
+
+test('the APK follows the contracts it reads, not the core', () => {
+  expect(affectedChecks(['packages/core/src/main.ts']).android).toBe(false);
+  expect(affectedChecks(['packages/contracts/src/index.ts']).android).toBe(true);
 });
 
 test('only the wrapper and its own pipeline build the APK', () => {
@@ -24,7 +47,7 @@ test('ordinary benches and architecture scripts keep the cheap type-check route'
   for (const file of ['bench/retitle.ts', 'scripts/architecture/check.ts']) {
     expect(affectedChecks([file])).toEqual({ ...none, web: true });
   }
-  expect(affectedChecks(['bench/retitle.ts', 'packages/core/src/main.ts'])).toEqual(allChecks);
+  expect(affectedChecks(['bench/retitle.ts', 'packages/core/src/main.ts'])).toEqual({ ...allChecks, shellRust: false, android: false });
 });
 
 test('telemetry-only changes require behavioral relay coverage on PRs and main', () => {
@@ -53,9 +76,10 @@ test('stress fixtures and their bench helpers require the bounded stress suite',
 });
 
 test('shared inputs and unknown files fail open to every check', () => {
-  for (const file of ['bun.lock', 'package.json', 'packages/contracts/src/index.ts', '.github/workflows/ci.yml', 'new-config.json']) {
+  for (const file of ['bun.lock', 'package.json', '.github/workflows/ci.yml', 'new-config.json']) {
     expect(Object.values(affectedChecks([file])).every(Boolean)).toBe(true);
   }
+  expect(affectedChecks(['packages/contracts/src/index.ts'])).toEqual({ ...allChecks, shellRust: false });
   expect(Object.values(affectedChecks(['README.md', '.coderabbit.yaml'])).some(Boolean)).toBe(false);
 });
 

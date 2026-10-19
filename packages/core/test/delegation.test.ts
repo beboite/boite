@@ -407,6 +407,18 @@ test('hook delivery does not spend another turn; unsupported steering waits unti
   expect(runs.get(child.thread.id)!.ctx.sessionId).toBe(`session:${child.thread.id}`);
 });
 
+test('the parent writing to its subagent lifts the coordination pause the core left on it', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup(); const child = await spawn();
+  const childId = child.thread.id;
+  await waitFor(() => runs.has(childId));
+  h.core.coordination.configure(childId, { mode: 'brief', resources: '', remote: false, paused: false });
+  runs.get(childId)!.finish('', 'error');
+  await waitFor(() => h.core.coordination.get(childId).config.paused);
+  await owner.call('delegation.send', { threadId, toThreadId: childId, text: 'Carry on with the port', requestId: 'carry-on' });
+  await waitFor(() => runs.get(childId)!.ctx.prompt.includes('Carry on with the port'), 5000);
+  expect(h.core.coordination.get(childId).config.paused).toBe(false);
+});
+
 test('stop all cancels queued and running children and blocks automatic wakeups until owner resumes', async () => {
   scripted(); const { h, owner, threadId, spawn, config } = await setup();
   const one = await spawn('one');
