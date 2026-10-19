@@ -222,6 +222,19 @@ export function consoleHost(exe: string | null, commandLine: string | null): boo
   return path === `${(process.env.SystemRoot ?? 'C:\\Windows').toLowerCase()}\\system32\\conhost.exe`;
 }
 
+/**
+ * The name a started process enters the trace under once its command line
+ * settled, or null for a console host. One caught as it starts can refuse
+ * both its image name and its command line: a child of `bun -e` that ran
+ * 38 ms in 7.5 MB entered prepared-drivers.test.ts's trace as `unknown`, with
+ * no command line (Windows CI, 2026-10-19). After the wait, the name is read
+ * once more.
+ */
+export function startedAs(api: ProcessReads, handle: number, exe: string | null, commandLine: string | null): string | null {
+  const name = exe ?? imageNameOf(api, handle);
+  return consoleHost(name, commandLine) ? null : name ?? 'unknown';
+}
+
 function baseName(path: string): string {
   const cut = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
   return (cut === -1 ? path : path.slice(cut + 1)).toLowerCase();
