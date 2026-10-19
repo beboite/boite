@@ -223,23 +223,30 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 492,300 |
-| UI files, excluding `.br` and `.gz` copies | 4,875,400 |
+| UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,501,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,501,900 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-19, settings cards that draw their switch in the chat, with the
 app's language, experiments and setting names reported to the core
-(`client.preferences`, PR #609), merged with `origin/main` at `38d5ca2f`
-measure 489,108 entry bytes, 4,875,358 UI bytes and 4,501,325 core JavaScript
+(`client.preferences`, PR #609), merged with `origin/main` at `de93f43a`
+measure 489,108 entry bytes, 4,875,358 UI bytes and 4,501,755 core JavaScript
 bytes with `measure()` after fresh `bun run build:ui` and `bun run build:core`
-on Linux, against 492,249, 4,871,151 and 4,494,397 for that main built the
-same way: the entry loses 3,141 bytes, the UI gains 4,207 and the core 6,928
-(the client preferences book, the experiment checks and the CLI's app line).
-Added to the 4,494,324 measured on Windows for PR #616, the core lands near
-4,501,252 there. The UI and core JavaScript limits rise to 4,875,400 and
-4,501,500; the other limits stay.
+on Linux. Against 492,249 entry and 4,871,151 UI bytes for `38d5ca2f` built
+the same way and the 4,494,827 core bytes recorded below for PR #623, the
+entry loses 3,141 bytes, the UI gains 4,207 and the core 6,928 (the client
+preferences book, the experiment checks and the CLI's app line). The UI and
+core JavaScript limits rise to 4,875,400 and 4,501,900; the other limits stay.
+
+On 2026-10-19, PR #622 merged with `origin/main` at `68033379` measures
+4,494,650 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,494,397 for that main: holding a
+roster offer while one is on its way adds 253 bytes. PR #623, which opens Bun
+WebSockets without permessage-deflate, adds 177 more on top of both
+(4,494,827). The core JavaScript limit rises to 4,494,900 to cover the two;
+the other limits stay.
 
 On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
 4,494,324 core JavaScript bytes with the same rule after a fresh
