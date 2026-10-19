@@ -723,7 +723,7 @@ export class ProcRegistry {
       this.sweepTimers.delete(threadId);
       this.sweepOrphans(threadId);
       // A finished turn bounds the thread's trace too (journal/processes.ts).
-      if (!this.journal.isClosed()) this.journal.pruneProcesses(threadId);
+      if (!this.journal.isClosed()) traceWrite(this.bus, threadId, () => this.journal.pruneProcesses(threadId));
     }, this.orphanGraceMs);
     timer.unref();
     this.sweepTimers.set(threadId, timer);
@@ -812,7 +812,7 @@ export class ProcRegistry {
       // The thread's Job Object too: an id minted per call would otherwise hold
       // one kernel handle for the life of the core.
       this.platform.forget(threadId);
-      if (!this.journal.isClosed()) { this.journal.forgetProcessesWithoutThread(threadId); this.journal.pruneProcesses(threadId); }
+      if (!this.journal.isClosed()) traceWrite(this.bus, threadId, () => { this.journal.forgetProcessesWithoutThread(threadId); this.journal.pruneProcesses(threadId); });
     }, this.forgetDelayMs);
     timer.unref();
     this.forgetTimers.set(threadId, timer);

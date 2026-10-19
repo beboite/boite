@@ -230,8 +230,10 @@ describe('procs', () => {
       const log = payload as { event?: string; message: string };
       if (name === 'core.log' && log.event === 'trace.disk-full') warnings.push(log.message);
     });
-    const procs = new ProcRegistry(harness.core.journal, bus, platform);
-    const db = harness.core.journal.db;
+    const procs = new ProcRegistry(harness.core.journal, bus, platform, { forgetDelayMs: 5 });
+    const journal = harness.core.journal;
+    const db = journal.db;
+    const prune = journal.pruneProcesses;
     const pages = (db.query('PRAGMA page_count').get() as { page_count: number }).page_count;
     try {
       db.exec(`PRAGMA max_page_count = ${pages}`);
@@ -245,8 +247,17 @@ describe('procs', () => {
       // Room again: the next process is traced.
       db.exec('PRAGMA max_page_count = 1073741823');
       job!.started('disk-full', 60_000, info(100));
-      expect(harness.core.journal.listProcesses('disk-full', 50).map(record => record.pid)).toContain(60_000);
+      expect(journal.listProcesses('disk-full', 50).map(record => record.pid)).toContain(60_000);
+
+      // The cleanup once the thread goes idle deletes rows, which still needs room in the WAL.
+      let pruned = 0;
+      journal.pruneProcesses = () => { pruned += 1; throw Object.assign(new Error('database or disk is full'), { code: 'SQLITE_FULL' }); };
+      for (const pid of [...Array.from({ length: 19 }, (_, n) => 50_001 + n), 60_000]) job!.exited('disk-full', pid, { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
+      await waitFor(() => pruned > 0, 2_000);
+      await Bun.sleep(20);
+      expect(procs.liveCount('disk-full')).toBe(0);
     } finally {
+      journal.pruneProcesses = prune;
       db.exec('PRAGMA max_page_count = 1073741823');
       await procs.close();
     }

@@ -78,6 +78,8 @@ export class Connection {
   reloading: { client: Client; generation: number; epoch: number; promise: Promise<void>; essential: Promise<void>; release: () => void } | null = null;
   #readEpoch = 0;
   #localRecovery: ReturnType<typeof setTimeout> | null = null;
+  /** Moves on every stop, so an ask still out from an earlier loss never reschedules. */
+  #recoveryGeneration = 0;
   /** The endpoint came with neither a token nor a grant: the page's own origin, asked with nothing. */
   #keyless = false;
 
@@ -365,6 +367,7 @@ export class Connection {
     if (state !== 'connecting' || !this.localCore) {
       if (this.#localRecovery !== null) clearTimeout(this.#localRecovery);
       this.#localRecovery = null;
+      this.#recoveryGeneration += 1;
       return;
     }
     if (this.#localRecovery !== null) return;
@@ -372,10 +375,12 @@ export class Connection {
   }
 
   #recoverLocalCore(client: Client, delay: number): void {
+    const generation = this.#recoveryGeneration;
     const lost = () => this.ctx.client === client && client.state === 'connecting';
     this.#localRecovery = setTimeout(() => {
       if (!lost()) { this.#localRecovery = null; return; }
       void this.#followLocalCore(client).then((outcome) => {
+        if (generation !== this.#recoveryGeneration) return;
         this.#localRecovery = null;
         if (outcome !== 'refused' || !lost() || !this.localCore) return;
         if (this.ctx.store.error !== null) this.ctx.store.error = `${this.ctx.store.error} ${strings.errors.coreRetrying}`;
