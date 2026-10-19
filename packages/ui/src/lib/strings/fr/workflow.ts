@@ -29,6 +29,7 @@ export const fr: Translation = {
     skipped: "Sautée : sa condition n'était pas remplie.",
     card: 'Workflow',
     show: 'Voir le workflow',
-    tokens: '{tokens} jetons'
+    tokens: '{tokens} jetons',
+    tokensHelp: 'Usage transmis par les tours terminés, lectures et écritures du cache et nouvelles tentatives comprises.'
   }
 };

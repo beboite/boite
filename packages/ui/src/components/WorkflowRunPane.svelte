@@ -57,7 +57,7 @@
         <span class="ui-label">{strings.workflow.status[run.status]}</span>
         <span class="ui-label">·</span><span class="ui-label">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span>
         <span class="ui-label">·</span><Elapsed startedAt={run.createdAt} finishedAt={run.finishedAt} active={run.status === 'running'} />
-        {#if tokens > 0}<span class="ui-label">·</span><span class="ui-label">{fill(strings.workflow.tokens, { tokens: formatTokens(tokens) })}</span>{/if}
+        <span class="ui-label">·</span><span class="ui-label" title={strings.workflow.tokensHelp}>{fill(strings.workflow.tokens, { tokens: formatTokens(tokens) })}</span>
       </p>
     </div>
     <div class="actions">
