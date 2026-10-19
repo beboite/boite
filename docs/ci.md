@@ -24,12 +24,14 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | `apps/shell/` | Windows installer, Rust and native shell E2E; three browser/core E2E shards; portable desktop matrix |
 | `tests/e2e/` | Desktop and E2E checks plus `check:e2e`; `tests/e2e/lib/` also selects stress |
 | `Dockerfile`, `.dockerignore`, `docker/` | Native x64 and ARM64 Docker smoke tests |
-| `packages/ui/` | Full type checks and UI tests, desktop/E2E, Docker and stress |
+| `packages/ui/` | Full type checks and UI tests, desktop/E2E without the shell's Rust tests, Docker and stress; `preview-picker.js` and `preview-highlight.js`, which `browser.rs` embeds, add them |
 | `apps/android/`, `android.yml`, `scripts/ci/android-apk.ts` | Unsigned APK build |
 | `telemetry/` | Full type checks and UI tests plus the existing relay behavior suite |
 | `tests/stress/`, `bench/agent-stress.ts`, `bench/lib/` | Full type checks, UI tests and stress |
 | Other `bench/` files, `scripts/architecture/` | Full type checks and UI tests |
-| Core, contracts, dependencies, shared builds, other workflows and unknown paths | All checks |
+| `packages/core/` | All checks except the shell's Rust tests and the APK |
+| `packages/contracts/` | All checks except the shell's Rust tests |
+| Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
 The changes job always installs frozen dependencies, runs `bun audit`, local
@@ -75,9 +77,14 @@ an Intel-only core failure now shows on the main push.
 
 `desktop.yml` holds the desktop builds: the Windows installer job and one job
 per portable platform, named after it (`Desktop / macOS x64`). `ci.yml` calls
-it with the Rust tests; the nightly calls it without them. On Windows they run
-in `Desktop / Windows x64 Rust tests`, a job of their own beside the installer
-build; portable jobs keep them in line. Only `CI required`
+it with the Rust tests when the `shellRust` plan output is on; the nightly calls
+it without them. On Windows they run in `Desktop / Windows x64 Rust tests`, a
+job of their own beside the installer build; portable jobs keep them in line.
+The tests compile `apps/shell/src-tauri` and the two page scripts `browser.rs`
+embeds, and start inline fake cores, so `shellRust` follows those paths and the
+ones that select every check. 7 of the 100 PRs before 2026-10-19 touched them,
+yet all ran the tests: 3.6 runner minutes on Windows, 3.5 on Apple Silicon and
+0.9 on Linux per green PR run. Only `CI required`
 and `PR title` are required checks, so a display name can change freely, except
 the `release.yml` job names that `server-provenance.ts` checks.
 
