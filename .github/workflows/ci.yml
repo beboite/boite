@@ -47,7 +47,10 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.workflow == 'ci' && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
+  # A main run finishes: merges land faster than a run takes, so cancelling
+  # left main without a green commit to publish (docs/ci.md#run-modes-and-platforms).
+  # A newer push only replaces the pending one.
+  cancel-in-progress: ${{ github.workflow == 'ci' && github.event_name == 'pull_request' }}
 
 env:
   CARGO_BUILD_JOBS: 8
