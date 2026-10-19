@@ -167,3 +167,31 @@ test('a field changed here and elsewhere to different values is a conflict the c
   expect(engine!.textContent).toContain(strings.settings.autosave.conflict);
   expect((await client.call('agents.runtime.get', { agentId: agent().id })).maxRunMinutes).toBe(37);
 });
+
+test('another writer saving while this card\'s last save comes back still conflicts with the edit made meanwhile', async () => {
+  const { client, view, agent } = await open();
+  const real = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let configured = 0;
+  client.call = (async (method: string, params: never) => {
+    const result = await real(method as never, params);
+    // The first save is stored; its answer is held while the rest happens.
+    if (method === 'agents.runtime.configure' && ++configured === 1) await gate;
+    return result;
+  }) as typeof client.call;
+  await pick('claude-sonnet-5-5');
+  const minutes = document.querySelectorAll<HTMLInputElement>('[data-testid=agent-runtime] input[type=number]')[1]!;
+  minutes.value = '50';
+  minutes.dispatchEvent(new Event('input', { bubbles: true }));
+  minutes.dispatchEvent(new Event('change', { bubbles: true }));
+  await idle();
+  const current = await real('agents.runtime.get', { agentId: agent().id });
+  const revision = (await real('agents.snapshot', {})).profiles[0]!.revision;
+  await real('agents.runtime.configure', { agentId: agent().id, expectedRevision: revision, config: { ...current, maxRunMinutes: 37 } });
+  await view.refresh();
+  release();
+  await idle();
+  expect((await real('agents.runtime.get', { agentId: agent().id })).maxRunMinutes).toBe(37);
+  expect(document.querySelector<HTMLElement>('[data-testid=agent-runtime] [data-testid=save-status]')?.dataset.state).toBe('error');
+});

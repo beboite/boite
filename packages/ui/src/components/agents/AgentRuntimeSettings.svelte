@@ -21,6 +21,18 @@
   /** Equal values whatever the order of their keys: the core writes a route's keys in its own order. */
   const canon = (value: unknown) => JSON.stringify(value, (_key, v: unknown) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
   const same = (a: unknown, b: unknown) => canon(a) === canon(b);
+  /**
+   * A configuration as the core stores it, so this card's copy and the core's
+   * compare equal: a route takes the default's permission mode on the core,
+   * names are trimmed, a missing effort is none, a missing auto memory is on.
+   */
+  function shape(value: AgentRuntimeConfig): AgentRuntimeConfig {
+    const route = <R extends { name?: string; effort?: string | null }>(r: R) => {
+      const { permissionMode: _mode, ...rest } = r as R & { permissionMode?: unknown };
+      return { ...rest, ...(r.name === undefined ? {} : { name: r.name.trim() }), effort: r.effort ?? null };
+    };
+    return { ...value, defaultRoute: { ...value.defaultRoute, effort: value.defaultRoute.effort ?? null }, allowedRoutes: value.allowedRoutes.map(route), subagents: { ...value.subagents, profiles: value.subagents.profiles.map(route) }, autoMemory: value.autoMemory !== false } as AgentRuntimeConfig;
+  }
   /** Read from the data, not the form: a card leaving the page has no form left to ask. */
   function problem(): string | null {
     if (!config) return null;
@@ -79,30 +91,36 @@
   }
   /**
    * Sends the card as it is now. Another save may have moved the agent since
-   * this card read it, the identity card beside it or another window: each
+   * this card's base, the identity card beside it or another window: each
    * field this card left alone then takes the stored value, and a field both
    * changed differently is a conflict the card reports rather than overwrites.
+   * The base is always what this card sent with the revision that save
+   * returned, never a later read that could hold someone else's write.
    */
   async function write() {
     if (!config || !base) return;
     const sent = $state.snapshot(config) as AgentRuntimeConfig;
+    let sending = sent;
     const saved = await view.save('agents.runtime.configure', async () => {
       const known = base!;
       const latest = view.snapshot?.profiles.find(p => p.id === agent.id);
+      sending = sent;
       if (!latest || latest.revision === known.revision) return { agentId: agent.id, expectedRevision: known.revision, config: sent };
       const stored = await view.store.client!.call('agents.runtime.get', { agentId: agent.id });
+      const [mine, theirs, was] = [shape(sent), shape(stored), shape(known.config)];
       const merged: Record<string, unknown> = { ...sent };
       for (const key of FIELDS) {
-        const mine = !same(sent[key], known.config[key]), theirs = !same(stored[key], known.config[key]);
-        if (mine && theirs && !same(sent[key], stored[key])) throw new Error(strings.settings.autosave.conflict);
-        if (!mine) merged[key] = stored[key];
+        const changed = !same(mine[key], was[key]), moved = !same(theirs[key], was[key]);
+        if (changed && moved && !same(mine[key], theirs[key])) throw new Error(strings.settings.autosave.conflict);
+        if (!changed) merged[key] = stored[key];
       }
-      return { agentId: agent.id, expectedRevision: latest.revision, config: merged as unknown as AgentRuntimeConfig };
+      sending = merged as unknown as AgentRuntimeConfig;
+      // A write newer than the snapshot's revision makes the core refuse this one: nothing is overwritten.
+      return { agentId: agent.id, expectedRevision: latest.revision, config: sending };
     });
-    // The core's own copy is the next base, so its key order and trimmed names never read as a change.
-    const stored = await view.store.client?.call('agents.runtime.get', { agentId: agent.id }).catch(() => null);
-    base = { config: stored ?? sent, revision: saved.revision };
-    if (stored && config) for (const key of FIELDS) if (same(config[key], sent[key])) (config as unknown as Record<string, unknown>)[key] = stored[key];
+    base = { config: sending, revision: saved.revision };
+    // What another writer changed shows in the fields nobody touched since this save left.
+    if (config && sending !== sent) for (const key of FIELDS) if (same(config[key], sent[key])) (config as unknown as Record<string, unknown>)[key] = sending[key];
   }
 </script>
 
