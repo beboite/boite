@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { affectedChecks, ciMode, lastGreen, needsCodeChecks, needsWorkflowLint, plan } from './changes.ts';
+import { affectedChecks, CORE_ALL, ciMode, lastGreen, needsCodeChecks, needsWorkflowLint, plan } from './changes.ts';
+import { loadWorkflow } from './required-checks.ts';
 
 const none = { core: false, web: false, desktop: false, shellRust: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
 const allChecks = { core: true, web: true, desktop: true, shellRust: true, server: true, android: true, telemetry: true, e2eTypes: true, stress: true };
@@ -131,7 +132,7 @@ test('pull requests run the core suite without the Intel Mac; main, releases and
   const runners = (mode: 'pr' | 'warm' | 'full') => JSON.parse(plan(all, mode).coreRunners).map((runner: { os: string }) => runner.os);
   expect(runners('pr')).toEqual(['ubuntu-24.04', 'ubuntu-24.04-arm', 'windows-2025', 'macos-15']);
   for (const mode of ['warm', 'full'] as const) expect(runners(mode)).toEqual([...runners('pr'), 'macos-15-intel']);
-  // The job names stay the ones the matrix had: `Core tests (macOS x64)`.
+  // ci.yml names each core job after its runner: `Core tests (macOS x64)`.
   expect(JSON.parse(plan(all, 'full').coreRunners).map((runner: { name: string }) => runner.name))
     .toEqual(['Linux x64', 'Linux arm64', 'Windows x64', 'macOS arm64', 'macOS x64']);
 });
@@ -159,22 +160,44 @@ test.skipIf(!python)('the actual required gate rejects failed, cancelled and une
   const match = /          python3 - <<'PY'\n([\s\S]+?)          PY/.exec(workflow);
   if (!match) throw new Error('ci.yml: missing required gate Python script');
   const script = match[1]!.replace(/^ {10}/gm, '');
-  const names = ['core', 'web', 'desktop', 'server', 'android', 'telemetry', 'e2e-types', 'stress', 'e2e'];
-  const outputFor = (name: string) => name === 'e2e-types' ? 'e2eTypes' : name;
+  // One job per core runner and E2E shard; callers of reusable workflows run
+  // with `enabled` off, so a caller left out may succeed or skip.
+  const ci = loadWorkflow('ci.yml').jobs;
+  const coreJobs = Object.keys(ci).filter(id => id.startsWith('core-'));
+  const runnerOf = (id: string) => ci[id]!['runs-on'];
+  const shards = ['e2e-1', 'e2e-2', 'e2e-3'];
+  const callers = ['desktop', 'server', 'android'];
+  const outputNames = ['core', 'web', 'desktop', 'server', 'android', 'telemetry', 'e2eTypes', 'stress', 'e2e'];
+  const jobFor: Record<string, string> = { 'e2e-types': 'e2eTypes' };
+  const ids = [...coreJobs, 'web', 'telemetry', 'e2e-types', 'stress', ...shards, ...callers];
   const cases: { jobs: object; success: boolean }[] = [];
-  for (const selected of [names, ['web', 'telemetry'], ['desktop', 'e2e-types', 'e2e'], ['web', 'stress'], []]) {
-    const outputs = Object.fromEntries(names.map(name => [outputFor(name), String(selected.includes(name))]));
-    const jobs = { changes: { result: 'success', outputs }, ...Object.fromEntries(names.map(name => [name, {
-      result: selected.includes(name) ? 'success' : 'skipped',
-    }])) } as Record<string, { result: string; outputs?: Record<string, string> }>;
+  const draft = JSON.stringify(CORE_ALL.slice(0, 1));
+  for (const [selected, coreRunners] of [
+    [outputNames, plan(affectedChecks(['packages/core/src/main.ts']), 'pr').coreRunners],
+    [outputNames, plan(affectedChecks(['packages/core/src/main.ts']), 'full').coreRunners],
+    [['core', 'web'], draft], [['web', 'telemetry'], draft], [['desktop', 'e2eTypes', 'e2e'], draft], [['web', 'stress'], draft], [[], draft],
+  ] as [string[], string][]) {
+    const outputs = { ...Object.fromEntries(outputNames.map(name => [name, String(selected.includes(name))])), coreRunners };
+    const runners = (JSON.parse(coreRunners) as { os: string }[]).map(runner => runner.os);
+    const required = (id: string) => coreJobs.includes(id) ? selected.includes('core') && runners.includes(runnerOf(id)!)
+      : shards.includes(id) ? selected.includes('desktop') && selected.includes('e2e')
+      : selected.includes(jobFor[id] ?? id);
+    const jobs = { changes: { result: 'success', outputs }, ...Object.fromEntries(ids.map(id => [id, {
+      result: required(id) || callers.includes(id) ? 'success' : 'skipped',
+    }])) } as Record<string, { result: string; outputs?: object }>;
     cases.push({ jobs, success: true });
-    for (const name of ['changes', ...selected]) {
+    for (const id of ['changes', ...ids.filter(required)]) {
       for (const result of ['failure', 'cancelled', 'skipped']) {
-        cases.push({ jobs: { ...jobs, [name]: { ...jobs[name], result } }, success: false });
+        cases.push({ jobs: { ...jobs, [id]: { ...jobs[id], result } }, success: false });
       }
     }
-    for (const name of names.filter(name => !selected.includes(name))) {
-      cases.push({ jobs: { ...jobs, [name]: { result: 'success' } }, success: false });
+    for (const id of ids.filter(id => !required(id))) {
+      if (callers.includes(id)) {
+        cases.push({ jobs: { ...jobs, [id]: { result: 'skipped' } }, success: true });
+        for (const result of ['failure', 'cancelled']) cases.push({ jobs: { ...jobs, [id]: { result } }, success: false });
+      } else {
+        cases.push({ jobs: { ...jobs, [id]: { result: 'success' } }, success: false });
+      }
     }
   }
   // Execute the workflow's own script for every fixture in one Python process.
