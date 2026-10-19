@@ -183,6 +183,14 @@ export class Delegation {
     })();
     return true;
   }
+  /** A restart between a retiring subagent's last delivery and its archive retires it on start. */
+  retireSettled(): void {
+    for (const { key } of this.core.journal.db.query("SELECT key FROM settings WHERE key GLOB 'delegation-retiring:*'").all() as { key: string }[]) {
+      const thread = this.core.journal.getThread(key.slice('delegation-retiring:'.length));
+      if (thread) this.retireIfDone(thread);
+      else this.core.journal.deleteSetting(key);
+    }
+  }
   /** A subagent a past episode left watching its pull request retires once the watch and its turn are over and its last result reached the parent. */
   private retireIfDone(thread: ThreadSummary): void {
     if (this.core.journal.getSetting(`delegation-retiring:${thread.id}`) === undefined) return;

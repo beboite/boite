@@ -2,6 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { AGENT_ENV, DEFAULT_DELEGATION_CONFIG, type ThreadId } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
+import { Core } from '../src/core.ts';
 import { PullRequestWatches } from '../src/pull-request-watch.ts';
 import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -562,6 +563,23 @@ for (const ending of ['merged by someone else', 'closed by someone else', 'a fai
     expect(harness!.core.journal.db.query('SELECT status FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(child, `result:${last.id}`)).toEqual({ status: 'delivered' });
   });
 }
+
+test('a restart between a retiring subagent\'s last delivery and its archive retires it on start', async () => {
+  const setup = await watchedThread();
+  const { threadId } = setup;
+  const child = await watchingChild(setup, 'episode');
+  await waitFor(() => harness!.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND status = 'delivered'").get(child, threadId) !== null);
+  await settled(threadId);
+  expect(harness!.core.delegation.beginEpisode(threadId, 'next-work-item', harness!.core.delegation.config(threadId))).toBe(true);
+  // The core goes down once the watch ended on disk, before the archive followed.
+  harness!.core.journal.deleteSetting(`pr-watches:${child}`);
+  await harness!.core.close();
+  const restarted = new Core({ dataDir: harness!.dataDir, token: harness!.token });
+  try {
+    expect(restarted.threads.require(child).archived).toBe(true);
+    expect(restarted.journal.getSetting(`delegation-retiring:${child}`)).toBeUndefined();
+  } finally { await restarted.close(); }
+});
 
 test('the parent\'s Stop ends its subagents\' watches, and a workflow step still cannot watch', async () => {
   const setup = await watchedThread();
