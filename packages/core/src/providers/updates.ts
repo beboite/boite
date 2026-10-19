@@ -8,7 +8,7 @@ import { notFound, refused } from '../errors.ts';
 import type { InstallOutcome } from './install.ts';
 import { npmCli, npmInstallOf, unwritableDir, type NpmCommand } from './npm.ts';
 import { profileFor, resolveCommand, type ResolvedCommand } from './resolve.ts';
-import { BACKGROUND_LIMIT_MS, backgroundHolders, resumeCut } from './update-background.ts';
+import { BACKGROUND_LIMIT_MS, backgroundHolders, resumeCut, withCut } from './update-background.ts';
 import { readReadings, readSkips, writeReadings, writeSkips, type Entry } from './update-readings.ts';
 import { resumeAfterUpdate, resumePostponed, resumeUnwaited, type Resume } from './update-resume.ts';
 import { readVersion, recheckVersions } from './versions.ts';
@@ -336,10 +336,12 @@ export class HarnessUpdates {
     return providerId !== undefined && this.drains.get(providerId)?.phase === 'run';
   }
 
-  /** What a turn that paused for this provider's update waits on. */
-  resumeOf(providerId: ProviderId): Promise<Resume | null> {
+  /** What a turn of that thread paused for this provider's update waits on, told when the release ended its background work. */
+  resumeOf(providerId: ProviderId, threadId?: ThreadId): Promise<Resume | null> {
     const drain = this.drains.get(providerId);
-    if (drain !== undefined) return drain.resume.promise;
+    if (drain !== undefined) {
+      return drain.resume.promise.then((resume) => resume === null || threadId === undefined ? resume : withCut(resume, drain.target.descriptor.name, drain.cut.get(threadId)));
+    }
     return Promise.resolve(resumeUnwaited(this.core.providers.get(providerId)?.name ?? providerId));
   }
 
@@ -755,12 +757,14 @@ export class HarnessUpdates {
     if (drain.bound !== null) clearTimeout(drain.bound);
     drain.limit = null;
     drain.bound = null;
-    // What the release below ends in the background: those agents are resumed once the update is done.
+    // What the release below ends in the background, and whose agents are resumed on the new version.
     drain.cut = backgroundHolders(this.core, providerId);
     // A running program cannot be replaced, and a warm session is one: a paused turn's included.
     for (const thread of this.core.journal.listThreads()) {
       if (thread.providerId === providerId) this.core.threads.releaseAgent(thread.id);
     }
+    // Planned now rather than after the updater, so a Stop meanwhile cancels the resume and a crash keeps it.
+    resumeCut(this.core, drain.cut, drain.target.descriptor.name);
     this.emit();
     const updateAt = logUpdate(this.core, providerId, 'started', { from: drain.before.current });
     void this.runUpdate(drain.target, drain.before)
@@ -775,11 +779,8 @@ export class HarnessUpdates {
         const entry = this.entries.get(providerId);
         drain.resume.resolve(this.closed || this.core.stopping ? null
           : resumeAfterUpdate(drain.target.descriptor.name, drain.before.current, entry?.current ?? null, entry?.state === 'failed'));
-        if (this.closed || this.core.stopping) return;
-        // The agents whose background work the release ended pick it up again, on the new version.
-        resumeCut(this.core, drain.cut, drain.target.descriptor.name);
         // The turns queued while the updater ran start now, on the new version.
-        this.core.scheduler.retry();
+        if (!this.closed && !this.core.stopping) this.core.scheduler.retry();
       });
   }
 
