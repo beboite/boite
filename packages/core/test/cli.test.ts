@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_ENV, AGENT_HISTORY_PAGE } from '@boite/contracts';
@@ -115,11 +115,16 @@ test('agents reach each other by a short address, find by chat, read and wait fo
   const read = await boite(['agents', 'read', other, '--last', '5']);
   expect(read.out).toContain('user:\n    the staging database keeps timing out');
   const self = harness.core.coordination.get(threadId).self;
-  const answering = new Promise<void>(resolve => setTimeout(() => {
-    void harness.core.coordination.send({ threadId: other, to: self, text: 'Restart it, I am done.', requestId: 'answer' }).then(() => resolve());
-  }, 300));
+  // The answer goes out once the CLI waits for it: one that came first would wake this idle thread
+  // with a turn instead. The CLI reaches its wait late here, as it did on a loaded macOS runner.
+  const coordination = harness.core.coordination;
+  const wait = coordination.wait.bind(coordination);
+  const late = spyOn(coordination, 'wait').mockImplementation(async (...args) => { await Bun.sleep(500); return wait(...args); });
+  const waiting = () => (coordination as unknown as { waiters: Map<string, unknown> }).waiters.has(threadId);
+  const answering = waitFor(waiting).then(() => coordination.send({ threadId: other, to: self, text: 'Restart it, I am done.', requestId: 'answer' }));
   const sent = await boite(['agents', 'send', other, 'May I restart staging?', '--wait', '--timeout', '10']);
   await answering;
+  late.mockRestore();
   expect(sent.code).toBe(0);
   expect(sent.out).toContain('Restart it, I am done.');
   expect((await boite(['agents', 'log', other])).out).toContain('-> to');
