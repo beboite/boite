@@ -2,9 +2,17 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // The check names a pull request run reports on its head, whether each job
-// runs or skips, for a ruleset that requires them directly
-// (docs/ci.md#check-names). A name holds no expression: a skipped matrix job
-// reports its unexpanded template, so every required job is written out.
+// runs or skips: the ruleset requires each of them (docs/ci.md#check-names).
+// A name holds no expression: a skipped matrix job reports its unexpanded
+// template, so every required job is written out.
+
+// The only expression a name may hold, on a job that always runs or a
+// reusable workflow's caller (a skipped job reports its name unevaluated): a
+// draft run reports the name plus " (draft)", the planning job's only outside
+// a conversion to draft (docs/ci.md#draft-pull-requests).
+const DRAFT_NAME = /^\$\{\{ github\.event\.pull_request\.draft(?: && github\.event\.action != 'converted_to_draft')? && '([^']+) \(draft\)' \|\| '([^']+)' \}\}$/;
+// A job that never runs on a pull request guards none: its skip is no check.
+const NOT_ON_PULL_REQUESTS = "github.event_name != 'pull_request'";
 
 const WORKFLOWS = join(import.meta.dir, '../../.github/workflows');
 
@@ -22,30 +30,31 @@ export type Load = (file: string) => Workflow;
 
 export const loadWorkflow: Load = (file) => Bun.YAML.parse(readFileSync(join(WORKFLOWS, file), 'utf8')) as Workflow;
 
-// The `CI required` gate leaves the ruleset in step 4 of the switch and the
-// workflow in step 5; a draft names it `CI draft`, so it is no fixed name.
-export const GATE_JOB = 'required';
-export const GATE_NAME = 'CI required';
-
 function list(value: string | string[] | undefined): string[] {
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
 }
 
-/** Every check a job reports: its name, or for a caller each name of the workflow it calls. */
-export function jobChecks(file: string, id: string, job: Job, load: Load = loadWorkflow): string[] {
-  if (job.strategy?.matrix !== undefined) throw new Error(`${file}: job ${id} is a matrix; a skipped one reports its template name`);
+/** The names a job reports on a draft and on a ready pull request: the same unless it uses the draft expression. */
+export function jobNames(job: Job, id: string): { draft: string; ready: string } {
   const name = job.name ?? id;
+  const match = DRAFT_NAME.exec(name);
+  return match && match[1] === match[2] ? { draft: `${match[2]} (draft)`, ready: match[2]! } : { draft: name, ready: name };
+}
+
+/** Every check a job reports: its name, or for a caller each name of the workflow it calls. */
+export function jobChecks(file: string, id: string, job: Job, load: Load = loadWorkflow, draft = false): string[] {
+  if (job.strategy?.matrix !== undefined) throw new Error(`${file}: job ${id} is a matrix; a skipped one reports its template name`);
+  const name = jobNames(job, id)[draft ? 'draft' : 'ready'];
   if (name.includes('${{')) throw new Error(`${file}: job ${id} has a computed name: ${name}`);
   if (!job.uses) return [name];
   const called = /^\.\/\.github\/workflows\/([\w.-]+\.ya?ml)$/.exec(job.uses)?.[1];
   if (!called) throw new Error(`${file}: job ${id} calls ${job.uses}, outside this repository`);
-  return workflowChecks(called, load).map((inner) => `${name} / ${inner}`);
+  return workflowChecks(called, load, draft).map((inner) => `${name} / ${inner}`);
 }
 
-export function workflowChecks(file: string, load: Load = loadWorkflow): string[] {
-  return Object.entries(load(file).jobs)
-    .filter(([id]) => !(file === 'ci.yml' && id === GATE_JOB))
-    .flatMap(([id, job]) => jobChecks(file, id, job, load));
+export function workflowChecks(file: string, load: Load = loadWorkflow, draft = false): string[] {
+  return Object.entries(load(file).jobs).filter(([, job]) => job.if !== NOT_ON_PULL_REQUESTS)
+    .flatMap(([id, job]) => jobChecks(file, id, job, load, draft));
 }
 
 /** The workflows a pull request starts on its head; pull_request_target runs the base's. */
@@ -57,37 +66,59 @@ export function pullRequestWorkflows(files: string[], load: Load = loadWorkflow)
   });
 }
 
-export function requiredChecks(files: string[], load: Load = loadWorkflow): string[] {
-  const names = pullRequestWorkflows(files, load).flatMap((file) => workflowChecks(file, load));
+/** The names a ready pull request reports, which the ruleset requires; with `draft`, those a draft reports. */
+export function requiredChecks(files: string[], load: Load = loadWorkflow, draft = false): string[] {
+  const names = pullRequestWorkflows(files, load).flatMap((file) => workflowChecks(file, load, draft));
   const repeated = names.filter((name, index) => names.indexOf(name) !== index);
   if (repeated.length) throw new Error(`check names reported twice: ${[...new Set(repeated)].join(', ')}`);
   return names.sort();
 }
 
-type Ruleset = { rules?: { type: string; parameters?: { required_status_checks?: { context: string }[] } }[] };
+type Rule = { type: string; parameters?: { required_status_checks?: { context: string }[] } };
 
-/** Compares with `gh api repos/<owner>/<repo>/rulesets/<id>`; the gate may stay until step 4. */
-export function compareRuleset(names: string[], ruleset: Ruleset) {
-  const required = (ruleset.rules ?? []).filter((rule) => rule.type === 'required_status_checks')
+/**
+ * Compares with the rules for a branch (`gh api repos/<owner>/<repo>/rules/branches/main`,
+ * every ruleset that applies) or one ruleset (`.../rulesets/<id>`).
+ */
+export function compareRuleset(names: string[], rules: Rule[] | { rules?: Rule[] }) {
+  const required = (Array.isArray(rules) ? rules : rules.rules ?? []).filter((rule) => rule.type === 'required_status_checks')
     .flatMap((rule) => rule.parameters?.required_status_checks ?? []).map((check) => check.context);
   return {
     missing: names.filter((name) => !required.includes(name)),
-    unknown: required.filter((name) => !names.includes(name) && name !== GATE_NAME),
-    gate: required.includes(GATE_NAME),
+    unknown: [...new Set(required.filter((name) => !names.includes(name)))],
   };
+}
+
+/** The rules main's pull requests merge under, or undefined when this token cannot read them. */
+async function liveRules(): Promise<Rule[] | undefined> {
+  const { GITHUB_API_URL: api = 'https://api.github.com', GITHUB_REPOSITORY: repo = 'beboite/boite', GH_TOKEN: token } = process.env;
+  try {
+    const response = await fetch(`${api}/repos/${repo}/rules/branches/main`, {
+      headers: { accept: 'application/vnd.github+json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error(`answered ${response.status}`);
+    return await response.json() as Rule[];
+  } catch (error) {
+    console.log(`::warning::the rules for main are unreadable here (${error instanceof Error ? error.message : String(error)}); check names not compared`);
+    return undefined;
+  }
 }
 
 if (import.meta.main) {
   const files = [...new Bun.Glob('*.yml').scanSync(WORKFLOWS)].sort();
   const names = requiredChecks(files);
   const index = process.argv.indexOf('--ruleset');
-  if (index === -1) {
+  if (index === -1 && !process.argv.includes('--live')) {
     process.stdout.write(`${names.join('\n')}\n`);
   } else {
-    const { missing, unknown, gate } = compareRuleset(names, JSON.parse(readFileSync(process.argv[index + 1]!, 'utf8')));
-    for (const name of missing) console.log(`not required: ${name}`);
-    for (const name of unknown) console.log(`required but never reported: ${name}`);
-    if (gate) console.log(`still required: ${GATE_NAME}`);
+    const rules = index === -1 ? await liveRules() : JSON.parse(readFileSync(process.argv[index + 1]!, 'utf8'));
+    if (rules === undefined) process.exit(0);
+    const { missing, unknown } = compareRuleset(names, rules);
+    // Only main's ruleset job runs it: a branch that adds or renames a job
+    // diverges until the ruleset follows (docs/ci.md#check-names).
+    for (const name of missing) console.log(`::error::not required by the ruleset: ${name}`);
+    for (const name of unknown) console.log(`::error::required by the ruleset, reported by no pull request: ${name}`);
     if (missing.length || unknown.length) process.exit(1);
     console.log(`The ruleset requires the ${names.length} check names a pull request reports`);
   }

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { CORE_ALL, PORTABLE_ALL } from './changes.ts';
-import { compareRuleset, GATE_JOB, GATE_NAME, jobChecks, loadWorkflow, requiredChecks, type Workflow } from './required-checks.ts';
+import { compareRuleset, jobChecks, jobNames, loadWorkflow, requiredChecks, type Job, type Workflow } from './required-checks.ts';
 
 const files = [...new Bun.Glob('*.yml').scanSync(`${import.meta.dir}/../../.github/workflows`)].sort();
 
@@ -38,26 +38,87 @@ test('a pull request reports the same fixed check names whichever jobs run', () 
     'Telemetry relay tests',
     'Type checks and UI tests',
   ].sort());
-  // labeler.yml runs the base's workflow through pull_request_target, so it
-  // is absent; so is the gate, which leaves once the ruleset requires these.
-  expect(names).not.toContain(GATE_NAME);
+  // labeler.yml runs the base's workflow through pull_request_target.
 });
 
 test('every job a needs chain runs through is in the list, so a skip after a failed dependency comes with a failed check', () => {
   const names = requiredChecks(files);
   const ci = loadWorkflow('ci.yml');
   for (const [id, job] of Object.entries(ci.jobs)) {
-    if (id === GATE_JOB) continue;
     for (const need of [job.needs ?? []].flat()) {
       for (const check of jobChecks('ci.yml', need, ci.jobs[need]!)) expect(names).toContain(check);
     }
   }
 });
 
-test('the gate waits for every job it judges', () => {
-  const gate = loadWorkflow('ci.yml').jobs[GATE_JOB]!;
-  const jobs = Object.keys(loadWorkflow('ci.yml').jobs).filter((id) => id !== GATE_JOB && id !== 'ui');
-  expect([gate.needs ?? []].flat().sort()).toEqual(jobs.sort());
+// A skip passes in a ruleset, so a draft must not satisfy it. A skipped job
+// reports its name unevaluated, so only the planning job and the reusable
+// workflows' callers, which always run, name themselves "(draft)"; every
+// other job runs only to fail when a draft run is rerun once the pull request
+// is ready, and a conversion to draft fails the required planning name.
+// How each direct job's condition starts, and what it decides for a run.
+// `stale` is planning's first step: `false` (still a draft) lets a failed
+// planning skip as usual; `true` (ready, or no answer) or nothing at all
+// (planning failed before it, a fork's draft run approved late included)
+// makes the job run only to fail. A cancelled run reports its pending jobs
+// cancelled, not skipped (#653), which blocks without a runner.
+const STALE = "!cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false')";
+type Run = { draft: boolean; changes: 'success' | 'failure'; stale: 'true' | 'false' | ''; cancelled?: boolean };
+const runsStale = (run: Run) => !run.cancelled && run.draft && (run.stale === 'true' || run.changes !== 'success' && run.stale !== 'false');
+
+test('a draft run fails its direct jobs unless planning saw a draft, whatever the attempt', () => {
+  // Planning failed at setup, before the flag read: no output.
+  expect(runsStale({ draft: true, changes: 'failure', stale: '' })).toBe(true);
+  expect(runsStale({ draft: true, changes: 'success', stale: 'true' })).toBe(true);
+  expect(runsStale({ draft: true, changes: 'failure', stale: 'true' })).toBe(true);
+  // Still a draft and its repository checks failed: the usual skips, no runner.
+  expect(runsStale({ draft: true, changes: 'failure', stale: 'false' })).toBe(false);
+  expect(runsStale({ draft: true, changes: 'success', stale: 'false' })).toBe(false);
+  expect(runsStale({ draft: false, changes: 'failure', stale: '' })).toBe(false);
+  expect(runsStale({ draft: true, changes: 'failure', stale: '', cancelled: true })).toBe(false);
+});
+
+test('a draft passes no required name, rerun or converted', () => {
+  const ci = loadWorkflow('ci.yml');
+  const changes = ci.jobs.changes as Job & { steps: { id?: string; if?: string; run?: string }[]; permissions: Record<string, string> };
+  expect(jobNames(changes, 'changes')).toEqual({ draft: 'Plan and repository checks (draft)', ready: 'Plan and repository checks' });
+  expect(changes.name).toContain("github.event.action != 'converted_to_draft'");
+  const [stale, conversion] = changes.steps;
+  expect(stale!.id).toBe('stale');
+  expect(stale!.if).toBe('github.event.pull_request.draft');
+  // Fail closed: only a draft answer gives `false`; an unreadable one is stale.
+  expect(stale!.run).toContain('if [ "$draft" = true ]; then\n  echo "stale=false"');
+  expect((changes as Job & { outputs: Record<string, string> }).outputs.stale).toBe('${{ steps.stale.outputs.stale }}');
+  expect(conversion!.if).toBe("github.event.action == 'converted_to_draft'");
+  expect(conversion!.run).toContain('exit 1');
+  expect(changes.permissions['pull-requests']).toBe('read');
+
+  const ready = requiredChecks(files);
+  const draftNames = requiredChecks(files, loadWorkflow, true);
+  for (const [id, job] of Object.entries(ci.jobs)) {
+    if (id === 'changes' || id === 'ruleset') continue;
+    if (job.uses) {
+      expect(jobChecks('ci.yml', id, job, loadWorkflow, true).filter((name) => ready.includes(name))).toEqual([]);
+      continue;
+    }
+    // Every other job keeps a fixed name, and a stale draft run makes it run and fail.
+    expect(jobNames(job, id).draft).toBe(jobNames(job, id).ready);
+    expect(job.if).toStartWith(`\${{ ${STALE} || success() && (`);
+    const [stop] = (job as Job & { steps: { if?: string; run?: string }[] }).steps;
+    expect(stop!.if).toBe("needs.changes.result != 'success' || needs.changes.outputs.stale == 'true'");
+    expect(stop!.run).toContain('exit 1');
+  }
+  expect(draftNames).toContain('Desktop (draft) / Linux x64');
+});
+
+test('main compares the names with the live rules in a job no other job needs', () => {
+  const ci = loadWorkflow('ci.yml');
+  const ruleset = ci.jobs.ruleset as Job & { steps: { run?: string }[] };
+  expect(ruleset.needs).toBeUndefined();
+  expect(ruleset.if).toBe("github.event_name != 'pull_request'");
+  expect(ruleset.steps.map((step) => step.run)).toContain('bun scripts/ci/required-checks.ts --live');
+  for (const job of Object.values(ci.jobs)) expect([job.needs ?? []].flat()).not.toContain('ruleset');
+  expect(requiredChecks(files)).not.toContain('Ruleset check names');
 });
 
 test('matrix jobs and computed names are refused', () => {
@@ -65,6 +126,13 @@ test('matrix jobs and computed names are refused', () => {
   expect(() => requiredChecks(['x.yml'], load({ a: { name: 'Core tests (${{ matrix.name }})' } }))).toThrow('computed name');
   expect(() => requiredChecks(['x.yml'], load({ a: { name: 'Core', strategy: { matrix: { os: ['a', 'b'] } } } }))).toThrow('matrix');
   expect(() => requiredChecks(['x.yml'], load({ a: { name: 'A' }, b: { name: 'A' } }))).toThrow('reported twice');
+  expect(() => requiredChecks(['x.yml'], load({ a: { name: "${{ github.event.pull_request.draft && 'A' || 'B' }}" } }))).toThrow('computed name');
+  expect(() => requiredChecks(['x.yml'], load({ a: { name: "${{ github.event.pull_request.draft && 'A (draft)' || 'B' }}" } }))).toThrow('computed name');
+  for (const name of ["${{ github.event.pull_request.draft && 'A (draft)' || 'A' }}", "${{ github.event.pull_request.draft && github.event.action != 'converted_to_draft' && 'A (draft)' || 'A' }}"]) {
+    const both = load({ a: { name } });
+    expect([requiredChecks(['x.yml'], both), requiredChecks(['x.yml'], both, true)]).toEqual([['A'], ['A (draft)']]);
+  }
+  expect(requiredChecks(['x.yml'], load({ a: { name: 'A', if: "github.event_name != 'pull_request'" } }))).toEqual([]);
   expect(requiredChecks(['x.yml'], () => ({ on: { push: null }, jobs: { a: {} } }))).toEqual([]);
 });
 
@@ -72,10 +140,10 @@ test('matrix jobs and computed names are refused', () => {
 // on the one it names, or a selected leg would skip without a failure.
 test('each core job runs on its CORE_ALL runner when coreRunners lists it', () => {
   const jobs = Object.entries(loadWorkflow('ci.yml').jobs).filter(([id]) => id.startsWith('core-'));
-  expect(jobs.map(([, job]) => ({ os: job['runs-on'], name: job.name })))
+  expect(jobs.map(([id, job]) => ({ os: job['runs-on'], name: jobNames(job, id).ready })))
     .toEqual(CORE_ALL.map((runner) => ({ os: runner.os, name: `Core tests (${runner.name})` })));
   for (const [, job] of jobs) {
-    expect(job.if).toBe(`needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"${job['runs-on']}"')`);
+    expect(job.if).toBe(`\${{ ${STALE} || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"${job['runs-on']}"')) }}`);
   }
   // The quoted label cannot match a longer one.
   const pr = JSON.stringify(CORE_ALL.filter((runner) => runner.os !== 'ubuntu-24.04'));
@@ -95,12 +163,15 @@ test('each portable desktop job builds its PORTABLE_ALL platform when platforms 
   }
 });
 
-test('the ruleset comparison names what to add and what no run reports, and tolerates the gate', () => {
-  const ruleset = (contexts: string[]) => ({ rules: [{ type: 'deletion' }, {
+test('the ruleset comparison names what to add and what no run reports', () => {
+  const rules = (contexts: string[]) => [{ type: 'deletion' }, {
     type: 'required_status_checks', parameters: { required_status_checks: contexts.map((context) => ({ context })) },
-  }] });
-  expect(compareRuleset(['A', 'B'], ruleset([GATE_NAME, 'A', 'B']))).toEqual({ missing: [], unknown: [], gate: true });
-  expect(compareRuleset(['A', 'B'], ruleset(['A', 'Core tests (${{ matrix.name }})']))).toEqual({
-    missing: ['B'], unknown: ['Core tests (${{ matrix.name }})'], gate: false,
+  }];
+  expect(compareRuleset(['A', 'B'], rules(['A', 'B']))).toEqual({ missing: [], unknown: [] });
+  // One ruleset's own rules, as `rulesets/<id>` answers.
+  expect(compareRuleset(['A', 'B'], { rules: rules(['A', 'B']) })).toEqual({ missing: [], unknown: [] });
+  // The removed gate, reported by no workflow, would block every pull request.
+  expect(compareRuleset(['A', 'B'], rules(['A', 'CI required', 'Core tests (${{ matrix.name }})']))).toEqual({
+    missing: ['B'], unknown: ['CI required', 'Core tests (${{ matrix.name }})'],
   });
 });
