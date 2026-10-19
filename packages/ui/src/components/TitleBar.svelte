@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
+  import { PanelLeftClose, PanelLeftOpen, Users } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import ThreadHeader from './ThreadHeader.svelte';
   import type { Window as TauriWindow } from '@tauri-apps/api/window';
@@ -12,6 +12,8 @@
   import { isMac } from '../lib/keybindings';
   import { linuxShell } from '../lib/shell-platform';
   import ProjectTile from './ProjectTile.svelte';
+  import { contactsRail } from '../lib/contacts-rail.svelte';
+  import { experimentOn } from '../lib/experiments.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -29,6 +31,8 @@
    * to open.
    */
   let foldable = $derived(store.booted && (store.page === 'chat' || store.page === 'home' || (store.page === 'agents' && !mobile.current)));
+  /** The contacts column folds from the bar's other end, beside the pages that keep it. */
+  let contactsToggle = $derived(store.booted && experimentOn('contacts') && !mobile.current && (store.page === 'chat' || store.page === 'home'));
   function toggleSidebar() {
     if (mobile.current) store.sidebarOpen = !store.sidebarOpen;
     else store.toggleSidebar();
@@ -140,6 +144,15 @@
   {:else}
     <span class="name ui-label">{store.page === 'agents' ? strings.agents.heading : store.page === 'home' ? strings.contacts.heading : heading}</span>
   {/if}
+  {#if contactsToggle}
+    <button type="button" class="ghost icon contacts-toggle" class:open={!contactsRail.folded}
+      aria-label={contactsRail.folded ? strings.contacts.rail.show : strings.contacts.rail.hide}
+      title={contactsRail.folded ? strings.contacts.rail.show : strings.contacts.rail.hide}
+      aria-expanded={!contactsRail.folded} data-testid="contacts-toggle" onclick={() => contactsRail.toggle()}>
+      <Users size={17} strokeWidth={1.75} />
+      {#if contactsRail.folded && contactsRail.waiting}<span class="contacts-waiting" data-testid="contacts-toggle-waiting"></span>{/if}
+    </button>
+  {/if}
   {#if dev}
     <span class="channel ui-label-box" title={strings.app.channelDevTitle} data-testid="titlebar-channel"><span class="ui-label">{strings.app.channelDev}</span></span>
   {/if}
@@ -192,6 +205,10 @@
   /* macOS: the traffic lights, 16 px in and about 52 px wide, then the usual gap. */
   .titlebar.mac { padding-left: 80px; padding-right: 8px; }
   .sidebar-toggle { flex: none; }
+  .contacts-toggle { position: relative; flex: none; margin-left: auto; }
+  .contacts-toggle.open { color: var(--color-foreground); }
+  /* Folded, the button alone says a contact asks something. */
+  .contacts-waiting { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--color-live); box-shadow: 0 0 0 2px var(--color-frame); }
   .project-heading {
     display: flex;
     align-items: center;

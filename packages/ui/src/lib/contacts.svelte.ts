@@ -1,13 +1,15 @@
 /*
  * The Home page's state for one machine: its contacts, their requests, the
  * contact settings and the Tailscale side, read with `contacts.get` and read
- * again on `contacts.updated`. Only the Home page imports it, so it rides that
- * page's chunk and never the boot bundle.
+ * again on `contacts.updated`. Only the Contacts page and the contact lists
+ * import it, so it rides their chunks and never the boot bundle.
  */
 
 import type { Contact, ContactInvite, ContactRequest, ContactSettings, ContactsState, ContactTailscale, ProjectId } from '@boite/contracts';
+import { untrack } from 'svelte';
 import { errorText } from './errors';
 import type { Store } from './store.svelte';
+import { workspace, type Machine } from './workspace.svelte';
 
 export class ContactsView {
   state = $state<ContactsState | null>(null);
@@ -170,6 +172,44 @@ export function contactsOf(store: Store): ContactsView {
     views.set(store, view);
   }
   return view;
+}
+
+/** A machine listed beside its contacts. */
+export interface MachineContacts { machine: Machine; view: ContactsView }
+
+/** A contact as the lists draw it, with the machine that holds it and how many of its requests wait. */
+export interface ContactRow { machine: Machine; contact: Contact; waiting: number }
+
+/**
+ * Keeps every listed machine's contacts read while a list is drawn, and
+ * follows each machine's reconnections. Call it while a component starts and
+ * read rows from what it returns: a derived that made a view would not see
+ * that view's state change.
+ */
+export function watchContacts(machines: () => readonly Machine[]): () => MachineContacts[] {
+  const views = $derived(machines().map(machine => ({ machine, view: contactsOf(machine.store) })));
+  $effect(() => {
+    const watched = views.map(entry => entry.view);
+    const releases = untrack(() => watched.map(view => view.watch()));
+    return () => { for (const release of releases) release(); };
+  });
+  $effect(() => { for (const { machine, view } of views) { void machine.store.client; untrack(() => view.follow()); } });
+  return () => views;
+}
+
+/** Every listed machine's contacts, in the order each core keeps them. */
+export function contactRows(views: readonly MachineContacts[]): ContactRow[] {
+  return views.flatMap(({ machine, view }) => (view.state?.contacts ?? []).map(contact => ({
+    machine,
+    contact,
+    waiting: view.state!.requests.filter(request => request.coreId === contact.coreId && request.direction === 'in' && request.status === 'pending').length
+  })));
+}
+
+/** Opens a contact's page, or the page that adds one, on the machine that holds it. */
+export async function openContact(owner: Store, coreId: string | null): Promise<void> {
+  if (workspace.active !== owner) await workspace.select(owner);
+  owner.showHome(coreId);
 }
 
 /** Pending requests first, newest first within each half. */

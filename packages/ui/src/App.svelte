@@ -188,6 +188,12 @@
     void import('./components/home/HomePage.svelte').then(module => { HomePage = module.default; })
       .catch(() => { homeLoadError = strings.contacts.loadFailed; });
   });
+  // The contacts column on the right loads with its experiment, on a desktop-wide window.
+  let ContactsRail = $state<typeof import('./components/home/ContactsRail.svelte').default>();
+  $effect(() => {
+    if (!experimentOn('contacts') || narrow.current || ContactsRail) return;
+    void import('./components/home/ContactsRail.svelte').then(module => { ContactsRail = module.default; }).catch(() => {});
+  });
   $effect(() => {
     if (experimentOn('contacts')) return;
     for (const machine of workspace.machines) if (machine.store.page === 'home') machine.store.showChat();
@@ -633,6 +639,9 @@
           />
         {/key}
       {/if}
+      {/if}
+      {#if ContactsRail && experimentOn('contacts') && !narrow.current}
+        {#key store}<ContactsRail {store} />{/key}
       {/if}
     {/if}
   </div>

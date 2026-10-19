@@ -1,6 +1,6 @@
 export const strings = {
 
-  /** Contacts: the list under the projects, one contact's page, and the page that adds one with Tailscale and the settings. */
+  /** Contacts: the column on the right, one contact's page, and the page that adds one with Tailscale and the settings. */
   contacts: {
     heading: 'Contacts',
     intro: 'Other owners\' Boites. Your agents and theirs work together on the projects each side shares, and on nothing else.',
@@ -8,8 +8,10 @@ export const strings = {
     loadFailed: 'Could not read the contacts.',
     retry: 'Retry',
     stale: 'This machine is disconnected: what shows may be out of date.',
-    /** The sidebar's section and the button at the foot of the list. */
+    /** The column's button and its empty row. */
     add: 'Add a contact',
+    /** The title bar's button that folds the column on the right. */
+    rail: { show: 'Show contacts', hide: 'Hide contacts' },
     waiting: '{count} waiting',
     link: { connected: 'Connected', connecting: 'Connecting', offline: 'Offline' },
     lastSeen: 'Seen {time}',

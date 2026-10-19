@@ -36,7 +36,7 @@
 
   let { store, recover = false, screen = $bindable('chat') }: { store: Store; recover?: boolean; screen: 'chat' | 'threads' | 'activity' } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
-  // The contacts under the projects, loaded with their experiment as in the desktop list.
+  // The contacts under the projects, loaded with their experiment; a desktop window shows them in the column on the right.
   let SidebarContacts = $state<typeof import('./home/SidebarContacts.svelte').default>();
   $effect(() => {
     if (!experimentOn('contacts') || SidebarContacts) return;

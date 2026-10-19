@@ -55,12 +55,15 @@ of a client's experiments.
 
 ## Contacts
 
-The Contacts section of the thread list and the Contacts page
-([contacts](contacts.md)). The section sits under the projects, on a phone too:
-one row per contact with its link and what it asks, and Add beside its title.
-A row opens that contact's page in the chat's card, the list staying beside it;
-the Contacts button at the foot of the list, and the phone menu entry, open the
-page with no contact picked.
+The contacts column and the Contacts page ([contacts](contacts.md)). On a
+desktop window the contacts stand in a column on the right edge, the thread
+list keeping the left one: one row per contact with its link and what it asks,
+and Add beside the title. A row opens that contact's page in the chat's card,
+between the two lists. The Contacts button at the right end of the title bar
+folds the column, remembered on the device, and shows a dot while a folded
+column hides a request. The right panel leaves the column its width. A phone
+has no right edge: its list shows the contacts as a section under the
+projects, and the menu entry opens the page with no contact picked.
 
 A contact's page shows what it asks, the projects each side shares with the
 other with their read switch, then trust, the four check words and Remove. With

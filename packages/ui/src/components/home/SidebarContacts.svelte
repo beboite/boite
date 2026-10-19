@@ -1,18 +1,17 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
   import { ChevronRight, UserPlus, Users } from '@lucide/svelte';
-  import { contactsOf, initialsOf } from '../../lib/contacts.svelte';
+  import { contactRows, initialsOf, openContact, watchContacts } from '../../lib/contacts.svelte';
   import { count } from '../../lib/format';
   import { fill, strings } from '../../lib/strings';
   import type { Store } from '../../lib/store.svelte';
   import { workspace, type Machine } from '../../lib/workspace.svelte';
 
   /**
-   * The contacts under the projects in the thread list: a section like a
+   * The contacts in a phone's list, under the projects: a section like a
    * project's, one row per contact with its link and what it asks, and Add
-   * beside the title. A row opens the contact's page in the main card, the
-   * list staying where it is. Every listed machine's contacts show; the
-   * section folds, and remembers it.
+   * beside the title. A row opens the contact's page. Every listed machine's
+   * contacts show; the section folds, and remembers it. A desktop window
+   * shows them in the column on the right instead (ContactsRail).
    */
   let { store, machines }: { store: Store; machines: Machine[] } = $props();
   const labels = $derived(strings.contacts);
@@ -27,26 +26,10 @@
     try { localStorage.setItem(FOLDED, open ? '0' : '1'); } catch { /* A private window keeps it for the session. */ }
   }
 
-  const views = $derived(machines.map(machine => ({ machine, view: contactsOf(machine.store) })));
-  // Each machine's contacts stay read while the list is drawn, and follow its reconnections.
-  $effect(() => {
-    const watched = views.map(entry => entry.view);
-    const releases = untrack(() => watched.map(view => view.watch()));
-    return () => { for (const release of releases) release(); };
-  });
-  $effect(() => { for (const { machine, view } of views) { void machine.store.client; untrack(() => view.follow()); } });
-
-  const rows = $derived(views.flatMap(({ machine, view }) => (view.state?.contacts ?? []).map(contact => ({
-    machine,
-    contact,
-    waiting: view.state!.requests.filter(request => request.coreId === contact.coreId && request.direction === 'in' && request.status === 'pending').length
-  }))));
+  const watched = watchContacts(() => machines);
+  const rows = $derived(contactRows(watched()));
   const waiting = $derived(rows.reduce((sum, row) => sum + row.waiting, 0));
-
-  async function show(owner: Store, coreId: string | null) {
-    if (workspace.active !== owner) await workspace.select(owner);
-    owner.showHome(coreId);
-  }
+  const show = (owner: Store, coreId: string | null) => void openContact(owner, coreId);
 </script>
 
 <section class="contacts" data-testid="sidebar-contacts">
@@ -57,21 +40,21 @@
       <!-- Folded, the title alone says something waits; open, the rows say it. -->
       {#if waiting && !open}<span class="waiting ui-label" data-testid="sidebar-contacts-waiting" title={fill(labels.waiting, { count: count(waiting) })}>{count(waiting)}</span>{/if}
     </button>
-    <button type="button" class="ghost small icon add" title={labels.add} aria-label={labels.add} onclick={() => void show(store, null)} data-testid="sidebar-contacts-add"><UserPlus size={15} /></button>
+    <button type="button" class="ghost small icon add" title={labels.add} aria-label={labels.add} onclick={() => show(store, null)} data-testid="sidebar-contacts-add"><UserPlus size={15} /></button>
   </div>
   <div class="disclosure-fold" class:open inert={!open}>
     <div>
       {#each rows as { machine, contact, waiting: asks } (`${machine.id}:${contact.coreId}`)}
         {@const current = machine.store === workspace.active && store.page === 'home' && store.contact === contact.coreId}
         <button type="button" class="ghost row" class:current aria-current={current ? 'page' : undefined} data-link={contact.link}
-          onclick={() => void show(machine.store, contact.coreId)} data-testid="sidebar-contact" data-core-id={contact.coreId}>
+          onclick={() => show(machine.store, contact.coreId)} data-testid="sidebar-contact" data-core-id={contact.coreId}>
           <span class="avatar" aria-hidden="true">{initialsOf(contact.name).slice(0, 1)}<span class="dot"></span></span>
           <span class="name">{contact.name}</span>
           {#if asks}<span class="state asks">{fill(labels.waiting, { count: count(asks) })}</span>
           {:else if contact.link !== 'connected'}<span class="state">{labels.link[contact.link]}</span>{/if}
         </button>
       {:else}
-        <button type="button" class="ghost row empty" onclick={() => void show(store, null)} data-testid="sidebar-contacts-empty">
+        <button type="button" class="ghost row empty" onclick={() => show(store, null)} data-testid="sidebar-contacts-empty">
           <UserPlus size={14} /><span class="name">{labels.add}</span>
         </button>
       {/each}

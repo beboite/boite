@@ -11,6 +11,7 @@ import { runCommand } from './lib/commands.svelte';
 import { undo } from './lib/undo.svelte';
 import { confirm } from './lib/confirm.svelte';
 import { rightPanel } from './lib/right-panel.svelte';
+import { contactsRail } from './lib/contacts-rail.svelte';
 
 /**
  * The desktop behaviours the UX audit found broken, on the whole app over the
@@ -53,6 +54,37 @@ test('a maximized panel stays with its thread: the Contacts page beside the list
     await waitFor(() => query('.body').classList.contains('panel-maximized'));
   } finally {
     rightPanel.maximized = false;
+  }
+});
+
+test('contacts stand in their own column on the right: the thread list keeps the projects, a row opens the page between them, the bar folds the column', async () => {
+  writeExperiments(['contacts']);
+  await mountOnFake();
+  try {
+    await waitFor(() => document.querySelector('[data-testid=rail-contact]') !== null);
+    const rail = query('[data-testid=contacts-rail]');
+    expect(query('main').compareDocumentPosition(rail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.querySelector('[data-testid=sidebar] [data-testid=sidebar-contacts]')).toBeNull();
+
+    query<HTMLButtonElement>('[data-testid=rail-contact]').click();
+    await waitFor(() => document.querySelector('[data-testid=home-page]') !== null);
+    expect([store.page, store.contact]).toEqual(['home', 'core-chris']);
+    expect(document.querySelector('[data-testid=sidebar]')).not.toBeNull();
+    flushSync();
+    expect(query('[data-testid=rail-contact]').getAttribute('aria-current')).toBe('page');
+
+    // Folded, the bar's button alone says Chris asks something, and the next start finds it folded.
+    query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
+    flushSync();
+    expect(rail.classList.contains('collapsed')).toBe(true);
+    expect(query('[data-testid=contacts-toggle]').getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('[data-testid=contacts-toggle-waiting]')).not.toBeNull();
+    expect(window.localStorage.getItem('boite.contacts-rail-folded')).toBe('1');
+    query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
+    flushSync();
+    expect(rail.classList.contains('collapsed')).toBe(false);
+  } finally {
+    if (contactsRail.folded) contactsRail.toggle();
   }
 });
 
