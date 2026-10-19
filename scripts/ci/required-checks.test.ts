@@ -51,17 +51,41 @@ test('every job a needs chain runs through is in the list, so a skip after a fai
   }
 });
 
-// A skip passes in a ruleset, so a draft must not satisfy it: a draft run,
-// rerun after the pull request went ready included, reports no required name.
-// Only pr-title.yml, which checks the title whatever the mode, reports the same.
-test('a draft reports none of the names the ruleset requires', () => {
+// A skip passes in a ruleset, so a draft must not satisfy it. A skipped job
+// reports its name unevaluated, so only the planning job and the reusable
+// workflows' callers, which always run, name themselves "(draft)"; every
+// other job runs only to fail when a draft run is rerun once the pull request
+// is ready, and a conversion to draft fails the required planning name.
+test('a draft passes no required name, rerun or converted', () => {
+  const ci = loadWorkflow('ci.yml');
+  const changes = ci.jobs.changes as Job & { steps: { id?: string; if?: string; run?: string }[]; permissions: Record<string, string> };
+  expect(jobNames(changes, 'changes')).toEqual({ draft: 'Plan and repository checks (draft)', ready: 'Plan and repository checks' });
+  expect(changes.name).toContain("github.event.action != 'converted_to_draft'");
+  const [conversion, stale] = changes.steps;
+  expect(conversion!.if).toBe("github.event.action == 'converted_to_draft'");
+  expect(conversion!.run).toContain('exit 1');
+  expect(stale!.id).toBe('stale');
+  expect(stale!.if).toBe('github.event.pull_request.draft');
+  // Fail closed: anything but a draft answer, an unreadable one included, is stale.
+  expect(stale!.run).toContain('if [ "$draft" != true ]; then');
+  expect(changes.permissions['pull-requests']).toBe('read');
+
   const ready = requiredChecks(files);
-  const draft = requiredChecks(files, loadWorkflow, true);
-  expect(draft.filter((name) => ready.includes(name))).toEqual(['PR title']);
-  expect(draft).toContain('Plan and repository checks (draft)');
-  expect(draft).toContain('Desktop (draft) / Linux x64');
-  expect(draft).toContain('Server (draft) / verify server (amd64)');
-  expect(draft.length).toBe(ready.length);
+  const draftNames = requiredChecks(files, loadWorkflow, true);
+  for (const [id, job] of Object.entries(ci.jobs)) {
+    if (id === 'changes' || id === 'ruleset') continue;
+    if (job.uses) {
+      expect(jobChecks('ci.yml', id, job, loadWorkflow, true).filter((name) => ready.includes(name))).toEqual([]);
+      continue;
+    }
+    // Every other job keeps a fixed name, and a stale draft run makes it run and fail.
+    expect(jobNames(job, id).draft).toBe(jobNames(job, id).ready);
+    expect(job.if).toStartWith("${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (");
+    const [stop] = (job as Job & { steps: { if?: string; run?: string }[] }).steps;
+    expect(stop!.if).toBe("needs.changes.outputs.stale == 'true'");
+    expect(stop!.run).toContain('exit 1');
+  }
+  expect(draftNames).toContain('Desktop (draft) / Linux x64');
 });
 
 test('main compares the names with the live rules in a job no other job needs', () => {
@@ -81,8 +105,10 @@ test('matrix jobs and computed names are refused', () => {
   expect(() => requiredChecks(['x.yml'], load({ a: { name: 'A' }, b: { name: 'A' } }))).toThrow('reported twice');
   expect(() => requiredChecks(['x.yml'], load({ a: { name: "${{ github.event.pull_request.draft && 'A' || 'B' }}" } }))).toThrow('computed name');
   expect(() => requiredChecks(['x.yml'], load({ a: { name: "${{ github.event.pull_request.draft && 'A (draft)' || 'B' }}" } }))).toThrow('computed name');
-  const both = load({ a: { name: "${{ github.event.pull_request.draft && 'A (draft)' || 'A' }}" } });
-  expect([requiredChecks(['x.yml'], both), requiredChecks(['x.yml'], both, true)]).toEqual([['A'], ['A (draft)']]);
+  for (const name of ["${{ github.event.pull_request.draft && 'A (draft)' || 'A' }}", "${{ github.event.pull_request.draft && github.event.action != 'converted_to_draft' && 'A (draft)' || 'A' }}"]) {
+    const both = load({ a: { name } });
+    expect([requiredChecks(['x.yml'], both), requiredChecks(['x.yml'], both, true)]).toEqual([['A'], ['A (draft)']]);
+  }
   expect(requiredChecks(['x.yml'], load({ a: { name: 'A', if: "github.event_name != 'pull_request'" } }))).toEqual([]);
   expect(requiredChecks(['x.yml'], () => ({ on: { push: null }, jobs: { a: {} } }))).toEqual([]);
 });
@@ -94,7 +120,7 @@ test('each core job runs on its CORE_ALL runner when coreRunners lists it', () =
   expect(jobs.map(([id, job]) => ({ os: job['runs-on'], name: jobNames(job, id).ready })))
     .toEqual(CORE_ALL.map((runner) => ({ os: runner.os, name: `Core tests (${runner.name})` })));
   for (const [, job] of jobs) {
-    expect(job.if).toBe(`needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"${job['runs-on']}"')`);
+    expect(job.if).toBe(`\${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"${job['runs-on']}"')) }}`);
   }
   // The quoted label cannot match a longer one.
   const pr = JSON.stringify(CORE_ALL.filter((runner) => runner.os !== 'ubuntu-24.04'));

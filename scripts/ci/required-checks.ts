@@ -6,10 +6,11 @@ import { join } from 'node:path';
 // A name holds no expression: a skipped matrix job reports its unexpanded
 // template, so every required job is written out.
 
-// The only expression a name may hold: a draft run, rerun included, reports
-// the name plus " (draft)", so it never satisfies a required one
-// (docs/ci.md#draft-pull-requests).
-const DRAFT_NAME = /^\$\{\{ github\.event\.pull_request\.draft && '([^']+) \(draft\)' \|\| '([^']+)' \}\}$/;
+// The only expression a name may hold, on a job that always runs or a
+// reusable workflow's caller (a skipped job reports its name unevaluated): a
+// draft run reports the name plus " (draft)", the planning job's only outside
+// a conversion to draft (docs/ci.md#draft-pull-requests).
+const DRAFT_NAME = /^\$\{\{ github\.event\.pull_request\.draft(?: && github\.event\.action != 'converted_to_draft')? && '([^']+) \(draft\)' \|\| '([^']+)' \}\}$/;
 // A job that never runs on a pull request guards none: its skip is no check.
 const NOT_ON_PULL_REQUESTS = "github.event_name != 'pull_request'";
 

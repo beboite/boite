@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   # A draft runs the Linux checks; ready_for_review starts the full run, and
-  # converted_to_draft cancels one in progress (changes.ts).
+  # converted_to_draft cancels one in progress and fails its planning (changes job).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
@@ -57,15 +57,17 @@ env:
 
 jobs:
   changes:
-    # In a draft run, rerun included, every job reports its name plus
-    # " (draft)": a draft never reports a required name, so only a full run
-    # satisfies the ruleset (docs/ci.md#draft-pull-requests).
-    name: ${{ github.event.pull_request.draft && 'Plan and repository checks (draft)' || 'Plan and repository checks' }}
+    # A draft run reports its planning and reusable workflows as "(draft)",
+    # and fails its other jobs when rerun once the pull request is ready, so a
+    # draft never passes a required name (docs/ci.md#draft-pull-requests).
+    name: ${{ github.event.pull_request.draft && github.event.action != 'converted_to_draft' && 'Plan and repository checks (draft)' || 'Plan and repository checks' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       # A main push compares with the last main commit whose CI passed (changes.ts).
       actions: read
+      # A draft run reads whether its pull request is still a draft.
+      pull-requests: read
     outputs:
       core: ${{ steps.filter.outputs.core }}
       web: ${{ steps.filter.outputs.web }}
@@ -79,7 +81,30 @@ jobs:
       stress: ${{ steps.filter.outputs.stress }}
       portable: ${{ steps.filter.outputs.portable }}
       coreRunners: ${{ steps.filter.outputs.coreRunners }}
+      stale: ${{ steps.stale.outputs.stale == 'true' }}
     steps:
+      # The conversion cancels a full run, whose planning may have passed
+      # under the required name: failing it keeps that success from merging
+      # next to the draft's skips. The next push runs the draft checks.
+      - name: Stop on a conversion to draft
+        if: github.event.action == 'converted_to_draft'
+        run: |
+          echo "::error::converted to draft: the next push runs the draft checks, gh pr ready the full run"
+          exit 1
+      # A rerun keeps its event: an old draft run rerun once the pull request
+      # is ready would put skips back under the required names. Its direct jobs
+      # then run only to fail; an unreadable flag counts as ready.
+      - id: stale
+        if: github.event.pull_request.draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          draft=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER" --jq .draft) || draft=unreadable
+          if [ "$draft" != true ]; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "::error::pull request #$NUMBER is no longer a draft (draft: $draft): this draft run fails its checks; rerun the latest ready run instead"
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
@@ -137,12 +162,18 @@ jobs:
   # coreRunners lists its label; the quotes keep `ubuntu-24.04` from matching
   # `ubuntu-24.04-arm`. Pull requests leave out the Intel Mac.
   core-linux-x64:
-    name: ${{ github.event.pull_request.draft && 'Core tests (Linux x64) (draft)' || 'Core tests (Linux x64)' }}
+    name: Core tests (Linux x64)
     needs: changes
-    if: needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04"')
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04"')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps: &core-steps
+      # A stale draft run fails here rather than skip (changes job).
+      - name: Stop a stale draft run
+        if: needs.changes.outputs.stale == 'true'
+        run: |
+          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -155,44 +186,50 @@ jobs:
           TMP: ${{ runner.temp }}
 
   core-linux-arm64:
-    name: ${{ github.event.pull_request.draft && 'Core tests (Linux arm64) (draft)' || 'Core tests (Linux arm64)' }}
+    name: Core tests (Linux arm64)
     needs: changes
-    if: needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04-arm"')
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04-arm"')) }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps: *core-steps
 
   core-windows-x64:
-    name: ${{ github.event.pull_request.draft && 'Core tests (Windows x64) (draft)' || 'Core tests (Windows x64)' }}
+    name: Core tests (Windows x64)
     needs: changes
-    if: needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"windows-2025"')
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"windows-2025"')) }}
     runs-on: windows-2025
     timeout-minutes: 15
     steps: *core-steps
 
   core-macos-arm64:
-    name: ${{ github.event.pull_request.draft && 'Core tests (macOS arm64) (draft)' || 'Core tests (macOS arm64)' }}
+    name: Core tests (macOS arm64)
     needs: changes
-    if: needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15"')
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15"')) }}
     runs-on: macos-15
     timeout-minutes: 15
     steps: *core-steps
 
   core-macos-x64:
-    name: ${{ github.event.pull_request.draft && 'Core tests (macOS x64) (draft)' || 'Core tests (macOS x64)' }}
+    name: Core tests (macOS x64)
     needs: changes
-    if: needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15-intel"')
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15-intel"')) }}
     runs-on: macos-15-intel
     timeout-minutes: 15
     steps: *core-steps
 
   web:
-    name: ${{ github.event.pull_request.draft && 'Type checks and UI tests (draft)' || 'Type checks and UI tests' }}
+    name: Type checks and UI tests
     needs: changes
-    if: needs.changes.outputs.web == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      # A stale draft run fails here rather than skip (changes job).
+      - name: Stop a stale draft run
+        if: needs.changes.outputs.stale == 'true'
+        run: |
+          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -213,12 +250,18 @@ jobs:
           key: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js', 'packages/ui/icon-plugin.ts') }}-${{ github.sha }}
 
   telemetry:
-    name: ${{ github.event.pull_request.draft && 'Telemetry relay tests (draft)' || 'Telemetry relay tests' }}
+    name: Telemetry relay tests
     needs: changes
-    if: needs.changes.outputs.telemetry == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.telemetry == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      # A stale draft run fails here rather than skip (changes job).
+      - name: Stop a stale draft run
+        if: needs.changes.outputs.stale == 'true'
+        run: |
+          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -226,12 +269,18 @@ jobs:
       - run: bun test packages/core/test/telemetry.test.ts
 
   e2e-types:
-    name: ${{ github.event.pull_request.draft && 'E2E type check (draft)' || 'E2E type check' }}
+    name: E2E type check
     needs: changes
-    if: needs.changes.outputs.e2eTypes == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.e2eTypes == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      # A stale draft run fails here rather than skip (changes job).
+      - name: Stop a stale draft run
+        if: needs.changes.outputs.stale == 'true'
+        run: |
+          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -242,12 +291,18 @@ jobs:
   # chunks on Linux and Windows except for a CSS color rounded in its sixth
   # decimal and the gzip OS byte (docs/ci.md#e2e-preparation).
   ui:
-    name: ${{ github.event.pull_request.draft && 'Build UI (draft)' || 'Build UI' }}
+    name: Build UI
     needs: changes
-    if: needs.changes.outputs.stress == 'true' || (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true')
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.stress == 'true' || (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      # A stale draft run fails here rather than skip (changes job).
+      - name: Stop a stale draft run
+        if: needs.changes.outputs.stale == 'true'
+        run: |
+          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -272,15 +327,21 @@ jobs:
           retention-days: 1
 
   stress:
-    name: ${{ github.event.pull_request.draft && 'Stress fixtures (draft)' || 'Stress fixtures' }}
+    name: Stress fixtures
     needs: [changes, ui]
-    if: needs.changes.outputs.stress == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.stress == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 15
     env:
       BOITE_E2E_PREBUILT_UI: '1'
       BOITE_STRESS_ARTIFACTS: tests/e2e/.artifacts/stress
     steps:
+      # A stale draft run fails here rather than skip (changes job).
+      - name: Stop a stale draft run
+        if: needs.changes.outputs.stale == 'true'
+        run: |
+          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -304,9 +365,9 @@ jobs:
   # published build plus 2 % (docs/ci.md#bundle-growth). Rerun this job alone
   # after editing the body.
   size:
-    name: ${{ github.event.pull_request.draft && 'Bundle size (draft)' || 'Bundle size' }}
+    name: Bundle size
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.desktop == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (github.event_name == 'pull_request' && needs.changes.outputs.desktop == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -316,6 +377,12 @@ jobs:
       # The pull request body, read at run time so a rerun sees an edit.
       pull-requests: read
     steps:
+      # A stale draft run fails here rather than skip (changes job).
+      - name: Stop a stale draft run
+        if: needs.changes.outputs.stale == 'true'
+        run: |
+          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -359,9 +426,9 @@ jobs:
   # Three shards written out, not a matrix, for the same fixed names as the
   # core jobs. E2E_SHARD picks the shard's files.
   e2e-1:
-    name: ${{ github.event.pull_request.draft && 'E2E 1/3 (draft)' || 'E2E 1/3' }}
+    name: E2E 1/3
     needs: [changes, ui]
-    if: needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 35
     env:
@@ -369,6 +436,12 @@ jobs:
       BOITE_E2E_FAKE_UI: tests/e2e/.artifacts/fake-ui
       E2E_SHARD: 1
     steps: &e2e-steps
+      # A stale draft run fails here rather than skip (changes job).
+      - name: Stop a stale draft run
+        if: needs.changes.outputs.stale == 'true'
+        run: |
+          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -411,9 +484,9 @@ jobs:
           retention-days: 7
 
   e2e-2:
-    name: ${{ github.event.pull_request.draft && 'E2E 2/3 (draft)' || 'E2E 2/3' }}
+    name: E2E 2/3
     needs: [changes, ui]
-    if: needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 35
     env:
@@ -423,9 +496,9 @@ jobs:
     steps: *e2e-steps
 
   e2e-3:
-    name: ${{ github.event.pull_request.draft && 'E2E 3/3 (draft)' || 'E2E 3/3' }}
+    name: E2E 3/3
     needs: [changes, ui]
-    if: needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 35
     env:
