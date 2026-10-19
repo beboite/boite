@@ -11,7 +11,6 @@
 
 import { fstatSync } from 'node:fs';
 import { loadavg } from 'node:os';
-import { SOCKET_OPTIONS } from '../client.ts';
 
 type Listener = (params: Record<string, unknown>, sessionId: string | undefined) => void;
 interface Waiting { resolve(value: Record<string, unknown>): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout>; method: string }
@@ -107,7 +106,7 @@ export class Cdp {
   /** The Windows transport: the browser's WebSocket endpoint on 127.0.0.1. */
   static connect(url: string, timeoutMs = 10_000): Promise<Cdp> {
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url, SOCKET_OPTIONS as unknown as string[]);
+      const socket = new WebSocket(url);
       const timer = setTimeout(() => { socket.close(); reject(new CdpError(`the browser did not accept a DevTools connection within ${timeoutMs / 1000} seconds`)); }, timeoutMs);
       socket.addEventListener('error', () => { clearTimeout(timer); reject(new CdpError(`could not connect to the browser's DevTools at ${url}`)); }, { once: true });
       socket.addEventListener('open', () => {
