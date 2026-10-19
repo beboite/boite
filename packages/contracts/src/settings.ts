@@ -1,6 +1,6 @@
 import type { BrowserProfile } from './browser';
 import type { AccountId, ProviderId, RequestId } from './ids';
-import type { SettingAsk, SettingRequestParams } from './setting-requests.ts';
+import type { ClientPreferences, SettingAsk, SettingRequestParams } from './setting-requests.ts';
 import type { AutoCompact, CacheKeepalive } from './settings-validation.ts';
 import type { SubscriptionProxy } from './subscription-proxy';
 import type { ThreadSummary } from './threads';
@@ -196,6 +196,13 @@ export interface SettingsRpcMethods {
   'telemetry.retryForget': { params: Record<string, never>; result: TelemetryState };
   'settings.get': { params: Record<string, never>; result: Settings };
   'settings.set': { params: Partial<Settings>; result: Settings };
+  /**
+   * The app says its language, the experiments it has on and the names it
+   * gives settings, after each hello and on every change. Agents read them
+   * from the app the user last used (`agent.settings`), and a card about an
+   * experiment settles when that app reports it changed.
+   */
+  'client.preferences': { params: ClientPreferences; result: { ok: true } };
 }
 
 export interface SettingsRpcEvents {

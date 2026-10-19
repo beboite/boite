@@ -2,7 +2,7 @@ import { pullRequestAddress, type PullRequestWatch, type PullRequestWatchSeen, t
 import type { Core } from './core.ts';
 import { messageOf, refused } from './errors.ts';
 import {
-  DETAIL_QUERY, FINGERPRINT_QUERY, REMARK_PAGES, evaluate, initialMemory, mergeChanges, parseDetail, parseFingerprint, parseRemarks,
+  CLOSER_QUERY, DETAIL_QUERY, FINGERPRINT_QUERY, REMARK_PAGES, evaluate, initialMemory, mergeChanges, parseCloser, parseDetail, parseFingerprint, parseRemarks,
   rateLimited, remarkPath, wakeMessage, type Fingerprint, type Remark, type RemarkKind, type WatchChange, type WatchDetail, type WatchMemory,
 } from './pull-request-watch-read.ts';
 import { withLoad } from './threads/records.ts';
@@ -40,6 +40,8 @@ interface WatchRecord {
   /** Changes not told yet, and since when they wait for the rest of their burst. */
   pending: WatchChange[];
   pendingSince: number | null;
+  /** Merged or closed by someone else: nothing is read any more, and the watch ends once that is told. */
+  ended?: boolean;
 }
 
 /** What only lives in memory: the next read, and why the last one got no answer. */
@@ -86,13 +88,12 @@ export class PullRequestWatches {
     }
     this.#unsubscribe = core.bus.onAny((name, payload) => {
       if (this.#closed) return;
-      if (name === 'thread.removed') this.endThread((payload as { threadId: ThreadId }).threadId);
+      if (name === 'thread.removed') this.#endWith((payload as { threadId: ThreadId }).threadId);
       else if (name === 'thread.updated') {
         const thread = payload as { id: ThreadId; archived: boolean; status: string };
-        if (!this.#records.has(thread.id)) return;
-        // Archived, which Mark done is too: the watch ends with the work.
-        if (thread.archived) this.endThread(thread.id);
-        else if (thread.status === 'idle' && this.#records.get(thread.id)!.some(record => record.pending.length)) this.#soon(500);
+        // Archived, which Mark done is too: the watch ends with the work, its subagents' too.
+        if (thread.archived) { this.#endWith(thread.id); return; }
+        if (this.#records.has(thread.id) && thread.status === 'idle' && this.#records.get(thread.id)!.some(record => record.pending.length)) this.#soon(500);
       }
     });
   }
@@ -120,7 +121,8 @@ export class PullRequestWatches {
   async watch(threadId: ThreadId, url: string): Promise<PullRequestWatch> {
     const thread = this.core.threads.require(threadId);
     if (thread.archived) throw refused('watching a pull request needs an active conversation', { threadId });
-    if (thread.parentThreadId) throw refused('a delegated agent cannot watch a pull request: its result goes to its parent, which can watch it', { threadId, field: 'threadId', expected: 'a top-level conversation' });
+    // A delegated agent's wake is its next turn, and that answer goes to its parent; a workflow step or a reviewer answers its run once.
+    if (thread.parentThreadId && !this.core.delegation.delegated(threadId)) throw refused('a workflow step or a reviewer cannot watch a pull request: its run reads its one answer', { threadId, field: 'threadId', expected: 'a conversation or a delegated agent' });
     if (thread.agentSessionId) throw refused('a persistent agent session takes work through Agents, not pull request watches', { threadId });
     const address = pullRequestAddress(url);
     const host = (process.env.GH_HOST ?? 'github.com').toLowerCase();
@@ -173,6 +175,12 @@ export class PullRequestWatches {
     return records.length;
   }
 
+  /** A thread that is over ends its watches and its delegated agents' watches. */
+  #endWith(threadId: ThreadId): void {
+    this.endThread(threadId);
+    for (const id of [...this.#records.keys()]) if (this.core.journal.getThread(id)?.parentThreadId === threadId) this.endThread(id);
+  }
+
   /** One pass now; tests drive the loop with it. */
   pass(): Promise<void> {
     if (this.#closed) return Promise.resolve();
@@ -195,7 +203,7 @@ export class PullRequestWatches {
       for (const record of [...records]) {
         if (this.#closed || this.core.stopping) return;
         const runtime = this.#runtime.get(runtimeKey(threadId, record.url));
-        if (!runtime || runtime.reading || Date.now() < runtime.nextReadAt || Date.now() < this.#rateUntil) continue;
+        if (!runtime || record.ended || runtime.reading || Date.now() < runtime.nextReadAt || Date.now() < this.#rateUntil) continue;
         await this.#read(threadId, record, memo, false).catch(error => {
           this.core.log('warn', `pull request watch ${record.url}: ${messageOf(error)}`, { source: 'pull-request-watch', threadId });
         });
@@ -215,12 +223,7 @@ export class PullRequestWatches {
     try {
       const fingerprint = await this.#shared(memo, `fingerprint ${record.url}`, () => this.#graphql(threadId, record, FINGERPRINT_QUERY).then(parseFingerprint));
       if (fingerprint.state !== 'OPEN') {
-        if (!baseline) {
-          this.core.log('info', `pull request #${record.number} is ${fingerprint.state.toLowerCase()}: its watch ended`, { source: 'pull-request-watch', threadId });
-          this.#remove(threadId, record.url);
-          this.#save(threadId);
-          this.#changed(threadId);
-        }
+        if (!baseline) await this.#end(threadId, record, runtime, memo, fingerprint.state);
         return fingerprint.state;
       }
       const statusMoved = record.fingerprint?.status !== fingerprint.status;
@@ -266,6 +269,30 @@ export class PullRequestWatches {
     } finally {
       runtime.reading = false;
     }
+  }
+
+  /**
+   * A merge or a close ends the watch. Someone else's is told first, with what
+   * was still waiting; the agent's own account's, or one GitHub cannot name,
+   * ends it at once, since the agent did it or cannot be told who did. A
+   * failed closer read throws to `#read`, which backs off as for any read; the
+   * next read finds the same state and asks again.
+   */
+  async #end(threadId: ThreadId, record: WatchRecord, runtime: Runtime, memo: Map<string, Promise<unknown>>, state: 'MERGED' | 'CLOSED'): Promise<void> {
+    const closer = await this.#shared(memo, `closer ${record.url}`, () => this.#graphql(threadId, record, CLOSER_QUERY).then(parseCloser));
+    if (this.#find(threadId, record.url) !== record) return;
+    this.#answered(runtime, record);
+    this.core.log('info', `pull request #${record.number} is ${state.toLowerCase()}${closer.by ? ` by ${closer.by}` : ''}: its watch ended`, { source: 'pull-request-watch', threadId });
+    if (!closer.by || closer.own) {
+      this.#remove(threadId, record.url);
+    } else {
+      record.ended = true;
+      record.pending = mergeChanges(record.pending, [{ kind: 'closed', state, by: closer.by }]);
+      record.pendingSince ??= Date.now();
+      runtime.nextReadAt = Number.POSITIVE_INFINITY;
+    }
+    this.#save(threadId);
+    this.#changed(threadId);
   }
 
   #answered(runtime: Runtime, record: WatchRecord): void {
@@ -321,7 +348,10 @@ export class PullRequestWatches {
       return;
     }
     for (const record of due) { record.pending = []; record.pendingSince = null; }
+    const ended = due.filter(record => record.ended);
+    for (const record of ended) this.#remove(threadId, record.url);
     this.#save(threadId);
+    if (ended.length) this.#changed(threadId);
   }
 
   #summary(threadId: ThreadId, record: WatchRecord): PullRequestWatch {

@@ -4,6 +4,7 @@ import type { FakeArchiveState, MergedPrFixture } from './merged-pr-archive';
 import { observeProgress } from './progress';
 import type { FakeRoster } from './group';
 import {
+  type ClientPreferences,
   DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   DEFAULT_THREAD_DONE_RETENTION_DAYS,
   PROTOCOL_VERSION,
@@ -236,6 +237,10 @@ export class FakeContext {
   readonly files = new Map<string, string>(Object.entries(FAKE_TREE));
   readonly artifactUrls = new Set<string>();
   settings: Settings;
+  /** What the app last said of itself (`client.preferences`); the fake core has one app. */
+  clientPreferences: ClientPreferences | null = null;
+  /** Each app's last report by its id, as the core's book keeps them. */
+  readonly clientApps = new Map<string, ClientPreferences>();
   speech: SpeechConfig = { engine: 'local', language: '', apiProvider: 'groq', fallback: false, executable: '', modelPath: '', model: SPEECH_DEFAULT_MODEL };
   readonly speechStatus: SpeechStatus = { revision: 'fake-voice', engine: 'local', ready: true, localReady: true, groqKeySet: false, openrouterKeySet: false, installing: false, downloadedBytes: 0, totalBytes: 0, error: null, canInstallRuntime: true, models: fakeSpeechModels(), downloading: null, runtimeOutdated: false };
   readonly speechRequests = new Map<string, symbol>();

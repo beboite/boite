@@ -111,13 +111,15 @@ test('an open viewer follows a replacement client without reusing old frames or 
 
   store.attach(nextClient); await settle();
   document.querySelector<HTMLButtonElement>('.keys button')!.click(); await settle();
-  expect(nextCalls.mock.calls.filter(([method]) => method !== 'browser.remoteStatus')).toHaveLength(0);
+  // The app tells a new client its language and experiments; nothing of the browser goes out yet.
+  const browserCalls = () => nextCalls.mock.calls.filter(([method]) => method !== 'client.preferences');
+  expect(browserCalls().filter(([method]) => method !== 'browser.remoteStatus')).toHaveLength(0);
   resolveOld(frame('Obsolete machine')); await settle();
   expect(document.querySelector('[data-testid=remote-browser-frame]')).toBeNull();
   await vi.advanceTimersByTimeAsync(1800); await settle();
   // A moving page is polled several times a second; every request goes to the replacement.
   expect(nextCalls).toHaveBeenCalledWith('browser.remoteFrame', { threadId: 't-trace', tabId: 'browser:tab' });
-  expect(nextCalls.mock.calls.every(([method]) => method === 'browser.remoteFrame' || method === 'browser.remoteStatus')).toBe(true);
+  expect(browserCalls().every(([method]) => method === 'browser.remoteFrame' || method === 'browser.remoteStatus')).toBe(true);
   expect(document.querySelector('[data-testid=remote-browser-frame]')).not.toBeNull();
   document.querySelector<HTMLButtonElement>('.screen')!.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 80, clientY: 80 }));
   await settle();

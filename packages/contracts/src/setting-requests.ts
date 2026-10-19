@@ -6,8 +6,78 @@ import type { QuestionAnswer, QuestionOption, Settings, ThreadId } from './index
  * points at a Settings page (`boite settings open`). The card never writes
  * anything itself. Apply calls `settings.set`, which only the owner reaches,
  * and the core settles the card when the value it asked about changes, from
- * the card or from the page. See docs/cli.md.
+ * the card or from the page. An experiment is a device's own switch: the app
+ * reports which are on (`client.preferences`), the card flips it there, and
+ * the core settles the card on the next report. See docs/cli.md.
  */
+
+/**
+ * The experiments this build ships, in the order Settings lists them. Each
+ * device turns them on for itself (`packages/ui/src/lib/experiments.ts`).
+ */
+export const EXPERIMENT_IDS = ['theme-grain', 'session-import', 'prompt-cache', 'open-chat-links', 'preview-comments', 'resident-agents', 'whip', 'recording-indicators', 'goal2', 'edge-scrollbars', 'press-preload', 'contacts'] as const;
+export type ExperimentId = (typeof EXPERIMENT_IDS)[number];
+
+export function isExperimentId(id: unknown): id is ExperimentId {
+  return typeof id === 'string' && (EXPERIMENT_IDS as readonly string[]).includes(id);
+}
+
+/** The languages the app speaks (`docs/language.md`). */
+export const APP_LANGUAGES = ['en', 'fr'] as const;
+export type AppLanguage = (typeof APP_LANGUAGES)[number];
+
+/** A setting key as an agent names it for an experiment: `experiment.resident-agents`. */
+export type ExperimentSettingKey = `experiment.${ExperimentId}`;
+
+/**
+ * What an app tells its core about itself, after each hello and on every
+ * change (`client.preferences`), so an agent reads the screen the user reads:
+ * the language, the experiments on, and the names it gives settings.
+ */
+export interface ClientPreferences {
+  /**
+   * This app's own id, random and kept on the device (`boite.appId`), the same
+   * across reconnects: a flip made while offline still reads as a flip.
+   */
+  app: string;
+  language: AppLanguage;
+  experiments: ExperimentId[];
+  /**
+   * The names the app shows, in its language: a requestable key, an
+   * `experiment.<id>`, or a Settings page id. A key the app leaves out reads
+   * as the key itself.
+   */
+  labels: Record<string, string>;
+}
+
+export const CLIENT_LABELS_MAX = 120;
+export const CLIENT_APP_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+export const CLIENT_LABEL_CHARS = 120;
+
+/** A report checked, or why it is refused. Labels lose control characters and keep the known keys only. */
+export function checkClientPreferences(params: unknown): { ok: true; preferences: ClientPreferences } | { ok: false; message: string; field: string } {
+  const given = (params ?? {}) as Partial<Record<keyof ClientPreferences, unknown>>;
+  if (typeof given.app !== 'string' || !CLIENT_APP_PATTERN.test(given.app)) return { ok: false, message: 'app must be 8 to 64 letters, digits, dashes or underscores', field: 'app' };
+  if (!(APP_LANGUAGES as readonly unknown[]).includes(given.language)) return { ok: false, message: `language must be one of ${APP_LANGUAGES.join(', ')}`, field: 'language' };
+  if (!Array.isArray(given.experiments) || given.experiments.length > EXPERIMENT_IDS.length * 2) return { ok: false, message: 'experiments must be a list of experiment ids', field: 'experiments' };
+  // A newer app may ship an experiment this core does not know: it is left out, not refused.
+  const experiments = EXPERIMENT_IDS.filter(id => (given.experiments as unknown[]).includes(id));
+  const raw = given.labels ?? {};
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).length > CLIENT_LABELS_MAX) return { ok: false, message: `labels must map at most ${CLIENT_LABELS_MAX} keys to names`, field: 'labels' };
+  const known = new Set<string>([...REQUESTABLE_SETTING_KEYS, ...EXPERIMENT_IDS.map(id => `experiment.${id}`), ...SETTINGS_PAGES]);
+  const labels: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!known.has(key) || typeof value !== 'string') continue;
+    // A label lands inside a line the agent reads.
+    const clean = value.replace(/[\p{C}\p{Zl}\p{Zp}]/gu, ' ').trim().slice(0, CLIENT_LABEL_CHARS);
+    if (clean.length > 0) labels[key] = clean;
+  }
+  return { ok: true, preferences: { app: given.app, language: given.language as AppLanguage, experiments, labels } };
+}
+
+export function sameClientPreferences(a: ClientPreferences | null, b: ClientPreferences | null): boolean {
+  return canonical(a) === canonical(b);
+}
 
 /** The Settings pages a card can open, under the ids the app's navigation uses. */
 export const SETTINGS_PAGES = [
@@ -72,11 +142,28 @@ export function isSettingsPage(page: unknown): page is SettingsPage {
 /** A section anchor as the app writes them: lowercase words joined by dashes. */
 export const SETTINGS_SECTION_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+/** A key a card may change: a core setting, or an experiment of the user's app. */
+export type RequestableKey = RequestableSetting | ExperimentSettingKey;
+
+export function experimentOf(key: string): ExperimentId | null {
+  const id = key.startsWith('experiment.') ? key.slice('experiment.'.length) : null;
+  return isExperimentId(id) ? id : null;
+}
+
 /** One readable setting, as `agent.settings` lists it. */
 export interface SettingReading extends SettingPlace {
-  key: RequestableSetting;
+  key: RequestableKey;
   /** The value now; null where the core keeps none and uses its default. */
   value: unknown;
+  /** Its name in the user's app, in the app's language, when the app said it. */
+  label?: string;
+}
+
+/** `agent.settings`: the app the user last used, then every readable setting. */
+export interface SettingsReading {
+  /** The app the user last used: its language and the computer or phone it runs on. Null before any app reported. */
+  app: { language: AppLanguage; device: string | null; client: 'shell' | 'pwa' | null } | null;
+  settings: SettingReading[];
 }
 
 /**
@@ -87,7 +174,8 @@ export interface SettingReading extends SettingPlace {
 export type SettingAsk =
   | {
       kind: 'change';
-      key: RequestableSetting;
+      /** A core setting, or `experiment.<id>`: a switch of the app the user last used. */
+      key: RequestableKey;
       /** The proposed value, as `settings.set` would store it. */
       value: unknown;
       /** The value when the agent asked, null when unset. The card settles when the setting leaves it. */
@@ -95,6 +183,8 @@ export type SettingAsk =
       page: SettingsPage;
       section: string;
       sensitive: boolean;
+      /** An experiment's card: the app whose switch it was asked from (`ClientPreferences.app`). */
+      app?: string;
     }
   | { kind: 'open'; page: SettingsPage; section: string | null };
 
@@ -133,8 +223,26 @@ export function effectiveSetting(settings: Settings, key: RequestableSetting): u
   return value !== null && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value;
 }
 
-export function readSettings(settings: Settings): SettingReading[] {
-  return REQUESTABLE_SETTING_KEYS.map(key => ({ key, value: effectiveSetting(settings, key), ...REQUESTABLE_SETTINGS[key] }));
+/** A key's value in effect: a core setting, or whether the app has the experiment on; null when no app reported. */
+export function currentSetting(key: RequestableKey, settings: Settings, client: ClientPreferences | null): unknown {
+  const experiment = experimentOf(key);
+  if (experiment === null) return effectiveSetting(settings, key as RequestableSetting);
+  return client === null ? null : client.experiments.includes(experiment);
+}
+
+function experimentPlace(id: ExperimentId): SettingPlace {
+  return { page: 'experiments', section: id, sensitive: false };
+}
+
+/** Every readable setting, an app's experiments after the core's settings once an app reported them. */
+export function readSettings(settings: Settings, client: ClientPreferences | null = null): SettingReading[] {
+  const labelled = (key: RequestableKey): { label?: string } => (client?.labels[key] === undefined ? {} : { label: client.labels[key] });
+  const core: SettingReading[] = REQUESTABLE_SETTING_KEYS.map(key => ({ key, value: effectiveSetting(settings, key), ...REQUESTABLE_SETTINGS[key], ...labelled(key) }));
+  if (client === null) return core;
+  return [...core, ...EXPERIMENT_IDS.map(id => {
+    const key: ExperimentSettingKey = `experiment.${id}`;
+    return { key, value: client.experiments.includes(id), ...experimentPlace(id), ...labelled(key) };
+  })];
 }
 
 /** Same JSON whatever the order of an object's keys; undefined reads as null. */
@@ -164,7 +272,7 @@ export type SettingNormalizer = (patch: Partial<Settings>) => { ok: true; patch:
  * `normalize` is the store's own validation; `open` lists the change cards
  * the thread already has open, one per key at most.
  */
-export function checkSettingRequest(params: SettingRequestParams, settings: Settings, normalize: SettingNormalizer, open: readonly SettingAsk[]): SettingRequestCheck {
+export function checkSettingRequest(params: SettingRequestParams, settings: Settings, normalize: SettingNormalizer, open: readonly SettingAsk[], client: ClientPreferences | null = null): SettingRequestCheck {
   const reason = typeof params.reason === 'string' ? params.reason.trim() : '';
   if (reason.length === 0 || reason.length > SETTING_REASON_MAX) return { ok: false, message: `reason must hold 1 to ${SETTING_REASON_MAX} characters`, data: { field: 'reason' } };
   const hasKey = params.key !== undefined;
@@ -181,32 +289,66 @@ export function checkSettingRequest(params: SettingRequestParams, settings: Sett
     };
   }
   const { key, value } = params;
-  if (!isRequestableSetting(key)) {
-    return { ok: false, message: `${String(key)} is not a setting an agent may ask about; the keys are ${REQUESTABLE_SETTING_KEYS.join(', ')}`, data: { field: 'key', expected: REQUESTABLE_SETTING_KEYS } };
+  const experiment = typeof key === 'string' ? experimentOf(key) : null;
+  if (!isRequestableSetting(key) && experiment === null) {
+    const keys = [...REQUESTABLE_SETTING_KEYS, ...EXPERIMENT_IDS.map(id => `experiment.${id}`)];
+    return { ok: false, message: `${String(key)} is not a setting an agent may ask about; the keys are ${keys.join(', ')}`, data: { field: 'key', expected: keys } };
   }
   if (value === undefined) return { ok: false, message: 'a change needs a value', data: { field: 'value' } };
-  const normalized = normalize({ [key]: value } as Partial<Settings>);
-  if (!normalized.ok) return { ok: false, message: normalized.message, data: { field: 'value', setting: normalized.field } };
-  const proposed = normalized.patch[key] ?? null;
-  const previous = effectiveSetting(settings, key);
+  let proposed: unknown;
+  let place: SettingPlace;
+  if (experiment !== null) {
+    if (typeof value !== 'boolean') return { ok: false, message: 'an experiment is true or false', data: { field: 'value', expected: 'true or false' } };
+    if (client === null) return { ok: false, message: 'no Boite app has reported its experiments yet; ask the user to open the app', data: { field: 'key', key } };
+    proposed = value;
+    place = experimentPlace(experiment);
+  } else {
+    const normalized = normalize({ [key]: value } as Partial<Settings>);
+    if (!normalized.ok) return { ok: false, message: normalized.message, data: { field: 'value', setting: normalized.field } };
+    proposed = normalized.patch[key as RequestableSetting] ?? null;
+    place = REQUESTABLE_SETTINGS[key as RequestableSetting];
+  }
+  const settingKey = key as RequestableKey;
+  const previous = currentSetting(settingKey, settings, client);
   if (sameSetting(proposed, previous)) return { ok: false, message: `${key} is already ${JSON.stringify(previous)}`, data: { field: 'value', key } };
   if (open.some(card => card.kind === 'change' && card.key === key)) return { ok: false, message: `a card asking about ${key} is already open in this thread`, data: { field: 'key', key } };
   return {
-    ok: true, reason, setting: { kind: 'change', key, value: proposed, previous, ...REQUESTABLE_SETTINGS[key] },
+    ok: true, reason, setting: { kind: 'change', key: settingKey, value: proposed, previous, ...place, ...(experiment !== null && client !== null ? { app: client.app } : {}) },
     // Applied is never an answer: the core says it when the value moves.
     options: [{ id: 'refuse', label: 'Refuse' }],
   };
 }
 
 /**
- * The answer a change card settles with once the settings changed, or null
- * while its setting still holds the value it was asked from.
+ * The answer a change card about a core setting settles with once the
+ * settings changed, or null while its setting still holds the value it was
+ * asked from. An experiment's card never settles here: a core setting moving
+ * flips no switch (`settledExperiment`).
  */
 export function settledSetting(setting: SettingAsk, settings: Settings): QuestionAnswer | null {
-  if (setting.kind !== 'change') return null;
-  const now = effectiveSetting(settings, setting.key);
+  if (setting.kind !== 'change' || experimentOf(setting.key) !== null) return null;
+  const now = effectiveSetting(settings, setting.key as RequestableSetting);
   if (sameSetting(now, setting.previous)) return null;
   return { optionIds: [sameSetting(now, setting.value) ? 'applied' : 'changed'], value: now };
+}
+
+/**
+ * The answer an experiment's card settles with when an app reports, or null.
+ * It settles when that app flipped the switch since its last report (`before`,
+ * null when the core has none), or when the app it was asked from reports a
+ * value other than the one it was asked from: a flip made offline or across a
+ * restart. Another app that merely had a different value, a language change
+ * or a core setting moving settles nothing.
+ */
+export function settledExperiment(setting: SettingAsk, report: ClientPreferences, before: readonly ExperimentId[] | null): QuestionAnswer | null {
+  if (setting.kind !== 'change') return null;
+  const id = experimentOf(setting.key);
+  if (id === null) return null;
+  const on = report.experiments.includes(id);
+  const flipped = before !== null && before.includes(id) !== on;
+  const fromAsker = setting.app === report.app && on !== setting.previous;
+  if (!flipped && !fromAsker) return null;
+  return { optionIds: [on === setting.value ? 'applied' : 'changed'], value: on };
 }
 
 /** What the agent reads once its card settles, under the quoted reason. */

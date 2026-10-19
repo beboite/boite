@@ -1,10 +1,12 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { AGENT_ENV, type ThreadId } from '@boite/contracts';
+import { AGENT_ENV, DEFAULT_DELEGATION_CONFIG, type ThreadId } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
+import { Core } from '../src/core.ts';
+import { Retirements } from '../src/delegation/retirement.ts';
 import { PullRequestWatches } from '../src/pull-request-watch.ts';
 import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
-import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const URL = 'https://github.com/example/repo/pull/7';
 let harness: TestCore | undefined;
@@ -12,9 +14,10 @@ afterEach(async () => { await harness?.stop(); harness = undefined; });
 
 // --- What a read decides ----------------------------------------------------
 
-type Run = { name: string; status?: string; conclusion?: string; required?: boolean; completedAt?: string; workflow?: string };
-const checkRun = (run: Run) => ({ __typename: 'CheckRun', name: run.name, status: run.status ?? 'COMPLETED', conclusion: run.conclusion ?? 'SUCCESS',
-  detailsUrl: `https://github.com/example/repo/actions/runs/1#${run.name}`, startedAt: '2026-10-15T10:00:00Z', completedAt: run.completedAt ?? '2026-10-15T10:05:00Z',
+/** A CI job, or with `context` a commit status such as CodeRabbit's (`status` is then its state). */
+type Run = { name: string; status?: string; conclusion?: string; required?: boolean; startedAt?: string; completedAt?: string; workflow?: string; context?: boolean };
+const checkRun = (run: Run) => run.context ? { __typename: 'StatusContext', context: run.name, state: run.status ?? 'SUCCESS', targetUrl: 'https://coderabbit.ai', createdAt: run.completedAt ?? '2026-10-15T10:05:00Z', isRequired: run.required ?? false } : ({ __typename: 'CheckRun', name: run.name, status: run.status ?? 'COMPLETED', conclusion: run.conclusion ?? 'SUCCESS',
+  detailsUrl: `https://github.com/example/repo/actions/runs/1#${run.name}`, startedAt: run.startedAt ?? '2026-10-15T10:00:00Z', completedAt: run.completedAt ?? '2026-10-15T10:05:00Z',
   isRequired: run.required ?? false, checkSuite: { workflowRun: { workflow: { name: run.workflow ?? 'CI' } } } });
 const detailJson = (runs: Run[], extra: Record<string, unknown> = {}) => JSON.stringify({ data: { viewer: { login: 'meetsu' }, repository: { pullRequest: {
   url: URL, state: 'OPEN', mergeable: 'MERGEABLE', headRefOid: 'a'.repeat(40), baseRefName: 'main', ...extra,
@@ -51,7 +54,7 @@ test('a failure is told once, a rerun failing again is told again, and passing w
   expect(evaluate(grown.next, detail([{ name: 'lint', required: true }, { name: 'test', required: true }, { name: 'e2e', required: true }, { name: 'docs', conclusion: 'FAILURE' }]), null).changes).toEqual([]);
 });
 
-test('remarks count when someone else wrote them or a bot rewrote one, once each, and a conflict is told once', () => {
+test('remarks count when someone else wrote them, once each, a bot rewriting one is not news, and a conflict is told once', () => {
   const memory = initialMemory(since);
   const old = remark('1', 'reviewer', '2026-10-15T08:00:00Z');
   const mine = remark('2', 'meetsu', '2026-10-15T09:30:00Z');
@@ -60,12 +63,12 @@ test('remarks count when someone else wrote them or a bot rewrote one, once each
   const first = evaluate(memory, detail([]), [old, mine, bot, human]);
   expect(first.changes).toEqual([{ kind: 'remarks', remarks: [expect.objectContaining({ id: 'comment:3' }), expect.objectContaining({ id: 'comment:4' })] }]);
   expect(evaluate(first.next, detail([]), [old, mine, bot, human]).changes).toEqual([]);
-  // A bot rewriting its summary is news; a person fixing a typo is not.
-  const edited = { ...bot, body: 'new findings', editedAt: '2026-10-15T09:40:00Z' };
+  // A bot rewriting its comment in place and a person fixing a typo are no news.
+  const edited = { ...bot, body: 'reworded', editedAt: '2026-10-15T09:40:00Z' };
   const fixed = { ...human, editedAt: null };
   const second = evaluate(first.next, detail([]), [old, mine, edited, fixed]);
-  expect(second.changes).toEqual([{ kind: 'remarks', remarks: [expect.objectContaining({ id: 'comment:3', body: 'new findings' })] }]);
-  expect(evaluate(second.next, detail([]), [old, mine, edited, fixed]).changes).toEqual([]);
+  expect(second.changes).toEqual([]);
+  expect(second.next.remarksThrough).toBe('2026-10-15T09:40:00.000Z');
   // The edit time comes from a bot's `updated_at` only.
   const page = parseRemarks('comment', JSON.stringify([
     { id: 9, user: { login: 'coderabbitai[bot]', type: 'Bot' }, body: 'x', created_at: '2026-10-15T09:00:00Z', updated_at: '2026-10-15T09:10:00Z', html_url: URL },
@@ -73,11 +76,138 @@ test('remarks count when someone else wrote them or a bot rewrote one, once each
   ]));
   expect(page.remarks.map(entry => entry.editedAt)).toEqual(['2026-10-15T09:10:00Z', null]);
   expect(page.full).toBe(false);
+  expect(parseRemarks('review-comment', JSON.stringify([
+    { id: 4303360301, user: { login: 'coderabbitai[bot]', type: 'Bot' }, body: 'finding', path: 'a.ts', created_at: '2026-10-15T09:00:00Z', updated_at: '2026-10-15T09:00:00Z', html_url: URL },
+    { id: 4303402494, in_reply_to_id: 4303360301, user: { login: 'coderabbitai[bot]', type: 'Bot' }, body: 'thanks', path: 'a.ts', created_at: '2026-10-15T09:01:00Z', updated_at: '2026-10-15T09:01:00Z', html_url: URL },
+  ])).remarks.map(entry => entry.reply)).toEqual([false, true]);
   // Conflicts: told once, kept while GitHub still computes, cleared by a clean answer.
   const conflict = evaluate(memory, { ...detail([]), mergeable: 'CONFLICTING' }, null);
   expect(conflict.changes).toEqual([{ kind: 'conflict', base: 'main' }]);
   expect(evaluate(conflict.next, { ...detail([]), mergeable: 'UNKNOWN' }, null).next.conflicting).toBe(true);
   expect(evaluate(conflict.next, { ...detail([]), mergeable: 'CONFLICTING' }, null).changes).toEqual([]);
+});
+
+// Bodies as CodeRabbit and mtsu-patrol posted them on beboite/boite #441, #567 and #583, trimmed.
+const QUOTA = '<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n\n> [!WARNING]\n> ## Review limit reached\n> \n> You\'ve used all free OSS reviews for now. Wait for the free limit to reset to keep reviewing this public repository.\n> \n> **Next included review available in 35 minutes.**';
+const WALKTHROUGH = '<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- review_stack_entry_start -->\n\n<a href="https://app.coderabbit.ai/change-stack/beboite/boite/pull/566"><picture><img alt="Review in Change Stack →" height="32"></picture></a>\n\n<!-- walkthrough_start -->\n\n<details>\n<summary><strong>📝 Walkthrough</strong></summary>\n\nThis pull request adds sleeping for idle browser tabs.';
+const CR_REVIEW = (count: number) => `**Actionable comments posted: ${count}**\n\n---\n\n<!-- autofix_checkbox_start -->\n- [ ] <!-- {"checkboxId":"4b0d0e0a"} --> 🪄 Fix comments: Fix CodeRabbit comments on this PR\n<!-- autofix_checkbox_end -->`;
+const CR_OUTSIDE = '**Actionable comments posted: 0**\n\n> [!CAUTION]\n> Some comments are outside the diff and can’t be posted inline due to GitHub limitations.\n> \n> **⚠️ Outside diff range comments (1)**';
+const CR_INLINE = '**🎯 Functional Correctness** | **🟡 Minor** | **⚡ Quick win**\n\n**Pass the kept pause origin to `stop`.**\n\nThe comment on Line 242 says that saving other settings of a paused team keeps the recorded pause origin.';
+const CR_REPLY = '@klNuno Thanks for the fix. The supplied code passes both `pause.by` and `pause.at` from `configure` to `stop`, which forwards them to `pause`.\n\nThe reported regression test covers the original failure path.\n\n---\n\nIf you found this review helpful, would you consider giving us a shout-out on X?';
+const CR_WITHDRAW = '@klNuno, you’re right. I withdraw this finding. Thanks for clarifying the pause contract.\n\n`adopt` records an already-started turn as the step’s attempt. It does not start or authorize a turn.';
+const CR_CONCEDE = '@klNuno You’re right about the retry, but the fix is still incomplete: the cancellation handler does not release its lock.';
+const CR_PUSHBACK = '@klNuno Thanks for the update, but the fix is incomplete: `stop` still drops the recorded origin when the team has live work.';
+const PATROL_REVIEW = '<!-- mtsu-patrol:297ca19b-7b01-4632-8bc8-075409846b6b -->\n\n**Actionable comments posted: 0**\n\n<details>\n<summary>Outside diff range comments (1)</summary>\n\n`L90-L104`: **Missing letter marks landed, pending letter never flashes**';
+const PATROL_SUMMARY = (posted: boolean, head: string) => `<!-- mtsu-patrol:summary -->\n<!-- mtsu-patrol:9017fed0 -->\n\nThis pull request makes a discussion opened on a missing letter land at the end.\n\n${posted ? '**Comments posted**: no critical or major finding.\n\n1 minor in [the review](https://github.com/beboite/boite/pull/441#pullrequestreview-5485468072).' : '**No comments posted**: the reviewers raised no finding.'}\n\n<details>\n<summary>Review details</summary>\n\n- Compared commits: \`e7b2b8c\` to \`${head}\`\n\n</details>`;
+
+test('a bot wakes the agent for findings only: quota notices, summaries, empty counts and in-place rewrites stay quiet', () => {
+  const at = '2026-10-15T09:30:00Z', later = '2026-10-15T09:50:00Z';
+  const told = (remarks: Remark[], memory = initialMemory(since)) => {
+    const result = evaluate(memory, detail([]), remarks);
+    return { ids: result.changes.flatMap(change => change.kind === 'remarks' ? change.remarks.map(entry => entry.id) : []), next: result.next };
+  };
+  const rabbit = 'coderabbitai[bot]', patrol = 'mtsu-patrol[bot]';
+  const kept = [
+    remark('10', rabbit, at, { kind: 'review', id: 'review:10', body: CR_REVIEW(4), state: 'COMMENTED' }),
+    remark('11', rabbit, at, { kind: 'review', id: 'review:11', body: CR_OUTSIDE, state: 'COMMENTED' }),
+    remark('12', patrol, at, { kind: 'review', id: 'review:12', body: PATROL_REVIEW, state: 'CHANGES_REQUESTED' }),
+    remark('13', rabbit, at, { kind: 'review-comment', id: 'review-comment:13', body: CR_INLINE, path: 'packages/core/src/delegation.ts' }),
+    remark('14', rabbit, at, { kind: 'review-comment', id: 'review-comment:14', body: CR_PUSHBACK, path: 'packages/core/src/delegation.ts', reply: true }),
+    remark('15', patrol, at, { body: PATROL_SUMMARY(true, '7723c1b') }),
+    remark('16', 'dependabot[bot]', at, { body: 'Looks like rustls is up-to-date now, so this is no longer needed.' }),
+    remark('17', 'reviewer', at, { kind: 'review', id: 'review:17', body: '', state: 'APPROVED' }),
+    // A finding about rate limits is a finding, inline or in a comment that is not a notice heading.
+    remark('18', rabbit, at, { kind: 'review-comment', id: 'review-comment:18', body: '**🎯 Functional Correctness** | **🟡 Minor**\n\n## Rate limit exceeded is retried forever\n\n`rateLimited` matches "rate limit exceeded" and never gives up.', path: 'packages/core/src/pull-request-watch.ts' }),
+    remark('19', 'dependabot[bot]', at, { body: 'GitHub answered "rate limit exceeded" while fetching the changelog; the update is still opened.' }),
+    // Conceding a point then turning against the fix keeps the thread open.
+    remark('27', rabbit, at, { kind: 'review-comment', id: 'review-comment:27', body: CR_CONCEDE, path: 'packages/core/src/delegation.ts', reply: true }),
+  ];
+  const dropped = [
+    remark('20', rabbit, at, { body: QUOTA }),
+    remark('21', rabbit, at, { body: WALKTHROUGH }),
+    remark('22', rabbit, at, { kind: 'review', id: 'review:22', body: CR_REVIEW(0), state: 'COMMENTED' }),
+    remark('23', rabbit, at, { kind: 'review', id: 'review:23', body: '', state: 'APPROVED' }),
+    remark('24', patrol, at, { body: PATROL_SUMMARY(false, '66df392') }),
+    remark('25', rabbit, at, { kind: 'review-comment', id: 'review-comment:25', body: CR_REPLY, path: 'packages/core/src/delegation.ts', reply: true }),
+    remark('26', rabbit, at, { kind: 'review-comment', id: 'review-comment:26', body: CR_WITHDRAW, path: 'packages/core/src/workflows.ts', reply: true }),
+  ];
+  const first = told([...kept, ...dropped]);
+  expect(first.ids).toEqual(kept.map(entry => entry.id));
+
+  // The walkthrough rewritten into the quota notice and back, the inline finding marked addressed: all quiet.
+  const rewritten = [
+    { ...dropped[1]!, body: QUOTA, editedAt: '2026-10-15T09:40:00Z' },
+    { ...kept[3]!, body: `${CR_INLINE}\n\n✅ Addressed in commit ca0bf65`, editedAt: '2026-10-15T09:41:00Z' },
+    { ...kept[5]!, body: PATROL_SUMMARY(false, '9a1b2c3'), editedAt: '2026-10-15T09:42:00Z' },
+  ];
+  const second = told(rewritten, first.next);
+  expect(second.ids).toEqual([]);
+  expect(told([{ ...dropped[1]!, body: WALKTHROUGH, editedAt: later }], second.next).ids).toEqual([]);
+  // The summary rewritten for a new head that again names findings is news, once.
+  const head = { ...kept[5]!, body: PATROL_SUMMARY(true, 'd4e5f6a'), editedAt: later };
+  const third = told([head], second.next);
+  expect(third.ids).toEqual(['comment:15']);
+  // Read again with only its markup moved (a later reread at the same second): no news.
+  expect(told([{ ...head, body: head.body.replace('<!-- mtsu-patrol:9017fed0 -->', '<!-- mtsu-patrol:00000000 -->') }], { ...third.next, remarkIds: [] }).ids).toEqual([]);
+  // A bot's new comment that is only a notice stays quiet; a person's always counts.
+  expect(told([remark('30', rabbit, later, { body: '> [!WARNING]\n> ## Rate limit exceeded\n> Please wait 12 minutes.' }), remark('31', 'reviewer', later)], first.next).ids).toEqual(['comment:31']);
+  // Watches saved before bodies were kept read on.
+  const saved = structuredClone(first.next);
+  delete saved.bodies;
+  expect(told([remark('32', 'reviewer', later)], saved).ids).toEqual(['comment:32']);
+});
+
+test('CI wakes on its first failure and on its verdict, not on each check that finishes', () => {
+  const head = 'a'.repeat(40);
+  const title = { name: 'PR title', workflow: 'pr title', required: true };
+  const job = (name: string, more: Partial<Run> = {}) => ({ name, workflow: 'ci', ...more });
+  const running = { status: 'IN_PROGRESS', conclusion: '' };
+  // "CI required" needs every other job: it starts once they all ended.
+  const gate = (more: Partial<Run> = {}) => job('CI required', { required: true, startedAt: '2026-10-15T10:06:00Z', completedAt: '2026-10-15T10:06:10Z', ...more });
+  const rabbit = { name: 'CodeRabbit', context: true, status: 'PENDING' };
+  let memory = initialMemory(since);
+  const step = (runs: Run[]) => { const result = evaluate(memory, detail(runs), null); memory = result.next; return result.changes; };
+  // beboite/boite requires "PR title", done in seconds, and "CI required", which exists only once every job finished.
+  expect(step([title, job('Core tests', running), job('Build UI', running), rabbit])).toEqual([]);
+  expect(step([title, job('Core tests'), job('Build UI', running), rabbit])).toEqual([]);
+  expect(step([title, job('Core tests'), job('Build UI'), gate(running), rabbit])).toEqual([]);
+  expect(step([title, job('Core tests'), job('Build UI'), gate(), rabbit])).toEqual([{ kind: 'passed', head, count: 2, required: true }]);
+  // CodeRabbit's status settling, a title edit rerunning "PR title": no second "passed".
+  expect(step([title, job('Core tests'), job('Build UI'), gate(), { ...rabbit, status: 'SUCCESS' }])).toEqual([]);
+  expect(step([{ ...title, ...running }, job('Core tests'), job('Build UI'), gate()])).toEqual([]);
+  expect(step([title, job('Core tests'), job('Build UI'), gate()])).toEqual([]);
+
+  // A new head: the first failure wakes at once, the next ones wait for the jobs to settle.
+  memory = { ...memory, head: 'old' };
+  const failedNames = (changes: ReturnType<typeof step>) => changes.flatMap(change => change.kind === 'failed' ? change.checks.map(check => check.name) : []);
+  expect(failedNames(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('Build UI', running), job('E2E', running)]))).toEqual(['ci / Core tests']);
+  expect(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('Build UI', { conclusion: 'FAILURE' }), job('E2E', running)])).toEqual([]);
+  expect(failedNames(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('Build UI', { conclusion: 'FAILURE' }), job('E2E'), gate({ conclusion: 'FAILURE' })])))
+    .toEqual(['ci / Build UI', 'ci / CI required']);
+  // The required gate failing alone after a job already did says nothing new.
+  memory = { ...memory, head: 'older' };
+  expect(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('E2E', running)])).toHaveLength(1);
+  expect(step([title, job('Core tests', { conclusion: 'FAILURE' }), job('E2E'), gate({ conclusion: 'FAILURE' })])).toEqual([]);
+  // A required job of its own failing after another job did is news: it ran beside it, it does not sum it up.
+  memory = { ...memory, head: 'oldest' };
+  expect(failedNames(step([title, job('lint', { conclusion: 'FAILURE' }), job('security', { required: true, ...running })]))).toEqual(['ci / lint']);
+  expect(failedNames(step([title, job('lint', { conclusion: 'FAILURE' }), job('security', { required: true, conclusion: 'FAILURE', completedAt: '2026-10-15T10:07:00Z' })]))).toEqual(['ci / security']);
+  memory = { ...memory, head: 'older' };
+  step([title, job('Core tests', { conclusion: 'FAILURE' }), job('E2E'), gate({ conclusion: 'FAILURE' })]);
+  // Rerun after the fix.
+  step([title, job('Core tests', running), job('Build UI', running), job('E2E'), gate(running)]);
+  // Rerun and passing: the verdict is news again after a failure.
+  expect(step([title, job('Core tests', running), job('Build UI', running), job('E2E'), gate(running)])).toEqual([]);
+  expect(step([title, job('Core tests'), job('Build UI'), job('E2E'), gate()])).toEqual([{ kind: 'passed', head, count: 2, required: true }]);
+
+  // Where nothing is required: one "passed" per head, a check joining later is no news, a commit status pending for good holds nothing.
+  memory = initialMemory(since);
+  expect(step([job('test'), rabbit])).toEqual([{ kind: 'passed', head, count: 1, required: false }]);
+  expect(step([job('test'), job('label'), rabbit])).toEqual([]);
+  // Commit statuses alone are the CI.
+  memory = initialMemory(since);
+  expect(step([{ name: 'jenkins', context: true, status: 'PENDING' }])).toEqual([]);
+  expect(step([{ name: 'jenkins', context: true, status: 'SUCCESS' }])).toEqual([{ kind: 'passed', head, count: 1, required: false }]);
 });
 
 test('a burst folds into one set of changes, and failures of an older head drop once the new head passed', () => {
@@ -102,21 +232,33 @@ interface FakeGitHub {
   reviews: unknown[];
   inline: unknown[];
   updatedAt: string;
+  /** Who merged or closed it. */
+  closedBy: string;
   /** Thrown instead of answering, once per call while set. */
   failure: string | null;
+  /** Thrown by the next closer query only, then cleared. */
+  closerFailure: string | null;
   calls: string[];
 }
 
 function fakeGitHub(): FakeGitHub {
-  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', failure: null, calls: [] };
+  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', closedBy: 'meetsu', failure: null, closerFailure: null, calls: [] };
 }
 
 /** What `gh` prints for each call a watch makes. */
 async function answer(github: FakeGitHub, args: string[]): Promise<string> {
   const query = args.find(arg => arg.startsWith('query='));
   const path = args.at(-1)!;
-  github.calls.push(query ? (query.includes('viewer') ? 'detail' : 'fingerprint') : path.replace(/^repos\/example\/repo\//, ''));
+  github.calls.push(query ? (query.includes('mergedBy') ? 'closer' : query.includes('viewer') ? 'detail' : 'fingerprint') : path.replace(/^repos\/example\/repo\//, ''));
   if (github.failure) throw new Error(github.failure);
+  if (query?.includes('mergedBy')) {
+    const failure = github.closerFailure;
+    github.closerFailure = null;
+    if (failure) throw new Error(failure);
+    const by = { login: github.closedBy };
+    return JSON.stringify({ data: { viewer: { login: 'meetsu' }, repository: { pullRequest: { state: github.state, mergedBy: github.state === 'MERGED' ? by : null,
+      timelineItems: { nodes: github.state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
+  }
   if (query?.includes('viewer')) return detailJson(github.runs, { state: github.state, mergeable: github.mergeable, headRefOid: github.head });
   if (query) {
     const counts = new Map<string, number>();
@@ -210,12 +352,44 @@ test('a watch reads first without waking, wakes once per change with links, and 
   await settled(threadId);
   expect(wakeText(threadId, wakes(threadId)[2]!.id)).toContain('The branch now conflicts with main.');
 
-  // A merge ends the watch without a wake.
+  // The agent's own merge ends the watch without a wake.
   github.state = 'MERGED';
   await drive();
+  expect(github.calls).toContain('closer');
   expect(harness!.core.pullRequestWatches.of(threadId)).toEqual([]);
   expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toBeUndefined();
   expect(wakes(threadId)).toHaveLength(3);
+});
+
+test('a merge or a close by someone else is told with what still waited, a failed closer read included, then the watch ends', async () => {
+  const { owner, threadId, github, watches, drive } = await watchedThread();
+  await owner.call('threads.watchPullRequest', { threadId });
+  await owner.call('turns.start', { threadId, prompt: 'wait [sleep:600]' });
+  for (let i = 0; i < 100 && harness!.core.journal.getThread(threadId)?.status !== 'running'; i++) await Bun.sleep(10);
+  github.comments = [comment(1, 'reviewer', later())];
+  github.updatedAt = '2026-10-15T10:00:00Z';
+  await drive();
+  github.state = 'MERGED';
+  github.closedBy = 'maintainer';
+  // GitHub fails to name the closer once: the watch backs off like any failed read and asks again.
+  github.closerFailure = 'error connecting to api.github.com';
+  github.calls = [];
+  await drive();
+  expect(github.calls.filter(call => call === 'closer')).toHaveLength(2);
+  // Told nothing yet, read no more, and the watch stays until it is told.
+  github.calls = [];
+  await drive();
+  expect(github.calls).toEqual([]);
+  expect(watches.of(threadId)).toHaveLength(1);
+  await settled(threadId);
+  await drive();
+  await settled(threadId);
+  expect(wakes(threadId)).toHaveLength(1);
+  const text = wakeText(threadId, wakes(threadId)[0]!.id);
+  expect(text).toContain('reviewer: "comment 1"');
+  expect(text).toContain('maintainer merged the pull request; its watch ended.');
+  expect(watches.of(threadId)).toEqual([]);
+  expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toBeUndefined();
 });
 
 test('changes while the agent works wait for the turn to end and go out as one message', async () => {
@@ -318,6 +492,131 @@ test('an agent watches its own thread; a paired phone may stop a watch, never st
     await expect(phone.call('threads.watchPullRequest', { threadId })).rejects.toThrow('owner');
     expect(await phone.call('threads.unwatchPullRequest', { threadId })).toEqual([]);
   } finally { agent.close(); phone.close(); }
+});
+
+/** A parent with delegation on and a delegated agent that has the pull request linked; the agent's own token watches it. */
+async function watchingChild(setup: Awaited<ReturnType<typeof watchedThread>>, requestId: string) {
+  const { owner, threadId } = setup;
+  const parent = harness!.core.threads.require(threadId);
+  await owner.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: parent.providerId, accountId: parent.accountId, model: parent.model!, effort: null }] } });
+  const child = (await owner.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Open the pull request and see it to green', requestId })).thread.id as ThreadId;
+  await settled(child);
+  harness!.core.journal.setSetting(`linked-pull-requests:${child}`, harness!.core.journal.getSetting(`linked-pull-requests:${threadId}`));
+  const agent = await connect(harness!.url, harness!.core.agents.tokenFor(child), { client: { name: 'boite-cli', version: 'test' } });
+  try { await agent.call('threads.watchPullRequest', { threadId: child }); } finally { agent.close(); }
+  return child;
+}
+
+test('a delegated agent watches its pull request: the wake is its turn, its answer goes to the parent, and its stop ends the watch', async () => {
+  const setup = await watchedThread();
+  const { owner, threadId, github, drive, watches } = setup;
+  const child = await watchingChild(setup, 'first');
+  const sibling = await watchingChild(setup, 'second');
+  expect(watches.of(child)).toHaveLength(1);
+
+  github.runs = [{ name: 'test', conclusion: 'FAILURE' }];
+  github.updatedAt = '2026-10-15T09:31:00Z';
+  await drive();
+  await settled(child);
+  expect(wakes(child)).toHaveLength(1);
+  expect(wakeText(child, wakes(child)[0]!.id)).toContain('Checks failed on aaaaaaa');
+  // What the wake turn answers comes back to the parent like any result of the subagent.
+  const result = () => harness!.core.journal.db.query('SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND request_id = ?').get(child, threadId, `result:${wakes(child)[0]!.id}`);
+  await waitFor(() => result() !== null);
+
+  // The parent stopping this subagent ends its watch, not its sibling's.
+  await owner.call('delegation.stop', { threadId, agentId: child });
+  expect(watches.of(child)).toEqual([]);
+  expect(harness!.core.journal.getSetting(`pr-watches:${child}`)).toBeUndefined();
+  expect(watches.of(sibling)).toHaveLength(1);
+  // Its parent archived, the subagent watches nothing either.
+  await owner.call('threads.archive', { threadId });
+  expect(watches.of(sibling)).toEqual([]);
+});
+
+test('a persistent agent takes its next work and keeps a subagent that still watches its pull request until the watch ends', async () => {
+  const setup = await watchedThread();
+  const { threadId, watches } = setup;
+  const child = await watchingChild(setup, 'episode');
+  const idle = (await setup.owner.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Read the logs', requestId: 'idle' })).thread.id as ThreadId;
+  await settled(idle);
+  await waitFor(() => (harness!.core.journal.db.query("SELECT COUNT(*) AS n FROM delegation_messages WHERE recipient_id = ? AND status = 'delivered'").get(threadId) as { n: number }).n >= 2);
+  await settled(threadId);
+  const delegation = harness!.core.delegation;
+  const archived = (id: ThreadId) => harness!.core.journal.getThread(id)?.archived;
+  // The resident runtime starts each work item through beginEpisode: the fresh work runs, the settled subagent retires, the watching one stays.
+  const accepted = delegation.beginEpisode(threadId, 'next-work-item', delegation.config(threadId));
+  expect({ accepted, idle: archived(idle), child: archived(child), watches: watches.of(child).length }).toEqual({ accepted: true, idle: true, child: false, watches: 1 });
+  // Its watch over, it retires too.
+  watches.unwatch(child);
+  await waitFor(() => archived(child) === true);
+});
+
+for (const ending of ['merged by someone else', 'closed by someone else', 'a failed turn']) {
+  test(`a subagent a past episode left watching delivers its last result before it retires: ${ending}`, async () => {
+    const setup = await watchedThread();
+    const { owner, threadId, github, drive, watches } = setup;
+    const child = await watchingChild(setup, 'episode');
+    await waitFor(() => harness!.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND status = 'delivered'").get(child, threadId) !== null);
+    await settled(threadId);
+    expect(harness!.core.delegation.beginEpisode(threadId, 'next-work-item', harness!.core.delegation.config(threadId))).toBe(true);
+    const before = harness!.core.journal.listTurns(child).map(turn => turn.id);
+    if (ending === 'a failed turn') await owner.call('turns.start', { threadId: child, prompt: '[error]' });
+    else {
+      github.state = ending.startsWith('merged') ? 'MERGED' : 'CLOSED';
+      github.closedBy = 'someone-else';
+      await drive();
+    }
+    await waitFor(() => harness!.core.journal.getThread(child)?.archived === true);
+    expect(watches.of(child)).toEqual([]);
+    const last = harness!.core.journal.listTurns(child).find(turn => !before.includes(turn.id))!;
+    expect(harness!.core.journal.db.query('SELECT status FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(child, `result:${last.id}`)).toEqual({ status: 'delivered' });
+  });
+}
+
+test('a restart between a retiring subagent\'s last delivery and its archive retires it on start', async () => {
+  const child = await retiringOnDisk();
+  const restarted = new Core({ dataDir: harness!.dataDir, token: harness!.token });
+  try {
+    expect(restarted.threads.require(child).archived).toBe(true);
+    expect(restarted.journal.getSetting(`delegation-retiring:${child}`)).toBeUndefined();
+  } finally { await restarted.close(); }
+});
+
+test('a retirement that throws on start is logged and the core still starts', async () => {
+  const child = await retiringOnDisk();
+  const retire = spyOn(Retirements.prototype, 'check').mockImplementation(() => { throw new Error('journal busy'); });
+  let restarted: Core;
+  try { restarted = new Core({ dataDir: harness!.dataDir, token: harness!.token }); } finally { retire.mockRestore(); }
+  try {
+    expect(restarted.threads.require(child).archived).toBe(false);
+    expect((await restarted.logs.query({ threadId: child, level: 'warn' })).some(record => record.event === 'delegation.retire_failed' && record.message.includes('journal busy'))).toBe(true);
+  } finally { await restarted.close(); }
+});
+
+/** A retiring subagent whose watch ended on disk, its core gone down before the archive followed. */
+async function retiringOnDisk(): Promise<ThreadId> {
+  const setup = await watchedThread();
+  const { threadId } = setup;
+  const child = await watchingChild(setup, 'episode');
+  await waitFor(() => harness!.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND status = 'delivered'").get(child, threadId) !== null);
+  await settled(threadId);
+  expect(harness!.core.delegation.beginEpisode(threadId, 'next-work-item', harness!.core.delegation.config(threadId))).toBe(true);
+  harness!.core.journal.deleteSetting(`pr-watches:${child}`);
+  await harness!.core.close();
+  return child;
+}
+
+test('the parent\'s Stop ends its subagents\' watches, and a workflow step still cannot watch', async () => {
+  const setup = await watchedThread();
+  const { owner, threadId, watches } = setup;
+  const child = await watchingChild(setup, 'first');
+  expect(watches.of(child)).toHaveLength(1);
+  await owner.call('turns.stop', { threadId });
+  expect(watches.of(child)).toEqual([]);
+  // A child the core runs for a plan answers it once: no watch to wake it again.
+  spyOn(harness!.core.delegation, 'delegated').mockReturnValue(false);
+  await expect(owner.call('threads.watchPullRequest', { threadId: child })).rejects.toThrow('a workflow step or a reviewer cannot watch');
 });
 
 test('archive ends the watches and their saved state, and a merged pull request has nothing to watch', async () => {

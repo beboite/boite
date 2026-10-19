@@ -139,6 +139,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'questions.answer',
   // Paired phones can dismiss the same question cards as the owner's chat.
   'questions.skip',
+  // A phone says its own language and experiments, so the agent reads the screen the user reads; nothing the core trusts.
+  'client.preferences',
   // Read-only Changes and Files panels on the phone: the thread's own changes and files.
   // The core runs git itself (no device command), refuses a diff against anything but
   // HEAD (core access.ts), and holds every path to a thread whose real working directory

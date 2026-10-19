@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { AGENT_ENV, AGENT_SETTING_KEYS, SETTINGS_PAGES, VIEW_HELP } from '@boite/contracts';
 import { VIEW_EXAMPLE } from './view-example.ts';
-import type { AgentTask, GitChange, PanelSurface, Todo } from '@boite/contracts';
+import type { AgentTask, GitChange, PanelSurface, SettingsReading, Todo } from '@boite/contracts';
 import { connect } from './client.ts';
 import type { CoreClient } from './client.ts';
 import { CORE_VERSION } from './version.ts';
@@ -85,11 +85,15 @@ ${CONTROL_HELP}
                                  show the user the draft before submit
   ask <question> [option ...]    ask the user without stopping; the answer
                                  arrives later as a message (--multiple)
-  settings [key]                 Boite settings you may ask about: value, page
+  settings [key]                 Boite settings you may ask about: value, page,
+                                 the name the user's app shows; first, the
+                                 language the app speaks; experiments last
   settings request <key> <value> --why <text>
-                                 a card asking the user to change one; value
-                                 is JSON or a bare word; the outcome arrives as
-                                 a message (applied, changed or refused)
+                                 a card with the switch or value itself, for
+                                 the user to change in the chat; value is JSON
+                                 or a bare word (experiment.<id> true|false);
+                                 the outcome arrives as a message (applied,
+                                 changed or refused)
   settings open <page>[#<card>] --why <text>
                                  a card with a button to that Settings page,
                                  for what is not one value: a provider login,
@@ -573,7 +577,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         print([
           `requested: ${asked.questionId}`,
           ...(setting.kind === 'change'
-            ? [`change: ${setting.key} ${JSON.stringify(setting.previous)} -> ${JSON.stringify(setting.value)}`, setting.sensitive ? 'card: opens Settings at the setting; the user changes it there' : 'card: Apply, or open Settings at the setting']
+            ? [`change: ${setting.key} ${JSON.stringify(setting.previous)} -> ${JSON.stringify(setting.value)}`, typeof setting.value === 'boolean' ? 'card: the switch itself, in the chat' : 'card: Apply in the chat, or open Settings at the setting']
             : [`card: opens Settings at ${setting.section === null ? setting.page : `${setting.page}#${setting.section}`}`]),
           'Keep working. The outcome arrives as a message quoting your reason; without one, nothing changed.',
         ], asked);
@@ -607,10 +611,11 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         return;
       }
       if (rest.length > 1) throw new Usage('settings expects a key, request <key> <value> or open <page>');
-      const readings = await client.call('agent.settings', { threadId });
-      const shown = action === undefined ? readings : readings.filter(reading => reading.key === action);
+      const read = await client.call('agent.settings', { threadId });
+      const shown = action === undefined ? read.settings : read.settings.filter(reading => reading.key === action);
       if (shown.length === 0) throw new Usage(`settings: unknown key ${action}; boite settings lists them`);
-      print(shown.map(reading => `${reading.key} ${JSON.stringify(reading.value)} ${reading.page}#${reading.section}${reading.sensitive ? ' (changed from Settings only)' : ''}`), action === undefined ? readings : shown[0]);
+      const rows = shown.map(reading => `${reading.key} ${JSON.stringify(reading.value)} ${reading.page}#${reading.section}${reading.label === undefined ? '' : ` ${JSON.stringify(reading.label)}`}${reading.sensitive ? ' (sensitive)' : ''}`);
+      print(action === undefined ? [appLine(read.app), ...rows] : rows, action === undefined ? read : shown[0]);
     },
     ask: async () => {
       // An agent once ran `boite ask help` for this text and drew a card reading "help".
@@ -741,4 +746,16 @@ export function watchStatus(watch: import('@boite/contracts').PullRequestWatch):
   const { total, running, failed } = seen.checks;
   const checks = total === 0 ? 'no checks' : `${total} checks, ${running} running, ${failed} failed`;
   return [`head ${seen.head}`, checks, seen.conflicting ? `conflicts with ${seen.base}` : null, paused].filter(Boolean).join('; ');
+}
+
+/**
+ * The first line of `boite settings`: which language the user reads Boite in,
+ * so the agent names a setting the way the screen does, and where experiments
+ * come from.
+ */
+function appLine(app: SettingsReading['app']): string {
+  if (app === null) return 'app: no Boite app has reported yet; experiments are unknown and names are the keys';
+  const language = app.language === 'fr' ? 'French' : 'English';
+  const where = app.client === 'shell' ? `the desktop app${app.device === null ? '' : ` on ${JSON.stringify(app.device)}`}` : app.device === null ? 'the web app' : `the web app on a ${app.device}`;
+  return `app: ${where} speaks ${language}; quoted names are what the user sees there, experiments are that app's own`;
 }

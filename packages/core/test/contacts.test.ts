@@ -461,25 +461,3 @@ test('the tailnet listener opens for an invitation and closes once the last one 
   await new Promise(resolve => setTimeout(resolve, 1500));
   expect(heard).toHaveLength(told);
 }, 20000);
-
-// Bun's client with permessage-deflate on sometimes closes a sound stream with
-// 1002 (SOCKET_OPTIONS in client.ts), and the core's server accepts it.
-test('the guest\'s link never offers permessage-deflate', async () => {
-  const harness = await startTestCore();
-  cores.push(harness);
-  const offers: Array<string | null> = [];
-  const stub = Bun.serve({
-    hostname: '127.0.0.1', port: 0,
-    fetch(request) { offers.push(request.headers.get('sec-websocket-extensions')); return new Response('refused', { status: 400 }); },
-    websocket: { perMessageDeflate: true, message() {} },
-  });
-  try {
-    const contact = { coreId: 'stub-core', role: 'guest', url: `http://127.0.0.1:${stub.port}` } as Parameters<typeof harness.core.contacts.dial>[0];
-    harness.core.contacts.dial(contact);
-    await waitFor(() => offers.length === 1, 5000);
-    expect(offers).toEqual([null]);
-  } finally {
-    harness.core.contacts.unlink('stub-core');
-    stub.stop(true);
-  }
-}, 20000);

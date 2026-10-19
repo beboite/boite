@@ -255,6 +255,11 @@ export function titleFrom(prompt: string, max = 60): string {
 }
 
 /** A project's name as the user reads it: the drafts in the app's own language, any other as the core named it. */
+/** A folder with the user's home folded to `~`, the part that tells two projects apart. */
+export function homePath(path: string): string {
+  return path.replace(/^(\/home\/[^/]+|\/Users\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)(?=[/\\]|$)/, '~');
+}
+
 export function projectName(project: { name: string; kind?: 'drafts' } | null | undefined): string {
   if (!project) return '';
   return project.kind === 'drafts' ? strings.drafts.name : project.name;
