@@ -22,10 +22,11 @@ function steps(job: string): Map<string, string> {
 test('the Windows E2E steps keep Chrome profiles and data directories on the runner temp drive', () => {
   // On C:, Chrome held page loads for 15 to 60 s after the server had answered
   // (PR #513): the shards failed on a different test in about one run in four.
-  const e2e = steps('e2e');
+  // The first shard holds the steps; the others alias them (`*e2e-steps`).
+  const e2e = steps('e2e-1');
   for (const name of ['Prepare end-to-end tests', 'Browser and core end-to-end tests']) {
     const step = e2e.get(name);
-    if (step === undefined) throw new Error(`ci.yml: the e2e job has no step named ${name}`);
+    if (step === undefined) throw new Error(`ci.yml: the e2e-1 job has no step named ${name}`);
     expect(step).toMatch(/^ {8}env:\n(?: {10}\S.*\n)*? {10}TEMP: \$\{\{ runner\.temp \}\}$/m);
     expect(step).toMatch(/^ {8}env:\n(?: {10}\S.*\n)*? {10}TMP: \$\{\{ runner\.temp \}\}$/m);
   }
