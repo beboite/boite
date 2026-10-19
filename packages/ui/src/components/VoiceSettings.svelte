@@ -69,7 +69,8 @@
   /**
    * Every choice applies at once, a path when its field loses focus, typed keys with their button.
    * One write at a time, each sending the fields as they are when its turn comes, so an older answer
-   * never lands after a newer one; a path typed during a write stays, only this write's patch lands.
+   * never lands after a newer one. A field edited while a write is out keeps the edit, the patched
+   * field included: the answer lands its patch only where the field still holds what it held then.
    */
   function apply(patch: Partial<SpeechConfig> = {}, keys: { groqKey?: string; openrouterKey?: string } = {}): Promise<void> {
     const run = applying.then(() => write(patch, keys));
@@ -78,11 +79,13 @@
   }
   async function write(patch: Partial<SpeechConfig>, keys: { groqKey?: string; openrouterKey?: string }) {
     if (!config || !store.client) return;
+    const before = { ...config };
     const next = { ...config, ...patch };
     busy = true; saved = false; error = '';
     try {
       status = await store.client.call('speech.configure', { ...next, ...keys });
-      config = { ...config, ...patch };
+      const landed = Object.fromEntries(Object.entries(patch).filter(([key]) => config![key as keyof SpeechConfig] === before[key as keyof SpeechConfig]));
+      config = { ...config!, ...landed };
       if (keys.groqKey !== undefined) groqKey = '';
       if (keys.openrouterKey !== undefined) openrouterKey = '';
       flash();
