@@ -191,12 +191,19 @@ export class Terminals {
     return last;
   }
 
-  /** That project's board, in the drawer of that conversation. */
+  /**
+   * That project's board, in the drawer of that conversation. A Back, a page
+   * or another conversation picked while it opens is a newer navigation: the
+   * board then stays hidden.
+   */
   async openProjectBoard(projectId: ProjectId): Promise<void> {
+    const s = this.ctx.store;
     const thread = this.projectBoardThread(projectId);
     if (!thread) return;
-    await this.ctx.store.open(thread.id);
-    if (this.ctx.store.openThread?.id === thread.id) this.showBoard();
+    const opening = s.open(thread.id);
+    const generation = s.navigationGeneration;
+    await opening;
+    if (s.navigationGeneration === generation && s.page === 'chat' && s.openThread?.id === thread.id) this.showBoard();
   }
 
   private pickTab(tab: DrawerTab): void {

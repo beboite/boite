@@ -34,13 +34,21 @@
 
   /** Each shared project's board: the conversation it opens in, null when the core serves none. */
   const boards = $derived(new Map(contact.grants.map(grant => [grant.projectId, view.store.projectBoardThread(grant.projectId)])));
-  /** Projects whose cards were asked for once; `todos.updated` keeps them current after. */
-  const asked = new Set<ProjectId>();
+  /**
+   * Projects whose cards were read since the connection last became ready;
+   * `todos.updated` keeps them current after. A reconnect may have missed an
+   * update, so it reads them again, and a read that failed is tried again.
+   */
+  const read = new Set<ProjectId>();
   $effect(() => {
+    if (view.store.connection !== 'ready') { read.clear(); return; }
     for (const [projectId, thread] of boards) {
-      if (!thread || asked.has(projectId) || untrack(() => view.store.todos[projectId]) !== undefined) continue;
-      asked.add(projectId);
-      void untrack(() => view.store.loadTodos(thread.id));
+      if (!thread || read.has(projectId)) continue;
+      read.add(projectId);
+      untrack(() => {
+        const before = view.store.todos[projectId];
+        void view.store.loadTodos(thread.id).then(() => { if (view.store.todos[projectId] === before) read.delete(projectId); });
+      });
     }
   });
 

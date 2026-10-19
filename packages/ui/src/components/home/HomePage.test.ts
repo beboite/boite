@@ -125,6 +125,57 @@ test('a shared project shows its board as four counts that follow its cards; a c
   await vi.waitFor(() => expect([store.page, store.openThread?.projectId, store.boardShown]).toEqual(['chat', 'p-boite', true]));
 });
 
+test('the counts read again after a reconnect that may have missed an update, and after a first read that failed', async () => {
+  setExperiment('goal2', true);
+  setExperiment('contacts', true);
+  const store = new Store();
+  store.machineId = 'home';
+  const client = new FakeClient({ delayMs: 0 });
+  const call = client.call.bind(client);
+  let refuse = true;
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method === 'todos.list' && refuse) { refuse = false; return Promise.reject(new Error('dropped')); }
+    return call(method as never, params as never);
+  }) as typeof client.call);
+  store.attach(client);
+  await store.connect();
+  opened = store;
+  workspace.machines = [{ id: 'home', label: 'Home', store }];
+  workspace.active = store;
+  store.showHome('core-chris');
+  components.push(mount(HomePage, { target: document.body, props: { store } }));
+  const tallies = () => [...one('contact-board-p-boite')?.querySelectorAll('[data-column]') ?? []].map(node => node.textContent);
+  await vi.waitFor(() => { flushSync(); expect(tallies()).toEqual(['0', '0', '0', '0']); });
+  expect(refuse).toBe(false);
+
+  const reconnect = async () => { store.connection = 'connecting'; flushSync(); store.connection = 'ready'; flushSync(); };
+  await reconnect();
+  await vi.waitFor(() => { flushSync(); expect(tallies()).toEqual(['1', '0', '1', '1']); });
+
+  // What the core holds moved while the link was down, and no update came.
+  store.todos = { ...store.todos, 'p-boite': [] };
+  await vi.waitFor(() => { flushSync(); expect(tallies()).toEqual(['0', '0', '0', '0']); });
+  await reconnect();
+  await vi.waitFor(() => { flushSync(); expect(tallies()).toEqual(['1', '0', '1', '1']); });
+});
+
+test("a board asked for from a contact's page stays hidden when another page is picked while its conversation opens", async () => {
+  setExperiment('goal2', true);
+  const store = await draw('core-chris');
+  await vi.waitFor(() => { flushSync(); expect(one('contact-board-p-boite')).not.toBeNull(); });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const open = store.open.bind(store);
+  vi.spyOn(store, 'open').mockImplementation(async (...args) => { const opening = open(...args); await gate; return opening; });
+
+  one<HTMLButtonElement>('contact-board-p-boite')!.click();
+  await vi.waitFor(() => expect(store.openThread?.projectId).toBe('p-boite'));
+  store.showSettings();
+  release();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect([store.page, store.boardShown]).toEqual(['settings', false]);
+});
+
 test('accept shares the project picked in the menu; refuse waits for a reason; remove asks first and goes back to the page that adds one', async () => {
   const store = await draw();
   expect(one('home-waiting')).not.toBeNull();
