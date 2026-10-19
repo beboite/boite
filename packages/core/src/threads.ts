@@ -48,6 +48,7 @@ import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/op
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
 import { LimitResumes } from './threads/limit-resume.ts';
+import { AutoContinues } from './threads/auto-continue.ts';
 import { ThreadTitles } from './threads/retitle.ts';
 import { SideQuestions } from './threads/side-questions.ts';
 import { messagePage, threadSnapshot, type MessagePage } from './threads/snapshot.ts';
@@ -113,6 +114,8 @@ export class ThreadStore {
   readonly cacheKeepalive: CacheKeepalive;
   /** Threads a usage limit stopped, resumed once its window resets (`threads/limit-resume.ts`). */
   readonly limitResumes: LimitResumes;
+  /** Turns stopped before their answer, resumed by themselves (`threads/auto-continue.ts`). */
+  readonly autoContinue: AutoContinues;
   private readonly recovery: ThreadRecovery;
   /** Turns a restart hands to the next core (`threads/handoff.ts`). */
   readonly handoff: RestartHandoff;
@@ -138,6 +141,7 @@ export class ThreadStore {
     this.autoCompact = new AutoCompaction(core, this);
     this.cacheKeepalive = new CacheKeepalive(core, this);
     this.limitResumes = new LimitResumes(core, this);
+    this.autoContinue = new AutoContinues(core, this);
     this.recovery = new ThreadRecovery(core);
     this.handoff = new RestartHandoff(core, this);
   }
@@ -701,12 +705,12 @@ export class ThreadStore {
 
   /**
    * Cancels what the core planned to try again on the thread: a capacity retry
-   * its turn waits for, which then fails with the refusal, or a resume after a
-   * usage limit. False when nothing was planned.
+   * its turn waits for, which then fails with the refusal, a resume after a
+   * usage limit, or an automatic resume. False when nothing was planned.
    */
   cancelRetry(threadId: ThreadId): boolean {
     this.require(threadId);
-    return this.runner.cancelRetry(threadId) || this.limitResumes.cancel(threadId, 'cancelled by the user');
+    return this.runner.cancelRetry(threadId) || this.limitResumes.cancel(threadId, 'cancelled by the user') || this.autoContinue.cancel(threadId, 'cancelled by the user');
   }
 
   stopTurn(threadId: ThreadId): boolean {
@@ -714,7 +718,7 @@ export class ThreadStore {
     this.handoff.forget(threadId);
     this.cacheKeepalive.forget(threadId);
     // Stop on a thread waiting for a usage limit to reset means: do not resume it.
-    const plannedResume = this.limitResumes.cancel(threadId, 'the thread was stopped');
+    const plannedResume = this.limitResumes.cancel(threadId, 'the thread was stopped') || this.autoContinue.cancel(threadId, 'the thread was stopped');
     this.core.coordination.pause(threadId);
     // Runs first: once they are stopped, a team with no child has nothing left to pause.
     const childrenStopped = this.core.workflows.stopRoot(threadId, 'Stopped with its thread') + this.core.delegation.stop(threadId);

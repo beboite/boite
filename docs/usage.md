@@ -408,9 +408,14 @@ The resume is a `resume` turn with the request id `limit-resume_<turnId>`,
 labelled "Resumed after the usage limit reset", whose prompt asks the agent to
 continue without repeating work.
 
-`turns.cancelRetry` and `turns.stop` cancel either kind; a paired phone may
-call both, since cancelling spends nothing. `?fake=1&retry=capacity` and
-`?fake=1&retry=usage-limit` put each banner on a fake thread.
+Any other failure resumes by itself as an automatic resume
+([restart handoff](restart-handoff.md#turns-that-stop-before-their-answer)),
+shown as `retry` with `kind: 'auto-continue'`.
+
+`turns.cancelRetry` and `turns.stop` cancel every kind; a paired phone may
+call both, since cancelling spends nothing. `?fake=1&retry=capacity`,
+`?fake=1&retry=usage-limit` and `?fake=1&retry=auto-continue` put each banner
+on a fake thread.
 
 ## Paired devices
 
