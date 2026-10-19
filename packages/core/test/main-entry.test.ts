@@ -77,14 +77,17 @@ test('a refused listen closes the initialized core and releases its data lock', 
 
 test('the bytecode compiled launcher runs commands and starts a core that shuts down cleanly', async () => {
   const binary = join(dir, process.platform === 'win32' ? 'core.exe' : 'core');
-  const targets: Record<string, string> = { win32: 'bun-windows-x64-baseline', linux: 'bun-linux-x64-baseline' };
-  const target = process.arch === 'x64' ? targets[process.platform] : undefined;
+  // The flags of bin/compile.ts on the running Bun. A `--target` other than this
+  // Bun's own build (the baseline one on x64) makes `bun build` fetch that
+  // runtime from npm with no deadline: a stalled download hung this test past
+  // its timeout on a Windows runner (2026-10-15).
+  const started = Date.now();
   const build = Bun.spawnSync([
-    process.execPath, 'build', '--compile', ...(target ? [`--target=${target}`] : []),
+    process.execPath, 'build', '--compile',
     '--minify-whitespace', '--minify-syntax', '--bytecode', '--format=esm', '--env=BOITE_RELEASE_*',
     'src/compiled-main.ts', 'src/artifact-retention-worker.ts', 'src/platform/linux-tcp-worker.ts', '--outfile', binary,
   ], { cwd: join(import.meta.dir, '..'), stdout: 'pipe', stderr: 'pipe', windowsHide: true });
-  expect(build.exitCode).toBe(0);
+  expect({ code: build.exitCode, stderr: build.stderr.toString().slice(-2000), ms: Date.now() - started }).toMatchObject({ code: 0 });
   if (process.platform === 'win32') {
     const workers = Bun.spawnSync([
       process.execPath, 'build', 'src/platform/windows/jobs-worker.ts', 'src/platform/windows/guard-worker.ts',

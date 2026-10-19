@@ -64,7 +64,7 @@ async function blankShell(): Promise<{ page: BrowserPage; shell: ShellUnderTest;
 
 test('a process-tree probe that rejects keeps the wait failure, its cause and the rest of the report', async () => {
   await using blank = await blankShell();
-  // What `Bun.spawn` throws when PowerShell is missing from the runner.
+  // A probe that throws, as one whose native call fails would.
   const processTree = () => Promise.reject(new Error('Executable not found in $PATH: "powershell"'));
   const failure = await waitForShellPage(blank.page, blank.shell, 500, { processTree }).then(() => null, (error: unknown) => error as Error);
   expect(failure?.message).toStartWith(TIMED_OUT);

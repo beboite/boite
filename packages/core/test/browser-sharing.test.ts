@@ -23,14 +23,15 @@ real('a viewer watching while the agent changes the page size never puts the old
     }
   })();
   try {
-    for (let round = 0; round < 6; round++) {
+    // The race needs frames actually taken while the sizes change. Six rounds take 0.4 s on a fast machine,
+    // less than three of the watcher's pulls, so the sizes keep changing until three frames came in.
+    for (let round = 0; round < 6 || (frames < 3 && round < 60); round++) {
       await agent.call('browser.command', { threadId, tabId, action: { kind: 'preset', preset: 'iphone-15-pro' } });
       expect(await evaluate('[innerWidth, innerHeight]', tabId)).toEqual([393, 852]);
       await agent.call('browser.command', { threadId, tabId, action: { kind: 'preset', preset: 'iphone-15-pro', orientation: 'landscape' } });
       expect(await evaluate('[innerWidth, innerHeight]', tabId)).toEqual([852, 393]);
     }
   } finally { watching = false; await watch; }
-  // The race needs frames actually taken while the sizes changed.
   expect(frames).toBeGreaterThan(2);
 }, 150_000);
 
