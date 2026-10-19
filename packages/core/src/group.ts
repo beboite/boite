@@ -27,7 +27,7 @@ import type { KeyObject } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join as joinPath } from 'node:path';
-import { DEVICE_LINK_JOIN, GRANT_TTL_MS, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
+import { GRANT_TTL_MS, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
 import { deviceAdmitInput, deviceHelloInput, type CoordinationPeer, type DeviceHello, type DeviceInvite, type Group, type GroupDevice, type GroupInvite, type GroupTicket, type PairingRole, type Principal } from '@boite/contracts';
 import { boundedBody, MAX_BODY, PeerGone } from './coordination-wire.ts';
 import type { Core } from './core.ts';
@@ -38,7 +38,7 @@ import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, SERVED_ORIGINS
 import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
 import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
 import type { Sealing } from './group/seal.ts';
-import { encodeInvite, encodeTicket, parseInvite, parseTicket, ticketSigningInput, inviteId, invitePsk } from './group/ticket.ts';
+import { encodeInvite, encodeTicket, inviteOf, parseInvite, parseTicket, ticketSigningInput, inviteId, invitePsk } from './group/ticket.ts';
 import type { Invite } from './group/ticket.ts';
 import { DEVICES_MAX, GroupClients } from './group/clients.ts';
 import { SyncBackoff } from './group/backoff.ts';
@@ -69,14 +69,6 @@ const FAREWELL_MS = 6000;
 
 export type { NetworkSink } from './group/addresses.ts';
 
-/** The invitation in what was pasted: itself, or the one a device link carries after `#join=`. */
-export function inviteOf(text: string): string {
-  const marker = `#${DEVICE_LINK_JOIN}=`;
-  const at = text.indexOf(marker);
-  if (at < 0) return text.trim();
-  try { return decodeURIComponent(text.slice(at + marker.length).trim()); } catch { return text.trim(); }
-}
-
 interface JoinReply { nonce: string; publicKey: string; roster?: unknown; error?: string }
 
 export class GroupStore {
@@ -85,6 +77,8 @@ export class GroupStore {
   sessions: Record<string, string> = {};
   /** The address each of those sessions was issued for: it lives while this machine still gives it. */
   vias: Record<string, string> = {};
+  /** Joins in flight: meanwhile a device of the group it joins is told to come back, not that this machine is in none. */
+  joining = 0;
   /** Keyed by `inviteId`: the grant itself is kept nowhere once the invitation is handed out. */
   private readonly invites = new Map<string, { expiresAt: number; joined: string | null; psk: Buffer; seen: Set<string> }>();
   private boxKey: KeyObject | null = null;
@@ -681,6 +675,11 @@ export class GroupStore {
 
   /** This core calls the member the invitation names, proves it holds its own key, and takes the roster back. */
   async join(text: unknown): Promise<Group> {
+    this.joining++;
+    try { return await this.enter(text); } finally { this.joining--; }
+  }
+
+  private async enter(text: unknown): Promise<Group> {
     const refusal = () => refused(`this machine already belongs to the group ${this.roster?.name}; leave it before joining another`);
     // A group of this machine alone, the one its devices brought, gives way: its devices come along.
     const alone = (): boolean => this.roster === null || liveCores(this.roster).every((core) => core.coreId === this.selfId());

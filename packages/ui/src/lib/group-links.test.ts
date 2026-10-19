@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { PROTOCOL_VERSION, type Group, type GroupCore } from '@boite/contracts';
+import { PROTOCOL_VERSION, RpcErrorCode, type Group, type GroupCore } from '@boite/contracts';
 import type { SocketLike } from './client';
+import { deviceKey } from './device-key';
+import { WsClient } from './ws-client';
+import { machineKey } from '../test/machine-key';
 import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, rememberSession, removeBrought, type Endpoint } from './endpoint';
 import { GroupLinks, usableAddresses } from './group-links.svelte';
 import type { Machine, Workspace } from './workspace.svelte';
@@ -795,5 +798,64 @@ describe('a removed machine the device key opens', () => {
 
   it('12. removed, it answers a roster without the machine that removed it (Sol r5): it leaves', async () => {
     expect(await left({ a: says('a', ['a']), b: says('b', ['b']) })).toContain(url('b'));
+  });
+});
+
+describe('a machine at the address of one the device key opens says it is in no group', () => {
+  /**
+   * The page's real client says hello to b's address, signed for b, and hears `refusal` for that hello's nonce; then
+   * the links reconcile with a, whose group no longer lists b. What left.
+   */
+  async function left(refusal: (nonce: string, b: ReturnType<typeof machineKey>) => object): Promise<string[]> {
+    const b = machineKey();
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([
+      { url: 'http://a.test', label: 'a', token: '', paired: true, signs: 'a'.repeat(64) },
+      { url: 'http://b.test', label: 'b', token: '', paired: true, signs: b.coreId }
+    ]));
+    const machines = [machine('http://a.test', { group: group('a'.repeat(64), [core('a'.repeat(64), ['http://a.test'])]) }), machine('http://b.test', { connection: 'connecting', groupKnown: false })];
+    const { workspace: ws, removed } = workspace(machines);
+    const nonces: string[] = [];
+    class Refusing implements SocketLike {
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onclose: SocketLike['onclose'] = null;
+      onerror: (() => void) | null = null;
+      constructor() { setTimeout(() => this.onopen?.(), 0); }
+      send(raw: string) {
+        const frame = JSON.parse(raw) as { id: number; params: { device: { nonce: string } } };
+        nonces.push(frame.params.device.nonce);
+        setTimeout(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, error: refusal(frame.params.device.nonce, b) }) }), 0);
+      }
+      close() { this.onclose?.({ code: 1000 }); }
+    }
+    const client = new WsClient({
+      url: 'http://b.test', token: '', paired: true, reconnect: false, signer: { key: deviceKey, coreId: b.coreId },
+      socketFactory: () => new Refusing(), onUngrouped: () => { storeOf(machines[1]!).ungrouped = true; }
+    });
+    try {
+      await client.connect().catch(() => undefined);
+      await vi.waitFor(() => expect(nonces).toHaveLength(1));
+      await settle();
+      await settle();
+      expect(client.state).not.toBe('ready');
+      const links = new GroupLinks(ws, { reach: vi.fn(async () => null), secure: () => false });
+      await links.reconcile();
+      await links.reconcile();
+      return removed;
+    } finally {
+      client.close();
+    }
+  }
+
+  it('1. b itself, signed with its key over this hello: it leaves', async () => {
+    expect(await left((nonce, b) => b.ungrouped(nonce))).toEqual(['http://b.test']);
+  });
+
+  it.each([
+    ['14. unsigned, as any server can say it (Sol r6)', () => ({ code: RpcErrorCode.Unavailable, message: 'this machine belongs to no group', data: { reason: 'ungrouped' } })],
+    ['14b. signed by another machine now at that address, for b', (nonce: string, b: ReturnType<typeof machineKey>) => machineKey().ungrouped(nonce, b.coreId)],
+    ['14c. signed by b over an older hello', (_nonce: string, b: ReturnType<typeof machineKey>) => b.ungrouped(crypto.randomUUID())]
+  ] as const)('%s: b stays', async (_name, refusal) => {
+    expect(await left(refusal)).toEqual([]);
   });
 });

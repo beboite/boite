@@ -465,20 +465,26 @@ hidden. A device signs
 its own way in there and is done: what a member lists is all it needs, and a
 machine its key opens that another one of the group no longer lists leaves its
 list. A machine out of every group says so, to `group.get` or on the hello it
-refuses the key with (`reason: 'ungrouped'`, `UngroupedData`), and leaves on
-that word once no machine the key opens lists it; so does one that refuses the
+refuses the key with (`reason: 'ungrouped'`, `UngroupedData`). That refusal is
+signed with the machine's key over the nonce of the hello it answers, and the
+page checks that the key's SHA-256 is the machine it signed the hello for:
+unsigned, signed by another machine now at that address, or over an older
+hello, it is heard as "come back". A machine joining a group says "come back"
+too, since the group it joins may know the device. The machine leaves on its
+word once no machine the key opens lists it; so does one that refuses the
 key. That word is of itself only, and a machine that says nothing, off or not
-answered yet, says nothing of anybody. The page checks no signature: a
-removal is a member's word that nobody signs, and the admissions members sign
-and check are left out of the group's view. What it cannot tell apart stays as
-it was:
+answered yet, says nothing of anybody. Beyond it the page checks no signature:
+a removal is a member's word that nobody signs, and the admissions members
+sign and check are left out of the group's view. What it cannot tell apart
+stays as it was:
 
 | the machine | the other machines the key opens | it |
 | --- | --- | --- |
 | removed while the page reloaded, refuses the hello: no group | none lists it | leaves |
 | same | one not caught up lists it | stays until that one hears |
 | refuses the key | none lists it | leaves |
-| says nothing: off, behind, moved | any | stays |
+| says nothing or "come back": off, behind, moved, joining | any | stays |
+| another machine at its address, or an older answer, says no group | any | stays |
 | answers its group | one of that group omits it | leaves |
 | answers its group | only a machine paired with a token, or brought by the group, omits it | stays |
 

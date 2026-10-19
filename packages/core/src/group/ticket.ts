@@ -15,7 +15,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { GROUP_INVITE_PREFIX, PAIRING_ROLES, type PairingRole } from '@boite/contracts';
+import { DEVICE_LINK_JOIN, GROUP_INVITE_PREFIX, PAIRING_ROLES, type PairingRole } from '@boite/contracts';
 import { invalidParams, unauthorized } from '../errors.ts';
 import { ADDRESSES_MAX, checkAddress } from './roster.ts';
 import { checkBox } from './seal.ts';
@@ -47,6 +47,14 @@ export function invitePsk(grant: string): Buffer {
 
 export function encodeInvite(invite: Invite): string {
   return GROUP_INVITE_PREFIX + Buffer.from(JSON.stringify({ v: 1, ...invite })).toString('base64url');
+}
+
+/** The invitation in what was pasted: itself, or the one a device link carries after `#join=`. */
+export function inviteOf(text: string): string {
+  const marker = `#${DEVICE_LINK_JOIN}=`;
+  const at = text.indexOf(marker);
+  if (at < 0) return text.trim();
+  try { return decodeURIComponent(text.slice(at + marker.length).trim()); } catch { return text.trim(); }
 }
 
 export function parseInvite(text: unknown): Invite {

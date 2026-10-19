@@ -106,9 +106,10 @@ export interface WsClientOptions {
   /** Every authentication refusal during hello, including automatic retries and resume attempts. */
   onUnauthorized?: (error: RpcFailure) => void;
   /**
-   * The machine refused a hello saying it is in no group (`UngroupedData`): its
-   * own word, as a `group.get` answering null. The client keeps trying, as a
-   * group that lets it in again tells it of this device.
+   * The machine refused a hello saying it is in no group (`UngroupedData`),
+   * signed with its key over that hello: its own word, as a `group.get`
+   * answering null. The client keeps trying, as a group that lets it in again
+   * tells it of this device.
    */
   onUngrouped?: () => void;
   clientName?: ClientName;

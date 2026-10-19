@@ -1,4 +1,4 @@
-import { deviceAdmitInput, deviceHelloInput, type DeviceHello } from '@boite/contracts';
+import { deviceAdmitInput, deviceHelloInput, ungroupedInput, type DeviceHello, type UngroupedData } from '@boite/contracts';
 
 /**
  * This device's one key: what lets it into every machine of its group.
@@ -137,6 +137,28 @@ export function dropDeviceKey(revoked: string): void {
   if (stored === null || stored.id !== revoked) return;
   try { localStorage.removeItem(DEVICE_STORAGE_KEY); } catch { /* storage refused */ }
   current = null;
+}
+
+/** What an Ed25519 key in SPKI starts with, before its 32 raw bytes. */
+const ED25519_SPKI_PREFIX = '302a300506032b6570032100';
+
+/**
+ * Whether `data` is the word of machine `coreId`, answering the hello sent with
+ * `nonce`, that it is in no group: its key, whose SHA-256 is that id, signed
+ * that nonce. Another machine at the same address, or an older answer, cannot say it.
+ */
+export async function signedUngrouped(coreId: string, nonce: string, data: unknown): Promise<boolean> {
+  const ed = await loadSigner();
+  const { publicKey, sig } = (typeof data === 'object' && data !== null ? data : {}) as Partial<UngroupedData>;
+  if (typeof publicKey !== 'string' || typeof sig !== 'string') return false;
+  if (hex(sha256!(new TextEncoder().encode(publicKey))) !== coreId) return false;
+  try {
+    const spki = fromB64url(publicKey.replace(/-----(BEGIN|END) PUBLIC KEY-----|\s/g, ''));
+    if (spki.length !== 44 || hex(spki.subarray(0, 12)) !== ED25519_SPKI_PREFIX) return false;
+    return ed.verify(fromB64url(sig), new TextEncoder().encode(ungroupedInput(coreId, nonce)), spki.subarray(12));
+  } catch {
+    return false;
+  }
 }
 
 /** Another window made or replaced the key: read it again. */

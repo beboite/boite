@@ -10,7 +10,7 @@
  */
 import { randomUUID, verify } from 'node:crypto';
 import { hostname } from 'node:os';
-import { deviceAdmitInput, deviceHelloInput, DEVICE_LINK_JOIN, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
+import { deviceAdmitInput, deviceHelloInput, DEVICE_LINK_JOIN, GROUP_TICKET_TTL_MS, PAIRING_ROLES, ungroupedInput } from '@boite/contracts';
 import type { DeviceHello, DeviceInvite, Group, GroupTicket, PairingRole, UngroupedData } from '@boite/contracts';
 import { invalidParams, messageOf, refused, unauthorized, unavailable } from '../errors.ts';
 import type { GroupStore } from '../group.ts';
@@ -115,9 +115,11 @@ export class GroupClients {
     // heard of yet, its roster behind the member that admitted it, is told to come back; so is a clock that is off.
     const roster = this.group.roster;
     const raw = (typeof hello === 'object' && hello !== null ? hello : {}) as Partial<DeviceHello>;
-    // Out of every group, removed or gone, it says so: its own word, which the app takes as a `group.get` answering
-    // none. Unavailable, not Unauthorized: a group that lets it in again tells it of the device, and the key opens it then.
-    if (roster === null) throw unavailable('this machine belongs to no group', { reason: 'ungrouped' } satisfies UngroupedData);
+    // Out of every group, removed or gone, it says so under its key: its own word, which the app takes as a `group.get`
+    // answering none. Unavailable, not Unauthorized: a group that lets it in again tells it of the device, and the key
+    // opens it then. Joining one, it does not know yet, and the device is told to come back.
+    if (roster === null && this.group.joining > 0) throw unavailable('this machine has not heard of this device yet: its group tells it within seconds');
+    if (roster === null) throw this.ungrouped(raw.nonce);
     const known = typeof raw.id === 'string' ? roster.deviceKeys?.find((device) => device.id === raw.id) : undefined;
     if (known === undefined) throw unavailable('this machine has not heard of this device yet: its group tells it within seconds');
     const entry = liveDeviceKeys(roster).find((device) => device === known);
@@ -133,6 +135,14 @@ export class GroupClients {
     if (this.deviceNonces.size >= DEVICE_NONCES_MAX) throw unavailable('too many device hellos at once: try again in a minute');
     this.deviceNonces.set(key, raw.at + DEVICE_HELLO_SKEW_MS * 2);
     return { sessionId: this.deviceSession(entry, client, now), role: entry.role, deviceId: entry.id };
+  }
+
+  /** The refusal that says this machine is in no group, signed over the nonce of the hello it answers. */
+  private ungrouped(nonce: unknown): Error {
+    if (typeof nonce !== 'string' || nonce.length < 16 || nonce.length > 64) return refused('device.nonce: expected 16 to 64 characters');
+    const { coreId, publicKey } = this.group.core.coordination.card();
+    const sig = this.group.core.coordination.signature(Buffer.from(ungroupedInput(coreId, nonce))).toString('base64');
+    return unavailable('this machine belongs to no group', { reason: 'ungrouped', publicKey, sig } satisfies UngroupedData);
   }
 
   /** This machine's session row for a device key, made on its first visit. Its token is thrown away: the key is what opens it. */
