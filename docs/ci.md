@@ -433,7 +433,8 @@ the 08:59 UTC nightly started on 30287eef while its run was pending; that run
 and the next two were each replaced while pending, 9c974e65's passed at 09:33,
 and the night was lost on `ended cancelled` (run 39226757576). The job writes the commit it passed as
 its `sha` output, and every later job checks out, tags and publishes that
-commit, never `github.sha`; `desktop.yml`, `android.yml`, `server.yml` and
+commit, never `github.sha`; the version step runs that commit's `nightly.ts`
+with `GITHUB_SHA` set to it. `desktop.yml`, `android.yml`, `server.yml` and
 `server-verify.yml` take it as their `ref` input. `app.yml` deploys its own
 checkout, so it does not follow and a cancelled run still fails it. The whole
 wait is bounded at two hours: 35 minutes behind the main run ahead, 35 for the

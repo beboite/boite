@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { type CiRun, decide, NO_RUN_GRACE_MS } from './commit-ci.ts';
 
 const sha = 'a'.repeat(40);
@@ -85,4 +88,34 @@ test('without follow, as app.yml deploys its own checkout, or in a dry run, a ca
   expect(decide(nightRuns, { sha: night, dryRun: false }, fresh)).toMatchObject({ action: 'fail', message: expect.stringContaining('ended cancelled') });
   const branch = nightRuns.map((each) => ({ ...each, event: 'pull_request', head_branch: 'feature' }));
   expect(decide(branch, { sha: night, dryRun: true, follow: true }, fresh)).toMatchObject({ action: 'fail' });
+});
+
+/** Runs the gate as the nightly does, against a fake API answering `runs`, and returns its exit code and step output. */
+async function gate(runs: CiRun[], started: string) {
+  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => Response.json({ workflow_runs: runs }) });
+  const dir = mkdtempSync(join(tmpdir(), 'commit-ci-'));
+  const output = join(dir, 'output');
+  try {
+    const { GITHUB_STEP_SUMMARY: _summary, COMMIT_CI_DRY_RUN: _dry, ...env } = process.env;
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, 'commit-ci.ts')], {
+      env: {
+        ...env, GITHUB_API_URL: server.url.origin, GITHUB_REPOSITORY: 'beboite/boite', GH_TOKEN: 'test',
+        GITHUB_SHA: started, COMMIT_CI_FOLLOW: '1', GITHUB_OUTPUT: output,
+      },
+      stdout: 'pipe', stderr: 'pipe',
+    });
+    const code = await child.exited;
+    return { code, output: Bun.file(output).size ? readFileSync(output, 'utf8') : '' };
+  } finally {
+    server.stop(true);
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('the gate hands the nightly the commit it passed, its own or the one it followed', async () => {
+  expect(await gate([run()], sha)).toEqual({ code: 0, output: `sha=${sha}
+` });
+  const passed = nightRuns.map((each) => each.head_sha === green ? { ...each, status: 'completed', conclusion: 'success' } : each);
+  expect(await gate(passed, night)).toEqual({ code: 0, output: `sha=${green}
+` });
 });

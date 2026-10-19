@@ -103,6 +103,12 @@ if (import.meta.main) {
     }
     if (decision.action === 'pass' || decision.action === 'fail') {
       if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${decision.message}\n`);
+      if (decision.action === 'pass') {
+        // The run that passed names the commit: the started one or the one followed.
+        const passed = decision.run!.head_sha;
+        if (!/^[a-f0-9]{40}$/.test(passed)) throw new Error(`${decision.run!.html_url} names no full commit SHA`);
+        if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `sha=${passed}\n`);
+      }
       console.log(decision.action === 'fail' ? `::error::${decision.message}` : decision.message);
       process.exit(decision.action === 'pass' ? 0 : 1);
     }

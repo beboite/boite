@@ -85,7 +85,8 @@ jobs:
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/tags?per_page=100" > tags.json
-          bun scripts/ci/nightly.ts released.json tags.json
+          # An older commit's planner reads only GITHUB_SHA: hand it the commit whose CI passed.
+          GITHUB_SHA="$NIGHTLY_SHA" bun scripts/ci/nightly.ts released.json tags.json
 
   # Built once per platform and tested as installed; the Rust tests already
   # passed in the commit's CI.
