@@ -5,12 +5,12 @@ import { existsSync } from 'node:fs';
 import { RpcErrorCode } from '@boite/contracts';
 import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
 import { cpuRateOfGlobalJob, memoryLimitOfJob, releaseThreadJob, sampleThreadJob } from '../src/platform/windows/jobs.ts';
-import { consoleHost } from '../src/platform/windows/process-reads.ts';
+import { commandLineOf, consoleHost, whenCommandLineReads, type ProcessReads } from '../src/platform/windows/process-reads.ts';
 import { jobPacketAction, MSG_JOB_MEMORY_LIMIT, MSG_NEW_PROCESS } from '../src/platform/windows/jobs-packets.ts';
 import { resolveMemoryLimits } from '../src/memory-limits.ts';
 import { processPlatform } from '../src/platform/index.ts';
 import { STARTUP_PRIORITY } from '../src/procs.ts';
-import { echoThread, startTestCore } from './harness.ts';
+import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const onWindows = process.platform === 'win32';
@@ -330,6 +330,53 @@ test('a console host whose image name could not be read is still left out of the
   expect(consoleHost(null, String.raw`"C:\Program Files\conhost.exe tools\bun.exe" -e 1`)).toBe(false);
   expect(consoleHost(String.raw`C:\bun\bun.exe`, 'conhost.exe 0x4')).toBe(false);
   expect(consoleHost(null, null)).toBe(false);
+});
+
+/** A process handle whose parameters Windows writes only after `polls` command line reads. */
+function lateParameters(polls: number, text = 'ping -n 30 127.0.0.1'): ProcessReads {
+  const PEB = 0x1000n, PARAMETERS = 0x2000n, BUFFER = 0x3000n;
+  const utf16 = new Uint8Array(Buffer.from(text, 'utf16le'));
+  let reads = 0;
+  const fail = () => false;
+  return {
+    hasNt: true,
+    imageName: fail, exitCode: fail, processTimes: fail, ioCounters: fail, memoryInfo: fail,
+    basicInfo(_proc, out) { reads++; new DataView(out.buffer).setBigUint64(8, PEB, true); return true; },
+    readMemory(_proc, address, into) {
+      const view = new DataView(into.buffer);
+      if (address === PEB + 0x20n) view.setBigUint64(0, reads > polls ? PARAMETERS : 0n, true);
+      else if (address === PARAMETERS + 0x70n) { view.setUint16(0, utf16.length, true); view.setBigUint64(8, BUFFER, true); }
+      else if (address === BUFFER) into.set(utf16);
+      else return false;
+      return true;
+    },
+  };
+}
+
+test('a process the job reports before Windows wrote its command line gets it once it reads', async () => {
+  // windows-2025 reported a ping whose name and parent read and whose command line was still empty.
+  const lines: (string | null)[] = [];
+  const late = lateParameters(2);
+  expect(commandLineOf(late, 1)).toBeNull();
+  expect(whenCommandLineReads(late, 1, null, line => lines.push(line), 20, 1)).not.toBeNull();
+  expect(lines).toEqual([]);
+  await waitFor(() => lines.length > 0, 1000);
+  expect(lines).toEqual(['ping -n 30 127.0.0.1']);
+
+  // One that never gets parameters settles with none after its tries; one that exits first settles at once.
+  const never: (string | null)[] = [];
+  whenCommandLineReads(lateParameters(Infinity), 1, null, line => never.push(line), 3, 1);
+  await waitFor(() => never.length > 0, 1000);
+  expect(never).toEqual([null]);
+  const exited: (string | null)[] = [];
+  whenCommandLineReads(lateParameters(Infinity), 1, null, line => exited.push(line), 20, 50)!.flush();
+  await Bun.sleep(80);
+  expect(exited).toEqual([null]);
+
+  // A command line read at once goes out before the call returns.
+  const ready: (string | null)[] = [];
+  expect(whenCommandLineReads(late, 1, 'ping -n 1 127.0.0.1', line => ready.push(line))).toBeNull();
+  expect(ready).toEqual(['ping -n 1 127.0.0.1']);
 });
 
 describe('the jobs Worker packet filter', () => {
