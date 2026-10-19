@@ -101,6 +101,10 @@ test('copy path stays readable with a long working directory in conversation men
 
 test('projects follow user activity, then keep a dragged custom order after reload', async () => {
   await showThreadView(page, 'projects');
+  // The menu ends every header at the same place, whatever counters sit before it.
+  const menuEdges = await page.evaluate<number[]>(`Array.from(document.querySelectorAll('${id('project-menu')}')).map(e => Math.round(e.getBoundingClientRect().right))`);
+  expect(menuEdges.length).toBeGreaterThan(1);
+  expect(new Set(menuEdges).size).toBe(1);
   await page.evaluate(`(() => { const s = globalThis.__boiteTest.workspace.machines[1].store; s.threads = s.threads.map(t => t.projectId === 'p-notes' ? {...t, lastUserMessageAt: Date.now() + 1000} : t); })()`);
   const keys = () => page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('project')}')).map(e => JSON.stringify([e.dataset.machineId, e.dataset.projectId]))`);
   await page.waitFor(`document.querySelector('${id('project')}')?.dataset.projectId === 'p-notes'`);
