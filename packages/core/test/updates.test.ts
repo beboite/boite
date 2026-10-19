@@ -4,6 +4,7 @@ import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { HarnessUpdate } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
@@ -559,6 +560,184 @@ describe('harness updates', () => {
     await changed;
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
+
+  test('an automatic update waits for the background work of an agent at rest before releasing it', async () => {
+    const { client, state } = await start('command');
+    const core = harness!.core;
+    await client.call('providers.updates', { refresh: true });
+    const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'ci loop' });
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'start the CI loop' });
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done', 20000);
+    // The turn ended on a checkpoint; the loop it started runs on in the agent's process.
+    core.threads.agentState.noteBackground(thread.id, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: Date.now() }]);
+    const released: string[] = [];
+    const release = core.threads.releaseAgent.bind(core.threads);
+    core.threads.releaseAgent = (id) => { released.push(id); release(id); };
+
+    const asked = await core.updates.update('update-fake', true);
+    await new Promise((done) => setTimeout(done, 300));
+    expect(released).toEqual([]);
+    expect(asked.waitingFor).toBe(1);
+    expect(readFileSync(state, 'utf8')).toBe('1.0.0');
+
+    const updated = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    const owner = { providerId: 'update-fake', sessionGeneration: core.threads.require(thread.id).sessionGeneration ?? 0, parentTurnId: null };
+    core.threads.agentState.finishBackground(thread.id, 'bg-ci', owner, 'completed');
+    await updated;
+    expect(released).toContain(thread.id);
+    // The work ended by itself: nothing was cut, nothing is resumed.
+    expect(core.threads.autoContinue.retryOf(thread.id)).toBeNull();
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  }, 30000);
+
+  test('past the background limit an automatic update goes on and resumes the agents whose work it ended', async () => {
+    const { client, state } = await start('command');
+    const core = harness!.core;
+    core.updates.backgroundLimitMs = 400;
+    await client.call('providers.updates', { refresh: true });
+    const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const parent = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'parent' });
+    await client.call('delegation.configure', { threadId: parent.id, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: 'update-fake', accountId: account.id, model: 'default', effort: null }] } });
+    const child = (await client.call('delegation.spawn', { threadId: parent.id, profileId: 'worker', task: 'watch CI', requestId: 'ci' })).thread.id;
+    const server = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'dev server' });
+    const turn = await client.call('turns.start', { threadId: server.id, prompt: 'start the dev server' });
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done' && core.journal.listTurns(child).at(-1)?.status === 'done', 20000);
+    // The child's result wakes its parent: let that turn end too.
+    await waitFor(() => core.journal.unfinishedTurns().length === 0, 20000);
+    // Each turn started its work before it ended on a checkpoint.
+    const during = (threadId: string) => core.journal.listTurns(threadId).at(-1)!.finishedAt! - 1;
+    core.threads.agentState.noteBackground(child, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: during(child) }]);
+    core.threads.agentState.noteBackground(server.id, [{ id: 'bg-dev', kind: 'shell', description: 'dev server', toolId: null, startedAt: during(server.id) }]);
+    const started = Date.now();
+
+    expect((await core.updates.update('update-fake', true)).waitingFor).toBe(2);
+    await client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    expect(readFileSync(state, 'utf8')).toBe('1.2.0');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(400);
+    const notices = (threadId: string, turnId: string) => [...core.journal.walkTurnMessages(threadId, turnId)]
+      .filter((message) => message.role === 'system').map((message) => message.parts[0]?.type === 'text' ? message.parts[0].displayText : null);
+    const checkpoint = core.journal.listTurns(child)[0]!.id;
+    expect(notices(child, checkpoint).at(-1)).toBe('Background work ended by the Fake updating agent update');
+    expect(notices(server.id, turn.id)).toEqual(['Background work ended by the Fake updating agent update']);
+    // The delegated agent gets the continuation `boite delegate resume` sends, on the new version.
+    await waitFor(() => core.journal.listTurns(child).length === 2 && core.journal.listTurns(child).at(-1)?.status === 'done', 20000);
+    expect(core.journal.db.query('SELECT 1 FROM delegation_messages WHERE recipient_id = ? AND request_id = ?').get(child, `resume:${checkpoint}`)).not.toBeNull();
+    // The conversation of its own resumes like background work that ended without waking it.
+    expect(core.threads.autoContinue.retryOf(server.id)).toMatchObject({ kind: 'auto-continue', turnId: turn.id });
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  }, 30000);
+
+  test('a turn paused for an automatic update keeps its background work, and is told when a forced release ends it', async () => {
+    const { client, state } = await start('command', 'update-gated');
+    const core = harness!.core;
+    await client.call('providers.updates', { refresh: true });
+    const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'thinking' });
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: '[sleep:30000]never written' });
+    await waitFor(() => core.threads.runner.handles.has(thread.id), 20000);
+    core.threads.agentState.noteBackground(thread.id, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: Date.now() }]);
+
+    await core.updates.update('update-fake', true);
+    await waitFor(() => core.threads.runner.isPaused(thread.id), 20000);
+    await new Promise((done) => setTimeout(done, 400));
+    expect(core.threads.agentState.background.get(thread.id)?.length).toBe(1);
+    expect(existsSync(`${state}.running`)).toBe(false);
+
+    // Asked by hand, the update goes on; the paused turn hears its loop ended.
+    await client.call('providers.update', { providerId: 'update-fake' });
+    await waitFor(() => existsSync(`${state}.running`), 20000);
+    expect(core.threads.agentState.background.get(thread.id)).toBeUndefined();
+    writeFileSync(`${state}.go`, '');
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done', 20000);
+    const answer = [...core.journal.walkTurnMessages(thread.id, turn.id)].filter((message) => message.role === 'assistant').at(-1)!.parts.map((part) => part.type === 'text' ? part.text : '').join('');
+    expect(answer).toContain('An update of Fake updating agent ended your background work (CI loop)');
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  }, 30000);
+
+  test('a Stop while the updater runs cancels the resume of the agents whose background work it ended', async () => {
+    const { client, state } = await start('command', 'update-gated');
+    const core = harness!.core;
+    await client.call('providers.updates', { refresh: true });
+    const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const parent = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'parent' });
+    await client.call('delegation.configure', { threadId: parent.id, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: 'update-fake', accountId: account.id, model: 'default', effort: null }] } });
+    const child = (await client.call('delegation.spawn', { threadId: parent.id, profileId: 'worker', task: 'watch CI', requestId: 'ci' })).thread.id;
+    const server = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'dev server' });
+    const turn = await client.call('turns.start', { threadId: server.id, prompt: 'start the dev server' });
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done' && core.journal.listTurns(child).at(-1)?.status === 'done', 20000);
+    await waitFor(() => core.journal.unfinishedTurns().length === 0, 20000);
+    const during = (threadId: string) => core.journal.listTurns(threadId).at(-1)!.finishedAt! - 1;
+    core.threads.agentState.noteBackground(child, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: during(child) }]);
+    core.threads.agentState.noteBackground(server.id, [{ id: 'bg-dev', kind: 'shell', description: 'dev server', toolId: null, startedAt: during(server.id) }]);
+    const childTurns = core.journal.listTurns(child).length;
+
+    await client.call('providers.update', { providerId: 'update-fake' });
+    await waitFor(() => existsSync(`${state}.running`), 20000);
+    core.delegation.stop(parent.id, child);
+    core.threads.stopTurn(server.id);
+    writeFileSync(`${state}.go`, '');
+    await waitFor(() => !core.updates.updating('update-fake'), 20000);
+    await new Promise((done) => setTimeout(done, 800));
+    // The continuation queued for the child was stopped with it and never ran.
+    expect(core.journal.listTurns(child).slice(childTurns).map((entry) => [entry.status, entry.startedAt])).toEqual([['stopped', null]]);
+    expect(core.threads.autoContinue.retryOf(server.id)).toBeNull();
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  }, 30000);
+
+  test('a crash while the updater runs keeps the resume of a conversation whose background work it ended', async () => {
+    const { client, state } = await start('command', 'update-gated');
+    const h = harness!;
+    const core = h.core;
+    await client.call('providers.updates', { refresh: true });
+    const project = await client.call('projects.add', { path: h.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'dev server' });
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'start the dev server' });
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done', 20000);
+    core.threads.agentState.noteBackground(thread.id, [{ id: 'bg-dev', kind: 'shell', description: 'dev server', toolId: null, startedAt: core.journal.getTurn(turn.id)!.finishedAt! - 1 }]);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    await waitFor(() => existsSync(`${state}.running`), 20000);
+
+    // The core dies under the updater.
+    client.close();
+    core.journal.close();
+    await h.server.stop();
+    await core.close();
+    writeFileSync(`${state}.go`, '');
+    harness = null;
+    const next = new Core({ dataDir: h.dataDir, token: h.token });
+    try {
+      expect(next.threads.autoContinue.retryOf(thread.id)).toMatchObject({ kind: 'auto-continue', turnId: turn.id });
+    } finally {
+      await next.close();
+    }
+  }, 30000);
+
+  test('an update asked by hand while an automatic one waits on background work goes on at once', async () => {
+    const { client, state } = await start('command');
+    const core = harness!.core;
+    await client.call('providers.updates', { refresh: true });
+    const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'dev server' });
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'start the dev server' });
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done', 20000);
+    core.threads.agentState.noteBackground(thread.id, [{ id: 'bg-dev', kind: 'shell', description: 'dev server', toolId: null, startedAt: core.journal.getTurn(turn.id)!.finishedAt! - 1 }]);
+    expect((await core.updates.update('update-fake', true)).waitingFor).toBe(1);
+    await new Promise((done) => setTimeout(done, 200));
+    expect(readFileSync(state, 'utf8')).toBe('1.0.0');
+
+    const updated = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    expect((await client.call('providers.update', { providerId: 'update-fake' })).state).toBe('updating');
+    await updated;
+    expect(core.threads.autoContinue.retryOf(thread.id)).toMatchObject({ kind: 'auto-continue', turnId: turn.id });
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  }, 30000);
 
   test('an accepted turn waits for its provider\'s updater after the picker changes', async () => {
     const { client, state } = await start('command', 'update-gated');
