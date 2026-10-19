@@ -10,7 +10,7 @@ import { insideTauri } from './endpoint-main';
 import { readStoredEndpoint, brought, signsOf, isEndpoint, type Endpoint } from './endpoint-storage';
 
 export { DROPPED_STORAGE_KEY, keepDropped, isDropped, droppedSince, isMemberDropped } from './endpoint-dropped';
-export { ENVIRONMENTS_STORAGE_KEY, defaultEnvironmentLabel, readEnvironments, storeEnvironments, refreshLocalEnvironment, upsertEnvironment, forgetGroupOf, rememberSession, rememberDevice, rememberSignedGroup, removeEnvironment, removeBrought, type SignedGroup, type StoredEnvironment } from './endpoint-env';
+export { ENVIRONMENTS_STORAGE_KEY, defaultEnvironmentLabel, readEnvironments, storeEnvironments, refreshLocalEnvironment, upsertEnvironment, forgetGroupOf, rememberSession, rememberDevice, rememberSignedGroup, removeEnvironment, removeBrought, type StoredEnvironment } from './endpoint-env';
 export { MAIN_STORAGE_KEY, readMainMachine, storeMainMachine, openOnMainMachine, insideTauri, servesThisPage, type MainMachine } from './endpoint-main';
 export { ENDPOINT_STORAGE_KEY, readStoredEndpoint, storeEndpoint, clearStoredEndpoint, opens, type Endpoint } from './endpoint-storage';
 

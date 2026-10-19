@@ -23,17 +23,11 @@ export interface StoredEnvironment {
   /** This device's key opens it, signed for this machine id; `token` is empty. */
   signs?: string;
   /**
-   * The group that machine last said it is in over that key, and under which
-   * admission (`GroupCore.epoch`): a reload knows it before the machine
-   * answers, and the group's removal of that admission still counts when the
-   * machine was removed before it said it again.
+   * The group that machine last said it is in, over that key: a reload knows
+   * it before the machine answers, and the group's word that it left still
+   * counts when the machine was removed before it said it again.
    */
-  signedGroup?: SignedGroup;
-}
-
-export interface SignedGroup {
-  id: string;
-  epoch: number;
+  signedGroup?: string;
 }
 
 export const ENVIRONMENTS_STORAGE_KEY = 'boite.envs';
@@ -146,15 +140,14 @@ export function upsertEnvironment(entry: {
   return list;
 }
 
-/** Keeps the group and admission a machine this device's key opens said it is in (`signedGroup`); null forgets it. */
-export function rememberSignedGroup(url: string, said: SignedGroup | null): void {
+/** Keeps the group a machine this device's key opens said it is in (`signedGroup`); null forgets it. */
+export function rememberSignedGroup(url: string, groupId: string | null): void {
   const at = withoutTrailingSlashes(url);
   const list = readEnvironments();
   const entry = list.find((env) => env.url === at);
-  if (entry === undefined || entry.signs === undefined) return;
-  if (entry.signedGroup?.id === said?.id && entry.signedGroup?.epoch === said?.epoch) return;
-  if (said === null) delete entry.signedGroup;
-  else entry.signedGroup = { id: said.id, epoch: said.epoch };
+  if (entry === undefined || entry.signs === undefined || (entry.signedGroup ?? null) === groupId) return;
+  if (groupId === null) delete entry.signedGroup;
+  else entry.signedGroup = groupId;
   storeEnvironments(list);
 }
 

@@ -466,15 +466,17 @@ its own way in there and is done: what a member lists is all it needs, and a
 machine its key opens that another one of the group took out leaves its list.
 A group's view carries its removals (`removed`, each with the admission
 `epoch` it ends): a member that never heard of an admission omits the machine
-too, so an omission is no removal. The group and admission such a machine last
-said it is in are kept with its key (`signedGroup`), so a machine removed
-before a reloaded page heard from it again leaves too: its key opens nothing
-there any more. One rule decides: the machine's admission is the one it says
-now, else the one it said last while no roster of another group lists it (it
-moved); it leaves once a roster of that group, from a machine the key opens,
-holds a removal of that admission, or of a later one a roster of the group
-lists. With no admission to go by, a machine that refuses the key or says it
-is in no group leaves once no roster lists it. The key let in there again
+too, so an omission is no removal. The group such a machine last said it is
+in is kept with its key (`signedGroup`), so a machine removed before a
+reloaded page heard from it again leaves too: its key opens nothing there any
+more. One rule decides: the machine's group is the one it says now, else the
+one it said last while no roster of another group lists it (it moved); it
+leaves once a roster of that group, from another machine the key opens, holds
+a removal of it as recent as any admission such a roster lists. Its own word
+names the group, never an admission: a machine taken out still answers, with
+any epoch it likes, and a machine its group took out answers for nobody. With
+no group to go by, a machine that refuses the key or says it is in no group
+leaves once no roster lists it. The key let in there again
 forgets what it said last. Its page's own machine, waiting for the device to be added, is taken over
 the same way. The rest of this section is about clients that use tickets, the
 desktop app and a client paired the older way: they ask a connected member
