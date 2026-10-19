@@ -157,34 +157,42 @@
   .search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; box-shadow: none; outline: none; font-size: var(--text-base); }
   .search input::-webkit-search-cancel-button { display: none; }
 
+  /* Four tiles a row while the longest French label still fits on one line,
+     else two, else one: a group of four never leaves one tile alone on a line.
+     Every tile is as tall as the others, status line or not. */
+  .home { container-type: inline-size; }
+
   .tiles {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
     max-width: var(--settings-width);
-    margin-bottom: 24px;
+    margin-bottom: 28px;
   }
 
   h2 {
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     font-size: var(--text-sm);
     font-weight: 500;
     color: var(--color-muted-foreground);
   }
 
+  /* The glyph sits above the words, so a long French label keeps the tile's
+     whole width instead of the room left beside an icon. */
   .tile {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
     justify-content: flex-start;
     gap: 12px;
     height: auto;
-    min-height: 60px;
-    padding: 10px 12px;
+    padding: 14px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     background: var(--color-surface);
     box-shadow: none;
     text-align: left;
+    white-space: normal;
     font-weight: normal;
     color: var(--color-foreground);
     transition: background var(--dur-2), border-color var(--dur-2);
@@ -201,12 +209,28 @@
     border-radius: var(--radius-md);
     background: var(--color-surface-3);
     color: var(--color-muted-foreground);
+    transition: color var(--dur-2);
   }
+  .tile:hover .glyph { color: var(--color-foreground); }
 
-  .text { display: grid; flex: 1; gap: 2px; min-width: 0; }
-  .label { font-weight: 500; overflow-wrap: anywhere; }
-  .status { font-size: var(--text-sm); color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Room for a label and two status lines on every tile ("3 machines · 10
+     paired devices" takes two at a quarter of the column), so a tile with
+     nothing to report stands as tall as one that has. */
+  .text { display: grid; align-content: start; gap: 2px; width: 100%; min-width: 0; min-height: calc(var(--text-base) * 1.3 + 2px + var(--text-sm) * 1.35 * 2); }
+  .label { font-size: var(--text-base); font-weight: 500; line-height: 1.3; overflow-wrap: break-word; }
+  .status { font-size: var(--text-sm); line-height: 1.35; color: var(--color-muted-foreground); overflow-wrap: break-word; }
   .status.call { color: var(--color-accent); }
+
+  /* Two a row, the glyph goes back beside the words: a half-width tile is wide
+     enough for both and a tall one would be mostly empty. */
+  @container (max-width: 840px) {
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tile { flex-direction: row; align-items: center; }
+    .text { align-content: center; }
+  }
+  @container (max-width: 440px) {
+    .tiles { grid-template-columns: minmax(0, 1fr); }
+  }
 
   .results { max-width: var(--settings-width); display: grid; }
   .result {
