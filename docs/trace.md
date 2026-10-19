@@ -430,6 +430,9 @@ carry into a later launch. `process.muted` identifies the thread and PID.
 Logic tests use a fake endpoint; the native audio test opens a session with two
 seconds of zeroed PCM, without audible content, once at start and once four
 seconds late, which only Core Audio's notice can catch inside the test's window.
+Run inside a Boite thread whose machine mutes agents, the fixture is muted
+again within a second of an unmute: the tests that need the test core to mute
+it are skipped then, with that reason, as on a machine with no audio device.
 
 ## Turning them off
 

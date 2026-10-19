@@ -24,8 +24,47 @@ if (onWindows) {
   coUninitialize();
   if (!hasAudioEndpoint) console.info('Audio integration tests skipped: no default render endpoint on this host');
 }
-const describeWindows = hasAudioEndpoint ? describe : describe.skip;
 const FIXTURE = join(import.meta.dir, 'fixtures', 'silent-tone.ts');
+
+/**
+ * Whether a Boite that runs these tests, an agent's turn on this machine, mutes
+ * what its agents start (`muteAgents`): the fixture's session is muted again
+ * within a second of an unmute, which a mute an earlier run left behind is not.
+ * The test core then finds the fixture muted already, takes that for the
+ * user's choice and never mutes it itself, so these tests cannot pass there.
+ */
+async function hostMutesAgents(): Promise<boolean> {
+  coInitialize();
+  const probe = openSessions();
+  const child = Bun.spawn(['bun', FIXTURE], { stdout: 'ignore', stderr: 'ignore' });
+  const muted = (): boolean | null => {
+    let state: boolean | null = null;
+    for (const session of probe?.list() ?? []) {
+      if (session.pid === child.pid && state !== true) state = session.getMute();
+      session.release();
+    }
+    return state;
+  };
+  try {
+    for (const end = Date.now() + 10_000; muted() === null && Date.now() < end;) await Bun.sleep(20);
+    if (muted() !== true) return false;
+    for (const session of probe?.list() ?? []) {
+      if (session.pid === child.pid) session.mute(false);
+      session.release();
+    }
+    for (const end = Date.now() + 1500; Date.now() < end; await Bun.sleep(50)) if (muted() === true) return true;
+    return false;
+  } finally {
+    child.kill();
+    await child.exited;
+    probe?.release();
+    coUninitialize();
+  }
+}
+
+const hostMutes = hasAudioEndpoint && await hostMutesAgents();
+if (hostMutes) console.info('Thread audio tests skipped: the Boite running these tests mutes what its agents start (muteAgents), so the test core never gets to mute the fixture');
+const describeWindows = hasAudioEndpoint ? describe : describe.skip;
 /**
  * How long the core has to mute a session that exists. Starting a Bun process
  * and opening a wave device is a second or so on its own and has nothing to do
@@ -204,7 +243,7 @@ describeWindows('the audio sessions of the default endpoint', () => {
     }
   }, 30000);
 
-  describe('a process a thread launched', () => {
+  (hostMutes ? describe.skip : describe)('a process a thread launched', () => {
     let harness: TestCore;
 
     beforeEach(async () => {
