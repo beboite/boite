@@ -81,8 +81,28 @@ jobs:
       stress: ${{ steps.filter.outputs.stress }}
       portable: ${{ steps.filter.outputs.portable }}
       coreRunners: ${{ steps.filter.outputs.coreRunners }}
-      stale: ${{ steps.stale.outputs.stale == 'true' }}
+      stale: ${{ steps.stale.outputs.stale }}
     steps:
+      # A rerun keeps its event: an old draft run rerun once the pull request
+      # is ready, or a fork's draft run approved after it, would put skips back
+      # under the required names. First step, so its answer survives a later
+      # failure: `false` (still a draft) lets the direct jobs skip as usual;
+      # `true` (ready, or no answer) or nothing at all (planning failed before
+      # it) makes them run only to fail. A cancelled run reports them
+      # cancelled, which blocks too.
+      - id: stale
+        if: github.event.pull_request.draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          draft=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER" --jq .draft) || draft=unreadable
+          if [ "$draft" = true ]; then
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "::error::pull request #$NUMBER is no longer a draft (draft: $draft): this draft run fails its checks; rerun the latest ready run instead"
+          fi
       # The conversion cancels a full run, whose planning may have passed
       # under the required name: failing it keeps that success from merging
       # next to the draft's skips. The next push runs the draft checks.
@@ -91,22 +111,6 @@ jobs:
         run: |
           echo "::error::converted to draft: the next push runs the draft checks, gh pr ready the full run"
           exit 1
-      # A rerun keeps its event: an old draft run rerun once the pull request
-      # is ready would put skips back under the required names. Its direct jobs
-      # then run only to fail; an unreadable flag counts as ready, and so does
-      # a rerun whose planning fails before this step. A cancelled run reports
-      # them cancelled, which blocks too.
-      - id: stale
-        if: github.event.pull_request.draft
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          draft=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER" --jq .draft) || draft=unreadable
-          if [ "$draft" != true ]; then
-            echo "stale=true" >> "$GITHUB_OUTPUT"
-            echo "::error::pull request #$NUMBER is no longer a draft (draft: $draft): this draft run fails its checks; rerun the latest ready run instead"
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
@@ -166,7 +170,7 @@ jobs:
   core-linux-x64:
     name: Core tests (Linux x64)
     needs: changes
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04"')) }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04"')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps: &core-steps
@@ -191,7 +195,7 @@ jobs:
   core-linux-arm64:
     name: Core tests (Linux arm64)
     needs: changes
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04-arm"')) }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04-arm"')) }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps: *core-steps
@@ -199,7 +203,7 @@ jobs:
   core-windows-x64:
     name: Core tests (Windows x64)
     needs: changes
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"windows-2025"')) }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"windows-2025"')) }}
     runs-on: windows-2025
     timeout-minutes: 15
     steps: *core-steps
@@ -207,7 +211,7 @@ jobs:
   core-macos-arm64:
     name: Core tests (macOS arm64)
     needs: changes
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15"')) }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15"')) }}
     runs-on: macos-15
     timeout-minutes: 15
     steps: *core-steps
@@ -215,7 +219,7 @@ jobs:
   core-macos-x64:
     name: Core tests (macOS x64)
     needs: changes
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15-intel"')) }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15-intel"')) }}
     runs-on: macos-15-intel
     timeout-minutes: 15
     steps: *core-steps
@@ -223,7 +227,7 @@ jobs:
   web:
     name: Type checks and UI tests
     needs: changes
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.web == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -256,7 +260,7 @@ jobs:
   telemetry:
     name: Telemetry relay tests
     needs: changes
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.telemetry == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.telemetry == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -276,7 +280,7 @@ jobs:
   e2e-types:
     name: E2E type check
     needs: changes
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.e2eTypes == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.e2eTypes == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -299,7 +303,7 @@ jobs:
   ui:
     name: Build UI
     needs: changes
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.stress == 'true' || (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true')) }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.stress == 'true' || (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -336,7 +340,7 @@ jobs:
   stress:
     name: Stress fixtures
     needs: [changes, ui]
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.stress == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.stress == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 15
     env:
@@ -375,7 +379,7 @@ jobs:
   size:
     name: Bundle size
     needs: changes
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (github.event_name == 'pull_request' && needs.changes.outputs.desktop == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (github.event_name == 'pull_request' && needs.changes.outputs.desktop == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -437,7 +441,7 @@ jobs:
   e2e-1:
     name: E2E 1/3
     needs: [changes, ui]
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 35
     env:
@@ -496,7 +500,7 @@ jobs:
   e2e-2:
     name: E2E 2/3
     needs: [changes, ui]
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 35
     env:
@@ -508,7 +512,7 @@ jobs:
   e2e-3:
     name: E2E 3/3
     needs: [changes, ui]
-    if: ${{ !cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true') || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
+    if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 35
     env:

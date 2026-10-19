@@ -56,24 +56,26 @@ test('every job a needs chain runs through is in the list, so a skip after a fai
 // workflows' callers, which always run, name themselves "(draft)"; every
 // other job runs only to fail when a draft run is rerun once the pull request
 // is ready, and a conversion to draft fails the required planning name.
-// How each direct job's condition starts, and what it decides for a run. A
-// draft rerun runs the job (to fail it) whenever planning failed, so its
-// skips never replace a ready run's results. A cancelled run reports its
-// pending jobs cancelled, not skipped (#653), which blocks without a runner.
-const STALE = "!cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true')";
-type Run = { draft: boolean; attempt: number; changes: 'success' | 'failure' | 'cancelled'; stale?: 'true' | 'false'; cancelled: boolean };
-const runsStale = (run: Run) => !run.cancelled && (run.draft && run.attempt > 1 && run.changes !== 'success' || run.stale === 'true');
+// How each direct job's condition starts, and what it decides for a run.
+// `stale` is planning's first step: `false` (still a draft) lets a failed
+// planning skip as usual; `true` (ready, or no answer) or nothing at all
+// (planning failed before it, a fork's draft run approved late included)
+// makes the job run only to fail. A cancelled run reports its pending jobs
+// cancelled, not skipped (#653), which blocks without a runner.
+const STALE = "!cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false')";
+type Run = { draft: boolean; changes: 'success' | 'failure'; stale: 'true' | 'false' | ''; cancelled?: boolean };
+const runsStale = (run: Run) => !run.cancelled && run.draft && (run.stale === 'true' || run.changes !== 'success' && run.stale !== 'false');
 
-test('a draft rerun whose planning failed before the stale step runs its direct jobs to fail them', () => {
-  // Planning failed at setup: no stale output, success() false.
-  expect(runsStale({ draft: true, attempt: 2, changes: 'failure', cancelled: false })).toBe(true);
-  expect(runsStale({ draft: true, attempt: 2, changes: 'cancelled', cancelled: true })).toBe(false);
-  expect(runsStale({ draft: true, attempt: 2, changes: 'success', stale: 'true', cancelled: false })).toBe(true);
-  // A first draft run whose planning fails, or one a newer push cancels, costs no runner.
-  expect(runsStale({ draft: true, attempt: 1, changes: 'failure', cancelled: false })).toBe(false);
-  expect(runsStale({ draft: true, attempt: 1, changes: 'cancelled', cancelled: true })).toBe(false);
-  expect(runsStale({ draft: false, attempt: 2, changes: 'failure', cancelled: false })).toBe(false);
-  expect(runsStale({ draft: true, attempt: 2, changes: 'success', stale: 'false', cancelled: false })).toBe(false);
+test('a draft run fails its direct jobs unless planning saw a draft, whatever the attempt', () => {
+  // Planning failed at setup, before the flag read: no output.
+  expect(runsStale({ draft: true, changes: 'failure', stale: '' })).toBe(true);
+  expect(runsStale({ draft: true, changes: 'success', stale: 'true' })).toBe(true);
+  expect(runsStale({ draft: true, changes: 'failure', stale: 'true' })).toBe(true);
+  // Still a draft and its repository checks failed: the usual skips, no runner.
+  expect(runsStale({ draft: true, changes: 'failure', stale: 'false' })).toBe(false);
+  expect(runsStale({ draft: true, changes: 'success', stale: 'false' })).toBe(false);
+  expect(runsStale({ draft: false, changes: 'failure', stale: '' })).toBe(false);
+  expect(runsStale({ draft: true, changes: 'failure', stale: '', cancelled: true })).toBe(false);
 });
 
 test('a draft passes no required name, rerun or converted', () => {
@@ -81,13 +83,14 @@ test('a draft passes no required name, rerun or converted', () => {
   const changes = ci.jobs.changes as Job & { steps: { id?: string; if?: string; run?: string }[]; permissions: Record<string, string> };
   expect(jobNames(changes, 'changes')).toEqual({ draft: 'Plan and repository checks (draft)', ready: 'Plan and repository checks' });
   expect(changes.name).toContain("github.event.action != 'converted_to_draft'");
-  const [conversion, stale] = changes.steps;
-  expect(conversion!.if).toBe("github.event.action == 'converted_to_draft'");
-  expect(conversion!.run).toContain('exit 1');
+  const [stale, conversion] = changes.steps;
   expect(stale!.id).toBe('stale');
   expect(stale!.if).toBe('github.event.pull_request.draft');
-  // Fail closed: anything but a draft answer, an unreadable one included, is stale.
-  expect(stale!.run).toContain('if [ "$draft" != true ]; then');
+  // Fail closed: only a draft answer gives `false`; an unreadable one is stale.
+  expect(stale!.run).toContain('if [ "$draft" = true ]; then\n  echo "stale=false"');
+  expect((changes as Job & { outputs: Record<string, string> }).outputs.stale).toBe('${{ steps.stale.outputs.stale }}');
+  expect(conversion!.if).toBe("github.event.action == 'converted_to_draft'");
+  expect(conversion!.run).toContain('exit 1');
   expect(changes.permissions['pull-requests']).toBe('read');
 
   const ready = requiredChecks(files);

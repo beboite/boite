@@ -190,12 +190,13 @@ A skip passes in a ruleset, so a draft must not satisfy it:
 - After `ready_for_review`, the required planning name stays expected until
   the `pr` run creates it, then pending until it ends.
 - A rerun keeps its event, so an old draft run rerun once the pull request is
-  ready would put skips back under the required names. Its planning job reads
-  the pull request's draft flag; when it is no longer a draft, or GitHub does
-  not answer, every other job runs only to fail with "rerun the latest ready
-  run instead". So does a rerun draft run whose planning fails before reading
-  it. A cancelled run reports its pending jobs `cancelled`, not skipped, which
-  blocks as well.
+  ready, or a fork's draft run approved after it, would put skips back under
+  the required names. The planning job's first step reads the pull request's
+  draft flag. Still a draft: the other jobs skip as usual, even when the
+  repository checks fail. No longer a draft, no answer from GitHub, or
+  planning failed before that step: every other job runs only to fail with
+  "rerun the latest ready run instead". A cancelled run reports its pending
+  jobs `cancelled`, not skipped, which blocks as well.
 - `converted_to_draft` cancels a full run in progress and fails `Plan and
   repository checks` at once, so that run's earlier planning success cannot
   merge next to skips; the next push runs the draft checks.
