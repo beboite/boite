@@ -299,6 +299,7 @@ export class Store {
   set settingsSection(value) { this.#ctx.layout.settingsSection = value; }
   get agentsTarget() { return this.#ctx.layout.agentsTarget; }
   set agentsTarget(value) { this.#ctx.layout.agentsTarget = value; }
+  get contact() { return this.#ctx.layout.contact; }
   get sidebarOpen() { return this.#ctx.layout.sidebarOpen; }
   set sidebarOpen(value) { this.#ctx.layout.sidebarOpen = value; }
   get sidebarCollapsed() { return this.#ctx.layout.sidebarCollapsed; }
@@ -318,7 +319,7 @@ export class Store {
   showSettings(...args: Parameters<Layout['showSettings']>) { return this.#ctx.layout.showSettings(...args); }
   showChat(...args: Parameters<Layout['showChat']>) { return this.#ctx.layout.showChat(...args); }
   showAgents(...args: Parameters<Layout['showAgents']>) { return this.#ctx.layout.showAgents(...args); }
-  showHome() { return this.#ctx.layout.showHome(); }
+  showHome(contact: string | null = null) { return this.#ctx.layout.showHome(contact); }
   togglePanel(...args: Parameters<Layout['togglePanel']>) { return this.#ctx.layout.togglePanel(...args); }
   setNotifications(...args: Parameters<Layout['setNotifications']>) { return this.#ctx.layout.setNotifications(...args); }
   setNotificationKind(...args: Parameters<Layout['setNotificationKind']>) { return this.#ctx.layout.setNotificationKind(...args); }

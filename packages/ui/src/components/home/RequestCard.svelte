@@ -9,9 +9,9 @@
   import Menu from '../Menu.svelte';
 
   /**
-   * One request between contacts. Waiting on this owner, it carries Accept,
-   * which opens a project picked in the app's menu, and Refuse, which asks for
-   * the reason the asking agent will read. Decided, it folds to one line with
+   * One request between contacts, a row of a Requests card. Waiting on this
+   * owner, it carries Accept, which shares a project picked in the app's menu,
+   * and Refuse, which asks for the reason the asking agent will read. Decided, it folds to one line with
    * what came of it and who decided.
    */
   let { view, request, now }: { view: ContactsView; request: ContactRequest; now: number } = $props();
@@ -85,23 +85,15 @@
 {/if}
 
 <style>
+  /* A row of the Requests card: rows are split by a rule, like Settings rows. */
   .request {
-    position: relative;
     display: grid;
-    gap: 8px;
-    padding: 14px 16px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    background: var(--color-surface);
-    box-shadow: var(--shadow-e1);
+    gap: 6px;
+    padding: 14px 0;
     animation: rise var(--dur-3) var(--ease-out-quint);
   }
-  /* Waiting on this owner: the accent outline and a soft glow, the one thing on the page that asks for a hand. */
-  .request.incoming {
-    border-color: color-mix(in oklch, var(--color-accent) 55%, transparent);
-    background: linear-gradient(160deg, color-mix(in oklch, var(--color-accent) 10%, var(--color-surface)), var(--color-surface) 60%);
-    box-shadow: var(--shadow-e1), 0 0 0 4px color-mix(in oklch, var(--color-accent) 10%, transparent);
-  }
+  :global(.request) + .request { border-top: 1px solid var(--color-border); }
+  :global(h2) + .request { padding-top: 0; }
   .kicker { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--color-accent); font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
   .request:not(.incoming) .kicker { color: var(--color-muted-foreground); }
   .kicker .ui-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

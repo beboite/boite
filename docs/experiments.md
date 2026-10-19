@@ -55,22 +55,28 @@ of a client's experiments.
 
 ## Contacts
 
-The Home page ([contacts](contacts.md)) and the buttons that lead there: Home
-beside Threads and Agents at the top of the sidebar, and the phone menu entry.
-Home lists each contact with its link, the trusted switch, the projects opened
-each way with their read switch, and the four fingerprint words under Details.
-Requests waiting for an answer come first, with Accept on a picked project and
-Refuse with a reason; decided ones fold under a count that says who decided.
-Invite makes a one-use link and says whether Tailscale shared the machine or
-why it could not; Join takes a pasted link and shows the four words to compare.
-The Tailscale card stores or clears the API key, never shows it back, and gives
-the policy lines to paste when the policy is open. The weakest model tier a
-contact's request may run on is the last setting.
+The Contacts section of the thread list and the Contacts page
+([contacts](contacts.md)). The section sits under the projects, on a phone too:
+one row per contact with its link and what it asks, and Add beside its title.
+A row opens that contact's page in the chat's card, the list staying beside it;
+the Contacts button at the foot of the list, and the phone menu entry, open the
+page with no contact picked.
+
+A contact's page shows what it asks, the projects each side shares with the
+other with their read switch, then trust, the four check words and Remove. With
+no contact picked, the page lists the requests waiting for an answer, with
+Accept on a picked project and Refuse with a reason; decided ones fold under a
+count that says who decided. Invite makes a one-use link, copies it and says
+whether Tailscale shared the machine or why it could not; Join takes a pasted
+link and shows the four words to compare. The Tailscale row says the policy
+state; Configure unfolds the API key (stored or cleared, never shown back), the
+policy lines to paste when it is open, and the weakest model tier a contact's
+request may run on.
 
 In a thread, a letter the core labelled with a contact shows that contact's
 name in a dashed "remote" chip beside the sender. The chip is drawn whatever
 the switch says: the label comes from the core. Turning the switch off closes
-Home if it is open; contacts, grants and requests stay on the core.
+the Contacts page if it is open; contacts, grants and requests stay on the core.
 
 ## Preview comments
 

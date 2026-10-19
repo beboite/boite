@@ -18,7 +18,6 @@ export const strings = {
     surface: 'Threads or agents',
     threads: 'Threads',
     agents: 'Agents',
-    home: 'Home',
     /** The count beside Threads or Agents in that switch: what works now, and whether something there needs the user. */
     surfaceWorking: '{count} at work',
     surfaceWaiting: '{count} at work, something needs you',

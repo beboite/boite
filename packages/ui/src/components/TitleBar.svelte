@@ -28,7 +28,7 @@
    * together. On a phone the Agents list is the screen itself, with no drawer
    * to open.
    */
-  let foldable = $derived(store.booted && (store.page === 'chat' || ((store.page === 'agents' || store.page === 'home') && !mobile.current)));
+  let foldable = $derived(store.booted && (store.page === 'chat' || store.page === 'home' || (store.page === 'agents' && !mobile.current)));
   function toggleSidebar() {
     if (mobile.current) store.sidebarOpen = !store.sidebarOpen;
     else store.toggleSidebar();

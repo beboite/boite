@@ -1,30 +1,33 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { confirm } from '../../lib/confirm.svelte';
+import { setExperiment } from '../../lib/experiments';
 import { FakeClient } from '../../lib/fake-client';
 import { Store, store as primary } from '../../lib/store.svelte';
 import { strings } from '../../lib/strings';
 import { workspace } from '../../lib/workspace.svelte';
 import HomePage from './HomePage.svelte';
+import SidebarContacts from './SidebarContacts.svelte';
 
-let component: ReturnType<typeof mount> | undefined;
+let components: ReturnType<typeof mount>[] = [];
 let opened: Store | undefined;
 
 afterEach(async () => {
   confirm.answer(false);
-  if (component) await unmount(component);
+  for (const component of components) await unmount(component);
+  components = [];
   opened?.client?.close();
   opened?.detach();
   opened = undefined;
   workspace.machines = [];
   workspace.active = primary;
-  component = undefined;
   document.body.innerHTML = '';
+  setExperiment('contacts', false);
   localStorage.clear();
 });
 
-async function draw(): Promise<Store> {
-  localStorage.setItem('boite.experiments', JSON.stringify(['contacts']));
+async function connect(): Promise<Store> {
+  setExperiment('contacts', true);
   const store = new Store();
   store.machineId = 'home';
   store.attach(new FakeClient({ delayMs: 0 }));
@@ -32,8 +35,15 @@ async function draw(): Promise<Store> {
   opened = store;
   workspace.machines = [{ id: 'home', label: 'Home', store }];
   workspace.active = store;
-  component = mount(HomePage, { target: document.body, props: { store } });
-  await vi.waitFor(() => { flushSync(); expect(one('contact-core-chris')).not.toBeNull(); });
+  return store;
+}
+
+/** The Contacts page as App draws it; `contact` opens that contact's page first. */
+async function draw(contact: string | null = null): Promise<Store> {
+  const store = await connect();
+  store.showHome(contact);
+  components.push(mount(HomePage, { target: document.body, props: { store } }));
+  await vi.waitFor(() => { flushSync(); expect(one(contact ? `contact-${contact}` : 'home-add')).not.toBeNull(); });
   return store;
 }
 
@@ -46,18 +56,41 @@ function type(input: HTMLInputElement, value: string) {
   flushSync();
 }
 
-test('Chris is drawn with the link, both lanes and the waiting request; rename, trust and read go to the core', async () => {
-  const store = await draw();
-  const card = one('contact-core-chris')!;
+test('the list under the projects shows Chris and what he asks; a row opens his page, Add the page without one, and the fold is kept', async () => {
+  const store = await connect();
+  components.push(mount(SidebarContacts, { target: document.body, props: { store, machines: workspace.machines } }));
+  await vi.waitFor(() => { flushSync(); expect(one('sidebar-contact')).not.toBeNull(); });
+  const row = one<HTMLButtonElement>('sidebar-contact')!;
+  expect([row.dataset.coreId, row.dataset.link]).toEqual(['core-chris', 'connected']);
+  expect(row.textContent).toContain('Chris');
+  expect(row.textContent).toContain('1');
+
+  row.click();
+  await vi.waitFor(() => expect([store.page, store.contact]).toEqual(['home', 'core-chris']));
+  flushSync();
+  expect(one('sidebar-contact')!.getAttribute('aria-current')).toBe('page');
+
+  one<HTMLButtonElement>('sidebar-contacts-add')!.click();
+  await vi.waitFor(() => expect([store.page, store.contact]).toEqual(['home', null]));
+
+  // Folded, the title alone says something waits, and a second visit finds it folded.
+  expect(one('sidebar-contacts-waiting')).toBeNull();
+  one<HTMLButtonElement>('sidebar-contacts-toggle')!.click();
+  flushSync();
+  expect(one('sidebar-contacts-toggle')!.getAttribute('aria-expanded')).toBe('false');
+  expect(one('sidebar-contacts-waiting')!.textContent).toBe('1');
+  expect(localStorage.getItem('boite.contacts-folded')).toBe('1');
+});
+
+test('his page draws the link, both ways of sharing and the check words; rename, trust and read go to the core', async () => {
+  const store = await draw('core-chris');
   expect(one('contact-link')!.textContent).toBe(strings.contacts.link.connected);
-  expect(card.querySelector('[data-testid^="contact-grant-"]')?.textContent).toContain('boite');
+  expect(one('contact-shared')!.querySelector('[data-testid^="contact-grant-"]')?.textContent).toContain('boite');
   expect(one('contact-offer-chris-website')!.textContent).toContain('website');
   expect(one('contact-words')!.querySelectorAll('li')).toHaveLength(4);
-  expect(one('home-waiting')).not.toBeNull();
-  expect(one('contact-request-creq-pending')).not.toBeNull();
-  // The decided one is folded under its count, with who decided.
-  expect(one<HTMLDetailsElement>('home-decided')!.open).toBe(false);
-  expect(one('contact-request-creq-done')!.querySelector('[data-by="match"]')).not.toBeNull();
+  // Only what he asks shows on his page, and nothing of the page that adds a contact.
+  expect(one('contact-requests')!.querySelector('[data-testid="contact-request-creq-pending"]')).not.toBeNull();
+  expect(one('home-add')).toBeNull();
 
   one<HTMLButtonElement>('contact-name')!.click();
   await vi.waitFor(() => { flushSync(); expect(one('contact-name-input')).not.toBeNull(); });
@@ -74,8 +107,13 @@ test('Chris is drawn with the link, both lanes and the waiting request; rename, 
   });
 });
 
-test('accept opens the project picked in the menu; refuse waits for a reason; remove asks first', async () => {
+test('accept shares the project picked in the menu; refuse waits for a reason; remove asks first and goes back to the page that adds one', async () => {
   const store = await draw();
+  expect(one('home-waiting')).not.toBeNull();
+  // The decided one is folded under its count, with who decided.
+  expect(one<HTMLDetailsElement>('home-decided')!.open).toBe(false);
+  expect(one('contact-request-creq-done')!.querySelector('[data-by="match"]')).not.toBeNull();
+
   one<HTMLButtonElement>('contact-refuse-creq-pending')!.click();
   await vi.waitFor(() => { flushSync(); expect(one('contact-refuse-reason')).not.toBeNull(); });
   expect(one<HTMLButtonElement>('contact-refuse-send')!.disabled).toBe(true);
@@ -91,14 +129,17 @@ test('accept opens the project picked in the menu; refuse waits for a reason; re
   });
   await vi.waitFor(() => { flushSync(); expect(one('home-waiting')).toBeNull(); });
 
+  store.showHome('core-chris');
+  await vi.waitFor(() => { flushSync(); expect(one('contact-remove')).not.toBeNull(); });
   one<HTMLButtonElement>('contact-remove')!.click();
   await vi.waitFor(() => expect(confirm.current?.danger).toBe(true));
   confirm.answer(true);
-  await vi.waitFor(() => { flushSync(); expect(one('home-no-contact')).not.toBeNull(); });
+  await vi.waitFor(() => { flushSync(); expect(one('home-add')).not.toBeNull(); });
+  expect(store.contact).toBeNull();
   expect((await contacts(store)).contacts).toEqual([]);
 });
 
-test('an invitation shows its link and share; a joined link shows the four words; the key clears and the tier moves', async () => {
+test('Invite makes a link with its share; a joined link shows the four words; Configure unfolds the key, the policy and the tier', async () => {
   const store = await draw();
   one<HTMLButtonElement>('contact-invite-create')!.click();
   await vi.waitFor(() => { flushSync(); expect(one('contact-invite')).not.toBeNull(); });
@@ -110,7 +151,11 @@ test('an invitation shows its link and share; a joined link shows the four words
   one<HTMLButtonElement>('contact-join')!.click();
   await vi.waitFor(() => { flushSync(); expect(one('contact-joined-words')?.querySelectorAll('li')).toHaveLength(4); });
 
+  // The Tailscale row says the policy is open without unfolding anything.
   expect(one('contact-policy')!.dataset.policy).toBe('open');
+  expect(one('contact-key-input')).toBeNull();
+  one<HTMLButtonElement>('contact-configure')!.click();
+  flushSync();
   expect(one('contact-policy-fix')).not.toBeNull();
   one<HTMLButtonElement>('contact-key-clear')!.click();
   await vi.waitFor(() => { flushSync(); expect(one('contact-policy')!.dataset.policy).toBe('unknown'); });
@@ -129,6 +174,8 @@ test('a link that shares the inviter, pasted without an API key, offers the shar
   await vi.waitFor(() => { flushSync(); expect(one('contact-invite-share')?.dataset.status).toBe('created'); });
   const link = one<HTMLInputElement>('contact-invite-link')!.value;
   const share = one<HTMLAnchorElement>('contact-invite-share')!.href;
+  one<HTMLButtonElement>('contact-configure')!.click();
+  flushSync();
   one<HTMLButtonElement>('contact-key-clear')!.click();
   await vi.waitFor(() => { flushSync(); expect(one('contact-key-state')!.textContent).toBe(strings.contacts.tailscale.keyMissing); });
   expect(one('contact-join-share')).toBeNull();

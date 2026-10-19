@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Bot, House, MessagesSquare } from '@lucide/svelte';
+  import { Bot, MessagesSquare } from '@lucide/svelte';
   import { experimentOn } from '../lib/experiments.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -12,15 +12,13 @@
    * The switch at the top of the sidebar and of the Agents rail: the thread
    * list or the Agents page, each with how much works there now, every
    * machine counted. The count turns to the waiting colour when something
-   * there needs the user. Home, where contacts live, follows when its
-   * experiment is on. With both experiments off there is only one place to
-   * be, so the switch is not drawn at all.
+   * there needs the user. With the Agents experiment off there is only one
+   * place to be, so the switch is not drawn at all.
    */
-  let { store, current, prefix = '' }: { store: Store; current: 'threads' | 'agents' | 'home'; prefix?: string } = $props();
+  let { store, current, prefix = '' }: { store: Store; current: 'threads' | 'agents'; prefix?: string } = $props();
 
   const stores = $derived(workspace.machines.length ? workspace.machines.map(machine => machine.store) : [store]);
   const on = $derived(experimentOn('resident-agents'));
-  const home = $derived(experimentOn('contacts'));
   const threads = $derived(on ? workingThreads(stores) : { count: 0, subagents: 0, waiting: false });
   const agents = $derived(on ? agentsAtWork(stores) : { count: 0, waiting: false });
 
@@ -48,24 +46,16 @@
   {/if}
 {/snippet}
 
-{#if on || home}
+{#if on}
   <div class="surface-switch" role="group" aria-label={strings.sidebar.surface}>
     <button type="button" class="ghost small view" class:chosen={current === 'threads'} aria-pressed={current === 'threads'} data-testid={`${prefix}view-threads`}
       onclick={() => { if (current !== 'threads') store.showChat(); }}>
       <MessagesSquare size={13} /><span class="label ui-label">{strings.sidebar.threads}</span>{@render badge(threads, `${prefix}threads-at-work`)}
     </button>
-    {#if on}
     <button type="button" class="ghost small view" class:chosen={current === 'agents'} aria-pressed={current === 'agents'} data-testid={`${prefix}view-agents`} data-preload-view="agents"
       onclick={() => { if (current !== 'agents') store.showAgents(); }}>
       <Bot size={14} /><span class="label ui-label">{strings.sidebar.agents}</span>{@render badge(agents, `${prefix}agents-at-work`)}
     </button>
-    {/if}
-    {#if home}
-      <button type="button" class="ghost small view" class:chosen={current === 'home'} aria-pressed={current === 'home'} data-testid={`${prefix}view-home`} data-preload-view="home"
-        onclick={() => { if (current !== 'home') store.showHome(); }}>
-        <House size={14} /><span class="label ui-label">{strings.sidebar.home}</span>
-      </button>
-    {/if}
   </div>
 {/if}
 

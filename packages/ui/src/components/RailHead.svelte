@@ -4,14 +4,14 @@
   import SurfaceSwitch from './SurfaceSwitch.svelte';
 
   /**
-   * The top of a list: the Threads, Agents and Home switch, then one row of tools,
+   * The top of a list: the Threads and Agents switch, then one row of tools,
    * what the list shows on the left and its actions on the right. The thread
    * list and the Agents list both draw it, so switching between them moves
    * nothing but the rows.
    */
   let { store, current, prefix = '', lead, actions }: {
     store: Store;
-    current: 'threads' | 'agents' | 'home';
+    current: 'threads' | 'agents';
     prefix?: string;
     lead?: Snippet;
     actions?: Snippet;

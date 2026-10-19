@@ -14,7 +14,6 @@
   import DragGhost from './components/DragGhost.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
 
-  import RailHead from './components/RailHead.svelte';
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
   import { Closing } from './lib/closing.svelte';
@@ -181,7 +180,7 @@
     if (experimentOn('resident-agents')) return;
     for (const machine of workspace.machines) if (machine.store.page === 'agents') machine.store.showChat();
   });
-  // The Home page loads only once it is opened, so the boot bundle never carries it.
+  // The Contacts page loads only once it is opened, so the boot bundle never carries it.
   let HomePage = $state<typeof import('./components/home/HomePage.svelte').default>();
   let homeLoadError = $state('');
   $effect(() => {
@@ -560,7 +559,7 @@
   {/if}
   <TitleBar {store} />
 
-  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
+  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={store.page === 'chat' && rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
     {#if !booted}
       <p class="empty boot" class:long={compacting}>{compacting ? strings.app.compacting : strings.app.loading}</p>
     {:else if wideRecovery}
@@ -582,8 +581,6 @@
       {/if}
     {:else if store.page === 'agents' && experimentOn('resident-agents')}
       {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
-    {:else if store.page === 'home' && experimentOn('contacts')}
-      {#if HomePage}{#key store}<HomePage {store}>{#snippet head()}<RailHead {store} current="home" />{/snippet}</HomePage>{/key}{:else}<p class="empty">{homeLoadError || strings.app.loading}</p>{/if}
     {:else if store.page === 'settings'}
       {#if SettingsShell}<SettingsShell {store} onopenthread={() => { mobileScreen = 'chat'; }} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}
@@ -599,6 +596,14 @@
           onclick={() => (store.sidebarOpen = false)}
         ></button>
       {/if}
+      {#if store.page === 'home' && experimentOn('contacts')}
+        <!-- Contacts take the chat's card; the thread list stays beside them. -->
+        <main>
+          <div class="thread-chat framed">
+            {#if HomePage}{#key store}<HomePage {store} />{/key}{:else}<p class="empty">{homeLoadError || strings.app.loading}</p>{/if}
+          </div>
+        </main>
+      {:else}
       <main>
         <div class="thread-chat framed">
           {#key store}
@@ -627,6 +632,7 @@
             onexit={panelSlot.end}
           />
         {/key}
+      {/if}
       {/if}
     {/if}
   </div>

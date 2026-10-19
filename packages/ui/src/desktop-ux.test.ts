@@ -10,6 +10,7 @@ import { archiveThread } from './lib/archive';
 import { runCommand } from './lib/commands.svelte';
 import { undo } from './lib/undo.svelte';
 import { confirm } from './lib/confirm.svelte';
+import { rightPanel } from './lib/right-panel.svelte';
 
 /**
  * The desktop behaviours the UX audit found broken, on the whole app over the
@@ -35,6 +36,24 @@ afterEach(() => {
   work.load();
   workspace.view = 'projects';
   undo.dismiss();
+});
+
+test('a maximized panel stays with its thread: the Contacts page beside the list is not squeezed to nothing', async () => {
+  writeExperiments(['contacts']);
+  await mountOnFake();
+  try {
+    if (!store.panelOpen) store.togglePanel();
+    rightPanel.maximized = true;
+    await waitFor(() => query('.body').classList.contains('panel-maximized'));
+    store.showHome();
+    await waitFor(() => document.querySelector('[data-testid=home-page]') !== null);
+    expect(query('.body').classList.contains('panel-maximized')).toBe(false);
+    // Back on the chat, the thread finds its panel as it left it.
+    store.showChat();
+    await waitFor(() => query('.body').classList.contains('panel-maximized'));
+  } finally {
+    rightPanel.maximized = false;
+  }
 });
 
 test('typed confirmation supports Enter and cancellation restores focus', async () => {

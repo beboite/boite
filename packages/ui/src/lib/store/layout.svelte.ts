@@ -60,6 +60,8 @@ export class Layout {
   search = $state('');
   /** The agent an outside link asked the Agents page to open, with a fresh key for repeated asks; the page takes it once. */
   agentsTarget = $state<{ agentId: string; request: number; pane?: 'settings'; kind?: 'profile' | 'group' | 'team' | 'mission' } | null>(null);
+  /** The contact the Contacts page shows, by core id; null shows the page that adds one. */
+  contact = $state<string | null>(null);
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -121,10 +123,11 @@ export class Layout {
     this.sidebarOpen = false;
   }
 
-  /** The Home page, where contacts live. An experiment too: with it off, nothing leads there. */
-  showHome(): void {
+  /** The Contacts page: one contact, or with none the way to add one. An experiment too: with it off, nothing leads there. */
+  showHome(contact: string | null = null): void {
     if (!experimentOn('contacts')) return;
     this.ctx.threads.invalidateNavigation();
+    this.contact = contact;
     this.page = 'home';
     this.sidebarOpen = false;
   }

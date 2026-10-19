@@ -16,7 +16,6 @@ export const fr: Translation = {
     surface: 'Conversations ou agents',
     threads: 'Conversations',
     agents: 'Agents',
-    home: 'Accueil',
     surfaceWorking: '{count} au travail',
     surfaceWaiting: '{count} au travail, quelque chose vous attend',
     surfaceSubagentsOne: 'dont 1 sous-agent',

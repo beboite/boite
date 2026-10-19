@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, Bot, ChevronRight, Ellipsis, House, MessageSquare, Monitor, Settings, X } from '@lucide/svelte';
+  import { Activity, Bot, ChevronRight, Ellipsis, MessageSquare, Monitor, Settings, Users, X } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
@@ -28,7 +28,7 @@
       <button class="ghost" data-testid="mobile-activity" aria-current={store.page === 'chat' && screen === 'activity' ? 'page' : undefined} onclick={() => go(() => navigate('activity'))}><Activity size={20} /><span class="ui-label">{strings.mobile.activity}</span>{#if waiting}<span class="badge ui-label-box"><span class="ui-label">{waiting}</span></span>{/if}</button>
       <button class="ghost" data-testid="mobile-settings" data-preload-view="settings" aria-current={store.page === 'settings' ? 'page' : undefined} onclick={() => go(() => store.showSettings())}><Settings size={20} /><span class="ui-label">{strings.settings.heading}</span></button>
       {#if experimentOn('resident-agents')}<button class="ghost" data-testid="mobile-agents" data-preload-view="agents" onclick={() => go(() => store.showAgents())}><Bot size={20} /><span class="ui-label">{strings.agents.heading}</span></button>{/if}
-      {#if experimentOn('contacts')}<button class="ghost" data-testid="mobile-contacts" data-preload-view="home" aria-current={store.page === 'home' ? 'page' : undefined} onclick={() => go(() => store.showHome())}><House size={20} /><span class="ui-label">{strings.contacts.heading}</span></button>{/if}
+      {#if experimentOn('contacts')}<button class="ghost" data-testid="mobile-contacts" data-preload-view="home" aria-current={store.page === 'home' ? 'page' : undefined} onclick={() => go(() => store.showHome())}><Users size={20} /><span class="ui-label">{strings.contacts.heading}</span></button>{/if}
     </nav>
     {#if experimentOn('whip')}<div class="extra"><WhipButton mobile onthrown={() => { shown = false; }} /><span class="ui-label">{strings.experiments.whip.title}</span></div>{/if}
   </dialog>

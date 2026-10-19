@@ -19,7 +19,7 @@ export type View =
   | { store: Store; page: 'draft'; projectId: ProjectId | null }
   | { store: Store; page: 'settings'; tab: SettingsTab }
   | { store: Store; page: 'agents' }
-  | { store: Store; page: 'home' };
+  | { store: Store; page: 'home'; contact: string | null };
 
 /** How far back the buttons reach. */
 export const TRAIL_LIMIT = 100;
@@ -32,6 +32,7 @@ function where(view: View): string {
   if (view.page === 'thread') return `thread:${view.threadId}`;
   if (view.page === 'draft') return `draft:${view.projectId ?? ''}`;
   if (view.page === 'settings') return `settings:${view.tab}`;
+  if (view.page === 'home') return `home:${view.contact ?? ''}`;
   return view.page;
 }
 
@@ -86,7 +87,7 @@ export function currentView(): View | null {
   const store = workspace.active;
   if (store.page === 'settings') return { store, page: 'settings', tab: store.settingsTab };
   if (store.page === 'agents') return { store, page: 'agents' };
-  if (store.page === 'home') return { store, page: 'home' };
+  if (store.page === 'home') return { store, page: 'home', contact: store.contact };
   if (store.openThread) return { store, page: 'thread', threadId: store.openThread.id };
   if (store.draft) return { store, page: 'draft', projectId: store.draft.projectId };
   return null;
@@ -108,7 +109,7 @@ async function show(view: View): Promise<void> {
   if (workspace.active !== store) await workspace.select(store);
   if (view.page === 'draft') store.startDraft(null);
   else if (view.page === 'settings') store.showSettings(view.tab);
-  else if (view.page === 'home') store.showHome();
+  else if (view.page === 'home') store.showHome(view.contact);
   else store.showAgents();
 }
 

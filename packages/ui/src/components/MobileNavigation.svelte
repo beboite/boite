@@ -32,9 +32,16 @@
   import { compareThreads } from '../lib/thread-order';
   import { needsUser } from '../lib/thread-state';
   import { minuteClock } from '../lib/clock.svelte';
+  import { experimentOn } from '../lib/experiments.svelte';
 
   let { store, recover = false, screen = $bindable('chat') }: { store: Store; recover?: boolean; screen: 'chat' | 'threads' | 'activity' } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
+  // The contacts under the projects, loaded with their experiment as in the desktop list.
+  let SidebarContacts = $state<typeof import('./home/SidebarContacts.svelte').default>();
+  $effect(() => {
+    if (!experimentOn('contacts') || SidebarContacts) return;
+    void import('./home/SidebarContacts.svelte').then(module => { SidebarContacts = module.default; }).catch(() => {});
+  });
   let search = $state('');
   const query = $derived(search.trim().toLocaleLowerCase());
   const chatting = $derived(screen === 'chat' && !recover && store.page === 'chat');
@@ -188,6 +195,10 @@
   {#if !chatting}<MobileMenu {store} {place} waiting={waiting.length} {screen} navigate={show} />{/if}
 </header>
 
+{#snippet contacts()}
+  {#if SidebarContacts && experimentOn('contacts')}<div class="contacts-slot"><SidebarContacts {store} {machines} /></div>{/if}
+{/snippet}
+
 {#if narrow.current && store.page === 'chat' && (screen !== 'chat' || recover)}
   <section class="mobile-list" class:recent={inRecent} bind:this={scrollRoot} onscroll={() => { if (scrollRoot) scrollPositions.set(listKey, scrollRoot.scrollTop); }} data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
     {#if recover && narrow.current}
@@ -272,6 +283,7 @@
       {#if !query}
         {#if groups.length > 0 && activeGroups.length === 0}<p class="empty">{strings.sidebar.noActiveProjects}</p>{/if}
         <ProjectShelf idle={otherGroups} archived={shelved} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
+        {@render contacts()}
       {/if}
       <WindowList items={rows.filter(row => row.thread.projectId === null)} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements('unassigned')}>
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
@@ -292,6 +304,7 @@
           <RecentDone entries={recentGroups} {scrollRoot} {now} {query} onopen={() => show('chat')} />
           <RecentDone kind="archived" entries={recentGroups} {scrollRoot} {now} {query} onopen={() => show('chat')} />
         </div>
+        {#if !query}{@render contacts()}{/if}
       {/if}
     {/if}
     {#if rows.length === 0 && (query || screen === 'activity' || workspace.view === 'recent' || groups.length === 0) && !(inRecent && !query && recentGroups.some(entry => entry.project.archivedThreads))}

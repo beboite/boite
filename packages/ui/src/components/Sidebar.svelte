@@ -2,7 +2,7 @@
   import { tick, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import WindowList from './WindowList.svelte';
-  import { ChevronRight, Ellipsis, FolderX, GripVertical, LoaderCircle, FolderPlus } from '@lucide/svelte';
+  import { ChevronRight, Ellipsis, FolderX, GripVertical, LoaderCircle, FolderPlus, Users } from '@lucide/svelte';
   import type { Project, ThreadId } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -34,7 +34,15 @@
   import ProjectTile from './ProjectTile.svelte';
   import RailFrame from './RailFrame.svelte';
   import { minuteClock } from '../lib/clock.svelte';
+  import { experimentOn } from '../lib/experiments.svelte';
   let { store }: { store: Store } = $props();
+  // The contacts under the projects load with their experiment, so the boot bundle never carries them.
+  let SidebarContacts = $state<typeof import('./home/SidebarContacts.svelte').default>();
+  $effect(() => {
+    if (!experimentOn('contacts') || SidebarContacts) return;
+    // A chunk that fails to load leaves the list without contacts; the foot's button still opens their page.
+    void import('./home/SidebarContacts.svelte').then(module => { SidebarContacts = module.default; }).catch(() => {});
+  });
   const mobile = new MediaQuery('(max-width: 720px)');
   let scrollRoot = $state<HTMLDivElement>();
   let savedScroll = 0;
@@ -150,6 +158,10 @@
   }
 </script>
 
+{#snippet contacts()}
+  {#if SidebarContacts && experimentOn('contacts')}<SidebarContacts {store} machines={visible} />{/if}
+{/snippet}
+
 <RailFrame {store} kind="sidebar" label={strings.sidebar.threads} testid="sidebar" drawer bind:scroller={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
   {#snippet head()}<ProjectViews entries={groups} {store} />{/snippet}
     {#if showRows}
@@ -166,6 +178,7 @@
       {#if groups.length > 0 && recent.length === 0 && !recentGroups.some(entry => entry.project.archivedThreads)}<p class="none">
           {strings.sidebar.noThreads}
         </p>{/if}
+      {@render contacts()}
       <div class="recent-folds">
         {#if working.length > 0}
           <RecentGroup kind="working" count={working.length} bind:open={workingOpen}>
@@ -280,6 +293,7 @@
         </section>
       {/each}
       {#if groups.length > 0 && activeGroups.length === 0}<p class="none">{strings.sidebar.noActiveProjects}</p>{/if}
+      {@render contacts()}
       <div class="project-folds">
         <ProjectShelf idle={otherGroups} archived={shelved} {multi} {now} {scrollRoot} onrows={rows => idleRows = rows} />
       </div>
@@ -289,6 +303,10 @@
     <MachineStatus {store} filter={shownFilter} onfilter={id => { if (id && selected && selected.machine.id !== id) projectView.pick('all'); filter = id; }} />
   {/snippet}
   {#snippet foot()}
+    {#if experimentOn('contacts')}
+      <button class="ghost icon" class:active={store.page === 'home'} data-testid="open-contacts" data-preload-view="home" onclick={() => store.showHome()}
+        title={strings.contacts.heading} aria-label={strings.contacts.heading}><Users size={16} /></button>
+    {/if}
     {#if store.owner && work.shows('sidebar.add-project')}
       <button class="ghost icon" data-testid="add-project" bind:this={projectButton} onclick={addProject}
         title={strings.sidebar.addProject} aria-label={strings.sidebar.addProject}
