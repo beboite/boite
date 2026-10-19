@@ -1,17 +1,25 @@
 /**
- * Size budgets for what the desktop job just built: the UI's entry chunk, the
- * whole UI without its precompressed copies, the core entry and all emitted
- * core JavaScript. Sizes are deterministic for a commit, unlike timings on a
- * shared runner, so they can
- * fail a pull request. Compare any limit change with a fresh measurement
- * and explain the growth in the same change.
+ * Bundle sizes: the UI's entry chunk, the whole UI without its precompressed
+ * copies, the core entry and all emitted core JavaScript. Sizes are
+ * deterministic for a commit, unlike timings on a shared runner, so they can
+ * fail a pull request. No file in the repository holds a limit
+ * (docs/ci.md#bundle-growth):
  *
- * Run: bun scripts/ci/budgets.ts (after build:ui and build:core)
+ * - a pull request is measured against its base, which bundle-size.yml
+ *   measured on its push to main and kept as the `bundle-sizes` artifact (or
+ *   this job builds when that run is missing). A measure growing more than 0.1 % needs a `## Bundle size`
+ *   section in the pull request body;
+ * - the ceiling is the last published build (a nightly or a release) plus 2 %,
+ *   so only publishing raises it.
+ *
+ * Run: bun scripts/ci/budgets.ts measure <out.json> (after build:ui and build:core)
+ *      bun scripts/ci/budgets.ts check <head.json> (in a pull request's CI)
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-export interface Budgets {
+export interface Sizes {
   /** bytes */
   uiEntryChunk: number;
   uiDist: number;
@@ -19,6 +27,19 @@ export interface Budgets {
   /** Includes worker entries and lazy chunks; excludes native binaries and maps. */
   coreJavaScript: number;
 }
+
+/** What `measure` writes and the `bundle-sizes` artifact holds. */
+export interface Measurement {
+  commit: string;
+  sizes: Sizes;
+}
+
+export const MEASURES = ['uiEntryChunk', 'uiDist', 'coreBundle', 'coreJavaScript'] as const satisfies readonly (keyof Sizes)[];
+/** Headroom of the ceiling above the last published build. */
+export const HEADROOM = 0.02;
+/** Growth over the base above which the pull request body must explain it. */
+export const EXPLAIN_ABOVE = 0.001;
+export const ARTIFACT = 'bundle-sizes';
 
 const ROOT = join(import.meta.dir, '..', '..');
 
@@ -36,7 +57,7 @@ export function entryChunk(indexHtml: string): string {
   return match[1]!;
 }
 
-export function measure(root = ROOT): Budgets {
+export function measure(root = ROOT): Sizes {
   const ui = join(root, 'packages', 'ui', 'dist');
   const core = join(root, 'packages', 'core', 'dist', 'main.js');
   for (const [path, build] of [[join(ui, 'index.html'), 'bun run build:ui'], [core, 'bun run build:core']] as const) {
@@ -53,19 +74,174 @@ export function measure(root = ROOT): Budgets {
   };
 }
 
-export function overBudget(measured: Budgets, limits: Budgets): string[] {
-  return (Object.keys(limits) as (keyof Budgets)[])
-    .filter((key) => measured[key] > limits[key])
-    .map((key) => `${key}: ${measured[key]} bytes, above its ${limits[key]}-byte budget in scripts/ci/budgets.json`);
+export function ceiling(published: Sizes): Sizes {
+  return Object.fromEntries(MEASURES.map((key) => [key, Math.floor(published[key] * (1 + HEADROOM))])) as unknown as Sizes;
+}
+
+/** Markdown without its `<!-- -->` comments, removed until none is left; an unclosed one runs to the end. */
+function withoutComments(text: string): string {
+  const once = withoutCommentsOnce(text);
+  return once === text ? text : withoutComments(once);
+}
+
+function withoutCommentsOnce(text: string): string {
+  let kept = '';
+  let at = 0;
+  for (let open = text.indexOf('<!--'); open !== -1; open = text.indexOf('<!--', at)) {
+    kept += text.slice(at, open);
+    const close = text.indexOf('-->', open + 4);
+    if (close === -1) return kept;
+    at = close + 3;
+  }
+  return kept + text.slice(at);
+}
+
+/** The text under a `## Bundle size` heading, comments removed; undefined when absent or empty. */
+export function bodyReason(body: string | null | undefined): string | undefined {
+  const text = withoutComments((body ?? '').replace(/\r\n/g, '\n'));
+  const heading = /^#{2,3}[ \t]+bundle size[ \t]*$/im.exec(text);
+  if (!heading) return undefined;
+  const rest = text.slice(heading.index + heading[0].length);
+  const next = /^#{1,3}[ \t]/m.exec(rest);
+  const reason = (next ? rest.slice(0, next.index) : rest).trim();
+  return reason || undefined;
+}
+
+export interface Reference {
+  sizes: Sizes;
+  /** Where the sizes come from, for the report: "`a1b2c3d4` (main)". */
+  source: string;
+}
+
+export interface Verdict {
+  /** Markdown table for the job summary. */
+  report: string;
+  /** Each failure, naming the measure and what to do. */
+  errors: string[];
+}
+
+const bytes = (value: number) => value.toLocaleString('en-US');
+const signed = (value: number) => `${value > 0 ? '+' : ''}${bytes(value)}`;
+
+export function judge(head: Sizes, base: Reference | undefined, limit: Reference | undefined, reason: string | undefined): Verdict {
+  const rows = ['| Measure | This PR | Base | Growth | Ceiling |', '| --- | ---: | ---: | ---: | ---: |'];
+  const errors: string[] = [];
+  const unexplained: string[] = [];
+  for (const key of MEASURES) {
+    const growth = base ? head[key] - base.sizes[key] : undefined;
+    const ratio = base && growth !== undefined ? growth / base.sizes[key] : undefined;
+    rows.push(`| ${key} | ${bytes(head[key])} | ${base ? bytes(base.sizes[key]) : 'n/a'} | ${growth === undefined ? 'n/a' : `${signed(growth)} (${(ratio! * 100).toFixed(2)} %)`} | ${limit ? bytes(limit.sizes[key]) : 'n/a'} |`);
+    if (limit && head[key] > limit.sizes[key]) {
+      errors.push(`${key}: ${bytes(head[key])} bytes, above its ${bytes(limit.sizes[key])}-byte ceiling (${limit.source} plus ${HEADROOM * 100} %). Shrink the change; the ceiling rises only when a nightly or a release is published.`);
+    }
+    if (ratio !== undefined && ratio > EXPLAIN_ABOVE) unexplained.push(`${key} ${signed(growth!)} bytes (${(ratio * 100).toFixed(2)} %)`);
+  }
+  if (unexplained.length && !reason) {
+    errors.push(`${unexplained.join(', ')} over ${base!.source}, above ${EXPLAIN_ABOVE * 100} %: say what grows and why under a "## Bundle size" heading in the pull request body, then rerun this job.`);
+  }
+  const notes = [
+    base ? `Base: ${base.source}.` : 'Base: no measurement, growth not checked.',
+    limit ? `Ceiling: ${limit.source} plus ${HEADROOM * 100} %.` : 'Ceiling: no published measurement, not checked.',
+    // Shown in the job summary, which renders HTML: the body's text stays text.
+    ...(reason ? ['', `Reason given in the body: ${reason.split('\n')[0]!.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`)}`] : []),
+  ];
+  return { report: [...rows, '', ...notes].join('\n'), errors };
+}
+
+// GitHub lookups. Every measurement comes from a `bundle size` push run on main of this
+// repository: a pull request's own artifact cannot stand in for its base or the ceiling.
+
+interface Run { id: number; path: string; head_sha: string; head_branch: string | null; event: string; repository: { id: number }; head_repository: { id: number } | null }
+
+export function mainRun(runs: Run[], sha: string): Run | undefined {
+  return runs.find((run) => run.path === '.github/workflows/bundle-size.yml' && run.event === 'push' && run.head_branch === 'main'
+    && run.head_sha === sha && run.head_repository?.id === run.repository.id);
+}
+
+/** Published releases newest first, keeping those whose target is a commit. */
+export function publishedCommits(releases: { draft: boolean; tag_name: string; target_commitish: string; published_at: string | null }[]): { tag: string; sha: string }[] {
+  return releases
+    .filter((release) => !release.draft && release.published_at && /^[0-9a-f]{40}$/.test(release.target_commitish))
+    .sort((a, b) => Date.parse(b.published_at!) - Date.parse(a.published_at!))
+    .map((release) => ({ tag: release.tag_name, sha: release.target_commitish }));
+}
+
+async function api<T>(path: string): Promise<T> {
+  const response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/${path}`, {
+    headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
+  });
+  if (!response.ok) throw new Error(`GET ${path}: HTTP ${response.status} ${await response.text()}`);
+  return response.json() as Promise<T>;
+}
+
+function run(command: string[], cwd?: string) {
+  const result = Bun.spawnSync(command, { cwd, stdout: 'inherit', stderr: 'inherit' });
+  if (result.exitCode !== 0) throw new Error(`${command.join(' ')}: exit ${result.exitCode}`);
+}
+
+/** The sizes bundle-size.yml measured at `sha`, or undefined when it has none (cancelled, skipped, expired). */
+async function mainMeasurement(sha: string): Promise<Sizes | undefined> {
+  const { workflow_runs } = await api<{ workflow_runs: Run[] }>(`actions/runs?head_sha=${sha}&branch=main&event=push&per_page=20`);
+  const found = mainRun(workflow_runs, sha);
+  if (!found) return undefined;
+  const { artifacts } = await api<{ artifacts: { name: string; expired: boolean }[] }>(`actions/runs/${found.id}/artifacts?name=${ARTIFACT}`);
+  if (!artifacts.some((artifact) => !artifact.expired)) return undefined;
+  const dir = mkdtempSync(join(process.env.RUNNER_TEMP ?? tmpdir(), 'bundle-sizes-'));
+  run(['gh', 'run', 'download', String(found.id), '--name', ARTIFACT, '--dir', dir, '--repo', process.env.GITHUB_REPOSITORY!]);
+  const measured = JSON.parse(readFileSync(join(dir, 'bundle-sizes.json'), 'utf8')) as Measurement;
+  return measured.commit === sha ? measured.sizes : undefined;
+}
+
+/** Builds `sha` in a worktree of its own: main's run for it was cancelled or skipped. */
+function buildBase(sha: string): Sizes {
+  const dir = join(process.env.RUNNER_TEMP ?? tmpdir(), `bundle-base-${sha.slice(0, 8)}`);
+  run(['git', 'fetch', '--no-tags', '--depth=1', 'origin', sha]);
+  run(['git', 'worktree', 'add', '--detach', dir, sha]);
+  run(['bun', 'install', '--frozen-lockfile'], dir);
+  run(['bun', 'run', 'build:ui'], dir);
+  run(['bun', 'run', 'build:core'], dir);
+  return measure(dir);
+}
+
+async function check(headFile: string) {
+  const head = (JSON.parse(readFileSync(headFile, 'utf8')) as Measurement).sizes;
+  const baseSha = process.env.BASE_SHA ?? '';
+  if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error(`BASE_SHA: "${baseSha}", expected the pull request's 40-character base commit`);
+  const short = (sha: string) => sha.slice(0, 8);
+
+  const fromMain = await mainMeasurement(baseSha);
+  const base: Reference = fromMain
+    ? { sizes: fromMain, source: `\`${short(baseSha)}\` (main bundle-sizes artifact)` }
+    : { sizes: buildBase(baseSha), source: `\`${short(baseSha)}\` (built here: main kept no measurement)` };
+
+  let limit: Reference | undefined;
+  const releases = publishedCommits(await api<Parameters<typeof publishedCommits>[0]>('releases?per_page=20'));
+  for (const release of releases.slice(0, 10)) {
+    const sizes = await mainMeasurement(release.sha);
+    if (sizes) {
+      limit = { sizes: ceiling(sizes), source: `${release.tag} at \`${short(release.sha)}\`` };
+      break;
+    }
+  }
+
+  const number = process.env.PR_NUMBER;
+  const pull = number ? await api<{ body: string | null }>(`pulls/${number}`) : undefined;
+  const verdict = judge(head, base, limit, bodyReason(pull?.body));
+  console.log(verdict.report);
+  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Bundle size\n\n${verdict.report}\n`);
+  if (verdict.errors.length) throw new Error(`Bundle size:\n${verdict.errors.join('\n')}`);
 }
 
 if (import.meta.main) {
-  const limits = JSON.parse(readFileSync(join(import.meta.dir, 'budgets.json'), 'utf8')) as Budgets;
-  const measured = measure();
-  for (const key of Object.keys(limits) as (keyof Budgets)[]) {
-    const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
-    console.log(`${key.padEnd(14)} ${kb(measured[key]).padStart(10)} of ${kb(limits[key])}`);
+  const [command, path] = process.argv.slice(2);
+  if (command === 'measure' && path) {
+    const sizes = measure();
+    for (const key of MEASURES) console.log(`${key.padEnd(14)} ${bytes(sizes[key]).padStart(11)} bytes`);
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, `${JSON.stringify({ commit: process.env.GITHUB_SHA ?? '', sizes } satisfies Measurement, null, 2)}\n`);
+  } else if (command === 'check' && path) {
+    await check(path);
+  } else {
+    throw new Error('usage: bun scripts/ci/budgets.ts measure <out.json> | check <head.json>');
   }
-  const errors = overBudget(measured, limits);
-  if (errors.length) throw new Error(`Size budget exceeded:\n${errors.join('\n')}`);
 }
