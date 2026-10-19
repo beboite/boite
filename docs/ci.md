@@ -231,7 +231,7 @@ the follow period starts when content is ready, and user input still cancels it.
 The Windows job shares release-profile Rust dependencies, builds the installer
 once, and stages its existing core beside the shell for native E2E. The shell's
 Rust tests run beside it in their own job, which restores the same
-`desktop-release-v1` cache and never saves it: the test build turns on
+`desktop-release-v2` cache and never saves it: the test build turns on
 `tauri/test` and drops `custom-protocol`, so it needs neither the UI nor the
 staged core, and in line it added 97 to 102 s after the 221 s build. Installer
 regressions set `BOITE_CI_INSTALLER_REQUIRED=1`, so missing NSIS or generated
@@ -247,9 +247,19 @@ on 2026-10-17, recompiling only the shell crate took 8 min 57 s with fat LTO and
 `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1` only on the steps that build a shipped
 shell (the Windows installer, the Debian package, the macOS bundle) and only
 when `sign-updates` is on: the nightly and a release. Other steps and runs set
-`false` and `16`, Cargo's defaults, so `test:shell --release` keeps them even in
-a release run. Both desktop jobs get 60 minutes instead of 35 when publishing.
-The cache is saved from `main`, so a publishing run also
+neither, so `test:shell --release` keeps Cargo's defaults even in a release run.
+Setting the defaults explicitly is not the same: `CODEGEN_UNITS=16` passes
+`-C codegen-units=16` to rustc, which changes every crate's fingerprint. On
+2026-10-19, `cargo build --release -p libc -v` in `apps/shell/src-tauri` stayed
+`Fresh` with `CARGO_PROFILE_RELEASE_LTO=false` and printed `Compiling` with
+`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`. In CI, the `Compiling` lines of the
+build step (Windows installer, macOS bundle, Debian package) fell from 203, 207
+and 260 in pull request run 39165484727 to 1, 33 and 1 in run 39251281108 once
+neither was set. The desktop Rust caches moved
+to `-v2` keys at the same time: rust-cache never rewrites a key it restored in
+full, and the v1 caches of macOS x64 and Linux arm64 held only those crates.
+Both desktop jobs get 60 minutes instead of 35 when publishing. The cache is
+saved from `main`, so a publishing run also
 compiles its dependencies with LTO, an estimated 7 to 8 minutes more per
 platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 2026-10-17, four alternating local runs of the old and new command, median
