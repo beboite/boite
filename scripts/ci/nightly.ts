@@ -22,7 +22,8 @@ export function nightlyVersion(base: string, date: string, sha: string, tags: Ni
 }
 
 if (import.meta.main) {
-  const sha = process.env.GITHUB_SHA ?? '';
+  // The commit whose CI passed (commit-ci.ts), which may be newer than the run's own.
+  const sha = process.env.NIGHTLY_SHA || process.env.GITHUB_SHA || '';
   const releases = JSON.parse(readFileSync(process.argv[2]!, 'utf8')).flat();
   const tags: NightlyTag[] = JSON.parse(readFileSync(process.argv[3]!, 'utf8')).flat();
   const published = new Set(releases.filter((r: any) => !r.draft).map((r: any) => r.tag_name));

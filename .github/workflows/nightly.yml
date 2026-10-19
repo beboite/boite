@@ -27,11 +27,41 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  revision:
-    name: Version
+  # The commit's own CI already ran every suite (scripts/ci/changes.ts): the
+  # nightly requires it instead of running it again. A main run cancelled while
+  # pending hands the verdict to the push that replaced it, so every job below
+  # builds and publishes the commit this one answers with, not github.sha.
+  ci:
+    name: CI passed
     # Enabled by default; false is the emergency stop for both entry points.
     # Only main publishes; a dry run may build any branch.
     if: vars.NIGHTLY_ENABLED != 'false' && (github.ref == 'refs/heads/main' || inputs.dry-run)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 130
+    permissions:
+      contents: read
+      # Reruns the failed jobs of that CI run once (scripts/ci/commit-ci.ts).
+      actions: write
+    outputs:
+      sha: ${{ steps.ci.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - name: Wait for a main commit's CI to pass
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_CI_DRY_RUN: ${{ inputs.dry-run && '1' || '' }}
+          COMMIT_CI_FOLLOW: '1'
+        run: bun scripts/ci/commit-ci.ts
+
+  revision:
+    name: Version
+    needs: ci
     runs-on: ubuntu-24.04
     outputs:
       changed: ${{ steps.revision.outputs.changed }}
@@ -42,6 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.ci.outputs.sha }}
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
@@ -50,41 +81,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NIGHTLY_DRY_RUN: ${{ inputs.dry-run && '1' || '' }}
+          NIGHTLY_SHA: ${{ needs.ci.outputs.sha }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/tags?per_page=100" > tags.json
           bun scripts/ci/nightly.ts released.json tags.json
 
-  # The commit's own CI already ran every suite (scripts/ci/changes.ts): the
-  # nightly requires it instead of running it again beside the builds.
-  ci:
-    name: CI passed
-    needs: revision
-    if: needs.revision.outputs.changed == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 110
-    permissions:
-      contents: read
-      # Reruns the failed jobs of that CI run once (scripts/ci/commit-ci.ts).
-      actions: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
-        with:
-          bun-version-file: package.json
-      - name: Wait for this commit's CI to pass
-        env:
-          GH_TOKEN: ${{ github.token }}
-          COMMIT_CI_DRY_RUN: ${{ inputs.dry-run && '1' || '' }}
-        run: bun scripts/ci/commit-ci.ts
-
   # Built once per platform and tested as installed; the Rust tests already
   # passed in the commit's CI.
   desktop:
     name: Desktop
-    needs: revision
+    needs: [ci, revision]
     if: needs.revision.outputs.changed == 'true'
     uses: ./.github/workflows/desktop.yml
     secrets:
@@ -96,6 +103,7 @@ jobs:
       APPLE_API_KEY_ID: ${{ !inputs.dry-run && secrets.APPLE_API_KEY_ID || '' }}
       APPLE_API_PRIVATE_KEY: ${{ !inputs.dry-run && secrets.APPLE_API_PRIVATE_KEY || '' }}
     with:
+      ref: ${{ needs.ci.outputs.sha }}
       platforms: ${{ needs.revision.outputs.platforms }}
       channel: nightly
       version: ${{ needs.revision.outputs.version }}
@@ -121,31 +129,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.revision.outputs.tag }}
-        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
+          NIGHTLY_SHA: ${{ needs.ci.outputs.sha }}
+        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$NIGHTLY_SHA"
 
   # Signed for the phone app's own address, or the previous release's APK taken
   # back when apps/android, the host and the key are unchanged (docs/android.md).
   # The app's version is its own, not this release's.
   android:
     name: Android
-    needs: revision
+    needs: [ci, revision]
     if: needs.revision.outputs.changed == 'true'
     uses: ./.github/workflows/android.yml
     secrets:
       ANDROID_KEYSTORE: ${{ !inputs.dry-run && secrets.ANDROID_KEYSTORE || '' }}
       ANDROID_KEYSTORE_PASSWORD: ${{ !inputs.dry-run && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
     with:
+      ref: ${{ needs.ci.outputs.sha }}
       release: ${{ !inputs.dry-run }}
 
   image:
     name: Server image
-    needs: revision
+    needs: [ci, revision]
     if: needs.revision.outputs.changed == 'true'
     uses: ./.github/workflows/server.yml
     permissions:
       contents: read
       packages: write
     with:
+      ref: ${{ needs.ci.outputs.sha }}
       publish: ${{ !inputs.dry-run }}
       defer-manifest: true
       channel: dev
@@ -153,7 +164,7 @@ jobs:
 
   publish-image:
     name: Publish image
-    needs: [revision, reserve, image]
+    needs: [ci, revision, reserve, image]
     uses: ./.github/workflows/server-manifest.yml
     permissions:
       contents: read
@@ -164,7 +175,7 @@ jobs:
       tags: |
         nightly
         ${{ needs.revision.outputs.tag }}
-        sha-${{ github.sha }}
+        sha-${{ needs.ci.outputs.sha }}
 
   release:
     name: Publish release
@@ -175,6 +186,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.ci.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
@@ -200,6 +212,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.revision.outputs.tag }}
           RELEASE_ANNOUNCEMENT: ${{ inputs.announcement }}
+          NIGHTLY_SHA: ${{ needs.ci.outputs.sha }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
           bun scripts/ci/changelog.ts released.json artifacts/release-notes.md
@@ -215,12 +228,12 @@ jobs:
           if [[ -n "$existing" ]]; then
             echo "$existing" | jq -e '.draft == true' >/dev/null
             if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
-              test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
+              test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$NIGHTLY_SHA"
             else
-              test "$(echo "$existing" | jq -r .target_commitish)" = "$GITHUB_SHA"
+              test "$(echo "$existing" | jq -r .target_commitish)" = "$NIGHTLY_SHA"
             fi
             gh release upload "$RELEASE_TAG" "${installers[@]}" "${apks[@]}" ./*.sig latest.json SHA256SUMS.txt --clobber
             gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
           else
-            gh release create "$RELEASE_TAG" "${installers[@]}" "${apks[@]}" ./*.sig latest.json SHA256SUMS.txt --target "$GITHUB_SHA" --title "boite (de nuit) $RELEASE_TAG" --prerelease --latest=false --notes-file release-notes.md
+            gh release create "$RELEASE_TAG" "${installers[@]}" "${apks[@]}" ./*.sig latest.json SHA256SUMS.txt --target "$NIGHTLY_SHA" --title "boite (de nuit) $RELEASE_TAG" --prerelease --latest=false --notes-file release-notes.md
           fi

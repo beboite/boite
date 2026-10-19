@@ -49,3 +49,40 @@ test('the newest run of the commit decides, not an older one', () => {
   const runs = [run({ id: 10, conclusion: 'failure' }), run({ id: 12 }), run({ id: 11, conclusion: 'cancelled' })];
   expect(decide(runs, options, fresh)).toMatchObject({ action: 'pass', run: { id: 12 } });
 });
+
+// Nightly 39226757576 started on 30287eef at 08:59:49 UTC; its pending main run
+// was replaced 12 s later, then two more pushes replaced theirs before
+// 9c974e65's run passed. The night was lost on `ended cancelled`.
+const superseded = (sha: string, id: number, fields: Partial<CiRun> = {}) =>
+  run({ id, head_sha: sha, conclusion: 'cancelled', html_url: `https://github.com/beboite/boite/actions/runs/${id}`, ...fields });
+const night = '30287eeffb74c73a938c8049dba3ca8ac1b5d799';
+const green = '9c974e65'.padEnd(40, '0');
+const nightRuns = [
+  superseded(night, 39226575960),
+  superseded('65b57cf4'.padEnd(40, '0'), 39226779197),
+  superseded('28bc9cbd'.padEnd(40, '0'), 39226817876),
+  run({ id: 39226850351, head_sha: green, status: 'in_progress', conclusion: null }),
+];
+const following = { sha: night, dryRun: false, follow: true };
+
+test('a run replaced while pending hands the verdict to the newest main run, and the nightly builds that commit', () => {
+  expect(decide(nightRuns, following, fresh)).toMatchObject({ action: 'follow', run: { id: 39226850351, head_sha: green } });
+  expect(decide(nightRuns, following, { elapsedMs: 0, sha: green })).toMatchObject({ action: 'wait' });
+  const passed = nightRuns.map((each) => each.head_sha === green ? { ...each, status: 'completed', conclusion: 'success' } : each);
+  expect(decide(passed, following, { elapsedMs: 0, sha: green })).toMatchObject({ action: 'pass', run: { head_sha: green } });
+});
+
+test('a cancelled head with no newer run falls back to the newest older green commit only', () => {
+  const older = 'c'.repeat(40);
+  const runs = [superseded(sha, 20), run({ id: 19, head_sha: older }), run({ id: 18, head_sha: 'd'.repeat(40) })];
+  expect(decide(runs, { sha, dryRun: false, follow: true }, fresh)).toMatchObject({ action: 'follow', run: { head_sha: older } });
+  // An older failure is no verdict on anything newer: the night fails as before.
+  const red = [superseded(sha, 20), run({ id: 19, head_sha: older, conclusion: 'failure' })];
+  expect(decide(red, { sha, dryRun: false, follow: true }, fresh)).toMatchObject({ action: 'fail', message: expect.stringContaining('ended cancelled') });
+});
+
+test('without follow, as app.yml deploys its own checkout, or in a dry run, a cancelled run still fails', () => {
+  expect(decide(nightRuns, { sha: night, dryRun: false }, fresh)).toMatchObject({ action: 'fail', message: expect.stringContaining('ended cancelled') });
+  const branch = nightRuns.map((each) => ({ ...each, event: 'pull_request', head_branch: 'feature' }));
+  expect(decide(branch, { sha: night, dryRun: true, follow: true }, fresh)).toMatchObject({ action: 'fail' });
+});
