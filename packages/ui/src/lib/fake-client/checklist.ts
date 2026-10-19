@@ -115,12 +115,15 @@ export function checkTurn(ctx: FakeContext, thread: Thread, then: () => void): v
   } });
 }
 
-/** The goal ended or was replaced: a pass in flight is dropped. */
+/** The goal ended or was replaced: a pass in flight is dropped, and a tracker still running stops. */
 export function stopChecklist(ctx: FakeContext, thread: Thread): void {
   const entry = passesOf(ctx, thread.id);
   if (entry.running) clearTimeout(entry.running.timer);
   entry.running = null;
   entry.queue = [];
   const list = thread.activity?.goal?.checklist;
-  if (list) list.phase = 'idle';
+  if (!list) return;
+  list.phase = 'idle';
+  // As the core stops the tracker's turn: one still writing the first list ends with the goal.
+  if (list.threadId && ctx.threads.get(list.threadId)?.status === 'running') workflowAnswer(ctx, list.threadId, 'Stopped', false);
 }

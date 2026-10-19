@@ -18,8 +18,8 @@
   let activity = $derived(thread?.activity ?? null);
   let tasks = $derived(activity?.tasks ?? []);
   let watches = $derived(thread?.pullRequestWatches ?? []);
-  /** A `/goal2`'s checklist, once its tracker wrote something or failed to. Dropped items count for nothing. */
-  let checklist = $derived(activity?.goal?.checklist && (activity.goal.checklist.items.length > 0 || activity.goal.checklist.error) ? activity.goal.checklist : null);
+  /** A `/goal2`'s checklist, from the first list its tracker writes, as the goal bar's button that leads here. Dropped items count for nothing. */
+  let checklist = $derived(activity?.goal?.checklist && (activity.goal.checklist.items.length > 0 || activity.goal.checklist.phase !== 'idle' || activity.goal.checklist.error) ? activity.goal.checklist : null);
   let listed = $derived(checklist?.items.filter((item) => item.status !== 'cancelled') ?? []);
   /** A `/goal2`'s reviews, newest first, with what each reviewer found: the bar keeps only their dots. */
   let verdicts = $derived([...(activity?.goal?.review?.verdicts ?? [])].reverse());
@@ -110,6 +110,8 @@
         <span class="section-label ui-label">{strings.activity.checklist}</span>
         {#if listed.length > 0}
           <span class="meta ui-label">{fill(strings.activity.checklistCount, { done: String(listed.filter((item) => item.status === 'done').length), total: String(listed.length) })}</span>
+        {:else if checklist.phase === 'writing'}
+          <span class="meta ui-label">{strings.activity.checklistWriting}</span>
         {/if}
       </button>
       <div class="disclosure-fold" id="{sectionId}-checklist" class:open={open.checklist} inert={!open.checklist}>

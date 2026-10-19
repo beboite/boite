@@ -84,6 +84,25 @@ test('the thread header shows the watches with their status and stops one from i
 });
 
 
+test('the checklist section shows while the tracker writes the first list, where the goal bar\'s button leads', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  await store.open('t-trace');
+  store.openThread!.activity = { tasks: [], loop: null, goal: { objective: 'Ship it', status: 'active', iterations: 0, error: null,
+    checklist: { threadId: 'tracker-1', phase: 'writing', model: null, effort: null, error: null, items: [] } } };
+  const component = mount(TasksSurface, { target: document.body, props: { store } });
+  try {
+    await settle();
+    await vi.waitFor(() => expect(document.querySelector('[data-testid=tasks-section-checklist]')!.textContent).toContain('Writing the checklist'));
+    expect(document.querySelector('[data-testid=tasks-checklist] [data-testid=goal-checklist-open]')).not.toBeNull();
+  } finally {
+    unmount(component);
+    document.body.innerHTML = '';
+  }
+});
+
 test('a reviewed goal\'s checklist and reviews have their own sections in the panel', async () => {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();

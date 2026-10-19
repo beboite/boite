@@ -972,6 +972,19 @@ test('a message sent while the fake tracker still writes the first list waits fo
   expect(goal.status).toBe('complete');
 });
 
+test('a fake goal removed while its tracker writes the first list stops the checklist conversation, as the core stops its turn', async ({ createClient }) => {
+  vi.useFakeTimers();
+  const client = await createClient({ delayMs: 1 });
+  const { id: threadId } = await newThread(client);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Rename the empty state', review: true } });
+  const tracker = (await client.call('threads.get', { threadId })).activity!.goal!.checklist!.threadId!;
+  await client.call('threads.activity.control', { threadId, kind: 'goal', action: 'remove' });
+  await vi.runAllTimersAsync();
+  const child = await client.call('threads.get', { threadId: tracker });
+  expect(child.status).toBe('idle');
+  expect(child.turns.at(-1)).toMatchObject({ status: 'error', error: 'Stopped' });
+});
+
 test('a task list set after the fake claim, before its review starts, still gets a verdict', async ({ createClient }) => {
   vi.useFakeTimers();
   const client = await createClient({ delayMs: 1 });
