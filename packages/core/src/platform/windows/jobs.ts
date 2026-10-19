@@ -29,6 +29,7 @@ import {
   imageNameOf,
   ioBytesOf,
   parentPidOf,
+  whenCommandLineReads,
   workingSetOf,
 } from './process-reads.ts';
 
@@ -230,6 +231,8 @@ const threadJobs = new Map<string, ThreadJob>();
 const threadsByKey = new Map<number, string>();
 const tracked = new Map<number, TrackedProcess>();
 const ignored = new Set<number>();
+/** Processes whose `started` waits for their command line (`whenCommandLineReads`). */
+const awaitingCommandLine = new Map<number, { flush(): void; cancel(): void }>();
 
 // -- lifecycle --------------------------------------------------------------
 
@@ -752,12 +755,12 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
   }
   const identity = creationIdentityOf(api, handle);
   tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });
-  sink?.started(threadId, pid, {
-    exe: exe ?? 'unknown',
-    commandLine,
-    parentPid: parentPidOf(api, handle),
-    ...identity,
+  const record = { exe: exe ?? 'unknown', parentPid: parentPidOf(api, handle), ...identity };
+  const waiting = whenCommandLineReads(api, handle, commandLine, (line) => {
+    awaitingCommandLine.delete(pid);
+    sink?.started(threadId, pid, { ...record, commandLine: line });
   });
+  if (waiting !== null) awaitingCommandLine.set(pid, waiting);
 }
 
 function onProcessExited(threadId: string, pid: number): void {
@@ -784,6 +787,8 @@ function reportExit(threadId: string, pid: number): void {
     sink?.exited(threadId, pid, { exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
     return;
   }
+  // Its start goes out first, with whatever command line it has by now.
+  awaitingCommandLine.get(pid)?.flush();
   tracked.delete(pid);
   const exit: NativeProcessExit = {
     ...entry.identity,
@@ -810,6 +815,8 @@ function teardown(): Promise<void> {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  for (const waiting of awaitingCommandLine.values()) waiting.cancel();
+  awaitingCommandLine.clear();
   const api = native;
   if (api !== null) {
     for (const entry of tracked.values()) api.close(entry.handle);

@@ -190,6 +190,16 @@ test('local messages remain valid when the clock advances between timestamp read
   }
 });
 
+test('a resume lifts the pause the core applied, but not one the owner set', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  h.core.coordination.pause(a);
+  h.core.coordination.configure(b, { ...brief, paused: true });
+  h.core.threads.startTurn(a, 'carry on', [], undefined, 'resume');
+  h.core.threads.startTurn(b, 'carry on', [], undefined, 'resume');
+  expect(h.core.coordination.get(a).config.paused).toBe(false);
+  expect(h.core.coordination.get(b).config.paused).toBe(true);
+});
+
 test('stop pauses automatic work; disabling rejects pending messages', async () => {
   const { h, a, b } = await setup(); enable(h, a, b);
   h.core.threads.stopTurn(b);
