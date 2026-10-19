@@ -5,6 +5,7 @@ import {
   CLOSER_QUERY, DETAIL_QUERY, FINGERPRINT_QUERY, REMARK_PAGES, evaluate, initialMemory, mergeChanges, parseCloser, parseDetail, parseFingerprint, parseRemarks,
   rateLimited, remarkPath, wakeMessage, type Fingerprint, type Remark, type RemarkKind, type WatchChange, type WatchDetail, type WatchMemory,
 } from './pull-request-watch-read.ts';
+import { RequiredContexts, withRequired } from './pull-request-required.ts';
 import { withLoad } from './threads/records.ts';
 
 const PREFIX = 'pr-watches:';
@@ -61,6 +62,7 @@ export class PullRequestWatches {
   readonly #records = new Map<ThreadId, WatchRecord[]>();
   readonly #runtime = new Map<string, Runtime>();
   readonly #timing: WatchTiming;
+  readonly #required = new RequiredContexts();
   #timer: ReturnType<typeof setTimeout> | null = null;
   #timerAt = 0;
   #pass: Promise<void> | null = null;
@@ -233,7 +235,8 @@ export class PullRequestWatches {
         runtime.nextReadAt = now + this.#timing.intervalMs;
         return 'OPEN';
       }
-      const detail = await this.#shared(memo, `detail ${record.url}`, () => this.#graphql(threadId, record, DETAIL_QUERY).then(parseDetail));
+      const read = await this.#shared(memo, `detail ${record.url}`, () => this.#graphql(threadId, record, DETAIL_QUERY).then(parseDetail));
+      const detail = withRequired(read, await this.#requiredOf(threadId, record, read.base));
       const remarks = remarksDue ? await this.#shared(memo, `remarks ${record.url}`, () => this.#remarks(threadId, record)) : null;
       // A stop or an unwatch that landed during the reads wins.
       if (this.#find(threadId, record.url) !== record) return 'OPEN';
@@ -313,6 +316,14 @@ export class PullRequestWatches {
   #graphql(threadId: ThreadId, record: WatchRecord, query: string): Promise<string> {
     const [owner, name] = record.repository.split('/');
     return this.gh(threadId, ['api', 'graphql', '--hostname', record.host, '-f', `query=${query}`, '-f', `owner=${owner}`, '-f', `name=${name}`, '-F', `number=${record.number}`]);
+  }
+
+  /** What the base branch requires, cached per repository and base: a failed read only logs and keeps what was known. */
+  #requiredOf(threadId: ThreadId, record: WatchRecord, base: string): Promise<string[]> {
+    if (!base) return Promise.resolve([]);
+    return this.#required.of(`${record.host} ${record.repository} ${base}`, record.repository, base,
+      path => this.gh(threadId, ['api', '--hostname', record.host, path]),
+      message => this.core.log('warn', `pull request watch ${record.url}: ${message}`, { source: 'pull-request-watch', threadId }));
   }
 
   /** Every page of the three lists: discussion comments, reviews and inline review comments with their replies. */

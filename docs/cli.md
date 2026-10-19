@@ -204,7 +204,10 @@ with one message, a `pull-request` turn, when:
   other job of its workflow ended); a rerun that fails again counts again;
 - every check the base branch requires passed and no CI job still runs (every
   job when none is required), once per head; again when a required check
-  appears already passed or after one of them failed. A commit status such as
+  appears already passed or after one of them failed. The base branch's
+  rulesets and classic protection name the required checks in advance: one
+  that has not reported on the head yet, such as `CI required` before the
+  rest of its workflow ended, counts as running, as GitHub's "Expected". A commit status such as
   CodeRabbit's holds nothing while it stays pending, unless the base branch
   requires it or commit statuses are the only checks;
 - someone other than the account `gh` signs in as posts a comment, a review or
@@ -229,7 +232,12 @@ mergeability, head, check counts by state, comment and review counts, edits
 and `updatedAt`. Only when it moves does the core read the checks one by one
 (with whether each is required) and the comments, reviews and inline comments,
 100 a page up to 10 pages each; remarks are read again every 30 minutes
-regardless, for edits the fingerprint cannot see. GitHub's rate limit pauses
+regardless, for edits the fingerprint cannot see. What the base branch
+requires costs two REST reads (`rules/branches/<base>` and
+`branches/<base>`) per repository and base every 10 minutes, shared by every
+watch on it; a 404 means nothing is required. A failed read is logged, keeps
+the last answer (or the checks' own `isRequired` when there is none), is tried
+again after two minutes and neither pauses nor ends the watch. GitHub's rate limit pauses
 every read, from two minutes doubling up to 15; an unreachable GitHub or a
 missing `gh` pauses that watch the same way. Neither ends it, even when the
 failed read is the one that asks who merged or closed it.
