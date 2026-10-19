@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { connect } from '../src/client.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 let h: TestCore;
@@ -18,4 +19,27 @@ test('boite ask --open keeps the page on the card, and refuses an address that i
 
   await expect(ask('file:///etc/passwd')).rejects.toThrow('http or https');
   await expect(ask('https://me:hunter2@billing.example/')).rejects.toThrow('user name or password');
+});
+
+test('a paired phone opens the page of a pending question in the conversation it watches, and nothing else', async () => {
+  h = await startTestCore();
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  await owner.call('turns.start', { threadId, prompt: 'hello' });
+  await waitFor(() => h.core.journal.lastTurn(threadId) !== null);
+  const { questionId } = await owner.call('questions.ask', { threadId, text: 'ci.example: to read the failed run', options: ['Signed in', 'Skip'], open: 'https://ci.example/login' });
+  const { questionId: plain } = await owner.call('questions.ask', { threadId, text: 'Which branch?', options: ['main', 'dev'] });
+  const opened: string[] = [];
+  h.core.browser.command = (async ({ action }: { action: { url: string } }) => { opened.push(action.url); return { value: { ok: true } }; }) as typeof h.core.browser.command;
+  const { grant } = await owner.call('pairing.grant', {});
+  const phone = await connect(h.url, '', { grant, client: { name: 'pwa', version: 'test' } });
+  try {
+    await expect(phone.call('questions.openPage', { threadId, questionId })).rejects.toThrow('subscribe to the active conversation');
+    await phone.call('threads.subscribe', { threadId });
+    await phone.call('questions.openPage', { threadId, questionId });
+    expect(opened).toEqual(['https://ci.example/login']);
+    await expect(phone.call('questions.openPage', { threadId, questionId: plain })).rejects.toThrow('not a pending question with a page');
+    await expect(phone.call('panel.open', { threadId, surface: { kind: 'browser', url: 'https://ci.example/login' } })).rejects.toThrow('for the owner only');
+    expect(opened).toHaveLength(1);
+  } finally { phone.close(); }
 });

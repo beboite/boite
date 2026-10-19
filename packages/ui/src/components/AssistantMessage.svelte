@@ -180,7 +180,7 @@
           skip={() => store.skipQuestion(message.threadId, part.questionId)}
           onwrite={() => writeAnswer(store, part.questionId)}
           page={part.open?.url}
-          onopen={() => part.open && openQuestionPage(store, message.threadId, part.open.url)}
+          onopen={() => openQuestionPage(store, message.threadId, part.questionId)}
         />
       {:else if part.type === 'compaction'}
         <div class="compaction" data-testid="compaction-part" data-trigger={part.trigger}>

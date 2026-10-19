@@ -9,12 +9,13 @@ import type { Store } from './store.svelte';
  * it on the Browser tab, live. From the Agents page or another thread, the
  * thread opens first, so its own panel is the one that shows the page.
  */
-export async function openQuestionPage(store: Store, threadId: string, url: string): Promise<void> {
+export async function openQuestionPage(store: Store, threadId: string, questionId: string): Promise<void> {
   const client = store.client;
   if (!client) return;
   try {
     if (store.page !== 'chat' || store.openThread?.id !== threadId) { store.showChat(); await store.open(threadId); }
-    await client.call('panel.open', { threadId, surface: { kind: 'browser', url } });
+    // Not `panel.open`, which is the owner's: a paired phone opens the page too.
+    await client.call('questions.openPage', { threadId, questionId });
     const key = store.threadKey(threadId);
     liveViews.show('agent-browser', key);
     const panel = rightPanel.for(key);

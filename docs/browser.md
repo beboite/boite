@@ -127,7 +127,10 @@ An agent that meets a login page asks with `boite ask --open <url> "<site and
 why>" "Signed in" Skip`. The question card gets an Open button: it opens the
 page as `boite browse` does, in a new tab of the conversation's browser and
 its default profile, and shows the panel on the Browser tab, going to the
-thread first from the Agents page or another conversation. The address must
+thread first from the Agents page or another conversation. It calls
+`questions.openPage`, which names the question rather than an address, so a
+paired phone subscribed to the conversation opens the page too, and the core
+reads and checks the address again. The address must
 be http or https and carry no user name or password. Such a question never
 goes to a delegated agent's parent: only the user can sign in.
 

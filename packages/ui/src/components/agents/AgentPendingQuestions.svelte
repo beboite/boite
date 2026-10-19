@@ -63,8 +63,7 @@
       <p class="agent-ask-question">{question.text}</p>
       <form class="agent-ask-answers" onsubmit={e => { e.preventDefault(); void send(question, chosen); }}>
         {#if question.open}
-          {@const url = question.open.url}
-          <button type="button" class="chip" title={url} onclick={() => openQuestionPage(store, question.threadId, url)} data-testid="question-open">{strings.chat.questionOpenPage}</button>
+          <button type="button" class="chip" title={question.open.url} onclick={() => openQuestionPage(store, question.threadId, question.id)} data-testid="question-open">{strings.chat.questionOpenPage}</button>
         {/if}
         {#each question.options as option (option.id)}
           <button type="button" class="chip" class:on={chosen.includes(option.id)} aria-pressed={question.multiple ? chosen.includes(option.id) : undefined}

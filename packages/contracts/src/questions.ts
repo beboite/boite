@@ -183,6 +183,15 @@ export interface QuestionsRpcMethods {
     params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; attachments?: Attachment[] };
     result: { ok: true };
   };
+  /**
+   * Open a pending question's page (`open`) as a new tab of its conversation's
+   * browser. The core reads the address from the question, so a paired phone
+   * subscribed to the conversation opens it without `panel.open`'s surfaces.
+   */
+  'questions.openPage': {
+    params: { threadId: ThreadId; questionId: RequestId };
+    result: { ok: true };
+  };
   /** Resolve a pending question without an answer, a steer or a new user message. */
   'questions.skip': {
     params: { threadId: ThreadId; questionId: RequestId };

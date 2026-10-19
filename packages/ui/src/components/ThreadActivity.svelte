@@ -246,7 +246,7 @@
                   skip={() => store.skipQuestion(question.threadId, question.id)}
                   onwrite={child ? undefined : () => writeAnswer(store, question.id)}
                   page={question.open?.url}
-                  onopen={() => question.open && openQuestionPage(store, question.threadId, question.open.url)}
+                  onopen={() => openQuestionPage(store, question.threadId, question.id)}
                 />
                 {/if}
               </div>
