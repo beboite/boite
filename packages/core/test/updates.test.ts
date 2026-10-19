@@ -630,6 +630,27 @@ describe('harness updates', () => {
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   }, 30000);
 
+  test('an update asked by hand while an automatic one waits on background work goes on at once', async () => {
+    const { client, state } = await start('command');
+    const core = harness!.core;
+    await client.call('providers.updates', { refresh: true });
+    const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'dev server' });
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'start the dev server' });
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done', 20000);
+    core.threads.agentState.noteBackground(thread.id, [{ id: 'bg-dev', kind: 'shell', description: 'dev server', toolId: null, startedAt: core.journal.getTurn(turn.id)!.finishedAt! - 1 }]);
+    expect((await core.updates.update('update-fake', true)).waitingFor).toBe(1);
+    await new Promise((done) => setTimeout(done, 200));
+    expect(readFileSync(state, 'utf8')).toBe('1.0.0');
+
+    const updated = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    expect((await client.call('providers.update', { providerId: 'update-fake' })).state).toBe('updating');
+    await updated;
+    expect(core.threads.autoContinue.retryOf(thread.id)).toMatchObject({ kind: 'auto-continue', turnId: turn.id });
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  }, 30000);
+
   test('an accepted turn waits for its provider\'s updater after the picker changes', async () => {
     const { client, state } = await start('command', 'update-gated');
     const core = harness!.core;

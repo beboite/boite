@@ -193,7 +193,8 @@ way. The row's waiting count includes these agents.
 The wait is bounded: two hours after the update was asked, background work
 stops holding it. A background task lives two hours at most, so only work
 started after the update was asked is cut. An update asked by hand (Update,
-Update all) does not wait for background work and goes on at once.
+Update all) does not wait for background work and goes on at once; asked
+while an automatic update waits, it makes that one go on.
 
 Either way, an agent whose background work the release ended is picked up
 again after the update, on the new version. Its thread shows `Background work

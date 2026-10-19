@@ -280,6 +280,11 @@ export class HarnessUpdates {
     }
     this.assertOpen();
     if (entry === undefined) throw notFound('provider update', providerId);
+    // Asked by hand while an automatic update waits on background work: it goes on now.
+    if (!automatic && this.drains.get(providerId)?.forced === false) {
+      this.force(providerId, true);
+      return this.describe(providerId)!;
+    }
     if (entry.state === 'updating') throw refused(`${target.descriptor.name} is already updating`, { providerId });
     // An agent with no way to name its newest release is still updated on request:
     // its updater checks by itself, and what it installed is read afterwards.
@@ -778,13 +783,18 @@ export class HarnessUpdates {
       });
   }
 
-  /** The background limit passed: work still running stops holding the update, and its agents are resumed after it. */
-  private force(providerId: ProviderId): void {
+  /**
+   * The background limit passed, or the owner asked by hand: work still
+   * running stops holding the update, and its agents are resumed after it.
+   */
+  private force(providerId: ProviderId, byHand = false): void {
     const drain = this.drains.get(providerId);
     if (drain === undefined || drain.phase === 'run') return;
+    if (drain.bound !== null) clearTimeout(drain.bound);
     drain.bound = null;
     drain.forced = true;
-    this.core.log('info', `${drain.target.descriptor.name}: background work still running after ${Math.round(this.backgroundLimitMs / 60000)} min; the update goes on and resumes those agents after it`);
+    const why = byHand ? 'asked by hand' : `background work still running after ${Math.round(this.backgroundLimitMs / 60000)} min`;
+    this.core.log('info', `${drain.target.descriptor.name}: ${why}; the update goes on and resumes those agents after it`);
     this.advance(providerId);
   }
 
