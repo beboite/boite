@@ -225,15 +225,19 @@ test('a reviewed goal\'s checklist takes the task line, counts what is done with
   toggle().click();
   await vi.waitFor(() => expect(document.querySelector('[data-testid=goal-checklist-item]')).not.toBeNull());
   const rows = [...document.querySelectorAll<HTMLElement>('[data-testid=goal-checklist-item]')];
-  expect(rows.map(row => [row.dataset.status, row.dataset.held ?? null, row.textContent?.trim()])).toEqual([
-    ['done', null, 'Fix the parser'],
-    ['open', 'true', 'Add a test'],
-    ['cancelled', null, 'Rename the module'],
-    ['open', null, 'Keep the old API added'],
+  // In the order asked: what is done, the item held for the review, then the next one; the dropped item waits folded.
+  expect(rows.map(row => [row.dataset.state, row.querySelector('.text')!.textContent])).toEqual([
+    ['done', 'Fix the parser'],
+    ['held', 'Add a test'],
+    ['next', 'Keep the old API'],
   ]);
-  expect(rows[1]!.querySelector('[role=img]')!.getAttribute('aria-label')).toBe('Sent back twice; the review decides');
+  expect(rows[1]!.querySelector('[role=img]')!.getAttribute('aria-label')).toBe('Not confirmed after two tries, the final review decides');
+  expect(rows[1]!.textContent).toContain('Not confirmed after two tries, the final review decides');
   expect(document.querySelector('[data-testid=activity-tasks]')).toBeNull();
-  rows[3]!.querySelector<HTMLButtonElement>('button')!.click();
+  document.querySelector<HTMLButtonElement>('[data-testid=goal-checklist-dropped-toggle]')!.click();
+  flushSync();
+  expect(document.querySelector('[data-testid=goal-checklist-dropped]')!.textContent).toContain('Rename the module');
+  rows[2]!.querySelector<HTMLButtonElement>('button')!.click();
   flushSync();
   expect(document.querySelector('[data-testid=goal-checklist-source]')!.textContent).toBe('You wrote: "keep the old API please"');
   document.querySelector<HTMLButtonElement>('[data-testid=goal-checklist-open]')!.click();

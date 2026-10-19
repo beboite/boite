@@ -45,7 +45,7 @@ test.each([['desktop', false], ['phone', true]] as const)('a reviewed goal shows
   // The owner's app keeps one line in the bar; the checklist and each review's findings are in the side panel's Tasks tab.
   await page.click(id('activity-tasks-toggle'));
   await page.waitFor(`document.querySelector('${id('tasks-reviews')}')?.textContent.includes('The empty state still shows the old label') && document.querySelector('${id('tasks-checklist')}')`);
-  expect(await page.text(id('tasks-section-checklist'))).toContain('1/1 done');
+  expect(await page.text(id('tasks-checklist-progress'))).toContain('1/1 done');
   await capture(`goal2-passed-${name}`);
   await page.click(id('panel-close'));
   await page.waitFor(`!document.querySelector('${id('tasks-reviews')}')`);

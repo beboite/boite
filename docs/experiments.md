@@ -178,11 +178,15 @@ phase (`writing`, `checking` or `idle`), the items with their status (`open`,
 `done`, `cancelled`), whether a later message `added` or `changed` them, how
 often each `bounced` a claim, and the last pass's `error`. The goal bar keeps
 one line: the first open item and `done/total`, dropped items left out. On the
-owner's app that line opens the side panel's Tasks tab, whose Checklist section
-lists every item and whose Reviews section lists each review, newest first,
-with what it found; a paired device, which has no Tasks tab, unfolds both in
-the bar instead. A press on an item shows its source, and an item that bounced
-twice turns red. A pass
+owner's app that line opens the side panel's Tasks tab. There the checklist
+sits under the goal it breaks down, in the same section: a progress bar with
+`done/total`, then the items in the order asked, done ones ticked and struck,
+the next open one marked. Dropped items wait folded under a "1 dropped" line,
+and an icon beside it opens the tracker conversation. The Reviews section lists
+each review, newest first, with what it found. A paired device, which has no
+Tasks tab, unfolds the same list in the bar instead. A press on an item shows
+its source. An item that bounced twice says the final review decides it. The
+screen leaves out the `added` and `changed` flags. A pass
 that fails, answers without its JSON block or runs past five minutes leaves the
 list as it was with the reason, and the goal goes on; a first list is tried
 three times at most. A core restart keeps the list and the tracker; work no

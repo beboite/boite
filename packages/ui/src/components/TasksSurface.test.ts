@@ -84,7 +84,7 @@ test('the thread header shows the watches with their status and stops one from i
 });
 
 
-test('the checklist section shows while the tracker writes the first list, where the goal bar\'s button leads', async () => {
+test('the checklist shows under its goal while the tracker writes the first list, where the goal bar\'s button leads', async () => {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();
   store.attach(client);
@@ -95,7 +95,9 @@ test('the checklist section shows while the tracker writes the first list, where
   const component = mount(TasksSurface, { target: document.body, props: { store } });
   try {
     await settle();
-    await vi.waitFor(() => expect(document.querySelector('[data-testid=tasks-section-checklist]')!.textContent).toContain('Writing the checklist'));
+    await vi.waitFor(() => expect(document.querySelector('[data-testid=tasks-checklist]')!.textContent).toContain('Writing the checklist'));
+    // One block: the goal, then its checklist, in the same section; no header of its own.
+    expect(document.querySelector('[data-testid=tasks-goal]')!.closest('section')!.contains(document.querySelector('[data-testid=tasks-checklist]'))).toBe(true);
     expect(document.querySelector('[data-testid=tasks-checklist] [data-testid=goal-checklist-open]')).not.toBeNull();
   } finally {
     unmount(component);
@@ -103,7 +105,7 @@ test('the checklist section shows while the tracker writes the first list, where
   }
 });
 
-test('a reviewed goal\'s checklist and reviews have their own sections in the panel', async () => {
+test('a reviewed goal\'s checklist lists what is left under the goal, folds dropped items, and reviews have their own section', async () => {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();
   store.attach(client);
@@ -122,9 +124,19 @@ test('a reviewed goal\'s checklist and reviews have their own sections in the pa
   const component = mount(TasksSurface, { target: document.body, props: { store } });
   try {
     await settle();
-    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=tasks-checklist] [data-testid=goal-checklist-item]')).toHaveLength(3));
-    expect(document.querySelector('[data-testid=tasks-section-checklist]')!.textContent).toContain('1/2 done');
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=tasks-checklist] [data-testid=goal-checklist-item]')).toHaveLength(2));
+    const items = () => [...document.querySelectorAll<HTMLElement>('[data-testid=tasks-checklist] [data-testid=goal-checklist-item]')].map(item => [item.dataset.state, item.querySelector('.text')!.textContent]);
+    expect(items()).toEqual([['done', 'Add a dark theme'], ['next', 'Export invoices as CSV']]);
+    expect(document.querySelector('[data-testid=tasks-checklist-progress]')!.textContent).toContain('1/2 done');
     expect(document.querySelector('[data-testid=tasks-checklist] [data-testid=goal-checklist]')!.classList.contains('dense')).toBe(true);
+    // A dropped item waits folded under the list, opened on demand.
+    const dropped = document.querySelector<HTMLButtonElement>('[data-testid=goal-checklist-dropped-toggle]')!;
+    expect(dropped.textContent).toContain('1 dropped');
+    dropped.click();
+    flushSync();
+    expect(items()).toEqual([['done', 'Add a dark theme'], ['next', 'Export invoices as CSV'], ['cancelled', 'Mail the invoices']]);
+    // The agent reported no task list: no empty section says so.
+    expect(document.querySelector('[data-testid=tasks-section-agent]')).toBeNull();
     // The bar keeps only the verdict dots: the panel lists each review, newest first, with what it found.
     const reviews = [...document.querySelectorAll<HTMLElement>('[data-testid=tasks-review]')];
     expect(reviews.map(review => review.dataset.verdict)).toEqual(['pass', 'fail']);
