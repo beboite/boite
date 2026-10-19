@@ -1,5 +1,8 @@
 import { expect, test } from 'bun:test';
-import { compare, leaves, loadCatalogues } from './translations.ts';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { compare, leaves, loadCatalogues, partErrors } from './translations.ts';
 
 const en = {
   common: { yes: 'yes', no: 'no' },
@@ -48,5 +51,25 @@ test('the real catalogues load and no translation carries a key English lacks', 
   for (const [code, catalogue] of translations) {
     const report = compare(reference, catalogue);
     expect({ code, extra: report.extra, mismatched: report.mismatched }).toEqual({ code, extra: [], mismatched: [] });
+  }
+});
+
+test('every part of English has a file in each translation and is spread by each index', async () => {
+  expect(await partErrors()).toEqual([]);
+  const dir = mkdtempSync(join(tmpdir(), 'boite-parts-'));
+  try {
+    for (const locale of ['en', 'fr']) mkdirSync(join(dir, 'strings', locale), { recursive: true });
+    writeFileSync(join(dir, 'strings', 'en', 'chat.ts'), `export const strings = { chat: { sent: 'Sent' } };`);
+    writeFileSync(join(dir, 'strings', 'en', 'common.ts'), `export const strings = { common: { yes: 'yes' } };`);
+    writeFileSync(join(dir, 'strings', 'fr', 'chat.ts'), `export const fr = { chat: { sent: 'Envoyé' } };`);
+    writeFileSync(join(dir, 'strings.en.ts'), `import { strings as chat } from './strings/en/chat.ts';\nexport const strings = { ...chat };`);
+    writeFileSync(join(dir, 'strings.fr.ts'), `export const fr = {};`);
+    expect(await partErrors(dir)).toEqual([
+      `${join(dir, 'strings.en.ts')}: does not spread common from strings/en/common.ts`,
+      `${join(dir, 'strings', 'fr')}: no common.ts, expected one per file of strings/en`,
+      `${join(dir, 'strings.fr.ts')}: does not spread chat from strings/fr/chat.ts`,
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

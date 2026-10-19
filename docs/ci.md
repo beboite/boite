@@ -14,7 +14,7 @@ requests reviews; approval is not required. The `release tags` policy protects
 
 `scripts/ci/changes.ts` selects jobs from changed paths. Unknown paths run the
 complete suite; renames affect both the old and new path. Every run has a
-`CI required` gate, including documentation-only changes. It requires success
+`CI required` gate, or `CI draft` on a draft, including documentation-only changes. It requires success
 for selected jobs and an intentional skip for the others. Failure, cancellation
 or an unexpected skip blocks it, including jobs whose dependency never started.
 
@@ -33,6 +33,8 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | `packages/contracts/` | All checks except the shell's Rust tests |
 | Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
+
+A pull request whose selection includes desktop also runs [Bundle growth](#bundle-growth).
 
 The changes job always installs frozen dependencies, runs `bun audit`, local
 link checks, `bun test scripts/ci ./bench ./apps/shell/scripts`, architecture
@@ -126,6 +128,31 @@ fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 attempt left attached and removes its partial DMGs. Any other failure ends
 the step.
 
+### Draft pull requests
+
+A draft pull request runs `draft` mode: the changes job, the Linux x64 core
+suite, type checks and UI tests, and the focused telemetry and E2E type checks,
+each only when its paths changed. Windows, macOS, desktop packages, E2E,
+stress, Docker and the APK wait. Its gate is named `CI draft`, so branch
+protection never reads a draft's green gate as `CI required` on a head that
+later turns ready. `ready_for_review` starts the `pr` run, and
+`converted_to_draft` cancels a full run in progress. CodeRabbit reviews drafts
+(`.coderabbit.yaml`).
+
+Of the 5,632 runner minutes spent by the 86 pull request runs started on
+2026-10-18 between 12:34 and 21:35 UTC, 2,476 went to runs a newer push
+cancelled, a median 9.8 minutes after the push they tested: the time a review
+bot takes to answer. A green full run
+cost 86 runner minutes; a draft run of the same core change costs about 11,
+all on Linux.
+
+An agent's pull request flow:
+
+1. `gh pr create --draft`.
+2. Fix the draft's CI failures and review findings, batching pushes.
+3. `gh pr ready <number>` once the draft gate is green and the threads are answered.
+4. After that, push only for a full-run failure or a new finding.
+
 ## Build cost
 
 Cargo, Vitest, the Bun store and BuildKit save caches only from `main`. Cargo namespaces
@@ -200,16 +227,17 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 492,300 |
 | UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,495,200 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,494,900 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-19, the orphan sweep's fork lineage (PR #625) merged with
-`origin/main` at `68033379` measures 4,495,189 core JavaScript bytes after a
-fresh `bun run build:core` on Windows. Built alone on `53cb2781` it measured
-4,494,298 against 4,493,506 for that main: `process-orphans.ts` (the parent
-link each process keeps, the fork check) adds 792 bytes. The core JavaScript
-limit rises to 4,495,200; the other limits stay.
+On 2026-10-19, PR #622 merged with `origin/main` at `68033379` measures
+4,494,650 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,494,397 for that main: holding a
+roster offer while one is on its way adds 253 bytes. PR #623, which opens Bun
+WebSockets without permessage-deflate, adds 177 more on top of both
+(4,494,827). The core JavaScript limit rises to 4,494,900 to cover the two;
+the other limits stay.
 
 On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
 4,494,324 core JavaScript bytes with the same rule after a fresh
@@ -1002,6 +1030,33 @@ total limit 4,070,000; the entry chunk (518,508 bytes) and `main.js` limits are
 unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
+
+### Bundle growth
+
+`bundle-size.yml` builds the UI and the core on Linux for every push to main,
+one job that the next push never cancels, and measures four sizes with
+`scripts/ci/budgets.ts`: the UI entry chunk, the UI files without their `.br`
+and `.gz` copies, the core `dist/main.js`, and all emitted core JavaScript with
+lazy chunks and workers, excluding native binaries and source maps. It keeps
+them 90 days as the `bundle-sizes` artifact. The `Bundle size` job in `ci.yml`
+measures a pull request the same way when the desktop build covers its change. No file in the repository
+holds a limit, so a pull request never edits a shared one to grow:
+`scripts/ci/budgets.json` and the dated size notes above are no longer read.
+
+A pull request is checked twice:
+
+- Against its base: the sizes `bundle-size.yml` kept for the base commit, or
+  the base built in the same job when that run is missing or still going. A measure
+  growing more than 0.1 % fails until the pull request body explains it under
+  a `## Bundle size` heading. The body is read when the job runs: after
+  editing it, rerun the failed jobs (`gh run rerun <run-id> --failed`).
+- Against a ceiling: the sizes `bundle-size.yml` kept for the newest published
+  nightly or release, plus 2 %. A reason does not lift it; only publishing
+  does, so a pull request over it waits for the next nightly or shrinks.
+
+The job summary shows each measure, its base, the growth and the ceiling.
+Reproduce a measurement with `bun run build:ui && bun run build:core &&
+bun scripts/ci/budgets.ts measure sizes.json`.
 
 ### E2E preparation
 
