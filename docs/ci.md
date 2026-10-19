@@ -249,9 +249,13 @@ shell (the Windows installer, the Debian package, the macOS bundle) and only
 when `sign-updates` is on: the nightly and a release. Other steps and runs set
 neither, so `test:shell --release` keeps Cargo's defaults even in a release run.
 Setting the defaults explicitly is not the same: `CODEGEN_UNITS=16` passes
-`-C codegen-units=16` to rustc, which changes every crate's fingerprint, so the
-installer build recompiled 203 to 260 crates the test build had just compiled
-(`LTO=false` alone left them fresh, 2026-10-19). The desktop Rust caches moved
+`-C codegen-units=16` to rustc, which changes every crate's fingerprint. On
+2026-10-19, `cargo build --release -p libc -v` in `apps/shell/src-tauri` stayed
+`Fresh` with `CARGO_PROFILE_RELEASE_LTO=false` and printed `Compiling` with
+`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`. In CI, the `Compiling` lines of the
+build step (Windows installer, macOS bundle, Debian package) fell from 203, 207
+and 260 in pull request run 39165484727 to 1, 33 and 1 in run 39251281108 once
+neither was set. The desktop Rust caches moved
 to `-v2` keys at the same time: rust-cache never rewrites a key it restored in
 full, and the v1 caches of macOS x64 and Linux arm64 held only those crates.
 Both desktop jobs get 60 minutes instead of 35 when publishing. The cache is
