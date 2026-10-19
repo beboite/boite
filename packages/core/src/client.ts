@@ -1,4 +1,5 @@
 import { PROTOCOL_VERSION, RPC_PATH } from '@boite/contracts';
+import { TextSocket, UpgradeError } from './ws-client.ts';
 import type {
   CoreInfo,
   HelloAccepted,
@@ -84,9 +85,12 @@ export class SocketClosedError extends Error {
 export async function connect(url: string, token: string, options: ConnectOptions = {}): Promise<CoreClient> {
   const timeoutMs = options.timeoutMs ?? 5000;
   const deadline = Date.now() + timeoutMs;
-  const socket = options.headers === undefined
-    ? new WebSocket(socketUrl(url))
-    : new WebSocket(socketUrl(url), { headers: options.headers } as unknown as string[]);
+  // Not Bun's own WebSocket, which closes sound streams from this core's server with 1002 or 1011 (`ws-client.ts`).
+  const socket = await TextSocket.connect(socketUrl(url), timeoutMs, { deflate: true, ...(options.headers === undefined ? {} : { headers: options.headers }) })
+    .catch((error: unknown) => {
+      if (error instanceof UpgradeError && error.timedOut) throw new Error('timed out opening the socket', { cause: error });
+      throw new Error(`the socket failed to open: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    });
   const pending = new Map<number, Pending>();
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   let nextId = 1;
@@ -104,14 +108,13 @@ export async function connect(url: string, token: string, options: ConnectOption
         resolve(value) { clearTimeout(timer); resolve(value); },
         reject(error) { clearTimeout(timer); reject(error); },
       };
+      if (!socket.open) { waiter.reject(new Error('the client is closed')); return; }
       pending.set(id, waiter);
-      try { socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params })); }
-      catch (error) { pending.delete(id); waiter.reject(error as Error); }
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
     });
   };
 
-  socket.addEventListener('message', (event: MessageEvent) => {
-    const raw = typeof event.data === 'string' ? event.data : '';
+  socket.onMessage((raw) => {
     let frame: { id?: unknown; method?: unknown; params?: unknown; result?: unknown; error?: RpcError };
     try {
       frame = JSON.parse(raw) as typeof frame;
@@ -140,7 +143,7 @@ export async function connect(url: string, token: string, options: ConnectOption
   const watchers = new Set<{ cancel(): void; fail(error: Error): void }>();
   let ownerClosed = false;
 
-  socket.addEventListener('close', (event: CloseEvent) => {
+  socket.onClose((event) => {
     closed = true;
     const error = new SocketClosedError(event.code, event.reason);
     for (const waiter of pending.values()) waiter.reject(error);
@@ -150,22 +153,6 @@ export async function connect(url: string, token: string, options: ConnectOption
       else watcher.fail(error);
     }
   });
-
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('timed out opening the socket')), timeoutMs);
-    socket.addEventListener('open', () => {
-      clearTimeout(timer);
-      resolve();
-    });
-    socket.addEventListener('error', () => {
-      clearTimeout(timer);
-      reject(new Error('the socket failed to open'));
-    });
-    socket.addEventListener('close', (event: CloseEvent) => {
-      clearTimeout(timer);
-      reject(new SocketClosedError(event.code, event.reason, 'the socket closed before opening'));
-    }, { once: true });
-  }).catch(error => { socket.close(); throw error; });
 
   const hello = (await send('hello', {
     ...(options.ticket !== undefined ? { ticket: options.ticket }

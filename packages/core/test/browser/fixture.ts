@@ -6,7 +6,7 @@ import type { RemoteBrowserFrame, RemoteBrowserUnchanged } from '@boite/contract
 import { connect, type CoreClient } from '../../src/client.ts';
 import { chromiumArgs, findChromium, waitForEndpoint } from '../../src/browser/chromium.ts';
 import { echoThread, startTestCore, type TestCore } from '../harness.ts';
-import { TextSocket } from '../../../../tests/e2e/lib/ws-client.ts';
+import { TextSocket } from '../../src/ws-client.ts';
 
 const PAGE = `<!doctype html><title>Fixture</title>
 <style>body{margin:0;font:16px sans-serif} button{position:absolute;left:100px;top:100px;width:200px;height:80px}</style>
@@ -150,7 +150,7 @@ export function createBrowserFixture() {
     try {
       const args = chromiumArgs(dir, 'linux').filter(arg => arg !== '--remote-debugging-pipe');
       browser = Bun.spawn([findChromium().path!, ...args, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', ...extraArgs], { stdout: 'ignore', stderr: 'ignore' });
-      // Bun's own WebSocket client closes sound devtools streams with 1002 (tests/e2e/lib/ws-client.ts).
+      // Bun's own WebSocket client closes sound devtools streams with 1002 (src/ws-client.ts).
       const connectedSocket = socket = await TextSocket.connect(await waitForEndpoint(dir, browser.exited), 10_000)
         .catch((error: unknown) => { throw new Error(`could not open the desktop browser DevTools socket: ${error instanceof Error ? error.message : String(error)}`, { cause: error }); });
       const connectedApp = app = await connect(harness.url, harness.token, { client: { name, version: 'test' } });

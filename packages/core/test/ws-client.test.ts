@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { encodeFrame, FrameReader, TextSocket, type CloseEvent, type Frame } from './lib/ws-client.ts';
+import { constants as zlibConstants, deflateRawSync } from 'node:zlib';
+import { encodeFrame, FrameReader, TextSocket, type CloseEvent, type Frame } from '../src/ws-client.ts';
 
 /** A server frame: unmasked, final unless told otherwise. */
 function serverFrame(opcode: number, payload: Uint8Array | string, fin = true, rsv = 0): Uint8Array {
@@ -216,6 +217,37 @@ test('a raw server whose frames arrive cut anywhere is read whole, and a malform
   } finally { broken.stop(true); }
 }, 30_000);
 
+test('what a message starts, an awaited answer included, runs before the next message of the same read', async () => {
+  let upgraded = false;
+  const server = Bun.listen({
+    hostname: '127.0.0.1', port: 0,
+    socket: {
+      data(socket, bytes) {
+        if (upgraded) { socket.write(join([serverFrame(1, 'answer'), serverFrame(1, 'event')])); return; }
+        const key = /sec-websocket-key:\s*(\S+)/i.exec(new TextDecoder().decode(bytes))?.[1];
+        const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+        upgraded = true;
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+      },
+    },
+  });
+  try {
+    const socket = await TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000);
+    const order: string[] = [];
+    let answered!: () => void;
+    const answer = new Promise<void>((resolve) => { answered = resolve; });
+    const done = new Promise<void>((resolve) => socket.onMessage((text) => {
+      order.push(text);
+      if (text === 'answer') answered(); else resolve();
+    }));
+    void answer.then(() => order.push('the caller resumed'));
+    socket.send('go');
+    await done;
+    expect(order).toEqual(['answer', 'the caller resumed', 'event']);
+    socket.close();
+  } finally { server.stop(true); }
+});
+
 test('an upgrade the server refuses or never answers rejects with what happened', async () => {
   const refusing = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('no page', { status: 404 }) });
   try {
@@ -229,4 +261,140 @@ test('an upgrade the server refuses or never answers rejects with what happened'
     for (let waited = 0; !hungUp && waited < 2_000; waited += 20) await Bun.sleep(20);
     expect(hungUp).toBe(true);
   } finally { silent.stop(true); }
+});
+
+/** A deflated message as permessage-deflate sends it: raw deflate without its empty final block. */
+function deflated(text: string): Uint8Array {
+  const raw = deflateRawSync(new TextEncoder().encode(text), { finishFlush: zlibConstants.Z_SYNC_FLUSH });
+  return raw.subarray(0, raw.length - 4);
+}
+
+test('with deflate negotiated, a compressed message is read whole whatever its fragments and the reads cut', () => {
+  const text = JSON.stringify({ method: 'thread.updated', params: { pad: 'é'.repeat(50_000) } });
+  const body = deflated(text);
+  const third = Math.floor(body.length / 3);
+  const bytes = join([
+    serverFrame(1, deflated('{"id":1}'), true, 4),
+    serverFrame(1, '{"plain":true}'),
+    // RSV1 on the first fragment only, a ping between fragments.
+    serverFrame(1, body.subarray(0, third), false, 4),
+    serverFrame(9, 'p'),
+    serverFrame(0, body.subarray(third, 2 * third), false),
+    serverFrame(0, body.subarray(2 * third)),
+  ]);
+  const want: Frame[] = [
+    { kind: 'text', text: '{"id":1}' },
+    { kind: 'text', text: '{"plain":true}' },
+    { kind: 'ping', payload: new TextEncoder().encode('p') },
+    { kind: 'text', text },
+  ];
+  const read = (cut: () => number) => {
+    const reader = new FrameReader({ inflate: true });
+    const frames: Frame[] = [];
+    for (let at = 0; at < bytes.length;) {
+      const n = Math.max(1, Math.min(cut(), bytes.length - at));
+      frames.push(...reader.push(bytes.slice(at, at + n)));
+      at += n;
+    }
+    return frames;
+  };
+  expect(read(() => bytes.length)).toEqual(want);
+  expect(read(() => 1)).toEqual(want);
+  const random = seeded(3);
+  expect(read(() => 1 + Math.floor(random() * 700))).toEqual(want);
+
+  const refusal = (frames: Uint8Array[]) => new FrameReader({ inflate: true }).push(join(frames)).at(-1);
+  expect(refusal([serverFrame(1, 'a', false), serverFrame(0, 'b', true, 4)])).toEqual({ kind: 'invalid', reason: 'reserved bits 4 set on opcode 0' });
+  expect(refusal([serverFrame(9, 'p', true, 4)])).toEqual({ kind: 'invalid', reason: 'reserved bits 4 set on opcode 9' });
+  expect(refusal([serverFrame(1, '{}', true, 2)])).toEqual({ kind: 'invalid', reason: 'reserved bits 2 set on opcode 1' });
+  expect(refusal([serverFrame(1, new Uint8Array([0xff, 0xff, 0xff]), true, 4)])).toMatchObject({ kind: 'invalid', reason: expect.stringContaining('does not inflate') });
+});
+
+test('a core server that deflates for remote clients is read whole once deflate is offered, and plain without it', async () => {
+  const messages = Array.from({ length: 50 }, (_, id) => JSON.stringify({ id, pad: 'é'.repeat((id * 7_919) % 90_000) }));
+  const offers: Array<string | null> = [];
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch(request, self) {
+      offers.push(request.headers.get('sec-websocket-extensions'));
+      return self.upgrade(request) ? undefined : new Response('upgrade required', { status: 426 });
+    },
+    // The core's own setting, and every send asking for deflate as one to a remote client does.
+    websocket: { perMessageDeflate: true, open(socket) { for (const text of messages) socket.send(text, true); }, message() {} },
+  });
+  try {
+    for (const deflate of [true, false]) {
+      const socket = await TextSocket.connect(`ws://127.0.0.1:${server.port}/rpc`, 5_000, { deflate });
+      const received: string[] = [];
+      await new Promise<void>((resolve) => socket.onMessage((text) => { received.push(text); if (received.length === messages.length) resolve(); }));
+      expect(received).toEqual(messages);
+      socket.close();
+    }
+  } finally { await server.stop(true); }
+  expect(offers).toEqual(['permessage-deflate; server_no_context_takeover; client_no_context_takeover', null]);
+});
+
+test('an upgrade answered with extensions this client cannot read is refused', async () => {
+  const answering = (extensions: string) => Bun.listen({
+    hostname: '127.0.0.1', port: 0,
+    socket: {
+      data(socket, bytes) {
+        const key = /sec-websocket-key:\s*(\S+)/i.exec(new TextDecoder().decode(bytes))?.[1];
+        if (key === undefined) return;
+        const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Extensions: ${extensions}\r\n\r\n`);
+      },
+    },
+  });
+  const cases: Array<[string, boolean, string]> = [
+    ['permessage-deflate; server_no_context_takeover', false, 'extensions nobody offered'],
+    ['permessage-deflate', true, 'keeps a deflate window'],
+    ['permessage-deflate; server_no_context_takeover; mystery', true, 'does not know: mystery'],
+    ['x-webkit-deflate-frame', true, 'answered the deflate offer with'],
+  ];
+  for (const [extensions, deflate, error] of cases) {
+    const server = answering(extensions);
+    try {
+      await expect(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000, { deflate })).rejects.toThrow(error);
+    } finally { server.stop(true); }
+  }
+});
+
+test('upgrade headers reach the server, a Host among them replacing the url one, and unsafe ones are refused', async () => {
+  let seen: { host: string | null; origin: string | null } | undefined;
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch(request, self) {
+      seen = { host: request.headers.get('host'), origin: request.headers.get('origin') };
+      return self.upgrade(request) ? undefined : new Response('upgrade required', { status: 426 });
+    },
+    websocket: { message() {} },
+  });
+  try {
+    const socket = await TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000, { headers: { host: 'boite.example:7000', Origin: 'http://boite.example' } });
+    expect(seen).toEqual({ host: 'boite.example:7000', origin: 'http://boite.example' });
+    socket.close();
+    await expect(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000, { headers: { 'x-a': 'b\r\nx-injected: 1' } })).rejects.toThrow('on one line');
+    await expect(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000, { headers: { 'Sec-WebSocket-Key': 'x' } })).rejects.toThrow('the client\'s own');
+    await expect(TextSocket.connect(`http://127.0.0.1:${server.port}/`, 5_000)).rejects.toThrow('ws:// or wss://');
+  } finally { await server.stop(true); }
+});
+
+test('a close carries its code and reason, the reason cut to what a close frame holds without splitting a character', async () => {
+  const closes: Array<[number, string]> = [];
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: (request, self) => (self.upgrade(request) ? undefined : new Response('no', { status: 426 })),
+    websocket: { message() {}, close(_socket, code, reason) { closes.push([code, reason]); } },
+  });
+  try {
+    for (const reason of ['the other machine dropped the connection', 'é'.repeat(100)]) {
+      const socket = await TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000);
+      const closed = new Promise<CloseEvent>((resolve) => socket.onClose(resolve));
+      socket.close(4001, reason);
+      await closed;
+    }
+    for (let waited = 0; closes.length < 2 && waited < 2_000; waited += 20) await Bun.sleep(20);
+  } finally { await server.stop(true); }
+  expect(closes).toEqual([[4001, 'the other machine dropped the connection'], [4001, 'é'.repeat(61)]]);
 });
