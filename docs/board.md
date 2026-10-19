@@ -33,8 +33,17 @@ The core reads each linked goal again whenever it sends the list
 (`Todo.goal`, never stored) and sends the list again when a linked
 conversation's goal changes. A goal whose review passes after its card last
 moved takes the open card to `claimed`, so it waits in In review for the user
-to confirm it in Done. A card moved back to In progress after that pass stays
+to confirm it in Done. Only a pass does: a goal completed by hand after a failed
+review claims nothing. A card moved back to In progress after that pass stays
 there.
+
+A card links one conversation at a time. When two devices put the same card in
+progress, the first link wins; the other device's link is refused and it
+deletes the empty conversation it made. A link to a conversation since moved to
+another project is dropped, so that project's agents never read its checklist;
+a removed conversation stops showing until a restore brings it back. A card in
+progress whose conversation has no goal, a start cut short or a goal removed
+there, reads "Goal not running" and its menu starts the goal again.
 
 Moving a card to To do unlinks its conversation, which goes on by itself. In
 review sets `claimed`, Done sets `done`, In progress on a linked card sets

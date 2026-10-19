@@ -159,11 +159,15 @@ export class Terminals {
     else this.showBoard();
   }
 
-  /** The board in the drawer; the terminal it replaces keeps its shells running. */
+  /**
+   * The board in the drawer; the terminals it replaces keep their shells
+   * running. Every thread's drawer is put away, not only this one's, since the
+   * board follows the user into the next thread.
+   */
   showBoard(): void {
     const open = this.ctx.store.openThread;
     if (!open || !this.boardAvailable()) return;
-    if (this.terminalShown(open.id)) this.hideTerminal(open.id);
+    for (const threadId of this.terminalThreads) this.hideTerminal(threadId);
     this.boardShown = true;
     this.pickTab('board');
   }

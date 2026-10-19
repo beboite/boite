@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { MessagesSquare, Plus } from '@lucide/svelte';
+  import { MessagesSquare, Play, Plus } from '@lucide/svelte';
   import type { ThreadId, Todo } from '@boite/contracts';
   import { separator, type MenuItem } from '../lib/menu';
   import { fill, strings } from '../lib/strings';
@@ -47,6 +47,11 @@
     return todo.goalThreadId ? 'doing' : 'todo';
   }
 
+  /** In progress with no goal on its conversation: a start cut short, or the goal removed there. */
+  function stalled(todo: Todo): boolean {
+    return Boolean(todo.goalThreadId) && !todo.goal && todo.status === 'open' && !starting.includes(todo.id);
+  }
+
   let columns = $derived(COLUMNS.map((column) => ({ column, cards: todos.filter((todo) => columnOf(todo) === column) })));
 
   async function move(todo: Todo, to: Column): Promise<void> {
@@ -66,7 +71,8 @@
     const here = columnOf(todo);
     return [
       ...COLUMNS.filter((column) => column !== here).map((column) => ({ id: `move:${column}`, label: fill(strings.board.moveTo, { column: strings.board.columns[column] }) })),
-      ...(todo.goalThreadId ? [separator('sep-thread'), { id: 'open', label: strings.board.openThread, glyph: MessagesSquare }] : []),
+      ...(todo.goalThreadId ? [separator('sep-thread'), ...(stalled(todo) ? [{ id: 'resume', label: strings.board.resume, glyph: Play }] : []),
+        { id: 'open', label: strings.board.openThread, glyph: MessagesSquare }] : []),
       separator('sep-remove'),
       { id: 'remove', label: strings.board.remove, danger: true }
     ];
@@ -75,6 +81,7 @@
   function pick(todo: Todo, id: string): void {
     if (id.startsWith('move:')) void move(todo, id.slice(5) as Column);
     else if (id === 'open' && todo.goalThreadId) void store.open(todo.goalThreadId);
+    else if (id === 'resume') void store.resumeCardGoal(threadId, todo);
     else if (id === 'remove') void store.removeTodo(threadId, todo.id);
   }
 
@@ -173,6 +180,8 @@
               <span class="state review ui-label" data-testid="board-card-state">{strings.board.reviewing}</span>
             {:else if todo.status === 'claimed'}
               <span class="state awaiting ui-label" data-testid="board-card-state">{strings.board.awaiting}</span>
+            {:else if stalled(todo)}
+              <span class="state muted ui-label" data-testid="board-card-state">{strings.board.stalled}</span>
             {/if}
             {#if open && todo.goal?.checklist}
               <div class="checklist"><GoalChecklist {store} checklist={todo.goal.checklist} dense /></div>

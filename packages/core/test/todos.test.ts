@@ -275,15 +275,15 @@ describe('the todo list of a project', () => {
 });
 
 describe('the project board', () => {
-  /** An echo agent that claims the goal at once, a tracker with one item it sees done, a reviewer that passes. */
-  function passingGoal(): void {
+  /** An echo agent that claims the goal at once, a tracker with one item it sees done, a reviewer that passes or fails. */
+  function passingGoal(verdict = 'PASS'): void {
     restoreDriver = setDriver('echo', {
       protocol: 'echo',
       startTurn(ctx) {
         const id = ctx.emit.startMessage('assistant');
         const text = harness.core.activity.ownsTracker(ctx.thread.id)
           ? (ctx.prompt.includes('Say which open items') ? '```json\n{"done":[1]}\n```' : '```json\n{"items":[{"text":"Do the card","source":"objective"}]}\n```')
-          : ctx.prompt.includes('You review a Boite goal') ? 'Checks pass.\nVERDICT: PASS' : 'Done.\n[BOITE_GOAL_COMPLETE]';
+          : ctx.prompt.includes('You review a Boite goal') ? `Checked.\nVERDICT: ${verdict}` : 'Done.\n[BOITE_GOAL_COMPLETE]';
         ctx.emit.part(id, 0, { type: 'text', text });
         ctx.emit.complete(id, 'complete');
         return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
@@ -315,6 +315,45 @@ describe('the project board', () => {
     await client.call('threads.activity.control', { threadId: goal.threadId, kind: 'goal', action: 'remove' });
     expect((await sent).todos[0]).toMatchObject({ id: card.id, status: 'open' });
     expect((await client.call('todos.list', { threadId }))[0]?.goal).toBeUndefined();
+  });
+
+  test('a goal completed by hand after a failed review claims nothing', async () => {
+    passingGoal('FAIL');
+    const card = await client.call('todos.add', { threadId, text: 'Do the card' });
+    const goal = await echoThread(harness, client, 'Do the card');
+    await client.call('todos.update', { threadId, todoId: card.id, goalThreadId: goal.threadId });
+    await client.call('threads.activity.set', { threadId: goal.threadId, goal: { objective: card.text, review: true } });
+    await waitFor(() => (harness.core.activity.get(goal.threadId).goal?.review?.verdicts.length ?? 0) > 0);
+    await client.call('threads.activity.control', { threadId: goal.threadId, kind: 'goal', action: 'complete' });
+    expect(harness.core.activity.get(goal.threadId).goal?.review?.verdicts.at(-1)?.verdict).toBe('fail');
+    expect((await client.call('todos.list', { threadId }))[0]).toMatchObject({ status: 'open', goal: { status: 'complete' } });
+  });
+
+  test('a second start loses to the first link, and a conversation moved to another project lets go of its card', async () => {
+    passingGoal();
+    const card = await client.call('todos.add', { threadId, text: 'one agent only' });
+    const first = await echoThread(harness, client, 'first');
+    const second = await echoThread(harness, client, 'second');
+    await client.call('todos.update', { threadId, todoId: card.id, goalThreadId: first.threadId });
+    await expect(client.call('todos.update', { threadId, todoId: card.id, goalThreadId: second.threadId })).rejects.toThrow(
+      `todo ${card.id} already works in conversation ${first.threadId}`,
+    );
+    await client.call('threads.activity.set', { threadId: first.threadId, goal: { objective: card.text, review: true } });
+    // Done, so no turn of the goal or its checklist holds the move back.
+    await waitFor(() => harness.core.activity.get(first.threadId).goal?.status === 'complete' && harness.core.activity.get(first.threadId).goal?.checklist?.phase === 'idle');
+    expect((await client.call('todos.list', { threadId }))[0]?.goal?.checklist?.items).toHaveLength(1);
+
+    const path = join(harness.dataDir, 'moved-to');
+    mkdirSync(path, { recursive: true });
+    const other = await client.call('projects.add', { path, name: 'moved-to' });
+    const heard = client.next<'todos.updated'>('todos.updated');
+    await client.call('threads.move', { threadId: first.threadId, projectId: other.id });
+    const sent = (await heard).todos[0];
+    // The old project's agents no longer read the moved conversation's checklist.
+    expect(sent).toMatchObject({ id: card.id, goalThreadId: null });
+    expect(sent).not.toHaveProperty('goal');
+    // Let go, the card takes a new conversation.
+    expect((await client.call('todos.update', { threadId, todoId: card.id, goalThreadId: second.threadId })).goalThreadId).toBe(second.threadId);
   });
 
   test('a card links only a conversation of its own project, and null unlinks it', async () => {

@@ -127,8 +127,9 @@
   type Deferred = { [K in keyof typeof deferredLoaders]?: Awaited<ReturnType<(typeof deferredLoaders)[K]>>['default'] };
   let deferred = $state.raw<Deferred>({});
   const requested = new Set<keyof Deferred>();
-  let terminalShown = $derived(store.openThread !== null && store.owner && store.terminalShown(store.openThread.id));
   let boardShown = $derived(store.openThread !== null && store.boardShown && store.boardAvailable());
+  // One drawer at a time: the board, when it holds the drawer, wins over a terminal left open.
+  let terminalShown = $derived(store.openThread !== null && store.owner && store.terminalShown(store.openThread.id) && !boardShown);
   function need(name: keyof Deferred): void {
     if (requested.has(name)) return;
     requested.add(name);

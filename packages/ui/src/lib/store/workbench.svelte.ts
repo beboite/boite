@@ -334,11 +334,28 @@ export class Workbench {
     if (!created || !this.ctx.currentClient(client, clientGeneration)) return null;
     try {
       await client.call('todos.update', { threadId, todoId: todo.id, status: 'open', goalThreadId: created.id });
-      await client.call('threads.activity.set', { threadId: created.id, goal: { objective: todo.text, review: true } });
-      return created.id;
+    } catch (error) {
+      // Another device put the card in progress first, or the card went: its conversation works, this empty one goes.
+      if (this.ctx.currentClient(client, clientGeneration)) {
+        void s.removeThread(created.id);
+        this.ctx.fail(error);
+      }
+      return null;
+    }
+    return await this.resumeCardGoal(threadId, { ...todo, goalThreadId: created.id }) ? created.id : null;
+  }
+
+  /** The `/goal2` of a card's linked conversation, set again: after a start cut short, or a goal removed there. */
+  async resumeCardGoal(threadId: ThreadId, todo: Todo): Promise<boolean> {
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    if (!client || !todo.goalThreadId || !this.#mayTodos()) return false;
+    try {
+      await client.call('threads.activity.set', { threadId: todo.goalThreadId, goal: { objective: todo.text, review: true } });
+      return true;
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
-      return null;
+      return false;
     }
   }
 

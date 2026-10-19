@@ -743,6 +743,7 @@ export class Store {
   updateTodo(...args: Parameters<Workbench['updateTodo']>) { return this.#ctx.workbench.updateTodo(...args); }
   removeTodo(...args: Parameters<Workbench['removeTodo']>) { return this.#ctx.workbench.removeTodo(...args); }
   startCardGoal(...args: Parameters<Workbench['startCardGoal']>) { return this.#ctx.workbench.startCardGoal(...args); }
+  resumeCardGoal(...args: Parameters<Workbench['resumeCardGoal']>) { return this.#ctx.workbench.resumeCardGoal(...args); }
   refreshResources(...args: Parameters<Workbench['refreshResources']>) { return this.#ctx.workbench.refreshResources(...args); }
   killTree(...args: Parameters<Workbench['killTree']>) { return this.#ctx.workbench.killTree(...args); }
 }

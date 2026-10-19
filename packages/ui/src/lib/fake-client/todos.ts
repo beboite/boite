@@ -10,6 +10,12 @@ function goalOf(thread: Thread | undefined): TodoGoal | null {
   return { status: goal.status, reviewing: goal.review.phase === 'reviewing', checklist: goal.checklist ?? null };
 }
 
+/** The conversation a card still links: one gone or moved to another project no longer counts, as in the core. */
+function liveLink(ctx: FakeContext, todo: Todo): string | null {
+  const thread = todo.goalThreadId ? ctx.threads.get(todo.goalThreadId) : undefined;
+  return thread && thread.projectId === todo.projectId ? thread.id : null;
+}
+
 /** The project's cards, the ones already done last, the core's order, each linked one with its goal. */
 function projectTodos(ctx: FakeContext, projectId: string | null): Todo[] {
   if (projectId === null) throw refusal('this agent session has no project');
@@ -19,7 +25,10 @@ function projectTodos(ctx: FakeContext, projectId: string | null): Todo[] {
       .filter((todo) => todo.projectId === projectId)
       .sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt)
       .map((todo) => {
-        const goal = todo.goalThreadId ? goalOf(ctx.threads.get(todo.goalThreadId)) : null;
+        if (!todo.goalThreadId) return todo;
+        const link = liveLink(ctx, todo);
+        if (link === null) return { ...todo, goalThreadId: null };
+        const goal = goalOf(ctx.threads.get(link));
         return goal ? { ...todo, goal } : todo;
       })
   );
@@ -33,7 +42,8 @@ export function followGoal(ctx: FakeContext, thread: Thread): void {
   const linked = ctx.todos.filter((todo) => todo.goalThreadId === thread.id);
   if (!linked.length || thread.projectId === null) return;
   const goal = thread.activity?.goal;
-  const passedAt = goal?.review && goal.status === 'complete' ? goal.review.verdicts.at(-1)?.finishedAt ?? null : null;
+  const verdict = goal?.review?.verdicts.at(-1);
+  const passedAt = goal?.status === 'complete' && verdict?.verdict === 'pass' ? verdict.finishedAt : null;
   for (const todo of linked) {
     if (passedAt !== null && todo.status === 'open' && todo.updatedAt < passedAt) {
       todo.status = 'claimed';
@@ -83,6 +93,10 @@ export function todoMethods(ctx: FakeContext) {
       }
       if (params.goalThreadId && ctx.threads.get(params.goalThreadId)?.projectId !== thread.projectId) {
         throw refusal(`goalThreadId ${params.goalThreadId} is not a conversation of this card's project`);
+      }
+      const linked = liveLink(ctx, todo);
+      if (params.goalThreadId && linked !== null && linked !== params.goalThreadId) {
+        throw refusal(`todo ${params.todoId} already works in conversation ${linked}; unlink it with goalThreadId null first`);
       }
       if (params.text !== undefined) todo.text = todoText(params.text);
       if (params.status !== undefined) todo.status = params.status;

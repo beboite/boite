@@ -53,11 +53,22 @@ function goalOf(activity: ThreadActivity): TodoGoal | null {
   return { status: goal.status, reviewing: goal.review.phase === 'reviewing', checklist: goal.checklist ?? null };
 }
 
-/** Each linked card with its goal read now; a conversation removed since leaves the card without one. */
+/**
+ * The conversation a card still links: one removed since, or moved to another
+ * project, no longer counts, so its goal never reaches the old project's agents.
+ */
+function liveLink(core: Core, todo: Todo): ThreadId | null {
+  if (!todo.goalThreadId) return null;
+  return core.journal.getThread(todo.goalThreadId)?.projectId === todo.projectId ? todo.goalThreadId : null;
+}
+
+/** Each linked card with its goal read now; a link that no longer counts is sent as none. */
 function withGoals(core: Core, todos: Todo[]): Todo[] {
   return todos.map((todo) => {
-    if (!todo.goalThreadId || !core.journal.getThread(todo.goalThreadId)) return todo;
-    const goal = goalOf(core.activity.get(todo.goalThreadId));
+    if (!todo.goalThreadId) return todo;
+    const link = liveLink(core, todo);
+    if (link === null) return { ...todo, goalThreadId: null };
+    const goal = goalOf(core.activity.get(link));
     return goal ? { ...todo, goal } : todo;
   });
 }
@@ -115,7 +126,9 @@ function checkText(text: unknown): string {
 }
 
 export function listTodos(core: Core, threadId: ThreadId): Todo[] {
-  return withGoals(core, orderTodos(stored(core, projectOfThread(core, threadId))));
+  const projectId = projectOfThread(core, threadId);
+  linkedThreads(core, projectId);
+  return withGoals(core, orderTodos(stored(core, projectId)));
 }
 
 export function addTodo(core: Core, params: RpcParams<'todos.add'>, principal: Principal = 'owner'): Todo {
@@ -185,6 +198,16 @@ export function updateTodo(core: Core, params: RpcParams<'todos.update'>, princi
     if (!goalThread || goalThread.projectId !== projectId) {
       throw refused(`goalThreadId ${params.goalThreadId} is not a conversation of this card's project`, { goalThreadId: params.goalThreadId, projectId });
     }
+    // Two devices putting the same card in progress each make a conversation:
+    // the first link wins, and the other learns it before starting a goal.
+    const linked = liveLink(core, current);
+    if (linked !== null && linked !== params.goalThreadId) {
+      throw refused(`todo ${params.todoId} already works in conversation ${linked}; unlink it with goalThreadId null first`, {
+        todoId: params.todoId,
+        goalThreadId: linked,
+        reason: 'already-linked',
+      });
+    }
   }
   const updated: Todo = {
     ...current,
@@ -213,7 +236,9 @@ function followGoal(core: Core, threadId: ThreadId, sent: Map<ThreadId, string>)
   if (sent.get(threadId) === seen) return;
   sent.set(threadId, seen);
   const todos = stored(core, projectId);
-  const passedAt = goal?.status === 'complete' ? activity.goal?.review?.verdicts.at(-1)?.finishedAt ?? null : null;
+  // A pass, not any verdict: a goal the user completes by hand after a failed review claims nothing.
+  const verdict = activity.goal?.review?.verdicts.at(-1);
+  const passedAt = goal?.status === 'complete' && verdict?.verdict === 'pass' ? verdict.finishedAt : null;
   const claims = (todo: Todo) => passedAt !== null && todo.goalThreadId === threadId && todo.status === 'open' && todo.updatedAt < passedAt;
   if (!todos.some(claims)) { send(core, projectId, todos); return; }
   save(core, projectId, todos.map((todo) => claims(todo) ? { ...todo, status: 'claimed', threadId, updatedAt: Date.now() } : todo));
@@ -233,6 +258,19 @@ export function registerTodoMethods(core: Core): void {
   const sent = new Map<ThreadId, string>();
   core.bus.onAny((name, payload) => {
     if (name === 'thread.activity') followGoal(core, (payload as RpcEvents['thread.activity']).threadId, sent);
+    // A linked conversation moved to another project lets go of its card for good;
+    // a removed one, which a restore may bring back, only stops showing.
+    else if (name === 'thread.updated') {
+      const thread = payload as RpcEvents['thread.updated'];
+      for (const [linking, linked] of links.get(core) ?? []) {
+        if (!linked.has(thread.id) || linking === thread.projectId) continue;
+        const now = Date.now();
+        save(core, linking, stored(core, linking).map((todo) => todo.goalThreadId === thread.id ? { ...todo, goalThreadId: null, updatedAt: now } : todo));
+      }
+    } else if (name === 'thread.removed') {
+      const { threadId } = payload as RpcEvents['thread.removed'];
+      for (const [linking, linked] of links.get(core) ?? []) if (linked.has(threadId)) send(core, linking, stored(core, linking));
+    }
   });
   core.router.register('todos.list', (params) => listTodos(core, params.threadId));
   core.router.register('todos.add', (params, ctx) => addTodo(core, params, ctx.connection.identity.principal));

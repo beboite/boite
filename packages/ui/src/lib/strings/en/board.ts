@@ -19,6 +19,9 @@ export const strings = {
     reviewing: 'Under review',
     awaiting: 'Awaiting you',
     starting: 'Starting',
+    /** A card in progress whose conversation has no goal: a start cut short, or the goal removed there. */
+    stalled: 'Goal not running',
+    resume: 'Start its goal',
     /** The dots under a phone's board, one per column. */
     pages: 'Columns',
     page: '{column}, {count}'

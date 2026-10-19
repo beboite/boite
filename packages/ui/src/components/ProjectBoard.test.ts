@@ -102,6 +102,35 @@ test('the board puts each card in its column, starts a /goal2 for a card put in 
   }
 });
 
+test('a start that loses to another device leaves no stray conversation, and a card whose goal stopped starts it again', async () => {
+  const { store, client } = await ready();
+  const component = mount(ProjectBoard, { target: document.body, props: { store, threadId: 't-trace', narrow: false } });
+  try {
+    await settle();
+    // This device still sees the card unlinked; another one linked it first.
+    const stale = { ...(await client.call('todos.list', { threadId: 't-trace' })).find(todo => todo.id === 'board-todo-1')! };
+    await client.call('todos.update', { threadId: 't-trace', todoId: 'board-todo-1', goalThreadId: 't-board-scroll' });
+    const before = store.threads.map(thread => thread.id).sort();
+    expect(await store.startCardGoal('t-trace', stale)).toBeNull();
+    await settle();
+    expect(store.threads.map(thread => thread.id).sort()).toEqual(before);
+    expect(store.error).toContain('already works in conversation t-board-scroll');
+    store.error = null;
+
+    // The goal removed from its conversation: the card says so and offers to start it again.
+    await client.call('threads.activity.control', { threadId: 't-board-dark', kind: 'goal', action: 'remove' });
+    await settle();
+    const dark = card('Dark theme for the settings page');
+    expect(dark.closest('[data-column]')!.getAttribute('data-column')).toBe('doing');
+    expect(dark.querySelector('[data-testid=board-card-state]')!.textContent).toBe('Goal not running');
+    await pick('Dark theme for the settings page', 'resume');
+    expect((await client.call('threads.get', { threadId: 't-board-dark' })).activity?.goal).toMatchObject({ objective: 'Dark theme for the settings page', review: { maxRounds: 5 } });
+    expect(card('Dark theme for the settings page').querySelector('[data-testid=board-card-state]')?.textContent).not.toBe('Goal not running');
+  } finally {
+    unmount(component);
+  }
+});
+
 test('a phone swipes the board one column a screen, a dot per column, and reaches it from a paired device', async () => {
   const { store } = await ready({ principal: 'session' });
   expect(store.owner).toBe(false);
@@ -151,6 +180,17 @@ test('Ctrl+J opens the drawer on the tab picked last; a device without a shell o
   } finally {
     unmount(tabs);
   }
+
+  // A terminal left open in another thread stays put away once the board took the drawer.
+  store.hideBoard();
+  await store.open('t-board-dark');
+  store.toggleTerminal();
+  expect(store.terminalShown('t-board-dark')).toBe(true);
+  await store.open('t-trace');
+  store.showBoard();
+  await store.open('t-board-dark');
+  expect([store.boardShown, store.terminalShown('t-board-dark')]).toEqual([true, false]);
+  await store.open('t-trace');
 
   setExperiment('goal2', false);
   expect(store.boardAvailable()).toBe(false);

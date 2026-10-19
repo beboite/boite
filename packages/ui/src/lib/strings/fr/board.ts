@@ -19,6 +19,8 @@ export const fr: Translation = {
     reviewing: 'En relecture',
     awaiting: 'Vous attend',
     starting: 'Lancement',
+    stalled: 'Objectif arrêté',
+    resume: 'Relancer son objectif',
     pages: 'Colonnes',
     page: '{column}, {count}'
   }
