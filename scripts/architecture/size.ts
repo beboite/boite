@@ -4,9 +4,8 @@
  * they may shrink, not grow, and an entry goes once its file is back under the
  * ceiling. A split that takes a file under the ceiling deletes its entry.
  *
- * Tables that grow with the product by design (the contract, which every new
- * RPC method changes first, the in-memory client that mirrors it, and the UI
- * strings of every language) are exempt, each with the reason beside it.
+ * A table that grows with the product by design may be exempt, with the reason
+ * beside it.
  */
 export interface SizeBudget {
   ceiling: number;
