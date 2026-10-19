@@ -1,14 +1,23 @@
-import type { ThreadId } from '@boite/contracts';
+import { parseGroupRelayUrl, type ThreadId } from '@boite/contracts';
+import { appPage } from '../app-origin';
+import { servesThisPage } from '../endpoint';
 import {
+  notificationCore,
   pushCovers,
+  pushHomeClient,
+  pushKinds,
+  readPushHome,
+  readNotificationKinds,
   readNotifications,
   requestNotificationPermission,
   sendNotification,
   shouldNotify,
   toastFor,
+  writeNotificationKinds,
   writeNotifications,
   type NotifyKind
 } from '../notify';
+import { PUSH_ENABLED_KEY } from '../pwa';
 import { experimentOn } from '../experiments.svelte';
 import type { DropKind } from '../native-drop';
 import { clampSidebar, SIDEBAR_DEFAULT, writeLayout } from '../prefs';
@@ -17,11 +26,16 @@ import { strings } from '../strings';
 import type { Page, SettingsTab } from '../store.svelte';
 import type { StoreContext } from './context';
 
+/** The kinds are this device's whichever machine is shown: one state every Store's Layout reads. */
+const deviceKinds = $state({ list: readNotificationKinds() });
+
 /** What the window shows around the chat: the page, the sidebar, the palette, the panel, the toasts. */
 export class Layout {
   projectPickerOpen = $state(false);
   /** Toasts for threads the user is not looking at, per machine. */
   notifications = $state(readNotifications());
+  /** The kinds of toast and push this device keeps, under that switch. */
+  get notificationKinds(): NotifyKind[] { return deviceKinds.list; }
   /** The command palette, `Ctrl+K`. */
   paletteOpen = $state(false);
   /** Set by the palette's Rename: the chat header opens its title field and clears it. */
@@ -142,17 +156,20 @@ export class Layout {
       threadId,
       openThreadId: s.visible ? s.openThread?.id ?? null : null,
       focused: typeof document !== 'undefined' && document.hasFocus() && document.visibilityState === 'visible',
-      enabled: readNotifications()
+      enabled: readNotifications(),
+      kinds: readNotificationKinds()
     });
     if (!go) return;
     const title = s.threads.find((t) => t.id === threadId)?.title ?? strings.app.name;
     const origin = s.endpointUrl ? new URL(s.endpointUrl).origin : undefined;
     const key = s.threadKey(threadId);
     void (async () => {
-      // The core's push already brings this one to the device.
-      if (await pushCovers(origin)) return;
+      // A machine this page does not serve: its id in the group, which its pushes and a tap name.
+      const core = origin !== undefined && origin !== location.origin ? notificationCore(s) : undefined;
+      // A push already brings this one to the device: this page's core, or a member forwarding to the device's push home.
+      if (await pushCovers(origin, core !== undefined && s.group !== null)) return;
       const body = typeof detail === 'function' ? await detail().catch(() => null) : detail;
-      await sendNotification({ ...toastFor(kind, key, title, body), coreThreadId: threadId, origin });
+      await sendNotification({ ...toastFor(kind, key, title, body), coreThreadId: threadId, origin, ...(core === undefined ? {} : { core }) });
     })();
   }
 
@@ -160,8 +177,42 @@ export class Layout {
   async setNotifications(enabled: boolean): Promise<void> {
     this.notifications = enabled;
     writeNotifications(enabled);
+    this.syncPushKinds();
     if (!enabled) return;
     const granted = await requestNotificationPermission();
     if (!granted) this.ctx.store.error = strings.settings.notificationsDenied;
+  }
+
+  /** One kind's switch, under the main one. */
+  setNotificationKind(kind: NotifyKind, on: boolean): void {
+    const kinds = readNotificationKinds().filter((k) => k !== kind);
+    writeNotificationKinds(on ? [...kinds, kind] : kinds);
+    deviceKinds.list = readNotificationKinds();
+    this.syncPushKinds();
+  }
+
+  /**
+   * The core sends this device's pushes, so it hears the device's choice: the
+   * push home, the machine holding the subscription, whichever one is shown.
+   * A subscription older than that record goes by the shown machine when it
+   * may hold it. The phone's settings screen checks again on `push.status`.
+   */
+  private syncPushKinds(): void {
+    try {
+      if (localStorage.getItem(PUSH_ENABLED_KEY) !== 'on') return;
+    } catch {
+      return;
+    }
+    const home = readPushHome();
+    const client = home !== null ? pushHomeClient(home) : this.mayHoldPush() ? this.ctx.store.client : null;
+    void client?.call('push.kinds', { kinds: pushKinds() }).catch(() => undefined);
+  }
+
+  /** The shown machine is one this page subscribes on: the one serving it, or any on the phone app's page. */
+  private mayHoldPush(): boolean {
+    const s = this.ctx.store;
+    const relay = s.endpointUrl === null ? null : parseGroupRelayUrl(s.endpointUrl);
+    if (relay !== null && servesThisPage(relay.member)) return false;
+    return appPage() || !s.endpointUrl || servesThisPage(s.endpointUrl);
   }
 }

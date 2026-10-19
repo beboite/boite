@@ -81,7 +81,7 @@ test('a recreated push store retains its keys and delivers completed turns to th
   const deliveries: { threadId: string; body: string }[] = [];
   restarted.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
   try {
-    expect(await restarted.status(paired.id)).toEqual({ ...before, subscribed: true });
+    expect(await restarted.status(paired.id)).toEqual({ ...before, subscribed: true, kinds: ['approvals', 'questions', 'finished', 'errors'] });
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
     // The body is the start of the reply, as one line of plain text cut at a word.
@@ -329,4 +329,64 @@ test('with no subscription and no other member, a finished turn prepares no push
     expect(walk.mock.calls.length).toBeGreaterThan(0);
     expect(forwarded).toEqual([]);
   } finally { walk.mockRestore(); badge.mockRestore(); }
+});
+
+test('a device that kept only approvals gets the permission push and not the finished turn, and changes its kinds without subscribing again', async () => {
+  const paired = session();
+  const phone = await connect(harness.url, paired.token);
+  const deliveries: { tag: string; kind?: string }[] = [];
+  harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
+  try {
+    await phone.call('push.subscribe', { ...subscription(), kinds: ['approvals'] });
+    expect(await phone.call('push.status', {})).toMatchObject({ subscribed: true, kinds: ['approvals'] });
+    const owner = await harness.connect();
+    const { threadId } = await echoThread(harness, owner);
+    const thread = harness.core.journal.getThread(threadId)!;
+    const finish = (id: string, status: 'done' | 'error') => harness.core.bus.emit('turn.finished', { id, threadId, status, queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null, execution: { providerId: thread.providerId, accountId: thread.accountId, model: null, effort: null, permissionMode: thread.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } });
+    const ask = (id: string, extra: Partial<RpcEvents['question.asked']> = {}) => harness.core.bus.emit('question.asked', { id, threadId, turnId: 'kind_turn', text: 'Which branch?', options: [], allowText: true, multiple: false, createdAt: Date.now(), ...extra });
+    finish('kind_done', 'done');
+    finish('kind_failed', 'error');
+    ask('kind_question');
+    ask('kind_setting', { async: true, setting: { kind: 'change', key: 'shortAnswers', value: false, previous: true, page: 'general', section: 'conversations', sensitive: false } });
+    harness.core.bus.emit('permission.requested', { id: 'kind_permission', threadId, turnId: 'kind_turn', toolName: 'ExitPlanMode', input: { plan: 'Ship it' }, description: null, createdAt: Date.now() });
+    await waitFor(() => deliveries.length === 2);
+    await Bun.sleep(30);
+    expect(deliveries.map(row => [row.tag, row.kind]).sort()).toEqual([['request-kind_permission', 'approvals'], ['request-kind_setting', 'approvals']]);
+
+    // The same subscription, other kinds: what reaches it changes, nothing else.
+    await phone.call('push.kinds', { kinds: ['errors', 'questions'] });
+    expect(await phone.call('push.status', {})).toMatchObject({ subscribed: true, kinds: ['questions', 'errors'] });
+    finish('kind_done_2', 'done');
+    finish('kind_failed_2', 'error');
+    ask('kind_question_2');
+    await waitFor(() => deliveries.length === 4);
+    await Bun.sleep(30);
+    expect(deliveries.slice(2).map(row => [row.tag, row.kind]).sort()).toEqual([['request-kind_question_2', 'questions'], ['turn-kind_failed_2', 'errors']]);
+    // Nothing chosen is nothing received; the test notification still goes.
+    await phone.call('push.kinds', { kinds: [] });
+    ask('kind_question_3');
+    await Bun.sleep(50);
+    expect(deliveries).toHaveLength(4);
+    await phone.call('push.test', {});
+    expect(deliveries).toHaveLength(5);
+    await expect(phone.call('push.kinds', { kinds: ['everything'] as never })).rejects.toThrow('kinds must be a list');
+    await phone.call('push.unsubscribe', {});
+    await expect(phone.call('push.kinds', { kinds: ['approvals'] })).rejects.toThrow('Enable notifications');
+    owner.close();
+  } finally { phone.close(); }
+});
+
+test('a subscription stored before kinds existed receives every kind', async () => {
+  const paired = session();
+  harness.core.push.subscribe(paired.id, subscription());
+  expect((await harness.core.push.status(paired.id)).kinds).toEqual(['approvals', 'questions', 'finished', 'errors']);
+  const deliveries: { kind?: string }[] = [];
+  harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
+  const owner = await harness.connect();
+  const { threadId } = await echoThread(harness, owner);
+  harness.core.bus.emit('question.asked', { id: 'old_question', threadId, turnId: 't', text: 'Which branch?', options: [], allowText: true, multiple: false, createdAt: Date.now() });
+  harness.core.bus.emit('permission.requested', { id: 'old_permission', threadId, turnId: 't', toolName: 'Edit', input: {}, description: null, createdAt: Date.now() });
+  await waitFor(() => deliveries.length === 2);
+  expect(deliveries.map(row => row.kind).sort()).toEqual(['approvals', 'questions']);
+  owner.close();
 });

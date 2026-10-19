@@ -1,6 +1,6 @@
 import { createHash, ECDH, randomUUID } from 'node:crypto';
-import { lastAgentText, notifiesOnFinish, requestExcerpt } from '@boite/contracts';
-import type { CoordinationPeer, NotificationLabel, PushPayload, RpcEvents, RpcParams } from '@boite/contracts';
+import { lastAgentText, NOTIFICATION_KINDS, notifiesOnFinish, requestExcerpt, requestKind } from '@boite/contracts';
+import type { CoordinationPeer, NotificationKind, NotificationLabel, PushPayload, RpcEvents, RpcParams } from '@boite/contracts';
 import type { PushSubscription } from 'web-push';
 import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
@@ -8,7 +8,10 @@ import type { AttentionReport } from './threads/focus.ts';
 import { deviceElsewhere, ownDevice } from './group/devices.ts';
 import { backgroundWaitOf } from './threads/records.ts';
 
+/** A device's destination; without `kinds`, written before devices chose, it receives every kind. */
 type Subscription = RpcParams<'push.subscribe'>;
+/** What a push says before it has a title and a badge. */
+type News = Pick<PushPayload, 'body' | 'label'> & { kind: NotificationKind };
 type Keys = { publicKey: string; privateKey: string };
 const SUBSCRIPTIONS = 'web-push.subscriptions';
 const KEYS = 'web-push.keys';
@@ -40,6 +43,9 @@ function readForwarded(value: unknown): Forwarded {
   if (label !== undefined && !LABELS.includes(label as NotificationLabel)) throw bad('push.label');
   const badge = push['badge'];
   if (badge !== undefined && (!Number.isSafeInteger(badge) || (badge as number) < 0 || (badge as number) > 100_000)) throw bad('push.badge');
+  // A member older than kinds sends none: its pushes go to every subscription, as they did.
+  const kind = push['kind'];
+  if (kind !== undefined && !NOTIFICATION_KINDS.includes(kind as NotificationKind)) throw bad('push.kind');
   if (typeof id !== 'string' || id.length === 0 || id.length > 64) throw bad('id');
   return {
     id,
@@ -47,9 +53,23 @@ function readForwarded(value: unknown): Forwarded {
     push: {
       title: string('title', 300), body: string('body', 2000), threadId, tag: string('tag', 200),
       ...(label === undefined ? {} : { label: label as NotificationLabel }),
+      ...(kind === undefined ? {} : { kind: kind as NotificationKind }),
       ...(badge === undefined ? {} : { badge: badge as number }),
     },
   };
+}
+
+/** The kinds a device chose, each once, in the settings' order. */
+export function validateKinds(value: unknown, method: string): NotificationKind[] {
+  if (!Array.isArray(value) || value.some(kind => !NOTIFICATION_KINDS.includes(kind))) {
+    throw invalidParams(`${method} kinds must be a list of ${NOTIFICATION_KINDS.join(', ')}`, { field: 'kinds', expected: NOTIFICATION_KINDS });
+  }
+  return NOTIFICATION_KINDS.filter(kind => value.includes(kind));
+}
+
+/** Whether a subscription receives a push of this kind. One without a kind, the test, goes to all. */
+function wants(subscription: Subscription, kind: NotificationKind | undefined): boolean {
+  return kind === undefined || subscription.kinds === undefined || subscription.kinds.includes(kind);
 }
 
 /** An authenticated phone cannot turn push delivery into a request to a local service. */
@@ -70,7 +90,8 @@ export function validateSubscription(value: Subscription): Subscription {
   }
   try { ECDH.convertKey(Buffer.from(value.keys.p256dh, 'base64url'), 'prime256v1'); }
   catch { throw invalidParams('push.subscribe keys.p256dh must be a valid P-256 public key'); }
-  return { endpoint: url.href, keys: { ...value.keys } };
+  const kinds = value.kinds === undefined ? undefined : validateKinds(value.kinds, 'push.subscribe');
+  return { endpoint: url.href, keys: { ...value.keys }, ...(kinds === undefined ? {} : { kinds }) };
 }
 
 /** Loaded by the core without loading the encryption library or making a network request. */
@@ -80,7 +101,7 @@ export class PushStore {
   private closed = false;
   private keysPromise: Promise<Keys> | null = null;
   /** By tag, the pushes held back while their thread is watched (`notify`). */
-  private readonly held = new Map<string, { threadId: string; text: Pick<PushPayload, 'body' | 'label'>; at: number }>();
+  private readonly held = new Map<string, { threadId: string; text: News; at: number }>();
   private heldTimer: ReturnType<typeof setTimeout> | undefined;
   /** When each forwarded push arrived, by sender and id (`relayed`). */
   private readonly forwards = new Map<string, number>();
@@ -94,7 +115,8 @@ export class PushStore {
       } else if (name === 'permission.requested' || name === 'question.asked') {
         const request = payload as RpcEvents['permission.requested'] | RpcEvents['question.asked'];
         const text = requestExcerpt(request);
-        this.notify(request.threadId, text ? { body: text } : { body: 'Needs your answer', label: 'needsYou' }, `request-${request.id}`, true);
+        const kind = requestKind(request);
+        this.notify(request.threadId, text ? { body: text, kind } : { body: 'Needs your answer', label: 'needsYou', kind }, `request-${request.id}`, true);
       } else if (name === 'turn.finished') {
         const turn = payload as RpcEvents['turn.finished'];
         if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error') || !this.reachable()) return;
@@ -103,8 +125,9 @@ export class PushStore {
         // The reply is the news; an error's own message is often a stack or a
         // provider's JSON, so the phone says only that the turn failed.
         const reply = turn.status === 'done' ? this.lastReply(turn.threadId, turn.id) : null;
-        this.notify(turn.threadId, reply ? { body: reply }
-          : turn.status === 'done' ? { body: 'Done', label: 'done' } : { body: 'The agent encountered an error', label: 'failed' }, `turn-${turn.id}`);
+        const kind = turn.status === 'done' ? 'finished' : 'errors';
+        this.notify(turn.threadId, reply ? { body: reply, kind }
+          : turn.status === 'done' ? { body: 'Done', label: 'done', kind } : { body: 'The agent encountered an error', label: 'failed', kind }, `turn-${turn.id}`);
       }
     });
   }
@@ -165,7 +188,8 @@ export class PushStore {
 
   async status(sessionId: string | null) {
     const id = this.requireSession(sessionId);
-    return { publicKey: (await this.keys()).publicKey, subscribed: Boolean(this.subscriptions()[id]) };
+    const subscription = this.subscriptions()[id];
+    return { publicKey: (await this.keys()).publicKey, subscribed: Boolean(subscription), ...(subscription ? { kinds: subscription.kinds ?? [...NOTIFICATION_KINDS] } : {}) };
   }
 
   subscribe(sessionId: string | null, input: Subscription) {
@@ -185,6 +209,20 @@ export class PushStore {
     });
     // Once the subscription is written, never before, and outside its transaction: the others send its notifications here from then on.
     if (keyed !== undefined) this.core.group.clients.pushedHere(keyed);
+    return { ok: true } as const;
+  }
+
+  /** The kinds this device's subscription receives from now on: the subscription stays, only what reaches it changes. */
+  setKinds(sessionId: string | null, params: RpcParams<'push.kinds'>) {
+    const id = this.requireSession(sessionId);
+    const kinds = validateKinds(params?.kinds, 'push.kinds');
+    const all = this.subscriptions();
+    const subscription = all[id];
+    if (!subscription) throw refused('Enable notifications on this device first');
+    all[id] = { ...subscription, kinds };
+    this.core.journal.append({ type: 'push.kinds', threadId: null, version: 1, payload: { sessionId: id, kinds } }, () => {
+      this.core.journal.setSetting(SUBSCRIPTIONS, all);
+    });
     return { ok: true } as const;
   }
 
@@ -227,7 +265,7 @@ export class PushStore {
    * quiet or a lease nobody renews sends it. Requests for input go immediately:
    * an attended thread does not prove the user noticed its question or permission.
    */
-  private notify(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string, needsInput = false) {
+  private notify(threadId: string, text: News, tag: string, needsInput = false) {
     if (this.closed || !this.reachable()) return;
     if (!needsInput && this.core.threads.focus.attended(threadId)) {
       this.held.set(tag, { threadId, text, at: Date.now() });
@@ -261,11 +299,13 @@ export class PushStore {
     }
   }
 
-  private deliverAll(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string) {
+  private deliverAll(threadId: string, text: News, tag: string) {
     const title = this.core.journal.getThread(threadId)?.title ?? 'Boite';
     const badge = this.badge(threadId);
     const subscriptions = this.subscriptions();
-    for (const sessionId of Object.keys(subscriptions)) {
+    for (const [sessionId, subscription] of Object.entries(subscriptions)) {
+      // The device turned this kind off: it stays subscribed and hears nothing of it.
+      if (!wants(subscription, text.kind)) continue;
       // A device of the group may run a page no machine serves: its push says which machine the thread is on.
       const self = this.core.group.clients.deviceOf(sessionId) === undefined ? undefined : this.core.coordination.card().coreId;
       this.track(this.deliver(sessionId, { title, ...text, threadId, tag, badge, ...(self === undefined ? {} : { core: self }) }).catch(() => {
@@ -282,8 +322,9 @@ export class PushStore {
       if (target === null || forwarded.has(target.device)) continue;
       forwarded.add(target.device);
       // Cut to what the home machine reads (`readForwarded`), so a long title or reply still arrives.
+      // The home holds the device's subscription and its kinds: it filters, from the kind sent along.
       const payload: Forwarded = { id: randomUUID(), device: target.device, push: { title: title.slice(0, 300), body: text.body.slice(0, 2000),
-        ...(text.label === undefined ? {} : { label: text.label }), threadId: threadId.slice(0, 128), tag: tag.slice(0, 200), badge } };
+        ...(text.label === undefined ? {} : { label: text.label }), kind: text.kind, threadId: threadId.slice(0, 128), tag: tag.slice(0, 200), badge } };
       this.track(this.forward(target.home, payload).catch(() => {
         this.core.log('warn', `a notification for a device of ${target.home.name} did not reach that machine; the conversation remains available in Boite`);
       }));
@@ -310,7 +351,10 @@ export class PushStore {
     const key = `${from.coreId}:${id}`;
     if (this.forwards.has(key)) return { delivered: true };
     this.forwards.set(key, now);
-    if (this.closed || !this.subscriptions()[sessionId]) return { delivered: false };
+    const subscription = this.subscriptions()[sessionId];
+    if (this.closed || !subscription) return { delivered: false };
+    // Received and dropped on purpose: the device turned this kind off.
+    if (!wants(subscription, push.kind)) return { delivered: true };
     // The icon counts the threads waiting here as well as there.
     const badge = (push.badge ?? 0) + this.badge();
     // A tag of that machine's never replaces a notification of this one's.
@@ -348,7 +392,7 @@ export class PushStore {
     const subscription = this.subscriptions()[sessionId];
     if (!subscription) return;
     try {
-      await this.send(subscription, JSON.stringify(payload), keys, createHash('sha256').update(payload.tag).digest('base64url').slice(0, 32));
+      await this.send({ endpoint: subscription.endpoint, keys: subscription.keys }, JSON.stringify(payload), keys, createHash('sha256').update(payload.tag).digest('base64url').slice(0, 32));
     } catch (error) {
       const status = (error as { statusCode?: number }).statusCode;
       const gone = (status === 404 || status === 410) && this.subscriptions()[sessionId]?.endpoint === subscription.endpoint;
@@ -387,4 +431,5 @@ export function registerPushMethods(core: Core) {
   core.router.register('push.subscribe', (params, ctx) => core.push.subscribe(ctx.connection.identity.sessionId, params));
   core.router.register('push.unsubscribe', (_params, ctx) => core.push.unsubscribe(ctx.connection.identity.sessionId));
   core.router.register('push.test', (_params, ctx) => core.push.test(ctx.connection.identity.sessionId));
+  core.router.register('push.kinds', (params, ctx) => core.push.setKinds(ctx.connection.identity.sessionId, params));
 }

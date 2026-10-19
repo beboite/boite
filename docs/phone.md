@@ -556,11 +556,21 @@ group sent through this one carries that machine's id: the worker opens
 once the group has connected it.
 
 An event makes one notification on a device. iOS shows every push and does not
-let a tag replace a notification the page shows, so a page whose own core
-pushes to it stays quiet: `pushCovers` in `lib/notify.ts` requires the page's
-push switch, the granted permission and a live browser subscription. A device
-without push, and a page's notices about another machine, keep the local
-notification, through the service worker and the per-thread tag a push would use.
+let a tag replace a notification the page shows, so a page stays quiet when a
+push brings the same notice: its own core pushes to it, or the notice is about
+a member of the group, which forwards it to the device's push home.
+`pushCovers` in `lib/notify.ts` requires the page's push switch, the granted
+permission and a live browser subscription. Otherwise the page shows the
+notice through the service worker whenever one is registered, since Android
+Chrome refuses `new Notification` on a page and the phone app's page serves no
+machine. It uses the tag and data a push about that thread would: `thread-<id>`
+for this page's own core, `thread-<core>-<id>` with `{threadId, core}` for a
+machine of the group (`GroupLinks.coreOf`, handed to `lib/notify.ts` by the
+workspace), so a later push replaces it and a tap opens the thread there. A
+machine with no group id gets a `key` in the data, which the open window reads
+through `openNotification`, and which the worker puts in the address it opens
+(`?thread=<id>&key=<key>`) when no window is open or one refuses focus. Only a page without a worker builds the
+notification itself.
 
 Routine turn notifications wait while someone watches their conversation.
 Questions and permission requests notify immediately, including asynchronous
@@ -604,6 +614,27 @@ for those labels in the language it speaks to the worker's `boite-notify`
 cache, again on each language change; the worker shows them in place of the
 English body, which stays the fallback until the page has run once.
 
+### Choosing which notifications
+
+Each device chooses the kinds it gets, all on by default: Approvals
+(permission requests, plan approvals, settings and agent settings cards asking
+to apply a change), Questions (an agent's questions, `boite ask`, a delegated
+agent's), Finished and Errors. The rows sit under the notifications switch, in
+General on the desktop and in App & notifications on the phone, and dim while
+the switch is off. The choice lives in the page's `localStorage`: the kinds
+turned off under `boite.notifications.muted`, so a kind added later starts on.
+Local toasts read it (`shouldNotify` in `lib/notify.ts`). For Web Push the core
+sends, so a subscribed device hands it over: `push.subscribe` takes `kinds`,
+`push.kinds` changes them without subscribing again, `push.status` returns
+them, and the switch off sends an empty list. The page records which machine
+holds the subscription (`boite.web-push.home`, its address in this page), so a
+change made while another machine is shown still goes there; the kinds are one
+state for every machine of the window. A subscription stored without
+kinds gets every kind. Every push carries its `kind` beside the `label`; a push
+forwarded through the group carries it too, and the device's home machine
+filters it by that subscription's kinds. The test notification has no kind and
+always goes.
+
 Disabling removes the server subscription and unsubscribes the browser.
 Revocation deletes the subscription with the pairing. Push services returning
 404 or 410 retire the destination. Other delivery failures leave it subscribed
@@ -625,7 +656,7 @@ one arrives.
 The path is: the installed app's Enable notifications asks the permission from
 the tap, subscribes with the core's VAPID key, and stores the subscription with
 `push.subscribe` against its pairing. A notification's payload is
-`{title, body, threadId, tag, label, badge}` (`PushPayload` in the contracts),
+`{title, body, threadId, tag, label, kind, badge}` (`PushPayload` in the contracts),
 plus `core` when another machine of the group sent it through this core;
 tapping it focuses an open window and posts it the thread, or, if the page
 refuses focus or none is open, opens `/?thread=<id>` on the worker's own
