@@ -637,6 +637,9 @@ export class AccountStore {
       run.acp?.kill();
       await this.core.procs.stopAndWait(`check:${accountId}`);
       await run.done;
+      // The login has closed, but on Windows its pid leaves the registry only
+      // once the Job Object reports the exit: wait for that too.
+      await this.core.procs.stopAndWait(loginThreadId(accountId));
     }
     return { ok: true };
   }

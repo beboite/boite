@@ -1861,10 +1861,20 @@ test('cancelling a Codex device login closes its process and releases the instal
   const link = client.next('account.login', event => event.accountId === accountId && event.url !== null);
   await client.call('accounts.login', { accountId });
   await link;
-  await client.call('accounts.loginCancel', { accountId });
-  expect(await client.call('accounts.logins', {})).toEqual([]);
-  expect(harness!.core.procs.liveCount(`login:${accountId}`)).toBe(0);
-  expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(0);
+  // On Windows the registry drops a pid when its Job Object reports the exit,
+  // which a loaded runner delivered after Node's 'close' (codex.test.ts on CI,
+  // 2026-10-18). Holding that event back reproduces it; elsewhere it never fires.
+  const registry = harness!.core.procs as unknown as { onJobExited(...args: unknown[]): void };
+  const onJobExited = registry.onJobExited;
+  registry.onJobExited = (...args) => { setTimeout(() => onJobExited.apply(registry, args), 300); };
+  try {
+    await client.call('accounts.loginCancel', { accountId });
+    expect(await client.call('accounts.logins', {})).toEqual([]);
+    expect(harness!.core.procs.liveCount(`login:${accountId}`)).toBe(0);
+    expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(0);
+  } finally {
+    delete (registry as Partial<typeof registry>).onJobExited;
+  }
 });
 
 describe('native Codex fork', () => {
