@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { DEFAULT_DELEGATION_CONFIG, checkSettingsPatch, type Turn, type Usage } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { SHORT_ANSWERS } from '../src/agent-guide.ts';
@@ -210,42 +210,62 @@ describe('cache keepalive', () => {
   test('turning the setting off, archiving and a user turn each hold the ping', async () => {
     const s = await setup(h);
     try {
-      // The ping is due 1 s after the last request, 900 ms after a turn ends: each hold below lands well
-      // before it, and each wait outlasts it. At 200 ms, a Linux arm64 run archived too late (#635).
-      CACHE_KEEPALIVE.marginMs = 300_000 - 1_000;
-      // Off before the ping comes.
+      // The timer is set a minute after the last request, past the end of the test, so none
+      // races a hold. Each check makes the ping due and runs the timer's own callback once the
+      // hold is done. A ping 200 ms, then 900 ms, after the turn lost to a late archive on a
+      // loaded runner (#639).
+      const later = 300_000 - 60_000;
+      CACHE_KEEPALIVE.marginMs = later;
+      const keepalive = h.core.threads.cacheKeepalive as unknown as { waits: Map<string, { timer: unknown }>; fire(threadId: string): void };
+      const settled = spyOn(h.core.threads.cacheKeepalive, 'turnFinished');
+      const turn = async () => { const before = settled.mock.calls.length; await s.turn(); await waitFor(() => settled.mock.calls.length > before); };
+      const armed = () => keepalive.waits.get(s.threadId)?.timer != null;
+      const fire = async () => {
+        CACHE_KEEPALIVE.marginMs = 300_000;
+        try { keepalive.fire(s.threadId); } finally { CACHE_KEEPALIVE.marginMs = later; }
+        return (await s.pings()).length;
+      };
+
+      // Nothing held, the timer's call sends the ping.
       await s.client.call('settings.set', { cacheKeepalive: { hours: 12 } });
       await s.spawn();
-      await s.turn();
+      await turn();
+      expect(armed()).toBe(true);
+      const pinged = s.client.next('turn.finished', t => t.threadId === s.threadId && t.execution?.operation === 'keepalive');
+      expect(await fire()).toBe(1);
+      expect((await pinged).status).toBe('done');
+      await waitFor(armed);
+
+      // Off before the ping comes.
       await s.client.call('settings.set', { cacheKeepalive: null });
-      await pause(1_200);
-      expect(await s.pings()).toEqual([]);
+      expect(await fire()).toBe(1);
 
       // Off from the start: nothing is planned.
-      await s.turn();
-      await pause(1_200);
-      expect(await s.pings()).toEqual([]);
+      await turn();
+      expect(armed()).toBe(false);
+      expect(await fire()).toBe(1);
 
       // A user turn that runs past the ping's time: no ping while it runs.
       await s.client.call('settings.set', { cacheKeepalive: { hours: 12 } });
-      await s.turn();
+      await turn();
+      expect(armed()).toBe(true);
       s.state.holdParent = true;
       const started = s.client.next('turn.started', t => t.threadId === s.threadId && !t.execution?.operation);
       await s.client.call('turns.start', { threadId: s.threadId, prompt: 'long' });
       await started;
-      await pause(1_200);
-      expect(await s.pings()).toEqual([]);
+      expect(await fire()).toBe(1);
       s.state.holdParent = false;
-      const ended = s.client.next('turn.finished', t => t.threadId === s.threadId && !t.execution?.operation);
+      const ended = settled.mock.calls.length;
       s.held.get(s.threadId)!();
-      await ended;
+      await waitFor(() => settled.mock.calls.length > ended);
+      expect(armed()).toBe(true);
 
       // Archived before the ping comes.
       await s.client.call('threads.archive', { threadId: s.threadId, archived: true });
-      await pause(1_200);
-      expect(await s.pings()).toEqual([]);
+      expect(await fire()).toBe(1);
+      expect(armed()).toBe(false);
     } finally { s.restore(); }
-  }, 10_000);
+  });
 
   test('a child result that comes in during a ping stops it and is delivered', async () => {
     const s = await setup(h);
