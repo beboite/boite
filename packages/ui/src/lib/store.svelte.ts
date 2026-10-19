@@ -263,6 +263,8 @@ export class Store {
   set group(value) { this.#ctx.pairing.group = value; }
   get groupKnown() { return this.#ctx.pairing.groupKnown; }
   set groupKnown(value) { this.#ctx.pairing.groupKnown = value; }
+  get ungrouped() { return this.#ctx.pairing.ungrouped; }
+  set ungrouped(value) { this.#ctx.pairing.ungrouped = value; }
   loadGroup(...args: Parameters<Pairing['loadGroup']>) { return this.#ctx.pairing.loadGroup(...args); }
   createGroup(...args: Parameters<Pairing['createGroup']>) { return this.#ctx.pairing.createGroup(...args); }
   renameGroup(...args: Parameters<Pairing['renameGroup']>) { return this.#ctx.pairing.renameGroup(...args); }

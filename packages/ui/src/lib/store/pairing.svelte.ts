@@ -15,6 +15,8 @@ export class Pairing {
   group = $state<Group | null>(null);
   /** The core answered `group.get` at least once on this connection: null then means no group, not no answer yet. */
   groupKnown = $state(false);
+  /** The core last answered that it is in no group. A new connection that has not answered yet does not take that back. */
+  ungrouped = false;
   constructor(private readonly ctx: StoreContext) {}
 
   /**
@@ -85,6 +87,7 @@ export class Pairing {
       if ((group?.cores.length ?? 0) + (group?.devices.length ?? 0) > (this.group?.cores.length ?? 0) + (this.group?.devices.length ?? 0) && this.group !== null) this.closeDeviceInvite();
       this.group = group;
       this.groupKnown = true;
+      this.ungrouped = group === null;
     } catch (error) {
       if (client !== this.ctx.client) return;
       if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
@@ -109,6 +112,7 @@ export class Pairing {
       // The store moved to another core meanwhile: this answer, or this refusal, is about the one it left.
       if (client !== this.ctx.client) return false;
       this.group = group;
+      this.ungrouped = group === null;
       return true;
     } catch (error) {
       if (client === this.ctx.client) this.ctx.fail(error);

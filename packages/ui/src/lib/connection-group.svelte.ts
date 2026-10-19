@@ -69,6 +69,7 @@ export class ConnectionGroup {
         if (!current(source, client) || !current(target, remote) || source.store.group?.id !== groupId) return false;
         target.store.group = group;
         target.store.groupKnown = true;
+        target.store.ungrouped = group === null;
         if (group === null) this.#attempted.delete(remote);
         if (group?.id === groupId && this.#adoptMember(group, target, groupId)) {
           this.errors = this.errors.filter(error => !error.startsWith(`${target.label}:`));
