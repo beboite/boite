@@ -28,6 +28,8 @@ export const fr: Translation = {
     readTip: 'Ses agents peuvent lire les conversations de ce projet, pas seulement écrire à ses conversations. Désactivé par défaut.',
     readLabel: 'Laisser {name} lire {project}',
     closeProject: 'Arrêter de partager {project}',
+    /** The compact board beside a shared project: its cards per column, a click opens the board. */
+    board: 'Ouvrir le tableau de {project}',
     closeTitle: 'Arrêter de partager {project} avec {name} ?',
     closeBody: 'Ses lettres en attente pour ce projet sont rejetées et ses conversations quittent l\'annuaire de {name}.',
     closeConfirm: 'Arrêter',

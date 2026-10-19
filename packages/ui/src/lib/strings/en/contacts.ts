@@ -29,6 +29,8 @@ export const strings = {
     readTip: 'Its agents may read this project\'s conversations, not only write to its threads. Off by default.',
     readLabel: 'Let {name} read {project}',
     closeProject: 'Stop sharing {project}',
+    /** The compact board beside a shared project: its cards per column, a click opens the board. */
+    board: 'Open the {project} board',
     closeTitle: 'Stop sharing {project} with {name}?',
     closeBody: 'Its letters waiting for this project are rejected and its threads leave {name}\'s directory.',
     closeConfirm: 'Stop sharing',

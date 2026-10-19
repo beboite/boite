@@ -367,6 +367,8 @@ export class Store {
   toggleBoard(...args: Parameters<Terminals['toggleBoard']>) { return this.#ctx.terminals.toggleBoard(...args); }
   showBoard(...args: Parameters<Terminals['showBoard']>) { return this.#ctx.terminals.showBoard(...args); }
   hideBoard(...args: Parameters<Terminals['hideBoard']>) { return this.#ctx.terminals.hideBoard(...args); }
+  projectBoardThread(...args: Parameters<Terminals['projectBoardThread']>) { return this.#ctx.terminals.projectBoardThread(...args); }
+  openProjectBoard(...args: Parameters<Terminals['openProjectBoard']>) { return this.#ctx.terminals.openProjectBoard(...args); }
   hideTerminal(...args: Parameters<Terminals['hideTerminal']>) { return this.#ctx.terminals.hideTerminal(...args); }
   openTerminal(...args: Parameters<Terminals['openTerminal']>) { return this.#ctx.terminals.openTerminal(...args); }
   loginTerminal(...args: Parameters<Terminals['loginTerminal']>) { return this.#ctx.terminals.loginTerminal(...args); }

@@ -30,7 +30,7 @@
   import { activeLocale } from './lib/i18n.svelte';
   import { retryOrReload } from './lib/retry-load';
   import { experimentOn } from './lib/experiments.svelte';
-  import { contactsShown } from './lib/contacts-rail.svelte';
+  import { contactsShown, contactsViews } from './lib/contacts-views.svelte';
   import { installWhipEscape } from './lib/whip.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
@@ -185,24 +185,7 @@
     if (experimentOn('resident-agents')) return;
     for (const machine of workspace.machines) if (machine.store.page === 'agents') machine.store.showChat();
   });
-  // The Contacts page loads only once it is opened, so the boot bundle never carries it.
-  let HomePage = $state<typeof import('./components/home/HomePage.svelte').default>();
-  let homeLoadError = $state('');
-  $effect(() => {
-    if (store.page !== 'home' || !experimentOn('contacts') || HomePage) return;
-    void import('./components/home/HomePage.svelte').then(module => { HomePage = module.default; })
-      .catch(() => { homeLoadError = strings.contacts.loadFailed; });
-  });
-  // The contacts column on the right loads with its experiment, on a desktop-wide window.
-  let ContactsRail = $state<typeof import('./components/home/ContactsRail.svelte').default>();
-  $effect(() => {
-    if (!contactsShown(store) || narrow.current || ContactsRail) return;
-    void import('./components/home/ContactsRail.svelte').then(module => { ContactsRail = module.default; }).catch(() => {});
-  });
-  $effect(() => {
-    for (const machine of workspace.machines) if (machine.store.page === 'home' && !contactsShown(machine.store)) machine.store.showChat();
-    if (store.page === 'home' && !contactsShown(store)) store.showChat();
-  });
+  const contacts = contactsViews(() => store, () => workspace.machines, () => narrow.current);
   let settingsLoadError = $state('');
   $effect(() => {
     if (store.page !== 'settings' || SettingsShell) return;
@@ -620,11 +603,9 @@
       {/if}
       {#if store.page === 'home' && contactsShown(store)}
         <!-- Contacts take the chat's card; the thread list stays beside them. -->
-        <main>
-          <div class="thread-chat framed">
-            {#if HomePage}{#key store}<HomePage {store} />{/key}{:else}<p class="empty">{homeLoadError || strings.app.loading}</p>{/if}
-          </div>
-        </main>
+        <main><div class="thread-chat framed">
+          {#if contacts.HomePage}{#key store}<contacts.HomePage {store} />{/key}{:else}<p class="empty">{contacts.homeError || strings.app.loading}</p>{/if}
+        </div></main>
       {:else}
       <main>
         <div class="thread-chat framed">
@@ -664,9 +645,7 @@
         {/key}
       {/if}
       {/if}
-      {#if ContactsRail && contactsShown(store) && !narrow.current}
-        {#key store}<ContactsRail {store} />{/key}
-      {/if}
+      {#if contacts.ContactsRail && contactsShown(store) && !narrow.current}{#key store}<contacts.ContactsRail {store} />{/key}{/if}
     {/if}
   </div>
 

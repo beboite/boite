@@ -87,6 +87,12 @@ after its last letter, even in a project not opened to it. A grant change
 reaches the contact as `contact.sync`, retried until heard, and becomes the
 contact's `offers`.
 
+With the [project board](board.md) on, a contact's page shows each project
+shared with that contact as its board's four counts: to do, in progress, in
+review and done. A click opens the board in the project's last conversation.
+These are this core's cards and stay on it: the contact sees none of them
+until shared projects sync their board.
+
 An agent asks a contact for help with `boite agents ask <contact> "<text>"`
 (`collaboration.ask`): "an agent on a project like X". The request carries the
 agent's git remote when its checkout has one. On the contact's side it waits

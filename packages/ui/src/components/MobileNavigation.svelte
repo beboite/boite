@@ -111,6 +111,12 @@
     const list = from;
     return mobileOverlay(() => { from = null; screen = list; });
   });
+  // A contact's page covers the list, and what it opens (its project's board) lands on the chat: Back returns to the list it came from.
+  $effect(() => {
+    if (store.page !== 'home' || screen === 'chat') return;
+    from = screen;
+    screen = 'chat';
+  });
 
   function show(next: typeof screen) {
     store.showChat();

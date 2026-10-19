@@ -25,6 +25,7 @@ afterEach(async () => {
   workspace.active = primary;
   document.body.innerHTML = '';
   setExperiment('contacts', false);
+  setExperiment('goal2', false);
   localStorage.clear();
 });
 
@@ -89,6 +90,8 @@ test('his page draws the link, both ways of sharing and the check words; rename,
   expect(one('contact-link')!.textContent).toBe(strings.contacts.link.connected);
   expect(one('contact-shared')!.querySelector('[data-testid^="contact-grant-"]')?.textContent).toContain('boite');
   expect(one('contact-offer-chris-website')!.textContent).toContain('website');
+  // The board is a `/goal2` experiment: off, a shared project shows none.
+  expect(one('contact-board-p-boite')).toBeNull();
   expect(one('contact-words')!.querySelectorAll('li')).toHaveLength(8);
   // Only what he asks shows on his page, and nothing of the page that adds a contact.
   expect(one('contact-requests')!.querySelector('[data-testid="contact-request-creq-pending"]')).not.toBeNull();
@@ -107,6 +110,19 @@ test('his page draws the link, both ways of sharing and the check words; rename,
     const chris = (await contacts(store)).contacts[0]!;
     expect([chris.name, chris.trusted, chris.grants[0]!.readThreads]).toEqual(['Chris B', true, true]);
   });
+});
+
+test('a shared project shows its board as four counts that follow its cards; a click opens the board in its last conversation', async () => {
+  setExperiment('goal2', true);
+  const store = await draw('core-chris');
+  const tallies = () => [...one('contact-board-p-boite')?.querySelectorAll('[data-column]') ?? []].map(node => node.textContent);
+  // To do, In progress, In review, Done: one card open, one claimed, one confirmed.
+  await vi.waitFor(() => { flushSync(); expect(tallies()).toEqual(['1', '0', '1', '1']); });
+  await store.client!.call('todos.add', { threadId: 't-trace', text: 'Show Chris the board' });
+  await vi.waitFor(() => { flushSync(); expect(tallies()).toEqual(['2', '0', '1', '1']); });
+
+  one<HTMLButtonElement>('contact-board-p-boite')!.click();
+  await vi.waitFor(() => expect([store.page, store.openThread?.projectId, store.boardShown]).toEqual(['chat', 'p-boite', true]));
 });
 
 test('accept shares the project picked in the menu; refuse waits for a reason; remove asks first and goes back to the page that adds one', async () => {

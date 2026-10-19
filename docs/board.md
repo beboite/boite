@@ -8,6 +8,10 @@ button, and on a phone the title menu's Project board row, open the board
 alone. The board belongs to the project, so every thread of the project shows
 the same cards; the terminal stays the thread's.
 
+A contact's page shows the four counts of each project shared with that
+contact and opens its board in the project's last conversation
+([contacts](contacts.md#projects-and-requests)).
+
 The board sits behind the Reviewed goals experiment (`goal2`, Settings,
 Experiments) and needs a core that sends `features.projectBoard` in its hello.
 

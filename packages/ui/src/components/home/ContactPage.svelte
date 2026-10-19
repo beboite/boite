@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { tick } from 'svelte';
-  import { Eye, Pencil, Plus, Trash2, X } from '@lucide/svelte';
-  import type { Contact, Project } from '@boite/contracts';
+  import { tick, untrack } from 'svelte';
+  import { Eye, Pencil, Plus, SquareKanban, Trash2, X } from '@lucide/svelte';
+  import type { Contact, Project, ProjectId } from '@boite/contracts';
+  import { BOARD_COLUMNS, columnCounts } from '../../lib/board';
   import { initialsOf, splitRequests, type ContactsView } from '../../lib/contacts.svelte';
   import { confirm } from '../../lib/confirm.svelte';
   import { ago, projectName } from '../../lib/format';
@@ -16,7 +17,8 @@
   /**
    * One contact, picked in the thread list: its name (a click renames it) and
    * how its link stands, what it asks, the projects each side shares with the
-   * other, then trust, the eight check words and Remove.
+   * other (yours with their board's cards per column), then trust, the eight
+   * check words and Remove.
    */
   let { view, contact, now }: { view: ContactsView; contact: Contact; now: number } = $props();
   const labels = $derived(strings.contacts);
@@ -29,6 +31,18 @@
   const shareItems = $derived<MenuItem[]>(unshared.length
     ? unshared.map(project => ({ id: project.id, label: projectName(project), projectTile: { project, store: view.store } }))
     : [{ id: '', label: labels.noProject, disabled: true }]);
+
+  /** Each shared project's board: the conversation it opens in, null when the core serves none. */
+  const boards = $derived(new Map(contact.grants.map(grant => [grant.projectId, view.store.projectBoardThread(grant.projectId)])));
+  /** Projects whose cards were asked for once; `todos.updated` keeps them current after. */
+  const asked = new Set<ProjectId>();
+  $effect(() => {
+    for (const [projectId, thread] of boards) {
+      if (!thread || asked.has(projectId) || untrack(() => view.store.todos[projectId]) !== undefined) continue;
+      asked.add(projectId);
+      void untrack(() => view.store.loadTodos(thread.id));
+    }
+  });
 
   let editing = $state(false);
   let draft = $state('');
@@ -109,8 +123,17 @@
   <h2>{fill(labels.youShare, { name: contact.name })}</h2>
   {#each shared as { grant, project } (grant.projectId)}
     {@const name = nameOf(project, grant.projectId)}
-    <div class="switch-row" data-testid="contact-grant-{grant.projectId}">
+    <div class="switch-row grant" data-testid="contact-grant-{grant.projectId}">
       <span class="text project">{#if project}<ProjectTile {project} store={view.store} />{/if}<span class="ui-label">{name}</span></span>
+      {#if boards.get(grant.projectId)}
+        {@const counts = columnCounts(view.store.todos[grant.projectId] ?? [])}
+        {@const summary = BOARD_COLUMNS.map(column => `${strings.board.columns[column]} ${counts[column]}`).join(', ')}
+        <button type="button" class="ghost board" title={`${fill(labels.board, { project: name })}: ${summary}`} aria-label={`${fill(labels.board, { project: name })}: ${summary}`}
+          data-testid="contact-board-{grant.projectId}" onclick={() => void view.store.openProjectBoard(grant.projectId)}>
+          <SquareKanban size={14} strokeWidth={2} aria-hidden="true" />
+          {#each BOARD_COLUMNS as column (column)}<span class="tally" data-column={column} class:zero={counts[column] === 0}>{counts[column]}</span>{/each}
+        </button>
+      {/if}
       <label class="read" title={labels.readTip}>
         <Eye size={14} strokeWidth={2} aria-hidden="true" /><span class="ui-label">{labels.read}</span>
         <input type="checkbox" role="switch" checked={grant.readThreads} aria-label={fill(labels.readLabel, { name: contact.name, project: name })}
@@ -186,6 +209,13 @@
   .project { display: flex; align-items: center; gap: 8px; }
   .project .ui-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .initial { display: grid; flex: none; place-items: center; width: 18px; height: 18px; border-radius: var(--radius-sm); background: var(--color-accent-soft); color: var(--color-accent); font-size: var(--text-xs); font-weight: 700; }
+  /* The board's columns as four counts, each in its column's tone: to do, in progress, in review, done. */
+  .board { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: var(--radius-sm); color: var(--color-muted-foreground); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+  .tally { min-width: 1ch; font-weight: 600; text-align: center; }
+  .tally[data-column='doing'] { color: var(--color-live); }
+  .tally[data-column='review'] { color: var(--color-accent); }
+  .tally[data-column='done'] { color: var(--color-success); }
+  .tally.zero { color: var(--color-subtle); font-weight: 400; }
   .read { display: inline-flex; flex: none; align-items: center; gap: 6px; color: var(--color-muted-foreground); font-size: var(--text-sm); cursor: pointer; }
   .none { margin: 0 0 12px; }
   .share { padding-top: 12px; }
@@ -199,5 +229,10 @@
     .who { margin-bottom: 20px; }
     .name :global(svg) { opacity: 1; }
     .switch-row button.icon { width: var(--touch-target); height: var(--touch-target); }
+    .board { height: var(--touch-target); }
+    /* The name takes the first line whole; the board, Read and Stop sharing go under it. */
+    .grant { flex-wrap: wrap; row-gap: 4px; }
+    .switch-row.grant .project { flex: 1 0 100%; }
+    .grant .board { margin: 0 auto 0 -8px; }
   }
 </style>
