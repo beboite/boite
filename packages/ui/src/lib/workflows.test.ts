@@ -37,6 +37,10 @@ test('the seeded run lays out as four phases with an arrow per dependency', asyn
   expect(nodeProgress(review)).toMatchObject({ done: 1, total: 3, running: 2 });
   expect(runProgress(run!)).toEqual({ done: 1, total: 5 });
   expect(routeOf(review, [])).toMatchObject({ providerId: review.instances[0]!.providerId });
+  expect(routeOf(review, [])?.effort).toBe('high');
+  expect(run!.usage.inputTokens).toBe(2800);
+  expect(review.instances[0]!.usage?.inputTokens).toBe(1400);
+  expect(review.instances[1]!.usage).toBeNull();
   expect(shown(review.instances[0]!.output)).toContain('"bugs"');
 });
 

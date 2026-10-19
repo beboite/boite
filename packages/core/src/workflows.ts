@@ -4,7 +4,7 @@ import {
   resolvePath, shapeMismatch, workflowLevels,
 } from '@boite/contracts';
 import type {
-  DelegationConfig, PauseOrigin, Principal, RpcParams, ThreadSummary, Turn, Usage, WorkflowInstance, WorkflowNode, WorkflowPlan, WorkflowRun,
+  DelegationConfig, PauseOrigin, Principal, RpcParams, ThreadSummary, Turn, WorkflowInstance, WorkflowNode, WorkflowPlan, WorkflowRun,
   WorkflowShape, WorkflowStepPlan, WorkflowStepStatus, WorkflowTemplate,
 } from '@boite/contracts';
 import type { Core } from './core.ts';
@@ -19,6 +19,7 @@ import { pauseHold } from './delegation/pauses.ts';
 import { listTemplates, removeTemplate, saveTemplate } from './workflows/templates.ts';
 import { planError, text } from './workflows/validation.ts';
 import { NOT_STARTED, failureNotice, unnoticed } from './workflows/notices.ts';
+import { workflowUsage } from './workflows/usage.ts';
 
 export { registerWorkflowMethods } from './workflows/register.ts';
 
@@ -156,13 +157,7 @@ export class Workflows {
     return run;
   }
   private view(run: WorkflowRun): WorkflowRun {
-    const totals = this.core.journal.db.query(`SELECT
-      SUM(json_extract(usage, '$.inputTokens')) AS inputTokens, SUM(json_extract(usage, '$.outputTokens')) AS outputTokens,
-      SUM(json_extract(usage, '$.cacheReadTokens')) AS cacheReadTokens, SUM(json_extract(usage, '$.cacheWriteTokens')) AS cacheWriteTokens,
-      SUM(json_extract(usage, '$.costUsdEquivalent')) AS costUsdEquivalent
-      FROM turns WHERE thread_id IN (SELECT thread_id FROM workflow_steps WHERE run_id = ?)`).get(run.id) as Usage;
-    const usage: Usage = { inputTokens: totals.inputTokens ?? 0, outputTokens: totals.outputTokens ?? 0, cacheReadTokens: totals.cacheReadTokens ?? 0, cacheWriteTokens: totals.cacheWriteTokens ?? 0, costUsdEquivalent: totals.costUsdEquivalent ?? null };
-    return { ...run, usage };
+    return workflowUsage(this.core, run);
   }
   private rootOf(threadId: string): ThreadSummary {
     const thread = this.core.threads.require(threadId);

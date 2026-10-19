@@ -35,6 +35,9 @@ test('the chat card opens the run top to bottom, an arrow per dependency, in the
   await page.waitFor(`document.querySelector('${id('workflow-graph')}')?.dataset.layout === 'rows'`);
   await page.waitFor(`document.querySelectorAll('${id('workflow-edge')}').length === 5`);
   expect(await page.evaluate(`[...document.querySelectorAll('${id('workflow-node')}')].map(node => node.dataset.status)`)).toEqual(['done', 'running', 'waiting', 'waiting', 'waiting']);
+  expect(await page.text('[data-node-id="review"] [data-testid="workflow-effort"]')).toBe('High');
+  expect(await page.text('[data-node-id="review"] [data-testid="workflow-node-tokens"]')).toBe('4.3K tokens');
+  expect(await page.text(id('workflow-meta'))).toContain('8.6K tokens');
   // Each phase sits under the one before it.
   expect(await page.evaluate(`[...document.querySelectorAll('${id('workflow-phase')}')].every((phase, i, all) => i === 0 || phase.getBoundingClientRect().top >= all[i - 1].getBoundingClientRect().bottom)`)).toBe(true);
   await capture('workflow-rows.png');
@@ -66,6 +69,8 @@ test('on a phone the same run keeps its rows and arrows without scrolling sidewa
   // The arrows once drawn for the wide panel must not hold the graph at that width.
   expect(await page.evaluate(`(g => g.scrollWidth <= g.clientWidth)(document.querySelector('${id('workflow-graph')}'))`)).toBe(true);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true);
+  expect(await page.text('[data-node-id="review"] [data-testid="workflow-effort"]')).toBe('High');
+  expect(await page.text(id('workflow-meta'))).toContain('8.6K tokens');
   await capture('workflow-phone.png');
   expect(page.errors()).toEqual([]);
 }, 30_000);

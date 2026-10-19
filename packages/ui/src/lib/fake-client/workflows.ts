@@ -19,6 +19,7 @@ import {
   type RpcResult,
   type Thread,
   type ThreadId,
+  type Usage,
   type WorkflowInstance,
   type WorkflowNode,
   type WorkflowPlan,
@@ -125,19 +126,19 @@ export class FakeWorkflows {
     'workflows.list': ({ threadId }) => {
       const root = this.#rootOf(threadId);
       return [...this.#runs.values()].filter(run => run.rootThreadId === root.id)
-        .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id)).slice(0, LIST_LIMIT).map(run => structuredClone(run));
+        .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id)).slice(0, LIST_LIMIT).map(run => this.#view(run));
     },
     'workflows.get': ({ threadId, runId }) => {
       const run = this.#runs.get(runId);
       if (!run || run.rootThreadId !== this.#rootOf(threadId).id) throw invalid(`runId: no workflow run ${String(runId)} on this thread`);
-      return structuredClone(run);
+      return this.#view(run);
     },
     'workflows.check': ({ threadId, plan }) => {
       const config = this.#team(this.#rootOf(threadId).id);
       const checked = planError(() => checkPlan(plan, { profiles: config.profiles.map(p => p.id) }));
       return { levels: workflowLevels(checked.steps.map(s => ({ id: s.id, after: s.deps }))) };
     },
-    'workflows.start': (params) => structuredClone(this.start(params.threadId, params.plan, params.requestId, params.templateId, 'user')),
+    'workflows.start': (params) => this.#view(this.start(params.threadId, params.plan, params.requestId, params.templateId, 'user')),
     'workflows.extend': (params) => {
       const run = this.#own(params.threadId, params.runId);
       const key = `${run.id}:${params.requestId}`;
@@ -145,7 +146,7 @@ export class FakeWorkflows {
       const prior = this.#requests.get(key);
       if (prior) {
         if (prior.fingerprint !== fingerprint) throw refusal('requestId already used for different content');
-        return structuredClone(this.#runs.get(prior.runId)!);
+        return this.#view(this.#runs.get(prior.runId)!);
       }
       if (run.status !== 'running' && run.status !== 'paused') throw refusal(`the run is ${run.status}; only a running or paused run takes new steps`);
       const config = this.#team(run.rootThreadId);
@@ -155,9 +156,9 @@ export class FakeWorkflows {
       this.#requests.set(key, { fingerprint, runId: run.id });
       this.#save(run);
       this.#advance(run.id);
-      return structuredClone(this.#runs.get(run.id)!);
+      return this.#view(this.#runs.get(run.id)!);
     },
-    'workflows.control': (params) => structuredClone(this.#control(params)),
+    'workflows.control': (params) => this.#view(this.#control(params)),
     'workflows.output': ({ threadId, value }) => {
       const entry = this.#steps.get(threadId);
       if (!entry) throw refusal('boite workflow output works only inside a workflow step');
@@ -286,6 +287,25 @@ export class FakeWorkflows {
     return { id: step.id, title: step.title ?? step.id, profileId: step.profile ?? null, after, forEach: step.forEach ?? null, status: 'waiting', instances: [], error: null, startedAt: null, finishedAt: null };
   }
 
+  #view(run: WorkflowRun): WorkflowRun {
+    const empty = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsdEquivalent: null });
+    const add = (into: Usage, from: Usage) => {
+      into.inputTokens += from.inputTokens; into.outputTokens += from.outputTokens;
+      into.cacheReadTokens += from.cacheReadTokens; into.cacheWriteTokens += from.cacheWriteTokens;
+      if (from.costUsdEquivalent !== null) into.costUsdEquivalent = (into.costUsdEquivalent ?? 0) + from.costUsdEquivalent;
+    };
+    const byKey = new Map<string, Usage>();
+    const usage = empty();
+    for (const [threadId, step] of this.#steps) {
+      if (step.runId !== run.id) continue;
+      for (const turn of this.host.thread(threadId).turns) if (turn.usage) {
+        const bucket = byKey.get(step.key) ?? empty();
+        add(bucket, turn.usage); add(usage, turn.usage); byKey.set(step.key, bucket);
+      }
+    }
+    return structuredClone({ ...run, usage, nodes: run.nodes.map(node => ({ ...node, instances: node.instances.map(inst => ({ ...inst, usage: byKey.get(inst.key) ?? null })) })) });
+  }
+
   #save(run: WorkflowRun): void {
     run.updatedAt = this.host.now();
     this.host.changed(run.rootThreadId, run.id);
@@ -405,9 +425,10 @@ export class FakeWorkflows {
         return;
       }
       const title = `${run.name} · ${node.title}${inst.label ? ` · ${inst.label}` : ''}`.slice(0, 120);
-      const threadId = this.host.child(root, profile, title, inst.task ?? '');
+      const effort = run.plan.steps.find(step => step.id === node.id)?.effort ?? profile.effort;
+      const threadId = this.host.child(root, { ...profile, effort }, title, inst.task ?? '');
       this.#steps.set(threadId, { runId: run.id, key: inst.key });
-      Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model });
+      Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model, effort });
     }
     Object.assign(inst, { status: 'running', attempts: 1, error: null, result: null, output: null, startedAt: now, finishedAt: null });
     if (this.#held) return;

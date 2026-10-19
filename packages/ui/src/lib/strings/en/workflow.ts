@@ -27,6 +27,7 @@ export const strings = {
     skipped: 'Skipped: its condition did not hold.',
     card: 'Workflow',
     show: 'Show the workflow',
-    tokens: '{tokens} tokens'
+    tokens: '{tokens} tokens',
+    tokensHelp: 'Reported usage from completed turns, including cache reads, cache writes and retries.'
   }
 } as const;
