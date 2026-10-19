@@ -81,7 +81,7 @@ test('the checked-in budget keeps the 900-line ceiling, allows nothing under it 
   expect(checkedIn.ceiling).toBe(900);
   for (const allowed of Object.values(checkedIn.allow)) expect(allowed).toBeGreaterThan(checkedIn.ceiling);
   for (const reason of Object.values(checkedIn.exempt ?? {})) expect(reason.length).toBeGreaterThan(20);
-  expect(exemptBy('packages/contracts/src/index.ts', checkedIn)).toBeDefined();
-  // The catalogues are one file per part under lib/strings/, each below the ceiling.
+  // The contract is one file per domain, the catalogues one per part, each below the ceiling.
+  expect(exemptBy('packages/contracts/src/index.ts', checkedIn)).toBeUndefined();
   expect(exemptBy('packages/ui/src/lib/strings/en/chat.ts', checkedIn)).toBeUndefined();
 });

@@ -28,9 +28,12 @@ prerequisites, adjacent runtime files and shell E2E coverage.
 - Native process code belongs behind `ProcessPlatform` in `packages/core/src/platform/`.
   Drivers and RPC handlers must not import an OS backend. The shell's OS
   integration belongs in `apps/shell/src-tauri/src/platform/`.
-- Change `packages/contracts/src/index.ts` before implementing an RPC method,
-  event or shared type. Update the real core and the in-memory client together.
-  Follow [Adding an RPC method](docs/development.md#adding-an-rpc-method).
+- Change the contract before implementing an RPC method, event or shared type:
+  the domain file in `packages/contracts/src/` (`threads.ts`, `providers.ts`),
+  which `index.ts` re-exports. Update the real core and the in-memory client
+  together. Follow [Adding an RPC method](docs/development.md#adding-an-rpc-method);
+  a branch still editing the single `index.ts` runs
+  `bun scripts/migrate/split-contracts.ts` after merging main.
 - Tests and benches use a fresh temporary `BOITE_DATA_DIR`. Real data directories
   and CLI logins are only for explicitly enabled live tests.
 - Kill only a process whose PID the test captured at spawn, or use
