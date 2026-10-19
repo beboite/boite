@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { removeDirectory } from './lib/cleanup.ts';
-import { waitForShellPage } from './lib/shell-diagnosis.ts';
+import { waitForShellPage, type ShellUnderTest } from './lib/shell-diagnosis.ts';
 
 // The Desktop Windows failure: the attached shell page stays about:blank and
 // never gets its IPC bridge. A plain browser on about:blank has no bridge
@@ -41,5 +41,51 @@ test('a shell page that never gets its IPC bridge reports its target, the target
   } finally {
     await page?.close();
     await removeDirectory(dataDir);
+  }
+}, 60_000);
+
+// The diagnosis runs after the wait failed: when one of its own steps fails,
+// the caller must still get the wait's failure, not the step's.
+const TIMED_OUT = "waitFor timed out on typeof window.__TAURI_INTERNALS__?.invoke === 'function'";
+
+async function blankShell(): Promise<{ page: BrowserPage; shell: ShellUnderTest; [Symbol.asyncDispose]: () => Promise<void> }> {
+  const dataDir = mkdtempSync(join(tmpdir(), 'boite-e2e-shell-ready-'));
+  const port = await freePort();
+  const page = await BrowserPage.launch({ url: 'about:blank', debugPort: port });
+  return {
+    page,
+    shell: { port, dataDir, pid: page.pid! },
+    async [Symbol.asyncDispose]() {
+      await page.close();
+      await removeDirectory(dataDir);
+    },
+  };
+}
+
+test('a process-tree probe that rejects keeps the wait failure, its cause and the rest of the report', async () => {
+  await using blank = await blankShell();
+  // What `Bun.spawn` throws when PowerShell is missing from the runner.
+  const processTree = () => Promise.reject(new Error('Executable not found in $PATH: "powershell"'));
+  const failure = await waitForShellPage(blank.page, blank.shell, 500, { processTree }).then(() => null, (error: unknown) => error as Error);
+  expect(failure?.message).toStartWith(TIMED_OUT);
+  expect((failure?.cause as Error | undefined)?.message).toStartWith(TIMED_OUT);
+  expect(failure!.message).toContain('Attached target: {"');
+  expect(failure!.message).toContain(`Shell ${blank.shell.pid} process tree: (could not list it: Executable not found in $PATH: "powershell")`);
+  expect(readFileSync(join(import.meta.dir, '.artifacts', `shell-${blank.shell.pid}-not-ready.txt`), 'utf8')).toBe(failure!.message);
+}, 60_000);
+
+test('an artifact that cannot be written keeps the wait failure and says why it is missing', async () => {
+  await using blank = await blankShell();
+  // A directory where the artifact goes makes the write fail with EISDIR.
+  const artifact = join(import.meta.dir, '.artifacts', `shell-${blank.shell.pid}-not-ready.txt`);
+  mkdirSync(artifact, { recursive: true });
+  try {
+    const failure = await waitForShellPage(blank.page, blank.shell, 500).then(() => null, (error: unknown) => error as Error);
+    expect(failure?.message).toStartWith(TIMED_OUT);
+    expect((failure?.cause as Error | undefined)?.message).toStartWith(TIMED_OUT);
+    expect(failure!.message).toContain('Attached target: {"');
+    expect(failure!.message).toMatch(new RegExp(`\\nCould not write the artifact shell-${blank.shell.pid}-not-ready\\.txt: \\S+`));
+  } finally {
+    rmSync(artifact, { recursive: true, force: true });
   }
 }, 60_000);

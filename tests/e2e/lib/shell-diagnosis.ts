@@ -21,6 +21,9 @@ const TARGETS_CHARS = 4_000;
 /** A hidden shell a test drives: its debugging port, data directory and pid. */
 export interface ShellUnderTest { port: number; dataDir: string; pid: number }
 
+/** What a diagnosis asks the system, which a test can make fail. */
+export interface DiagnosisProbes { processTree?: (shellPid: number) => Promise<string> }
+
 /**
  * What a hidden shell that never exposed its page left behind: the end of its
  * own log, which says whether `build_main_window` returned (the `main-window`
@@ -46,18 +49,28 @@ export async function describeShell(dataDir: string, shellPid: number, failure =
  * tree. The text also goes to `tests/e2e/.artifacts/shell-<pid>-not-ready.txt`,
  * which the desktop job uploads as `desktop-failure-captures`.
  */
-export async function waitForShellPage(page: BrowserPage, shell: ShellUnderTest, timeoutMs = 15_000): Promise<void> {
+export async function waitForShellPage(page: BrowserPage, shell: ShellUnderTest, timeoutMs = 15_000, probes: DiagnosisProbes = {}): Promise<void> {
   try {
     await page.waitFor(TAURI_READY, timeoutMs);
   } catch (error) {
-    const failure = error instanceof Error ? error.message : String(error);
-    const report = await notReadyReport(page, shell);
-    writeArtifact(`shell-${shell.pid}-not-ready.txt`, `${failure}\n${report}`);
-    throw new Error(`${failure}\n${report}`, { cause: error });
+    // The wait's failure is what the caller needs: a diagnosis that fails, or
+    // cannot be saved, adds a line to it and never takes its place.
+    const failure = errorText(error);
+    const report = await notReadyReport(page, shell, probes.processTree ?? processTree)
+      .catch((diagnosisError: unknown) => `The diagnosis failed: ${errorText(diagnosisError)}`);
+    const text = `${failure}\n${report}`;
+    const name = `shell-${shell.pid}-not-ready.txt`;
+    let unsaved = '';
+    try {
+      writeArtifact(name, text);
+    } catch (writeError) {
+      unsaved = `\nCould not write the artifact ${name}: ${errorText(writeError)}`;
+    }
+    throw new Error(`${text}${unsaved}`, { cause: error });
   }
 }
 
-async function notReadyReport(page: BrowserPage, shell: ShellUnderTest): Promise<string> {
+async function notReadyReport(page: BrowserPage, shell: ShellUnderTest, tree: (shellPid: number) => Promise<string>): Promise<string> {
   const ask = (method: string) => page.send(method, {}, PROBE_TIMEOUT_MS).then(
     result => JSON.stringify(result),
     (error: unknown) => `(no answer: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)})`,
@@ -71,7 +84,7 @@ async function notReadyReport(page: BrowserPage, shell: ShellUnderTest): Promise
       ),
     ask('Page.getFrameTree'),
     ask('Page.getNavigationHistory'),
-    shellReport(shell.dataDir, shell.pid),
+    shellReport(shell.dataDir, shell.pid, tree),
   ]);
   const records = shellRecords(shell.dataDir);
   const webview = typeof records === 'string'
@@ -88,11 +101,17 @@ async function notReadyReport(page: BrowserPage, shell: ShellUnderTest): Promise
   ].join('\n');
 }
 
-async function shellReport(dataDir: string, shellPid: number): Promise<string> {
+async function shellReport(dataDir: string, shellPid: number, tree = processTree): Promise<string> {
   const records = shellRecords(dataDir);
   const tail = typeof records === 'string' ? records : records.slice(-SHELL_LOG_RECORDS).map(record => record.text).join('\n');
+  // A missing or blocked PowerShell makes `Bun.spawn` throw: the log tail stays.
+  const listing = await tree(shellPid).catch((error: unknown) => `(could not list it: ${errorText(error)})`);
   return `Shell ${shellPid} log (newest ${SHELL_LOG_RECORDS} records of ${join(dataDir, 'logs', 'shell.0.ndjson')}):\n${tail}\n`
-    + `Shell ${shellPid} process tree: ${await processTree(shellPid)}`;
+    + `Shell ${shellPid} process tree: ${listing}`;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function writeArtifact(name: string, text: string): void {
