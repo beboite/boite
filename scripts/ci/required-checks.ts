@@ -6,9 +6,10 @@ import { join } from 'node:path';
 // A name holds no expression: a skipped matrix job reports its unexpanded
 // template, so every required job is written out.
 
-// The planning job's only expression: a draft, which cannot merge, reports
-// another name, so it never satisfies the required one (docs/ci.md#draft-pull-requests).
-const DRAFT_NAME = /^\$\{\{ github\.event\.pull_request\.draft && github\.event\.action != 'converted_to_draft' && '([^']+)' \|\| '([^']+)' \}\}$/;
+// The only expression a name may hold: a draft run, rerun included, reports
+// the name plus " (draft)", so it never satisfies a required one
+// (docs/ci.md#draft-pull-requests).
+const DRAFT_NAME = /^\$\{\{ github\.event\.pull_request\.draft && '([^']+) \(draft\)' \|\| '([^']+)' \}\}$/;
 // A job that never runs on a pull request guards none: its skip is no check.
 const NOT_ON_PULL_REQUESTS = "github.event_name != 'pull_request'";
 
@@ -32,27 +33,27 @@ function list(value: string | string[] | undefined): string[] {
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
 }
 
-/** The names a job reports on a draft and on a ready pull request; the same unless it is the planning job. */
+/** The names a job reports on a draft and on a ready pull request: the same unless it uses the draft expression. */
 export function jobNames(job: Job, id: string): { draft: string; ready: string } {
   const name = job.name ?? id;
-  const [, draft, ready] = DRAFT_NAME.exec(name) ?? [name, name, name];
-  return { draft: draft!, ready: ready! };
+  const match = DRAFT_NAME.exec(name);
+  return match && match[1] === match[2] ? { draft: `${match[2]} (draft)`, ready: match[2]! } : { draft: name, ready: name };
 }
 
-/** Every check a job reports on a ready pull request: its name, or for a caller each name of the workflow it calls. */
-export function jobChecks(file: string, id: string, job: Job, load: Load = loadWorkflow): string[] {
+/** Every check a job reports: its name, or for a caller each name of the workflow it calls. */
+export function jobChecks(file: string, id: string, job: Job, load: Load = loadWorkflow, draft = false): string[] {
   if (job.strategy?.matrix !== undefined) throw new Error(`${file}: job ${id} is a matrix; a skipped one reports its template name`);
-  const name = jobNames(job, id).ready;
+  const name = jobNames(job, id)[draft ? 'draft' : 'ready'];
   if (name.includes('${{')) throw new Error(`${file}: job ${id} has a computed name: ${name}`);
   if (!job.uses) return [name];
   const called = /^\.\/\.github\/workflows\/([\w.-]+\.ya?ml)$/.exec(job.uses)?.[1];
   if (!called) throw new Error(`${file}: job ${id} calls ${job.uses}, outside this repository`);
-  return workflowChecks(called, load).map((inner) => `${name} / ${inner}`);
+  return workflowChecks(called, load, draft).map((inner) => `${name} / ${inner}`);
 }
 
-export function workflowChecks(file: string, load: Load = loadWorkflow): string[] {
+export function workflowChecks(file: string, load: Load = loadWorkflow, draft = false): string[] {
   return Object.entries(load(file).jobs).filter(([, job]) => job.if !== NOT_ON_PULL_REQUESTS)
-    .flatMap(([id, job]) => jobChecks(file, id, job, load));
+    .flatMap(([id, job]) => jobChecks(file, id, job, load, draft));
 }
 
 /** The workflows a pull request starts on its head; pull_request_target runs the base's. */
@@ -64,8 +65,9 @@ export function pullRequestWorkflows(files: string[], load: Load = loadWorkflow)
   });
 }
 
-export function requiredChecks(files: string[], load: Load = loadWorkflow): string[] {
-  const names = pullRequestWorkflows(files, load).flatMap((file) => workflowChecks(file, load));
+/** The names a ready pull request reports, which the ruleset requires; with `draft`, those a draft reports. */
+export function requiredChecks(files: string[], load: Load = loadWorkflow, draft = false): string[] {
+  const names = pullRequestWorkflows(files, load).flatMap((file) => workflowChecks(file, load, draft));
   const repeated = names.filter((name, index) => names.indexOf(name) !== index);
   if (repeated.length) throw new Error(`check names reported twice: ${[...new Set(repeated)].join(', ')}`);
   return names.sort();

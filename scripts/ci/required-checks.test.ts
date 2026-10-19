@@ -51,16 +51,17 @@ test('every job a needs chain runs through is in the list, so a skip after a fai
   }
 });
 
-// A draft cannot satisfy the ruleset: after ready_for_review the required
-// planning name stays expected until the full run creates it, and a
-// conversion to draft fails it, so an earlier full run's success cannot merge
-// next to the draft's skips.
-test('a draft reports another planning name and a conversion to draft fails the required one', () => {
-  const changes = loadWorkflow('ci.yml').jobs.changes as Job & { steps: { if?: string; run?: string }[] };
-  expect(jobNames(changes, 'changes')).toEqual({ draft: 'Plan and repository checks (draft)', ready: 'Plan and repository checks' });
-  const [stop] = changes.steps;
-  expect(stop!.if).toBe("github.event.action == 'converted_to_draft'");
-  expect(stop!.run).toContain('exit 1');
+// A skip passes in a ruleset, so a draft must not satisfy it: a draft run,
+// rerun after the pull request went ready included, reports no required name.
+// Only pr-title.yml, which checks the title whatever the mode, reports the same.
+test('a draft reports none of the names the ruleset requires', () => {
+  const ready = requiredChecks(files);
+  const draft = requiredChecks(files, loadWorkflow, true);
+  expect(draft.filter((name) => ready.includes(name))).toEqual(['PR title']);
+  expect(draft).toContain('Plan and repository checks (draft)');
+  expect(draft).toContain('Desktop (draft) / Linux x64');
+  expect(draft).toContain('Server (draft) / verify server (amd64)');
+  expect(draft.length).toBe(ready.length);
 });
 
 test('main compares the names with the live rules in a job no other job needs', () => {
@@ -79,7 +80,9 @@ test('matrix jobs and computed names are refused', () => {
   expect(() => requiredChecks(['x.yml'], load({ a: { name: 'Core', strategy: { matrix: { os: ['a', 'b'] } } } }))).toThrow('matrix');
   expect(() => requiredChecks(['x.yml'], load({ a: { name: 'A' }, b: { name: 'A' } }))).toThrow('reported twice');
   expect(() => requiredChecks(['x.yml'], load({ a: { name: "${{ github.event.pull_request.draft && 'A' || 'B' }}" } }))).toThrow('computed name');
-  expect(requiredChecks(['x.yml'], load({ a: { name: "${{ github.event.pull_request.draft && github.event.action != 'converted_to_draft' && 'A (draft)' || 'A' }}" } }))).toEqual(['A']);
+  expect(() => requiredChecks(['x.yml'], load({ a: { name: "${{ github.event.pull_request.draft && 'A (draft)' || 'B' }}" } }))).toThrow('computed name');
+  const both = load({ a: { name: "${{ github.event.pull_request.draft && 'A (draft)' || 'A' }}" } });
+  expect([requiredChecks(['x.yml'], both), requiredChecks(['x.yml'], both, true)]).toEqual([['A'], ['A (draft)']]);
   expect(requiredChecks(['x.yml'], load({ a: { name: 'A', if: "github.event_name != 'pull_request'" } }))).toEqual([]);
   expect(requiredChecks(['x.yml'], () => ({ on: { push: null }, jobs: { a: {} } }))).toEqual([]);
 });
@@ -88,7 +91,7 @@ test('matrix jobs and computed names are refused', () => {
 // on the one it names, or a selected leg would skip without a failure.
 test('each core job runs on its CORE_ALL runner when coreRunners lists it', () => {
   const jobs = Object.entries(loadWorkflow('ci.yml').jobs).filter(([id]) => id.startsWith('core-'));
-  expect(jobs.map(([, job]) => ({ os: job['runs-on'], name: job.name })))
+  expect(jobs.map(([id, job]) => ({ os: job['runs-on'], name: jobNames(job, id).ready })))
     .toEqual(CORE_ALL.map((runner) => ({ os: runner.os, name: `Core tests (${runner.name})` })));
   for (const [, job] of jobs) {
     expect(job.if).toBe(`needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"${job['runs-on']}"')`);

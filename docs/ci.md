@@ -84,7 +84,7 @@ reports its own name (`Desktop`), never the inner ones. So:
 
 `bun scripts/ci/required-checks.ts` prints the names a ready pull request
 reports. Its tests pin all of them, refuse a matrix or an expression in a name
-(the planning job's draft name aside), and check each written-out job against
+(the draft expression aside, see [draft pull requests](#draft-pull-requests)), and check each written-out job against
 `CORE_ALL` and `PORTABLE_ALL`. On main and in a release, the `Ruleset check
 names` job runs it with `--live`, which reads the rules for `main`
 (`repos/beboite/boite/rules/branches/main`, public) and fails on a check the
@@ -181,14 +181,17 @@ suite, type checks and UI tests, and the focused telemetry and E2E type checks,
 each only when its paths changed. Windows, macOS, desktop packages, E2E,
 stress, Docker and the APK wait: their checks skip.
 
-A skip passes in a ruleset, so a draft must not satisfy it: its planning job
-reports `Plan and repository checks (draft)`, never the required `Plan and
-repository checks`. After `ready_for_review`, the required name stays expected
-until the `pr` run creates it, then pending until it ends; its selected jobs
-then report again under the draft's names. `converted_to_draft` cancels a full
-run in progress and fails `Plan and repository checks` at once, so that run's
-earlier planning success cannot merge next to skips; the next push runs the
-draft checks. CodeRabbit reviews drafts (`.coderabbit.yaml`).
+A skip passes in a ruleset, so a draft must not satisfy it. In a draft run
+every `ci.yml` job reports its name plus ` (draft)`
+(`${{ github.event.pull_request.draft && 'Build UI (draft)' || 'Build UI' }}`),
+skipped or not, and a reusable workflow's jobs follow their caller
+(`Desktop (draft) / Linux x64`). A rerun keeps its run's event, so even an old
+draft run rerun after `ready_for_review` reports no required name: those come
+only from full runs, and a full run that failed or was cancelled keeps blocking.
+After `ready_for_review`, the required names stay expected until the `pr` run
+creates them. `converted_to_draft` cancels a full run in progress. Only
+`PR title`, which checks the title whatever the mode, reports the same name.
+CodeRabbit reviews drafts (`.coderabbit.yaml`).
 
 Of the 5,632 runner minutes spent by the 86 pull request runs started on
 2026-10-18 between 12:34 and 21:35 UTC, 2,476 went to runs a newer push
