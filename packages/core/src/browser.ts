@@ -93,6 +93,11 @@ export class AgentBrowser {
 
   constructor(core: Core, private findBrowser = findChromium) {
     this.#core = core;
+    // A freeze or wake step that missed its time: the browser process answers its own targets without the page's renderer.
+    this.#sleep.browserAnswers = tab => tab.engine.cdp.send('Target.getTargetInfo', { targetId: tab.targetId });
+    this.#sleep.lateAnswer = (tab, method, after) => core.logs.record('warn', typeof after === 'number'
+      ? `A sleeping tab's page answered ${method} ${after} ms after it was sent`
+      : `A sleeping tab's page never answered ${method}: ${after.message}`, { source: 'browser', event: 'browser.sleep-late', threadId: tab.threadId, data: { method } });
     this.#downloads = new BrowserDownloads(() => core.dataDir, message => core.log('warn', message));
     this.#engines = new BrowserEngines(core, this.#host, () => this.findBrowser(), this.#machine, BROWSER_SCOPE,
       engine => this.#targets(engine), id => this.#drop(id), this.#downloads);

@@ -86,7 +86,8 @@ export function createBrowserFixture() {
     opened.harness = harness = await startTestCore();
     const record = harness.core.logs.record.bind(harness.core.logs);
     harness.core.logs.record = (level, message, context = {}, at) => {
-      if (context.event === 'rpc.failed') failures.push(message);
+      // A sleeping tab's late answer explains a wake that failed (`browser/sleep.ts`).
+      if (context.event === 'rpc.failed' || context.event === 'browser.sleep-late') failures.push(message);
       record(level, message, context, at);
     };
     opened.owner = owner = await harness.connect();

@@ -115,6 +115,38 @@ test('a wake that fails leaves the tab asleep, and the next use wakes it', async
   sleep.drop(tab);
 });
 
+// A wake step that gets no answer in time failed a command on a macOS runner
+// with only "did not answer Emulation.setFocusEmulationEnabled within 5
+// seconds" (job 118094995614). A frozen page answers at once, so the error
+// says whether the browser itself still answered, and the log hears when, or
+// whether, the page answered after.
+test('a wake step that misses its time says whether the browser answered, and when the page did', async () => {
+  const { tab, calls, holdNext, release, held } = fakeTab();
+  const sleep = new TabSleep<Sleeper>(() => false, () => false, 20);
+  sleep.stepMs = 50;
+  const late: Array<[string, number | string]> = [];
+  sleep.lateAnswer = (_tab, method, after) => late.push([method, typeof after === 'number' ? after : after.message]);
+  sleep.schedule(tab);
+  await until(() => tab.sleep.asleep);
+  holdNext('Emulation.setFocusEmulationEnabled');
+  await expect(sleep.use(tab, async () => { calls.push('first'); })).rejects.toThrow('the browser did not answer Emulation.setFocusEmulationEnabled within 0.05 seconds; the browser itself answered in');
+  expect(tab.sleep.asleep).toBe(true);
+  expect(late).toEqual([]);
+  release('Emulation.setFocusEmulationEnabled');
+  await until(() => late.length === 1);
+  expect(late[0]![0]).toBe('Emulation.setFocusEmulationEnabled');
+  expect(late[0]![1]).toBeGreaterThanOrEqual(50);
+  // A browser that does not answer its own targets either is named so.
+  sleep.browserAnswers = () => new Promise(() => {});
+  holdNext('Page.setWebLifecycleState');
+  await expect(sleep.use(tab, async () => {})).rejects.toThrow('within 0.05 seconds; the browser itself did not answer either');
+  release('Page.setWebLifecycleState');
+  await sleep.use(tab, async () => { calls.push('second'); });
+  expect(calls.at(-1)).toBe('second');
+  expect(held('Page.setWebLifecycleState')).toBe(false);
+  sleep.drop(tab);
+});
+
 // A turn that runs for half an hour without touching its tab must not keep
 // it awake throughout: the turn holds it only for a while after its last use,
 // and the next command wakes it. The hold is measured from the use to the
