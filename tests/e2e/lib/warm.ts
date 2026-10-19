@@ -40,6 +40,7 @@ async function prepare(): Promise<void> {
   const { build, createServer } = await preparationStep('load Vite', () =>
     import(createRequire(join(root, 'package.json')).resolve('vite')));
   const { fixtureBridge } = await preparationStep('load fixture bridge', () => import('./ui.ts'));
+  const { requestLog } = await import('./ui-requests.ts');
   const buildFakeUi = () => preparationStep('build fake UI', async () => {
     await build({ root, plugins: [fixtureBridge], define: { 'import.meta.env.DEV': 'true' }, build: { outDir: resolve(outDir!), emptyOutDir: true }, logLevel: 'warn' });
   });
@@ -50,7 +51,7 @@ async function prepare(): Promise<void> {
 
   // Match startDevUi's plugins: Vite hashes them into the optimized-dependency cache.
   const server = await preparationStep('create dev server', async () =>
-    createServer({ root, plugins: [fixtureBridge], server: { host: '127.0.0.1', port: await freePort(), strictPort: true }, clearScreen: false }));
+    createServer({ root, plugins: [fixtureBridge, requestLog], server: { host: '127.0.0.1', port: await freePort(), strictPort: true }, clearScreen: false }));
   try {
     await preparationStep('listen', () => server.listen());
     const base = server.resolvedUrls?.local[0]?.replace(/\/$/, '');
