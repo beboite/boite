@@ -82,6 +82,10 @@ export function settingsMethods(ctx: FakeContext) {
       if (titleModel && ctx.providers.find(p => p.id === titleModel.providerId)?.titles !== true) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `titleModel names ${titleModel.providerId}, which is not a loaded provider that writes titles`, data: { field: 'titleModel' } });
       }
+      const tracker = checked.patch.goalTracker;
+      if (tracker && !ctx.providers.some(p => p.id === tracker.providerId)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `goalTracker names ${tracker.providerId}, which is not a loaded provider`, data: { field: 'goalTracker' } });
+      }
       ctx.settings = { ...ctx.settings, ...keepLaterFavorites(ctx.settings, checked.patch) };
       ctx.emit('scheduler.updated', structuredClone(ctx.scheduler));
       ctx.emit('settings.updated', { ...ctx.settings });

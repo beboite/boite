@@ -1,4 +1,5 @@
 import type { ProjectId, ThreadId, Timestamp } from './ids';
+import type { GoalChecklist } from './threads';
 
 /**
  * One card of a project's todo list, shared by every thread of the project.
@@ -13,6 +14,22 @@ export interface Todo {
   threadId: ThreadId | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  /** The `/goal2` conversation the project board started for this card. Missing on older cores and on a card nobody started. */
+  goalThreadId?: ThreadId | null;
+  /** That conversation's goal as the board draws it, read on every send and never stored. Missing once the goal is gone. */
+  goal?: TodoGoal;
+}
+
+/**
+ * Where a card's `/goal2` stands. The core moves an open card to `claimed`
+ * when its goal completes, so the user confirms it like any claimed card.
+ */
+export interface TodoGoal {
+  status: 'active' | 'paused' | 'complete';
+  /** A reviewer reads the agent's completion claim. */
+  reviewing: boolean;
+  /** Null until the goal's tracker wrote its first list. */
+  checklist: GoalChecklist | null;
 }
 
 export const TODO_STATUSES: readonly Todo['status'][] = ['open', 'claimed', 'done'];
@@ -25,8 +42,12 @@ export interface TodosRpcMethods {
   /** The project's todo list, the thread naming the project. Done cards last. */
   'todos.list': { params: { threadId: ThreadId }; result: Todo[] };
   'todos.add': { params: { threadId: ThreadId; text: string }; result: Todo };
-  /** A status or a text change. An agent moves a card to `claimed`; `done` is the user's confirmation. */
-  'todos.update': { params: { threadId: ThreadId; todoId: string; status?: Todo['status']; text?: string }; result: Todo };
+  /**
+   * A status or a text change. An agent moves a card to `claimed`; `done` is the user's confirmation.
+   * `goalThreadId` links the card to the `/goal2` conversation the board started for it, a thread of
+   * the same project, or unlinks it with null.
+   */
+  'todos.update': { params: { threadId: ThreadId; todoId: string; status?: Todo['status']; text?: string; goalThreadId?: ThreadId | null }; result: Todo };
   'todos.remove': { params: { threadId: ThreadId; todoId: string }; result: { ok: true } };
 }
 

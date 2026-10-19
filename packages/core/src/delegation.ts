@@ -424,11 +424,11 @@ export class Delegation {
   }
   /**
    * A child the core runs for a plan rather than for the agent: a workflow
-   * step, a `/goal2` reviewer or an agent's memory pass. It needs no enabled team, only an unpaused
+   * step, a `/goal2` reviewer or checklist tracker, or an agent's memory pass. It needs no enabled team, only an unpaused
    * one, and its answer never comes back as mail.
    */
   private stepOwned(threadId: string): boolean {
-    return this.core.workflows.owns(threadId) || this.core.activity.ownsReviewer(threadId) || this.core.workforce.memory.owns(threadId);
+    return this.core.workflows.owns(threadId) || this.core.activity.ownsReviewer(threadId) || this.core.activity.ownsTracker(threadId) || this.core.workforce.memory.owns(threadId);
   }
   /**
    * Whether a child's team lets its turn start. The scheduler passes the parent it
@@ -822,8 +822,8 @@ export class Delegation {
   instructions(threadId: string, request?: string, fresh = true): string {
     const thread = this.core.threads.require(threadId), root = this.root(threadId), config = this.config(root.id);
     if (thread.parentThreadId && this.core.workflows.owns(threadId)) return this.core.workflows.instructions(threadId);
-    // A memory pass's prompt says everything it needs; it neither delegates nor writes mail.
-    if (thread.parentThreadId && this.core.workforce.memory.owns(threadId)) return '';
+    // A memory pass's or a `/goal2` checklist pass's prompt says everything it needs; it neither delegates nor writes mail.
+    if (thread.parentThreadId && (this.core.workforce.memory.owns(threadId) || this.core.activity.ownsTracker(threadId))) return '';
     if (thread.parentThreadId && this.core.activity.ownsReviewer(threadId)) return '\nYou are a Boite goal reviewer. Your final answer and its VERDICT line go to the goal automatically; do not message the parent, start subagents or edit project files.\n';
     if (thread.parentThreadId) {
       const own = this.worktrees.get(threadId);

@@ -8,12 +8,14 @@
   import { MAX_PANES, MIN_SHARE, activeTab, paneNumber, panesOf, terminalIdOf, type TerminalTab } from '../lib/terminal-layout';
   import { baseName } from '../lib/terminal-marks';
   import type TerminalView from './TerminalView.svelte';
+  import DrawerTabs from './DrawerTabs.svelte';
   import ResizeHandle from './ResizeHandle.svelte';
 
   /**
    * The thread's shells in the frame under the chat, in tabs, each one shell
    * or a split of up to four. Ctrl+J shows and hides the drawer, the shells
-   * keep running while hidden, a cross kills one. The top edge drags the
+   * keep running while hidden, a cross kills one. With the project board on,
+   * the drawer's first tabs switch between the board and the shells. The top edge drags the
    * drawer's height, kept per device, and the line between two panes their
    * shares. A phone shows each shell as a tab of its own: a split that narrow
    * cannot be read.
@@ -171,6 +173,11 @@
   </div>
   <div class="surface framed">
     <header>
+      {#if store.boardAvailable()}
+        <!-- The project board shares the drawer: its tab first, the shells' after. -->
+        <DrawerTabs {store} current="terminal" />
+        <span class="divider" aria-hidden="true"></span>
+      {/if}
       {#if tabs.length > 1}
         <div class="tabs" role="tablist" aria-label={strings.terminal.tabs}>
           {#each tabs as tab (tab.id)}

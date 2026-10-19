@@ -378,12 +378,56 @@ export interface GoalReview {
   verdicts: GoalVerdict[];
 }
 
+/** One thing the user asked for in a `/goal2`, as its tracker wrote it. */
+export interface GoalChecklistItem {
+  /** From 1, in the order the items were written; never reused. */
+  id: number;
+  /** A verb and a visible result in the user's language, at most `GOAL_CHECKLIST_TEXT_MAX` characters. */
+  text: string;
+  /** The words of the user's message it comes from, at most `GOAL_CHECKLIST_SOURCE_MAX` characters. */
+  source: string;
+  /** `done`: a check saw it done. `cancelled`: a later message of the user dropped it. */
+  status: 'open' | 'done' | 'cancelled';
+  /** Added by a message after the objective. */
+  added?: boolean;
+  /** Changed by a message after the objective. */
+  changed?: boolean;
+  /** Completion claims sent back to the agent because this item was still open; at 2 it no longer holds one. */
+  bounced?: number;
+}
+
+/**
+ * A `/goal2`'s checklist. A tracker conversation, a child of the goal's
+ * thread with none of its history, writes it from the objective, updates it
+ * on every later message of the user, and after each turn of the agent marks
+ * what the turn did. What stays open goes to the agent's next goal turn; a
+ * completion claim with an open item goes back to the agent before any review.
+ * The tracker reads only what Boite hands it: it runs nothing and edits nothing.
+ */
+export interface GoalChecklist {
+  /** The tracker conversation; null before it starts or when it could not. */
+  threadId: ThreadId | null;
+  /** `writing`: reading the objective or a new message. `checking`: reading the agent's last turn. */
+  phase: 'idle' | 'writing' | 'checking';
+  items: GoalChecklistItem[];
+  /** The tracker's provider, model and effort, as `claude/claude-opus-5-5`, for the panel. */
+  model: string | null;
+  effort: string | null;
+  /** Why the last pass gave nothing; the goal goes on without it. */
+  error: string | null;
+}
+
 /** What an automated goal or loop turn carries on its user message, for the driver prompt. */
 export interface ActivityTurn {
   kind: 'goal' | 'loop';
   iteration: number;
   /** A reviewed goal's first turn after a failed review: what the reviewer reported. */
   review?: { round: number; feedback: string };
+  /**
+   * A `/goal2` turn after its tracker's check: the checklist items still open.
+   * `bounced`: the agent claimed completion with them open, so no review ran.
+   */
+  checklist?: { open: string[]; bounced: boolean };
 }
 
 export interface ThreadActivity {
@@ -391,7 +435,7 @@ export interface ThreadActivity {
    * `blocked`: the agent ended a goal turn with `[BOITE_GOAL_BLOCKED]` and
    * waits for the user. The goal is paused; the user's next message resumes it.
    */
-  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean; blocked?: boolean; review?: GoalReview } | null;
+  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean; blocked?: boolean; review?: GoalReview; checklist?: GoalChecklist } | null;
   loop: { prompt: string; intervalMs: number; maxIterations?: number | null; status: 'active' | 'paused' | 'complete'; iterations: number; nextRunAt: number | null; error: string | null; history?: ActivityIteration[] } | null;
   tasks: AgentTask[];
   tasksDismissed?: boolean;

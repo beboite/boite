@@ -699,6 +699,8 @@ export class ThreadStore {
       // His own message, a resume or a parent's message to its subagent puts the agent back to work,
       // so a pause the core left on Stop, a failure or a restart ends with it; the owner's stays.
       if (!activity && !startedBy && (!operation || operation === 'resume' || (operation === 'delegation' && thread.parentThreadId))) this.core.coordination.resumeForUser(threadId);
+      // A `/goal2`'s checklist reads what the user adds, drops or changes.
+      if (!activity && !operation && !startedBy && !nativeCommandPrompt(prompt)) this.core.activity.userMessage(threadId, prompt);
     });
     this.autoCompact.cancel(threadId);
     this.cacheKeepalive.cancel(threadId);

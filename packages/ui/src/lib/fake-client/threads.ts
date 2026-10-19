@@ -1,3 +1,4 @@
+import { noteUserMessage } from './checklist';
 import { createFakeThread, publishFakeThread } from './create-thread';
 import { dismissMergedPr } from './merged-pr-archive';
 import { assertIdleFamily } from './completion';
@@ -626,6 +627,8 @@ export function threadMethods(ctx: FakeContext) {
       const turn = ctx.startTurn(params.threadId, params.prompt, params.attachments ?? [], rootId ? 'delegation' : undefined, undefined, undefined, params.previewReferences ?? []);
       if (rootId) ctx.delegationTurns.set(rootId, (ctx.delegationTurns.get(rootId) ?? 0) + 1);
       if (key) ctx.turnRequests.set(key, { content, turn, messageId: thread.messages[messageIndex]!.id });
+      // A `/goal2`'s checklist reads what the user adds.
+      if (!rootId) noteUserMessage(ctx, thread, params.prompt);
       return turn;
     },
     'threads.compact': async (params) => {
