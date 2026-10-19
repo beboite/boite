@@ -98,6 +98,11 @@ test('a query finds a project by its name and folder, and Enter starts a thread 
   expect(project).toBe('project:["local","p-boite"]');
   expect(rows()).not.toContain('project:["local","p-notes"]');
   while (selectedId() !== project) key('ArrowDown');
+  // WebKit sends the Enter that confirms an IME candidate with keyCode 229.
+  const input = document.querySelector<HTMLInputElement>('[data-testid=palette-input]')!;
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true, cancelable: true }));
+  flushSync();
+  expect(store.paletteOpen).toBe(true);
   key('Enter');
   await new Promise((resolve) => setTimeout(resolve, 5));
   await tick();

@@ -187,7 +187,7 @@
       return;
     }
     if (event.key === 'Enter') {
-      if (event.isComposing) return;
+      if (event.isComposing || event.keyCode === 229) return;
       event.preventDefault();
       const item = rows[selected];
       if (item) pick(item);
