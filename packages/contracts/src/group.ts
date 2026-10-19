@@ -25,6 +25,12 @@ export interface GroupCore {
   epoch: number;
 }
 
+/** A machine taken out of the group, and the admission (`GroupCore.epoch`) its removal ends. */
+export interface GroupRemoval {
+  coreId: string;
+  epoch: number;
+}
+
 /**
  * A phone or a browser of the group. It holds one Ed25519 key, `id` is the
  * fingerprint of it, and every member lets it in on a signature of that key
@@ -55,6 +61,13 @@ export interface Group {
   /** The core that answered. */
   self: string;
   cores: GroupCore[];
+  /**
+   * The machines taken out, each with the admission its removal ends. A member
+   * that never heard of an admission omits the machine without a removal: an
+   * omission says nothing, a removal of the admission a client knows says the
+   * machine is out. Absent when none, and from a core older than this field.
+   */
+  removed?: GroupRemoval[];
   /** The phones and browsers of the group. A device reads only its own entry. */
   devices: GroupDevice[];
   /** The id of the device that asked, when a device asked. */
