@@ -121,7 +121,7 @@ test('agents reach each other by a short address, find by chat, read and wait fo
   const wait = coordination.wait.bind(coordination);
   const late = spyOn(coordination, 'wait').mockImplementation(async (...args) => { await Bun.sleep(500); return wait(...args); });
   const waiting = () => (coordination as unknown as { waiters: Map<string, unknown> }).waiters.has(threadId);
-  const answering = waitFor(waiting).then(() => coordination.send({ threadId: other, to: self, text: 'Restart it, I am done.', requestId: 'answer' }));
+  const answering = waitFor(waiting, 10_000).then(() => coordination.send({ threadId: other, to: self, text: 'Restart it, I am done.', requestId: 'answer' }));
   const sent = await boite(['agents', 'send', other, 'May I restart staging?', '--wait', '--timeout', '10']);
   await answering;
   late.mockRestore();
