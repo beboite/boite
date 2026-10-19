@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RemoteBrowserFrame, RemoteBrowserUnchanged } from '@boite/contracts';
-import { connect, type CoreClient } from '../../src/client.ts';
+import { connect, SOCKET_OPTIONS, type CoreClient } from '../../src/client.ts';
 import { chromiumArgs, findChromium, waitForEndpoint } from '../../src/browser/chromium.ts';
 import { echoThread, startTestCore, type TestCore } from '../harness.ts';
 
@@ -161,7 +161,7 @@ export function createBrowserFixture() {
     try {
       const args = chromiumArgs(dir, 'linux').filter(arg => arg !== '--remote-debugging-pipe');
       browser = Bun.spawn([findChromium().path!, ...args, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', ...extraArgs], { stdout: 'ignore', stderr: 'ignore' });
-      const connectedSocket = socket = new WebSocket(await waitForEndpoint(dir, browser.exited));
+      const connectedSocket = socket = new WebSocket(await waitForEndpoint(dir, browser.exited), SOCKET_OPTIONS as unknown as string[]);
       await new Promise<void>((resolve, reject) => {
         const finish = (error?: Error) => {
           clearTimeout(timer);

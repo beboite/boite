@@ -1,0 +1,30 @@
+export const strings = {
+  resources: {
+    memory: 'Memory',
+    resolved: (mb: number) => `${Math.round(mb)} MB`,
+    auto: (mb: number) => `Auto: ${Math.round(mb)} MB`,
+    agents: 'Agents / budget',
+    available: 'Available / reserve',
+    unknown: 'Not available',
+    state: 'Protection status',
+    states: { ok: 'Enough memory', critical: 'Memory limit crossed' },
+    killTitle: 'Process stopped to free memory',
+    killCount: (count: number) => `${count} processes stopped to free memory`,
+    stoppedProcesses: (count: number) => `Show ${count} stopped processes`,
+    memorySettings: 'Memory settings',
+    protectionOff: 'Memory protection is off',
+    killReason: {
+      'thread-quota': (limit: string) => `This conversation exceeded its ${limit} memory limit.`,
+      budget: (limit: string) => `The agents exceeded their ${limit} shared memory budget.`,
+      machine: (limit: string) => `Available memory fell below the ${limit} reserve.`,
+    },
+    threadCap: 'This conversation reached its memory limit. Boite refused more memory.',
+    budget: 'The agents reached their shared memory budget. Boite refused more memory.',
+    throttled: (limit: string) => `This conversation's processes are slowed by their ${limit} memory limit. They stall instead of failing.`,
+    empty: 'Nothing is running right now.',
+    processes: 'processes',
+    killTree: 'Kill tree',
+    killConfirm: 'Kill every process of this thread?',
+    killConfirmYes: 'Kill',
+  }
+} as const;

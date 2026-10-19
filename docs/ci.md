@@ -34,6 +34,8 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
+A pull request whose selection includes desktop also runs [Bundle growth](#bundle-growth).
+
 The changes job always installs frozen dependencies, runs `bun audit`, local
 link checks, `bun test scripts/ci ./bench ./apps/shell/scripts`, architecture
 checks and their tests, and translation validation. Changes to workflows,
@@ -222,25 +224,20 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 495,400 |
-| UI files, excluding `.br` and `.gz` copies | 4,883,400 |
+| UI entry chunk | 492,300 |
+| UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,500,900 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,494,900 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-19, the sign-in card (PR #604) merged with `origin/main` at
-`a30478ff` measures 494,857 entry bytes, 4,882,834 UI bytes and 4,500,422 core
-JavaScript bytes with `measure()` after fresh `bun run build:ui` and
-`bun run build:core` on Windows, against 492,249 and 4,869,493 recorded below
-for PR #603 and 4,494,324 for PR #616. The card adds 13,341 UI bytes: 2,608 in the
-entry chunk (its loader, card routing and contracts), about 1,540 of
-sentences, and the rest in the lazy `SignInCard` chunk (its browser hosted on
-the Agents page, and `lib/thread-holds.ts`, which shares a hidden thread's
-subscription between cards) and the browser surface it splits from the
-panel's chunk. `browser login`, `browser/sign-in.ts` and the `browser.signIn`
-routes add 6,098 core bytes. The entry, UI and core JavaScript limits rise to
-495,400, 4,883,400 and 4,500,900; `main.js` stays.
+On 2026-10-19, PR #622 merged with `origin/main` at `68033379` measures
+4,494,650 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,494,397 for that main: holding a
+roster offer while one is on its way adds 253 bytes. PR #623, which opens Bun
+WebSockets without permessage-deflate, adds 177 more on top of both
+(4,494,827). The core JavaScript limit rises to 4,494,900 to cover the two;
+the other limits stay.
 
 On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
 4,494,324 core JavaScript bytes with the same rule after a fresh
@@ -1033,6 +1030,33 @@ total limit 4,070,000; the entry chunk (518,508 bytes) and `main.js` limits are
 unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
+
+### Bundle growth
+
+`bundle-size.yml` builds the UI and the core on Linux for every push to main,
+one job that the next push never cancels, and measures four sizes with
+`scripts/ci/budgets.ts`: the UI entry chunk, the UI files without their `.br`
+and `.gz` copies, the core `dist/main.js`, and all emitted core JavaScript with
+lazy chunks and workers, excluding native binaries and source maps. It keeps
+them 90 days as the `bundle-sizes` artifact. The `Bundle size` job in `ci.yml`
+measures a pull request the same way when the desktop build covers its change. No file in the repository
+holds a limit, so a pull request never edits a shared one to grow:
+`scripts/ci/budgets.json` and the dated size notes above are no longer read.
+
+A pull request is checked twice:
+
+- Against its base: the sizes `bundle-size.yml` kept for the base commit, or
+  the base built in the same job when that run is missing or still going. A measure
+  growing more than 0.1 % fails until the pull request body explains it under
+  a `## Bundle size` heading. The body is read when the job runs: after
+  editing it, rerun the failed jobs (`gh run rerun <run-id> --failed`).
+- Against a ceiling: the sizes `bundle-size.yml` kept for the newest published
+  nightly or release, plus 2 %. A reason does not lift it; only publishing
+  does, so a pull request over it waits for the next nightly or shrinks.
+
+The job summary shows each measure, its base, the growth and the ceiling.
+Reproduce a measurement with `bun run build:ui && bun run build:core &&
+bun scripts/ci/budgets.ts measure sizes.json`.
 
 ### E2E preparation
 
