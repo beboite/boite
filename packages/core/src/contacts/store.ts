@@ -17,6 +17,7 @@
 import { randomUUID, verify } from 'node:crypto';
 import type { AgentContact, Contact, ContactGrant, ContactInvite, ContactOffer, ContactRequest, ContactSettings, ContactsState, ContactTailscale, CoordinationBridgeResponse, CoordinationPeer, ModelTier, RpcEvents, RpcParams, RpcResult } from '@boite/contracts';
 import { text } from '../coordination-letter.ts';
+import { SOCKET_OPTIONS } from '../client.ts';
 import type { BridgeRoute } from '../coordination-bridge.ts';
 import { PeerRefusal } from '../coordination-wire.ts';
 import type { Core } from '../core.ts';
@@ -781,7 +782,7 @@ export class ContactStore {
     let socket: WebSocket;
     try {
       // Bun's client takes headers; the hello rides in them, before any frame.
-      socket = new WebSocket(`${contact.url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, { headers } as unknown as string[]);
+      socket = new WebSocket(`${contact.url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, { ...SOCKET_OPTIONS, headers } as unknown as string[]);
     } catch {
       this.backoff.failed(contact.coreId, 'link');
       return;
