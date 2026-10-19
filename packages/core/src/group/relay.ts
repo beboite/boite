@@ -31,6 +31,7 @@ import type { ServerWebSocket } from 'bun';
 import { FILE_ROUTE, GROUP_RELAY_ROUTE, PROTOCOL_VERSION, RPC_PATH, RpcErrorCode, VIEW_ROUTE } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
+import { TextSocket } from '../ws-client.ts';
 import { OUTBOUND_CONGESTION_TIMEOUT_MS, OUTBOUND_MAX_BUFFERED_BYTES } from '../server/connection.ts';
 import { ticketAddresses } from './addresses.ts';
 
@@ -75,7 +76,8 @@ export interface RelaySocketData {
   relay: RelayPipe;
 }
 
-type Upstream = WebSocket;
+/** Not Bun's own WebSocket, which closes sound streams from a core's server with 1002 or 1011 (`ws-client.ts`). */
+type Upstream = TextSocket;
 
 /**
  * Who may be carried: a key this machine issued, or its own owner's token,
@@ -258,13 +260,8 @@ export class RelayPipe {
       void this.open(text);
       return;
     }
-    if (this.upstream !== null && this.upstream.readyState === WebSocket.OPEN) {
-      // A throw here would leave the server's handler and this pipe would stay in the hub: both sides close instead.
-      try {
-        this.upstream.send(text);
-      } catch {
-        this.close(1011, 'the other machine dropped the connection');
-      }
+    if (this.upstream !== null && this.upstream.open) {
+      this.upstream.send(text);
       return;
     }
     this.queued += Buffer.byteLength(text);
@@ -319,24 +316,12 @@ export class RelayPipe {
       return;
     }
     this.upstream = upstream;
-    upstream.onmessage = (event) => {
-      const data = event.data;
-      this.forward(typeof data === 'string' ? data : Buffer.from(data as ArrayBuffer));
-    };
-    upstream.onclose = (event) => this.close(SENDABLE(event.code) ? event.code : 1011, event.reason || 'the other machine closed the connection');
-    upstream.onerror = () => this.close(1011, 'the other machine dropped the connection');
-    // Closed before its handlers were in place: nothing would ever say so.
-    if (upstream.readyState !== WebSocket.OPEN) {
-      this.close(1011, 'the other machine dropped the connection');
-      return;
-    }
-    try {
-      upstream.send(JSON.stringify({ ...frame, params: rest }));
-      for (const queued of this.queue) upstream.send(queued);
-    } catch {
-      this.close(1011, 'the other machine dropped the connection');
-      return;
-    }
+    // What came before these were in place waits for them, a close included.
+    upstream.onMessage((text) => this.forward(text));
+    upstream.onClose((event) => this.close(SENDABLE(event.code) ? event.code : 1011, event.reason || 'the other machine closed the connection'));
+    if (this.closed) return;
+    upstream.send(JSON.stringify({ ...frame, params: rest }));
+    for (const queued of this.queue) upstream.send(queued);
     this.queue = [];
     this.queued = 0;
   }
@@ -349,10 +334,10 @@ export class RelayPipe {
    * reconnect, and loads a fresh snapshot, rather than missing frames on a
    * socket that stays open.
    */
-  private forward(data: string | Buffer): void {
+  private forward(data: string): void {
     const socket = this.socket;
     if (this.closed || socket === null) return;
-    const bytes = typeof data === 'string' ? Buffer.byteLength(data) : data.length;
+    const bytes = Buffer.byteLength(data);
     try {
       if (socket.getBufferedAmount() + bytes > OUTBOUND_MAX_BUFFERED_BYTES) {
         this.close(1013, 'connection exceeded outgoing buffer limit; reconnect');
@@ -385,30 +370,8 @@ export class RelayPipe {
   private async dial(targets: string[]): Promise<Upstream | null> {
     for (const target of targets) {
       if (this.closed) return null;
-      const opened = await new Promise<Upstream | null>((resolve) => {
-        let socket: Upstream;
-        try {
-          socket = new WebSocket(`${target.replace(/^http/, 'ws')}${RPC_PATH}`);
-        } catch {
-          resolve(null);
-          return;
-        }
-        const timer = setTimeout(() => {
-          socket.onopen = socket.onerror = socket.onclose = null;
-          try { socket.close(); } catch { /* never opened */ }
-          resolve(null);
-        }, DIAL_MS);
-        socket.onopen = () => {
-          clearTimeout(timer);
-          socket.onopen = socket.onerror = socket.onclose = null;
-          resolve(socket);
-        };
-        socket.onerror = socket.onclose = () => {
-          clearTimeout(timer);
-          socket.onopen = socket.onerror = socket.onclose = null;
-          resolve(null);
-        };
-      });
+      // The other core deflates what it sends a client that is not on its loopback: offered, as Bun's client did.
+      const opened = await TextSocket.connect(`${target.replace(/^http/, 'ws')}${RPC_PATH}`, DIAL_MS, { deflate: true }).catch(() => null);
       if (opened !== null) {
         this.core.group.reached(this.coreId, target);
         return opened;
@@ -441,8 +404,8 @@ export class RelayPipe {
     const upstream = this.upstream;
     this.upstream = null;
     if (upstream !== null) {
-      upstream.onmessage = upstream.onclose = upstream.onerror = null;
-      try { upstream.close(SENDABLE(code) ? code : 1000, reason.slice(0, 120)); } catch { /* already gone */ }
+      // Its close comes back to `close`, which has already run.
+      upstream.close(SENDABLE(code) ? code : 1000, reason.slice(0, 120));
     }
     try { this.socket?.close(SENDABLE(code) ? code : 1011, reason.slice(0, 120)); } catch { /* already gone */ }
     this.hub.ended(this);

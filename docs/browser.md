@@ -420,9 +420,13 @@ any browser profile.
 
 On Windows Bun cannot open those descriptors (`EBADF`, CI on 2026-10-05), so
 the browser listens on a random port of 127.0.0.1 and the core connects to it.
-That port has no authentication: a process of the same PC that finds it can
-drive the browser, signed-in profiles included. Do not copy sign-ins into the
-agent browser of a Windows machine other people have an account on.
+The core reads that socket with its own WebSocket client on `Bun.connect`
+(`packages/core/src/ws-client.ts`), as it does every socket it opens to
+another core: Bun's client (1.4.2 and 1.4.3) lost frames of sound streams and
+closed them with 1002 or 1011. That port has no authentication: a process of
+the same PC that finds it can drive the browser, signed-in profiles included.
+Do not copy sign-ins into the agent browser of a Windows machine other people
+have an account on.
 
 ## Verification
 

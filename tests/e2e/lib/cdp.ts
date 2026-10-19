@@ -6,7 +6,7 @@ import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui
 import type { Subprocess } from 'bun';
 import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
 import { uiServerSide } from './ui-requests.ts';
-import { TextSocket } from './ws-client.ts';
+import { TextSocket } from '../../../packages/core/src/ws-client.ts';
 
 /**
  * Marks the tour seen before any script of the page runs, and only where no
@@ -905,7 +905,7 @@ export async function probeDebuggingPort(port: number): Promise<string> {
   }
 }
 
-/** Bun's own WebSocket client closes sound devtools streams with 1002: see `ws-client.ts`. */
+/** Bun's own WebSocket client closes sound devtools streams with 1002: see `packages/core/src/ws-client.ts`. */
 async function openSocket(target: TargetInfo): Promise<TextSocket> {
   const url = target.webSocketDebuggerUrl;
   if (url === undefined) throw new Error('the page target has no debugger url');
