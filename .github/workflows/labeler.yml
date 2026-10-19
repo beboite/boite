@@ -8,6 +8,12 @@ on:
 
 permissions: {}
 
+# Only the newest push of a pull request needs labels: it replaces a run still
+# queued or running, so pushes do not pile labeler runs into the runner queue.
+concurrency:
+  group: labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   label:
     runs-on: ubuntu-24.04

@@ -412,7 +412,9 @@ group. Workspace minor/patch updates share another PR; majors are separate.
 
 The labeler uses `.github/labeler.yml` for `core`, `ui`, `shell`, `server`, `ci`
 and `documentation`. It runs on `pull_request_target` without checking out or
-executing PR code, with write scope limited to pull-request labels.
+executing PR code, with write scope limited to pull-request labels. A newer
+push cancels the pull request's labeler run still queued or running: on
+2026-10-19, 43 labeler runs were queued at once.
 
 ## Releases and server images
 
