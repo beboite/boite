@@ -3,7 +3,7 @@ import { AGENT_ENV, DEFAULT_DELEGATION_CONFIG, type ThreadId } from '@boite/cont
 import { runCli } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
-import { Delegation } from '../src/delegation.ts';
+import { Retirements } from '../src/delegation/retirement.ts';
 import { PullRequestWatches } from '../src/pull-request-watch.ts';
 import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -576,7 +576,7 @@ test('a restart between a retiring subagent\'s last delivery and its archive ret
 
 test('a retirement that throws on start is logged and the core still starts', async () => {
   const child = await retiringOnDisk();
-  const retire = spyOn(Delegation.prototype as unknown as { retireIfDone(): void }, 'retireIfDone').mockImplementation(() => { throw new Error('journal busy'); });
+  const retire = spyOn(Retirements.prototype, 'check').mockImplementation(() => { throw new Error('journal busy'); });
   let restarted: Core;
   try { restarted = new Core({ dataDir: harness!.dataDir, token: harness!.token }); } finally { retire.mockRestore(); }
   try {
