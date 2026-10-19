@@ -601,15 +601,21 @@ describe('harness updates', () => {
     const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
     const parent = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'parent' });
     await client.call('delegation.configure', { threadId: parent.id, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: 'update-fake', accountId: account.id, model: 'default', effort: null }] } });
+    // The child starts its CI loop in its first turn, which ends on that checkpoint: it stays open while the loop runs.
+    const off = core.bus.onAny((name, payload) => {
+      const turn = payload as { threadId: string };
+      if (name !== 'turn.started' || core.threads.require(turn.threadId).parentThreadId !== parent.id) return;
+      off();
+      core.threads.agentState.noteBackground(turn.threadId, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: Date.now() }]);
+    });
     const child = (await client.call('delegation.spawn', { threadId: parent.id, profileId: 'worker', task: 'watch CI', requestId: 'ci' })).thread.id;
     const server = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'dev server' });
     const turn = await client.call('turns.start', { threadId: server.id, prompt: 'start the dev server' });
     await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done' && core.journal.listTurns(child).at(-1)?.status === 'done', 20000);
     // The child's result wakes its parent: let that turn end too.
     await waitFor(() => core.journal.unfinishedTurns().length === 0, 20000);
-    // Each turn started its work before it ended on a checkpoint.
+    // The server's turn started its work before it ended on a checkpoint.
     const during = (threadId: string) => core.journal.listTurns(threadId).at(-1)!.finishedAt! - 1;
-    core.threads.agentState.noteBackground(child, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: during(child) }]);
     core.threads.agentState.noteBackground(server.id, [{ id: 'bg-dev', kind: 'shell', description: 'dev server', toolId: null, startedAt: during(server.id) }]);
     const started = Date.now();
 
@@ -666,13 +672,19 @@ describe('harness updates', () => {
     const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
     const parent = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'parent' });
     await client.call('delegation.configure', { threadId: parent.id, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: 'update-fake', accountId: account.id, model: 'default', effort: null }] } });
+    // The child starts its CI loop in its first turn, which ends on that checkpoint: it stays open while the loop runs.
+    const off = core.bus.onAny((name, payload) => {
+      const turn = payload as { threadId: string };
+      if (name !== 'turn.started' || core.threads.require(turn.threadId).parentThreadId !== parent.id) return;
+      off();
+      core.threads.agentState.noteBackground(turn.threadId, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: Date.now() }]);
+    });
     const child = (await client.call('delegation.spawn', { threadId: parent.id, profileId: 'worker', task: 'watch CI', requestId: 'ci' })).thread.id;
     const server = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'dev server' });
     const turn = await client.call('turns.start', { threadId: server.id, prompt: 'start the dev server' });
     await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done' && core.journal.listTurns(child).at(-1)?.status === 'done', 20000);
     await waitFor(() => core.journal.unfinishedTurns().length === 0, 20000);
     const during = (threadId: string) => core.journal.listTurns(threadId).at(-1)!.finishedAt! - 1;
-    core.threads.agentState.noteBackground(child, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: during(child) }]);
     core.threads.agentState.noteBackground(server.id, [{ id: 'bg-dev', kind: 'shell', description: 'dev server', toolId: null, startedAt: during(server.id) }]);
     const childTurns = core.journal.listTurns(child).length;
 
