@@ -628,6 +628,10 @@ the same shell details. The whole text lands in
 the process tree 10 s, so a stuck WMI query costs the tree, not the error. A
 missing `main-window` startup phase means the main webview was never built; a
 phase with no `shell.webview.page-load` means the page never started loading.
+A page that is exposed but never gets its IPC bridge fails in
+`waitForShellPage` with its frame tree, its navigation history and each
+main-frame navigation event and document request devtools saw since the
+attach, with how the request ended, in `shell-<pid>-not-ready.txt`.
 
 ## Staging the sidecar
 

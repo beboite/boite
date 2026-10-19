@@ -89,3 +89,26 @@ test('an artifact that cannot be written keeps the wait failure and says why it 
     rmSync(artifact, { recursive: true, force: true });
   }
 }, 60_000);
+
+// The run of 2026-10-19 (39288093294): the shell's page-load said started and
+// finished, yet the frame stayed about:blank. A navigation that ends without a
+// document behaves the same; the report must say it was tried and how it ended.
+test('a navigation that leaves the page on about:blank is named in the report with how its document request ended', async () => {
+  await using blank = await blankShell();
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response(null, { status: 204 }) });
+  try {
+    await blank.page.evaluate(`(location.href = ${JSON.stringify(`${server.url}app?ticket=secret`)}, null)`);
+    await Bun.sleep(500);
+    const failure = await waitForShellPage(blank.page, blank.shell, 500).then(() => null, (error: unknown) => error as Error);
+    const report = failure!.message;
+    expect(report).toMatch(/Page\.getFrameTree: \{"frameTree":\{"frame":\{"id":"[^"]+","loaderId":"[^"]+","url":"about:blank"/);
+    const section = report.slice(report.indexOf('Main frame navigation since the devtools socket opened ('));
+    expect(section).toMatch(/^Main frame navigation since the devtools socket opened \(\d+\):\n/);
+    const request = section.indexOf(`ms document request ${server.url.href}app loader `);
+    expect(request).toBeGreaterThan(0);
+    expect(section.indexOf('ms document response HTTP 204', request)).toBeGreaterThan(request);
+    expect(report).not.toContain('secret');
+  } finally {
+    server.stop(true);
+  }
+}, 60_000);

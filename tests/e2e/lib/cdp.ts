@@ -27,6 +27,8 @@ const PROBE_TIMEOUT_MS = 5_000;
 /** How long a failed attach waits for its launcher's diagnosis. */
 const DIAGNOSIS_TIMEOUT_MS = 20_000;
 const WAIT_DIAGNOSTIC_TIMEOUT_MS = 250;
+/** Main-frame navigation events a page keeps for its failure reports. */
+const NAVIGATION_EVENTS = 30;
 /** What a page that left an evaluate hanging is doing: frames drawn in a second, fonts and animations still pending. */
 const HUNG_PAGE = `new Promise((resolve) => {
   let frames = 0;
@@ -213,7 +215,18 @@ export class BrowserPage {
   #paused: ((frames: string) => void) | null = null;
   /** Completed failures would otherwise disappear from the timeout's in-flight list. */
   #networkFailures: string[] = [];
+  /**
+   * What devtools said of the main frame's navigations, oldest first, timed
+   * from when this page opened its socket: a page left on about:blank shows
+   * whether a navigation reached it, where to, and how its document request
+   * ended. Main frame only, the last `NAVIGATION_EVENTS`.
+   */
+  #navigations: string[] = [];
+  #opened = Date.now();
+  /** Main-frame document requests still loading, by request id. */
+  #documents = new Set<string>();
   errors(): string[] { return [...this.#pageErrors]; }
+  navigationLog(): string[] { return [...this.#navigations]; }
   /** The profile `launch` made for this page and removes on close; null when the caller owns it. */
   get profileDir(): string | null { return this.#userDataDir; }
   /** The browser's pid, null for a page `attach` drives. */
@@ -379,6 +392,8 @@ export class BrowserPage {
   async #prepareAttached(): Promise<BrowserPage> {
     await this.send('Page.enable', {});
     await this.send('Runtime.enable', {});
+    // A page launched here reports its requests; one attached to, its own document request too (`navigationLog`).
+    await this.send('Network.enable', {});
     await this.#enableHangProbes();
     // The page booted before we got here, on a profile as new as the data
     // directory it sits in: it read "never seen" already. Record the tour and
@@ -731,7 +746,8 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
       params?: {
         exceptionDetails?: { text?: string; exception?: { description?: string } };
         requestId?: string; frameId?: string; loaderId?: string; wallTime?: number; request?: { url?: string }; response?: { status?: number }; errorText?: string;
-        frame?: { id: string; loaderId: string };
+        frame?: { id: string; loaderId: string; url?: string; parentId?: string };
+        url?: string; reason?: string; type?: string; canceled?: boolean; blockedReason?: string;
         callFrames?: { functionName: string; url: string; location: { lineNumber: number; columnNumber: number } }[];
       };
       result?: unknown;
@@ -761,6 +777,13 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
         else void this.send('Debugger.resume', {}).catch(() => undefined);
         return;
       }
+      if (frame.method?.startsWith('Page.frame') && (frame.params?.frameId ?? frame.params?.frame?.id) === this.#target.id) {
+        const params = frame.params!;
+        const detail = frame.method === 'Page.frameNavigated' ? ` ${params.frame!.url} loader ${params.frame!.loaderId}`
+          : frame.method === 'Page.frameRequestedNavigation' ? ` ${params.url} (${params.reason})`
+            : frame.method === 'Page.frameStartedNavigating' ? ` ${params.url} loader ${params.loaderId}` : '';
+        this.#navigated(`${frame.method}${detail}`);
+      }
       if (frame.method === 'Page.frameNavigated') {
         // Chrome sends nothing more about the requests of a document a
         // navigation replaced: they would read as unanswered forever.
@@ -773,6 +796,17 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
       const id = frame.params?.requestId;
       if (id !== undefined) {
         const url = frame.params?.request?.url ?? '';
+        if (frame.method === 'Network.requestWillBeSent' && frame.params?.type === 'Document' && frame.params.frameId === this.#target.id) {
+          this.#documents.add(id);
+          this.#navigated(`document request ${url.split(/[?#]/, 1)[0]} loader ${frame.params.loaderId}`);
+        } else if (this.#documents.has(id) && frame.method === 'Network.responseReceived') {
+          this.#navigated(`document response HTTP ${frame.params?.response?.status}`);
+        } else if (this.#documents.has(id) && (frame.method === 'Network.loadingFinished' || frame.method === 'Network.loadingFailed')) {
+          this.#documents.delete(id);
+          const params = frame.params!;
+          this.#navigated(frame.method === 'Network.loadingFinished' ? 'document loaded'
+            : `document failed: ${params.errorText ?? 'no error text'}${params.canceled ? ', canceled' : ''}${params.blockedReason ? `, blocked (${params.blockedReason})` : ''}`);
+        }
         if (frame.method === 'Network.requestWillBeSent' && !url.startsWith('data:')) {
           const early = this.#early.get(id);
           this.#early.delete(id);
@@ -807,6 +841,12 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     clearTimeout(pending.timer);
     if (frame.error !== undefined) pending.reject(new Error(frame.error.message ?? 'devtools error'));
     else pending.resolve(frame.result);
+  }
+
+  #navigated(line: string): void {
+    // Pairing and ticket query strings belong to the test, never to its failure log.
+    this.#navigations.push(`+${Date.now() - this.#opened} ms ${line.replace(/(https?:\/\/[^\s?#]*)[?#]\S*/g, '$1')}`);
+    if (this.#navigations.length > NAVIGATION_EVENTS) this.#navigations.shift();
   }
 
   #recordNetworkFailure(id: string, reason: string): void {
