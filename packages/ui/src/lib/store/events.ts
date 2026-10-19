@@ -13,6 +13,7 @@ import { strings } from '../strings';
 import { needsUser } from '../thread-state';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
+import { reportPreferences } from '../client-preferences.svelte';
 import { lightPage } from './reading-pages.svelte';
 import type { StoreContext } from './context';
 import { probeKey } from './models.svelte';
@@ -67,6 +68,9 @@ export function listen(ctx: StoreContext, client: Client): void {
       })
     );
   }
+
+  // After the state handler above, so a reconnect has its principal and core first.
+  if (observable(client)) ctx.off.push(reportPreferences(client, current));
 
   on('core.updateChanged', snapshot => ctx.serverUpdater.apply(snapshot));
   on('core.desktopUpdateChanged', ({ status }) => { if (!s.localCore) ctx.serverUpdater.applyDesktop(status); });

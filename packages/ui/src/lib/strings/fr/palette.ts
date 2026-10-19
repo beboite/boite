@@ -3,9 +3,12 @@ import type { Translation } from '../../i18n.svelte';
 export const fr: Translation = {
 
   palette: {
-    placeholder: 'Cherchez une conversation, ou tapez une commande',
+    placeholder: 'Cherchez une conversation, un projet ou une commande',
+    projects: 'Projets',
+    /** Extra words a project row answers to: picking one starts a thread there. */
+    newThreadWords: 'nouvelle conversation démarrer brouillon new thread',
+    find: 'Chercher dans cette conversation',
     terminal: 'Afficher ou masquer le terminal',
-    threads: 'Conversations',
     commands: 'Commandes',
     empty: 'Rien ne correspond.',
     hint: 'Entrée pour ouvrir, Échap pour fermer',

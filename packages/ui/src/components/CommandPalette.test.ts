@@ -66,14 +66,50 @@ test('closed until asked, then the recents come first and the commands after the
   expect(document.querySelector('[data-testid=palette]')).not.toBeNull();
   expect(document.activeElement?.getAttribute('data-testid')).toBe('palette-input');
   const ids = rows();
-  // Every seeded thread first, then the commands; nothing typed.
+  // Every seeded thread first, then the commands; nothing typed, no project rows.
   expect([...ids.slice(0, 4)].sort()).toEqual(['thread:t-bench', 'thread:t-descriptors', 'thread:t-scheduler', 'thread:t-trace']);
   expect(ids).toContain('new-thread');
   expect(ids).toContain('settings');
+  expect(ids.some((id) => id.startsWith('project:'))).toBe(false);
   expect(ids.at(-1)).toBe('archive');
   expect(selectedId()).toBe(ids[0]);
-  expect(document.body.textContent).toContain('Threads');
+  // Each project's threads sit together under its name, the commands after them.
+  const sections = Array.from(document.querySelectorAll<HTMLElement>('[data-testid=palette-section]'));
+  const of = (section: HTMLElement) => Array.from(section.querySelectorAll('[data-testid=palette-row]')).map((row) => row.getAttribute('data-palette-id'));
+  expect(sections.map((section) => section.querySelector('[data-testid=palette-project] .name')?.textContent ?? 'commands')).toEqual(['notes', 'boite', 'commands']);
+  expect(of(sections[0]!)).toEqual(['thread:t-descriptors']);
+  expect(of(sections[1]!).sort()).toEqual(['thread:t-bench', 'thread:t-scheduler', 'thread:t-trace']);
+  // A row says what its thread is doing, the way the sidebar does.
+  expect(document.querySelector('[data-palette-id="thread:t-bench"]')?.textContent).toContain('Needs you');
   expect(document.body.textContent).toContain('Commands');
+});
+
+test('a query finds a project by its name and folder, and Enter starts a thread there with the keyboard in the composer', async () => {
+  const composer = document.createElement('textarea');
+  composer.dataset['testid'] = 'composer-input';
+  document.body.append(composer);
+  store.paletteOpen = true;
+  flushSync();
+  await tick();
+
+  // "boite src" lands one word on the name, the other on the folder.
+  await type('boite src');
+  const project = rows().find((id) => id.startsWith('project:'));
+  expect(project).toBe('project:["local","p-boite"]');
+  expect(rows()).not.toContain('project:["local","p-notes"]');
+  while (selectedId() !== project) key('ArrowDown');
+  // WebKit sends the Enter that confirms an IME candidate with keyCode 229.
+  const input = document.querySelector<HTMLInputElement>('[data-testid=palette-input]')!;
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true, cancelable: true }));
+  flushSync();
+  expect(store.paletteOpen).toBe(true);
+  key('Enter');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await tick();
+  expect(store.paletteOpen).toBe(false);
+  expect(store.openThread).toBeNull();
+  expect(store.draft?.projectId).toBe('p-boite');
+  expect(document.activeElement).toBe(composer);
 });
 
 test('typing filters across threads and commands, the arrows move, Enter opens the thread', async () => {

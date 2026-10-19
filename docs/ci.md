@@ -104,7 +104,12 @@ checks against Debian, extracted AppImage and macOS application bundles.
 These verify startup, UI serving, authenticated RPC and a fixture echo turn
 outside the checkout. Native WebView2 E2E remains Windows-only.
 
-New commits cancel older ordinary runs for the same PR or main ref. Stable
+New commits cancel an older run of the same PR. A main run is never cancelled:
+the newest push waits behind it and replaces any push still waiting, so each
+run tests everything merged since the last green commit. After the green run
+of 2026-10-18 20:52 UTC, the next merge cancelled 11 of the 12 main runs
+started before 2026-10-19 03:30 and the twelfth failed, so the nightly had no
+green commit to publish (`commit-ci.ts`). Stable
 release and publication groups include the ref and SHA, so different versions
 do not replace each other's pending run. Nightlies retain one shared group:
 a running publication finishes, while newer pending work can supersede older

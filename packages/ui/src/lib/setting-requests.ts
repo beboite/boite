@@ -5,7 +5,8 @@
  * are in `packages/contracts/src/setting-requests.ts`, the core's cards in
  * `packages/core/src/threads/cards.ts`.
  */
-import type { AutoCompactMoment, ProviderSummary, RequestableSetting, SettingAsk, SettingsPage } from '@boite/contracts';
+import { experimentOf, type AutoCompactMoment, type ProviderSummary, type RequestableKey, type RequestableSetting, type SettingAsk, type SettingsPage } from '@boite/contracts';
+import { experimentCopy } from './experiment-copy';
 import { formatLocale } from './i18n.svelte';
 import { fill, strings } from './strings';
 import { formatTokens } from './format';
@@ -26,19 +27,27 @@ export function settingHeading(setting: SettingAsk): string {
   return setting.kind === 'open' ? words.headingOpen : setting.sensitive ? words.headingSensitive : words.heading;
 }
 
-export function settingLabel(key: RequestableSetting): string {
-  return strings.settingRequest.keys[key] ?? key;
+export function settingLabel(key: RequestableKey): string {
+  const experiment = experimentOf(key);
+  if (experiment !== null) return experimentCopy()[experiment].title;
+  return strings.settingRequest.keys[key as RequestableSetting] ?? key;
+}
+
+/** What the setting does, as the Settings page explains it; null where the card's name says enough. */
+export function settingHint(key: RequestableKey): string | null {
+  const experiment = experimentOf(key);
+  return experiment === null ? null : experimentCopy()[experiment].hint;
 }
 
 /** A value as the card shows it: `60 %`, `On`, `512 MB`, `In D:/worktrees`. */
-export function settingValueText(key: RequestableSetting, value: unknown, providers: readonly ProviderSummary[] = []): string {
+export function settingValueText(key: RequestableKey, value: unknown, providers: readonly ProviderSummary[] = []): string {
   const words = strings.settingRequest;
   if (value === null || value === undefined) return words.none;
   if (typeof value === 'boolean') return value ? words.on : words.off;
   if (typeof value === 'number') {
-    const zero = (words.zero as Partial<Record<RequestableSetting, string>>)[key];
+    const zero = (words.zero as Partial<Record<RequestableKey, string>>)[key];
     if (value === 0 && zero !== undefined) return zero;
-    const unit = UNITS[key];
+    const unit = UNITS[key as RequestableSetting];
     return new Intl.NumberFormat(formatLocale(), unit ? { style: 'unit', unit: unit.unit, unitDisplay: unit.display } : {}).format(value);
   }
   if (typeof value === 'string') return value;

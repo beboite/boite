@@ -30,11 +30,11 @@ test('height-capped desktop popovers can scroll to their last action', async () 
       await escape(page);
       await page.waitFor(`!document.querySelector('[data-testid="${popup}"]')`);
     }
-    // Rows with a hint are taller than the minimum: capped, the list scrolls and none of them shrinks onto the next.
+    // Capped by a short window, the project list scrolls and none of its rows shrinks onto the next.
     // A label's ink room overflows its row by under 3px at rest; a squashed row lost 7px or more.
     await page.evaluate('globalThis.__boiteTest.workspace.active.startDraft(null)');
     await page.waitFor('document.querySelector("[data-testid=draft-project]")');
-    await page.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 330, deviceScaleFactor: 1, mobile: false });
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 220, deviceScaleFactor: 1, mobile: false });
     await page.click('[data-testid=draft-project]');
     await page.waitFor('document.querySelector("[data-testid=draft-project-menu]")');
     await page.settleAnimations();

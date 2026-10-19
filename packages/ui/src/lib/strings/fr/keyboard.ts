@@ -39,7 +39,7 @@ export const fr: Translation = {
       pin: 'Épingler ou désépingler cette conversation',
       reopenThread: 'Rouvrir la dernière conversation archivée',
       copyAnswer: 'Copier la dernière réponse',
-      find: 'Chercher dans cette conversation',
+      find: 'Chercher dans cette conversation, ou choisir le projet d\'une nouvelle',
       terminalNew: 'Nouveau terminal',
       terminalSplit: 'Diviser le terminal à droite',
       terminalSplitVertical: 'Diviser le terminal en bas',
