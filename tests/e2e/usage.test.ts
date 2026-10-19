@@ -36,7 +36,9 @@ async function openUsage() {
 }
 
 async function openLimits() {
-  // Settings may already be open from the previous test, and its entry then lives in the nav.
+  // Settings may already be open from the previous test, and its entry then lives in the nav. Back from a
+  // phone width, the desktop's settings nav draws a frame after the resize: wait for one way or the other.
+  await page.waitFor(`document.querySelector('[data-testid=settings-tab-limits], [data-testid=nav-settings]')`);
   if (await page.evaluate<boolean>(`!document.querySelector('[data-testid=settings-tab-limits]')`)) {
     await page.click('[data-testid=nav-settings]');
   }

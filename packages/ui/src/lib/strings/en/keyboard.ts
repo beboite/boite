@@ -38,7 +38,7 @@ export const strings = {
       pin: 'Pin or unpin this thread',
       reopenThread: 'Reopen the thread archived last',
       copyAnswer: 'Copy the last answer',
-      find: 'Find in this thread',
+      find: 'Find in this thread, or pick a new thread\'s project',
       terminalNew: 'New terminal',
       terminalSplit: 'Split the terminal right',
       terminalSplitVertical: 'Split the terminal down',

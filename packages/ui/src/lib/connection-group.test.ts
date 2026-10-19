@@ -159,3 +159,16 @@ test('reopening after an interrupted admission records membership and respects a
   await new ConnectionGroup(workspace).merge();
   expect(target.store.group).toBeNull();
 });
+
+test('a machine keeps its last word of being in no group until it answers with one', async () => {
+  const { source } = await setup();
+  expect(source.store.ungrouped).toBe(true);
+  await source.store.createGroup('Home');
+  expect(source.store.ungrouped).toBe(false);
+  await source.store.leaveGroup();
+  expect(source.store.ungrouped).toBe(true);
+  // A new connection forgets what the group was, not what the machine last said of it.
+  source.store.groupKnown = false;
+  await source.store.loadGroup();
+  expect(source.store.ungrouped).toBe(true);
+});

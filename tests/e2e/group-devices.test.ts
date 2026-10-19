@@ -8,7 +8,7 @@ import { startUi } from './lib/ui.ts';
 import { startCore, type RunningCore } from './lib/core.ts';
 import { mobileAction } from './lib/mobile.ts';
 import { codeVideo } from './lib/qr-video.ts';
-import { connect, SOCKET_OPTIONS, type CoreClient } from '../../packages/core/src/client.ts';
+import { connect, type CoreClient } from '../../packages/core/src/client.ts';
 
 /**
  * A phone is a device of the group, not of one machine.
@@ -71,7 +71,7 @@ function proxy(core: RunningCore): ReturnType<typeof Bun.serve> {
     websocket: {
       open(socket: ServerWebSocket<Piped>) {
         const headers: Record<string, string> = { host: socket.data.host, ...(socket.data.origin === null ? {} : { origin: socket.data.origin }) };
-        const upstream = new WebSocket(`${core.url.replace(/^http/, 'ws')}${socket.data.path}`, { ...SOCKET_OPTIONS, headers } as unknown as string[]);
+        const upstream = new WebSocket(`${core.url.replace(/^http/, 'ws')}${socket.data.path}`, { headers } as unknown as string[]);
         upstream.binaryType = 'arraybuffer';
         socket.data.upstream = upstream;
         upstream.onopen = () => {
@@ -222,7 +222,7 @@ test('a phone installed from one machine scans the code of another and lists and
 
   // Settings, Machines on the phone: the group, its two machines and this phone, in one list.
   await mobileAction(phone, 'mobile-settings');
-  await phone.click(id('settings-tab-machines'));
+  await phone.click(id('mobile-settings-connection'));
   await phone.waitFor(`document.querySelectorAll('${id('machine-card')}').length === 2 && document.querySelector('${id('group-device')}')`);
   expect(await phone.evaluate(`document.body.textContent.includes('Phones and other devices')`)).toBe(false);
   await capture(phone, 'devices-phone-machines.png');

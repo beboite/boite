@@ -2,9 +2,10 @@ import { pullRequestAddress, type PullRequestWatch, type PullRequestWatchSeen, t
 import type { Core } from './core.ts';
 import { messageOf, refused } from './errors.ts';
 import {
-  DETAIL_QUERY, FINGERPRINT_QUERY, REMARK_PAGES, evaluate, initialMemory, mergeChanges, parseDetail, parseFingerprint, parseRemarks,
+  CLOSER_QUERY, DETAIL_QUERY, FINGERPRINT_QUERY, REMARK_PAGES, evaluate, initialMemory, mergeChanges, parseCloser, parseDetail, parseFingerprint, parseRemarks,
   rateLimited, remarkPath, wakeMessage, type Fingerprint, type Remark, type RemarkKind, type WatchChange, type WatchDetail, type WatchMemory,
 } from './pull-request-watch-read.ts';
+import { RequiredContexts, withRequired } from './pull-request-required.ts';
 import { withLoad } from './threads/records.ts';
 
 const PREFIX = 'pr-watches:';
@@ -40,10 +41,15 @@ interface WatchRecord {
   /** Changes not told yet, and since when they wait for the rest of their burst. */
   pending: WatchChange[];
   pendingSince: number | null;
+  /** Merged or closed by someone else: nothing is read any more, and the watch ends once that is told. */
+  ended?: boolean;
 }
 
-/** What only lives in memory: the next read, and why the last one got no answer. */
-interface Runtime { nextReadAt: number; failures: number; paused: PullRequestWatch['paused']; reading: boolean }
+/**
+ * What only lives in memory: the next read, why the last one got no answer,
+ * and the checks it read with which read of the base branch's rules judged them.
+ */
+interface Runtime { nextReadAt: number; failures: number; paused: PullRequestWatch['paused']; reading: boolean; detail: WatchDetail | null; rules: number | null }
 
 type Gh = (threadId: ThreadId, args: string[]) => Promise<string>;
 
@@ -59,6 +65,7 @@ export class PullRequestWatches {
   readonly #records = new Map<ThreadId, WatchRecord[]>();
   readonly #runtime = new Map<string, Runtime>();
   readonly #timing: WatchTiming;
+  readonly #required = new RequiredContexts();
   #timer: ReturnType<typeof setTimeout> | null = null;
   #timerAt = 0;
   #pass: Promise<void> | null = null;
@@ -82,17 +89,16 @@ export class PullRequestWatches {
       if (!records.length || !thread || thread.archived) { core.journal.deleteSetting(key); continue; }
       this.#records.set(threadId, records);
       // A restart reads each watch again soon, a few seconds apart.
-      for (const record of records) this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Date.now() + 2_000 * ++stagger, failures: 0, paused: null, reading: false });
+      for (const record of records) this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Date.now() + 2_000 * ++stagger, failures: 0, paused: null, reading: false, detail: null, rules: null });
     }
     this.#unsubscribe = core.bus.onAny((name, payload) => {
       if (this.#closed) return;
-      if (name === 'thread.removed') this.endThread((payload as { threadId: ThreadId }).threadId);
+      if (name === 'thread.removed') this.#endWith((payload as { threadId: ThreadId }).threadId);
       else if (name === 'thread.updated') {
         const thread = payload as { id: ThreadId; archived: boolean; status: string };
-        if (!this.#records.has(thread.id)) return;
-        // Archived, which Mark done is too: the watch ends with the work.
-        if (thread.archived) this.endThread(thread.id);
-        else if (thread.status === 'idle' && this.#records.get(thread.id)!.some(record => record.pending.length)) this.#soon(500);
+        // Archived, which Mark done is too: the watch ends with the work, its subagents' too.
+        if (thread.archived) { this.#endWith(thread.id); return; }
+        if (this.#records.has(thread.id) && thread.status === 'idle' && this.#records.get(thread.id)!.some(record => record.pending.length)) this.#soon(500);
       }
     });
   }
@@ -120,7 +126,8 @@ export class PullRequestWatches {
   async watch(threadId: ThreadId, url: string): Promise<PullRequestWatch> {
     const thread = this.core.threads.require(threadId);
     if (thread.archived) throw refused('watching a pull request needs an active conversation', { threadId });
-    if (thread.parentThreadId) throw refused('a delegated agent cannot watch a pull request: its result goes to its parent, which can watch it', { threadId, field: 'threadId', expected: 'a top-level conversation' });
+    // A delegated agent's wake is its next turn, and that answer goes to its parent; a workflow step or a reviewer answers its run once.
+    if (thread.parentThreadId && !this.core.delegation.delegated(threadId)) throw refused('a workflow step or a reviewer cannot watch a pull request: its run reads its one answer', { threadId, field: 'threadId', expected: 'a conversation or a delegated agent' });
     if (thread.agentSessionId) throw refused('a persistent agent session takes work through Agents, not pull request watches', { threadId });
     const address = pullRequestAddress(url);
     const host = (process.env.GH_HOST ?? 'github.com').toLowerCase();
@@ -133,7 +140,7 @@ export class PullRequestWatches {
     const record: WatchRecord = { url: address.url, host: address.host, repository: address.repository, number: address.number, since,
       memory: initialMemory(since), fingerprint: null, remarksReadAt: 0, seen: null, pending: [], pendingSince: null };
     this.#records.set(threadId, [...records, record]);
-    this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Number.POSITIVE_INFINITY, failures: 0, paused: null, reading: false });
+    this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Number.POSITIVE_INFINITY, failures: 0, paused: null, reading: false, detail: null, rules: null });
     try {
       const state = await this.#read(threadId, record, new Map(), true);
       if (state !== 'OPEN' && state !== null) throw refused(`pull request #${record.number} is ${state.toLowerCase()}; there is nothing to watch`, { field: 'url', expected: 'an open pull request' });
@@ -173,6 +180,12 @@ export class PullRequestWatches {
     return records.length;
   }
 
+  /** A thread that is over ends its watches and its delegated agents' watches. */
+  #endWith(threadId: ThreadId): void {
+    this.endThread(threadId);
+    for (const id of [...this.#records.keys()]) if (this.core.journal.getThread(id)?.parentThreadId === threadId) this.endThread(id);
+  }
+
   /** One pass now; tests drive the loop with it. */
   pass(): Promise<void> {
     if (this.#closed) return Promise.resolve();
@@ -195,7 +208,7 @@ export class PullRequestWatches {
       for (const record of [...records]) {
         if (this.#closed || this.core.stopping) return;
         const runtime = this.#runtime.get(runtimeKey(threadId, record.url));
-        if (!runtime || runtime.reading || Date.now() < runtime.nextReadAt || Date.now() < this.#rateUntil) continue;
+        if (!runtime || record.ended || runtime.reading || Date.now() < runtime.nextReadAt || Date.now() < this.#rateUntil) continue;
         await this.#read(threadId, record, memo, false).catch(error => {
           this.core.log('warn', `pull request watch ${record.url}: ${messageOf(error)}`, { source: 'pull-request-watch', threadId });
         });
@@ -215,26 +228,28 @@ export class PullRequestWatches {
     try {
       const fingerprint = await this.#shared(memo, `fingerprint ${record.url}`, () => this.#graphql(threadId, record, FINGERPRINT_QUERY).then(parseFingerprint));
       if (fingerprint.state !== 'OPEN') {
-        if (!baseline) {
-          this.core.log('info', `pull request #${record.number} is ${fingerprint.state.toLowerCase()}: its watch ended`, { source: 'pull-request-watch', threadId });
-          this.#remove(threadId, record.url);
-          this.#save(threadId);
-          this.#changed(threadId);
-        }
+        if (!baseline) await this.#end(threadId, record, runtime, memo, fingerprint.state);
         return fingerprint.state;
       }
       const statusMoved = record.fingerprint?.status !== fingerprint.status;
       const remarksDue = record.fingerprint?.remarks !== fingerprint.remarks || now - record.remarksReadAt >= this.#timing.rereadMs;
-      if (!statusMoved && !remarksDue) {
+      // The base branch's rules are not in the fingerprint: once they expire the checks are judged again.
+      const kept = runtime.detail;
+      const rulesDue = !kept || (kept.base !== '' && this.#required.stamp(rulesKey(record, kept.base)) !== runtime.rules);
+      if (!statusMoved && !remarksDue && !rulesDue) {
         this.#answered(runtime, record);
         runtime.nextReadAt = now + this.#timing.intervalMs;
         return 'OPEN';
       }
-      const detail = await this.#shared(memo, `detail ${record.url}`, () => this.#graphql(threadId, record, DETAIL_QUERY).then(parseDetail));
+      // Rules alone expired: the checks already read are judged against them, with no detail read.
+      const read = statusMoved || remarksDue || !kept ? await this.#shared(memo, `detail ${record.url}`, () => this.#graphql(threadId, record, DETAIL_QUERY).then(parseDetail)) : kept;
+      const detail = withRequired(read, await this.#requiredOf(threadId, record, read.base));
       const remarks = remarksDue ? await this.#shared(memo, `remarks ${record.url}`, () => this.#remarks(threadId, record)) : null;
       // A stop or an unwatch that landed during the reads wins.
       if (this.#find(threadId, record.url) !== record) return 'OPEN';
       const { changes, next } = evaluate(record.memory, detail, remarks);
+      runtime.detail = read;
+      runtime.rules = read.base ? this.#required.stamp(rulesKey(record, read.base)) : null;
       record.memory = next;
       record.fingerprint = { ...fingerprint, remarks: remarks === null ? record.fingerprint?.remarks ?? '' : fingerprint.remarks };
       if (remarks !== null) record.remarksReadAt = now;
@@ -268,6 +283,30 @@ export class PullRequestWatches {
     }
   }
 
+  /**
+   * A merge or a close ends the watch. Someone else's is told first, with what
+   * was still waiting; the agent's own account's, or one GitHub cannot name,
+   * ends it at once, since the agent did it or cannot be told who did. A
+   * failed closer read throws to `#read`, which backs off as for any read; the
+   * next read finds the same state and asks again.
+   */
+  async #end(threadId: ThreadId, record: WatchRecord, runtime: Runtime, memo: Map<string, Promise<unknown>>, state: 'MERGED' | 'CLOSED'): Promise<void> {
+    const closer = await this.#shared(memo, `closer ${record.url}`, () => this.#graphql(threadId, record, CLOSER_QUERY).then(parseCloser));
+    if (this.#find(threadId, record.url) !== record) return;
+    this.#answered(runtime, record);
+    this.core.log('info', `pull request #${record.number} is ${state.toLowerCase()}${closer.by ? ` by ${closer.by}` : ''}: its watch ended`, { source: 'pull-request-watch', threadId });
+    if (!closer.by || closer.own) {
+      this.#remove(threadId, record.url);
+    } else {
+      record.ended = true;
+      record.pending = mergeChanges(record.pending, [{ kind: 'closed', state, by: closer.by }]);
+      record.pendingSince ??= Date.now();
+      runtime.nextReadAt = Number.POSITIVE_INFINITY;
+    }
+    this.#save(threadId);
+    this.#changed(threadId);
+  }
+
   #answered(runtime: Runtime, record: WatchRecord): void {
     const was = runtime.paused !== null || this.#rateUntil > 0;
     runtime.failures = 0;
@@ -286,6 +325,14 @@ export class PullRequestWatches {
   #graphql(threadId: ThreadId, record: WatchRecord, query: string): Promise<string> {
     const [owner, name] = record.repository.split('/');
     return this.gh(threadId, ['api', 'graphql', '--hostname', record.host, '-f', `query=${query}`, '-f', `owner=${owner}`, '-f', `name=${name}`, '-F', `number=${record.number}`]);
+  }
+
+  /** What the base branch requires, cached per repository and base: a failed read logs and keeps what was known, a rate limit throws. */
+  #requiredOf(threadId: ThreadId, record: WatchRecord, base: string): Promise<string[] | null> {
+    if (!base) return Promise.resolve(null);
+    return this.#required.of(rulesKey(record, base), record.repository, base,
+      path => this.gh(threadId, ['api', '--hostname', record.host, path]),
+      message => this.core.log('warn', `pull request watch ${record.url}: ${message}`, { source: 'pull-request-watch', threadId }));
   }
 
   /** Every page of the three lists: discussion comments, reviews and inline review comments with their replies. */
@@ -321,7 +368,10 @@ export class PullRequestWatches {
       return;
     }
     for (const record of due) { record.pending = []; record.pendingSince = null; }
+    const ended = due.filter(record => record.ended);
+    for (const record of ended) this.#remove(threadId, record.url);
     this.#save(threadId);
+    if (ended.length) this.#changed(threadId);
   }
 
   #summary(threadId: ThreadId, record: WatchRecord): PullRequestWatch {
@@ -385,6 +435,7 @@ export class PullRequestWatches {
 }
 
 const runtimeKey = (threadId: string, url: string) => `${threadId}\n${url.toLowerCase()}`;
+const rulesKey = (record: WatchRecord, base: string) => `${record.host} ${record.repository} ${base}`;
 
 function seenOf(detail: WatchDetail, memory: WatchMemory, now: number): PullRequestWatchSeen {
   return {

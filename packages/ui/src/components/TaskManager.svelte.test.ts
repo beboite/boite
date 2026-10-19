@@ -77,7 +77,7 @@ test('watching follows visibility, stops on close and resumes immediately when v
   expect(watches()).toEqual([true, true, false, true, false]);
 });
 
-test('a paired phone can reach the task manager and has no process-stop control', async ({ ready }) => {
+test('a paired phone sent to the task manager by a link has no process-stop control', async ({ ready }) => {
   visibility();
   const { store, client } = await ready({ delayMs: 0, principal: 'session' });
   expect(store.owner).toBe(false);
@@ -85,7 +85,9 @@ test('a paired phone can reach the task manager and has no process-stop control'
   const beforeOpen = vi.fn(() => expect(open).not.toHaveBeenCalled());
   mounted = mount(MobileSettings, { target: document.body, props: { store, onopenthread: beforeOpen } });
   await settle();
-  await click(element('[data-testid="settings-tab-task-manager"]'));
+  // The phone's settings list no longer offers it: a link, the palette or a card in a conversation, still leads there.
+  expect(document.querySelector('[data-testid="settings-tab-task-manager"]')).toBeNull();
+  store.showSettings('task-manager');
   await vi.waitFor(() => expect(document.querySelector('[data-testid="task-manager-agent"]')).not.toBeNull());
   expect(element('[data-testid="task-manager"]').textContent).not.toContain(strings.taskManager.stop);
   await expect(client.call('resources.killTree', { threadId: rows()[0]!.dataset.threadId! })).rejects.toMatchObject({ code: RpcErrorCode.Refused });

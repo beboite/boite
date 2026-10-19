@@ -253,7 +253,8 @@
     window.addEventListener('pageshow', pageshow);
     const notification = (event: MessageEvent) => {
       if (event.data?.type !== 'boite.open-thread' || typeof event.data.threadId !== 'string') return;
-      void workspace.openFromWorker(event.data.threadId, event.data.core);
+      if (typeof event.data.key === 'string' && event.data.core === undefined) void workspace.openNotification(event.data.key);
+      else void workspace.openFromWorker(event.data.threadId, event.data.core);
       mobileScreen = 'chat';
     };
     navigator.serviceWorker?.addEventListener('message', notification);

@@ -21,7 +21,7 @@
    * switch sit behind its "i". `target` is the project the last section speaks
    * for, owned by `owner`, which may be another machine's Store.
    */
-  let { popover, anchor, onclose, entries, target, owner, prefix = '' }: {
+  let { popover, anchor, onclose, entries, target, owner, prefix = '', compact = false }: {
     popover: Closing;
     anchor: () => HTMLElement | null;
     onclose: (refocus?: boolean) => void;
@@ -29,6 +29,8 @@
     target: Project | undefined;
     owner: Store;
     prefix?: string;
+    /** A phone's panel: the view and the groups only. */
+    compact?: boolean;
   } = $props();
 
   let panel = $state<HTMLDivElement>();
@@ -36,7 +38,7 @@
 
   const projects = $derived(workspace.view === 'projects');
   /** The merged-PR switch is the project's, on cores that know it, for a repository the owner controls. */
-  const merged = $derived(target && owner.owner && target.autoArchiveMergedPr !== undefined && target.repository !== false && target.kind !== 'drafts' ? target : null);
+  const merged = $derived(!compact && target && owner.owner && target.autoArchiveMergedPr !== undefined && target.repository !== false && target.kind !== 'drafts' ? target : null);
   // Both follow the project on screen: the section's heading names the project a press writes to, and a lost connection disables it.
   const mergedBusy = $derived(merged ? owner.connection !== 'ready' || owner.projectAutoArchiveMergedPrBusy(merged.id) : true);
   /** The worktree removal switch, beside it on cores that know it. */
@@ -105,7 +107,7 @@
       {@render segment('view:recent', strings.sidebar.recentView, !projects, List, () => workspace.setView('recent'))}
     </div>
   </section>
-  {#if projects && entries.length}
+  {#if projects && entries.length && !compact}
     <section>
       <h3 class="ui-label" id="{uid}-order">{strings.sidebar.displayOrder}</h3>
       <div class="segmented" role="radiogroup" aria-labelledby="{uid}-order" data-testid={`${prefix}project-sort`} data-order={projectView.order}>

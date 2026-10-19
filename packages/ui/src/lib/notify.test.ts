@@ -2,20 +2,25 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { ThreadSummary, Turn } from '@boite/contracts';
 import {
   finishNotifies,
+  NOTIFICATION_MUTED_STORAGE_KEY,
   NOTIFICATIONS_STORAGE_KEY,
+  pushKinds,
   onNotificationOpen,
   pushCovers,
+  readNotificationKinds,
   readNotifications,
   sendNotification,
   setNotificationSender,
   shouldNotify,
   toastFor,
+  writeNotificationKinds,
   writeNotifications,
   type Toast
 } from './notify';
 
 describe('shouldNotify', () => {
-  const base = { kind: 'done' as const, threadId: 't-1', openThreadId: 't-1', focused: true, enabled: true };
+  const all = ['approvals', 'questions', 'finished', 'errors'] as const;
+  const base = { kind: 'finished' as const, threadId: 't-1', openThreadId: 't-1', focused: true, enabled: true, kinds: all };
 
   test('the open thread on a focused window is already on the screen', () => {
     expect(shouldNotify(base)).toBe(false);
@@ -28,8 +33,17 @@ describe('shouldNotify', () => {
   });
 
   test('a request for user input notifies even in the focused open thread', () => {
-    expect(shouldNotify({ ...base, kind: 'needs-you' })).toBe(true);
-    expect(shouldNotify({ ...base, kind: 'needs-you', enabled: false })).toBe(false);
+    expect(shouldNotify({ ...base, kind: 'approvals' })).toBe(true);
+    expect(shouldNotify({ ...base, kind: 'questions' })).toBe(true);
+    expect(shouldNotify({ ...base, kind: 'approvals', enabled: false })).toBe(false);
+  });
+
+  test('a device that kept only approvals hears of a permission, not of a finished turn, a failure or a question', () => {
+    const elsewhere = { ...base, openThreadId: null, focused: false, kinds: ['approvals'] as const };
+    expect(shouldNotify({ ...elsewhere, kind: 'approvals' })).toBe(true);
+    expect(shouldNotify({ ...elsewhere, kind: 'finished' })).toBe(false);
+    expect(shouldNotify({ ...elsewhere, kind: 'errors' })).toBe(false);
+    expect(shouldNotify({ ...elsewhere, kind: 'questions' })).toBe(false);
   });
 
   test('the switch off wins over everything', () => {
@@ -75,23 +89,37 @@ describe('the switch', () => {
     expect(window.localStorage.getItem(NOTIFICATIONS_STORAGE_KEY)).toBeNull();
     expect(readNotifications()).toBe(true);
   });
+
+  test('keeps every kind until one is turned off, stores the ones off, and tells push nothing while off', () => {
+    expect(readNotificationKinds()).toEqual(['approvals', 'questions', 'finished', 'errors']);
+    writeNotificationKinds(['errors', 'approvals']);
+    expect(JSON.parse(window.localStorage.getItem(NOTIFICATION_MUTED_STORAGE_KEY)!)).toEqual(['questions', 'finished']);
+    expect(readNotificationKinds()).toEqual(['approvals', 'errors']);
+    expect(pushKinds()).toEqual(['approvals', 'errors']);
+    writeNotifications(false);
+    expect(pushKinds()).toEqual([]);
+    writeNotificationKinds(['approvals', 'questions', 'finished', 'errors']);
+    expect(window.localStorage.getItem(NOTIFICATION_MUTED_STORAGE_KEY)).toBeNull();
+    window.localStorage.setItem(NOTIFICATION_MUTED_STORAGE_KEY, '{broken');
+    expect(readNotificationKinds()).toHaveLength(4);
+  });
 });
 
 describe('toastFor', () => {
   test('names the thread and says what happened', () => {
-    expect(toastFor('done', 't-1', 'Port the scheduler', null)).toEqual({
+    expect(toastFor('finished', 't-1', 'Port the scheduler', null)).toEqual({
       title: 'Port the scheduler',
       body: 'Done',
       threadId: 't-1'
     });
-    expect(toastFor('error', 't-1', 'Port the scheduler', 'the model refused')).toEqual({
+    expect(toastFor('errors', 't-1', 'Port the scheduler', 'the model refused')).toEqual({
       title: 'Port the scheduler',
       body: 'the model refused',
       threadId: 't-1'
     });
-    expect(toastFor('error', 't-1', 'Port the scheduler', null).body).toBe('Failed');
-    expect(toastFor('needs-you', 't-1', 'Port the scheduler', null).body).toBe('Needs your answer');
-    expect(toastFor('needs-you', 't-1', 'Port the scheduler', 'Which branch?').body).toBe('Which branch?');
+    expect(toastFor('errors', 't-1', 'Port the scheduler', null).body).toBe('Failed');
+    expect(toastFor('questions', 't-1', 'Port the scheduler', null).body).toBe('Needs your answer');
+    expect(toastFor('questions', 't-1', 'Port the scheduler', 'Which branch?').body).toBe('Which branch?');
   });
 });
 
@@ -120,6 +148,15 @@ describe('pushCovers', () => {
     device(null);
     expect(await pushCovers(location.origin)).toBe(false);
   });
+
+  test('a notice about a member of the group stays quiet when this device has push: the member forwards it to the push home', async () => {
+    device({ endpoint: 'https://web.push.apple.com/x' });
+    localStorage.setItem('boite.web-push', 'on');
+    expect(await pushCovers('https://remote.test', true)).toBe(true);
+    expect(await pushCovers(undefined, true)).toBe(true);
+    device(null);
+    expect(await pushCovers('https://remote.test', true)).toBe(false);
+  });
 });
 
 describe('sendNotification', () => {
@@ -140,6 +177,23 @@ describe('sendNotification', () => {
       await sendNotification({ title: 'Done', body: 'Finished', threadId: 't-1', coreThreadId: 't-1', origin: location.origin });
       expect(browserNotification).toHaveBeenCalledOnce();
     } finally { localStorage.removeItem('boite.web-push'); vi.unstubAllGlobals(); }
+  });
+
+  test('a notice about a machine of another origin goes through the worker with that machine\'s push tag, never the page constructor Android refuses', async () => {
+    const showNotification = vi.fn().mockResolvedValue(undefined);
+    const browserNotification = vi.fn(function () { throw new TypeError('Illegal constructor'); });
+    Object.assign(browserNotification, { permission: 'granted' });
+    vi.stubGlobal('Notification', browserNotification);
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistration: vi.fn().mockResolvedValue({ showNotification }) } });
+    const core = 'c'.repeat(64);
+    try {
+      await sendNotification({ title: 'Which branch?', body: 'Needs you', threadId: '["m2","t-1"]', coreThreadId: 't-1', origin: 'https://remote.test', core });
+      expect(showNotification).toHaveBeenCalledWith('Which branch?', expect.objectContaining({ tag: `thread-${core}-t-1`, data: { threadId: 't-1', core } }));
+      // No group id known: still the worker, and the window opens it by its own key.
+      await sendNotification({ title: 'Which branch?', body: 'Needs you', threadId: '["m3","t-2"]', coreThreadId: 't-2', origin: 'https://other.test' });
+      expect(showNotification).toHaveBeenLastCalledWith('Which branch?', expect.objectContaining({ tag: 'thread-["m3","t-2"]', data: { threadId: 't-2', key: '["m3","t-2"]' } }));
+      expect(browserNotification).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
   });
 
   test('goes through the sender handed in, and swallows what it throws', async () => {

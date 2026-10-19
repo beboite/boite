@@ -13,6 +13,9 @@ import {
   type SettingAsk,
   type SettingRequestParams,
   checkSettingRequest,
+  settledExperiment,
+  type ClientPreferences,
+  type ExperimentId,
   settingAnswerText,
   settledSetting,
   signInAnswerText,
@@ -257,7 +260,7 @@ export class ThreadCards {
         const field = (error.data as { field?: unknown } | undefined)?.field;
         return { ok: false, message: error.message, field: typeof field === 'string' ? field : 'value' };
       }
-    }, open);
+    }, open, this.core.clients.current());
     if (!checked.ok) throw refused(checked.message, checked.data);
     const { reason, setting, options } = checked;
     const { questionId } = this.drawAsync(thread, { text: reason, options, allowText: false, multiple: false, async: true, setting });
@@ -271,6 +274,11 @@ export class ThreadCards {
    */
   settleSettings(next: Settings): void {
     this.settle(request => (request.setting === undefined ? null : settledSetting(request.setting, next)), 'a settings change');
+  }
+
+  /** An app reported: every experiment card whose switch it flipped settles (`settledExperiment`). */
+  settleClient(preferences: ClientPreferences, before: readonly ExperimentId[] | null): void {
+    this.settle(request => (request.setting === undefined ? null : settledExperiment(request.setting, preferences, before)), 'an app change');
   }
 
   /**

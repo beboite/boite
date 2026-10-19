@@ -123,16 +123,14 @@ test('working grouping persists on the device, retains attention and works on th
   await page.click(phoneToggle('working'));
   await page.type(id('mobile-search'), 'Finish the trace');
   await page.waitFor(`document.querySelector(${JSON.stringify(phoneRow(main))})`);
-  await page.click(id('mobile-menu'));
-  await page.click(id('mobile-settings'));
-  await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
-  expect(await page.evaluate(`document.querySelector('${id('setting-group-working-threads')}').checked`)).toBe(true);
+  // The phone groups from the display options at the end of its search field.
+  await page.click(id('mobile-grouping-options'));
+  await page.waitFor(`document.querySelector('${id('mobile-grouping-options-menu')} [data-value=working]')?.getAttribute('aria-checked') === 'true'`);
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await capture('recent-settings-phone.png');
-  await page.click(id('setting-group-working-threads'));
+  await page.click(`${id('mobile-grouping-options-menu')} [data-value=working]`);
   expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.recent.v1')).groupWorking`)).toBe(false);
-  await page.click(id('mobile-menu'));
-  await page.click(id('mobile-conversations'));
+  await page.click(id('mobile-grouping-options'));
   await page.type(id('mobile-search'), '');
   await page.waitFor(`!document.querySelector('${phoneToggle('working')}')`);
   await page.waitFor(`document.querySelector(${JSON.stringify(phoneRow(main))})`);
@@ -177,10 +175,36 @@ test('the draft project picker has its logo and dashed selection at desktop and 
   expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('mobile-draft-project')}').closest('.project-choice')).borderStyle`)).toBe('dashed');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await capture('recent-project-phone.png');
+  // The find chord opens the phone's copy with the keys in its search, and Back closes it.
+  await page.evaluate(`document.querySelector('${id('composer-input')}').focus()`);
+  const find = { key: 'f', code: 'KeyF', modifiers: 2, windowsVirtualKeyCode: 70 };
+  await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...find });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', ...find });
+  await page.waitFor(`document.activeElement === document.querySelector('${id('mobile-draft-project-search')}')`);
+  expect(await page.evaluate(`!!document.querySelector('${id('draft-project-menu')}')`)).toBe(false);
+  await page.evaluate('history.back()');
+  await page.waitFor(`!document.querySelector('${id('mobile-draft-project-menu')}')`);
   await page.click(id('mobile-draft-project'));
   await page.evaluate(`Array.from(document.querySelectorAll('${id('mobile-draft-project-menu')} [data-value]')).find(e => e.dataset.value === ${JSON.stringify(JSON.stringify(['http://builder.test', 'p-notes']))}).click()`);
   await page.waitFor(`globalThis.__boiteTest.workspace.active.machineId === 'http://builder.test' && document.querySelector('${id('mobile-draft-project')} [data-tech=python]')`);
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  // From the keyboard alone: the find chord on a draft opens the list, one
+  // word lands on the project and one on the machine, Enter moves the draft
+  // to the other machine and its composer takes the next keys.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`document.querySelector('${id('composer-input')}')?.getClientRects().length`);
+  await page.evaluate(`document.querySelector('${id('composer-input')}').focus()`);
+  const chord = { key: 'f', code: 'KeyF', modifiers: 2, windowsVirtualKeyCode: 70 };
+  await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...chord });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', ...chord });
+  await page.waitFor(`document.activeElement === document.querySelector('${id('draft-project-search')}')`);
+  // The machine's own name, in whatever language the page speaks.
+  const here = await page.evaluate<string>('globalThis.__boiteTest.workspace.machines[0].label');
+  await page.send('Input.insertText', { text: `boite ${here}` });
+  await page.waitFor(`Array.from(document.querySelectorAll('${id('draft-project-list')} [data-value]')).map(e => e.dataset.value).join('|') === ${JSON.stringify(JSON.stringify([main, 'p-boite']))}`);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  await page.waitFor(`globalThis.__boiteTest.workspace.active === globalThis.__boiteTest.workspace.machines[0].store && globalThis.__boiteTest.workspace.active.draft?.projectId === 'p-boite' && document.activeElement === document.querySelector('${id('composer-input')}')`);
   expect(page.errors()).toEqual([]);
   console.log('RECENT_PROJECT_PICKER_OK desktop=1280x900 phone=390x844');
 }, 20_000);

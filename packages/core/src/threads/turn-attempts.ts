@@ -418,7 +418,7 @@ export class TurnAttempts {
     this.threads.noteSystem(threadId, turnId, `Paused between two tool calls while ${provider.name} updates.`, `Paused while ${provider.name} updates`, 'turn.pausedForUpdate');
     try {
       // Taken before the update can learn of this pause: it may settle in the same tick.
-      const settled = this.core.updates.resumeOf(provider.id);
+      const settled = this.core.updates.resumeOf(provider.id, threadId);
       this.core.updates.turnPaused(provider.id);
       const resume = await Promise.race([settled, left.promise]);
       quiet(() => this.core.logs.info(resume === null ? 'Turn paused for an update was stopped before the update ended' : `Turn resumes after ${provider.id} updated`, {

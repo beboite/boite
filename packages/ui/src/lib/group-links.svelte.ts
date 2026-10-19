@@ -437,10 +437,11 @@ export class GroupLinks {
       if (signs === undefined) continue;
       const groupId = machine.store.group?.id;
       const listedBy = (other: Machine): boolean => other.store.group!.cores.some((core) => core.coreId === signs);
-      // Its own group, as another machine of it says; or, refused there with the group it was in unknown, none of the device's groups lists it.
+      // Its own group, as another machine of it says; or, refused there or out of every group by its own word, none of the device's groups lists it.
+      // Removed, a machine may say it is in no group before the others drop it from their roster, then tell this device's hellos to come back.
       const delisted = groupId !== undefined
         ? signed.some((other) => other !== machine && other.store.group!.id === groupId && !listedBy(other))
-        : machine.store.pairingRequired && signed.length > 0 && !signed.some((other) => other !== machine && listedBy(other));
+        : (machine.store.pairingRequired || machine.store.ungrouped) && signed.length > 0 && !signed.some((other) => other !== machine && listedBy(other));
       if (delisted) await this.#drop(machine, false);
     }
   }

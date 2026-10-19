@@ -1,5 +1,5 @@
 /** Permission requests and questions: asked by a turn, answered by the user. */
-import { RpcErrorCode, agentSettingAnswerText, browserProfilesOf, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, SIGN_IN_DONE, SIGN_IN_REASON_MAX, signInAnswerText, signInSites, type SignInAsk, type SignInRequestParams, checkSettingRequest, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { RpcErrorCode, agentSettingAnswerText, browserProfilesOf, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, SIGN_IN_DONE, SIGN_IN_REASON_MAX, signInAnswerText, signInSites, type SignInAsk, type SignInRequestParams, checkClientPreferences, checkSettingRequest, settledExperiment, type ClientPreferences, type ExperimentId, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { checkAnswer, checkAsk } from './checks';
 import { QUESTION_OPTIONS, QUESTION_TEXT } from './conversation';
@@ -140,10 +140,15 @@ function agentSettingText(ctx: FakeContext, setting: AgentSettingAsk, answer: Qu
   return agentSettingAnswerText(setting, answer, (value) => JSON.stringify(setting.key === 'projects' && Array.isArray(value) ? value.map((id) => names.get(String(id)) ?? id) : value ?? null));
 }
 
-/** As the core's `settleSettings`: a change card closes once its setting left the value it was asked from. */
-export function settleSettings(ctx: FakeContext, settings: Settings): void {
+/**
+ * As the core's `settleSettings`, or `settleClient` with `report`: a core
+ * setting's card closes once its setting left the value it was asked from, an
+ * experiment's once an app flipped its switch.
+ */
+export function settleSettings(ctx: FakeContext, settings: Settings, report?: { preferences: ClientPreferences; before: readonly ExperimentId[] | null }): void {
   for (const [questionId, pending] of [...ctx.pendingQuestions]) {
-    const answer = pending.request.setting === undefined ? null : settledSetting(pending.request.setting, settings);
+    const setting = pending.request.setting;
+    const answer = setting === undefined ? null : report ? settledExperiment(setting, report.preferences, report.before) : settledSetting(setting, settings);
     if (answer === null) continue;
     ctx.pendingQuestions.delete(questionId);
     pending.resolve(answer);
@@ -156,7 +161,7 @@ export function requestSetting(ctx: FakeContext, thread: Thread, turn: Turn, par
   const checked = checkSettingRequest(params, ctx.settings, (patch) => {
     const result = checkSettingsPatch(patch);
     return result.ok ? { ok: true, patch: result.patch } : { ok: false, message: result.message, field: result.field };
-  }, open);
+  }, open, ctx.clientPreferences);
   if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.Refused, message: checked.message, data: checked.data });
   return { questionId: askSetting(ctx, thread, turn, checked.reason, checked.options, checked.setting), setting: checked.setting };
 }
@@ -215,7 +220,9 @@ function drawAsync(
         return;
       }
       if (asked.signIn) {
-        holdAnswer(ctx, thread, `> ${text}\n\n${signInAnswerText(asked.signIn)}`);
+        holdAnswer(ctx, thread, `> ${text}
+
+${signInAnswerText(asked.signIn)}`);
         return;
       }
       if (asked.agentSetting) {
@@ -355,7 +362,19 @@ export function requestMethods(ctx: FakeContext) {
       if (!turn) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the thread has no turn to ask in yet', data: { threadId: params.threadId } });
       return requestSignIn(ctx, thread, turn, params);
     },
-    'agent.settings': async () => readSettings(ctx.settings),
+    'agent.settings': async () => ({
+      app: ctx.clientPreferences === null ? null : { language: ctx.clientPreferences.language, device: null, client: null },
+      settings: readSettings(ctx.settings, ctx.clientPreferences),
+    }),
+    'client.preferences': async (params) => {
+      const checked = checkClientPreferences(params);
+      if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
+      const before = ctx.clientApps.get(checked.preferences.app)?.experiments ?? null;
+      ctx.clientApps.set(checked.preferences.app, checked.preferences);
+      ctx.clientPreferences = checked.preferences;
+      settleSettings(ctx, ctx.settings, { preferences: checked.preferences, before });
+      return { ok: true };
+    },
     'questions.skip': async (params) => {
       const pending = ctx.pendingQuestions.get(params.questionId);
       if (!pending) throw ctx.notFound('question', params.questionId);

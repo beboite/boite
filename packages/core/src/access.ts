@@ -30,6 +30,8 @@
  * quotas.list and subscriptionProxy.quotas let a phone draw the same limit bars
  * as the owner without a dashboard embed; a forced refresh reaches the
  * providers and stays the owner's, as do monitoring switches and resets.
+ * push.kinds lets a paired device choose which kinds of notification its own
+ * subscription receives; it reaches no other device's destination.
  */
 
 import { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS, type RpcEventName, type RpcMethodName } from '@boite/contracts';

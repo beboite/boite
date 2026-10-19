@@ -13,6 +13,7 @@ interface FakeStore {
   client: { call: ReturnType<typeof vi.fn> } | null;
   group: Group | null;
   groupKnown: boolean;
+  ungrouped?: boolean;
   endpointUrl: string | null;
   loadGroup: ReturnType<typeof vi.fn>;
 }
@@ -691,6 +692,33 @@ describe('a machine the device key opens', () => {
     localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://a.test', label: 'A', token: '', paired: true, signs: 'a'.repeat(64) }]));
     const asleep = { id: 'http://a.test', label: 'A', store: { group: null } } as unknown as Machine;
     expect(GroupLinks.coreOf(asleep)).toBe('a'.repeat(64));
+    localStorage.clear();
+  });
+
+  it('leaves once it said it is in no group and the device\'s group stopped listing it, even if it said so first', async () => {
+    const [selfA, selfB, selfC] = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([
+      { url: 'http://a.test', label: 'A', token: '', paired: true, signs: selfA },
+      { url: 'http://b.test', label: 'B', token: '', paired: true, signs: selfB },
+      { url: 'http://c.test', label: 'C', token: '', paired: true, signs: selfC }
+    ]));
+    const both = [core(selfA, ['http://a.test']), core(selfB, ['http://b.test'])];
+    const a = machine('http://a.test', { group: group(selfA, both) });
+    const b = machine('http://b.test', { group: group(selfB, both) });
+    // A machine of another group, not reached yet since the page opened: it has said nothing.
+    const c = machine('http://c.test', { connection: 'connecting', groupKnown: false });
+    const { workspace: ws, removed } = workspace([a, b, c]);
+    const links = new GroupLinks(ws, { reach: vi.fn(async () => null), secure: () => false });
+    // Removed, B says it is in no group before A's roster says it left; then it closes the socket, and its
+    // hellos are told to come back, as it has no roster to find the device in.
+    Object.assign(storeOf(b), { group: null, ungrouped: true });
+    await links.reconcile();
+    expect(removed).toEqual([]);
+    Object.assign(storeOf(b), { connection: 'connecting', groupKnown: false });
+    await links.reconcile();
+    storeOf(a).group = group(selfA, [both[0]!]);
+    await links.reconcile();
+    expect(removed).toEqual(['http://b.test']);
     localStorage.clear();
   });
 });

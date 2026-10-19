@@ -388,7 +388,7 @@
 
     <button
       type="button"
-      class="ghost small icon"
+      class="ghost small icon maximize"
       title={rightPanel.maximized ? strings.rightPanel.restore : strings.rightPanel.maximize}
       aria-label={rightPanel.maximized ? strings.rightPanel.restore : strings.rightPanel.maximize}
       aria-pressed={rightPanel.maximized}
@@ -516,6 +516,13 @@
   .strip :global(.trigger.ghost) {
     height: var(--control-sm);
     width: var(--control-sm);
+  }
+
+  /* Only the tabs give way. A control that shrank too took part of the room the
+     chevrons cost, so the tabs lost less than `measure` counted and the
+     chevrons went and came back on every frame at the panel's narrowest. */
+  .strip > :not(.tabs, .spacer) {
+    flex: none;
   }
 
   .tabs {
@@ -734,6 +741,11 @@
     .closer {
       width: var(--touch-target);
       height: var(--touch-target);
+    }
+
+    /* The sheet already fills the screen. */
+    .maximize {
+      display: none;
     }
   }
 

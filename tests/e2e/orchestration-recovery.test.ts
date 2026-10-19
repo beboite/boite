@@ -27,7 +27,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     })()`);
     await page.waitFor('document.querySelector("[data-testid=thread-recovery]") !== null');
     if (viewport.width === 1280) {
-      for (const font of ['inter', 'geist', 'plex', 'atkinson', 'figtree', 'source', 'dm', 'system']) {
+      for (const font of ['inter', 'atkinson', 'source', 'plex', 'system']) {
         await page.evaluate(`(async () => {
           document.documentElement.dataset.font = '${font}';
           const family = getComputedStyle(document.body).fontFamily;
