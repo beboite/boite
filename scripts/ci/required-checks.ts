@@ -6,6 +6,12 @@ import { join } from 'node:path';
 // A name holds no expression: a skipped matrix job reports its unexpanded
 // template, so every required job is written out.
 
+// The planning job's only expression: a draft, which cannot merge, reports
+// another name, so it never satisfies the required one (docs/ci.md#draft-pull-requests).
+const DRAFT_NAME = /^\$\{\{ github\.event\.pull_request\.draft && github\.event\.action != 'converted_to_draft' && '([^']+)' \|\| '([^']+)' \}\}$/;
+// A job that never runs on a pull request guards none: its skip is no check.
+const NOT_ON_PULL_REQUESTS = "github.event_name != 'pull_request'";
+
 const WORKFLOWS = join(import.meta.dir, '../../.github/workflows');
 
 export type Job = {
@@ -26,10 +32,17 @@ function list(value: string | string[] | undefined): string[] {
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
 }
 
-/** Every check a job reports: its name, or for a caller each name of the workflow it calls. */
+/** The names a job reports on a draft and on a ready pull request; the same unless it is the planning job. */
+export function jobNames(job: Job, id: string): { draft: string; ready: string } {
+  const name = job.name ?? id;
+  const [, draft, ready] = DRAFT_NAME.exec(name) ?? [name, name, name];
+  return { draft: draft!, ready: ready! };
+}
+
+/** Every check a job reports on a ready pull request: its name, or for a caller each name of the workflow it calls. */
 export function jobChecks(file: string, id: string, job: Job, load: Load = loadWorkflow): string[] {
   if (job.strategy?.matrix !== undefined) throw new Error(`${file}: job ${id} is a matrix; a skipped one reports its template name`);
-  const name = job.name ?? id;
+  const name = jobNames(job, id).ready;
   if (name.includes('${{')) throw new Error(`${file}: job ${id} has a computed name: ${name}`);
   if (!job.uses) return [name];
   const called = /^\.\/\.github\/workflows\/([\w.-]+\.ya?ml)$/.exec(job.uses)?.[1];
@@ -38,7 +51,8 @@ export function jobChecks(file: string, id: string, job: Job, load: Load = loadW
 }
 
 export function workflowChecks(file: string, load: Load = loadWorkflow): string[] {
-  return Object.entries(load(file).jobs).flatMap(([id, job]) => jobChecks(file, id, job, load));
+  return Object.entries(load(file).jobs).filter(([, job]) => job.if !== NOT_ON_PULL_REQUESTS)
+    .flatMap(([id, job]) => jobChecks(file, id, job, load));
 }
 
 /** The workflows a pull request starts on its head; pull_request_target runs the base's. */
@@ -98,12 +112,11 @@ if (import.meta.main) {
     const rules = index === -1 ? await liveRules() : JSON.parse(readFileSync(process.argv[index + 1]!, 'utf8'));
     if (rules === undefined) process.exit(0);
     const { missing, unknown } = compareRuleset(names, rules);
-    // A pull request that adds or renames a job diverges until the ruleset
-    // follows its merge, so it only warns; main fails until the ruleset matches.
-    const level = process.env.GITHUB_EVENT_NAME === 'pull_request' ? 'warning' : 'error';
-    for (const name of missing) console.log(`::${level}::not required by the ruleset: ${name}`);
-    for (const name of unknown) console.log(`::${level}::required by the ruleset, reported by no pull request: ${name}`);
-    if ((missing.length || unknown.length) && level === 'error') process.exit(1);
-    if (!missing.length && !unknown.length) console.log(`The ruleset requires the ${names.length} check names a pull request reports`);
+    // Only main's ruleset job runs it: a branch that adds or renames a job
+    // diverges until the ruleset follows (docs/ci.md#check-names).
+    for (const name of missing) console.log(`::error::not required by the ruleset: ${name}`);
+    for (const name of unknown) console.log(`::error::required by the ruleset, reported by no pull request: ${name}`);
+    if (missing.length || unknown.length) process.exit(1);
+    console.log(`The ruleset requires the ${names.length} check names a pull request reports`);
   }
 }

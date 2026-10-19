@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { CORE_ALL, PORTABLE_ALL } from './changes.ts';
-import { compareRuleset, jobChecks, loadWorkflow, requiredChecks, type Workflow } from './required-checks.ts';
+import { compareRuleset, jobChecks, jobNames, loadWorkflow, requiredChecks, type Job, type Workflow } from './required-checks.ts';
 
 const files = [...new Bun.Glob('*.yml').scanSync(`${import.meta.dir}/../../.github/workflows`)].sort();
 
@@ -51,9 +51,26 @@ test('every job a needs chain runs through is in the list, so a skip after a fai
   }
 });
 
-test('the changes job compares the names with the live rules for main', () => {
-  const steps = (loadWorkflow('ci.yml').jobs.changes as { steps: { run?: string }[] }).steps;
-  expect(steps.map((step) => step.run)).toContain('bun scripts/ci/required-checks.ts --live');
+// A draft cannot satisfy the ruleset: after ready_for_review the required
+// planning name stays expected until the full run creates it, and a
+// conversion to draft fails it, so an earlier full run's success cannot merge
+// next to the draft's skips.
+test('a draft reports another planning name and a conversion to draft fails the required one', () => {
+  const changes = loadWorkflow('ci.yml').jobs.changes as Job & { steps: { if?: string; run?: string }[] };
+  expect(jobNames(changes, 'changes')).toEqual({ draft: 'Plan and repository checks (draft)', ready: 'Plan and repository checks' });
+  const [stop] = changes.steps;
+  expect(stop!.if).toBe("github.event.action == 'converted_to_draft'");
+  expect(stop!.run).toContain('exit 1');
+});
+
+test('main compares the names with the live rules in a job no other job needs', () => {
+  const ci = loadWorkflow('ci.yml');
+  const ruleset = ci.jobs.ruleset as Job & { steps: { run?: string }[] };
+  expect(ruleset.needs).toBeUndefined();
+  expect(ruleset.if).toBe("github.event_name != 'pull_request'");
+  expect(ruleset.steps.map((step) => step.run)).toContain('bun scripts/ci/required-checks.ts --live');
+  for (const job of Object.values(ci.jobs)) expect([job.needs ?? []].flat()).not.toContain('ruleset');
+  expect(requiredChecks(files)).not.toContain('Ruleset check names');
 });
 
 test('matrix jobs and computed names are refused', () => {
@@ -61,6 +78,9 @@ test('matrix jobs and computed names are refused', () => {
   expect(() => requiredChecks(['x.yml'], load({ a: { name: 'Core tests (${{ matrix.name }})' } }))).toThrow('computed name');
   expect(() => requiredChecks(['x.yml'], load({ a: { name: 'Core', strategy: { matrix: { os: ['a', 'b'] } } } }))).toThrow('matrix');
   expect(() => requiredChecks(['x.yml'], load({ a: { name: 'A' }, b: { name: 'A' } }))).toThrow('reported twice');
+  expect(() => requiredChecks(['x.yml'], load({ a: { name: "${{ github.event.pull_request.draft && 'A' || 'B' }}" } }))).toThrow('computed name');
+  expect(requiredChecks(['x.yml'], load({ a: { name: "${{ github.event.pull_request.draft && github.event.action != 'converted_to_draft' && 'A (draft)' || 'A' }}" } }))).toEqual(['A']);
+  expect(requiredChecks(['x.yml'], load({ a: { name: 'A', if: "github.event_name != 'pull_request'" } }))).toEqual([]);
   expect(requiredChecks(['x.yml'], () => ({ on: { push: null }, jobs: { a: {} } }))).toEqual([]);
 });
 

@@ -82,18 +82,23 @@ reports its own name (`Desktop`), never the inner ones. So:
   the ruleset requires every job of each needs chain (`Plan and repository
   checks`, `Build UI`).
 
-`bun scripts/ci/required-checks.ts` prints the names a pull request reports.
-Its tests pin all of them, refuse a matrix or an expression in a name, and
-check each written-out job against `CORE_ALL` and `PORTABLE_ALL`. The changes
-job runs it with `--live`, which reads the rules for `main`
-(`repos/beboite/boite/rules/branches/main`, public) and names a check the
-ruleset lacks or one no pull request reports: a warning on a pull request, an
-error on main. `--ruleset <file>` compares with saved `gh api` output instead.
+`bun scripts/ci/required-checks.ts` prints the names a ready pull request
+reports. Its tests pin all of them, refuse a matrix or an expression in a name
+(the planning job's draft name aside), and check each written-out job against
+`CORE_ALL` and `PORTABLE_ALL`. On main and in a release, the `Ruleset check
+names` job runs it with `--live`, which reads the rules for `main`
+(`repos/beboite/boite/rules/branches/main`, public) and fails on a check the
+ruleset lacks or one no pull request reports. No job needs it: the tests still
+run, and once the ruleset matches, a rerun of that job alone turns the run
+green. Pull requests skip it, so it is not required. `--ruleset <file>`
+compares with saved `gh api` output instead.
 
-Adding or renaming a job: merge the pull request (it only warns), then edit
-the ruleset in the same sitting, since main's run fails until it matches. A
-required name that disappears blocks every pull request; one never added
-leaves that job unguarded.
+- Adding a job: merge the pull request, then add its name to the ruleset in
+  the same sitting; until then main's run fails and the new job is unguarded.
+- Renaming or removing a job: a required name no pull request reports blocks
+  every pull request. Keep the old job and add the new one, merge, add the new
+  name to the ruleset, then remove the old job and its name once no open pull
+  request still needs it.
 
 ### Run modes and platforms
 
@@ -174,12 +179,16 @@ the step.
 A draft pull request runs `draft` mode: the changes job, the Linux x64 core
 suite, type checks and UI tests, and the focused telemetry and E2E type checks,
 each only when its paths changed. Windows, macOS, desktop packages, E2E,
-stress, Docker and the APK wait: their checks skip, which a draft cannot
-merge on. `ready_for_review` starts the `pr` run, whose planning job is pending
-from its start and whose selected jobs report again under the same names,
-replacing the draft's skips before the pull request can merge.
-`converted_to_draft` cancels a full run in progress. CodeRabbit reviews drafts
-(`.coderabbit.yaml`).
+stress, Docker and the APK wait: their checks skip.
+
+A skip passes in a ruleset, so a draft must not satisfy it: its planning job
+reports `Plan and repository checks (draft)`, never the required `Plan and
+repository checks`. After `ready_for_review`, the required name stays expected
+until the `pr` run creates it, then pending until it ends; its selected jobs
+then report again under the draft's names. `converted_to_draft` cancels a full
+run in progress and fails `Plan and repository checks` at once, so that run's
+earlier planning success cannot merge next to skips; the next push runs the
+draft checks. CodeRabbit reviews drafts (`.coderabbit.yaml`).
 
 Of the 5,632 runner minutes spent by the 86 pull request runs started on
 2026-10-18 between 12:34 and 21:35 UTC, 2,476 went to runs a newer push

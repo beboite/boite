@@ -17,7 +17,7 @@ export type ServerProvenance = ReleaseIdentity & {
 };
 
 // `draft` needs `verify`, the whole of ci.yml, so its success proves every
-// verify job passed; the planning job proves verify ran in this attempt.
+// verify job passed or skipped as planned; the planning job proves verify planned them.
 const REQUIRED_JOBS = [
   'version',
   'verify / Plan and repository checks',
