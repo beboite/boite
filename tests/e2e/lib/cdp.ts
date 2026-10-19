@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import type { Subprocess } from 'bun';
 import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
+import { reportOnHang } from './hang-report.ts';
 import { uiServerSide } from './ui-requests.ts';
 import { TextSocket } from '../../../packages/core/src/ws-client.ts';
 
@@ -163,6 +164,12 @@ const open = new Set<BrowserPage>();
 export async function closeAllBrowsers(): Promise<void> {
   await Promise.all([...open].map((page) => page.close()));
 }
+
+// A run stopped at its deadline (scripts/ci/hang-watch.ts) reports every page still open.
+reportOnHang('browser pages', async () => {
+  const reports = await Promise.all([...open].map((page) => page.hangReport()));
+  return reports.join('\n\n') || '(no page open)';
+});
 
 /**
  * Lets a closing browser exit, then kills a stalled browser's process tree
@@ -631,6 +638,18 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     open.delete(this);
     if (this.#proc !== null) await stopBrowser(this.#proc, this.#userDataDir, this.#watch);
     else if (this.#userDataDir !== null) await removeDirectory(this.#userDataDir);
+  }
+
+  /** What a run stopped at its deadline reports of this page: its target, what it waits on and whether its main thread answers. */
+  async hangReport(): Promise<string> {
+    return [
+      `Page ${JSON.stringify(this.#target.url)} of browser ${this.pid ?? 'attached'} on port ${this.#debugPort ?? '?'}${this.#fault === null ? '' : `, socket fault: ${this.#fault}`}`,
+      `Calls waiting: ${this.#pending.size}`,
+      `Errors: ${JSON.stringify(this.#pageErrors)}`,
+      `In flight: ${JSON.stringify(this.#inFlight())}`,
+      `Failed requests: ${JSON.stringify(this.#networkFailures)}`,
+      await this.#busyReport(),
+    ].join('\n');
   }
 
   async #enableHangProbes(): Promise<void> {
