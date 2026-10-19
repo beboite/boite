@@ -106,7 +106,10 @@ async function run(command: string[], deadline?: number): Promise<{ code: number
       console.log(`::warning title=Test run without the inspector::${missing}; the tests run without it, and a hang report then names no test`);
       killProcessTree(tests.child.pid);
       await tests.exited;
-      tests = spawnTests(command);
+      // The deadline may pass while its output closes: then the run ends
+      // stopped. Otherwise `timer`, still armed on it, now covers this bun.
+      if (stopped === undefined && Date.now() < deadline) tests = spawnTests(command);
+      else stop();
     }
   }
   const code = await tests.exited;

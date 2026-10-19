@@ -136,6 +136,34 @@ test('a run without its inspector is still stopped at the deadline with what the
   expect(tree).not.toContain('--inspect-wait');
 }, 120_000);
 
+test('a deadline that passes while the refused run closes starts no run after it', async () => {
+  // The refused bun's output closes 2 s after it exits, past the deadline.
+  const preload = join(dir, 'refused-slow-close.ts');
+  writeFileSync(preload, `${readFileSync(inspectorFault('refused'), 'utf8')}
+const spawn = Bun.spawn.bind(Bun);
+Bun.spawn = ((...args: Parameters<typeof Bun.spawn>) => {
+  const child = spawn(...args);
+  if (!(args[0] as string[]).some(arg => arg.startsWith('--inspect-wait'))) return child;
+  const stdout = new ReadableStream({ async start(controller) {
+    await Bun.sleep(2_000);
+    for await (const chunk of child.stdout as ReadableStream<Uint8Array>) controller.enqueue(chunk);
+    controller.close();
+  } });
+  return new Proxy(child, { get: (target, key) => key === 'stdout' ? stdout : Reflect.get(target, key, target) });
+}) as typeof Bun.spawn;
+`);
+  const marker = join(dir, 'slow-close.started');
+  const run = await runUntilDeadline('slow-close', [
+    "import { writeFileSync } from 'node:fs';",
+    "import { test } from 'bun:test';",
+    `test('would run past the deadline', async () => { writeFileSync(${JSON.stringify(marker)}, 'started'); await Bun.sleep(3_000); });`,
+  ].join('\n'), 600, preload);
+  expect(run.code).toBe(1);
+  expect(run.stdout).toContain('::error title=Test run stopped at its deadline::');
+  expect(run.read('summary.txt')).toMatch(/^Running: unknown, the run had no inspector/m);
+  expect(existsSync(marker)).toBe(false);
+}, 60_000);
+
 test('an inspector that disconnects is reported as gone, not as a blocked thread', async () => {
   const run = await runUntilDeadline('dropped', "import { test } from 'bun:test';\ntest('waits forever', () => new Promise(() => {}), 600_000);\n", 3_000, inspectorFault('dropped'));
   expect(run.code).toBe(1);
