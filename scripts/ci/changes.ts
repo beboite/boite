@@ -3,7 +3,7 @@ import { appendFileSync } from 'node:fs';
 // Unknown files run the complete suite. Documentation-only PRs still get the
 // required job, so branch protection never waits for a filtered-out workflow.
 export function affectedChecks(files: string[]) {
-  const checks = { core: false, web: false, desktop: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
+  const checks = { core: false, web: false, desktop: false, shellRust: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
   for (const file of files) {
     if (
       /^(docs\/.*\.md|README\.md|AGENTS\.md|CONTRIBUTING\.md|SECURITY\.md|CODE_OF_CONDUCT\.md|LICENSE)$/.test(file) ||
@@ -14,7 +14,13 @@ export function affectedChecks(files: string[]) {
       // The wrapper loads the UI from the core, so nothing else goes into the APK.
       checks.android = true;
     } else if (file.startsWith('apps/shell/')) {
-      checks.desktop = true;
+      checks.desktop = checks.shellRust = true;
+    } else if (/^packages\/(core|contracts)\//.test(file)) {
+      // The shell's Rust tests compile apps/shell/src-tauri and start inline
+      // fake cores, never this code. The APK build reads APP_ORIGIN from the
+      // contracts and nothing from the core.
+      checks.core = checks.web = checks.desktop = checks.server = checks.telemetry = checks.e2eTypes = checks.stress = true;
+      if (file.startsWith('packages/contracts/')) checks.android = true;
     } else if (file.startsWith('tests/e2e/')) {
       checks.desktop = checks.e2eTypes = true;
       // Stress fixtures use the same isolated core and browser harness.
@@ -23,6 +29,8 @@ export function affectedChecks(files: string[]) {
       checks.server = true;
     } else if (file.startsWith('packages/ui/')) {
       checks.web = checks.desktop = checks.server = checks.stress = true;
+      // browser.rs embeds these two page scripts with include_str!.
+      if (/^packages\/ui\/src\/lib\/preview-(picker|highlight)\.js$/.test(file)) checks.shellRust = true;
     } else if (file.startsWith('telemetry/')) {
       checks.web = checks.telemetry = true;
     } else if (/^(tests\/stress\/|bench\/agent-stress\.ts$|bench\/lib\/)/.test(file)) {
@@ -31,8 +39,8 @@ export function affectedChecks(files: string[]) {
       // The web job type-checks these; the changes job tests architecture scripts.
       checks.web = true;
     } else {
-      // Core and contracts are used by both clients; unknown inputs stay safe.
-      checks.core = checks.web = checks.desktop = checks.server = checks.android = checks.telemetry = checks.e2eTypes = checks.stress = true;
+      // Dependencies, shared builds and unknown inputs stay safe.
+      checks.core = checks.web = checks.desktop = checks.shellRust = checks.server = checks.android = checks.telemetry = checks.e2eTypes = checks.stress = true;
     }
   }
   return checks;
@@ -72,22 +80,33 @@ export const CORE_ALL: CoreRunner[] = [...CORE_PR, { os: 'macos-15-intel', name:
 
 // `pr` gates a merge, `warm` follows it on main, `full` is a release or a
 // manual run. Main runs the extra portable architectures, the Intel Mac core
-// suite, and refreshes caches.
+// suite, and refreshes caches. `draft` is a draft pull request: only the Linux
+// checks run, under a gate named `CI draft`, and marking it ready runs `pr`
+// (docs/ci.md#draft-pull-requests).
 // A push event alone provides no proof that its tree passed PR tests, so every
 // mode runs the affected suites. A main push compares with the last main commit
 // whose CI passed, not the previous push: a cancelled or failed run's changes
 // are tested again, so a green main commit has every suite passing on some tree
 // that its later changes did not affect. The nightly publishes on that alone.
-export type Mode = 'pr' | 'warm' | 'full';
+export type Mode = 'draft' | 'pr' | 'warm' | 'full';
 
-export function ciMode(event: string, force: boolean): Mode {
+export function ciMode(event: string, force: boolean, draft = false): Mode {
   if (force) return 'full';
-  if (event === 'pull_request') return 'pr';
+  if (event === 'pull_request') return draft ? 'draft' : 'pr';
   if (event === 'push') return 'warm';
   return 'full';
 }
 
+// A draft keeps the Linux core suite, type checks, UI tests and focused checks;
+// Windows, macOS, desktop packages, E2E, stress, Docker and the APK wait for
+// the ready pull request.
+const CORE_DRAFT: CoreRunner[] = CORE_PR.slice(0, 1);
+
 export function plan(checks: ReturnType<typeof affectedChecks>, mode: Mode) {
+  if (mode === 'draft') {
+    const draft = plan({ ...checks, desktop: false, server: false, android: false, stress: false }, 'pr');
+    return { ...draft, coreRunners: JSON.stringify(CORE_DRAFT) };
+  }
   return {
     ...checks,
     // Full suites already cover these focused checks.
@@ -140,7 +159,7 @@ if (import.meta.main) {
     checks = affectedChecks(files);
     workflows = needsWorkflowLint(files);
   }
-  const mode = ciMode(process.env.GITHUB_EVENT_NAME ?? '', force);
+  const mode = ciMode(process.env.GITHUB_EVENT_NAME ?? '', force, process.env.DRAFT === 'true');
   const output = Object.entries({ ...plan(checks, mode), workflows, mode }).map(([key, value]) => `${key}=${value}\n`).join('');
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, output);
   process.stdout.write(output);

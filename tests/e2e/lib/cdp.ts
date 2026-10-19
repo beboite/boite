@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import type { Subprocess } from 'bun';
+import { SOCKET_OPTIONS } from '../../../packages/core/src/client.ts';
 import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
 import { relay } from './ws-relay.ts';
 
@@ -192,6 +194,11 @@ export class BrowserPage {
   #pageErrors: string[] = [];
   /** Requests the page sent and has not finished loading, reported when a wait times out. */
   #requests = new Map<string, { url: string; at: number; answered: boolean }>();
+  /** Requests whose headers the network stack put on the wire (`requestWillBeSentExtraInfo`, which may come first). */
+  #sent = new Set<string>();
+  /** Under `BOITE_E2E_TRACE_DIR`, Chrome's net log, kept only for a page whose failure printed a trace. */
+  #netlog: string | null = null;
+  #keepNetlog = false;
   /** Completed failures would otherwise disappear from the timeout's in-flight list. */
   #networkFailures: string[] = [];
   errors(): string[] { return [...this.#pageErrors]; }
@@ -242,6 +249,8 @@ export class BrowserPage {
     const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), `${E2E_DIR_PREFIX}browser-`));
     const port = options.debugPort ?? (await freePort());
     const size = options.windowSize ?? { width: 1440, height: 900 };
+    // Where each request waited (cache, socket pool, connection, server) when a page stalls.
+    const netlog = TRACE && process.env.BOITE_E2E_TRACE_DIR ? join(process.env.BOITE_E2E_TRACE_DIR, `netlog-${port}-${Date.now()}.json`) : null;
 
     const proc = Bun.spawn({
       cmd: [
@@ -273,6 +282,7 @@ export class BrowserPage {
         `--window-size=${size.width},${size.height}`,
         `--user-data-dir=${userDataDir}`,
         `--remote-debugging-port=${port}`,
+        ...(netlog ? [`--log-net-log=${netlog}`, '--net-log-capture-mode=Default'] : []),
         ...(options.args ?? []),
         'about:blank',
       ],
@@ -302,6 +312,7 @@ export class BrowserPage {
       const socket = await openSocket(target);
       page = new BrowserPage(socket, proc, ownsUserDataDir ? userDataDir : null, watch);
       page.#stderr = () => stderr;
+      page.#netlog = netlog;
       open.add(page);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
@@ -592,6 +603,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     open.delete(this);
     if (this.#proc !== null) await stopBrowser(this.#proc, this.#userDataDir, this.#watch);
     else if (this.#userDataDir !== null) await removeDirectory(this.#userDataDir);
+    if (this.#netlog !== null && !this.#keepNetlog) await rm(this.#netlog, { force: true }).catch(() => undefined);
   }
 
   /** What `BOITE_E2E_TRACE` adds to a failure, on its own lines; empty without it. */
@@ -600,12 +612,14 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     const now = performance.now();
     const lags = loopLag.filter(([at]) => now - at < 30_000).map(([at, ms]) => `${ms} ms ${Math.round((now - at) / 1000)} s ago`);
     const ui = (globalThis as { __boiteUiTrace?: () => string }).__boiteUiTrace?.() ?? 'not traced';
+    this.#keepNetlog = true;
     const stderr = this.#stderr().trim().split('\n').slice(-12).join('\n');
     return `\nTrace: last devtools message ${Math.round(now - this.#heardAt)} ms ago; socket ${this.#closedBy ?? `state ${this.#socket.readyState}`}; browser ${this.#proc === null ? 'attached' : this.#proc.exitCode === null ? `pid ${this.#proc.pid} running` : `exited ${this.#proc.exitCode} (signal ${this.#proc.signalCode})`}
 Messages: ${this.#heard} delivered, ${this.#unread} unreadable${this.#firstUnread ? ` (first ${this.#firstUnread})` : ''}
 Test loop delays over 50 ms in 30 s: ${lags.length ? lags.slice(-8).join(', ') : 'none'}
 UI server: ${ui}
 Relay: ${relays.get(this.#socket)?.report() ?? 'none'}
+Net log: ${this.#netlog ?? 'none'}
 Browser stderr tail:
 ${stderr || '(empty)'}`;
   }
@@ -613,8 +627,8 @@ ${stderr || '(empty)'}`;
   /** What a stalled page is still waiting on: whether the server never answered or the body never arrived. */
   #inFlight(): string[] {
     const now = Date.now();
-    return [...this.#requests.values()].filter((request) => now - request.at > 1_000).slice(0, 10)
-      .map((request) => `${request.url} ${request.answered ? 'answered, body pending' : 'no response'} for ${now - request.at} ms`);
+    return [...this.#requests.entries()].filter(([, request]) => now - request.at > 1_000).slice(0, 10)
+      .map(([id, request]) => `${request.url} ${request.answered ? 'answered, body pending' : TRACE ? `no response, ${this.#sent.has(id) ? 'headers sent' : 'headers never sent'}` : 'no response'} for ${now - request.at} ms`);
   }
 
   #receive(raw: string): void {
@@ -639,6 +653,7 @@ ${stderr || '(empty)'}`;
       if (id !== undefined) {
         const url = frame.params?.request?.url ?? '';
         if (frame.method === 'Network.requestWillBeSent' && !url.startsWith('data:')) this.#requests.set(id, { url, at: Date.now(), answered: false });
+        else if (frame.method === 'Network.requestWillBeSentExtraInfo') this.#sent.add(id);
         else if (frame.method === 'Network.responseReceived') {
           const request = this.#requests.get(id);
           if (request) request.answered = true;
@@ -646,6 +661,7 @@ ${stderr || '(empty)'}`;
         } else if (frame.method === 'Network.loadingFinished' || frame.method === 'Network.loadingFailed') {
           if (frame.method === 'Network.loadingFailed') this.#recordNetworkFailure(id, frame.params?.errorText ?? 'loading failed');
           this.#requests.delete(id);
+          this.#sent.delete(id);
         }
       }
       return;
@@ -762,7 +778,7 @@ async function openSocket(target: TargetInfo): Promise<WebSocket> {
   if (url === undefined) throw new Error('the page target has no debugger url');
   const traced = TRACE ? await relay(url) : null;
   return new Promise<WebSocket>((resolve, reject) => {
-    const socket = new WebSocket(traced?.url ?? url);
+    const socket = new WebSocket(traced?.url ?? url, SOCKET_OPTIONS as unknown as string[]);
     if (traced) {
       relays.set(socket, traced);
       socket.addEventListener('close', (event) => {

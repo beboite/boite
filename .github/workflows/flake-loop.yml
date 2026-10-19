@@ -27,7 +27,9 @@ env:
 jobs:
   browser:
     name: Core browser files (${{ matrix.name }}, ${{ matrix.parallel }} at once)
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
+    # Paused while the E2E loop measures the UI stalls: run 39180308980 already
+    # compared two at once (1/10) with four (3/10) on macOS arm64.
+    if: false && (github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop'))
     strategy:
       fail-fast: false
       matrix:
@@ -83,19 +85,19 @@ jobs:
           path: flake-loop/
 
   e2e:
-    name: E2E coordination bridge (${{ matrix.mode }})
+    name: E2E ${{ matrix.mode }}
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
     strategy:
       fail-fast: false
       matrix:
-        mode: [alone, shard 3]
+        mode: [alone, shard 1, shard 2, shard 3]
     runs-on: windows-2025
     timeout-minutes: 90
     env:
       BOITE_E2E_PREBUILT_UI: '1'
       BOITE_E2E_FAKE_UI: tests/e2e/.artifacts/fake-ui
       BOITE_E2E_TRACE: '1'
-      FLAKE_LOOP_TITLE: E2E coordination bridge, ${{ matrix.mode }}
+      FLAKE_LOOP_TITLE: E2E ${{ matrix.mode }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -118,15 +120,24 @@ jobs:
           if ($env:MODE -eq 'alone') {
             $files = @('tests/e2e/coordination-bridge-live.test.ts', 'tests/e2e/machines.test.ts'); $runs = [int]$env:RUNS * 2; $together = @()
           } else {
-            $files = @(bun scripts/ci/e2e-shards.ts 3 3)
-            if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw 'No E2E files for shard 3' }
-            $runs = [math]::Max(1, [int]([int]$env:RUNS / 4)); $together = @('--together')
+            $shard = $env:MODE.Split(' ')[1]
+            $files = @(bun scripts/ci/e2e-shards.ts $shard 3)
+            if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw "No E2E files for $env:MODE" }
+            $runs = [math]::Max(1, [int]([int]$env:RUNS / 2)); $together = @('--together')
           }
           New-Item -ItemType Directory -Force flake-loop/devtools | Out-Null
           $env:BOITE_E2E_TRACE_DIR = (Resolve-Path flake-loop/devtools).Path
+          # A page stall lines up with these: is the disk under Chrome's profile slow then, and is Defender scanning it?
+          Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, OnAccessProtectionEnabled, BehaviorMonitorEnabled | Format-List | Out-File flake-loop/defender.txt
+          (Get-MpPreference).ExclusionPath | Out-File -Append flake-loop/defender.txt
+          Get-Content flake-loop/defender.txt
+          $perf = Start-Process typeperf -ArgumentList @('\PhysicalDisk(*)\Avg. Disk sec/Transfer', '\PhysicalDisk(*)\Current Disk Queue Length', '\Processor(_Total)\% Processor Time', '\Process(MsMpEng)\% Processor Time', '-si', '1', '-f', 'CSV', '-o', (Join-Path $PWD 'flake-loop/perf.csv'), '-y') -PassThru -WindowStyle Hidden
           bun scripts/ci/flake-loop.ts --runs $runs --out flake-loop @together @files
+          $code = $LASTEXITCODE
+          Stop-Process -Id $perf.Id -ErrorAction SilentlyContinue
+          exit $code
       - uses: ./.github/actions/upload-artifact
         if: always()
         with:
-          name: flake-loop-e2e-${{ matrix.mode == 'alone' && 'alone' || 'shard3' }}
+          name: flake-loop-e2e-${{ matrix.mode == 'alone' && 'alone' || format('shard{0}', strategy.job-index) }}
           path: flake-loop/

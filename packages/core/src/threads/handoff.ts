@@ -234,18 +234,19 @@ export class RestartHandoff {
   /**
    * The cut turn's own request goes along: a turn stopped in its first second
    * may never have reached the agent's session. Delegation and workflows
-   * continue the children a handoff cut with it too.
+   * continue the children a handoff cut with it too, and a crash resume
+   * (`threads/auto-continue.ts`) leads with its own reason.
    */
-  continuation(turn: Turn): string {
+  continuation(turn: Turn, lead: string = RESUME_PROMPT): string {
     const opening = turn.execution?.operation === 'resume'
       ? Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })).find(message => message.role === 'system') ?? null
       : this.core.journal.lastUserMessage(turn.threadId, turn.id);
     const text = (opening?.parts ?? []).map(part => part.type === 'text' ? part.text : '').join('').trim();
     // A second restart over a resumed turn sends the same note, not a note about a note.
     if (turn.execution?.operation === 'resume' && text.length > 0) return text;
-    if (text.length === 0) return RESUME_PROMPT;
+    if (text.length === 0) return lead;
     const quoted = text.length > QUOTE_LIMIT ? `${text.slice(0, QUOTE_LIMIT)}\n[cut by Boite at ${QUOTE_LIMIT} characters]` : text;
-    return `${RESUME_PROMPT}\n\nThe request that turn was answering:\n\n${quoted}`;
+    return `${lead}\n\nThe request that turn was answering:\n\n${quoted}`;
   }
 
   /**
