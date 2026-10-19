@@ -21,8 +21,8 @@ export const strings = {
     /** The count beside Threads or Agents in that switch: what works now, and whether something there needs the user. */
     surfaceWorking: '{count} at work',
     surfaceWaiting: '{count} at work, something needs you',
-    surfaceSubagentsOne: 'including 1 subagent',
-    surfaceSubagentsMany: 'including {count} subagents',
+    surfaceSubagentsOne: 'and 1 subagent',
+    surfaceSubagentsMany: 'and {count} subagents',
     /** The two ways the display options can list threads. */
     projectsView: 'Projects',
     recentView: 'Recent',
