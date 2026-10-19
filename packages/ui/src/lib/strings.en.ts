@@ -1307,6 +1307,8 @@ export const strings = {
     retryLimitTitle: 'Usage limit reached',
     retryLimitBody: 'Resumes at {time}, once the limit has reset, in {in}.',
     retryLimitCancel: 'Do not resume',
+    retryContinueTitle: 'Stopped before its answer',
+    retryContinueBody: 'Resumes by itself in {time}, resume {attempt} of {attempts}.',
     contextDetails: 'Context',
     contextInput: 'Input',
     contextCache: 'Cached input',
