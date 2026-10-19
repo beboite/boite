@@ -9,8 +9,11 @@ use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 
 use serde_json::json;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
-use webview2_com::{CoTaskMemPWSTR, ProcessFailedEventHandler};
-use windows::core::{Interface, PWSTR};
+use webview2_com::{
+    ContentLoadingEventHandler, CoTaskMemPWSTR, NavigationCompletedEventHandler, NavigationStartingEventHandler,
+    ProcessFailedEventHandler,
+};
+use windows::core::{Interface, BOOL, PWSTR};
 
 use crate::shell_log::{self, Level};
 
@@ -160,6 +163,7 @@ fn report(args: &ICoreWebView2ProcessFailedEventArgs) -> windows::core::Result<(
 
 /// Registers the `ProcessFailed` handler on the main window's WebView2. The
 /// browser and GPU processes are shared by every surface, so one is enough.
+/// The main page's navigations are logged too (`watch_navigations`).
 pub(crate) fn watch_webview(window: &tauri::WebviewWindow) {
     let registered = window.with_webview(|platform| {
         let added = (|| -> windows::core::Result<()> { unsafe {
@@ -169,15 +173,104 @@ pub(crate) fn watch_webview(window: &tauri::WebviewWindow) {
                 Ok(())
             }));
             let mut token = 0;
-            webview.add_ProcessFailed(&handler, &mut token)
+            webview.add_ProcessFailed(&handler, &mut token)?;
+            watch_navigations(&webview)
         }})();
         if let Err(error) = added {
             shell_log::warn("webview", "shell.webview.watch-unavailable",
-                format!("WebView2 process failures will not be logged: {error}"), json!({}));
+                format!("WebView2 process failures or navigations will not be logged: {error}"), json!({}));
         }
     });
     if let Err(error) = registered {
         shell_log::warn("webview", "shell.webview.watch-unavailable",
-            format!("WebView2 process failures will not be logged: {error}"), json!({}));
+            format!("WebView2 process failures or navigations will not be logged: {error}"), json!({}));
     }
+}
+
+/// The URL a record names: no query, fragment or credentials.
+fn bare(uri: PWSTR) -> String {
+    if uri.is_null() { return String::new(); }
+    let text = CoTaskMemPWSTR::from(uri).to_string();
+    match tauri::Url::parse(&text) {
+        Ok(mut url) => {
+            url.set_query(None);
+            url.set_fragment(None);
+            let _ = url.set_username("");
+            let _ = url.set_password(None);
+            url.to_string()
+        }
+        Err(_) => text.chars().take(200).collect(),
+    }
+}
+
+fn error_name(status: COREWEBVIEW2_WEB_ERROR_STATUS) -> &'static str {
+    match status {
+        COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN => "unknown",
+        COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED => "operation-canceled",
+        COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_ABORTED => "connection-aborted",
+        COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_RESET => "connection-reset",
+        COREWEBVIEW2_WEB_ERROR_STATUS_DISCONNECTED => "disconnected",
+        COREWEBVIEW2_WEB_ERROR_STATUS_CANNOT_CONNECT => "cannot-connect",
+        COREWEBVIEW2_WEB_ERROR_STATUS_HOST_NAME_NOT_RESOLVED => "host-name-not-resolved",
+        COREWEBVIEW2_WEB_ERROR_STATUS_SERVER_UNREACHABLE => "server-unreachable",
+        COREWEBVIEW2_WEB_ERROR_STATUS_TIMEOUT => "timeout",
+        COREWEBVIEW2_WEB_ERROR_STATUS_ERROR_HTTP_INVALID_SERVER_RESPONSE => "invalid-server-response",
+        COREWEBVIEW2_WEB_ERROR_STATUS_REDIRECT_FAILED => "redirect-failed",
+        COREWEBVIEW2_WEB_ERROR_STATUS_UNEXPECTED_ERROR => "unexpected-error",
+        _ => "other",
+    }
+}
+
+/// Logs each navigation of the main page as `shell.webview.navigation`: when
+/// it starts and to which URL, whether its content is an error page, and how
+/// it ends, with WebView2's error status and the HTTP status. A page left on
+/// about:blank on Windows runners logged only `page-load` started and
+/// finished, 17 and 22 s after the shell started, which says neither when the
+/// navigation was asked for nor why it ended without a document (2026-10-19).
+/// The first record says where the page is when the watch begins, in case
+/// its first navigation started before.
+fn watch_navigations(webview: &ICoreWebView2) -> windows::core::Result<()> {
+    let mut source = PWSTR::null();
+    let at = if unsafe { webview.Source(&mut source) }.is_ok() { bare(source) } else { String::new() };
+    shell_log::info("webview", "shell.webview.navigation", format!("watching the main page's navigations from {at}"),
+        json!({ "phase": "watching", "url": at }));
+    let mut token = 0;
+    let starting = NavigationStartingEventHandler::create(Box::new(|_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let (mut id, mut uri) = (0u64, PWSTR::null());
+        unsafe { args.NavigationId(&mut id)?; args.Uri(&mut uri)?; }
+        let url = bare(uri);
+        shell_log::info("webview", "shell.webview.navigation", format!("navigation {id} to {url} started"),
+            json!({ "phase": "starting", "id": id, "url": url }));
+        Ok(())
+    }));
+    unsafe { webview.add_NavigationStarting(&starting, &mut token)? };
+    let content = ContentLoadingEventHandler::create(Box::new(|_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let (mut id, mut error_page) = (0u64, BOOL::default());
+        unsafe { args.NavigationId(&mut id)?; args.IsErrorPage(&mut error_page)?; }
+        let error_page = error_page.as_bool();
+        shell_log::info("webview", "shell.webview.navigation",
+            format!("navigation {id} loads {}", if error_page { "an error page" } else { "its document" }),
+            json!({ "phase": "content", "id": id, "errorPage": error_page }));
+        Ok(())
+    }));
+    unsafe { webview.add_ContentLoading(&content, &mut token)? };
+    let completed = NavigationCompletedEventHandler::create(Box::new(|_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let (mut id, mut success, mut status) = (0u64, BOOL::default(), COREWEBVIEW2_WEB_ERROR_STATUS::default());
+        unsafe { args.NavigationId(&mut id)?; args.IsSuccess(&mut success)?; args.WebErrorStatus(&mut status)?; }
+        let mut code = 0i32;
+        // Runtimes before 1.0.1185 do not say the HTTP status.
+        let http = args.cast::<ICoreWebView2NavigationCompletedEventArgs2>().ok()
+            .and_then(|more| unsafe { more.HttpStatusCode(&mut code) }.ok().map(|()| code));
+        let success = success.as_bool();
+        let (level, outcome) = if success { (Level::Info, "succeeded".to_string()) }
+            else { (Level::Warn, format!("failed: {} ({})", error_name(status), status.0)) };
+        let http_text = http.map_or_else(|| "unknown".to_string(), |code| code.to_string());
+        shell_log::log(level, "webview", "shell.webview.navigation", format!("navigation {id} {outcome}, HTTP {http_text}"), None,
+            json!({ "phase": "completed", "id": id, "success": success, "webErrorStatus": error_name(status), "webErrorCode": status.0, "httpStatus": http }));
+        Ok(())
+    }));
+    unsafe { webview.add_NavigationCompleted(&completed, &mut token) }
 }

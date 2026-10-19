@@ -8,13 +8,15 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
   import { workflowTone } from '../lib/thread-state';
+  import { formatTokens, levelName } from '../lib/format';
+  import { totalTokens } from '../lib/usage';
 
   /** One step: where it sits in the plan, its executions, and a way into the chat of the one picked. */
   let { store, run, node, profiles, onback }: { store: Store; run: WorkflowRun; node: WorkflowNode; profiles: DelegationProfile[]; onback: () => void } = $props();
 
   let picked = $state<string | null>(null);
   let step = $derived(run.plan.steps.find(entry => entry.id === node.id));
-  let route = $derived(routeOf(node, profiles));
+  let route = $derived(routeOf(node, profiles, step));
   let timing = $derived(nodeTiming(node));
   /** The execution shown: the one picked, else the first still running or failed, else the first. */
   let instance = $derived(
@@ -42,6 +44,7 @@
       <small>
         {strings.workflow.stepStatus[node.status]}
         {#if route}· <ProviderLogo providerId={route.providerId} size={12} /> {route.model || route.profile}{/if}
+        {#if route?.effort}· <span>{levelName({ id: route.effort, label: route.effort })}</span>{/if}
         {#if timing.startedAt !== null}· <Elapsed startedAt={timing.startedAt} finishedAt={timing.finishedAt} active={timing.active} />{/if}
       </small>
     </div>
@@ -67,6 +70,7 @@
           <button type="button" class="instance" class:chosen={inst.key === instance?.key} role="option" aria-selected={inst.key === instance?.key} data-testid="workflow-instance" onclick={() => (picked = inst.key)}>
             <StatusMark {...workflowTone(inst.status)} />
             <span class="label ui-label">{inst.label || inst.key}</span>
+            {#if inst.usage !== undefined}<span class="time" title={strings.workflow.tokensHelp}>{fill(strings.workflow.tokens, { tokens: formatTokens(inst.usage ? totalTokens(inst.usage) : 0) })}</span>{/if}
             {#if inst.startedAt !== null}<span class="time"><Elapsed startedAt={inst.startedAt} finishedAt={inst.finishedAt} active={inst.status === 'running'} /></span>{/if}
           </button>
         {/each}

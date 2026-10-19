@@ -18,8 +18,25 @@ const SLOW_BACK = `{
   };
 }`;
 
+/**
+ * A transition caught by a `content-visibility: hidden` lock the way a loaded runner caught one after a theme
+ * switch: Chrome stops updating it, so its `finished` promise never settles and the hang probe lists nothing.
+ * Planted in every page here, it hangs any capture that awaits every animation instead of the drawn ones.
+ */
+const STUCK_TRANSITION = `addEventListener('DOMContentLoaded', () => {
+  const lock = document.body.appendChild(document.createElement('div'));
+  lock.style.cssText = 'position: fixed; width: 0; height: 0; overflow: hidden';
+  const text = lock.appendChild(document.createElement('span'));
+  text.style.transition = 'color 10s';
+  getComputedStyle(text).color;
+  text.style.color = 'red';
+  getComputedStyle(text).color;
+  // Locked once the transition has run a frame: one locked before its first update is dropped.
+  requestAnimationFrame(() => requestAnimationFrame(() => { lock.style.contentVisibility = 'hidden'; }));
+});`;
+
 async function capture(name: string) {
-  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.settleAnimations();
   await page.screenshot(join(import.meta.dir, '.artifacts', name));
 }
 async function viewport(width: number, height: number, mobile = false) {
@@ -77,6 +94,7 @@ beforeAll(async () => {
   // A loaded runner lands a phone panel's history pop late, after the next navigation has started. Every
   // pop here is held until then, or 250 ms: a test that navigates before its pop landed fails each run.
   await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SLOW_BACK });
+  await page.send('Page.addScriptToEvaluateOnNewDocument', { source: STUCK_TRANSITION });
   await page.reload();
   await scheme('dark');
   await viewport(1280, 800);

@@ -2,6 +2,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, writeF
 import { join } from 'node:path';
 import type { BrowserPage } from './cdp.ts';
 import { reportOnHang } from './hang-report.ts';
+import { windowsProcessTree } from './process-tree.ts';
 
 /** The webview exposes its page target before the IPC bridge is injected. */
 export const TAURI_READY = "typeof window.__TAURI_INTERNALS__?.invoke === 'function'";
@@ -11,8 +12,6 @@ const SHELL_LOG_RECORDS = 60;
 /** How much of the log's end is read to find them, whatever its size. */
 const SHELL_LOG_TAIL_BYTES = 256 * 1024;
 const MESSAGE_CHARS = 300;
-/** How long PowerShell gets to list the shell's process tree. */
-const PROCESS_TREE_TIMEOUT_MS = 10_000;
 /** The newest `shell.webview.*` records a page that never got its bridge reports, from the same tail. */
 const WEBVIEW_RECORDS = 40;
 /** How long each devtools question of that report may take: the page may be what hangs. */
@@ -45,7 +44,8 @@ export async function describeShell(dataDir: string, shellPid: number, failure =
  * Waits for the shell page's IPC bridge (`TAURI_READY`). A page that never
  * gets it fails with what the attach did not show: the target the test
  * attached to, `/json/list` at the failure, the frame and its navigation
- * history as devtools reports them, the shell's `shell.webview.*` records
+ * history as devtools reports them, each main-frame navigation event and
+ * document request the page saw since the attach, the shell's `shell.webview.*` records
  * (`shell.webview.page-load` started and finished), its log tail and process
  * tree. The text also goes to `tests/e2e/.artifacts/shell-<pid>-not-ready.txt`,
  * which the desktop job uploads as `desktop-failure-captures`.
@@ -101,11 +101,14 @@ async function notReadyReport(page: BrowserPage, shell: ShellUnderTest, tree: (s
   const webview = typeof records === 'string'
     ? records
     : records.filter(record => record.event.startsWith('shell.webview.')).slice(-WEBVIEW_RECORDS).map(record => record.text).join('\n') || '  (none)';
+  const navigations = page.navigationLog();
   return [
     `Attached target: ${JSON.stringify(page.target)}`,
     `/json/list of port ${shell.port} now: ${targets}`,
     `Page.getFrameTree: ${frames}`,
     `Page.getNavigationHistory: ${history}`,
+    `Main frame navigation since the devtools socket opened (${navigations.length}):`,
+    navigations.map(line => `  ${line}`).join('\n') || '  (none: devtools reported no navigation of this page)',
     `Shell ${shell.pid} webview records (newest ${WEBVIEW_RECORDS} shell.webview.* of the log tail):`,
     webview,
     shellText,
@@ -115,7 +118,7 @@ async function notReadyReport(page: BrowserPage, shell: ShellUnderTest, tree: (s
 async function shellReport(dataDir: string, shellPid: number, tree = processTree): Promise<string> {
   const records = shellRecords(dataDir);
   const tail = typeof records === 'string' ? records : records.slice(-SHELL_LOG_RECORDS).map(record => record.text).join('\n');
-  // A missing or blocked PowerShell makes `Bun.spawn` throw: the log tail stays.
+  // A probe that cannot read the processes throws: the log tail stays.
   const listing = await tree(shellPid).catch((error: unknown) => `(could not list it: ${errorText(error)})`);
   return `Shell ${shellPid} log (newest ${SHELL_LOG_RECORDS} records of ${join(dataDir, 'logs', 'shell.0.ndjson')}):\n${tail}\n`
     + `Shell ${shellPid} process tree: ${listing}`;
@@ -183,12 +186,6 @@ function readTail(path: string): string {
 /** The shell and every descendant, WebView2's processes with their `--type`. */
 async function processTree(shellPid: number): Promise<string> {
   if (process.platform !== 'win32') return '(only collected on Windows)';
-  // Bun kills this PowerShell, and only it, once the timeout passes: a stuck
-  // WMI query then costs the diagnosis its tree, not the run its error.
-  const listing = Bun.spawn(['powershell', '-NoProfile', '-Command',
-    `$all = Get-CimInstance Win32_Process; $ids = @(${shellPid}); do { $next = @($all | Where-Object { $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids } | Select-Object -ExpandProperty ProcessId); $ids += $next } while ($next.Count); $all | Where-Object { $_.ProcessId -in $ids } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Depth 3`,
-  ], { stdout: 'pipe', stderr: 'pipe', windowsHide: true, timeout: PROCESS_TREE_TIMEOUT_MS });
-  const [stdout, stderr] = await Promise.all([new Response(listing.stdout).text(), new Response(listing.stderr).text(), listing.exited]);
-  if (listing.signalCode !== null) return `(PowerShell gave no tree within ${PROCESS_TREE_TIMEOUT_MS} ms)`;
-  return stdout || `(empty; powershell said: ${stderr.slice(0, 300)})`;
+  const tree = await windowsProcessTree(shellPid);
+  return tree.length === 0 ? `(none: pid ${shellPid} is not running)` : JSON.stringify(tree, null, 2);
 }

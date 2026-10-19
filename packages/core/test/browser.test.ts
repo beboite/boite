@@ -59,7 +59,7 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
 real('a page nobody drives or watches sleeps, and meets the next command or viewer awake and focused', async () => {
   const { harness, owner, agent, threadId } = browserFixture;
   harness.core.browser.sleepAfterMs = 300;
-  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/animated') } });
+  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/animated?busy=400') } });
   const browser = harness.core.browser;
   // Whether the core keeps the tab awake is its own state; how fast a runner's
   // Chrome then runs the page is not (macOS runners stalled awake pages 2 s).
@@ -75,17 +75,26 @@ real('a page nobody drives or watches sleeps, and meets the next command or view
     }
     return true;
   };
+  // The browser answers a freeze before its renderer applies it, and a loaded
+  // renderer applies it late: a page that still ran 400 ms into a second counted
+  // from the answer showed a timer pause of 701 ms. The second runs from when the
+  // page says it froze, and the page above is still busy for 400 ms each time.
+  const frozenFor = async (ms: number) => {
+    const froze = browserFixture.frozen();
+    expect(await asleepWithin(30_000)).toBe(true);
+    for (const end = Date.now() + 30_000; browserFixture.frozen() === froze && Date.now() < end;) await Bun.sleep(50);
+    expect(browserFixture.frozen()).toBeGreaterThan(froze);
+    await Bun.sleep(ms);
+  };
   await evaluate('gaps()');
-  expect(await asleepWithin(30_000)).toBe(true);
-  await Bun.sleep(1000);
+  await frozenFor(1000);
   // Frozen for a second: no animation frame and no timer ran, and the command found the page as it was.
   const [frameGap, tickGap] = await evaluate('gaps()') as [number, number];
   expect(frameGap).toBeGreaterThan(800);
   expect(tickGap).toBeGreaterThan(800);
   expect(await evaluate('document.visibilityState + " " + document.hasFocus()')).toBe('visible true');
   // Asleep again, a viewer's first frame wakes it and its screencast keeps it awake past the wait.
-  expect(await asleepWithin(30_000)).toBe(true);
-  await Bun.sleep(1000);
+  await frozenFor(1000);
   await owner.call('threads.subscribe', { threadId });
   await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 300, quality: 40 });
   expect(browser.asleep(tabId!)).toBe(false);
@@ -96,8 +105,7 @@ real('a page nobody drives or watches sleeps, and meets the next command or view
   // Once the viewer leaves it sleeps again; a client that shows the tab's own
   // page asks for no frames, and one `browser.remoteWatch` keeps it awake.
   // The screencast stops up to twice its idle time after the last frame; a loaded runner takes longer.
-  expect(await asleepWithin(30_000)).toBe(true);
-  await Bun.sleep(1000);
+  await frozenFor(1000);
   expect(await owner.call('browser.remoteWatch', { threadId, tabId: tabId! })).toEqual({ ok: true });
   expect((await evaluate('gaps()') as [number, number])[0]).toBeGreaterThan(800);
   // Without the lease it would sleep within this wait, as it did above.

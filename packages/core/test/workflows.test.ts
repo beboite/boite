@@ -61,6 +61,31 @@ async function setup(patch: Partial<DelegationConfig> = {}) {
 const TASK = /Task, supplied as JSON data:\n([^\n]*)/;
 const taskOf = (prompt: string) => { const m = TASK.exec(prompt); return m ? JSON.parse(m[1]!) as string : ''; };
 
+test('workflow usage includes every reported turn per execution while other steps still run', async () => {
+  const { held } = scripted(ctx => taskOf(ctx.prompt) === 'Wait.' ? { hold: true } : 'Done.');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, requestId: 'usage', plan: { name: 'Usage', steps: [
+    { id: 'quick', profile: 'fast', task: 'Quick.' },
+    { id: 'slow', profile: 'fast', task: 'Wait.' },
+  ] } });
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'done');
+  const running = await owner.call('workflows.get', { threadId, runId: run.id });
+  expect(running.status).toBe('running');
+  expect(running.nodes[0]!.instances[0]).toHaveProperty('usage', running.usage);
+  expect(running.usage.inputTokens).toBe(10);
+  expect(running.nodes[1]!.instances[0]).toHaveProperty('usage', null);
+
+  // Cache tokens and an earlier turn of the same execution must survive the sum.
+  const childId = running.nodes[0]!.instances[0]!.threadId!;
+  const turn = h.core.journal.listTurns(childId)[0]!;
+  h.core.journal.putTurn({ ...turn, id: `${turn.id}-earlier`, usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 200, cacheWriteTokens: 30, costUsdEquivalent: 0.01 } });
+  held.get(running.nodes[1]!.instances[0]!.threadId!)!('Done.');
+  const done = await settled(h, threadId, run.id);
+  expect(done.usage).toEqual({ inputTokens: 120, outputTokens: 30, cacheReadTokens: 200, cacheWriteTokens: 30, costUsdEquivalent: 0.01 });
+  expect(done.nodes[0]!.instances[0]).toHaveProperty('usage', { inputTokens: 110, outputTokens: 25, cacheReadTokens: 200, cacheWriteTokens: 30, costUsdEquivalent: 0.01 });
+  expect(done.nodes[1]!.instances[0]).toHaveProperty('usage.inputTokens', 10);
+});
+
 const REVIEW: WorkflowPlan = {
   name: 'Review the parser',
   steps: [
@@ -523,6 +548,7 @@ test('a failed step stops what never launched and is told to the parent at once,
   const retried = h.core.workflows.get(threadId, run.id).nodes[1]!.instances;
   expect(retried[0]!.threadId).not.toBeNull();
   expect(retried[0]!.threadId).not.toBe(first);
+  expect(retried[0]!.usage?.inputTokens).toBe(10);
   expect(retried.map(i => i.status)).toEqual(['running', 'done', 'running', 'waiting']);
   // The archived conversation speaks for nothing once the step moved on.
   const stale = await connect(h.url, h.core.agents.tokenFor(first));
@@ -532,7 +558,9 @@ test('a failed step stops what never launched and is told to the parent at once,
   for (const finish of [...held.values()]) finish('ok');
   await waitFor(() => held.size === 1);
   for (const finish of [...held.values()]) finish('ok');
-  expect((await settled(h, threadId, run.id)).status).toBe('done');
+  const done = await settled(h, threadId, run.id);
+  expect(done.status).toBe('done');
+  expect(done.nodes[1]!.instances[0]!.usage?.inputTokens).toBe(20);
 });
 
 test('a step that fails before it has any execution is told to the parent while another step runs', async () => {
