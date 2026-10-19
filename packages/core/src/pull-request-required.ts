@@ -51,11 +51,14 @@ const missing = (message: string) => /HTTP 404|Not Found|Branch not found/i.test
  * Marks the checks the base branch requires, and adds each required context
  * that has no check on the head yet as a pending one, as GitHub shows it
  * ("Expected"). A check run matches by its own name, without its workflow.
+ * Once the rules answered they alone decide, so a context they dropped stops
+ * counting even on checks read before; until then (`null`) each check's own
+ * `isRequired` stands.
  */
-export function withRequired(detail: WatchDetail, contexts: string[]): WatchDetail {
-  if (!contexts.length) return detail;
+export function withRequired(detail: WatchDetail, contexts: string[] | null): WatchDetail {
+  if (contexts === null) return detail;
   const wanted = new Set(contexts);
-  const checks = detail.checks.map(check => wanted.has(check.job) && !check.required ? { ...check, required: true } : check);
+  const checks = detail.checks.map(check => wanted.has(check.job) === check.required ? check : { ...check, required: wanted.has(check.job) });
   const reported = new Set(checks.map(check => check.job));
   const expected = [...wanted].filter(context => !reported.has(context)).map((context): WatchCheck => ({
     name: context, job: context, status: 'pending', conclusion: 'EXPECTED', required: true, url: '', context: false, workflow: '', started: '', finished: '',
@@ -68,13 +71,13 @@ type Log = (message: string) => void;
 
 /**
  * The required contexts per repository and base, read again after
- * `RULES_TTL_MS`. A failed read keeps what was known before (nothing when it
+ * `RULES_TTL_MS`. A failed read keeps what was known before (null when it
  * never answered), waits `RULES_RETRY_MS` and is logged: the watch goes on
  * with what the checks say of themselves. A rate limit is thrown instead, so
  * the watch pauses every read until it passes.
  */
 export class RequiredContexts {
-  readonly #held = new Map<string, { contexts: string[]; until: number; read: number; reading: Promise<string[]> | null }>();
+  readonly #held = new Map<string, { contexts: string[] | null; until: number; read: number; reading: Promise<string[] | null> | null }>();
   #reads = 0;
 
   constructor(private readonly ttlMs = RULES_TTL_MS, private readonly retryMs = RULES_RETRY_MS) {}
@@ -85,11 +88,11 @@ export class RequiredContexts {
     return held && Date.now() < held.until ? held.read : null;
   }
 
-  async of(key: string, repository: string, base: string, load: Load, log: Log): Promise<string[]> {
-    const held = this.#held.get(key) ?? { contexts: [], until: 0, read: 0, reading: null };
+  async of(key: string, repository: string, base: string, load: Load, log: Log): Promise<string[] | null> {
+    const held = this.#held.get(key) ?? { contexts: null, until: 0, read: 0, reading: null };
     this.#held.set(key, held);
     if (Date.now() < held.until) return held.contexts;
-    held.reading ??= this.#read(repository, base, load).then(contexts => {
+    held.reading ??= this.#read(repository, base, load).then((contexts): string[] | null => {
       held.contexts = contexts;
       held.until = Date.now() + this.ttlMs;
       held.read = ++this.#reads;

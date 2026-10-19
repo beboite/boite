@@ -452,6 +452,19 @@ test('rules that expire or failed are read again while the fingerprint stands st
   expect(watches.of(threadId)[0]!.seen?.checks).toEqual({ total: 3, running: 1, failed: 0 });
 });
 
+test('a check the rules stop requiring stops counting as required, even on the checks already read', async () => {
+  const { owner, threadId, github, drive } = await watchedThread();
+  github.rules = ['A', 'B'];
+  github.runs = [{ name: 'A', required: true }, { name: 'B', conclusion: 'FAILURE', required: true }];
+  await owner.call('threads.watchPullRequest', { threadId });
+  // B leaves the ruleset; nothing on the pull request moves.
+  github.rules = ['A'];
+  const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 11 * 60_000);
+  try { await drive(); } finally { clock.mockRestore(); }
+  await settled(threadId);
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('All 1 required check passed on aaaaaaa.');
+});
+
 test('a rate limit on the rules pauses every read like any other', async () => {
   const { owner, threadId, github, watches } = await watchedThread({ intervalMs: 40, coalesceMs: 0 });
   github.rulesFailure = 'gh: API rate limit exceeded for user ID 1. (HTTP 403)';

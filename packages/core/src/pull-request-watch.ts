@@ -328,8 +328,8 @@ export class PullRequestWatches {
   }
 
   /** What the base branch requires, cached per repository and base: a failed read logs and keeps what was known, a rate limit throws. */
-  #requiredOf(threadId: ThreadId, record: WatchRecord, base: string): Promise<string[]> {
-    if (!base) return Promise.resolve([]);
+  #requiredOf(threadId: ThreadId, record: WatchRecord, base: string): Promise<string[] | null> {
+    if (!base) return Promise.resolve(null);
     return this.#required.of(rulesKey(record, base), record.repository, base,
       path => this.gh(threadId, ['api', '--hostname', record.host, path]),
       message => this.core.log('warn', `pull request watch ${record.url}: ${message}`, { source: 'pull-request-watch', threadId }));

@@ -235,7 +235,9 @@ and `updatedAt`. Only when it moves does the core read the checks one by one
 regardless, for edits the fingerprint cannot see. What the base branch
 requires costs two REST reads (`rules/branches/<base>` and
 `branches/<base>`) per repository and base every 10 minutes, shared by every
-watch on it; a 404 means nothing is required. The rules are not in the
+watch on it; a 404 means nothing is required. Once they answered, the rules
+alone say which checks are required, so a context they drop stops counting at
+once; each check's own `isRequired` stands only while they never answered. The rules are not in the
 fingerprint: when they expire, the next pass reads them even if the
 fingerprint stood still and judges the checks it last read against them, with
 no detail read (one detail read after a restart, which keeps no checks). A
