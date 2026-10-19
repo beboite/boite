@@ -27,7 +27,8 @@ env:
 jobs:
   browser:
     name: Core browser files (${{ matrix.name }}, ${{ matrix.parallel }} at once, Spotlight ${{ matrix.spotlight }})
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
+    # Parked while the cli loop runs alone after #635: set the FLAKE_LOOP_ALL variable to 1 to run it.
+    if: vars.FLAKE_LOOP_ALL == '1'
     strategy:
       fail-fast: false
       matrix:
@@ -71,13 +72,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The 1002 closes: 1 in 480 runs before #623, 3 in 720 with it, never on Windows. The pinned Bun
-        # against canary and its WebSocket rewrite, ten times longer for a rate that small.
+        # The 1002 closes on macOS, 200 runs four at a time: 5 with #623, 11 (as 1006) on Bun canary.
+        # The same loop once #623 is reverted (#635).
         include:
-          - { os: ubuntu-24.04, name: Linux x64, bun: pinned }
-          - { os: ubuntu-24.04, name: Linux x64, bun: canary }
           - { os: macos-15, name: macOS arm64, bun: pinned }
-          - { os: macos-15, name: macOS arm64, bun: canary }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
@@ -87,8 +85,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - if: matrix.bun == 'canary'
-        run: bun upgrade --canary && bun --revision
       # Four copies at once load the runner as the core suite's four workers do.
       - shell: bash
         run: bun scripts/ci/flake-loop.ts --runs "$((RUNS * 20))" --parallel 4 --cwd packages/core --out flake-loop test/cli.test.ts test/cli.test.ts test/cli.test.ts test/cli.test.ts
@@ -100,7 +96,8 @@ jobs:
 
   e2e:
     name: E2E ${{ matrix.mode }}
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
+    # Parked while the cli loop runs alone after #635: set the FLAKE_LOOP_ALL variable to 1 to run it.
+    if: vars.FLAKE_LOOP_ALL == '1'
     strategy:
       fail-fast: false
       matrix:

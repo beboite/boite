@@ -125,7 +125,7 @@ The `flake-loop` workflow measures a flaky test before and after its fix. It
 runs on a pull request that carries the `flake-loop` label, or by hand: the
 quarantined browser files four at a time on macOS arm64, once with Spotlight
 indexing and once without, with disk throughput and load logged each second
-(`iostat.txt`) and the busiest processes every 5 s (`top.txt`), `cli.test.ts` four copies at a time on Linux and macOS, with the pinned Bun and with canary, and
+(`iostat.txt`) and the busiest processes every 5 s (`top.txt`), `cli.test.ts` four copies at a time on macOS (the browser and E2E jobs run only with the `FLAKE_LOOP_ALL` variable set to 1), and
 `coordination-bridge-live.test.ts` and `machines.test.ts` alone and each E2E
 shard whole on Windows, with the runner's disk latency, queue length and
 Defender CPU logged every second (`perf.csv`).
