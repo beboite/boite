@@ -14,6 +14,8 @@ const POLICY_FIX = [
   '// Then remove "*" and "autogroup:shared" from the "src" of every other rule that reaches this machine.'
 ].join('\n');
 const MAX_PENDING = 32;
+/** The core's `INVITE_TTL_MS`: an invitation lasts a day. */
+const INVITE_TTL = DAY;
 const DECLINED = 'The owner declined this request.';
 const SMALL = new Set(['haiku', 'lite', 'oss', 'mini', 'nano']);
 const FRONTIER = new Set(['opus', 'fable', 'sol', 'luna']);
@@ -154,7 +156,7 @@ export function contactMethods(ctx: FakeContext) {
         : { status: 'manual' as const, reason: 'No Tailscale API key is stored: share this machine from the admin console.' };
       const url = `http://${state.tailscale.fqdn ?? 'boite-pc'}:8777`;
       return {
-        link: encodeInvite({ v: 1, c: state.self.coreId, m: state.self.machine, u: url, t: token, s: share.status === 'created' ? share.url : null }),
+        link: encodeInvite({ v: 1, c: state.self.coreId, m: state.self.machine, u: url, t: token, e: ctx.now() + INVITE_TTL, s: share.status === 'created' ? share.url : null }),
         expiresAt: ctx.now() + DAY,
         share
       };
@@ -164,6 +166,8 @@ export function contactMethods(ctx: FakeContext) {
       if (!link.startsWith(INVITE_PREFIX)) throw invalid(`link: expected an invitation starting with ${INVITE_PREFIX}`, 'link');
       const card = readInvite(link);
       if (!card || typeof card.c !== 'string' || !card.c) throw invalid('link: the invitation is damaged; ask for a new one', 'link');
+      if (!Number.isSafeInteger(card.e)) throw invalid('link.expiresAt: expected a timestamp', 'link.expiresAt');
+      if ((card.e as number) <= ctx.now()) throw invalid('link: this invitation expired; ask for a new one', 'link');
       const machine = typeof card.m === 'string' && card.m ? card.m : 'new-contact';
       const state = stateOf(ctx);
       const coreId = card.c;
@@ -230,6 +234,8 @@ export function contactMethods(ctx: FakeContext) {
       const state = stateOf(ctx);
       const contact = contactOf(state, params?.coreId);
       state.contacts = state.contacts.filter(entry => entry !== contact);
+      // Like the core: its requests, both ways, go with it.
+      state.requests = state.requests.filter(request => request.coreId !== contact.coreId);
       changed();
       return { ok: true as const };
     },
@@ -266,7 +272,7 @@ export function contactMethods(ctx: FakeContext) {
     },
     'contacts.tailscaleKey': async (params) => {
       const key = params?.key;
-      if (key !== null && (typeof key !== 'string' || !key.trim().startsWith('tskey-'))) throw invalid('key: expected a Tailscale API key starting with tskey-, or null to clear it', 'key');
+      if (key !== null && (typeof key !== 'string' || !/^tskey-[A-Za-z0-9_-]{10,200}$/.test(key.trim()))) throw invalid('key: expected a Tailscale API key starting with tskey-, or null to clear it', 'key');
       const state = stateOf(ctx);
       state.tailscale = tailscale(key !== null);
       changed();

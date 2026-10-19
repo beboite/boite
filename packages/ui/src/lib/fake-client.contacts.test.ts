@@ -3,6 +3,7 @@ import { defaultCoordinationConfig, RpcErrorCode } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 import { FAKE_CONTACT_INVITE } from './fake-client/contacts';
 import { RpcFailure } from './client';
+import { encodeInvite, readInvite } from './contact-link';
 
 /*
  * The in-memory core's contacts: the seed `?fake=1` draws, the event every
@@ -65,7 +66,7 @@ test('rename, trust, read grant and revoke answer the contact and send contacts.
   expect(await refusal(client.call('contacts.update', { coreId: 'core-nobody', trusted: true }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'coreId' });
 });
 
-test('accepting opens the picked project to the asker; refusing without a reason declines; only a pending incoming request is decided', async () => {
+test('accepting opens the picked project to the asker; refusing without a reason declines; only a pending incoming request of a listed contact is decided', async () => {
   const { client } = await fake();
   const state = await client.call('contacts.get', {});
   const pending = state.requests.find(request => request.status === 'pending')!;
@@ -82,9 +83,15 @@ test('accepting opens the picked project to the asker; refusing without a reason
   const other = (await fake()).client;
   const declined = await other.call('contacts.decide', { id: pending.id, accept: false });
   expect([declined.status, declined.reason]).toEqual(['refused', 'The owner declined this request.']);
+
+  // A removed contact takes its requests along: nothing of it is left to accept.
+  const removed = (await fake()).client;
+  await removed.call('contacts.remove', { coreId: pending.coreId });
+  expect((await removed.call('contacts.get', {})).requests.filter(request => request.coreId === pending.coreId)).toEqual([]);
+  expect(await refusal(removed.call('contacts.decide', { id: pending.id, accept: true, projectId: 'p-notes' }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'id' });
 });
 
-test('an invitation shares the machine only with a key; join refuses this core\'s own link and a second join; eight words', async () => {
+test('an invitation shares the machine only with a key; join refuses this core\'s own link, an expired one and a second join; eight words', async () => {
   const { client } = await fake();
   const shared = await client.call('contacts.invite', {});
   expect(shared.link.startsWith('boite://contact#')).toBe(true);
@@ -99,10 +106,14 @@ test('an invitation shares the machine only with a key; join refuses this core\'
   const manual = await client.call('contacts.invite', {});
   expect(manual.share).toMatchObject({ status: 'manual' });
   expect(await refusal(client.call('contacts.tailscaleKey', { key: 'hunter2' }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'key' });
-  expect((await client.call('contacts.tailscaleKey', { key: 'tskey-api-x' })).policy).toBe('open');
+  // Like the core's `checkApiKey`: ten to two hundred characters after the prefix.
+  expect(await refusal(client.call('contacts.tailscaleKey', { key: 'tskey-api-x' }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'key' });
+  expect((await client.call('contacts.tailscaleKey', { key: 'tskey-api-0123456789' })).policy).toBe('open');
 
   expect(await refusal(client.call('contacts.join', { link: 'https://example.com' }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'link' });
   expect(await refusal(client.call('contacts.join', { link: manual.link }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'link' });
+  const expired = encodeInvite({ ...readInvite(FAKE_CONTACT_INVITE), e: 1 });
+  expect(await refusal(client.call('contacts.join', { link: expired }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'link' });
   const joined = await client.call('contacts.join', { link: FAKE_CONTACT_INVITE });
   expect([joined.role, joined.machine, joined.fingerprint.split(' ').length]).toEqual(['guest', 'dana-laptop', 8]);
   expect(joined.coreId).toBe('core-dana');
