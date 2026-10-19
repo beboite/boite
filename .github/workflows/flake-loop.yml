@@ -26,30 +26,32 @@ env:
 
 jobs:
   browser:
-    name: Core browser files (${{ matrix.name }})
+    name: Core browser files (${{ matrix.name }}, ${{ matrix.parallel }} at once)
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-15, name: macOS arm64 }
-          - { os: macos-15-intel, name: macOS x64 }
-          - { os: ubuntu-24.04, name: Linux x64 }
+          # Two at once against four: does the load of four Chromiums explain the macOS arm64 timeouts?
+          - { os: macos-15, name: macOS arm64, parallel: 4 }
+          - { os: macos-15, name: macOS arm64, parallel: 2 }
+          - { os: macos-15-intel, name: macOS x64, parallel: 4 }
+          - { os: ubuntu-24.04, name: Linux x64, parallel: 4 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     env:
       BOITE_CDP_TRACE: '1'
-      FLAKE_LOOP_TITLE: Core browser files, ${{ matrix.name }}
+      FLAKE_LOOP_TITLE: Core browser files, ${{ matrix.name }}, ${{ matrix.parallel }} at once
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: bun scripts/ci/flake-loop.ts --runs "$RUNS" --parallel 4 --cwd packages/core --out flake-loop test/browser-sharing.test.ts test/browser.test.ts test/browser-sleep.test.ts test/browser-profile-lifecycle.test.ts
+      - run: bun scripts/ci/flake-loop.ts --runs "$RUNS" --parallel ${{ matrix.parallel }} --cwd packages/core --out flake-loop test/browser-sharing.test.ts test/browser.test.ts test/browser-sleep.test.ts test/browser-profile-lifecycle.test.ts
       - uses: ./.github/actions/upload-artifact
         if: always()
         with:
-          name: flake-loop-browser-${{ matrix.os }}
+          name: flake-loop-browser-${{ matrix.os }}-${{ matrix.parallel }}
           path: flake-loop/
 
   cli:
