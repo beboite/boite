@@ -82,6 +82,9 @@ export function pairingMethods(ctx: FakeContext) {
     'push.test': async (params) => {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Web Push needs a paired connection to a real core' });
     },
+    'push.kinds': async (params) => {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Web Push needs a paired connection to a real core' });
+    },
     'sessions.revoke': async (params) => {
       if (!ctx.sessions.some((session) => session.id === params.sessionId)) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: `unknown session ${params.sessionId}` });

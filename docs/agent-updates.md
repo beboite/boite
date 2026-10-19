@@ -37,7 +37,9 @@ machine at once ([update everything](updates.md#update-everything)).
   is not what runs, and the version shown is the one the update reads.
 
 `Automatic updates` under each machine's agents makes that core update by
-itself, pausing running turns the same way. It is off by default. `Check for updates` reads its versions again.
+itself, pausing running turns the same way and also waiting for the work
+agents left running in the background ([Background work](#background-work)).
+It is off by default. `Check for updates` reads its versions again.
 Providers keeps sign-ins and installation controls and names no version: an
 agent's version is on its machine's card and nowhere else.
 
@@ -170,9 +172,43 @@ waits on another turn of the same agent, such as `boite agents send --wait`,
 which would otherwise never let the update start.
 
 Stop during a pause ends the turn as stopped and the update goes on. A core
-that restarts during a pause hands the turn over ([Restarts](#restarts)). Work
-the agent left running in the background, such as a background shell, ends
-with its process when the update releases it.
+that restarts during a pause hands the turn over ([Restarts](#restarts)).
+
+## Background work
+
+A turn may end on a checkpoint while work its agent started in the background
+goes on: a CI loop under `run_in_background`, a dev server, a monitor. That
+work lives in the agent's process, so releasing the agent for an update ends
+it. On 2026-10-19 an automatic Claude update released four delegated agents
+waiting on their CI loops; each parent only learned it from an interruption
+notice.
+
+An automatic update counts such an agent like a running turn. While one of
+its agents at rest still runs background work, the update waits and pauses
+no turn: turns start and end as usual. Once that work ends, the update goes
+on as in [Turns in flight](#turns-in-flight). Work an agent starts later, a
+turn woken by its own background task included, holds the update the same
+way, and so does the background work of a turn paused for the update. The
+row's waiting count includes these agents.
+
+The wait is bounded: two hours after the update was asked, background work
+stops holding it. A background task lives two hours at most, so only work
+started after the update was asked is cut. An update asked by hand (Update,
+Update all) does not wait for background work and goes on at once; asked
+while an automatic update waits, it makes that one go on.
+
+Either way, an agent whose background work the release ended is picked up
+again on the new version. The resume is planned as the release ends the
+work, not when the updater is done, and its turn waits in the queue for the
+updater: a Stop meanwhile cancels it like any queued turn or planned resume,
+and a crash of the core keeps it. The thread shows `Background work ended by
+the <agent> update`, and the agent is told which work ended. A delegated
+agent gets the continuation `boite delegate resume` sends, unless its owner
+paused the team; its parent still hears the interruption. A conversation of
+the user's own resumes like background work that ended without waking it
+([auto-continue](restart-handoff.md#turns-that-stop-before-their-answer)). A
+turn paused for the update reads it in its resume note. A persistent agent
+only gets the notice.
 
 ## Restarts
 
@@ -190,6 +226,10 @@ on the next core like any turn it cut.
   another account. Closing the core cancels update processes, stops the paused
   turns and prevents an updater waiting on a version check from
   starting later.
+- An automatic update also waits, two hours at most, for the background work
+  of the provider's agents at rest; an update asked by hand does not. Either
+  way the agents whose work the release ended are resumed after it
+  ([Background work](#background-work)).
 - A turn sent while its provider's updater runs waits in the queue, and an
   update asked for during a version check starts once that check has landed.
 - Versions compare by their numbers; a pre-release is older than its release.

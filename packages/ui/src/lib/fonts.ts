@@ -15,7 +15,8 @@
 export const FONT_KEY = 'boite.font';
 export const MONO_KEY = 'boite.font-mono';
 
-export const FONTS = ['inter', 'geist', 'plex', 'atkinson', 'figtree', 'source', 'dm', 'system'] as const;
+/** A face no longer offered (`geist`, `figtree`, `dm` until 2026-10-18) reads as the default. */
+export const FONTS = ['inter', 'atkinson', 'source', 'plex', 'system'] as const;
 export type Font = (typeof FONTS)[number];
 
 export const MONOS = ['geist', 'jetbrains', 'system'] as const;

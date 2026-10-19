@@ -335,6 +335,7 @@ export class Connection {
     s.sessions = [];
     s.group = null;
     s.groupKnown = false;
+    s.ungrouped = false;
     s.projects = [];
     s.threads = [];
     // What the next core answers replaces these; one that cannot answer must not show the last one's.

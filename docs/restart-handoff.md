@@ -77,7 +77,7 @@ says why and asks the agent to carry on without repeating work:
 | The turn failed: an API or stream error, a process exit | Resumed after an error | 1 min, then 5 min |
 | The core died mid-turn | Resumed after a crash | 3 s after the next start |
 | The turn ended on a compaction part, nothing after it | Resumed after a compaction | 1 min, then 5 min |
-| Background work the agent waited on ended without waking it (failed, vanished, cut by a restart) | Resumed after background work was interrupted | 1 min, then 5 min; 3 s after a restart |
+| Background work the agent waited on ended without waking it (failed, vanished, cut by a restart or an [agent update](agent-updates.md#background-work)) | Resumed after background work was interrupted | 1 min, then 5 min; 3 s after a restart |
 
 A crash resume quotes the cut turn's request like a handoff continuation. When
 a crash paused the conversation's subagent team or workflow runs, the prompt

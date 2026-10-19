@@ -1341,3 +1341,84 @@ test('a place read inside a long message is saved by message with its row, and o
   // The store asks the core for the page around a message: the anchor names it, never a row.
   expect(live.readingPositions.get('t-heavy')?.anchor).toEqual({ id: giant.id, offset: -30, row: first });
 });
+
+test('a phone keeps the buttons under the last prompt and answer, shows another prompt\'s on a tap and offers no fork', async ({ ready }) => {
+  window.localStorage.clear();
+  vi.stubGlobal('matchMedia', (media: string) => Object.assign(new EventTarget(), { media, matches: media.includes('max-width: 720px'), onchange: null, addListener() {}, removeListener() {} }));
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  const { store: live } = await ready({ delayMs: 0, long: true });
+  await live.open('t-long');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+
+  const prompts = () => [...document.querySelectorAll<HTMLElement>('article.message.user')];
+  const last = prompts().at(-1)!, earlier = prompts().at(-2)!;
+  expect(last.hasAttribute('data-latest')).toBe(true);
+  expect(earlier.hasAttribute('data-latest')).toBe(false);
+  expect(document.querySelector('article.message.assistant[data-latest] [data-testid=message-actions]')).not.toBeNull();
+  expect(document.querySelector('[data-testid=message-fork]')).toBeNull();
+
+  const bubble = () => earlier.querySelector<HTMLElement>('.bubble')!;
+  bubble().click(); flushSync();
+  expect(earlier.hasAttribute('data-revealed')).toBe(true);
+  // Its own buttons keep the row; a second tap on the bubble, or one anywhere else, puts it away.
+  earlier.querySelector<HTMLButtonElement>('[data-testid=message-copy]')!.click(); flushSync();
+  expect(earlier.hasAttribute('data-revealed')).toBe(true);
+  bubble().click(); flushSync();
+  expect(earlier.hasAttribute('data-revealed')).toBe(false);
+  bubble().click(); flushSync();
+  document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); flushSync();
+  expect(earlier.hasAttribute('data-revealed')).toBe(false);
+});
+
+test('a prompt queued behind a finished turn keeps the buttons of the answer before it on a phone', async ({ ready }) => {
+  window.localStorage.clear();
+  vi.stubGlobal('matchMedia', (media: string) => Object.assign(new EventTarget(), { media, matches: media.includes('max-width: 720px'), onchange: null, addListener() {}, removeListener() {} }));
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  const { store: live } = await ready({ delayMs: 0, long: true });
+  await live.open('t-long');
+  const thread = live.openThread!;
+  const messages = thread.messages;
+  const answer = messages.findLast((message) => message.role === 'assistant')!;
+  // Its turn is queued and nothing answers it yet: the newest turn has no answer row.
+  thread.turns.push({ id: 'turn-queued', threadId: 't-long', status: 'queued', queuedAt: Date.now(), startedAt: null, finishedAt: null, usage: null, error: null });
+  messages.push({ id: 'm-queued', threadId: 't-long', turnId: 'turn-queued', role: 'user', parts: [{ type: 'text', text: 'and then?' }], state: 'complete', createdAt: Date.now() });
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+
+  expect(document.querySelector('[data-mid="m-queued"]')?.closest('article')?.hasAttribute('data-latest')).toBe(true);
+  expect(document.querySelector(`[data-mid="${answer.id}"]`)?.closest('article')?.hasAttribute('data-latest')).toBe(true);
+});
+
+test('a row counts at the height it is drawn, fractions included, so rows measured above the reader move the view by what they weigh', async () => {
+  const messages = thread(200);
+  stubLayout(messages.length * ESTIMATE);
+  const observers: Array<{ callback: ResizeObserverCallback }> = [];
+  vi.stubGlobal('ResizeObserver', class {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; observers.push(this); }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.scrollTop = 4_000;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  const before = timeline.scrollTop;
+  // Each drawn row is 0.37 px taller than a whole pixel, as text lays out on some screens and font metrics.
+  const observer = observers.at(-1)!;
+  observer.callback(articles().map((target) => ({ target, borderBoxSize: [{ blockSize: 100.37, inlineSize: 300 }] }) as unknown as ResizeObserverEntry), observer as unknown as ResizeObserver);
+  await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  await settle();
+  const moved = timeline.scrollTop - before;
+  expect(moved).toBeGreaterThan(0);
+  // Rounded heights would move it by whole pixels and leave the reader's text a fraction off per row.
+  expect(Math.abs(moved - Math.round(moved))).toBeGreaterThan(0.01);
+});

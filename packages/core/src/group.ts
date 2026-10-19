@@ -304,10 +304,7 @@ export class GroupStore {
   }
 
   /** Contacts changed: the tailnet listener follows. */
-  relisten(): void {
-    if (this.closed || !this.live) return;
-    this.listen(this.roster !== null);
-  }
+  relisten(): void { if (!this.closed && this.live) this.listen(this.roster !== null); }
 
   private card(): CoreCard {
     const { coreId, publicKey } = this.core.coordination.card();
@@ -539,6 +536,7 @@ export class GroupStore {
     const stillMember = (): boolean => this.roster !== null && !this.closed && this.roster.id === roster.id
       && liveCores(this.roster).some((core) => core.coreId === entry.coreId);
     let answer: unknown;
+    const since = this.backoff.mark();
     try {
       answer = await this.core.coordination.request(peerOf(entry), 'group.sync', roster);
     } catch (error) {
@@ -548,7 +546,7 @@ export class GroupStore {
         this.disband();
       }
       // Anything else is a machine that is off or unreachable: it is asked again later, sooner if the roster changes.
-      else if (stillMember()) this.backoff.failed(entry.coreId, digestOf(roster));
+      else if (stillMember()) this.backoff.failed(entry.coreId, digestOf(roster), since);
       return;
     }
     this.backoff.heard(entry.coreId);

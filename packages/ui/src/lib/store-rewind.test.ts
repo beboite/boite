@@ -2,6 +2,7 @@ import { expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
 import { RpcErrorCode } from '@boite/contracts';
 import type { FakeClient } from './fake-client';
+import { strings } from './strings';
 
 /** Two finished turns on the open thread, and the ids of their user messages. */
 async function twoTurns(client: FakeClient, threadId: string): Promise<[string, string]> {
@@ -53,6 +54,20 @@ test('a rewind without file backups visibly explains that the code could not be 
   });
   expect((await store.rewind(edited))?.files?.status).toBe('unavailable');
   expect(store.error).toContain('code');
+});
+
+test('a rewind beside another working agent says the files were left as they are', async ({ ready }) => {
+  const { store, client } = await ready();
+  const [, edited] = await twoTurns(client, 't-trace');
+  await store.open('t-trace');
+  const call = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await call(method, params);
+    if (method === 'threads.rewind') return { ...result as object, files: { status: 'unavailable', count: 0, busy: true } } as typeof result;
+    return result;
+  });
+  await store.rewind(edited);
+  expect(store.error).toBe(strings.composer.filesBusy);
 });
 
 test('the fake forks a copy that leaves the source whole', async ({ createClient }) => {

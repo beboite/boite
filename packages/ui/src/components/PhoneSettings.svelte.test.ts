@@ -48,3 +48,32 @@ test('a machine carried by the one that serves this page sends its notifications
     Reflect.deleteProperty(window, 'isSecureContext');
   }
 });
+
+test('the phone screen turns notifications and each kind on and off, and a device with push tells its core', async ({ store }) => {
+  localStorage.clear();
+  localStorage.setItem('boite.web-push', 'on');
+  const calls: unknown[] = [];
+  const call = store.client!.call.bind(store.client!);
+  store.client!.call = (async (method: string, params: unknown) => {
+    if (method === 'push.kinds') { calls.push(params); return { ok: true }; }
+    return call(method as never, params as never);
+  }) as typeof call;
+  try {
+    component = mount(PhoneSettings, { target: document.body, props: { store, showServerSettings: false } });
+    flushSync();
+    const kind = (name: string) => document.querySelector<HTMLInputElement>(`[data-testid=setting-notification-kind-${name}]`)!;
+    expect(['approvals', 'questions', 'finished', 'errors'].map((name) => kind(name).checked)).toEqual([true, true, true, true]);
+    kind('finished').click();
+    flushSync();
+    expect(kind('finished').checked).toBe(false);
+    expect(JSON.parse(localStorage.getItem('boite.notifications.muted')!)).toEqual(['finished']);
+    expect(calls.at(-1)).toEqual({ kinds: ['approvals', 'questions', 'errors'] });
+    // The main switch off dims the kinds and stops the pushes too.
+    document.querySelector<HTMLInputElement>('[data-testid=phone-notifications]')!.click();
+    flushSync();
+    expect(kind('approvals').disabled).toBe(true);
+    expect(calls.at(-1)).toEqual({ kinds: [] });
+  } finally {
+    localStorage.clear();
+  }
+});

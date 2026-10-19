@@ -783,7 +783,8 @@ export class ContactStore {
       // Bun's client takes headers; the hello rides in them, before any frame.
       socket = new WebSocket(`${contact.url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, { headers } as unknown as string[]);
     } catch {
-      this.backoff.failed(contact.coreId, 'link');
+      // A link that fails counts whatever was heard before: the mark is now.
+      this.backoff.failed(contact.coreId, 'link', this.backoff.mark());
       return;
     }
     const coreId = contact.coreId;
@@ -800,7 +801,7 @@ export class ContactStore {
     socket.addEventListener('close', () => {
       if (this.dialed.get(coreId) !== link) return;
       this.dialed.delete(coreId);
-      this.backoff.failed(coreId, 'link');
+      this.backoff.failed(coreId, 'link', this.backoff.mark());
       if (!this.closed) this.changed();
     });
   }

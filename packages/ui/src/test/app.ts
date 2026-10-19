@@ -221,6 +221,11 @@ export async function showMobileThreads(): Promise<void> {
   // jsdom does not implement dialog methods; the browser suite exercises the modal.
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function(this: HTMLDialogElement) { this.open = false; } });
+  // A conversation's header has no menu: Back leads to the list that has it.
+  if (!document.querySelector('[data-testid=mobile-menu]')) {
+    query<HTMLButtonElement>('[data-testid=mobile-back]').click();
+    await waitFor(() => document.querySelector('[data-testid=mobile-menu]') !== null);
+  }
   query<HTMLButtonElement>('[data-testid=mobile-menu]').click();
   await waitFor(() => document.querySelector('[data-testid=mobile-conversations]') !== null);
   query<HTMLButtonElement>('[data-testid=mobile-conversations]').click();

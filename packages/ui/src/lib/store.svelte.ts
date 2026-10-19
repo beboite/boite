@@ -263,6 +263,8 @@ export class Store {
   set group(value) { this.#ctx.pairing.group = value; }
   get groupKnown() { return this.#ctx.pairing.groupKnown; }
   set groupKnown(value) { this.#ctx.pairing.groupKnown = value; }
+  get ungrouped() { return this.#ctx.pairing.ungrouped; }
+  set ungrouped(value) { this.#ctx.pairing.ungrouped = value; }
   loadGroup(...args: Parameters<Pairing['loadGroup']>) { return this.#ctx.pairing.loadGroup(...args); }
   createGroup(...args: Parameters<Pairing['createGroup']>) { return this.#ctx.pairing.createGroup(...args); }
   renameGroup(...args: Parameters<Pairing['renameGroup']>) { return this.#ctx.pairing.renameGroup(...args); }
@@ -278,6 +280,7 @@ export class Store {
   set projectPickerOpen(value) { this.#ctx.layout.projectPickerOpen = value; }
   get notifications() { return this.#ctx.layout.notifications; }
   set notifications(value) { this.#ctx.layout.notifications = value; }
+  get notificationKinds() { return this.#ctx.layout.notificationKinds; }
   get paletteOpen() { return this.#ctx.layout.paletteOpen; }
   set paletteOpen(value) { this.#ctx.layout.paletteOpen = value; }
   get renameRequested() { return this.#ctx.layout.renameRequested; }
@@ -318,6 +321,7 @@ export class Store {
   showHome() { return this.#ctx.layout.showHome(); }
   togglePanel(...args: Parameters<Layout['togglePanel']>) { return this.#ctx.layout.togglePanel(...args); }
   setNotifications(...args: Parameters<Layout['setNotifications']>) { return this.#ctx.layout.setNotifications(...args); }
+  setNotificationKind(...args: Parameters<Layout['setNotificationKind']>) { return this.#ctx.layout.setNotificationKind(...args); }
 
   // -------------------------------------------------------------------------
   // Core settings, keyboard and telemetry: store/settings.svelte.ts

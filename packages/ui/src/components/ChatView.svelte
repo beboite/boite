@@ -19,6 +19,8 @@
   import ThreadRetry from './ThreadRetry.svelte';
   import ForkReturn from './ForkReturn.svelte';
   import ProjectTile from './ProjectTile.svelte';
+  import MachineIcon from './MachineIcon.svelte';
+  import { workspace } from '../lib/workspace.svelte';
   import DoneThreadNotice from './DoneThreadNotice.svelte';
   import WorktreeGoneNotice from './WorktreeGoneNotice.svelte';
 
@@ -60,6 +62,8 @@
   let draftEffort = $derived(draftChoice?.effort ?? draftModel?.effort?.default ?? null);
   let effortLabel = $derived(draftEffort ? effortName(draftModel, draftEffort) : null);
   let modelLabel = $derived(draftModel?.name ?? draftChoice?.model ?? draftProvider?.name ?? '');
+  /** The machine the draft's project is on: the heading ends with it, one machine or several. */
+  let machine = $derived(workspace.machinesOr(store).find((entry) => entry.store === store) ?? null);
 
   /**
    * A draft's first prompt takes the composer from the middle of the column to
@@ -109,7 +113,10 @@
           <img src="./icons/icon.svg" alt="" width="42" height="42" />
           <h1>{strings.mobile.draftTitle}</h1>
           <p>{strings.mobile.draftHint}</p>
-          <span class="project-choice"><ProjectChoice {store} testid="mobile-draft-project" phone>{#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}<span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span><ChevronDown size={14} /></ProjectChoice></span>
+          <span class="mobile-place">
+            <span class="project-choice"><ProjectChoice {store} testid="mobile-draft-project" phone>{#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}<span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span><ChevronDown size={14} /></ProjectChoice></span>
+            {#if machine}<span class="ui-label">{strings.thread.onMachine}</span><span class="machine" data-testid="mobile-draft-machine"><MachineIcon icon={machine.icon} os={store.core?.os} size={15} /><span class="ui-label">{machine.label}</span></span>{/if}
+          </span>
           {#if draftChoice}<small>{modePhrase(draftChoice.permissionMode, draftProvider)}</small>{/if}
           {#if store.draft?.worktree}<small>{strings.thread.inWorktree}</small>{/if}
         </div>
@@ -124,6 +131,10 @@
               <span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span>
               <ChevronDown size={14} strokeWidth={2} />
             </ProjectChoice></span>
+            {#if machine}
+              <span class="ui-label">{strings.thread.onMachine}</span>
+              <span class="machine" data-testid="draft-machine"><MachineIcon icon={machine.icon} os={store.core?.os} size={20} /><span class="ui-label">{machine.label}</span></span>
+            {/if}
           </h1>
           {#if draftChoice || store.draft?.worktree}
             <p class="draft-details">
@@ -179,6 +190,10 @@
   .project-choice :global(.trigger) { min-height: var(--row); height: auto; max-width: 100%; padding: 7px 12px; gap: 8px; }
   .project-label { min-width: 0; overflow-wrap: anywhere; }
   .mobile-welcome { display: none; }
+  /* The machine reads as part of the sentence: no outline, since nothing opens from it. */
+  .machine { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+  .machine :global(svg) { flex: none; color: var(--color-muted-foreground); }
+  .machine .ui-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .none {
     margin: auto;
     padding: 40px;
@@ -289,6 +304,8 @@
     .mobile-welcome h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.6px; line-height: 1.2; }
     .mobile-welcome p { margin: 0 0 6px; font-size: var(--text-sm); line-height: 1.6; color: var(--color-muted-foreground); }
     .mobile-welcome small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
+    .mobile-place { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; max-width: 100%; font-size: var(--text-md); font-weight: 600; }
+    .mobile-place .machine { gap: 6px; }
     .draft-body {
       padding: 24px; align-items: center; min-height: 0; overflow-y: auto;
     }

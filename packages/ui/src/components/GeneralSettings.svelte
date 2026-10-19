@@ -11,6 +11,7 @@
   import { openTour } from '../lib/onboarding.svelte';
   import type { Store } from '../lib/store.svelte';
   import ConversationSwitches from './ConversationSwitches.svelte';
+  import NotificationKinds from './NotificationKinds.svelte';
 
   /**
    * What the app does for the person in front of it: how a thread
@@ -43,6 +44,7 @@
       <input id="{uid}-notifications" aria-labelledby="{uid}-notifications-name" type="checkbox" role="switch" data-testid="setting-notifications"
         checked={store.notifications} onchange={(event) => void store.setNotifications(event.currentTarget.checked)} />
     </label>
+    <NotificationKinds {store} />
     {#if store.owner}
       <label for="{uid}-async" class="switch-row">
         <span class="text ui-label-box">

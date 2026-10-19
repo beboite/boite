@@ -3,7 +3,7 @@
   import WindowList from './WindowList.svelte';
   import MobileMenu from './MobileMenu.svelte';
   import ThreadHeader from './ThreadHeader.svelte';
-  import { Activity, ArrowLeft, ChevronDown, Ellipsis, FolderCog, MessageSquare, Plus, Radar, Search, X } from '@lucide/svelte';
+  import { Activity, ArrowLeft, ChevronDown, Ellipsis, Folder, FolderPlus, MessageSquare, Plus, Radar, Search, X } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import MobileConnect from './MobileConnect.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -13,13 +13,12 @@
   import { mobileOverlay } from '../lib/mobile-history';
   import { groupWorkingThread, recentPreferences } from '../lib/recent.svelte';
   import { pickThreadAction, threadMenuItems } from '../lib/thread-menu';
-  import { projectMenu } from '../lib/project-menu';
-  import type { MenuItem } from '../lib/menu';
+  import { separator, type MenuItem } from '../lib/menu';
   import type { ThreadSummary } from '@boite/contracts';
   import Menu from './Menu.svelte';
   import ThreadState from './ThreadState.svelte';
   import ThreadHeadline from './ThreadHeadline.svelte';
-  import ProjectViews from './ProjectViews.svelte';
+  import DisplayOptions from './DisplayOptions.svelte';
   import RecentGroup from './RecentGroup.svelte';
   import RecentDone from './RecentDone.svelte';
   import ProjectThreadCounters from './ProjectThreadCounters.svelte';
@@ -55,11 +54,9 @@
   let several = $derived(machines.length > 1);
   let place = $derived(store.pairingRequired ? strings.mobile.pairingRequired : store.connection === 'ready' ? machine?.label ?? strings.mobile.computer : strings.connection[store.connection]);
   let project = $derived(store.openProject ?? store.projects.find(p => p.archived !== true));
-  let actionProject = $derived(store.openProject);
   let groups = $derived(projectView.sorted(machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))));
   let activeGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(activeProject) : groups);
   let otherGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(entry => !activeProject(entry)) : []);
-  let shownGroups = $derived(query ? groups : activeGroups);
   let shelved = $derived(machines.flatMap(machine => machine.store.projects.filter(project => project.archived === true).map(project => ({ machine, project }))));
   let selected = $derived(projectView.selected(groups));
   let draftOwner = $derived(screen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);
@@ -68,6 +65,8 @@
     return machine.store.threads.filter(t => !t.archived && !t.incognito).map(thread => ({ machine, thread, project: thread.projectId === null ? undefined : byId.get(thread.projectId) }));
   }));
   let waiting = $derived(entries.filter(e => needsUser(e.thread)));
+  /** What waits on the user besides the conversation on screen: Back carries its mark. */
+  let elsewhere = $derived(waiting.filter(e => !(e.machine.store === store && e.thread.id === store.openThread?.id)).length);
   let active = $derived(entries.filter(e => needsUser(e.thread) || ['running', 'queued'].includes(e.thread.status)));
   let rows = $derived((screen === 'activity' ? active : entries)
     .filter(e => !query || [e.thread.title, projectName(e.project), e.thread.branch, e.machine.label].some(value => value?.toLocaleLowerCase().includes(query)))
@@ -78,8 +77,13 @@
   let projects = $derived([...machines.flatMap(m => m.store.projects.filter(p => p.archived !== true).map(p => ({
     id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: several ? m.label : '', projectTile: { project: p, store: m.store },
     active: m.store === store && p.id === project?.id
-  }))), ...(store.owner ? [{ id: 'add-project', label: strings.sidebar.addProject, hint: '', active: false }] : [])]);
+  }))), ...(store.owner ? [separator('add-sep'), { id: 'add-project', label: strings.sidebar.addProject, hint: '', active: false, glyph: FolderPlus }] : [])]);
   const inRecent = $derived(screen === 'threads' && workspace.view === 'recent');
+  /** Recent shows one project or all of them: the filter's choices. */
+  const filterItems = $derived([
+    { id: 'all', label: strings.sidebar.allProjects, active: !selected },
+    ...groups.map(entry => ({ id: projectKey(entry), label: projectName(entry.project), hint: several ? entry.machine.label : '', active: projectKey(entry) === projectView.filter, projectTile: { project: entry.project, store: entry.machine.store } }))
+  ]);
   const recentGroups = $derived(selected ? [selected] : groups);
   let workingOpen = $state(false);
   const groupWorking = $derived(inRecent && recentPreferences.groupWorking && !query);
@@ -107,9 +111,9 @@
     from = next === 'chat' && screen !== 'chat' ? screen : null;
     screen = next;
   }
-  /** Thread organization and lifecycle use the same groups as the desktop. */
+  /** A phone's row menu: the thread's lifecycle, as in its header (`threadMenuItems`' phone set). */
   function rowItems(owner: Store, thread: ThreadSummary): MenuItem[] {
-    return threadMenuItems(owner, thread, { showDone: screen === 'threads' });
+    return threadMenuItems(owner, thread, { showDone: screen === 'threads', phone: true });
   }
   /** Thread ids can collide between machines: the row's own store acts, and its pickers hang under the row's own trigger. */
   function rowAction(owner: Store, thread: ThreadSummary, action: string, machineId: string) {
@@ -124,8 +128,16 @@
         ?.querySelector<HTMLElement>('[aria-haspopup=menu]')
     });
   }
+  /** Adding a project from the picker starts a draft in it: the phone opens that draft, as the desktop does. */
+  let known = $state<Set<string> | null>(null);
+  $effect(() => {
+    if (!known || store.projectPickerOpen) return;
+    const before = known;
+    known = null;
+    if (store.draft?.projectId && !before.has(store.draft.projectId)) show('chat');
+  });
   async function pickProject(key: string) {
-    if (key === 'add-project') { store.projectPickerOpen = true; return; }
+    if (key === 'add-project') { known = new Set(store.projects.map(p => p.id)); store.projectPickerOpen = true; return; }
     const [id, projectId] = JSON.parse(key) as [string, string];
     const target = machines.find(m => m.id === id);
     if (!target) return;
@@ -143,22 +155,12 @@
     if (query) return groups;
     return recentPreferences.groupOtherProjects && !activeProject(entry) ? otherGroups : activeGroups;
   }
-  function openProjectMenu(event: MouseEvent) {
-    if (!actionProject) return;
-    const entry = shownGroups.find(group => group.machine.store === store && group.project.id === actionProject.id);
-    const key = entry ? projectKey(entry) : null;
-    const fold = entry ? foldOf(entry) : [];
-    projectMenu(event, store, actionProject, projectView.order === 'manual' && entry && key !== null ? {
-      up: projectKey(fold[0]!) !== key,
-      down: projectKey(fold[fold.length - 1]!) !== key,
-      move: direction => projectView.step(foldOf(entry), key, direction)
-    } : undefined);
-  }
 </script>
 
 <header class="mobile-header" class:chatting class:settings={store.page !== 'chat'} data-testid="mobile-header">
   {#if chatting}
-    <button class="ghost icon" data-testid="mobile-back" aria-label={strings.mobile.threads} onclick={() => show('threads')}><ArrowLeft size={20} /></button>
+    <!-- The only way out of a conversation on a phone: it carries the mark of a thread that waits on the user elsewhere. -->
+    <button class="ghost icon back" data-testid="mobile-back" aria-label={elsewhere ? `${strings.mobile.threads}, ${fill(strings.mobile.waitingElsewhere, { count: String(elsewhere) })}` : strings.mobile.threads} onclick={() => show('threads')}><ArrowLeft size={20} />{#if elsewhere}<span class="waiting-mark" data-testid="mobile-back-waiting"></span>{/if}</button>
   {:else if recover}
     <img class="brand-icon" src="./icons/icon.svg" alt="" width="30" height="30" />
   {:else}
@@ -175,17 +177,15 @@
         <span class="ui-label">{store.draftInDrafts && !store.openThread ? strings.drafts.name : project ? projectName(project) : strings.mobile.project}</span><ChevronDown size={14} />
       </Menu>
     {:else}
-      <strong>{store.page === 'settings' ? strings.settings.heading : store.page === 'agents' ? strings.agents.heading : store.page === 'home' ? strings.contacts.heading : 'Boite'}</strong>
+      <strong>{store.page === 'settings' ? strings.settings.heading : store.page === 'agents' ? strings.agents.heading : store.page === 'home' ? strings.contacts.heading : screen === 'activity' ? strings.mobile.activity : 'Boite'}</strong>
       <button class="ghost connection" data-testid="mobile-connection" onclick={() => store.showSettings('machines')}><span class="dot" class:ready={store.connection === 'ready'}></span><span class="ui-label">{place}</span><ChevronDown size={12} /></button>
     {/if}
   </div>
   {/if}
-  {#if actionProject && screen === 'threads' && !recover && store.page === 'chat'}
-    <button class="ghost icon" data-testid="mobile-project-actions" aria-label={strings.sidebar.projectMenu}
-      onclick={openProjectMenu}><FolderCog size={20} /></button>
-  {/if}
-  {#if !recover && !chatting}<button class="ghost icon new" data-testid="mobile-new" aria-label={strings.sidebar.newThread} disabled={draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={21} /></button>{/if}
-  <MobileMenu {store} {place} waiting={waiting.length} {screen} navigate={show} create={newThread} {projects} {pickProject} />
+  <!-- The Agents page has its own + for a new agent: one + per screen. -->
+  {#if !recover && !chatting && store.page !== 'agents'}<button class="ghost icon new" data-testid="mobile-new" aria-label={strings.sidebar.newThread} disabled={draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={21} /></button>{/if}
+  <!-- A conversation's header holds its title's menu only: the navigation is one Back away. -->
+  {#if !chatting}<MobileMenu {store} {place} waiting={waiting.length} {screen} navigate={show} />{/if}
 </header>
 
 {#if narrow.current && store.page === 'chat' && (screen !== 'chat' || recover)}
@@ -193,12 +193,22 @@
     {#if recover && narrow.current}
       <MobileConnect {store} onpaired={() => show('threads')} />
     {:else}
+    <!-- The header says where this is: the list opens on its search, the display options at its end. -->
     <div class="list-heading">
-      <div class="heading-row"><h1>{screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}</h1>{#if screen === 'activity'}<button class="ghost icon" aria-label={strings.sidebar.search} onclick={() => store.paletteOpen = true}><Search size={18} /></button>{/if}</div>
-      {#if screen === 'threads'}<ProjectViews entries={groups} {store} prefix="mobile-" />{/if}
-      <div class="search"><Search size={17} /><input type="search" bind:value={search} aria-label={strings.mobile.search} placeholder={strings.mobile.search} data-testid="mobile-search" />{#if search}<button class="ghost icon" aria-label={strings.mobile.clearSearch} onclick={() => search = ''}><X size={16} /></button>{/if}</div>
-      {#if atWorkRows.length > 0}
-        <button class="ghost at-work" class:on={atWorkShown} aria-pressed={atWorkShown} title={strings.mobile.atWorkFilter} data-testid="mobile-at-work" onclick={() => atWorkOnly = !atWorkShown}><Radar size={14} aria-hidden="true" /><span class="ui-label">{fill(strings.mobile.atWork, { count: String(atWorkRows.length) })}</span></button>
+      <div class="search"><Search size={17} /><input type="search" bind:value={search} aria-label={strings.mobile.search} placeholder={strings.mobile.search} data-testid="mobile-search" />{#if search}<button class="ghost icon" aria-label={strings.mobile.clearSearch} onclick={() => search = ''}><X size={16} /></button>{/if}
+        {#if screen === 'threads' && groups.length}<span class="display"><DisplayOptions entries={groups} target={undefined} owner={store} prefix="mobile-" compact /></span>{/if}
+      </div>
+      {#if (inRecent && groups.length) || atWorkRows.length > 0}
+        <div class="filters">
+          {#if inRecent && groups.length}
+            <Menu items={filterItems} onpick={key => projectView.pick(key)} label={strings.sidebar.filterProject} placement="bottom" variant="ghost" testid="mobile-project-filter">
+              {#if selected}<ProjectTile project={selected.project} store={selected.machine.store} size={16} />{:else}<Folder size={14} />{/if}<span class="ui-label">{selected ? projectName(selected.project) : strings.sidebar.allProjects}</span>{#if selected && several}<span class="filter-machine ui-label">{selected.machine.label}</span>{/if}<ChevronDown size={13} />
+            </Menu>
+          {/if}
+          {#if atWorkRows.length > 0}
+            <button class="ghost at-work" class:on={atWorkShown} aria-pressed={atWorkShown} title={strings.mobile.atWorkFilter} data-testid="mobile-at-work" onclick={() => atWorkOnly = !atWorkShown}><Radar size={14} aria-hidden="true" /><span class="ui-label">{fill(strings.mobile.atWork, { count: String(atWorkRows.length) })}</span></button>
+          {/if}
+        </div>
       {/if}
     </div>
     {#snippet threadRow(row: typeof rows[number])}
@@ -306,13 +316,26 @@
     .chat-heading :global(.thread-header) { gap: 2px; }
     .chat-heading :global(.launcher span) { display: none; }
     .chat-heading :global(.launcher) { width: 44px; padding: 0; justify-content: center; flex: none; }
-    .search { display: flex; gap: 8px; align-items: center; padding: 0 10px; margin-top: 12px; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-lg); color: var(--color-muted-foreground); }
+    .search { display: flex; gap: 8px; align-items: center; padding: 0 0 0 12px; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-lg); color: var(--color-muted-foreground); }
+    .search > :global(svg) { flex: none; }
+    /* The display options close the field's row, after a hairline. */
+    .display { display: flex; align-self: stretch; align-items: center; flex: none; border-left: 1px solid var(--color-border); }
+    .display :global(.trigger) { width: var(--touch-target); height: var(--touch-target); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
     .search input { flex: 1; min-width: 0; border: 0; background: transparent; min-height: 44px; font-size: 16px; padding: 8px 0; }
     .search:focus-within { border-color: var(--color-accent); }
     .search input:focus { outline: none; }
-    .at-work { display: inline-flex; gap: 6px; align-items: center; height: auto; min-height: var(--touch-target); margin-top: 10px; padding: 0 12px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-2); color: var(--color-accent); font-size: var(--text-sm); font-weight: 500; }
+    .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .filters :global(.menu) { min-width: 0; max-width: 100%; }
+    .at-work, .filters :global(.trigger) { display: inline-flex; gap: 6px; align-items: center; height: auto; min-height: var(--touch-target); max-width: 100%; padding: 0 12px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-2); font-size: var(--text-sm); font-weight: 500; }
+    .at-work { color: var(--color-accent); }
+    .filters :global(.trigger) { color: var(--color-foreground); }
+    .filters :global(.trigger svg) { flex: none; color: var(--color-muted-foreground); }
+    .filters :global(.trigger .ui-label) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .filters .filter-machine { color: var(--color-muted-foreground); font-weight: 400; }
     .at-work.on { border-color: var(--color-accent); background: var(--color-surface); }
     .brand-icon { flex: none; border-radius: var(--radius-md); }
+    .back { position: relative; flex: none; }
+    .waiting-mark { position: absolute; top: 9px; right: 8px; width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--color-live); box-shadow: 0 0 0 2px var(--color-background); }
     .home { flex: none; padding: 0; }
     .brand strong { display: block; font-size: var(--text-md); font-weight: 600; letter-spacing: -0.3px; }
     .connection { display: flex; gap: 5px; height: auto; min-height: var(--touch-target); max-width: 100%; padding: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
@@ -326,13 +349,7 @@
     /* A finger-sized target without growing the header: the padding reaches over the machine line and the header's own padding. */
     .identity :global(.trigger) { min-height: var(--touch-target); margin-block: -13px -6px; }
     .mobile-list { display: block; position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--color-background); padding: 8px max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
-    .list-heading { padding: 18px 0 12px; }
-    .list-heading :global(.rail-head) { padding-top: 16px; }
-    .list-heading :global(.toolbar) { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 3px; gap: 4px; }
-    .list-heading :global(.view) { font-size: var(--text-sm); }
-    .list-heading :global(.chosen) { background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-edge); border-radius: var(--radius-md); }
-    .heading-row { display: flex; align-items: center; justify-content: space-between; }
-    h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; margin: 0; }
+    .list-heading { padding: 8px 0 14px; }
     p { font-size: var(--text-sm); }
     .project-group { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); margin-bottom: 12px; overflow: hidden; }
     .project-heading { display: flex; align-items: center; padding: 8px 12px; gap: 8px; background: var(--color-surface-2); color: var(--color-muted-foreground); border-bottom: 1px solid var(--color-border); }

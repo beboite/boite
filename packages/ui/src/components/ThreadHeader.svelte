@@ -10,7 +10,7 @@
   import { contextMenu } from '../lib/context-menu.svelte';
   import { pendingLine } from '../lib/thread-move.svelte';
   import { pickThreadAction, threadMenuItems } from '../lib/thread-menu';
-  import type { MenuItem } from '../lib/menu';
+  import { separator, type MenuItem } from '../lib/menu';
   import { fill, strings } from '../lib/strings';
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
@@ -75,24 +75,32 @@
   });
   let desktopItems = $derived(thread ? threadMenuItems(store, thread, { tools }) : []);
 
+  /** Children delegated from this thread, at work or done, its CLI's own agents included: the phone offers Subagents only then. */
+  let delegated = $derived(!!thread && (store.subagents(thread.id) !== null || store.threads.some(row => row.parentThreadId === thread!.id)
+    || (store.delegation?.agents.length ?? 0) > 0 || (store.delegation?.nativeAgents?.length ?? 0) > 0));
   /**
-   * A phone's header has room for the title or for every toggle, not both: the
-   * Agents and Terminal toggles move into the title's sheet there, ticked when on.
+   * A phone's header is the title and this one menu: the panel, ticked when
+   * open, then the thread's own actions. The terminal, the coordination and
+   * what only the desktop does with a thread stay there.
    */
   let phoneItems = $derived.by((): MenuItem[] => {
     if (!thread) return [];
-    return threadMenuItems(store, thread, { tools: [
-      ...tools,
-      ...(store.owner && work.shows('header.terminal') ? [{ id: 'terminal', label: strings.terminal.title, glyph: SquareTerminal, active: store.terminalShown(thread.id) }] : [])
-    ] });
+    return [
+      { id: 'panel', label: strings.thread.panelMenu, glyph: PanelRight, active: store.panelOpen },
+      separator('sep-panel'),
+      ...threadMenuItems(store, thread, { phone: true, tools: [
+        { id: 'find', label: strings.keyboard.commands.find, glyph: Search },
+        ...(delegated || agentsOn ? [{ id: 'agents', label: strings.delegation.heading, glyph: UsersRound, active: agentsOn }] : [])
+      ] })
+    ];
   });
 
   function titleAction(action: string) {
     const open = store.openThread;
     if (!open) return;
     if (action === 'coordination') coordinationThreadId = open.id;
+    else if (action === 'panel') store.togglePanel();
     else if (action === 'agents') store.panel.toggleKind('agents');
-    else if (action === 'terminal') store.toggleTerminal();
     else if (action === 'find') {
       store.findOpen = true;
       store.findRequest += 1;
@@ -265,7 +273,7 @@
       {#if thread}
         <button
           type="button"
-          class="ghost icon"
+          class="ghost icon in-title-menu"
           class:on={store.panelOpen}
           title={`${strings.thread.panelHint}${store.keyHint('panel')}`}
           aria-label={strings.thread.panelHint}
@@ -400,6 +408,7 @@
     /* The thread's title button gives way to its menu; a draft's label has no menu and stays. */
     .title:not(.draft) { display: none; }
     .title.draft { max-width: none; }
+    .draft-mark { margin: 0 4px 0 6px; }
     .title-menu { display: flex; min-width: 0; flex: 0 1 auto; margin-left: -6px; }
     .title-menu :global(.menu) { min-width: 0; max-width: 100%; }
     .title-menu :global(.trigger) { min-width: 0; max-width: 100%; min-height: var(--touch-target); font-weight: 600; color: var(--color-foreground); }

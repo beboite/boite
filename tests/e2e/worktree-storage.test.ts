@@ -54,7 +54,9 @@ test('owners choose storage in desktop and phone settings, with validation and e
 
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
-  await page.click(id('mobile-settings-worktrees'));
+  // The phone's settings list leaves worktrees to the desktop; the page a project's menu links to still opens.
+  expect(await page.evaluate(`document.querySelector('${id('mobile-settings-worktrees')}') === null`)).toBe(true);
+  await page.evaluate(`${state}.showSettings('general', 'worktrees')`);
   await page.waitFor(`document.querySelector('${id('worktree-storage-directory')}')`);
   await capture('worktree-storage-phone.png');
   await mode('project');
@@ -65,6 +67,7 @@ test('owners choose storage in desktop and phone settings, with validation and e
   await page.click(id('mobile-settings-back'));
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
   await page.evaluate(`${state}.principal = 'session'; ${state}.client.becomes('session')`);
-  await page.waitFor(`!document.querySelector('${id('mobile-settings-worktrees')}')`);
+  await page.evaluate(`${state}.showSettings('general', 'worktrees')`);
+  await page.waitFor(`document.querySelector('${id('mobile-settings-home')}') && !document.querySelector('${id('worktree-storage-directory')}')`);
   expect(page.errors()).toEqual([]);
 }, 60_000);

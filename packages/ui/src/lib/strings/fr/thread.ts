@@ -45,6 +45,7 @@ export const fr: Translation = {
     trace: 'Trace',
     panel: 'Panneau',
     panelHint: 'Navigateur, fichiers et outils de cette conversation',
+    panelMenu: 'Navigateur, fichiers et outils',
     terminalHint: 'Terminal dans le dossier de cette conversation',
     cwd: 'Répertoire de travail',
     model: 'Modèle',
@@ -53,6 +54,7 @@ export const fr: Translation = {
     start: 'Lancer une conversation',
     inWorktree: 'dans un worktree',
     inProject: 'dans',
+    onMachine: 'sur',
     using: 'avec',
     onEffort: 'en raisonnement {effort}',
     draftMode: {

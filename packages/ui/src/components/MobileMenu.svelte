@@ -1,14 +1,13 @@
 <script lang="ts">
-  import { Activity, Bot, ChevronDown, ChevronRight, Ellipsis, Folder, House, MessageSquare, Monitor, Plus, Settings, X } from '@lucide/svelte';
-  import type { MenuItem } from '../lib/menu';
-  import Menu from './Menu.svelte';
+  import { Activity, Bot, ChevronRight, Ellipsis, House, MessageSquare, Monitor, Settings, X } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
   import { focusedElement, restoreFocus } from '../lib/focus';
   import WhipButton from './WhipButton.svelte';
-  let { store, place, waiting, screen, navigate, create, projects, pickProject }: { store: Store; place: string; waiting: number; screen: string; navigate: (screen: 'threads' | 'activity') => void; create: () => void; projects: MenuItem[]; pickProject: (id: string) => void } = $props();
+  /** The phone's places and its machine. A project and a new thread are the header's: its picker and its `+`. */
+  let { store, place, waiting, screen, navigate }: { store: Store; place: string; waiting: number; screen: string; navigate: (screen: 'threads' | 'activity') => void } = $props();
   let shown = $state(false), dialog = $state<HTMLDialogElement>();
   $effect(() => {
     if (!shown || !dialog) return;
@@ -31,8 +30,6 @@
       {#if experimentOn('resident-agents')}<button class="ghost" data-testid="mobile-agents" data-preload-view="agents" onclick={() => go(() => store.showAgents())}><Bot size={20} /><span class="ui-label">{strings.agents.heading}</span></button>{/if}
       {#if experimentOn('contacts')}<button class="ghost" data-testid="mobile-contacts" data-preload-view="home" aria-current={store.page === 'home' ? 'page' : undefined} onclick={() => go(() => store.showHome())}><House size={20} /><span class="ui-label">{strings.contacts.heading}</span></button>{/if}
     </nav>
-    <div class="project-picker"><Menu items={projects} onpick={id => go(() => pickProject(id))} label={strings.mobile.project} placement="bottom" variant="ghost" testid="mobile-menu-project"><Folder size={18} /><span class="ui-label">{strings.mobile.project}</span><ChevronDown size={15} /></Menu></div>
-    <button class="primary create" data-testid="mobile-menu-new" disabled={store.connection !== 'ready'} onclick={() => go(create)}><Plus size={18} /><span class="ui-label">{strings.sidebar.newThread}</span></button>
     {#if experimentOn('whip')}<div class="extra"><WhipButton mobile onthrown={() => { shown = false; }} /><span class="ui-label">{strings.experiments.whip.title}</span></div>{/if}
   </dialog>
 {/if}
@@ -46,6 +43,5 @@
   nav { display: grid; gap: 4px; } nav button { justify-content: flex-start; min-height: 48px; gap: 12px; padding: 12px; border-radius: var(--radius-md); } nav button > span:first-of-type { flex: 1; text-align: left; }
   [aria-current=page] { color: var(--color-accent); background: var(--color-accent-soft); }
   .badge { padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-accent-soft); color: var(--color-accent); }
-  .create { width: 100%; min-height: 44px; margin-top: 14px; } .extra { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--color-muted-foreground); }
-  .project-picker { margin-top: 8px; } .project-picker :global(.trigger) { width: 100%; min-height: 44px; gap: 12px; justify-content: flex-start; } .project-picker span { flex: 1; text-align: left; }
+  .extra { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--color-muted-foreground); }
 </style>

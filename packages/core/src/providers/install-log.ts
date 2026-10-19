@@ -70,7 +70,7 @@ export function logUpdate(core: Core, providerId: string, step: 'waiting' | 'sta
   const now = performance.now();
   // `idle` is where a successful run leaves the entry; anything else is said as it is.
   const outcome = data.state === 'failed' ? 'failed' : data.state === 'idle' ? 'succeeded' : `ended with state ${data.state ?? 'unknown'}`;
-  const message = step === 'waiting' ? `Update of ${providerId} waits for ${data.running} running turns to pause or end`
+  const message = step === 'waiting' ? `Update of ${providerId} waits for ${data.running} threads: running turns to pause or end, background work to end`
     : step === 'started' ? `Updating ${providerId} from ${data.from ?? 'unknown'}`
       : `Update of ${providerId} ${outcome}, now at ${data.to ?? 'unknown'}`;
   // Called inside the update drain: a log that throws must not leave paused turns waiting forever.

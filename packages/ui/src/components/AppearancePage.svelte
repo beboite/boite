@@ -19,8 +19,15 @@
   import type { Store } from '../lib/store.svelte';
   import SurfaceIcon from './SurfaceIcon.svelte';
   import { chatPrefs, setChatPref } from '../lib/chat-prefs.svelte';
+  import { featureOn } from '../lib/features.svelte';
+  import { setFeature } from '../lib/features';
 
-  let { store }: { store: Store } = $props();
+  /**
+   * `phone`: what a phone reads and looks like. The column width, the terminal,
+   * the workspace and the header's buttons are the desktop's; the chat's files
+   * and previews switch, on the desktop's General page, joins the display here.
+   */
+  let { store, phone = false }: { store: Store; phone?: boolean } = $props();
   const uid = $props.id();
 
   // The owner's buttons (the terminal, Add a project) are not a paired device's to hide.
@@ -38,13 +45,10 @@
    * carries: nothing but this picker reads them.
    */
   const FONT_NAMES: Record<Exclude<Font, 'system'>, string> = {
-    geist: 'Geist',
     inter: 'Inter',
-    plex: 'IBM Plex Sans',
     atkinson: 'Atkinson Hyperlegible',
-    figtree: 'Figtree',
     source: 'Source Sans 3',
-    dm: 'DM Sans'
+    plex: 'IBM Plex Sans'
   };
   const MONO_NAMES: Record<Exclude<Mono, 'system'>, string> = { geist: 'Geist Mono', jetbrains: 'JetBrains Mono' };
 
@@ -209,6 +213,7 @@
       </div>
     </div>
     <ThemeColors />
+    {#if !phone}
     <div class="switch-row">
       <span class="text ui-label">{strings.settings.chatWidth}</span>
       <div class="segmented" role="group" aria-label={strings.settings.chatWidth}>
@@ -230,6 +235,7 @@
       <input type="checkbox" role="switch" checked={terminalGpu} data-testid="terminal-gpu"
         onchange={(event) => { terminalGpu = event.currentTarget.checked; setTerminalGpu(terminalGpu); }} />
     </label>
+    {/if}
     <label class="switch-row">
       <span class="text ui-label">{strings.settings.groupChanges}</span>
       <input type="checkbox" role="switch" checked={chatPrefs.groupChanges} data-testid="chat-group-changes" onchange={event => setChatPref('groupChanges', event.currentTarget.checked)} />
@@ -238,6 +244,13 @@
       <span class="text ui-label">{strings.settings.expandDiffs}</span>
       <input type="checkbox" role="switch" checked={chatPrefs.expandDiffs} data-testid="chat-expand-diffs" onchange={event => setChatPref('expandDiffs', event.currentTarget.checked)} />
     </label>
+    {#if phone}
+      <label class="switch-row" for="{uid}-chat-artifacts">
+        <span class="text ui-label-box"><span class="ui-label" id="{uid}-chat-artifacts-name">{strings.features.chatArtifacts.title}</span><InfoTip topic={strings.features.chatArtifacts.title} text={strings.features.chatArtifacts.hint} /></span>
+        <input id="{uid}-chat-artifacts" aria-labelledby="{uid}-chat-artifacts-name" type="checkbox" role="switch" checked={featureOn('chat-artifacts')} data-testid="setting-chat-artifacts"
+          onchange={event => setFeature('chat-artifacts', event.currentTarget.checked)} />
+      </label>
+    {/if}
     {#if hasMaterial}
       <div class="switch-row">
         <span class="text ui-label">
@@ -263,7 +276,7 @@
   <section class="card" id="settings-reading">
     <h2>{strings.settings.reading}</h2>
     <div class="switch-row faces-row">
-      <span class="text ui-label">{strings.settings.font}</span>
+      <span class="text ui-label-box"><span class="ui-label">{strings.settings.font}</span><InfoTip topic={strings.settings.font} text={strings.settings.fontHint} /></span>
       <div class="faces" role="group" aria-label={strings.settings.font}>
         {#each faces as face (face.id)}
           <button type="button" class="face" style:font-family="var(--face-{face.id})" aria-pressed={font === face.id} data-testid="font-{face.id}" onclick={() => pickFont(face.id)}>
@@ -294,6 +307,7 @@
     {/if}
   </section>
 
+  {#if !phone}
   <!-- What the tour's question set, each piece on its own. -->
   <section class="card" id="settings-workspace">
     <h2>{strings.settings.workspace}</h2>
@@ -349,13 +363,15 @@
       </div>
     {/each}
   </section>
+  {/if}
 </div>
 
 <style>
   /* The text font's choices are tiles, each drawn in the face it picks, so the
      choice is made by reading rather than by name. */
   :global(.settings .page) .faces-row { flex-direction: column; align-items: stretch; gap: 12px; }
-  .faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+  /* Five faces: one row on a desktop card, none left alone on a second one. */
+  .faces { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
   .face {
     display: flex;
     flex-direction: column;
@@ -413,6 +429,7 @@
     :global(.settings .page) .switch-row:has(.segmented) { flex-direction: column; align-items: stretch; }
     :global(.settings .page) .segmented { display: flex; }
     .faces { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .face:last-child:nth-child(odd) { grid-column: 1 / -1; }
     /* Each option grows from its own word: equal thirds cut "Soulignement"
        and "Modifications" past their button's edge. */
     .segmented button { flex: 1 1 auto; min-width: 0; padding: 0 6px; }
