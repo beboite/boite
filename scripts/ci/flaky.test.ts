@@ -19,6 +19,19 @@ test('failed tests are named only when every counted failure has a name', () => 
   expect(failedTests('(fail) a\n 1 fail\n(fail) b\n 1 fail\n')).toEqual(['a', 'b']);
 });
 
+test('a run of several files names each failure once, not again in its closing recap', () => {
+  // bun test over several files lists every skip and failure again before the counts.
+  const several = [
+    '(fail) relays reads [4246.43ms]', '(pass) other [1.00ms]', '',
+    '1 tests skipped:', '(skip) killed outright', '', '',
+    '1 tests failed:', '(fail) relays reads [4246.43ms]', '',
+    ' 111 pass', ' 1 skip', ' 1 fail', 'Ran 113 tests across 39 files. [447.52s]', ''
+  ].join('\r\n');
+  expect(failedTests(several)).toEqual(['relays reads']);
+  const two = '(fail) a [1ms]\n(fail) b [1ms]\n\n2 tests failed:\n(fail) a [1ms]\n(fail) b [1ms]\n\n 2 fail\n';
+  expect(failedTests(two)).toEqual(['a', 'b']);
+});
+
 test('a retry needs every failure quarantined in a file that ran', () => {
   const list = [entry('tests/e2e/a.test.ts', 'one'), entry('tests/e2e/b.test.ts', 'two')];
   const absolute = join(ROOT, 'tests', 'e2e', 'a.test.ts');
