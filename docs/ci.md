@@ -428,15 +428,30 @@ failed build is eligible next time.
 The nightly does not run CI again. Its `CI passed` job (`scripts/ci/commit-ci.ts`)
 waits for the `ci` run that pushing this commit to main started. It reruns that
 run's failed jobs once and fails unless the run ends green; a commit with no
-such run after ten minutes fails. Beside it, `desktop.yml` builds and signs
-each desktop package once and tests what ships: installer regressions and
-native shell E2E on Windows, the installed Debian package, the extracted
-AppImage and the macOS bundle. The Rust tests are skipped because the commit's
-CI already ran them.
+such run after ten minutes fails. A main run is only cancelled while pending,
+when a newer push replaces it, so a cancelled run has no verdict: the job then
+follows the newest main run that was not cancelled, normally the one that
+replaced it, and waits for that commit instead. With no newer run it takes the
+newest older main commit whose run passed; anything else fails. On 2026-10-19
+the 08:59 UTC nightly started on 30287eef while its run was pending; that run
+and the next two were each replaced while pending, 9c974e65's passed at 09:33,
+and the night was lost on `ended cancelled` (run 39226757576). The job writes the commit it passed as
+its `sha` output, and every later job checks out, tags and publishes that
+commit, never `github.sha`; the version step runs that commit's `nightly.ts`
+with `GITHUB_SHA` set to it. `desktop.yml`, `android.yml`, `server.yml` and
+`server-verify.yml` take it as their `ref` input. `app.yml` deploys its own
+checkout, so it does not follow and a cancelled run still fails it. The whole
+wait is bounded at two hours: 35 minutes behind the main run ahead, 35 for the
+followed run and 35 for its rerun.
+
+`desktop.yml` builds and signs each desktop package once and tests what ships:
+installer regressions and native shell E2E on Windows, the installed Debian
+package, the extracted AppImage and the macOS bundle. The Rust tests are
+skipped because the commit's CI already ran them.
 
 A dispatch with `dry-run` builds any branch with throwaway signing keys, even a
-commit that already has a nightly. It accepts that
-branch's pull request CI run without rerunning it, skips reservation and every
+commit that already has a nightly. It accepts that branch's pull request CI run
+without rerunning or following it, skips reservation and every
 publication, and has its own concurrency group.
 
 Versions use `2.0.0-nightly.YYYYMMDD.N`, taking the base from the manifest and
@@ -444,8 +459,11 @@ resetting the counter each UTC day. For example, September 15's first build is
 `2.0.0-nightly.20260915.1`, then `.2` for a new commit. Build inputs stamp the
 version; source manifests retain theirs.
 
-The CI check, desktop builds and native image builds run alongside one
-another. Only after all pass does reservation bind the tag to the exact commit. A publishing
+The CI check runs first, since it decides which commit gets built; the
+version, desktop builds, APK and native image builds follow on that commit,
+alongside one another. A scheduled run usually finds its CI long finished, so
+the wait costs nothing there; a dispatch right after a merge waits for that
+run before building. Only after all pass does reservation bind the tag to the exact commit. A publishing
 failure keeps that tag for retry, including on a later day. A reserved tag alone
 is not a successful release. `server-manifest.yml` promotes the tested digests
 to `nightly`, the version and commit tags after reservation. It never moves

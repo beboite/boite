@@ -3,6 +3,10 @@ name: server image
 on:
   workflow_call:
     inputs:
+      ref:
+        description: The commit to build; empty builds the caller's own. The nightly passes the one whose CI passed.
+        type: string
+        default: ''
       publish:
         type: boolean
         default: false
@@ -35,6 +39,7 @@ jobs:
     permissions:
       contents: read
     with:
+      ref: ${{ inputs.ref }}
       channel: ${{ inputs.channel }}
       version: ${{ inputs.version }}
 
@@ -57,6 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
       - uses: ./.github/actions/server-image
         with:
