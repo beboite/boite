@@ -172,10 +172,11 @@ Each call of a freeze or a wake has 5 seconds. A frozen page still answers
 DevTools at once (measured on Windows on 2026-10-19), so a call that misses
 them met a stalled renderer or browser, not a frozen page: a wake that fails
 fails the command that asked for it, the tab stays asleep and the next use
-wakes it again. The error says whether the browser itself still answered
-(`Target.getTargetInfo` for the tab), and a `browser.sleep-late` warning in
-the logs says when the page answered after, or that it never did within 30
-seconds.
+wakes it again. The command fails at those 5 seconds; after it, a
+`browser.sleep-stalled` warning says whether the browser itself still
+answered (`Target.getTargetInfo` for the tab, within 1 second), and a
+`browser.sleep-late` warning says when the page answered, or that it never did
+within 30 seconds.
 
 A tab the desktop app hosts gets the same calls through the relay: `Page` and
 `Emulation` are among the domains an agent webview takes. The desktop's own
@@ -427,7 +428,7 @@ once nobody uses it and meets the next command and viewer awake and focused,
 one kept awake by `browser.remoteWatch`, and a machine without a browser. `browser-sleep.test.ts` checks, with the page
 stubbed, that a command arriving during a freeze runs after the wake, and that
 a held or closed tab never sleeps, that a running turn holds an unused
-tab only 5 minutes, and that a wake call that misses its time names who stalled. `AgentBrowserSurface.test.ts` checks that the desktop app
+tab only 5 minutes, and that a wake call that misses its time fails at once and then names who stalled. `AgentBrowserSurface.test.ts` checks that the desktop app
 reports a hosted tab it shows, only while its window is visible. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
 `tests/e2e/agent-browser-core.test.ts` runs the whole path on a real core: the
 owner's desktop at 1280 × 900 and a paired phone at 390 × 844 see the cover,

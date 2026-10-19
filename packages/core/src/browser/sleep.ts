@@ -44,18 +44,20 @@ export function sleepState(): SleepState {
 const STEP_MS = 5000;
 /** How long a step that missed its time is still listened to, so the log says whether its answer came late or not at all. */
 const LATE_MS = 30_000;
-/** What the browser gets to answer for itself once a step missed its time: the command that waits pays for it. */
+/** What the browser gets to answer for itself once a step missed its time. */
 const PROBE_MS = 1000;
 
 export class TabSleep<T extends Sleeper> {
   /** What each DevTools call of a freeze or a wake may take; tests shorten it. */
   stepMs = STEP_MS;
   /**
-   * Asked of the browser itself when a step of a tab misses its time: an
-   * answer puts the stall in that page's renderer, none in the browser or
-   * its connection.
+   * Asked of the browser itself, within `timeoutMs`, when a step of a tab
+   * misses its time: an answer puts the stall in that page's renderer, none
+   * in the browser or its connection.
    */
-  browserAnswers: (tab: T) => Promise<unknown> = () => Promise.resolve();
+  browserAnswers: (tab: T, timeoutMs: number) => Promise<unknown> = () => Promise.resolve();
+  /** Hears, once the step has failed, how long the browser took to answer for itself, or null for no answer in time. */
+  browserAnswered: (tab: T, method: string, ms: number | null) => void = () => {};
   /** Hears when a step that missed its time got its answer, in ms after it was sent, or why none came. */
   lateAnswer: (tab: T, method: string, after: number | Error) => void = () => {};
 
@@ -149,19 +151,18 @@ export class TabSleep<T extends Sleeper> {
   /**
    * One DevTools call of a freeze or a wake, given `stepMs`. A frozen page
    * answers at once (measured on 2026-10-19), so a call that misses its time
-   * met a stalled renderer or browser: the error says whether the browser
-   * itself still answered, and the late answer is still awaited for the log.
+   * met a stalled renderer or browser. The step fails at its time; whether
+   * the browser itself still answers, and when the page does, reach the log after.
    */
   async #step(tab: T, method: string, params: Record<string, unknown>): Promise<void> {
     const sent = performance.now();
     const answer = tab.page.send(method, params, LATE_MS);
     if (await within(answer.then(() => true), this.stepMs) !== null) return;
     void answer.then(() => this.lateAnswer(tab, method, Math.round(performance.now() - sent)), (error: Error) => this.lateAnswer(tab, method, error));
-    const probed = performance.now();
-    const browser = await within(Promise.resolve(this.browserAnswers(tab)).then(() => true, () => null), Math.min(PROBE_MS, this.stepMs)) === null
-      ? 'the browser itself did not answer either'
-      : `the browser itself answered in ${Math.round(performance.now() - probed)} ms`;
-    throw new Error(`the browser did not answer ${method} within ${this.stepMs / 1000} seconds; ${browser}`);
+    const probeMs = Math.min(PROBE_MS, this.stepMs), probed = performance.now();
+    void within(Promise.resolve(this.browserAnswers(tab, probeMs)).then(() => true, () => null), probeMs)
+      .then(answered => this.browserAnswered(tab, method, answered === null ? null : Math.round(performance.now() - probed)));
+    throw new Error(`the browser did not answer ${method} within ${this.stepMs / 1000} seconds`);
   }
 
   #queue(tab: T, run: () => Promise<void>): Promise<void> {
