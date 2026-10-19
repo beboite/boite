@@ -23,7 +23,7 @@
   import { speedControl } from '../lib/model-speeds';
 
   /**
-   * The row under the composer's box: the model, effort, mode and worktree
+   * The row under the composer's box: the model, effort, worktree and mode
    * chips (folded into Options on a phone), then stop, attach, dictation and
    * send. A pick on a thread is saved at once, after the switch warnings; on a
    * draft the whole choice is remembered. `choice`, `picking` and `dictating`
@@ -248,14 +248,6 @@
       <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} ondefault={agentDefault ? () => pickEffort(null) : undefined} {speeds} speed={speedOptions.speed} onspeed={(speed) => void pick(speedOptions.pick(speed))} />
     {/if}
 
-    {#if modes.length > 0}
-      <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end" variant="ghost">
-        {@const ModeIcon = modeIcon(displayedMode)}
-        <span class="mode-icon"><ModeIcon size={14} strokeWidth={1.75} /></span>
-        <span class="ui-label">{modeLabel(displayedMode, provider)}</span>
-      </Menu>
-    {/if}
-
     <!-- A thread keeps its directory, so the switch exists on a draft alone. -->
     {#if store.draft && draftRepository}
       <button
@@ -271,6 +263,14 @@
         <GitBranch size={14} strokeWidth={1.75} />
         <span class="ui-label">{strings.composer.worktree}</span>
       </button>
+    {/if}
+
+    {#if modes.length > 0}
+      <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end" variant="ghost">
+        {@const ModeIcon = modeIcon(displayedMode)}
+        <span class="mode-icon"><ModeIcon size={14} strokeWidth={1.75} /></span>
+        <span class="ui-label">{modeLabel(displayedMode, provider)}</span>
+      </Menu>
     {/if}
     </div>
   </div>

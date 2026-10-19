@@ -38,13 +38,10 @@
    * carries: nothing but this picker reads them.
    */
   const FONT_NAMES: Record<Exclude<Font, 'system'>, string> = {
-    geist: 'Geist',
     inter: 'Inter',
-    plex: 'IBM Plex Sans',
     atkinson: 'Atkinson Hyperlegible',
-    figtree: 'Figtree',
     source: 'Source Sans 3',
-    dm: 'DM Sans'
+    plex: 'IBM Plex Sans'
   };
   const MONO_NAMES: Record<Exclude<Mono, 'system'>, string> = { geist: 'Geist Mono', jetbrains: 'JetBrains Mono' };
 
@@ -263,7 +260,7 @@
   <section class="card" id="settings-reading">
     <h2>{strings.settings.reading}</h2>
     <div class="switch-row faces-row">
-      <span class="text ui-label">{strings.settings.font}</span>
+      <span class="text ui-label-box"><span class="ui-label">{strings.settings.font}</span><InfoTip topic={strings.settings.font} text={strings.settings.fontHint} /></span>
       <div class="faces" role="group" aria-label={strings.settings.font}>
         {#each faces as face (face.id)}
           <button type="button" class="face" style:font-family="var(--face-{face.id})" aria-pressed={font === face.id} data-testid="font-{face.id}" onclick={() => pickFont(face.id)}>
@@ -355,7 +352,8 @@
   /* The text font's choices are tiles, each drawn in the face it picks, so the
      choice is made by reading rather than by name. */
   :global(.settings .page) .faces-row { flex-direction: column; align-items: stretch; gap: 12px; }
-  .faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+  /* Five faces: one row on a desktop card, none left alone on a second one. */
+  .faces { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
   .face {
     display: flex;
     flex-direction: column;
@@ -413,6 +411,7 @@
     :global(.settings .page) .switch-row:has(.segmented) { flex-direction: column; align-items: stretch; }
     :global(.settings .page) .segmented { display: flex; }
     .faces { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .face:last-child:nth-child(odd) { grid-column: 1 / -1; }
     /* Each option grows from its own word: equal thirds cut "Soulignement"
        and "Modifications" past their button's edge. */
     .segmented button { flex: 1 1 auto; min-width: 0; padding: 0 6px; }

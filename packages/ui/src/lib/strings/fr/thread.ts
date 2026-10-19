@@ -53,6 +53,7 @@ export const fr: Translation = {
     start: 'Lancer une conversation',
     inWorktree: 'dans un worktree',
     inProject: 'dans',
+    onMachine: 'sur',
     using: 'avec',
     onEffort: 'en raisonnement {effort}',
     draftMode: {

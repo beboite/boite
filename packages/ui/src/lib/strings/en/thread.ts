@@ -53,6 +53,8 @@ export const strings = {
     start: 'Start a thread',
     inWorktree: 'in a worktree',
     inProject: 'in',
+    /** Before the machine the draft's project is on, which ends the heading. */
+    onMachine: 'on',
     using: 'using',
     onEffort: 'on {effort} effort',
     draftMode: {

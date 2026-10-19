@@ -518,6 +518,13 @@
     width: var(--control-sm);
   }
 
+  /* Only the tabs give way. A control that shrank too took part of the room the
+     chevrons cost, so the tabs lost less than `measure` counted and the
+     chevrons went and came back on every frame at the panel's narrowest. */
+  .strip > :not(.tabs, .spacer) {
+    flex: none;
+  }
+
   .tabs {
     display: flex;
     align-items: center;
