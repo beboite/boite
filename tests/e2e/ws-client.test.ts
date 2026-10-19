@@ -221,8 +221,12 @@ test('an upgrade the server refuses or never answers rejects with what happened'
   try {
     await expect(TextSocket.connect(`ws://127.0.0.1:${refusing.port}/devtools/page/gone`, 5_000)).rejects.toThrow('refused the WebSocket upgrade: HTTP/1.1 404');
   } finally { await refusing.stop(true); }
-  const silent = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } });
+  // A server that never answers the upgrade gets its connection closed: a late 101 would otherwise keep it for the run.
+  let hungUp = false;
+  const silent = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {}, close() { hungUp = true; } } });
   try {
     await expect(TextSocket.connect(`ws://127.0.0.1:${silent.port}/`, 300)).rejects.toThrow('no WebSocket upgrade');
+    for (let waited = 0; !hungUp && waited < 2_000; waited += 20) await Bun.sleep(20);
+    expect(hungUp).toBe(true);
   } finally { silent.stop(true); }
 });

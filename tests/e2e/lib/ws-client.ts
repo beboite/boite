@@ -254,11 +254,13 @@ export class TextSocket {
       let handshake: Uint8Array = new Uint8Array(0);
       const reader = new FrameReader();
       let settled = false;
-      const fail = (socket: Bun.Socket | null, message: string) => {
+      /** The connection before it upgraded: a failed upgrade ends it, including one that connects after the timeout. */
+      let raw: Bun.Socket | null = null;
+      const fail = (message: string) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        socket?.end();
+        raw?.end();
         reject(new Error(message));
       };
       const receive = (bytes: Uint8Array) => {
@@ -279,29 +281,31 @@ export class TextSocket {
           }
         }
       };
-      const timer = setTimeout(() => fail(null, `no WebSocket upgrade from ${target.host} within ${timeoutMs} ms`), timeoutMs);
+      const timer = setTimeout(() => fail(`no WebSocket upgrade from ${target.host} within ${timeoutMs} ms`), timeoutMs);
       Bun.connect({
         hostname: target.hostname,
         port: Number(target.port || 80),
         socket: {
           open(socket) {
+            raw = socket;
+            if (settled) { socket.end(); return; }
             socket.write(`GET ${target.pathname}${target.search} HTTP/1.1\r\nHost: ${target.host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
           },
           data(socket, bytes) {
             if (client !== null) { receive(bytes); return; }
-            if (settled) return;
+            if (settled) { socket.end(); return; }
             handshake = concat([handshake, bytes]);
             const end = headerEnd(handshake);
             if (end === -1) {
-              if (handshake.length > 16_384) fail(socket, 'the WebSocket upgrade answer has no end');
+              if (handshake.length > 16_384) fail('the WebSocket upgrade answer has no end');
               return;
             }
             const head = new TextDecoder().decode(handshake.subarray(0, end));
             const status = head.split('\r\n', 1)[0] ?? '';
-            if (!/^HTTP\/1\.1 101\b/.test(status)) { fail(socket, `the server refused the WebSocket upgrade: ${status}`); return; }
-            if (/^sec-websocket-accept:\s*(\S+)/im.exec(head)?.[1] !== accept) { fail(socket, 'the server answered the upgrade with a wrong Sec-WebSocket-Accept'); return; }
+            if (!/^HTTP\/1\.1 101\b/.test(status)) { fail(`the server refused the WebSocket upgrade: ${status}`); return; }
+            if (/^sec-websocket-accept:\s*(\S+)/im.exec(head)?.[1] !== accept) { fail('the server answered the upgrade with a wrong Sec-WebSocket-Accept'); return; }
             const extensions = /^sec-websocket-extensions:\s*(.*)$/im.exec(head)?.[1]?.trim();
-            if (extensions) { fail(socket, `the server turned on extensions nobody offered: ${extensions}`); return; }
+            if (extensions) { fail(`the server turned on extensions nobody offered: ${extensions}`); return; }
             settled = true;
             clearTimeout(timer);
             client = new TextSocket(socket);
@@ -309,12 +313,12 @@ export class TextSocket {
             if (end < handshake.length) receive(handshake.subarray(end));
           },
           drain() { if (client !== null) client.#flush(); },
-          end() { if (client) client.#ended({ code: 1006, reason: 'the server hung up' }); else fail(null, 'the server hung up during the WebSocket upgrade'); },
-          close() { if (client) client.#ended({ code: 1006, reason: 'the connection closed' }); else fail(null, 'the connection closed during the WebSocket upgrade'); },
-          error(_socket, error) { if (client) client.#ended({ code: 1006, reason: error.message }); else fail(null, `the WebSocket connection failed: ${error.message}`); },
-          connectError(_socket, error) { fail(null, `could not connect to ${target.host}: ${error.message}`); },
+          end() { if (client) client.#ended({ code: 1006, reason: 'the server hung up' }); else fail('the server hung up during the WebSocket upgrade'); },
+          close() { if (client) client.#ended({ code: 1006, reason: 'the connection closed' }); else fail('the connection closed during the WebSocket upgrade'); },
+          error(_socket, error) { if (client) client.#ended({ code: 1006, reason: error.message }); else fail(`the WebSocket connection failed: ${error.message}`); },
+          connectError(_socket, error) { fail(`could not connect to ${target.host}: ${error.message}`); },
         },
-      }).catch((error: unknown) => fail(null, `could not connect to ${target.host}: ${error instanceof Error ? error.message : String(error)}`));
+      }).catch((error: unknown) => fail(`could not connect to ${target.host}: ${error instanceof Error ? error.message : String(error)}`));
     });
   }
 }
