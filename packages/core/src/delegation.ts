@@ -183,12 +183,17 @@ export class Delegation {
     })();
     return true;
   }
-  /** A restart between a retiring subagent's last delivery and its archive retires it on start. */
+  /** A restart between a retiring subagent's last delivery and its archive retires it on start; one that fails waits for its next update. */
   retireSettled(): void {
     for (const { key } of this.core.journal.db.query("SELECT key FROM settings WHERE key GLOB 'delegation-retiring:*'").all() as { key: string }[]) {
-      const thread = this.core.journal.getThread(key.slice('delegation-retiring:'.length));
-      if (thread) this.retireIfDone(thread);
-      else this.core.journal.deleteSetting(key);
+      const threadId = key.slice('delegation-retiring:'.length);
+      try {
+        const thread = this.core.journal.getThread(threadId);
+        if (thread) this.retireIfDone(thread);
+        else this.core.journal.deleteSetting(key);
+      } catch (error) {
+        this.core.logs.record('warn', `Retiring subagent ${threadId} on start failed: ${messageOf(error)}`, { source: 'delegation', event: 'delegation.retire_failed', threadId });
+      }
     }
   }
   /** A subagent a past episode left watching its pull request retires once the watch and its turn are over and its last result reached the parent. */
