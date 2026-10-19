@@ -241,6 +241,24 @@ describeWindows('windows job objects', () => {
     await until('the script to be gone', () => !isRunning(sh.pid) && !isRunning(nap.pid), 5000);
   }, 30000);
 
+  (existsSync(GIT_BASH) ? test : test.skip)('stopping the thread stops a Git Bash script the orphan sweep keeps', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const procs = harness.core.procs;
+    procs.spawn(threadId, GIT_BASH, ['-c', '/usr/bin/sh -c "while :; do /usr/bin/sleep 30; done"; :']);
+    const script = (): ProcessRecord | undefined => procs.liveOf(threadId).find((record) => /[\\/]sh\.exe$/i.test(record.exe));
+    const sleep = (): ProcessRecord | undefined => procs.liveOf(threadId).find((record) => /[\\/]sleep\.exe$/i.test(record.exe));
+    await until('the script and its sleep to be reported', () => script() !== undefined && sleep() !== undefined, 10000);
+    const sh = script() as ProcessRecord;
+    const nap = sleep() as ProcessRecord;
+    await until('the fork stubs to exit', () => !procs.liveOf(threadId).some((record) => record.pid === sh.parentPid || record.pid === nap.parentPid), 10000);
+    expect(procs.sweepOrphans(threadId, Date.now() + 60_000)).toEqual([]);
+
+    // The thread's job goes whole, whatever the sweep kept.
+    procs.killTree(threadId);
+    await until('the script to be gone', () => !isRunning(sh.pid) && !isRunning(nap.pid), 5000);
+  }, 30000);
+
   test('a grandchild that outlives its parent is still traced and still killed', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);

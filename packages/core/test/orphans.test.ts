@@ -278,6 +278,24 @@ describe('orphan sweep', () => {
     expect(procs.sweepOrphans(THREAD, now + GRACE_MS).sort()).toEqual([173, 183]);
   });
 
+  test('a subshell left by a subshell that trapped TERM is kept while the bash above runs, then goes', () => {
+    const sink = job.sink();
+    const bash = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
+    const exit = { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
+    const born = Date.now() - 1000;
+    // `( trap 'exit 0' TERM; ( read ) & wait ) &`, the middle one stopped by
+    // TERM: from Windows it is a fork that exited with 0, so its child stays.
+    sink.started(THREAD, 190, { exe: bash, commandLine: null, parentPid: 100, startedAt: born });
+    sink.started(THREAD, 191, { exe: bash, commandLine: null, parentPid: 190, startedAt: born + 10 });
+    sink.started(THREAD, 192, { exe: bash, commandLine: null, parentPid: 191, startedAt: born + 20 });
+    sink.exited(THREAD, 191, exit);
+    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104]);
+
+    // The first sweep after that bash exits takes it.
+    sink.exited(THREAD, 190, exit);
+    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS)).toEqual([192]);
+  });
+
   test('a new turn inside the grace cancels the sweep', async () => {
     bus.emit(...turn('turn.finished'));
     bus.emit(...turn('turn.started'));

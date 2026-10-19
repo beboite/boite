@@ -24,6 +24,12 @@ interface Traced {
  * fork and that bash dead above it, and goes. What an interrupted command left
  * goes too, since its shell is a different image from the agent above it, and
  * so does what an exited Node worker left under a live Node.
+ *
+ * The limit: a real subshell that exits with 0 while its own subshell runs
+ * (`( trap 'exit 0' TERM; ( read ) & wait ) &` stopped by TERM) looks the
+ * same from Windows, and its child stays while the bash above it runs. The
+ * first sweep after that bash exits takes it, and a thread's stop kills its
+ * whole job anyway.
  */
 export function orphansOf<T extends Traced>(byPid: ReadonlyMap<number, T>, now: number, graceMs: number, runningSince: (pid: number) => number | null): Map<number, T> {
   const entries = [...byPid.values()];
