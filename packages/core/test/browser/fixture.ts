@@ -6,6 +6,7 @@ import type { RemoteBrowserFrame, RemoteBrowserUnchanged } from '@boite/contract
 import { connect, type CoreClient } from '../../src/client.ts';
 import { chromiumArgs, findChromium, waitForEndpoint } from '../../src/browser/chromium.ts';
 import { echoThread, startTestCore, type TestCore } from '../harness.ts';
+import { TextSocket } from '../../../../tests/e2e/lib/ws-client.ts';
 
 const PAGE = `<!doctype html><title>Fixture</title>
 <style>body{margin:0;font:16px sans-serif} button{position:absolute;left:100px;top:100px;width:200px;height:80px}</style>
@@ -85,7 +86,8 @@ export function createBrowserFixture() {
     opened.harness = harness = await startTestCore();
     const record = harness.core.logs.record.bind(harness.core.logs);
     harness.core.logs.record = (level, message, context = {}, at) => {
-      if (context.event === 'rpc.failed') failures.push(message);
+      // What a sleeping tab's stalled step turned out to be explains a wake that failed (`browser/sleep.ts`).
+      if (context.event === 'rpc.failed' || context.event === 'browser.sleep-stalled' || context.event === 'browser.sleep-late') failures.push(message);
       record(level, message, context, at);
     };
     opened.owner = owner = await harness.connect();
@@ -116,7 +118,7 @@ export function createBrowserFixture() {
    */
   async function fakeHost(name = 'shell', extraArgs: string[] = []) {
     const dir = mkdtempSync(join(tmpdir(), 'boite-host-'));
-    let browser: Bun.Subprocess | undefined, socket: WebSocket | undefined, app: CoreClient | undefined;
+    let browser: Bun.Subprocess | undefined, socket: TextSocket | undefined, app: CoreClient | undefined;
     let closing: Promise<void> | undefined;
     const close = () => closing ??= (async () => {
       const errors: unknown[] = [];
@@ -129,7 +131,7 @@ export function createBrowserFixture() {
             // Browser.close lets Chromium's helpers release the profile before removal.
             stuck = setTimeout(() => attempt(() => browser!.kill()), 10_000);
             attempt(() => {
-              if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 2 ** 31 - 1, method: 'Browser.close', params: {} }));
+              if (socket?.open) socket.send(JSON.stringify({ id: 2 ** 31 - 1, method: 'Browser.close', params: {} }));
               else browser!.kill();
             });
           }
@@ -148,27 +150,13 @@ export function createBrowserFixture() {
     try {
       const args = chromiumArgs(dir, 'linux').filter(arg => arg !== '--remote-debugging-pipe');
       browser = Bun.spawn([findChromium().path!, ...args, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', ...extraArgs], { stdout: 'ignore', stderr: 'ignore' });
-      const connectedSocket = socket = new WebSocket(await waitForEndpoint(dir, browser.exited));
-      await new Promise<void>((resolve, reject) => {
-        const finish = (error?: Error) => {
-          clearTimeout(timer);
-          connectedSocket.removeEventListener('open', opened);
-          connectedSocket.removeEventListener('error', failed);
-          connectedSocket.removeEventListener('close', ended);
-          if (error) reject(error); else resolve();
-        };
-        const opened = () => finish();
-        const failed = () => finish(new Error('could not open the desktop browser DevTools socket'));
-        const ended = () => finish(new Error('the desktop browser DevTools socket closed before opening'));
-        const timer = setTimeout(() => finish(new Error('the desktop browser did not accept a DevTools connection within 10 seconds')), 10_000);
-        connectedSocket.addEventListener('open', opened);
-        connectedSocket.addEventListener('error', failed);
-        connectedSocket.addEventListener('close', ended);
-      });
+      // Bun's own WebSocket client closes sound devtools streams with 1002 (tests/e2e/lib/ws-client.ts).
+      const connectedSocket = socket = await TextSocket.connect(await waitForEndpoint(dir, browser.exited), 10_000)
+        .catch((error: unknown) => { throw new Error(`could not open the desktop browser DevTools socket: ${error instanceof Error ? error.message : String(error)}`, { cause: error }); });
       const connectedApp = app = await connect(harness.url, harness.token, { client: { name, version: 'test' } });
       const relayed: string[] = [];
       connectedApp.on('browser.hostMessage', ({ profile, message }) => { relayed.push(profile); connectedSocket.send(message); });
-      connectedSocket.addEventListener('message', event => void connectedApp.call('browser.hostReply', { profile: 'default', messages: [String(event.data)] }).catch(() => {}));
+      connectedSocket.onMessage(text => void connectedApp.call('browser.hostReply', { profile: 'default', messages: [text] }).catch(() => {}));
       return { app: connectedApp, relayed, close };
     } catch (error) {
       try { await close(); }

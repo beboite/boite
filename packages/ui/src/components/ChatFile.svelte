@@ -54,8 +54,6 @@
   // A WebM on an iPhone without WebM support: offer the download rather than a black frame.
   const unplayable = $derived(video && !videoPlayable(mime));
   const deferredImage = $derived(image && size > ATTACHMENT_MAX_BYTES && !imageRequested);
-  const inlineMedia = $derived(!!file && ((image && !deferredImage) || video || audio));
-  const showPreview = $derived(inlineMedia || (expanded && rich));
   const previewable = $derived(text !== null || image || (pdf && !!file) || audio || video);
   /**
    * A picture's own size, from the core for one it deferred or from the header
@@ -78,6 +76,14 @@
   const frame = $derived(box ?? (visual ? learned ?? rememberedSize(sizeKey) : null));
   const boxWidth = $derived(frame === null ? undefined : `min(${frame.width}px, calc(min(480px, 65vh) * ${frame.width} / ${frame.height}))`);
   const boxRatio = $derived(frame === null ? undefined : `${frame.width} / ${frame.height}`);
+  /**
+   * Mounted again, the file holds the size it loaded at while its bytes come back. Its kind is not
+   * known yet, so it is laid out as the inline media it will be: in a full-width card the box stood
+   * up to 480 px tall, then dropped to the 560 px-wide player, and the timeline jumped on every mount.
+   */
+  const reserved = $derived(!!file && !waiting && frame !== null && !url && loading);
+  const inlineMedia = $derived(!!file && ((image && !deferredImage) || video || audio || reserved));
+  const showPreview = $derived(inlineMedia || (expanded && rich));
   /** The light copy the core made for the timeline (`loadDisplayImage`), drawn until the original is asked for. */
   let copy = $state('');
   let copyShown = $state(false);
@@ -275,7 +281,7 @@
         <span class="enlarge"><Maximize2 size={16} /></span>
       </button>
     </div>
-  {:else if file && frame !== null && !url && loading}
+  {:else if reserved}
     <!-- Mounted again, the file keeps the size it loaded at while its bytes come back. -->
     <div class="preview" data-testid="artifact-reserved"><div class="clip boxed" style:width={boxWidth} style:aspect-ratio={boxRatio}></div></div>
   {:else if showPreview && url}

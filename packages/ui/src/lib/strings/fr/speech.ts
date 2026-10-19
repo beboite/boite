@@ -43,7 +43,7 @@ export const fr: Translation = {
     link: 'Ajouter depuis un lien', linkPlaceholder: 'https://huggingface.co/.../ggml-model.bin',
     linkHint: 'Un lien https vers un fichier ggml de whisper.cpp, comme ceux de huggingface.co/ggerganov/whisper.cpp.',
     add: 'Ajouter',
-    advanced: 'Avancé', executable: 'Exécutable Whisper', modelPath: 'Fichier du modèle', savePaths: 'Enregistrer les chemins',
+    advanced: 'Avancé', executable: 'Exécutable Whisper', modelPath: 'Fichier du modèle',
     pathHint: 'Laissez les deux vides pour utiliser les modèles ci-dessus. Un fichier de modèle indiqué ici passe avant la liste.',
     provider: 'Fournisseur', providerHint: 'Les deux font tourner Whisper Large v3 Turbo. Les clés restent sur ce cœur.', groq: 'Groq', openrouter: 'OpenRouter',
     groqKey: 'Clé Groq', openrouterKey: 'Clé OpenRouter', keySaved: 'Enregistrée', keyEmpty: 'Collez une clé', keyReplace: 'Collez une nouvelle clé pour la remplacer',

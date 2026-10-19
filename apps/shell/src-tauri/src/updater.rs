@@ -6,7 +6,16 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 use sha2::{Digest, Sha256};
 
 const RELEASES: &str = "https://api.github.com/repos/beboite/boite/releases";
-const DOWNLOADS: &str = "https://github.com/beboite/boite/releases/download/";
+/// Where a release's files may live. The repository moves from `beboite` to
+/// `mtsu-dev`: GitHub then answers the old listing with the new owner's URLs,
+/// while manifests published before the move keep the old ones.
+const DOWNLOADS: [&str; 2] = ["https://github.com/mtsu-dev/boite/releases/download/", "https://github.com/beboite/boite/releases/download/"];
+
+/// Whether `url` is a file of the release tagged `tag`, under either owner.
+fn in_release(url: &str, tag: &str) -> bool {
+    DOWNLOADS.iter().any(|base| url.strip_prefix(base).and_then(|rest| rest.strip_prefix(tag))
+        .is_some_and(|file| file.starts_with('/') && file.len() > 1))
+}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -194,8 +203,9 @@ async fn find_release(track: Track) -> Result<Release, String> {
 
 fn release_asset_url(release: &Release) -> Result<&str, String> {
     let asset = release.assets.iter().find(|a| a.name == "latest.json").ok_or("Release is missing latest.json")?;
-    let expected = format!("{DOWNLOADS}{}/latest.json", release.tag_name);
-    if asset.browser_download_url != expected { return Err(format!("latest.json URL must equal {expected}")); }
+    if !DOWNLOADS.iter().any(|base| asset.browser_download_url == format!("{base}{}/latest.json", release.tag_name)) {
+        return Err(format!("latest.json URL must be {}{}/latest.json", DOWNLOADS[0], release.tag_name));
+    }
     Ok(&asset.browser_download_url)
 }
 
@@ -243,7 +253,7 @@ pub async fn app_update_check(webview: Webview, app: AppHandle, state: State<'_,
             .build().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
         if let Some(update) = update {
             if update.version != release.tag_name.trim_start_matches('v') { return Err("Update manifest version disagrees with release tag".into()); }
-            if !update.download_url.as_str().starts_with(&format!("{DOWNLOADS}{}/", release.tag_name)) {
+            if !in_release(update.download_url.as_str(), &release.tag_name) {
                 return Err("Update payload URL must belong to the selected Boite release".into());
             }
             let version = update.version.clone();
@@ -371,7 +381,7 @@ mod tests {
     use super::*;
     fn release(tag: &str, draft: bool, signed: bool) -> Release {
         Release { tag_name: tag.into(), draft, published_at: None, body: None,
-            assets: if signed { vec![Asset { name: "latest.json".into(), browser_download_url: format!("{DOWNLOADS}{tag}/latest.json") }] } else { vec![] } }
+            assets: if signed { vec![Asset { name: "latest.json".into(), browser_download_url: format!("{}{tag}/latest.json", DOWNLOADS[0]) }] } else { vec![] } }
     }
     #[test]
     fn stable_includes_beta_but_never_nightly_drafts_or_unsigned_builds() {
@@ -384,8 +394,22 @@ mod tests {
     fn release_manifest_must_be_attached_to_the_selected_release() {
         let mut r = release("v2.0.0", false, true);
         assert!(release_asset_url(&r).is_ok());
-        r.assets[0].browser_download_url = "https://example.com/latest.json".into();
-        assert!(release_asset_url(&r).is_err());
+        // Releases listed before the move from beboite still name the old owner.
+        r.assets[0].browser_download_url = "https://github.com/beboite/boite/releases/download/v2.0.0/latest.json".into();
+        assert!(release_asset_url(&r).is_ok());
+        for url in ["https://example.com/latest.json", "https://github.com/other/boite/releases/download/v2.0.0/latest.json",
+            "https://github.com/mtsu-dev/boite/releases/download/v2.0.1/latest.json", "https://github.com/mtsu-dev/boite/releases/download/v2.0.0/Boite.exe"] {
+            r.assets[0].browser_download_url = url.into();
+            assert!(release_asset_url(&r).is_err(), "{url}");
+        }
+    }
+    #[test]
+    fn a_payload_must_belong_to_the_selected_release_under_either_owner() {
+        assert!(in_release("https://github.com/mtsu-dev/boite/releases/download/v2.0.0/Boite_2.0.0_x64-setup.exe", "v2.0.0"));
+        assert!(in_release("https://github.com/beboite/boite/releases/download/v2.0.0/Boite_2.0.0_x64-setup.exe", "v2.0.0"));
+        assert!(!in_release("https://github.com/mtsu-dev/boite/releases/download/v2.0.0.1/Boite.exe", "v2.0.0"));
+        assert!(!in_release("https://github.com/mtsu-dev/boite/releases/download/v2.0.0/", "v2.0.0"));
+        assert!(!in_release("https://github.com/someone/boite/releases/download/v2.0.0/Boite.exe", "v2.0.0"));
     }
     #[test]
     fn operation_guard_refuses_overlap_and_releases_on_drop() {

@@ -3,6 +3,14 @@ import type { Translation } from '../../i18n.svelte';
 export const fr: Translation = {
 
   settings: {
+    autosave: {
+      saving: 'Enregistrement',
+      saved: 'Enregistré',
+      failed: 'Non enregistré',
+      invalid: 'Rien n\'est enregistré tant qu\'un champ est invalide',
+      conflict: 'Modifié ailleurs aussi. Rouvrez cette page pour voir les deux changements.',
+      retry: 'Réessayer'
+    },
     heading: 'Réglages',
     modelDefaults: 'Modèles par défaut',
     modelDefaultsHint: 'Pour les nouvelles conversations. Enregistré sur cet appareil.',

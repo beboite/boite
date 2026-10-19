@@ -115,6 +115,51 @@ test('a wake that fails leaves the tab asleep, and the next use wakes it', async
   sleep.drop(tab);
 });
 
+// A wake step that gets no answer in time failed a command on a macOS runner
+// with only "did not answer Emulation.setFocusEmulationEnabled within 5
+// seconds" (job 118094995614). A frozen page answers at once, so the log says
+// after whether the browser itself still answered, and when, or whether, the
+// page did. The command fails at the step's time, not after the probe.
+test('a wake step that misses its time fails at once, then logs whether the browser answered and when the page did', async () => {
+  const { tab, calls, holdNext, release } = fakeTab();
+  const sleep = new TabSleep<Sleeper>(() => false, () => false, 20);
+  sleep.stepMs = 50;
+  const late: Array<[string, number | string]> = [];
+  const stalls: Array<[string, number | null]> = [];
+  sleep.lateAnswer = (_tab, method, after) => late.push([method, typeof after === 'number' ? after : after.message]);
+  sleep.browserAnswered = (_tab, method, ms) => stalls.push([method, ms]);
+  let answerProbe!: () => void;
+  const probes: number[] = [];
+  sleep.browserAnswers = (_tab, timeoutMs) => { probes.push(timeoutMs); return new Promise<void>(resolve => { answerProbe = resolve; }); };
+  sleep.schedule(tab);
+  await until(() => tab.sleep.asleep);
+  holdNext('Emulation.setFocusEmulationEnabled');
+  await expect(sleep.use(tab, async () => { calls.push('first'); })).rejects.toThrow(/^the browser did not answer Emulation\.setFocusEmulationEnabled within 0\.05 seconds$/);
+  // The probe is still out: the command did not wait for it.
+  expect(stalls).toEqual([]);
+  expect(probes).toEqual([50]);
+  expect(tab.sleep.asleep).toBe(true);
+  answerProbe();
+  await until(() => stalls.length === 1);
+  expect(stalls[0]![0]).toBe('Emulation.setFocusEmulationEnabled');
+  expect(stalls[0]![1]).toBeGreaterThanOrEqual(0);
+  expect(late).toEqual([]);
+  release('Emulation.setFocusEmulationEnabled');
+  await until(() => late.length === 1);
+  expect(late[0]![0]).toBe('Emulation.setFocusEmulationEnabled');
+  expect(late[0]![1]).toBeGreaterThanOrEqual(50);
+  // A browser that does not answer its own targets either is named so once its time is out.
+  sleep.browserAnswers = () => new Promise(() => {});
+  holdNext('Page.setWebLifecycleState');
+  await expect(sleep.use(tab, async () => {})).rejects.toThrow('within 0.05 seconds');
+  await until(() => stalls.length === 2);
+  expect(stalls[1]).toEqual(['Page.setWebLifecycleState', null]);
+  release('Page.setWebLifecycleState');
+  await sleep.use(tab, async () => { calls.push('second'); });
+  expect(calls.at(-1)).toBe('second');
+  sleep.drop(tab);
+});
+
 // A turn that runs for half an hour without touching its tab must not keep
 // it awake throughout: the turn holds it only for a while after its last use,
 // and the next command wakes it. The hold is measured from the use to the

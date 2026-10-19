@@ -226,6 +226,23 @@ test('the base branch names what it requires through its rulesets and its classi
   expect(evaluate(initialMemory(since), withRequired(detail([{ name: 'CI required' }]), ['CI required', 'PR title']), null).changes).toEqual([]);
 });
 
+test('a draft passes on the required checks it reports, without waiting for one it never reports', () => {
+  // beboite/boite's draft run names its planning job apart, so a draft never satisfies the ruleset (docs/ci.md#draft-pull-requests).
+  const required = ['Plan and repository checks', 'Build UI'];
+  const draft = parseDetail(detailJson([{ name: 'Plan and repository checks (draft)' }, { name: 'Build UI' }], { isDraft: true }));
+  expect(draft.draft).toBe(true);
+  expect(withRequired(draft, required).checks.map(({ name, required }) => ({ name, required }))).toEqual([
+    { name: 'CI / Plan and repository checks (draft)', required: false },
+    { name: 'CI / Build UI', required: true },
+  ]);
+  expect(evaluate(initialMemory(since), withRequired(draft, required), null).changes).toEqual([{ kind: 'passed', head: 'a'.repeat(40), count: 1, required: true }]);
+  // Once ready, the required name the full run has not created yet waits as GitHub's "Expected".
+  const ready = parseDetail(detailJson([{ name: 'Plan and repository checks (draft)' }, { name: 'Build UI' }]));
+  expect(ready.draft).toBe(false);
+  expect(withRequired(ready, required).checks.at(-1)).toMatchObject({ name: 'Plan and repository checks', status: 'pending', conclusion: 'EXPECTED' });
+  expect(evaluate(initialMemory(since), withRequired(ready, required), null).changes).toEqual([]);
+});
+
 test('a burst folds into one set of changes, and failures of an older head drop once the new head passed', () => {
   const merged = mergeChanges(
     [{ kind: 'failed', head: 'old', checks: [{ name: 'test', conclusion: 'FAILURE', url: '' }] }, { kind: 'remarks', remarks: [{ id: 'a', author: 'x', body: '1', url: '', path: null, state: null }] }],
@@ -613,11 +630,13 @@ async function watchingChild(setup: Awaited<ReturnType<typeof watchedThread>>, r
   const { owner, threadId } = setup;
   const parent = harness!.core.threads.require(threadId);
   await owner.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: parent.providerId, accountId: parent.accountId, model: parent.model!, effort: null }] } });
-  const child = (await owner.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Open the pull request and see it to green', requestId })).thread.id as ThreadId;
-  await settled(child);
+  // The child watches during its turn, as `boite pr watch` does: a child that finished without one is put away.
+  const child = (await owner.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Open the pull request and see it to green [sleep:300]', requestId })).thread.id as ThreadId;
   harness!.core.journal.setSetting(`linked-pull-requests:${child}`, harness!.core.journal.getSetting(`linked-pull-requests:${threadId}`));
   const agent = await connect(harness!.url, harness!.core.agents.tokenFor(child), { client: { name: 'boite-cli', version: 'test' } });
   try { await agent.call('threads.watchPullRequest', { threadId: child }); } finally { agent.close(); }
+  expect(harness!.core.journal.listTurns(child).some(turn => turn.status === 'running' || turn.status === 'queued')).toBe(true);
+  await settled(child);
   return child;
 }
 

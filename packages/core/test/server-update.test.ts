@@ -1,11 +1,11 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { generateKeyPairSync, createHash, randomBytes, sign } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { zipSync } from 'fflate';
 import { Database } from 'bun:sqlite';
-import { downloadPayload, verifyPayload, unpackPayload } from '../src/server-update/release.ts';
+import { downloadPayload, findServerOffer, verifyPayload, unpackPayload } from '../src/server-update/release.ts';
 import { applyServerUpdate, clearStaleUpdates, recoverServerUpdate, UNSAVED_DATA, type UpdateDisk } from '../src/server-update/apply.ts';
 import { linuxServerUpdates, unitWord } from '../src/platform/linux-server-update.ts';
 import { openDataDir, restoreSnapshot, type FileLock, type RestoreMoves } from '../src/server-update/restore.ts';
@@ -41,6 +41,20 @@ test('publisher signatures reject altered bytes, a different key and changed tru
     expect(() => verifyPayload(bytes, Buffer.from(plain.replace(comment, 'version:9.0.0')).toString('base64'), publicKey)).toThrow('verification failed');
     expect(() => verifyPayload(bytes, encoded, Buffer.from('invalid key').toString('base64'))).toThrow('signing key');
   }
+});
+
+test('an offer is taken from the release under the old or the new owner, never another repository', async () => {
+  const offered = (url: string) => {
+    const fetcher = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async (input: string | URL | Request) => String(input).startsWith('https://api.github.com/')
+      ? Response.json([{ tag_name: 'v2.0.0', draft: false, published_at: '2026-10-19T00:00:00Z' }])
+      : Response.json({ version: '2.0.0', platforms: { 'linux-x86_64-server': { url, signature: 'c2ln' } } }), { preconnect: fetch.preconnect }));
+    return findServerOffer('1.0.0', 'x64', new AbortController().signal).finally(() => fetcher.mockRestore());
+  };
+  for (const owner of ['mtsu-dev', 'beboite']) {
+    const url = `https://github.com/${owner}/boite/releases/download/v2.0.0/boite-server_2.0.0_x64.zip`;
+    expect((await offered(url))?.url).toBe(url);
+  }
+  await expect(offered('https://github.com/someone/boite/releases/download/v2.0.0/boite-server_2.0.0_x64.zip')).rejects.toThrow('signed boite-server_2.0.0_x64.zip');
 });
 
 test('a downloaded archive is verified over every byte, refused when altered, and unpacks the files it holds', async () => {

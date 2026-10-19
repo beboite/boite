@@ -434,6 +434,12 @@ test('an external edit to an affected file refuses the rewind without truncating
 });
 
 const hashOf = (text: string) => createHash('sha256').update(text).digest('hex');
+/**
+ * A file's inode, exact. NTFS ids carry a sequence number in their top 16 bits
+ * and pass 2^53; near 2^55 a number keeps one id in 8, so two private copies written
+ * one after the other read as one inode on a Windows runner (job 118081174911).
+ */
+const inodeOf = async (path: string) => (await stat(path, { bigint: true })).ino;
 
 test('threads on one folder share each blob, and a discarded thread\'s blobs are collected while the other still rewinds', async () => {
   await mkdir(join(cwd, 'src', 'deep'), { recursive: true });
@@ -448,8 +454,8 @@ test('threads on one folder share each blob, and a discarded thread\'s blobs are
   const messageId = await run('second');
   const shared = join(h.dataDir, 'checkpoints', 'objects');
   for (const text of ['initial', 'agent']) {
-    const blob = await stat(sharedBlob(shared, hashOf(text)));
-    for (const thread of [first, threadId]) expect((await stat(join(h.dataDir, 'checkpoints', thread, 'objects', hashOf(text)))).ino).toBe(blob.ino);
+    const blob = await inodeOf(sharedBlob(shared, hashOf(text)));
+    for (const thread of [first, threadId]) expect(await inodeOf(join(h.dataDir, 'checkpoints', thread, 'objects', hashOf(text)))).toBe(blob);
   }
 
   await h.core.threads.codeCheckpoints.discard([first]);
@@ -483,7 +489,7 @@ test('a thread saved before the shared store still rewinds, and its next snapsho
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('initial');
   expect((await stat(join(objects, hashOf('initial')))).nlink).toBe(1);
   await run('again');
-  expect((await stat(join(objects, hashOf('initial')))).ino).toBe((await stat(sharedBlob(join(h.dataDir, 'checkpoints', 'objects'), hashOf('initial')))).ino);
+  expect(await inodeOf(join(objects, hashOf('initial')))).toBe(await inodeOf(sharedBlob(join(h.dataDir, 'checkpoints', 'objects'), hashOf('initial'))));
 });
 
 test('a short shared blob left by a crash is replaced instead of linked', async () => {
@@ -525,14 +531,14 @@ test('private copies from before the shared store are adopted once, end as one c
   await privateCopies(second);
   await rm(join(h.dataDir, 'checkpoints', 'objects'), { recursive: true });
   const named = (thread: string, text: string) => join(h.dataDir, 'checkpoints', thread, 'objects', hashOf(text));
-  expect((await stat(named(first, initial))).ino).not.toBe((await stat(named(second, initial))).ino);
+  expect(await inodeOf(named(first, initial))).not.toBe(await inodeOf(named(second, initial)));
 
   await h.core.threads.codeCheckpoints.maintain();
   const shared = join(h.dataDir, 'checkpoints', 'objects');
   for (const text of [initial, agent]) {
-    const blob = await stat(sharedBlob(shared, hashOf(text)));
-    expect(blob.nlink).toBe(3);
-    for (const thread of [first, second]) expect((await stat(named(thread, text))).ino).toBe(blob.ino);
+    const blob = await stat(sharedBlob(shared, hashOf(text)), { bigint: true });
+    expect(blob.nlink).toBe(3n);
+    for (const thread of [first, second]) expect(await inodeOf(named(thread, text))).toBe(blob.ino);
     // Adopted into the store as a frame: the name stays the hash of the original bytes.
     const stored = await readFile(sharedBlob(shared, hashOf(text)));
     expect(stored.subarray(0, 4)).toEqual(ZSTD_MAGIC);
@@ -568,7 +574,7 @@ test('a copy that does not match its name is left alone, and the rest of the fol
   const shared = join(h.dataDir, 'checkpoints', 'objects');
   expect(await readFile(join(objects, hashOf(text)), 'utf8')).toBe('damaged');
   await expect(stat(sharedBlob(shared, hashOf(text)))).rejects.toMatchObject({ code: 'ENOENT' });
-  expect((await stat(join(objects, hashOf(other)))).ino).toBe((await stat(sharedBlob(shared, hashOf(other)))).ino);
+  expect(await inodeOf(join(objects, hashOf(other)))).toBe(await inodeOf(sharedBlob(shared, hashOf(other))));
 });
 
 test('compressed and raw blobs, framed and plain manifests all restore byte for byte', async () => {
@@ -658,7 +664,7 @@ test('a damaged shared frame of the right size is linked without reading it, and
   await writeFile(path, damaged);
   const objects = join(h.dataDir, 'checkpoints', threadId, 'objects');
   const before = await snapshot(h.core, threadId, cwd, objects, undefined, shared);
-  expect((await stat(join(objects, hash))).ino).toBe((await stat(path)).ino);
+  expect(await inodeOf(join(objects, hash))).toBe(await inodeOf(path));
   await writeFile(join(cwd, 'app.ts'), 'agent');
   const after = await snapshot(h.core, threadId, cwd, objects, undefined, shared);
   await expect(restoreFiles(cwd, objects, [{ name: 'app.ts', before: before['app.ts'], after: after['app.ts'] }])).rejects.toThrow('app.ts is missing or corrupt');

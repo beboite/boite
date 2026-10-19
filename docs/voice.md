@@ -63,9 +63,9 @@ message bar and cancels any capture or transcription running on that device.
 The model and engine configuration remain available for turning it back on.
 
 The engine, the API provider, the fallback, the language and the model apply as
-soon as they change. API keys and local paths have their own Save button, so a
-half-typed key is never sent. The Save keys button shows only once a key is
-typed. A machine whose core predates dictation answers
+soon as they change, and a local path when its field loses focus. API keys
+have their own Save button, so a half-typed key is never sent. The Save keys
+button shows only once a key is typed. A machine whose core predates dictation answers
 `speech.status` with MethodNotFound; the page and the microphone then name that
 machine and ask to update Boite there, instead of showing the RPC error.
 

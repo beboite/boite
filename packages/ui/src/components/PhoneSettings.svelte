@@ -2,6 +2,8 @@
   import FirewallNotice from './FirewallNotice.svelte';
   import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
+  import SaveStatus from './SaveStatus.svelte';
+  import { Autosave, saved, typed } from '../lib/autosave.svelte';
   import NotificationKinds from './NotificationKinds.svelte';
   import LanReach from './LanReach.svelte';
   import TailscaleAccess from './TailscaleAccess.svelte';
@@ -10,7 +12,7 @@
   import { strings } from '../lib/strings';
   import { installApp, installed, PUSH_ENABLED_KEY, worker } from '../lib/pwa';
   import { pushKinds, readPushHome, sameKinds, writePushHome } from '../lib/notify';
-  import { parseGroupRelayUrl } from '@boite/contracts';
+  import { checkSettingsPatch, parseGroupRelayUrl } from '@boite/contracts';
   import { servesThisPage } from '../lib/endpoint';
   import { appPage } from '../lib/app-origin';
   let { store, showServerSettings = true }: { store: Store; showServerSettings?: boolean } = $props();
@@ -22,9 +24,25 @@
   let publicUrl = $state(untrack(() => store.settings?.publicUrl ?? ''));
   // The field follows the saved value, which the Tailscale switch can change
   // too. Any other setting replaces the settings object without touching it:
-  // an address being typed stays.
+  // an address being typed stays. So does one typed while this field's own
+  // save was on its way: that save coming back is not a value from elsewhere.
   const savedUrl = $derived(store.settings?.publicUrl ?? '');
-  $effect(() => { publicUrl = savedUrl; });
+  /** The addresses this field sent, as the core stores them. */
+  const sent = new Set<string>();
+  $effect(() => {
+    const next = savedUrl;
+    untrack(() => { if (!sent.delete(next)) publicUrl = next; });
+  });
+  const urlCheck = () => checkSettingsPatch({ publicUrl: publicUrl.trim() || null });
+  const urlSave = new Autosave(async () => {
+    const check = urlCheck();
+    const stored = check.ok ? check.patch.publicUrl ?? '' : '';
+    // Saving what is already saved changes no setting, so no echo comes back to skip.
+    if (stored !== savedUrl) sent.add(stored);
+    try { await saved(store.saveSettings({ publicUrl: publicUrl.trim() || null })); }
+    catch (error) { sent.delete(stored); throw error; }
+  }, () => urlCheck().ok ? null : strings.settings.autosave.invalid);
+  $effect(() => () => void urlSave.flush());
   let key = $state('');
   let subscribed = $state(false);
   let busy = $state(false);
@@ -125,7 +143,7 @@
 </script>
 
 <section class="card" id="settings-phone" data-testid="phone-settings">
-  <h2>{strings.phone.heading}</h2>
+  <h2>{strings.phone.heading}<SaveStatus save={urlSave} /></h2>
   {#if store.owner && showServerSettings}
     <div class="block"><TailscaleAccess {store} /></div>
     <div class="block">
@@ -144,10 +162,7 @@
     <div class="block"><details class="disclosure" data-testid="phone-own-address">
       <summary>{strings.phone.ownAddress}</summary>
       <div class="fields">
-      <label for="{uid}-public-url"><span class="ui-label-box"><span class="ui-label" id="{uid}-public-url-name">{strings.phone.publicUrl}</span><InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input id="{uid}-public-url" aria-labelledby="{uid}-public-url-name" type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
-      <div class="actions">
-        <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}><span class="ui-label">{strings.common.save}</span></button>
-      </div>
+      <label for="{uid}-public-url"><span class="ui-label-box"><span class="ui-label" id="{uid}-public-url-name">{strings.phone.publicUrl}</span><InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input id="{uid}-public-url" aria-labelledby="{uid}-public-url-name" type="url" bind:value={publicUrl} disabled={store.connection !== 'ready'} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" {...typed(urlSave)} /></label>
       </div>
     </details></div>
   {/if}

@@ -146,6 +146,28 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 }
 
 export const SCENARIOS: Record<string, Scenario> = {
+  'agents.runtime.configure keeps the route it saved, refuses a stale revision and follows the profile': async (env) => {
+    const setup = await echo(env);
+    check(setup.levels.length >= 2, 'the echo model offers fewer than two effort levels');
+    const [low, high] = [setup.levels[0]!, setup.levels.at(-1)!];
+    const selection = { providerId: setup.provider.id, accountId: setup.account.id, model: setup.model, effort: null, permissionMode: 'default' as const };
+    const agent = await env.call('agents.profile.save', { value: { name: 'Contract', domain: '', instructions: '', avatar: '', selection, status: 'active', tools: ['messages'] } });
+    const config = await env.call('agents.runtime.get', { agentId: agent.id });
+    const saved = await env.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: { ...config, defaultRoute: { ...config.defaultRoute, effort: high } } });
+    same(saved.selection.effort, high, 'saved effort');
+    check(saved.revision !== agent.revision, 'a saved route kept the old revision');
+    same((await env.call('agents.runtime.get', { agentId: agent.id })).defaultRoute.effort, high, 'effort read back');
+    let stale = false;
+    try { await env.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: { ...config, defaultRoute: { ...config.defaultRoute, effort: low } } }); } catch { stale = true; }
+    check(stale, 'a save on a stale revision was accepted');
+    const blank = { ...config, defaultRoute: { ...config.defaultRoute, effort: high }, allowedRoutes: config.allowedRoutes.map(route => ({ ...route, name: '  ' })) };
+    await refusedWith(env.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: saved.revision, config: blank }), RpcErrorCode.InvalidParams);
+    same((await env.call('agents.runtime.get', { agentId: agent.id })).allowedRoutes.map(route => route.name), config.allowedRoutes.map(route => route.name), 'route names after a blank one');
+    same((await env.call('agents.runtime.get', { agentId: agent.id })).defaultRoute.effort, high, 'effort after a stale save');
+    // The profile owns the route: a save of the profile is what the runtime reads next.
+    await env.call('agents.profile.save', { id: agent.id, expectedRevision: saved.revision, value: { ...saved, selection: { ...saved.selection, effort: low } } });
+    same((await env.call('agents.runtime.get', { agentId: agent.id })).defaultRoute.effort, low, 'effort after a profile save');
+  },
   'opening snapshots restore questions, replace subscriptions and omit a proven quiet tail': async env => {
     const { setup, threadId, questionId } = await asked(env);
     const previous = await thread(env, setup, 'previous');

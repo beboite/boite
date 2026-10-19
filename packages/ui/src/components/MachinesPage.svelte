@@ -313,9 +313,6 @@
 {/if}
 
 <style>
-  .machines-page {
-    padding: 36px clamp(20px, 4vw, 64px);
-  }
   .machines-page > :global(*) { max-width: var(--settings-width); }
   .machines { margin: 0; }
   .connections-section { scroll-margin-top: 24px; }

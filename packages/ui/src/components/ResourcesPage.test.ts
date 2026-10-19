@@ -47,7 +47,7 @@ test('shows resolved automatic limits, live totals and largest conversations fir
   expect([...document.querySelectorAll<HTMLElement>('[data-testid=resource-row]')].map(row => row.dataset.threadId)).toEqual(['large', 'small']);
 });
 
-test('saves a percentage and can return the quota and reserve to auto', async () => {
+test('saves a percentage by itself and can return the quota and reserve to auto', async () => {
   await setup();
   const field = document.querySelector<HTMLInputElement>('[data-testid=memory-budget]')!;
   expect([field.min, field.max, field.step, field.value]).toEqual(['10', '90', '1', '60']);
@@ -57,13 +57,15 @@ test('saves a percentage and can return the quota and reserve to auto', async ()
     field.value = String(value); field.dispatchEvent(new Event('input', { bubbles: true }));
   }
   input('budget', 25); input('cap', 4096); input('reserve', 3072);
-  document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  // Leaving the last field saves the card: there is no Save button.
+  document.querySelector('[data-testid=memory-reserve]')!.dispatchEvent(new Event('change', { bubbles: true }));
   await settle();
   expect(save).toHaveBeenLastCalledWith({ agentCpuCapPercent: 75, agentMemoryBudgetPercent: 25, threadMemoryCapMb: 4096, memoryReserveMb: 3072 });
   expect(await client.call('settings.get', {})).toMatchObject({ agentMemoryBudgetPercent: 25, threadMemoryCapMb: 4096, memoryReserveMb: 3072 });
   expect(document.querySelector('[data-testid=memory-budget-resolved]')?.textContent).toBe(strings.resources.resolved(8192));
   input('budget', 60); input('cap', 0); input('reserve', 0);
-  document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  // Leaving the last field saves the card: there is no Save button.
+  document.querySelector('[data-testid=memory-reserve]')!.dispatchEvent(new Event('change', { bubbles: true }));
   await settle();
   expect(store.memory!.limits).toEqual({ budgetMb: 19456, threadMemoryCapMb: 9728, memoryReserveMb: 3276.8 });
   expect(document.querySelector('[data-testid=memory-cap-auto]')?.textContent).toBe(strings.resources.auto(9728));

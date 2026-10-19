@@ -427,6 +427,8 @@ export class ThreadStore {
       void this.core.terminals.closeThread(threadId);
     }
     const thread = this.require(threadId);
+    // A subagent reopened by hand is not put away again for the work it already finished.
+    if (!archived && thread.archived && thread.parentThreadId) this.core.delegation.retirements.keep(threadId);
     const saved = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       if (!archived) {
         const state = archiveState(this.core.journal, threadId);

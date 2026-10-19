@@ -215,7 +215,10 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('turns.start', async (params, ctx) => {
     await requireCwd(core, params.threadId);
     const attachments = await core.attachmentUploads.resolve(ctx.connection.id, params.attachments ?? [], params.attachmentIds);
-    return core.threads.startTurn(params.threadId, params.prompt, attachments, params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, undefined, promptOrigin(ctx.connection, core.clients.use(ctx.connection)));
+    // A subagent put away as done takes a new prompt, as it takes a letter from its parent.
+    const thread = core.threads.require(params.threadId);
+    const start = () => core.threads.startTurn(params.threadId, params.prompt, attachments, params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, undefined, promptOrigin(ctx.connection, core.clients.use(ctx.connection)));
+    return core.delegation.retirements.revivable(thread) ? core.delegation.retirements.revive(thread, start) : start();
   });
   core.router.register('turns.stop', (params, ctx) => {
     const by = ctx.connection.identity.principal === 'agent' ? `agent of ${ctx.connection.identity.threadId}` : `${ctx.connection.identity.principal} from ${ctx.connection.sentFrom?.client ?? 'a client'}`;

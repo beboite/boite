@@ -1,6 +1,7 @@
 import { errorText } from './errors';
 import type { AgentEntityKind, AgentsSnapshot, RpcParams, RpcResult, AgentsRpcMethods, AgentHistoryCursor, AgentHistoryKind, AgentRecord, AgentsHistoryPage, AgentConversationMessage, AgentMission, AgentScope, AgentTeam, ThreadSummary } from '@boite/contracts';
 import type { Store } from './store.svelte';
+import { strings } from './strings';
 import { agentThreadLive } from './agent-directory.svelte';
 
 export type AgentEntryKind = Extract<AgentEntityKind, 'profile' | 'group' | 'team' | 'mission'>;
@@ -394,6 +395,25 @@ export class AgentsView {
       return result;
     } catch (error) { this.error = errorText(error); return null; }
     finally { this.pending = false; }
+  }
+  private saves: Promise<unknown> = Promise.resolve();
+  /**
+   * A settings card's save. Unlike `call`, it is never dropped while another
+   * call is pending and it throws when refused. Saves run one at a time, each
+   * building its params when its turn comes, after the snapshot the previous
+   * save refreshed: two cards of one agent never send the same revision.
+   * Building them may read the core first; a refusal there fails the save.
+   */
+  save<M extends keyof AgentsRpcMethods>(method: M, params: () => RpcParams<M> | Promise<RpcParams<M>>): Promise<RpcResult<M>> {
+    const run = this.saves.then(async () => {
+      const client = this.store.client;
+      if (!client || this.disposed) throw new Error(strings.connection.unavailable);
+      const result = await client.call(method, $state.snapshot(await params()) as RpcParams<M>);
+      await this.refresh();
+      return result;
+    });
+    this.saves = run.catch(() => undefined);
+    return run;
   }
   close(): void { this.disposed = true; this.off?.(); }
 }

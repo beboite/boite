@@ -109,6 +109,7 @@ export class Delegation {
           if (name === 'thread.updated') { if (previous !== state) this.changed(thread.parentThreadId); this.retirements.check(thread.id); }
         }
       }
+      if (name === 'workflows.changed') this.retirements.runChanged(payload as RpcEvents['workflows.changed']);
       if (name === 'thread.removed' && !(payload as { undoable?: boolean }).undoable) this.remove((payload as { threadId: string }).threadId);
       if (name === 'question.asked') this.asked(payload as QuestionRequest);
       if (name === 'permission.requested') this.permissionAsked(payload as PermissionRequest);
@@ -471,7 +472,7 @@ export class Delegation {
       return JSON.parse(existing.data) as AgentLetter;
     }
     this.available(root);
-    if (sender.archived || recipient.archived) throw refused('delegation messages require unarchived threads');
+    if (sender.archived || (recipient.archived && (sender.parentThreadId || !this.retirements.revivable(recipient)))) throw refused('delegation messages require unarchived threads');
     const fromCore = origin === 'result' || origin === 'question';
     const count = this.core.journal.db.query('SELECT count(*) AS n FROM delegation_messages WHERE root_id = ? AND created_at > ?').get(root.id, Date.now() - 3_600_000) as { n: number };
     if (!fromCore && count.n >= 100) throw refused('delegation hourly message limit reached');
@@ -481,9 +482,10 @@ export class Delegation {
     const question = reply?.question, answer = reply?.answer;
     // A question letter stays until the card closes, which withdraws it if it was not delivered yet.
     const letter: AgentLetter = { id: randomUUID(), origin, ...(checkpoint ? { checkpoint: true } : {}), from: this.contact(sender), to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title, toProject: this.contact(recipient).project, toMachine: 'Boite', text: body, replyTo: null, createdAt: Date.now(), expiresAt: fromCore ? Number.MAX_SAFE_INTEGER : Date.now() + 15 * 60_000, status: question ? 'delivered' : 'received', error: null, ...(question ? { answered: question.id } : {}) };
-    this.core.journal.append({ type: 'delegation.sent', threadId: sender.id, version: 1, payload: letter }, () => {
+    const post = () => this.core.journal.append({ type: 'delegation.sent', threadId: sender.id, version: 1, payload: letter }, () => {
       this.core.journal.db.query('INSERT INTO delegation_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(letter.id, root.id, sender.id, recipient.id, requestId, fingerprint, letter.status, letter.createdAt, JSON.stringify(letter));
     });
+    if (recipient.archived) this.retirements.revive(recipient, post); else post();
     for (const id of [sender.id, recipient.id]) this.core.threads.runner.noteMail(id, letter.createdAt);
     // An explicit new instruction resumes this child only. It cannot resume a paused team.
     this.stopped.delete(recipient.id);
@@ -516,7 +518,7 @@ export class Delegation {
   private inbox(threadId: string): AgentLetter[] {
     const root = this.root(threadId), config = this.config(root.id);
     if (this.closed || root.archived || !config.enabled || config.paused || this.stopped.has(threadId)) return [];
-    return this.letters(threadId, 'received').filter(letter => letter.expiresAt > Date.now() && !this.core.journal.getThread(letter.from.threadId)?.archived).slice(0, 4);
+    return this.letters(threadId, 'received').filter(letter => letter.expiresAt > Date.now() && !this.retirements.silent(letter.from.threadId)).slice(0, 4);
   }
   take(threadId: string, turnId: string): string | null {
     if (this.delivering.has(threadId)) return null;

@@ -39,13 +39,12 @@ test('owners choose storage in desktop and phone settings, with validation and e
   const schedulerCwd = await page.evaluate(`${state}.threads.find(t => t.id === 't-scheduler').cwd`);
   await capture('worktree-storage-project.png');
   await mode('shared');
+  // Each change saves by itself: a shared mode with no folder, then a relative one, are never sent.
   await page.type(id('worktree-storage-directory'), 'relative/path');
-  await page.click(id('worktree-storage-save'));
-  await page.waitFor(`document.querySelector('${id('worktree-storage')} [role=alert]')`);
+  await page.waitFor(`document.querySelector('${id('worktree-storage')} [data-testid=save-status]')?.dataset.state === 'invalid'`);
   expect(await page.evaluate(`${state}.settings.worktreeStorage.mode`)).toBe('project');
   await page.type(id('worktree-storage-directory'), 'D:\\Worktrees');
-  await page.click(id('worktree-storage-save'));
-  await page.waitFor(`${state}.settings.worktreeStorage.mode === 'shared' && document.querySelector('${id('worktree-storage-save')}').disabled`);
+  await page.waitFor(`${state}.settings.worktreeStorage.mode === 'shared' && document.querySelector('${id('worktree-storage')} [data-testid=save-status]')?.dataset.state === 'saved'`);
   await capture('worktree-storage-shared.png');
   // Leave and reopen the form to read the saved setting, not its draft.
   await page.click(id('settings-tab-appearance'));
@@ -60,7 +59,6 @@ test('owners choose storage in desktop and phone settings, with validation and e
   await page.waitFor(`document.querySelector('${id('worktree-storage-directory')}')`);
   await capture('worktree-storage-phone.png');
   await mode('project');
-  await page.click(id('worktree-storage-save'));
   await page.waitFor(`${state}.settings.worktreeStorage.mode === 'project'`);
   await capture('worktree-storage-phone-project.png');
   expect(await page.evaluate(`${state}.threads.find(t => t.id === 't-scheduler').cwd`)).toBe(schedulerCwd);

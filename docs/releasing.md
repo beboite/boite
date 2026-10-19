@@ -99,9 +99,9 @@ to the app attaches the previous APK under its original name.
 
 A published shell is built with fat LTO over one codegen unit:
 `desktop.yml` sets `CARGO_PROFILE_RELEASE_LTO=fat` and
-`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1` when `sign-updates` is on. Local
-builds and pull requests keep Cargo's release defaults, since that final step
-is serial ([CI](ci.md#build-cost)). `panic` stays `unwind`, which the update
+`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1` when `sign-updates` is on, and
+neither otherwise. Local builds and pull requests keep Cargo's release
+defaults, since that final step is serial ([CI](ci.md#build-cost)). `panic` stays `unwind`, which the update
 commands' `catch_unwind` needs, and nothing is stripped: the Windows symbols
 stay in the PDB beside the build, which a hang dump needs to name the frames.
 To reproduce the shipped executable locally:

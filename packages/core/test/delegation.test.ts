@@ -357,6 +357,92 @@ test('a completed child can receive further turns without a team turn budget', a
   expect(h.core.delegation.get(threadId).messages.some(m => m.text.includes('Tests passed'))).toBe(true);
 });
 
+test('a finished subagent is put away as done once its result reached the parent, and comes back when written to again', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  const done = (await spawn('done')).thread.id, stopped = (await spawn('stopped')).thread.id;
+  const state = (id: string) => { const thread = h.core.threads.require(id); return { archived: thread.archived, done: thread.doneAt != null }; };
+  /** The parent takes the result that holds `text`, and ends its turn. */
+  const read = async (text: string) => {
+    await waitFor(() => h.core.threads.require(threadId).status === 'running' && runs.get(threadId)?.ctx.prompt.includes(text) === true, 5000);
+    runs.get(threadId)!.finish('Read.');
+    await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+  };
+  // A stopped one stays for its parent to resume.
+  await owner.call('delegation.stop', { threadId, agentId: stopped });
+  await read('stopped');
+  runs.get(done)!.finish();
+  await read('Tests passed');
+  await waitFor(() => h.core.threads.require(done).archived);
+  expect({ done: state(done), stopped: state(stopped) }).toEqual({ done: { archived: true, done: true }, stopped: { archived: false, done: false } });
+  // Every child stays in the team's list.
+  expect(h.core.delegation.get(threadId).agents.map(agent => agent.thread.id).sort()).toEqual([done, stopped].sort());
+
+  await owner.call('delegation.send', { threadId, toThreadId: done, text: 'One more file', requestId: 'more' });
+  expect(state(done)).toEqual({ archived: false, done: false });
+  await waitFor(() => h.core.threads.require(done).status === 'running');
+  runs.get(done)!.finish('Second file checked.');
+  await read('Second file checked');
+  await waitFor(() => h.core.threads.require(done).archived);
+  // The user's own prompt in a finished subagent brings it back too.
+  await owner.call('turns.start', { threadId: done, prompt: 'And the README' });
+  expect(h.core.threads.require(done)).toMatchObject({ archived: false, status: 'running' });
+  runs.get(done)!.finish('README checked.');
+  await read('README checked');
+
+  await waitFor(() => h.core.threads.require(done).archived);
+  // An archived parent keeps the rest of its family as it was, for its restore.
+  await owner.call('threads.archive', { threadId });
+  await owner.call('threads.archive', { threadId, archived: false });
+  expect(state(stopped)).toEqual({ archived: false, done: false });
+}, 20_000);
+
+test('a finished subagent stays open while an answer waits for it, and once the user reopened it by hand', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  const child = (await spawn('asks')).thread.id;
+  /** The parent reads its mail until a turn of it holds `text`. */
+  const read = async (text: string) => {
+    await waitFor(() => {
+      const turn = h.core.threads.require(threadId).status === 'running' ? runs.get(threadId) : undefined;
+      if (turn && !turn.ctx.prompt.includes(text)) turn.finish('Read.');
+      return turn?.ctx.prompt.includes(text) === true;
+    }, 5000);
+    runs.get(threadId)!.finish('Read.');
+  };
+  // The user answers its question while its turn runs: the answer waits for that turn to end.
+  const { questionId } = await owner.call('questions.ask', { threadId: child, text: 'Which value?', options: ['First', 'Second'] });
+  await owner.call('questions.answer', { threadId: child, questionId, optionIds: ['2'] });
+  expect(h.core.threads.deferred.deferredAnswers.get(child)?.length).toBe(1);
+  runs.get(child)!.finish();
+  await read('Tests passed');
+  // The held answer opens its next turn instead of being archived with it.
+  await waitFor(() => h.core.threads.require(child).status === 'running', 5000);
+  expect(h.core.threads.require(child).archived).toBe(false);
+  expect(runs.get(child)!.ctx.prompt).toContain('Second');
+  runs.get(child)!.finish('Used the second value.');
+  await read('Used the second value');
+  await waitFor(() => h.core.threads.require(child).archived);
+
+  // Reopened from its done notice, it stays open for the work it already finished.
+  expect((await owner.call('threads.archive', { threadId: child, archived: false })).archived).toBe(false);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(h.core.threads.require(child).archived).toBe(false);
+}, 20_000);
+
+test('a core that left its finished subagents open retires them on start', async () => {
+  const runs = scripted(); const { h, threadId, spawn } = await setup();
+  const child = (await spawn('left-open')).thread.id;
+  runs.get(child)!.finish();
+  await waitFor(() => runs.get(threadId)?.ctx.prompt.includes('Tests passed') === true, 5000);
+  runs.get(threadId)!.finish('Result incorporated');
+  await waitFor(() => h.core.threads.require(child).archived);
+  // What an older core left: the same child, open.
+  h.core.journal.putThread({ ...h.core.threads.require(child), archived: false, doneAt: null, archivedAt: null });
+  await h.core.close();
+  const restarted = new Core({ dataDir: h.dataDir, token: h.token });
+  try { expect(restarted.threads.require(child)).toMatchObject({ archived: true }); expect(restarted.threads.require(child).doneAt).not.toBeNull(); }
+  finally { await restarted.close(); }
+});
+
 test('completion forwards bounded text without tools, paid summaries or duplicate delivery, and can wake the parent once', async () => {
   const runs = scripted(); const { h, threadId, spawn } = await setup();
   const child = await spawn();

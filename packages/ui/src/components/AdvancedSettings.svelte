@@ -1,6 +1,9 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { checkSettingsPatch } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
+  import SaveStatus from './SaveStatus.svelte';
+  import { Autosave, typed } from '../lib/autosave.svelte';
   import AutoCompactSettings from './AutoCompactSettings.svelte';
   import SchedulerSettings from './SchedulerSettings.svelte';
   import { strings } from '../lib/strings';
@@ -21,10 +24,13 @@
     untrack(() => { if (!dirty) origins = next; });
   });
 
-  async function saveOrigins() {
-    const ok = await store.saveSettings({ browserOrigins: origins.split('\n').map((line) => line.trim()).filter(Boolean) });
-    if (ok) dirty = false;
-  }
+  const list = () => origins.split('\n').map((line) => line.trim()).filter(Boolean);
+  const save = new Autosave(async () => {
+    const sent = origins;
+    if (!await store.saveSettings({ browserOrigins: list() })) throw new Error('');
+    if (origins === sent) dirty = false;
+  }, () => checkSettingsPatch({ browserOrigins: list() }).ok ? null : strings.settings.autosave.invalid);
+  $effect(() => () => void save.flush());
 </script>
 
 <div class="page" data-testid="advanced-page">
@@ -37,9 +43,8 @@
 
   {#if store.owner}
     <section class="card" id="settings-origins" data-testid="browser-origins">
-      <h2 class="ui-label-box"><span class="ui-label">{strings.machines.browserOrigins}</span><InfoTip topic={strings.machines.browserOrigins} text={strings.machines.browserOriginsHint} /></h2>
-      <textarea bind:value={origins} oninput={() => (dirty = true)} aria-label={strings.machines.browserOrigins} rows="3" spellcheck="false" placeholder="https://boite.example.com"></textarea>
-      <button type="button" disabled={!store.settings || origins.trim() === saved} onclick={saveOrigins}><span class="ui-label">{strings.common.save}</span></button>
+      <h2 class="ui-label-box"><span class="ui-label">{strings.machines.browserOrigins}</span><InfoTip topic={strings.machines.browserOrigins} text={strings.machines.browserOriginsHint} /><SaveStatus {save} /></h2>
+      <textarea bind:value={origins} oninput={() => { dirty = true; typed(save).oninput(); }} onchange={() => void save.flush()} disabled={!store.settings} aria-label={strings.machines.browserOrigins} rows="3" spellcheck="false" placeholder="https://boite.example.com"></textarea>
     </section>
   {/if}
 

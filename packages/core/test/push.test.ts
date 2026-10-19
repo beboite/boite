@@ -206,19 +206,22 @@ test('no push about a thread someone is looking at and uses, on the PC or the ph
     finish(threadId);
     await delivered(3);
     // Looking away without having used the thread since sends what waited.
+    // The core dates a use at the report's arrival minus its idleMs, so any
+    // margin the test picks loses to a slow enough trip to the core, which then
+    // drops the news as seen. A still clock dates the use 1 ms before the news.
+    setSystemTime(new Date());
     await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
-    const heldFrom = Date.now();
     finish(threadId);
-    await Bun.sleep(5);
-    // The last use is dated before the news, however long the runner took to
-    // get here: a fixed 20 ms fell after it on a slow runner and dropped it as seen.
-    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: Date.now() - heldFrom + 20 });
+    // The report takes its time to arrive, as on a loaded runner.
+    await Bun.sleep(40);
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 1 });
+    setSystemTime();
     await delivered(3);
     desktop.close();
     await delivered(4);
     await expect(phone.call('threads.focus', { threadId, attentive: 'yes' as never })).rejects.toThrow('attentive');
     await expect(phone.call('threads.focus', { threadId, idleMs: -1 })).rejects.toThrow('idleMs');
-  } finally { phone.close(); }
+  } finally { setSystemTime(); phone.close(); }
 });
 test('questions and permissions push immediately even when their thread is attended', async () => {
   const paired = session();
