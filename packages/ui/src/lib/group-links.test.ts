@@ -749,8 +749,11 @@ describe('a machine the device key opens', () => {
     localStorage.clear();
   });
 
-  describe('not heard since the page opened, with the group it said last', () => {
+  // One rule, rows as in docs/groups.md: its group is the one it says now, else the one it said last while no roster
+  // of another group lists it; there, one roster that omits it wins. With none, a refusal leaves once no roster lists it.
+  describe('one rule decides whether it leaves', () => {
     const [selfA, selfB, selfC] = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
+    const [cA, cB, cC] = [core(selfA, ['http://a.test']), core(selfB, ['http://b.test']), core(selfC, ['http://c.test'])];
     const seed = (signedGroup?: string) => localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([
       { url: 'http://a.test', label: 'A', token: '', paired: true, signs: selfA },
       { url: 'http://b.test', label: 'B', token: '', paired: true, signs: selfB, ...(signedGroup === undefined ? {} : { signedGroup }) },
@@ -761,38 +764,65 @@ describe('a machine the device key opens', () => {
       await new GroupLinks(ws, { reach: vi.fn(async () => null), secure: () => false }).reconcile();
       return removed;
     };
+    /** B, not heard since the page opened. */
+    const silent = (store: Partial<FakeStore> = {}) => machine('http://b.test', { connection: 'connecting', groupKnown: false, ...store });
     beforeEach(() => localStorage.clear());
 
-    it('stays while a machine the device key does not open says that group dropped it', async () => {
-      seed('old');
-      const a = machine('http://unsigned.test', { group: group(selfA, [core(selfA, ['http://unsigned.test'])], 'old') });
-      const b = machine('http://b.test', { connection: 'connecting', groupKnown: false });
-      expect(await removedBy([a, b])).toEqual([]);
-    });
-
-    it('stays when it never said its group, whatever group the others are in', async () => {
+    it('1. says G now, one roster of G omits it and a staler one lists it: leaves', async () => {
       seed();
-      const a = machine('http://a.test', { group: group(selfA, [core(selfA, ['http://a.test'])], 'old') });
-      const b = machine('http://b.test', { connection: 'connecting', groupKnown: false });
-      expect(await removedBy([a, b])).toEqual([]);
+      const a = machine('http://a.test', { group: group(selfA, [cA, cC], 'old') });
+      const b = machine('http://b.test', { group: group(selfB, [cA, cB, cC], 'old') });
+      const c = machine('http://c.test', { group: group(selfC, [cA, cB, cC], 'old') });
+      expect(await removedBy([a, b, c])).toEqual(['http://b.test']);
     });
 
-    it('stays while the group it moved to lists it, though its old group dropped it', async () => {
-      seed('old');
-      const a = machine('http://a.test', { group: group(selfA, [core(selfA, ['http://a.test'])], 'old') });
-      const b = machine('http://b.test', { connection: 'connecting', groupKnown: false });
-      const c = machine('http://c.test', { group: group(selfC, [core(selfC, ['http://c.test']), core(selfB, ['http://b.test'])], 'new') });
+    it('2. says G now, every roster of G lists it, a roster of another group omits it: stays', async () => {
+      seed();
+      const a = machine('http://a.test', { group: group(selfA, [cA, cB], 'old') });
+      const b = machine('http://b.test', { group: group(selfB, [cA, cB], 'old') });
+      const c = machine('http://c.test', { group: group(selfC, [cC], 'new') });
       expect(await removedBy([a, b, c])).toEqual([]);
     });
 
-    it('leaves once it refuses the device key and no group lists it, though no machine of its old group is left to say so', async () => {
+    it('3. said G last, one roster of G omits it and a staler one lists it: leaves', async () => {
       seed('old');
-      const a = machine('http://a.test', { group: group(selfA, [core(selfA, ['http://a.test'])], 'new') });
-      const b = machine('http://b.test', { connection: 'connecting', groupKnown: false, pairingRequired: true });
-      expect(await removedBy([a, b])).toEqual(['http://b.test']);
+      const a = machine('http://a.test', { group: group(selfA, [cA, cC], 'old') });
+      const c = machine('http://c.test', { group: group(selfC, [cA, cB, cC], 'old') });
+      expect(await removedBy([a, silent(), c])).toEqual(['http://b.test']);
     });
 
-    it('is forgotten when the device key is let in there again: that was its word over another key', () => {
+    it('4. said G last, G omits it, a roster of another group lists it: it moved, and stays', async () => {
+      seed('old');
+      const a = machine('http://a.test', { group: group(selfA, [cA], 'old') });
+      const c = machine('http://c.test', { group: group(selfC, [cC, cB], 'new') });
+      expect(await removedBy([a, silent(), c])).toEqual([]);
+    });
+
+    it('5. refuses the device key and no roster lists it, with no roster of the group it said last: leaves', async () => {
+      seed('old');
+      const a = machine('http://a.test', { group: group(selfA, [cA], 'new') });
+      expect(await removedBy([a, silent({ pairingRequired: true })])).toEqual(['http://b.test']);
+    });
+
+    it('6. refuses the device key while a roster lists it: stays', async () => {
+      seed('old');
+      const a = machine('http://a.test', { group: group(selfA, [cA, cB], 'new') });
+      expect(await removedBy([a, silent({ pairingRequired: true })])).toEqual([]);
+    });
+
+    it('7. never said its group and does not refuse the key, whatever group the others are in: stays', async () => {
+      seed();
+      const a = machine('http://a.test', { group: group(selfA, [cA], 'old') });
+      expect(await removedBy([a, silent()])).toEqual([]);
+    });
+
+    it('8. only a machine the device key does not open omits it: stays', async () => {
+      seed('old');
+      const a = machine('http://unsigned.test', { group: group(selfA, [core(selfA, ['http://unsigned.test'])], 'old') });
+      expect(await removedBy([a, silent()])).toEqual([]);
+    });
+
+    it('9. the device key let in there again forgets the group it said last: that was its word over another key', () => {
       seed('old');
       rememberDevice('http://b.test', selfB);
       expect(readEnvironments().find((env) => env.url === 'http://b.test')?.signedGroup).toBeUndefined();

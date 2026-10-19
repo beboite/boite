@@ -466,10 +466,13 @@ its own way in there and is done: what a member lists is all it needs, and a
 machine its key opens that another one of the group no longer lists leaves its
 list. The group such a machine last said it is in is kept with its key
 (`signedGroup`), so a machine removed before a reloaded page heard from it
-again leaves too: its key opens nothing there any more. That word is older
-than any roster: a group of the device that lists the machine now keeps it, a
-machine that refuses the key and no group lists leaves without its old group's
-word, and the key let in there again forgets it. Its page's own machine, waiting for the device to be added, is taken over
+again leaves too: its key opens nothing there any more. One rule decides: the
+machine's group is the one it says now, else the one it said last while no
+roster of another group lists it (it moved); in that group, one roster of a
+machine the key opens that omits it is the last word, whatever a staler roster
+of the same group says. With no such group, a machine that refuses the key or
+says it is in no group leaves once no roster lists it. The key let in there
+again forgets the group it said last. Its page's own machine, waiting for the device to be added, is taken over
 the same way. The rest of this section is about clients that use tickets, the
 desktop app and a client paired the older way: they ask a connected member
 for a ticket and connect. Who is in a group is read off the machines this

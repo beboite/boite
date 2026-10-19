@@ -424,11 +424,15 @@ export class GroupLinks {
   }
 
   /**
-   * A machine this device's key opens that its group no longer lists: another
-   * machine the key opens, in that group, has the last word, as for a machine
-   * the group brought. Nothing is marked: the key itself opens nothing there
-   * once that machine heard of its own removal, and a machine let back in is
-   * listed again.
+   * A machine this device's key opens that its group no longer lists, by one
+   * rule (docs/groups.md): its group is the one it says now, else the one it
+   * said last over this key while no roster of another group lists it; in that
+   * group, one roster of a machine the key opens that omits it is the last word,
+   * whatever a staler roster of the same group says, as for a machine the group
+   * brought. With no such group, refused or out of every group by its own word,
+   * it leaves once no roster lists it. Nothing is marked: the key itself opens
+   * nothing there once that machine heard of its own removal, and a machine let
+   * back in is listed again.
    */
   async #pruneSigned(anchors: readonly Machine[]): Promise<void> {
     const signed = anchors.filter((other) => signsFor(other.id) !== undefined && other.store.group != null);
@@ -438,19 +442,18 @@ export class GroupLinks {
     for (const machine of [...this.workspace.machines]) {
       const signs = signsFor(machine.id);
       if (signs === undefined) continue;
+      const rosters = signed.filter((other) => other !== machine);
       const listedBy = (other: Machine): boolean => other.store.group!.cores.some((core) => core.coreId === signs);
-      const delistedIn = (groupId: string): boolean => signed.some((other) => other !== machine && other.store.group!.id === groupId && !listedBy(other));
-      const listed = signed.some((other) => other !== machine && listedBy(other));
-      const groupId = machine.store.group?.id;
+      const omittedIn = (groupId: string): boolean => rosters.some((other) => other.store.group!.id === groupId && !listedBy(other));
       // Not heard since this page opened, it is in the group it said last: removed before it says it again, its
       // key no longer opens it, and the group's roster is the only word left (run 39299531333 kept it connecting).
-      // That word is older than any roster: a group that lists it now keeps it.
-      const cached = groupId === undefined && !machine.store.groupKnown ? remembered.get(machine.id) : undefined;
-      // Its own group, as another machine of it says; or, refused there or out of every group by its own word, none of the device's groups lists it.
+      // A roster of another group that lists it says it moved since.
+      const said = machine.store.groupKnown ? undefined : remembered.get(machine.id);
+      const last = said !== undefined && !rosters.some((other) => other.store.group!.id !== said && listedBy(other)) ? said : undefined;
+      const groupId = machine.store.group?.id;
       // Removed, a machine may say it is in no group before the others drop it from their roster, then tell this device's hellos to come back.
-      const delisted = groupId !== undefined
-        ? delistedIn(groupId)
-        : !listed && signed.length > 0 && ((machine.store.pairingRequired || machine.store.ungrouped) || (cached !== undefined && delistedIn(cached)));
+      const refused = (machine.store.pairingRequired || machine.store.ungrouped) && rosters.length > 0 && !rosters.some(listedBy);
+      const delisted = groupId !== undefined ? omittedIn(groupId) : refused || (last !== undefined && omittedIn(last));
       if (delisted) await this.#drop(machine, false);
     }
   }
