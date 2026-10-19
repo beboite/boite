@@ -69,6 +69,7 @@ export { CORE_VERSION } from './version.ts';
 
 /** The server tells the core which threads a live socket is watching, and closes sockets on request. */
 export interface SubscriptionSink {
+  /** A window of the owner or a paired device has the thread open; an agent's or a plugin's subscription is no reader. */
   hasSubscribers(threadId: ThreadId): boolean;
   /** Every socket a revoked session holds goes, with the close code the client reads as "pair again". */
   closeSession(sessionId: string): void;

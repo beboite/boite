@@ -745,7 +745,10 @@ export function startServer(options: ServerOptions): RunningServer {
   core.subscribers = {
     hasSubscribers(threadId: ThreadId): boolean {
       for (const connection of connections) {
-        if (connection.authenticated && connection.subscriptions.has(threadId)) return true;
+        // Only a window counts: an agent or a desktop-app plugin following the
+        // thread (B.O.T.S streams every thread at work) shows it to nobody.
+        if (!connection.authenticated || connection.identity.principal === 'agent' || connection.clientName === 'plugin') continue;
+        if (connection.subscriptions.has(threadId)) return true;
       }
       return false;
     },

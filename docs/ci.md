@@ -24,12 +24,14 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | `apps/shell/` | Windows installer, Rust and native shell E2E; three browser/core E2E shards; portable desktop matrix |
 | `tests/e2e/` | Desktop and E2E checks plus `check:e2e`; `tests/e2e/lib/` also selects stress |
 | `Dockerfile`, `.dockerignore`, `docker/` | Native x64 and ARM64 Docker smoke tests |
-| `packages/ui/` | Full type checks and UI tests, desktop/E2E, Docker and stress |
+| `packages/ui/` | Full type checks and UI tests, desktop/E2E without the shell's Rust tests, Docker and stress; `preview-picker.js` and `preview-highlight.js`, which `browser.rs` embeds, add them |
 | `apps/android/`, `android.yml`, `scripts/ci/android-apk.ts` | Unsigned APK build |
 | `telemetry/` | Full type checks and UI tests plus the existing relay behavior suite |
 | `tests/stress/`, `bench/agent-stress.ts`, `bench/lib/` | Full type checks, UI tests and stress |
 | Other `bench/` files, `scripts/architecture/` | Full type checks and UI tests |
-| Core, contracts, dependencies, shared builds, other workflows and unknown paths | All checks |
+| `packages/core/` | All checks except the shell's Rust tests and the APK |
+| `packages/contracts/` | All checks except the shell's Rust tests |
+| Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
 The changes job always installs frozen dependencies, runs `bun audit`, local
@@ -75,9 +77,14 @@ an Intel-only core failure now shows on the main push.
 
 `desktop.yml` holds the desktop builds: the Windows installer job and one job
 per portable platform, named after it (`Desktop / macOS x64`). `ci.yml` calls
-it with the Rust tests; the nightly calls it without them. On Windows they run
-in `Desktop / Windows x64 Rust tests`, a job of their own beside the installer
-build; portable jobs keep them in line. Only `CI required`
+it with the Rust tests when the `shellRust` plan output is on; the nightly calls
+it without them. On Windows they run in `Desktop / Windows x64 Rust tests`, a
+job of their own beside the installer build; portable jobs keep them in line.
+The tests compile `apps/shell/src-tauri` and the two page scripts `browser.rs`
+embeds, and start inline fake cores, so `shellRust` follows those paths and the
+ones that select every check. 7 of the 100 PRs before 2026-10-19 touched them,
+yet all ran the tests: 3.6 runner minutes on Windows, 3.5 on Apple Silicon and
+0.9 on Linux per green PR run. Only `CI required`
 and `PR title` are required checks, so a display name can change freely, except
 the `release.yml` job names that `server-provenance.ts` checks.
 
@@ -193,21 +200,27 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 495,300 |
 | UI files, excluding `.br` and `.gz` copies | 4,943,100 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,562,400 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,563,300 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-19, contacts (PR #602) merged with `origin/main` at `2627b39b`
-measure 495,270 entry bytes, 4,942,992 UI bytes and 4,561,819 core JavaScript
+On 2026-10-19, contacts (PR #602) merged with `origin/main` at `68033379`
+measure 495,270 entry bytes, 4,942,992 UI bytes and 4,562,798 core JavaScript
 bytes with `measure()` after fresh `bun run build:ui` and `bun run build:core`
-on Windows, against the 492,249, 4,869,493 and 4,493,171 recorded below for
-PR #603; PR #607 changes only the test runner. The Home surface loads on first
-open: its chunk is 36,618 bytes of JavaScript and 21,882 of CSS, and its
-strings sit in the catalogue chunks. The entry grows 3,021 bytes for the Home
-switch, the remote chip and the lazy loader's wiring. The contact store, join,
-link, concierge and Tailscale client add 68,648 core bytes. The core
-JavaScript limit rises to 4,562,400; the entry and UI limits of 495,300 and
-4,943,100 still hold, and the `main.js` limit stays.
+on Windows, against 492,249, 4,869,493 and 4,494,397 measured the same way for
+that main. The Home surface loads on first open: its chunk is 36,618 bytes of
+JavaScript and 21,882 of CSS, and its strings sit in the catalogue chunks. The
+entry grows 3,021 bytes for the Home switch, the remote chip and the lazy
+loader's wiring. The contact store, join, link, concierge and Tailscale client
+add 68,401 core bytes. The core JavaScript limit rises to 4,563,300; the entry
+and UI limits of 495,300 and 4,943,100 still hold, and the `main.js` limit
+stays.
+
+On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
+4,494,324 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,493,506 for that main: the wait
+for a new process's command line (`whenCommandLineReads`) adds 818 bytes. The
+core JavaScript limit rises to 4,494,400; the other limits stay.
 
 On 2026-10-18, automatic resumes (PR #603) merged with `origin/main` at
 `e22bb094` measure 492,249 entry bytes, 4,869,493 UI bytes and 4,493,171 core
