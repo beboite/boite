@@ -106,11 +106,16 @@ export class TestProgress {
   }
 }
 
+/** What a question to the test process got: its value, silence, or a socket that closed. */
+export type Answer = { value?: unknown } | 'silent' | { disconnected: string };
+
 /** The watch's end of the Bun inspector of a `bun test --inspect-wait` run. */
 export class TestInspector {
   #socket: WebSocket;
   #next = 1;
-  #replies = new Map<number, (result: unknown) => void>();
+  #replies = new Map<number, (answer: Answer) => void>();
+  /** When and why the socket closed; nothing the test process does after that is seen. */
+  disconnected: { at: number; reason: string } | undefined;
 
   private constructor(socket: WebSocket, progress: TestProgress) {
     this.#socket = socket;
@@ -127,8 +132,14 @@ export class TestInspector {
       }
       // Only an id this watch sent has a reply waiting; any other is ignored.
       const reply = typeof message.id === 'number' ? this.#replies.get(message.id) : undefined;
-      if (typeof reply === 'function') reply(message.result);
+      if (typeof reply === 'function') reply((message.result as { result?: { value?: unknown } } | undefined)?.result ?? {});
     });
+    const lost = (reason: string) => {
+      this.disconnected ??= { at: Date.now(), reason };
+      for (const reply of [...this.#replies.values()]) reply({ disconnected: this.disconnected.reason });
+    };
+    socket.addEventListener('close', (event) => lost(`closed ${event.code}${event.reason === '' ? '' : ` ${event.reason}`}`));
+    socket.addEventListener('error', () => lost('socket error'));
   }
 
   static async connect(url: string, progress: TestProgress, timeoutMs = CONNECT_TIMEOUT_MS): Promise<TestInspector> {
@@ -137,6 +148,13 @@ export class TestInspector {
       const timer = setTimeout(() => reject(new Error(`the Bun inspector at ${url} did not accept the watch within ${timeoutMs} ms`)), timeoutMs);
       socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
       socket.addEventListener('error', () => { clearTimeout(timer); reject(new Error(`the Bun inspector at ${url} refused the watch`)); }, { once: true });
+    }).catch((error: unknown) => {
+      try {
+        socket.close();
+      } catch {
+        /* never opened */
+      }
+      throw error;
     });
     const inspector = new TestInspector(socket, progress);
     // `Inspector.initialized` lets `--inspect-wait` start the run.
@@ -150,15 +168,16 @@ export class TestInspector {
     return id;
   }
 
-  /** The value of `expression` in the test process, or undefined when its JavaScript thread does not answer in time. */
-  async evaluate(expression: string, timeoutMs = ANSWER_TIMEOUT_MS): Promise<{ value?: unknown } | undefined> {
+  /** The value of `expression` in the test process; `'silent'` when its JavaScript thread does not answer in time. */
+  async evaluate(expression: string, timeoutMs = ANSWER_TIMEOUT_MS): Promise<Answer> {
+    if (this.disconnected !== undefined) return { disconnected: this.disconnected.reason };
     const id = this.#send('Runtime.evaluate', { expression, returnByValue: true });
     return new Promise((resolve) => {
-      const timer = setTimeout(() => { this.#replies.delete(id); resolve(undefined); }, timeoutMs);
-      this.#replies.set(id, (result) => {
+      const timer = setTimeout(() => { this.#replies.delete(id); resolve('silent'); }, timeoutMs);
+      this.#replies.set(id, (answer) => {
         clearTimeout(timer);
         this.#replies.delete(id);
-        resolve((result as { result?: { value?: unknown } } | undefined)?.result ?? {});
+        resolve(answer);
       });
     });
   }
@@ -260,8 +279,15 @@ export interface HangInput {
   deadline: number;
   progress: TestProgress;
   inspector: TestInspector | undefined;
+  /** Why the run has no inspector, when it has none. */
+  missing?: string;
   output: string;
   samples: Sample[];
+}
+
+function disconnectedText(inspector: TestInspector): string {
+  const gone = inspector.disconnected!;
+  return `the inspector disconnected at ${new Date(gone.at).toISOString().slice(11, 19)} (${gone.reason}): no answer can come, and the tests above are those seen before`;
 }
 
 /**
@@ -283,10 +309,11 @@ export async function writeHangReport(input: HangInput): Promise<string> {
   const inProcessPath = join(dir, 'test-process.txt');
 
   const inProcess = (async () => {
-    if (inspector === undefined) return 'no inspector connection';
+    if (inspector === undefined) return `no inspector (${input.missing ?? 'not connected'}): nothing asked of it`;
     const asked = Date.now();
     const answer = await inspector.evaluate(hangReportExpression(inProcessPath));
-    if (answer === undefined) return `no answer within ${ANSWER_TIMEOUT_MS} ms: its JavaScript thread is blocked in synchronous code (a loop, a spawnSync, a synchronous file or lock wait)`;
+    if (answer === 'silent') return `no answer within ${ANSWER_TIMEOUT_MS} ms on an open inspector: its JavaScript thread is blocked in synchronous code (a loop, a spawnSync, a synchronous file or lock wait)`;
+    if ('disconnected' in answer) return disconnectedText(inspector);
     const sources = Number(answer.value ?? -1);
     if (sources < 0) return `answered in ${Date.now() - asked} ms, without tests/e2e/lib/hang-report.ts loaded`;
     const until = Date.now() + IN_PROCESS_REPORT_MS;
@@ -329,9 +356,11 @@ export async function writeHangReport(input: HangInput): Promise<string> {
   const last = progress.lastEnded;
   const summary = [
     `The run passed its deadline, ${new Date(input.deadline).toISOString()}, and was stopped.`,
-    running.length > 0
-      ? `Running: ${running.map((test) => `"${test.name}" (${test.file}:${test.line}) for ${minutes(test.forMs)}`).join('; ')}`
-      : `Running: no test; bun is in ${progress.file ?? 'no file yet'} (a hook, a file load or the end of the run)`,
+    inspector === undefined
+      ? `Running: unknown, the run had no inspector (${input.missing ?? 'not connected'})`
+      : running.length > 0
+        ? `Running: ${running.map((test) => `"${test.name}" (${test.file}:${test.line}) for ${minutes(test.forMs)}`).join('; ')}`
+        : `Running: no test; bun is in ${progress.file ?? 'no file yet'} (a hook, a file load or the end of the run)`,
     `Last ended: ${last === undefined ? 'none' : `"${last.name}" (${last.file}), ${last.status}, ${minutes(now - last.at)} ago`}; ${progress.ended} ended in all, in tests.txt`,
     `Test process ${pid}: ${inProcessText}`,
     `Process tree: ${tree.length} process(es), in process-tree.txt`,

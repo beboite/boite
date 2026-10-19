@@ -42,13 +42,13 @@ test('the deadline keeps the reserve inside the job limit, and the inspector wai
 });
 
 /** Runs flaky.ts on `source` with a deadline `afterMs` from now, its report in a fresh folder. */
-async function runUntilDeadline(name: string, source: string, afterMs: number) {
+async function runUntilDeadline(name: string, source: string, afterMs: number, preload?: string) {
   const file = join(dir, `${name}.test.ts`);
   writeFileSync(file, source);
   const report = join(dir, `${name}-report`);
   const jobStarted = Date.now() + afterMs + REPORT_RESERVE_MS - 35 * 60_000;
   const began = Date.now();
-  const child = Bun.spawn([process.execPath, join(ROOT, 'scripts/ci/flaky.ts'), '--job-started', String(jobStarted), '--job-minutes', '35', file], {
+  const child = Bun.spawn([process.execPath, ...(preload === undefined ? [] : ['--preload', preload]), join(ROOT, 'scripts/ci/flaky.ts'), '--job-started', String(jobStarted), '--job-minutes', '35', file], {
     cwd: dir,
     stdout: 'pipe',
     stderr: 'pipe',
@@ -105,3 +105,43 @@ test('a run that ends before its deadline is not touched', async () => {
   expect(run.stderr).toMatch(/^\s*1 pass$/m);
   expect(run.tookMs).toBeLessThan(30_000);
 }, 60_000);
+
+/** A preload for flaky.ts that replaces the WebSocket its watch opens: `refused` never opens, `dropped` closes 300 ms after it opened. */
+function inspectorFault(kind: 'refused' | 'dropped'): string {
+  const file = join(dir, `${kind}-socket.ts`);
+  writeFileSync(file, kind === 'refused'
+    ? "globalThis.WebSocket = class extends EventTarget { constructor() { super(); setTimeout(() => this.dispatchEvent(new Event('error')), 10); } send() {} close() {} } as unknown as typeof WebSocket;\n"
+    : "const Real = WebSocket;\nglobalThis.WebSocket = class extends Real { constructor(url: string) { super(url); this.addEventListener('open', () => setTimeout(() => this.close(), 300), { once: true }); } } as unknown as typeof WebSocket;\n");
+  return file;
+}
+
+test('a run whose inspector refuses the watch still runs its tests, without it', async () => {
+  const run = await runUntilDeadline('refused-pass', "import { test } from 'bun:test';\ntest('passes', () => {});\n", 60_000, inspectorFault('refused'));
+  expect(run.code).toBe(0);
+  expect(run.stdout).toContain('::warning title=Test run without the inspector::');
+  expect(run.stderr).toMatch(/^\s*1 pass$/m);
+  expect(run.stdout).not.toContain('stopped at its deadline');
+}, 60_000);
+
+test('a run without its inspector is still stopped at the deadline with what the watch sees from outside', async () => {
+  const run = await runUntilDeadline('refused-idle', "import { test } from 'bun:test';\ntest('waits forever', () => new Promise(() => {}), 600_000);\n", 3_000, inspectorFault('refused'));
+  expect(run.code).toBe(1);
+  expect(run.stdout).toContain('::error title=Test run stopped at its deadline::');
+  const summary = run.read('summary.txt');
+  expect(summary).toMatch(/^Running: unknown, the run had no inspector \(.*refused the watch.*\)$/m);
+  expect(summary).toMatch(/^Test process \d+: no inspector/m);
+  // The tests ran again without the inspector: that bun is what the tree shows.
+  const tree = run.read('process-tree.txt');
+  expect(tree).toContain('refused-idle.test.ts');
+  expect(tree).not.toContain('--inspect-wait');
+}, 120_000);
+
+test('an inspector that disconnects is reported as gone, not as a blocked thread', async () => {
+  const run = await runUntilDeadline('dropped', "import { test } from 'bun:test';\ntest('waits forever', () => new Promise(() => {}), 600_000);\n", 3_000, inspectorFault('dropped'));
+  expect(run.code).toBe(1);
+  const summary = run.read('summary.txt');
+  expect(summary).toMatch(/^Test process \d+: the inspector disconnected at \d\d:\d\d:\d\d/m);
+  expect(summary).not.toContain('blocked in synchronous code');
+  // No wait on a reply that cannot come.
+  expect(run.tookMs).toBeLessThan(3_000 + 8_000);
+}, 120_000);

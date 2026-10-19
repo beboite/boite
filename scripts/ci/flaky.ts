@@ -47,61 +47,83 @@ export function announce(entries: Quarantined[]): void {
   for (const entry of entries) console.log(`::warning file=${entry.file},title=Quarantined test retried::${entry.test} (${entry.reason})`);
 }
 
-async function run(command: string[], deadline?: number): Promise<{ code: number; output: string; stopped?: string }> {
-  if (deadline !== undefined) command = inspectedTestCommand(command);
+interface Tests {
+  child: Subprocess;
+  output: () => string;
+  stderr: () => string;
+  exited: Promise<number>;
+}
+
+/** `bun test` with its output shown as it comes and kept, stdout and stderr apart. */
+function spawnTests(command: string[]): Tests {
   const child = Bun.spawn(command, { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', windowsHide: true });
-  const forward = async (stream: ReadableStream<Uint8Array>, sink: NodeJS.WriteStream) => {
+  const text = { stdout: '', stderr: '' };
+  const forward = async (stream: ReadableStream<Uint8Array>, sink: NodeJS.WriteStream, into: keyof typeof text) => {
     const decoder = new TextDecoder();
     for await (const chunk of stream) {
       sink.write(chunk);
-      text[sink === process.stdout ? 'stdout' : 'stderr'] += decoder.decode(chunk, { stream: true });
+      text[into] += decoder.decode(chunk, { stream: true });
     }
-    text[sink === process.stdout ? 'stdout' : 'stderr'] += decoder.decode();
+    text[into] += decoder.decode();
   };
-  const text = { stdout: '', stderr: '' };
-  const streams = Promise.all([forward(child.stdout, process.stdout), forward(child.stderr, process.stderr)]);
-  const output = () => `${text.stdout}
-${text.stderr}`;
-  const stopped = deadline === undefined ? undefined : watch(child, () => inspectorAddress(text.stderr), deadline, output);
-  const [, code] = await Promise.all([streams, child.exited]);
-  const report = await stopped?.finish();
-  return { code, output: output(), ...(report === undefined ? {} : { stopped: report }) };
+  const streams = Promise.all([forward(child.stdout, process.stdout, 'stdout'), forward(child.stderr, process.stderr, 'stderr')]);
+  return {
+    child,
+    output: () => `${text.stdout}\n${text.stderr}`,
+    stderr: () => text.stderr,
+    exited: Promise.all([streams, child.exited]).then(([, code]) => code),
+  };
 }
 
 /**
- * Stops `child` at `deadline` with a report in HANG_REPORT. `finish` returns
- * the report's summary when the run was stopped, after the child exited.
+ * Runs `command`; with a deadline, under the watch, and stopped with a report
+ * in HANG_REPORT when it passes. `stopped` is the report's summary.
  */
-function watch(child: Subprocess, address: () => string | undefined, deadline: number, output: () => string): { finish: () => Promise<string | undefined> } {
+async function run(command: string[], deadline?: number): Promise<{ code: number; output: string; stopped?: string }> {
+  if (deadline === undefined) {
+    const tests = spawnTests(command);
+    return { code: await tests.exited, output: tests.output() };
+  }
   const progress = new TestProgress();
   const sampling = sampleEveryMinute(progress);
+  let tests = spawnTests(inspectedTestCommand(command));
   let inspector: TestInspector | undefined;
-  let report: Promise<string> | undefined;
-  const stop = (why: Promise<string>) => {
-    report ??= why.finally(() => killProcessTree(child.pid));
+  let missing: string | undefined;
+  let stopped: Promise<string> | undefined;
+  // The deadline covers the inspector's start too, and whichever bun runs then.
+  const stop = () => {
+    const pid = tests.child.pid;
+    stopped ??= writeHangReport({ dir: HANG_REPORT, pid, deadline, progress, inspector, missing, output: tests.output(), samples: sampling.samples })
+      .finally(() => killProcessTree(pid));
   };
-  const connecting = (async () => {
-    const until = Date.now() + 60_000;
-    let url: string | undefined;
-    while ((url = address()) === undefined && child.exitCode === null && Date.now() < until) await Bun.sleep(50);
-    if (url === undefined) {
-      if (child.exitCode === null) stop(Promise.resolve('bun test never printed its inspector address within 60 s'));
-      return;
+  const timer = setTimeout(stop, Math.max(0, deadline - Date.now()));
+  try {
+    inspector = await connect(tests, progress);
+  } catch (error) {
+    missing = error instanceof Error ? error.message : String(error);
+    // `--inspect-wait` has run no test yet: they run once, without the inspector.
+    if (stopped === undefined && tests.child.exitCode === null) {
+      console.log(`::warning title=Test run without the inspector::${missing}; the tests run without it, and a hang report then names no test`);
+      killProcessTree(tests.child.pid);
+      await tests.exited;
+      tests = spawnTests(command);
     }
-    inspector = await TestInspector.connect(url, progress);
-  })().catch((error: unknown) => stop(Promise.resolve(error instanceof Error ? error.message : String(error))));
-  const timer = setTimeout(() => {
-    stop(connecting.then(() => writeHangReport({ dir: HANG_REPORT, pid: child.pid, deadline, progress, inspector, output: output(), samples: sampling.samples })));
-  }, Math.max(0, deadline - Date.now()));
-  return {
-    async finish() {
-      clearTimeout(timer);
-      sampling.stop();
-      await connecting;
-      inspector?.close();
-      return report;
-    },
-  };
+  }
+  const code = await tests.exited;
+  clearTimeout(timer);
+  sampling.stop();
+  const summary = await stopped;
+  inspector?.close();
+  return { code, output: tests.output(), ...(summary === undefined ? {} : { stopped: summary }) };
+}
+
+/** The watch on the inspector of `tests`, once bun printed its address and accepted the socket. */
+async function connect(tests: Tests, progress: TestProgress): Promise<TestInspector> {
+  const until = Date.now() + 60_000;
+  let url: string | undefined;
+  while ((url = inspectorAddress(tests.stderr())) === undefined && tests.child.exitCode === null && Date.now() < until) await Bun.sleep(50);
+  if (url !== undefined) return TestInspector.connect(url, progress);
+  throw new Error(tests.child.exitCode === null ? 'bun test never printed its inspector address within 60 s' : `bun test exited ${tests.child.exitCode} before its inspector listened`);
 }
 
 /** Value of `--name <value>` in `args`, removed from them. */

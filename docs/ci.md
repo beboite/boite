@@ -200,8 +200,12 @@ leaves `tests/e2e/.artifacts/hang/` in the shard's failure captures:
 | `machine.txt` | Free memory and disk, and the 15 largest processes |
 | `output-tail.txt` | The end of the run's output |
 
-A test process that does not answer within 10 s is blocked in synchronous
-code; the summary says so and the files written from outside remain. Bun
+A test process that does not answer within 10 s on an open inspector is
+blocked in synchronous code; the summary says so and the files written from
+outside remain. An inspector that refuses the watch before any test ran leaves
+a warning, and the tests run once without it under the same deadline: a hang
+then reports no test names. An inspector that disconnects later is named in
+the summary with its time, and the tests listed are those seen before. Bun
 gives no list of open handles and no stack of a test that awaits: its
 inspector answers only when the JavaScript thread is free.
 
