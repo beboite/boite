@@ -90,7 +90,8 @@ export function freePort(): Promise<number> {
   });
 }
 
-interface TargetInfo {
+export interface TargetInfo {
+  id?: string;
   type: string;
   url: string;
   webSocketDebuggerUrl?: string;
@@ -161,6 +162,7 @@ export class BrowserPage {
   #proc: Subprocess | null;
   #watch: ParentDeathWatch | null;
   #userDataDir: string | null;
+  #target: TargetInfo;
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #closed = false;
@@ -174,9 +176,12 @@ export class BrowserPage {
   get profileDir(): string | null { return this.#userDataDir; }
   /** The browser's pid, null for a page `attach` drives. */
   get pid(): number | null { return this.#proc?.pid ?? null; }
+  /** The `/json/list` entry this page was opened on, as it read then. */
+  get target(): TargetInfo { return { ...this.#target }; }
 
-  private constructor(socket: TextSocket, proc: Subprocess | null, userDataDir: string | null, watch: ParentDeathWatch | null = null) {
+  private constructor(socket: TextSocket, target: TargetInfo, proc: Subprocess | null, userDataDir: string | null, watch: ParentDeathWatch | null = null) {
     this.#socket = socket;
+    this.#target = target;
     this.#proc = proc;
     this.#watch = watch;
     this.#userDataDir = userDataDir;
@@ -272,7 +277,7 @@ export class BrowserPage {
     try {
       const target = await waitForPageTarget(port, '', proc, true);
       const socket = await openSocket(target);
-      page = new BrowserPage(socket, proc, ownsUserDataDir ? userDataDir : null, watch);
+      page = new BrowserPage(socket, target, proc, ownsUserDataDir ? userDataDir : null, watch);
       open.add(page);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
@@ -314,7 +319,8 @@ export class BrowserPage {
   static async attach(port: number, urlIncludes = '', diagnose?: (failure: string) => string | Promise<string>): Promise<BrowserPage> {
     let page: BrowserPage | undefined;
     try {
-      page = new BrowserPage(await openSocket(await waitForPageTarget(port, urlIncludes)), null, null);
+      const target = await waitForPageTarget(port, urlIncludes);
+      page = new BrowserPage(await openSocket(target), target, null, null);
       return await page.#prepareAttached();
     } catch (error) {
       await page?.close().catch(() => undefined);

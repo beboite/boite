@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test, expect } from 'bun:test';
 import { BrowserPage, freePort } from './lib/cdp.ts';
-import { describeShell } from './lib/shell-diagnosis.ts';
+import { describeShell, waitForShellPage } from './lib/shell-diagnosis.ts';
 import { killProcessTreeAsync, removeDirectory } from './lib/cleanup.ts';
 import { connect } from '../../packages/core/src/client.ts';
 import type { BrowserAction } from '../../packages/contracts/src/index.ts';
@@ -47,7 +47,7 @@ test.skip('browser profiles keep their own cookies across a restart until one is
     }
     if (!client) throw new Error('core did not start');
     page = await BrowserPage.attach(port, '', failure => describeShell(dataDir, shell!.pid, failure));
-    await page.waitFor("typeof window.__TAURI_INTERNALS__?.invoke === 'function'");
+    await waitForShellPage(page, { port, dataDir, pid: shell!.pid });
   };
   const openThread = async (threadId: string) => {
     await page!.waitFor("document.querySelector('[data-testid=thread-row]')");
