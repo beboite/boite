@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { ProjectStore, hasGitMarker } from '../src/projects.ts';
+import { ProjectStore, hasGitMarker, probeGit } from '../src/projects.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -126,6 +126,31 @@ test('a deleted project folder is named by every refusal, and a folder put back 
   await waitFor(() => updated.length > 0);
   expect(updated.at(-1)).toBeUndefined();
   await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', title: 'back' });
+});
+
+test('a list asked after a folder came back is not answered by a check that read the disk before', async () => {
+  const client = await harness.connect();
+  const path = join(harness.dataDir, 'returning');
+  mkdirSync(path, { recursive: true });
+  const project = await client.call('projects.add', { path });
+  rmSync(path, { recursive: true, force: true });
+  expect((await client.call('projects.list', {})).find((entry) => entry.id === project.id)?.missing).toBe(true);
+  // The request below starts a check in the background, as any request naming a
+  // project does. It reads the disk while the folder is gone; on a loaded runner
+  // its answer is not in yet when the folder comes back.
+  const stale = Promise.withResolvers<boolean | null>();
+  const store = harness.core.projects;
+  let started = 0;
+  store.gitProbe = () => { started += 1; return stale.promise; };
+  await expect(client.call('worktrees.list', { projectId: project.id })).rejects.toThrow('does not exist any more');
+  expect(started).toBe(1);
+  // Every other folder answers at once; the stale answer lands once the list has started.
+  store.gitProbe = async (folder) => (folder === path ? probeGit(folder) : null);
+  mkdirSync(path, { recursive: true });
+  const listFresh = store.listFresh.bind(store);
+  store.listFresh = () => { const answer = listFresh(); setTimeout(() => stale.resolve(false), 0); return answer; };
+  const back = (await client.call('projects.list', {})).find((entry) => entry.id === project.id);
+  expect(back?.missing).toBeUndefined();
 });
 
 test('a disk that gives no clear answer does not mark a project missing', async () => {

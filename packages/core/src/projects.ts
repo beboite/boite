@@ -76,6 +76,8 @@ interface GitFlag {
   /** The folder itself is gone. Undefined before a check gave a clear answer. */
   missing?: boolean | undefined;
   inflight: boolean;
+  /** The check in flight; `overdue` once a list gave up waiting for it. */
+  pending?: { done: Promise<void>; overdue: boolean; again?: Promise<void> | undefined } | undefined;
 }
 
 export class ProjectStore {
@@ -155,14 +157,16 @@ export class ProjectStore {
    * The list a client asks for, with a fresh `.git` answer per folder: a
    * `git init` done in a terminal shows on the very next answer. Each check
    * runs off the event loop and gets `gitWaitMs`; past it, or when a folder's
-   * previous check is still pending (a share whose host is gone), that folder
-   * answers from its last check instead of holding the list.
+   * previous check already went past it (a share whose host is gone), that
+   * folder answers from its last check instead of holding the list. A check
+   * still within its time may have read the disk before this call: the list
+   * waits for it and checks once more.
    */
   async listFresh(): Promise<Project[]> {
     const projects = this.core.journal.listProjects();
     const checks: Promise<void>[] = [];
     for (const project of projects) {
-      const check = this.refreshGit(project.path);
+      const check = this.freshGit(project.path);
       if (check !== null) checks.push(check);
     }
     if (checks.length > 0) {
@@ -173,6 +177,11 @@ export class ProjectStore {
       });
       await Promise.race([Promise.all(checks), deadline]);
       clearTimeout(timer);
+      // A check still pending was waited for once: the next lists answer without it.
+      for (const project of projects) {
+        const pending = this.git.get(project.path)?.pending;
+        if (pending !== undefined) pending.overdue = true;
+      }
     }
     // Every folder was just checked or is still being checked: no second probe.
     const counts = this.core.journal.archivedThreadCounts();
@@ -503,6 +512,19 @@ export class ProjectStore {
     };
   }
 
+  /**
+   * A check of `path` that started after this call: a new one, or the pending
+   * one followed by another. Null when the pending check is overdue.
+   */
+  private freshGit(path: string): Promise<void> | null {
+    const pending = this.git.get(path)?.pending;
+    if (pending === undefined) return this.refreshGit(path);
+    if (pending.overdue) return null;
+    // One follow-up per pending check, however many lists ask meanwhile.
+    pending.again ??= pending.done.then(() => this.refreshGit(path) ?? this.git.get(path)?.pending?.done);
+    return pending.again;
+  }
+
   /** Starts a check of `path`, or returns null when one is already pending. */
   private refreshGit(path: string): Promise<void> | null {
     const flag = this.git.get(path) ?? { value: undefined, inflight: false };
@@ -511,19 +533,23 @@ export class ProjectStore {
     this.git.set(path, flag);
     // One check per folder at a time, held until the disk answers: a dead share
     // costs one pending check, never a pile of them.
-    return this.gitProbe(path).then(
+    const done = this.gitProbe(path).then(
       async (found) => {
         // No clear answer keeps the last one: a sleeping share is not a lost repository.
         if (found !== null) flag.value = found;
         // A `.git` that answered sits in a folder that is there; without one the folder itself is asked.
         const present = found === true ? true : found === false ? await this.folderProbe(path).catch(() => null) : null;
         flag.inflight = false;
+        flag.pending = undefined;
         if (present !== null && this.git.get(path) === flag) this.noteFolder(path, !present);
       },
       () => {
         flag.inflight = false;
+        flag.pending = undefined;
       },
     );
+    flag.pending = { done, overdue: false };
+    return done;
   }
 }
 
