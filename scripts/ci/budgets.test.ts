@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { entryChunk, measure, overBudget, type Budgets } from './budgets.ts';
+import { bodyReason, ceiling, entryChunk, judge, mainRun, measure, publishedCommits, type Sizes } from './budgets.ts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -34,23 +34,59 @@ test('measures all emitted core JavaScript including workers and lazy chunks, ex
   writeFileSync(join(core, 'workers', 'guard-worker.js'), 'x'.repeat(25));
   writeFileSync(join(core, 'main.js.map'), 'x'.repeat(300));
   writeFileSync(join(core, 'boite-core.exe'), 'x'.repeat(10_000));
-  const measured = measure(root);
-  expect(measured).toEqual({ uiEntryChunk: 100, uiDist: html.length + 130, coreBundle: 70, coreJavaScript: 240 });
-  expect(overBudget(measured, { ...measured, coreJavaScript: 100 })).toEqual([
-    'coreJavaScript: 240 bytes, above its 100-byte budget in scripts/ci/budgets.json',
+  expect(measure(root)).toEqual({ uiEntryChunk: 100, uiDist: html.length + 130, coreBundle: 70, coreJavaScript: 240 });
+});
+
+const base: Sizes = { uiEntryChunk: 500_000, uiDist: 5_000_000, coreBundle: 1_000_000, coreJavaScript: 4_000_000 };
+const reference = { sizes: base, source: '`a1b2c3d4` (main bundle-sizes artifact)' };
+
+test('growth up to 0.1 % passes without a reason, more needs one in the body', () => {
+  expect(judge({ ...base, uiDist: base.uiDist + 5_000 }, reference, undefined, undefined).errors).toEqual([]);
+  const grown = { ...base, uiEntryChunk: base.uiEntryChunk + 501, coreBundle: base.coreBundle - 10_000 };
+  const [error, ...rest] = judge(grown, reference, undefined, undefined).errors;
+  expect(rest).toEqual([]);
+  expect(error).toContain('uiEntryChunk +501 bytes (0.10 %) over `a1b2c3d4` (main bundle-sizes artifact)');
+  expect(error).toContain('"## Bundle size" heading in the pull request body');
+  expect(error).not.toContain('coreBundle');
+  expect(judge(grown, reference, undefined, 'the palette strings load with the entry').errors).toEqual([]);
+});
+
+test('the ceiling is the published build plus 2 %, and a reason does not lift it', () => {
+  const limit = { sizes: ceiling(base), source: 'v2.0.0-nightly.20261018.2 at `0011aabb`' };
+  expect(limit.sizes).toEqual({ uiEntryChunk: 510_000, uiDist: 5_100_000, coreBundle: 1_020_000, coreJavaScript: 4_080_000 });
+  expect(judge({ ...base, uiDist: 5_100_000 }, reference, limit, 'reason').errors).toEqual([]);
+  expect(judge({ ...base, uiDist: 5_100_001 }, reference, limit, 'reason').errors).toEqual([
+    'uiDist: 5,100,001 bytes, above its 5,100,000-byte ceiling (v2.0.0-nightly.20261018.2 at `0011aabb` plus 2 %). Shrink the change; the ceiling rises only when a nightly or a release is published.',
   ]);
 });
 
-test('names each measure above its limit', () => {
-  const limits: Budgets = { uiEntryChunk: 100, uiDist: 1000, coreBundle: 50, coreJavaScript: 100 };
-  expect(overBudget({ uiEntryChunk: 100, uiDist: 1001, coreBundle: 10, coreJavaScript: 10 }, limits)).toEqual([
-    'uiDist: 1001 bytes, above its 1000-byte budget in scripts/ci/budgets.json',
-  ]);
-  expect(overBudget({ uiEntryChunk: 1, uiDist: 1, coreBundle: 1, coreJavaScript: 1 }, limits)).toEqual([]);
+test('reads the reason under a Bundle size heading, ignoring comments and empty sections', () => {
+  expect(bodyReason('## What changed\n\nx\n\n## Bundle size\n\nThe new card adds 3 KB to the settings chunk.\n\n## Verification\n\nok')).toBe('The new card adds 3 KB to the settings chunk.');
+  expect(bodyReason('### bundle size\r\nlazy chunk only')).toBe('lazy chunk only');
+  expect(bodyReason('## Bundle size\n\n<!-- Explain growth above 0.1 %. -->\n\n## Verification')).toBeUndefined();
+  expect(bodyReason('Bundle size grows, see below')).toBeUndefined();
+  expect(bodyReason(null)).toBeUndefined();
+  // A comment split by another, or never closed, leaves no `<!--` behind.
+  expect(bodyReason('## Bundle size\n<!<!-- x -->-- hidden -->kept')).toBe('kept');
+  expect(bodyReason('## Bundle size\nkept <!-- never closed\n## Verification')).toBe('kept');
+  const verdict = judge({ ...base, uiEntryChunk: base.uiEntryChunk + 600 }, reference, undefined, '<img src=x onerror=alert(1)> & co');
+  expect(verdict.report).toContain('&#60;img src=x onerror=alert(1)&#62; &#38; co');
+  expect(verdict.report).not.toContain('<img');
 });
 
-test('the checked-in budgets name every measure', () => {
-  const limits = JSON.parse(readFileSync(join(import.meta.dir, 'budgets.json'), 'utf8')) as Budgets;
-  expect(Object.keys(limits).sort()).toEqual(['coreBundle', 'coreJavaScript', 'uiDist', 'uiEntryChunk']);
-  for (const value of Object.values(limits)) expect(value).toBeGreaterThan(0);
+test('takes measurements only from a bundle size push run on main of this repository', () => {
+  const sha = 'a'.repeat(40);
+  const ci = { id: 1, path: '.github/workflows/bundle-size.yml', head_sha: sha, head_branch: 'main', event: 'push', repository: { id: 7 }, head_repository: { id: 7 } };
+  expect(mainRun([{ ...ci, id: 2, event: 'pull_request' }, { ...ci, id: 3, path: '.github/workflows/ci.yml' }, { ...ci, id: 4, head_repository: { id: 8 } }, ci], sha)?.id).toBe(1);
+  expect(mainRun([{ ...ci, head_branch: 'feature' }], sha)).toBeUndefined();
+});
+
+test('the ceiling follows the newest published release, drafts and branch targets left out', () => {
+  const release = (tag: string, published_at: string | null, target = tag.at(-1)!.repeat(40), draft = false) => ({ tag_name: tag, published_at, target_commitish: target, draft });
+  expect(publishedCommits([
+    release('v1', '2026-10-17T00:00:00Z'),
+    release('v2', '2026-10-18T00:00:00Z'),
+    release('v3', null, 'c'.repeat(40), true),
+    release('v4', '2026-10-19T00:00:00Z', 'main'),
+  ])).toEqual([{ tag: 'v2', sha: '2'.repeat(40) }, { tag: 'v1', sha: '1'.repeat(40) }]);
 });

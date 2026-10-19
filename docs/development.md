@@ -196,8 +196,13 @@ minutes per pass. A worktree qualifies when all of these hold:
   or deleted at least an hour ago, and none has a live process or terminal. An
   archive written by an older core counts from `updatedAt`.
 - With no thread standing there, the branch starts with `boite/` (or HEAD is
-  detached), no draft reservation names the folder, and git created it at least
-  an hour ago (the `.git` file's date).
+  detached), no draft reservation names the folder, and git last wrote to it at
+  least an hour ago: the newest of the `.git` file and the HEAD, index and HEAD
+  log in its admin folder. PR lookups run git with `GIT_OPTIONAL_LOCKS=0`, so
+  the cleanup's own reads do not move those dates.
+- No live, non-archived thread linked an open pull request whose head is the
+  worktree's branch. A delegated worker often runs from another folder and
+  makes its worktree with `git worktree add`; its `boite pr link` keeps it.
 - `git status` lists nothing, untracked files included. Ignored files such as
   dependencies and build output leave with the folder.
 - HEAD is on another local branch or remote-tracking ref, or a merged, non-fork
@@ -547,8 +552,14 @@ live in `fake-client.parity.test.ts`. A fake path below a directory named
 
 ### Adding an RPC method
 
-1. Add the method's `params` and `result` to `RpcMethods` in
-   `packages/contracts/src/index.ts`, beside its domain's entries.
+1. Add the method's `params` and `result` to its domain's `<Domain>RpcMethods`
+   in `packages/contracts/src/<domain>.ts` (`threads.*` in `ThreadsRpcMethods`
+   of `threads.ts`), and its types beside them. `index.ts` re-exports every
+   domain file and composes `RpcMethods` and `RpcEvents` from them; a new
+   domain is a file there, an `export *` and one line in each `extends`.
+   A branch cut before the split, still editing the single `index.ts`, runs
+   `bun scripts/migrate/split-contracts.ts` once `git merge origin/main`
+   stops: it replays its edits onto the domain files.
 2. Register the core handler in the domain's `register*Methods` function.
    For `threads.*`, use `registerThreadMethods` in
    `packages/core/src/threads/rpc.ts`, called by `packages/core/src/modules.ts`.

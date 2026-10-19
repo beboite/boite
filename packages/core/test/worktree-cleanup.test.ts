@@ -66,6 +66,15 @@ function commitWork(cwd: string): string {
   return git(cwd, 'rev-parse', 'HEAD');
 }
 
+/** Dates the worktree's `.git` file and its admin folder's HEAD, index and HEAD log two hours back. */
+function ageGitFiles(cwd: string): void {
+  const old = (Date.now() - 2 * 3_600_000) / 1000;
+  const admin = git(cwd, 'rev-parse', '--absolute-git-dir');
+  for (const path of [join(cwd, '.git'), join(admin, 'HEAD'), join(admin, 'index'), join(admin, 'logs', 'HEAD')]) {
+    if (existsSync(path)) utimesSync(path, old, old);
+  }
+}
+
 function branches(project: { path: string }): string[] {
   return git(project.path, 'branch', '--format=%(refname:short)').split('\n').filter(Boolean);
 }
@@ -165,7 +174,7 @@ describe('settled worktree cleanup', () => {
     expect(existsSync(off.cwd)).toBe(true);
   });
 
-  test('a worktree no thread stands in goes only on a boite branch, outside a reservation, an hour after git made it', async () => {
+  test('a worktree no thread stands in goes only on a boite branch, outside a reservation, an hour after git last touched it', async () => {
     const project = await repoProject();
     const root = worktreeRoot(project.path);
     const orphan = join(root, 'orphan');
@@ -176,14 +185,45 @@ describe('settled worktree cleanup', () => {
     git(project.path, 'worktree', 'add', '-q', '-b', 'feature/mine', mine);
     const elsewhere = join(harness.dataDir, 'elsewhere');
     git(project.path, 'worktree', 'add', '-q', '-b', 'boite/elsewhere', elsewhere);
+    for (const path of [orphan, mine, elsewhere]) ageGitFiles(path);
+    // Made two hours ago, but its HEAD, index and HEAD log moved just now: an agent still works in it.
+    const active = join(root, 'active');
+    git(project.path, 'worktree', 'add', '-q', '-b', 'boite/active', active);
     const old = (Date.now() - 2 * 3_600_000) / 1000;
-    for (const path of [orphan, mine, elsewhere]) utimesSync(join(path, '.git'), old, old);
+    utimesSync(join(active, '.git'), old, old);
 
     const hourly = new WorktreeCleanup(harness.core, { graceMs: 3_600_000, startDelayMs: 3_600_000 });
     expect((await hourly.run()).map((entry) => entry.branch)).toEqual(['boite/orphan']);
     await hourly.close();
     expect(existsSync(orphan)).toBe(false);
-    for (const path of [recent, mine, elsewhere]) expect(existsSync(path)).toBe(true);
+    for (const path of [recent, mine, elsewhere, active]) expect(existsSync(path)).toBe(true);
+  });
+
+  test('a worktree no thread stands in stays while a live thread links an open pull request on its branch', async () => {
+    const project = await repoProject();
+    const linked = join(worktreeRoot(project.path), 'linked');
+    git(project.path, 'worktree', 'add', '-q', '-b', 'boite/linked', linked);
+    ageGitFiles(linked);
+    // A delegated worker runs in another folder, made the worktree with git and linked its pull request.
+    const account = (await client.call('accounts.list', {})).find((entry) => entry.providerId === 'echo');
+    if (account === undefined) throw new Error('no echo account');
+    const worker = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Worker' });
+    harness.core.journal.setSetting(`linked-pull-requests:${worker.id}`, [{
+      url: 'https://github.com/example/repo/pull/7', repository: 'example/repo', number: 7, title: 'work', state: 'OPEN', draft: false,
+      head: 'boite/linked', base: 'main', headRepository: 'example/repo', checkedAt: Date.now(),
+    }]);
+
+    const hourly = new WorktreeCleanup(harness.core, { graceMs: 3_600_000, startDelayMs: 3_600_000 });
+    expect(await hourly.run()).toEqual([]);
+    expect(existsSync(linked)).toBe(true);
+    await hourly.close();
+
+    // Once the worker is archived, the abandoned worktree goes as before.
+    await client.call('threads.archive', { threadId: worker.id });
+    const later = new WorktreeCleanup(harness.core, { graceMs: 3_600_000, startDelayMs: 3_600_000 });
+    expect((await later.run()).map((entry) => entry.branch)).toEqual(['boite/linked']);
+    await later.close();
+    expect(existsSync(linked)).toBe(false);
   });
 
   test('the project policy is on by default, owner only, and refuses anything but a boolean', async () => {
