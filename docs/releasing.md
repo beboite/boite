@@ -52,7 +52,15 @@ to the app attaches the previous APK under its original name.
   keep the SDKs off the start path. `bun run core` and the shell both prefer this
   bundle over the sources when it is there.
 - `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. On x64 it embeds
-  Bun's baseline runtime, which needs no AVX2. The jobs and guard workers remain
+  Bun's baseline runtime, which needs no AVX2. That runtime, and the other
+  architecture's in a cross build, is not the running Bun, and `bun build
+  --target` would fetch it from npm with no deadline. `packages/core/bin/bun-runtime.ts`
+  fetches it instead from the release of the running Bun, failing after 30 s
+  without data or 300 s in all, checks it against `SHASUMS256.txt`, keeps it under
+  `node_modules/.cache/boite-bun-runtime/<target>-v<version>` with the SHA-256
+  of the unpacked runtime, rechecked at each use (a copy that differs is fetched
+  again), and `compile.ts` passes it with `--compile-executable-path`; the compile itself
+  stops after 10 minutes. The jobs and guard workers remain
   JavaScript files beside the core. `artifact-retention-worker.ts` is also a
   compile entry point, so standalone signed server archives embed it and need
   no separate retention worker file. Shell staging still ships all three
