@@ -11,6 +11,7 @@ import { type KnownProcess, type ProcessIdentity, unseenIdentity } from './proce
 import { killBunChild, stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 import { ResourceCollection } from './resource-usage.ts';
+import { traceWrite } from './trace-writes.ts';
 import { orphansOf, parentAtStart } from './process-orphans.ts';
 import { forgetOnMissing, resolveSpawnCommand, startResolved } from './spawn-command.ts';
 import { BUSY_CPU_PERCENT, IDLE_LOAD_INTERVAL_MS, LOAD_INTERVAL_MS, LoadPace, worthPushing } from './load-pace.ts';
@@ -527,7 +528,7 @@ export class ProcRegistry {
     seen.set(record.pid, { identity, incarnations, recordedAt: record.startedAt });
 
     // The trace row only: a copy in the event log would be read by nothing.
-    this.journal.putProcess(record);
+    traceWrite(this.bus, threadId, () => this.journal.putProcess(record));
     this.bus.emit('process.started', { ...record });
   }
 
@@ -784,7 +785,7 @@ export class ProcRegistry {
       if (fromJob.peakMemoryBytes !== null) record.peakMemoryBytes = fromJob.peakMemoryBytes;
       if (fromJob.ioBytes !== null) record.ioBytes = fromJob.ioBytes;
     }
-    this.journal.finishProcess(record);
+    traceWrite(this.bus, threadId, () => this.journal.finishProcess(record));
 
     this.bus.emit('process.exited', { ...record });
   }
