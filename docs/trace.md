@@ -26,7 +26,9 @@ settings enable them.
 
 The registry owns spawn, exit, journal process rows and thread events. A process
 row is written whole at start; the exit updates its exit columns only, without
-copying it into the operational event journal. A thread keeps its newest 2,000
+copying it into the operational event journal. On a full disk a row is skipped
+instead of stopping the core: the process runs untraced, and a `trace.disk-full`
+warning is logged at most once a minute (`trace-writes.ts`). A thread keeps its newest 2,000
 rows, every live row and the rows a process agent card reads (the agent CLI and
 its parent, `native-agents.ts`). Older rows are deleted when a finished turn's
 sweep runs, when the registry forgets an idle thread, and every 500 exits of a

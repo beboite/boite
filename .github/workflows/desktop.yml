@@ -32,6 +32,10 @@ on:
         description: Contents of the AuthKey_<id>.p8 file.
         required: false
     inputs:
+      enabled:
+        description: Off skips every job, which still reports its own check name; ci.yml turns it off when no desktop input changed.
+        type: boolean
+        default: true
       platforms:
         description: JSON list of portable platforms, as scripts/ci/changes.ts writes them.
         type: string
@@ -68,7 +72,7 @@ jobs:
   # none, which the installer job owns.
   windows-rust:
     name: Windows x64 Rust tests
-    if: inputs.rust-tests
+    if: inputs.enabled && inputs.rust-tests
     runs-on: windows-2025
     timeout-minutes: 35
     steps:
@@ -91,6 +95,7 @@ jobs:
 
   windows:
     name: Windows x64
+    if: inputs.enabled
     runs-on: windows-2025
     # A published build compiles the shell and its dependencies with fat LTO,
     # which the cache saved from pull-request settings does not hold.
@@ -162,20 +167,23 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  portable:
-    name: ${{ matrix.platform.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: ${{ fromJSON(inputs.platforms) }}
-    runs-on: ${{ matrix.platform.runner }}
+  # One job per platform of PORTABLE_ALL in scripts/ci/changes.ts, not a
+  # matrix, so a skipped one reports its fixed name (docs/ci.md#check-names).
+  # Each runs when `platforms` lists its id. PORTABLE_ID and PORTABLE_RUNNER
+  # stand in for the matrix in the shared steps.
+  portable-linux-x64:
+    name: Linux x64
+    if: inputs.enabled && contains(inputs.platforms, '"id":"linux-x64"')
+    runs-on: ubuntu-22.04
     # A published build compiles the shell and its dependencies with fat LTO,
     # which the cache saved from pull-request settings does not hold.
     timeout-minutes: ${{ inputs.sign-updates && 60 || 35 }}
     env:
+      PORTABLE_ID: linux-x64
+      PORTABLE_RUNNER: ubuntu-22.04
       # A cross build: compile.ts, stage-sidecar.ts, tauri.ts and desktop-bundles.ts all read it.
-      BOITE_TARGET: ${{ matrix.platform.target || '' }}
-    steps:
+      BOITE_TARGET: ''
+    steps: &portable-steps
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -184,17 +192,17 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11 xdg-utils
       - name: Run Intel binaries under Rosetta
-        if: runner.os == 'macOS' && matrix.platform.target == 'x86_64-apple-darwin'
+        if: runner.os == 'macOS' && env.BOITE_TARGET == 'x86_64-apple-darwin'
         run: arch -x86_64 /usr/bin/true 2>/dev/null || sudo softwareupdate --install-rosetta --agree-to-license
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           toolchain: stable
-          targets: ${{ matrix.platform.target }}
+          targets: ${{ env.BOITE_TARGET }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           workspaces: apps/shell/src-tauri -> target
           # Per runner and target: a cache built on Ubuntu 24.04 restored on 22.04 left crates rustc could not load.
-          shared-key: desktop-portable-${{ matrix.platform.runner }}${{ matrix.platform.target && format('-{0}', matrix.platform.target) || '' }}-v1
+          shared-key: desktop-portable-${{ env.PORTABLE_RUNNER }}${{ env.BOITE_TARGET && format('-{0}', env.BOITE_TARGET) || '' }}-v1
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Set nightly artifact version
         if: inputs.channel == 'nightly' && inputs.version != ''
@@ -346,8 +354,41 @@ jobs:
       # release.yml and nightly.yml publish every desktop-bundle-* artifact.
       - uses: ./.github/actions/upload-artifact
         with:
-          name: desktop-bundle-${{ matrix.platform.id }}
+          name: desktop-bundle-${{ env.PORTABLE_ID }}
           path: ${{ runner.temp }}/desktop-bundles/
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
+
+  portable-linux-arm64:
+    name: Linux arm64
+    if: inputs.enabled && contains(inputs.platforms, '"id":"linux-arm64"')
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: ${{ inputs.sign-updates && 60 || 35 }}
+    env:
+      PORTABLE_ID: linux-arm64
+      PORTABLE_RUNNER: ubuntu-22.04-arm
+      BOITE_TARGET: ''
+    steps: *portable-steps
+
+  portable-macos-arm64:
+    name: macOS arm64
+    if: inputs.enabled && contains(inputs.platforms, '"id":"macos-arm64"')
+    runs-on: macos-15
+    timeout-minutes: ${{ inputs.sign-updates && 60 || 35 }}
+    env:
+      PORTABLE_ID: macos-arm64
+      PORTABLE_RUNNER: macos-15
+      BOITE_TARGET: ''
+    steps: *portable-steps
+
+  portable-macos-x64:
+    name: macOS x64
+    if: inputs.enabled && contains(inputs.platforms, '"id":"macos-x64"')
+    runs-on: macos-15
+    timeout-minutes: ${{ inputs.sign-updates && 60 || 35 }}
+    env:
+      PORTABLE_ID: macos-x64
+      PORTABLE_RUNNER: macos-15
+      BOITE_TARGET: x86_64-apple-darwin
+    steps: *portable-steps

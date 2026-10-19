@@ -22,8 +22,8 @@ export const strings = {
     /** The count beside Threads or Agents in that switch: what works now, and whether something there needs the user. */
     surfaceWorking: '{count} at work',
     surfaceWaiting: '{count} at work, something needs you',
-    surfaceSubagentsOne: 'including 1 subagent',
-    surfaceSubagentsMany: 'including {count} subagents',
+    surfaceSubagentsOne: 'and 1 subagent',
+    surfaceSubagentsMany: 'and {count} subagents',
     /** The two ways the display options can list threads. */
     projectsView: 'Projects',
     recentView: 'Recent',
@@ -120,8 +120,6 @@ export const strings = {
       subagentsOne: '1 sub-agent at work',
       subagentsMany: '{count} sub-agents at work',
       /** The chip's own words, its count written out: the full sentence stays in its title. */
-      subagentsShortOne: '1 agent',
-      subagentsShortMany: '{count} agents',
       /** The same chip once a sub-agent asks the user something: the parent reads Needs you. */
       subagentsAskingOne: '1 sub-agent needs you',
       subagentsAskingMany: '{count} sub-agents need you',

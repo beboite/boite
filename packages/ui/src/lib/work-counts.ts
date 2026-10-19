@@ -10,7 +10,7 @@ export interface WorkCount {
   waiting: boolean;
 }
 
-/** The threads at work behind the Threads side: `subagents` of `count` are delegated agents, not rows of the list. */
+/** The threads at work behind the Threads side: `count` rows of the list, and `subagents` delegated agents under them, which are not rows. */
 export interface ThreadWork extends WorkCount {
   subagents: number;
 }
@@ -18,8 +18,10 @@ export interface ThreadWork extends WorkCount {
 /**
  * The conversations the thread list draws that are at work: a turn under way,
  * queued, waiting on its delegated agents or on something it left running, or
- * asking the user, plus every delegated agent under them at work or asking, at
- * any depth: seven sub-agents are seven agents running, not one row.
+ * asking the user, and apart from them every delegated agent under them at
+ * work or asking, at any depth: seven sub-agents are seven agents running, but
+ * the badge's number stays the rows the user can see ("ça m'annonce 8 threads
+ * alors que j'en vois que 2").
  * Archived projects and archived threads are out of the list, so they are out
  * of the count, and so is a machine that is not connected: a laptop gone to
  * sleep mid-turn would otherwise count as at work for hours.
@@ -60,7 +62,7 @@ export function workingThreads(stores: readonly Store[]): ThreadWork {
       }
     }
   }
-  return { count: count + subagents, subagents, waiting };
+  return { count, subagents, waiting };
 }
 
 /**

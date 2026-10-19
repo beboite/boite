@@ -218,6 +218,51 @@ describe('procs', () => {
     expect(client.core.trace.note).toContain('Windows-only');
   });
 
+  test('a full disk skips trace rows and keeps the core alive', async () => {
+    // A Unity build filled C: and the job's next grandchild threw SQLITE_FULL out of its callback, which stopped the core (#596).
+    let job: Parameters<ProcessPlatform['retain']>[0] | undefined;
+    // The pids are made up: nothing here may kill one.
+    const platform: ProcessPlatform = { ...createPosixPlatform('linux', null), retain: (jobs) => { job = jobs; },
+      terminate: () => false, terminateProcess: () => false, terminateUnassigned: async () => undefined };
+    const bus = new Bus();
+    const warnings: string[] = [];
+    bus.onAny((name, payload) => {
+      const log = payload as { event?: string; message: string };
+      if (name === 'core.log' && log.event === 'trace.disk-full') warnings.push(log.message);
+    });
+    const procs = new ProcRegistry(harness.core.journal, bus, platform, { forgetDelayMs: 5 });
+    const journal = harness.core.journal;
+    const db = journal.db;
+    const prune = journal.pruneProcesses;
+    const pages = (db.query('PRAGMA page_count').get() as { page_count: number }).page_count;
+    try {
+      db.exec(`PRAGMA max_page_count = ${pages}`);
+      const info = (n: number) => ({ exe: 'il2cpp.exe', commandLine: `il2cpp ${'x'.repeat(8_000)} ${n}`, parentPid: 1, startedAt: Date.now() + n });
+      for (let n = 0; n < 20; n += 1) expect(() => job!.started('disk-full', 50_000 + n, info(n))).not.toThrow();
+      expect(() => job!.exited('disk-full', 50_000, { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null })).not.toThrow();
+      expect(procs.liveCount('disk-full')).toBe(19);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('disk is full');
+
+      // Room again: the next process is traced.
+      db.exec('PRAGMA max_page_count = 1073741823');
+      job!.started('disk-full', 60_000, info(100));
+      expect(journal.listProcesses('disk-full', 50).map(record => record.pid)).toContain(60_000);
+
+      // The cleanup once the thread goes idle deletes rows, which still needs room in the WAL.
+      let pruned = 0;
+      journal.pruneProcesses = () => { pruned += 1; throw Object.assign(new Error('database or disk is full'), { code: 'SQLITE_FULL' }); };
+      for (const pid of [...Array.from({ length: 19 }, (_, n) => 50_001 + n), 60_000]) job!.exited('disk-full', pid, { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
+      await waitFor(() => pruned > 0, 2_000);
+      await Bun.sleep(20);
+      expect(procs.liveCount('disk-full')).toBe(0);
+    } finally {
+      journal.pruneProcesses = prune;
+      db.exec('PRAGMA max_page_count = 1073741823');
+      await procs.close();
+    }
+  });
+
   test.skipIf(process.platform === 'win32')('a fallback tree kill runs before the child is stopped, and shutdown waits for it', async () => {
     // Windows' taskkill fallback, for a pid outside the job: async, so the core is not held while it starts.
     const fallback = Promise.withResolvers<void>();
