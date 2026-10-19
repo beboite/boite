@@ -416,6 +416,10 @@ test('one invitation groups two real cores: the page connects the second by itse
       console.error('Group removal state:', JSON.stringify(await removalState().catch(() => 'group diagnostics unavailable')));
       throw error;
     }
+    // The page lets it go on the first machine's word; the second hears of its removal from it in the background
+    // (`group.remove` in core group.ts), which nothing orders before that word.
+    const left = async () => (await b.call('group.get', {})) === null && !(await b.call('sessions.list', {})).some((session) => session.group);
+    for (const end = Date.now() + 10_000; !await left() && Date.now() < end;) await Bun.sleep(50);
     expect(await b.call('group.get', {})).toBeNull();
     expect((await b.call('sessions.list', {})).filter((session) => session.group)).toEqual([]);
     await page.send('Emulation.clearDeviceMetricsOverride', {});
