@@ -66,11 +66,14 @@
   }
 
   let applying: Promise<unknown> = Promise.resolve();
+  /** How many times each typed field was edited: a value typed back to what it was is still an edit. */
+  const edits: Partial<Record<keyof SpeechConfig, number>> = {};
+  const edited = (key: keyof SpeechConfig) => { edits[key] = (edits[key] ?? 0) + 1; };
   /**
    * Every choice applies at once, a path when its field loses focus, typed keys with their button.
    * One write at a time, each sending the fields as they are when its turn comes, so an older answer
    * never lands after a newer one. A field edited while a write is out keeps the edit, the patched
-   * field included: the answer lands its patch only where the field still holds what it held then.
+   * field included: the answer lands its patch only on a field nobody typed in since it left.
    */
   function apply(patch: Partial<SpeechConfig> = {}, keys: { groqKey?: string; openrouterKey?: string } = {}): Promise<void> {
     const run = applying.then(() => write(patch, keys));
@@ -79,12 +82,12 @@
   }
   async function write(patch: Partial<SpeechConfig>, keys: { groqKey?: string; openrouterKey?: string }) {
     if (!config || !store.client) return;
-    const before = { ...config };
+    const seen = { ...edits };
     const next = { ...config, ...patch };
     busy = true; saved = false; error = '';
     try {
       status = await store.client.call('speech.configure', { ...next, ...keys });
-      const landed = Object.fromEntries(Object.entries(patch).filter(([key]) => config![key as keyof SpeechConfig] === before[key as keyof SpeechConfig]));
+      const landed = Object.fromEntries(Object.entries(patch).filter(([key]) => edits[key as keyof SpeechConfig] === seen[key as keyof SpeechConfig]));
       config = { ...config!, ...landed };
       if (keys.groqKey !== undefined) groqKey = '';
       if (keys.openrouterKey !== undefined) openrouterKey = '';
@@ -270,8 +273,8 @@
             </div>
           {/if}
           <div class="paths">
-            <label>{strings.speech.executable}<input data-testid="voice-executable" bind:value={config.executable} onchange={() => void apply()} spellcheck="false" placeholder={status.canInstallRuntime ? '' : 'whisper-cli'} /></label>
-            <label>{strings.speech.modelPath}<input data-testid="voice-model-path" bind:value={config.modelPath} onchange={() => void apply()} spellcheck="false" /></label>
+            <label>{strings.speech.executable}<input data-testid="voice-executable" bind:value={config.executable} oninput={() => edited('executable')} onchange={() => void apply()} spellcheck="false" placeholder={status.canInstallRuntime ? '' : 'whisper-cli'} /></label>
+            <label>{strings.speech.modelPath}<input data-testid="voice-model-path" bind:value={config.modelPath} oninput={() => edited('modelPath')} onchange={() => void apply()} spellcheck="false" /></label>
             <div class="actions"><InfoTip topic={strings.speech.advanced} text={strings.speech.pathHint} /></div>
           </div>
         </details>

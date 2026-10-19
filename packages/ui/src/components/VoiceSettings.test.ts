@@ -245,3 +245,42 @@ test('a model picked while a path is typed afterwards: the answer to the pick ne
   expect(persisted.modelPath).toBe('/models/custom.bin');
   expect(field.value).toBe('/models/custom.bin');
 });
+
+test('a path typed away and back to its old value while a model pick saves is still an edit the pick\'s answer keeps', async () => {
+  const original = '/models/original.bin';
+  let persisted = { ...config, modelPath: original };
+  const sent: SpeechConfig[] = [];
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const ready = () => status({ ready: true, localReady: true, models: models(['small-q5_1', 'base-q5_1']) });
+  show(async (method: string, params?: unknown) => {
+    if (method === 'speech.status') return ready();
+    if (method === 'speech.config') return { ...persisted };
+    if (method === 'speech.configure') {
+      sent.push({ ...params as SpeechConfig });
+      if (sent.length === 1) await held;
+      persisted = { ...params as SpeechConfig };
+      return ready();
+    }
+    throw new Error(`unexpected ${method}`);
+  });
+  await settle();
+  document.querySelector<HTMLDetailsElement>('[data-testid=voice-models] details')!.open = true;
+  document.querySelector<HTMLButtonElement>('[data-testid=voice-model-base-q5_1] [role=radio]')!.click();
+  await settle();
+  const field = document.querySelector<HTMLInputElement>('[data-testid=voice-model-path]')!;
+  expect(field.value).toBe(original);
+  // Two edits while the pick saves: to another path, then back to the one it held.
+  for (const value of ['/models/intermediate.bin', original]) {
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+  }
+  expect(sent).toHaveLength(1);
+  release();
+  await settle();
+  expect(persisted.modelPath).toBe(original);
+  expect(field.value).toBe(original);
+  expect(sent.slice(1).map(c => c.modelPath)).toEqual([original, original]);
+});
