@@ -23,7 +23,8 @@ test('only a release build defaults to the relay, and the runtime override wins'
 test('every core build inlines the release flag present at build time and only then', async () => {
   const root = join(import.meta.dir, '..');
   const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts as Record<string, string>;
-  for (const command of [scripts.build, scripts['build:linux'], readFileSync(join(root, 'bin', 'compile.ts'), 'utf8')]) {
+  expect(scripts['build:linux']).toContain('bun run bin/compile.ts ');
+  for (const command of [scripts.build, readFileSync(join(root, 'bin', 'compile.ts'), 'utf8')]) {
     expect(command).toContain('--env=BOITE_RELEASE_*');
   }
   // The CLI, as the build scripts run it: Bun.build reads the environment its process started with.
