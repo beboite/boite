@@ -1,0 +1,36 @@
+import type { Translation } from '../../i18n.svelte';
+
+export const fr: Translation = {
+  appUpdate: {
+    released: 'Sortie {time}',
+    changelog: 'Changelog sur GitHub',
+    heading: "Mises à jour de l'application",
+    intro: 'Choisissez les versions suivies par cette application de bureau. Boite et Boite Nightly partagent cette installation, vos conversations et vos réglages.',
+    unsupported: 'Les mises à jour automatiques sont disponibles dans les versions installées : l’installateur Windows x64, l’app macOS et le .deb ou l’AppImage Linux.',
+    channel: 'Canal de publication',
+    stable: 'Boite',
+    nightly: 'Boite Nightly',
+    nightlyHint: "Boite Nightly est expérimentale et peut contenir des changements inachevés. Vous pouvez revenir à Boite même si son numéro de version est inférieur.",
+    installedVersion: 'Version installée',
+    idle: "Aucune recherche de mise à jour n'a encore eu lieu.",
+    checking: 'Recherche de mises à jour',
+    available: 'La version {version} est disponible.',
+    downloading: 'Téléchargement de {received} sur {total}',
+    downloaded: '{received} téléchargés',
+    ready: 'La version {version} est prête à installer.',
+    waiting: 'En attente de la fin du travail',
+    installing: "Les agents terminent leur étape, puis l'installation démarre",
+    current: 'Boite est à jour.',
+    failed: 'La mise à jour a échoué.',
+    lastChecked: 'Vérifié à {time}',
+    progress: "Téléchargement de la mise à jour de l'application",
+    notes: 'Notes de version',
+    retained: 'Changer de canal conserve vos conversations et vos réglages.',
+    check: 'Rechercher des mises à jour',
+    checkingAction: 'Recherche en cours',
+    install: 'Installer et redémarrer',
+    readyAction: 'Mise à jour',
+    installTitle: 'Installer la mise à jour de Boite ?',
+    installBody: "Les agents terminent leur appel d'outil en cours, 30 secondes au plus. Boite se met ensuite à jour, redémarre et les reprend.",
+  }
+};

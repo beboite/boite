@@ -9,7 +9,8 @@ reviews:
   review_details: false
   auto_review:
     enabled: true
-    drafts: false
+    # Agents open drafts and fix findings before the full CI run (docs/ci.md).
+    drafts: true
   path_filters:
     - '!bun.lock'
     - '!**/Cargo.lock'

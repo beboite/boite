@@ -177,8 +177,8 @@ same host settings and shell command as Settings.
 ## Adding a screen
 
 1. A key in `ORDER` and in `OnboardingStep`, in `lib/onboarding.ts`.
-2. A block under `onboarding` in `lib/strings.en.ts`, with a `title` and at
-   most one sentence, then the same block in `lib/strings.fr.ts`.
+2. A block under `onboarding` in `lib/strings/en/onboarding.ts`, with a `title` and at
+   most one sentence, then the same block in `lib/strings/fr/onboarding.ts`.
 3. A branch in `Onboarding.svelte`, between the two it sits between.
 4. `ONBOARDING_VERSION` up, since the tour changed shape.
 

@@ -3,7 +3,10 @@ name: ci
 on:
   push:
     branches: [main]
+  # A draft runs the Linux checks; ready_for_review starts the full run, and
+  # converted_to_draft cancels one in progress (changes.ts).
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
   workflow_call:
     secrets:
@@ -81,6 +84,7 @@ jobs:
       - id: filter
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DRAFT: ${{ github.event.pull_request.draft == true }}
           GH_TOKEN: ${{ github.token }}
           FORCE_CHECKS: ${{ inputs.force || github.ref_type == 'tag' || (github.event_name != 'push' && github.event_name != 'pull_request') }}
         run: bun scripts/ci/changes.ts
@@ -88,7 +92,7 @@ jobs:
       - name: Audit frozen dependencies
         run: bun audit
       - run: bun scripts/check-docs.ts
-      - run: bun test scripts/ci ./bench ./apps/shell/scripts
+      - run: bun test scripts/ci scripts/migrate ./bench ./apps/shell/scripts
       # Missing sentences are warnings here and in the nightly; release.yml refuses them.
       - run: bun scripts/ci/translations.ts
       - run: bun run check:architecture
@@ -237,6 +241,38 @@ jobs:
           path: tests/e2e/.artifacts/stress/
           retention-days: 7
 
+  # A pull request's sizes, measured on Linux against its base's, which
+  # bundle-size.yml keeps for every main commit, and against the last
+  # published build plus 2 % (docs/ci.md#bundle-growth). Rerun this job alone
+  # after editing the body.
+  size:
+    name: Bundle size
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.desktop == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # The base's and the published build's artifacts from main's runs.
+      actions: read
+      # The pull request body, read at run time so a rerun sees an edit.
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun run build:ui
+      - run: bun run build:core
+      - name: Measure
+        run: bun scripts/ci/budgets.ts measure .artifacts/bundle-sizes/bundle-sizes.json
+      - name: Compare with the base and the ceiling
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bun scripts/ci/budgets.ts check .artifacts/bundle-sizes/bundle-sizes.json
+
   desktop:
     name: Desktop
     needs: changes
@@ -329,22 +365,25 @@ jobs:
     uses: ./.github/workflows/android.yml
 
   required:
-    name: CI required
+    # A draft's gate has another name: a green `CI required` on a head is a
+    # full run, which branch protection may trust after the PR turns ready.
+    name: ${{ github.event.pull_request.draft == true && 'CI draft' || 'CI required' }}
     if: always()
-    needs: [changes, core, web, telemetry, e2e-types, stress, desktop, e2e, server, android]
+    needs: [changes, core, web, telemetry, e2e-types, stress, size, desktop, e2e, server, android]
     runs-on: ubuntu-24.04
     steps:
       - name: Require all applicable checks
         env:
           RESULTS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
         run: |
           python3 - <<'PY'
           import json, os
           jobs = json.loads(os.environ['RESULTS'])
           assert jobs['changes']['result'] == 'success', jobs
-          for name in ('core', 'web', 'telemetry', 'e2e-types', 'stress', 'desktop', 'server', 'android'):
-              output = {'e2e-types': 'e2eTypes'}.get(name, name)
-              required = jobs['changes']['outputs'][output] == 'true'
+          for name in ('core', 'web', 'telemetry', 'e2e-types', 'stress', 'size', 'desktop', 'server', 'android'):
+              output = {'e2e-types': 'e2eTypes', 'size': 'desktop'}.get(name, name)
+              required = jobs['changes']['outputs'][output] == 'true' and (name != 'size' or os.environ['EVENT'] == 'pull_request')
               assert jobs[name]['result'] == ('success' if required else 'skipped'), jobs
           e2e_required = jobs['changes']['outputs']['desktop'] == 'true' and jobs['changes']['outputs']['e2e'] == 'true'
           assert jobs['e2e']['result'] == ('success' if e2e_required else 'skipped'), jobs

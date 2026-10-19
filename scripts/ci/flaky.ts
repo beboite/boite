@@ -14,7 +14,8 @@ export const QUARANTINE: Quarantined[] = JSON.parse(readFileSync(resolve(import.
 
 /** Names of the failed tests in bun test output, or undefined unless every counted failure has one. */
 export function failedTests(output: string): string[] | undefined {
-  const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
+  // Over several files, bun lists every failure again under "N tests failed:" before the counts.
+  const clean = output.replace(/\x1b\[[0-9;]*m/g, '').replace(/^\d+ tests? failed:\r?\n(?:\(fail\) .*\r?\n)*/gm, '');
   const names = [...clean.matchAll(/^\(fail\) (.+?)(?: \[[\d.]+m?s\])?\r?$/gm)].map(match => match[1]!);
   const count = [...clean.matchAll(/^\s*(\d+) fail\r?$/gm)].reduce((sum, match) => sum + Number(match[1]), 0);
   return names.length > 0 && names.length === count ? names : undefined;

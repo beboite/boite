@@ -103,6 +103,9 @@ test('runtime, build inputs and unknown files require the complete suite', () =>
 
 test('pull requests, main pushes and forced runs pick their mode', () => {
   expect(ciMode('pull_request', false)).toBe('pr');
+  expect(ciMode('pull_request', false, true)).toBe('draft');
+  expect(ciMode('pull_request', true, true)).toBe('full');
+  expect(ciMode('push', false, true)).toBe('warm');
   expect(ciMode('push', false)).toBe('warm');
   expect(ciMode('push', true)).toBe('full');
   expect(ciMode('workflow_dispatch', false)).toBe('full');
@@ -124,6 +127,17 @@ test('main pushes run affected tests while warming the extra portable architectu
   expect(full).toMatchObject({ core: true, e2e: true });
   expect(JSON.parse(full.portable)).toHaveLength(4);
   expect(plan(affectedChecks(['README.md']), 'warm')).toMatchObject({ ...none, e2e: false });
+});
+
+test('a draft runs only the Linux checks and leaves the rest to the ready pull request', () => {
+  const all = affectedChecks(['packages/core/src/main.ts']);
+  const draft = plan(all, 'draft');
+  expect(draft).toMatchObject({ core: true, web: true, desktop: false, e2e: false, server: false, android: false, stress: false });
+  expect(JSON.parse(draft.coreRunners)).toEqual([{ os: 'ubuntu-24.04', name: 'Linux x64' }]);
+  // Focused checks still stand in for absent full suites.
+  expect(plan(affectedChecks(['tests/e2e/ui.test.ts']), 'draft')).toMatchObject({ e2eTypes: true, desktop: false, e2e: false });
+  expect(plan(affectedChecks(['telemetry/src/index.ts']), 'draft')).toMatchObject({ web: true, telemetry: true });
+  expect(plan(affectedChecks(['README.md']), 'draft')).toMatchObject({ ...none, e2e: false });
 });
 
 test('pull requests run the core suite without the Intel Mac; main, releases and manual runs keep it', () => {
@@ -155,20 +169,25 @@ test('focused checks are covered by the full core and web jobs when both apply',
 const python = Bun.which(process.platform === 'win32' ? 'python' : 'python3');
 test.skipIf(!python)('the actual required gate rejects failed, cancelled and unexpected job skips', () => {
   const workflow = readFileSync(join(import.meta.dir, '../../.github/workflows/ci.yml'), 'utf8');
-  expect(workflow).toContain('name: CI required');
+  expect(workflow).toContain("name: ${{ github.event.pull_request.draft == true && 'CI draft' || 'CI required' }}");
   const match = /          python3 - <<'PY'\n([\s\S]+?)          PY/.exec(workflow);
   if (!match) throw new Error('ci.yml: missing required gate Python script');
   const script = match[1]!.replace(/^ {10}/gm, '');
   const names = ['core', 'web', 'desktop', 'server', 'android', 'telemetry', 'e2e-types', 'stress', 'e2e'];
   const outputFor = (name: string) => name === 'e2e-types' ? 'e2eTypes' : name;
-  const cases: { jobs: object; success: boolean }[] = [];
+  const cases: { jobs: object; success: boolean; event?: string }[] = [];
   for (const selected of [names, ['web', 'telemetry'], ['desktop', 'e2e-types', 'e2e'], ['web', 'stress'], []]) {
     const outputs = Object.fromEntries(names.map(name => [outputFor(name), String(selected.includes(name))]));
     const jobs = { changes: { result: 'success', outputs }, ...Object.fromEntries(names.map(name => [name, {
       result: selected.includes(name) ? 'success' : 'skipped',
     }])) } as Record<string, { result: string; outputs?: Record<string, string> }>;
+    // The bundle size job runs with desktop, on pull requests only.
+    const desktop = selected.includes('desktop');
+    jobs.size = { result: desktop ? 'success' : 'skipped' };
     cases.push({ jobs, success: true });
-    for (const name of ['changes', ...selected]) {
+    cases.push({ jobs: { ...jobs, size: { result: 'skipped' } }, success: true, event: 'push' });
+    cases.push({ jobs: { ...jobs, size: { result: desktop ? 'skipped' : 'success' } }, success: false });
+    for (const name of ['changes', ...selected, ...(desktop ? ['size'] : [])]) {
       for (const result of ['failure', 'cancelled', 'skipped']) {
         cases.push({ jobs: { ...jobs, [name]: { ...jobs[name], result } }, success: false });
       }
@@ -184,6 +203,7 @@ script = compile(os.environ['GATE_SCRIPT'], 'ci.yml', 'exec')
 cases = json.load(sys.stdin)
 for index, case in enumerate(cases):
     os.environ['RESULTS'] = json.dumps(case['jobs'])
+    os.environ['EVENT'] = case.get('event', 'pull_request')
     try:
         exec(script, {})
         success = True
