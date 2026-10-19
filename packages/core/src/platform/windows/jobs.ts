@@ -756,23 +756,16 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
   }
   const exe = imageNameOf(api, handle);
   const commandLine = commandLineOf(api, handle);
-  if (consoleHost(exe, commandLine)) {
-    ignored.add(pid);
-    api.close(handle);
-    return;
-  }
+  // A console host stays out of the trace, and so does its exit.
+  const ignore = (): void => { tracked.delete(pid); ignored.add(pid); api.close(handle); };
+  if (consoleHost(exe, commandLine)) return ignore();
   const identity = creationIdentityOf(api, handle);
   tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });
   const record = { parentPid: parentPidOf(api, handle), ...identity };
   const waiting = whenCommandLineReads(api, handle, commandLine, (line) => {
     awaitingCommandLine.delete(pid);
     const name = startedAs(api, handle, exe, line);
-    if (name === null) {
-      tracked.delete(pid);
-      ignored.add(pid);
-      api.close(handle);
-      return;
-    }
+    if (name === null) return ignore();
     sink?.started(threadId, pid, { ...record, exe: name, commandLine: line });
   });
   if (waiting !== null) awaitingCommandLine.set(pid, waiting);
