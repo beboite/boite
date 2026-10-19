@@ -313,7 +313,11 @@ holds a limit, so a pull request never edits a shared one to grow.
 A pull request is checked twice:
 
 - Against its base: the sizes `bundle-size.yml` kept for the base commit, or
-  the base built in the same job when that run is missing or still going. A measure
+  the base built in the same job when that run is missing or still going. The
+  base is the first parent of the merge ref the job checks out, the main commit
+  the pull request is merged onto. `pull_request.base.sha` stays at the branch
+  point until the branch moves: on 2026-10-19 it charged #665, which touched no
+  UI file, with 156e44cf's UI growth over 184e63a7 (run 39319378723). A measure
   growing more than 0.1 % fails until the pull request body explains it under
   a `## Bundle size` heading. The body is read when the job runs: after
   editing it, rerun the failed jobs (`gh run rerun <run-id> --failed`).

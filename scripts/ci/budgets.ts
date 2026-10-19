@@ -5,7 +5,8 @@
  * fail a pull request. No file in the repository holds a limit
  * (docs/ci.md#bundle-growth):
  *
- * - a pull request is measured against its base, which bundle-size.yml
+ * - a pull request is measured against the main commit its merge ref sits on
+ *   (comparisonBase), which bundle-size.yml
  *   measured on its push to main and kept as the `bundle-sizes` artifact (or
  *   this job builds when that run is missing). A measure growing more than 0.1 % needs a `## Bundle size`
  *   section in the pull request body;
@@ -203,10 +204,25 @@ function buildBase(sha: string): Sizes {
   return measure(dir);
 }
 
+/**
+ * The commit a pull request's sizes are compared with. Its CI checks out the
+ * merge ref, whose first parent is the main commit it was merged onto;
+ * `pull_request.base.sha` stays at the branch point until the branch moves,
+ * so main's growth since then was charged to the pull request. `headCommit`
+ * is `git cat-file -p HEAD`, which a shallow checkout still holds.
+ */
+export function comparisonBase(headCommit: string, pullBase: string): string {
+  const parents = [...headCommit.split('\n\n')[0]!.matchAll(/^parent ([0-9a-f]{40})$/gm)].map((match) => match[1]!);
+  return parents.length === 2 ? parents[0]! : pullBase;
+}
+
 async function check(headFile: string) {
   const head = (JSON.parse(readFileSync(headFile, 'utf8')) as Measurement).sizes;
-  const baseSha = process.env.BASE_SHA ?? '';
-  if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error(`BASE_SHA: "${baseSha}", expected the pull request's 40-character base commit`);
+  const pullBase = process.env.BASE_SHA ?? '';
+  if (!/^[0-9a-f]{40}$/.test(pullBase)) throw new Error(`BASE_SHA: "${pullBase}", expected the pull request's 40-character base commit`);
+  const headCommit = Bun.spawnSync(['git', 'cat-file', '-p', 'HEAD'], { stderr: 'inherit' });
+  if (headCommit.exitCode !== 0) throw new Error('git cat-file -p HEAD failed');
+  const baseSha = comparisonBase(headCommit.stdout.toString(), pullBase);
   const short = (sha: string) => sha.slice(0, 8);
 
   const fromMain = await mainMeasurement(baseSha);
