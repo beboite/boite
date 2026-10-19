@@ -199,6 +199,44 @@ describe('orphan sweep', () => {
     expect(procs.liveOf(THREAD).map((record) => record.pid).sort((a, b) => a - b)).toEqual([100, 101, 105, 2000]);
   });
 
+  test('a script under a background shell that still runs outlives the fork stubs Git Bash left exited', () => {
+    const sink = job.sink();
+    const exit = { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
+    const bash = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
+    const sh = 'C:\\Program Files\\Git\\usr\\bin\\sh.exe';
+    // `sh wait.sh` run in the background, as the trace shows it: Git's launcher
+    // starts the MSYS bash, which forks a copy of itself to exec the script.
+    // That copy exits once the script runs, and the script's own fork for
+    // `sleep` does the same.
+    sink.started(THREAD, 130, { exe: 'C:\\Program Files\\Git\\bin\\bash.exe', commandLine: null, parentPid: 100, startedAt: 5000 });
+    sink.started(THREAD, 131, { exe: bash, commandLine: null, parentPid: 130, startedAt: 5010 });
+    sink.started(THREAD, 132, { exe: bash, commandLine: null, parentPid: 131, startedAt: 5020 });
+    sink.started(THREAD, 133, { exe: sh, commandLine: null, parentPid: 132, startedAt: 5030 });
+    sink.exited(THREAD, 132, exit);
+    sink.started(THREAD, 134, { exe: sh, commandLine: null, parentPid: 133, startedAt: 5040 });
+    sink.started(THREAD, 135, { exe: 'C:\\Program Files\\Git\\usr\\bin\\sleep.exe', commandLine: null, parentPid: 134, startedAt: 5050 });
+    sink.exited(THREAD, 134, exit);
+    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104]);
+
+    // The task's shell goes, though its launcher stays: the script is an orphan now.
+    sink.exited(THREAD, 131, exit);
+    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([133, 135]);
+  });
+
+  test('what an orphan shell ran through a fork stub goes with it', () => {
+    const sink = job.sink();
+    const exit = { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
+    const bash = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
+    // An interrupted command: the launcher goes, its MSYS bash and the sleep it forked stay.
+    sink.started(THREAD, 140, { exe: 'C:\\Program Files\\Git\\bin\\bash.exe', commandLine: null, parentPid: 100, startedAt: 5000 });
+    sink.started(THREAD, 141, { exe: bash, commandLine: null, parentPid: 140, startedAt: 5010 });
+    sink.started(THREAD, 142, { exe: bash, commandLine: null, parentPid: 141, startedAt: 5020 });
+    sink.started(THREAD, 143, { exe: 'C:\\Program Files\\Git\\usr\\bin\\sleep.exe', commandLine: null, parentPid: 142, startedAt: 5030 });
+    sink.exited(THREAD, 142, exit);
+    sink.exited(THREAD, 140, exit);
+    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104, 141, 143]);
+  });
+
   test('a new turn inside the grace cancels the sweep', async () => {
     bus.emit(...turn('turn.finished'));
     bus.emit(...turn('turn.started'));
