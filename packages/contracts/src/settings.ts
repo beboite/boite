@@ -97,8 +97,9 @@ export interface Settings {
    */
   asyncQuestions?: boolean;
   /**
-   * Every normal turn asks the agent for short answers: result first, no
-   * preamble, recap or commentary between tool calls. Missing reads as on.
+   * Every normal turn asks the agent to work silently and answer short:
+   * no text between tool calls, result first, no preamble or recap. Claude
+   * also starts without its own progress reminder. Missing reads as on.
    */
   shortAnswers?: boolean;
   /**
