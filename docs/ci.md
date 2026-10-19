@@ -14,7 +14,7 @@ requests reviews; approval is not required. The `release tags` policy protects
 
 `scripts/ci/changes.ts` selects jobs from changed paths. Unknown paths run the
 complete suite; renames affect both the old and new path. Every run has a
-`CI required` gate, including documentation-only changes. It requires success
+`CI required` gate, or `CI draft` on a draft, including documentation-only changes. It requires success
 for selected jobs and an intentional skip for the others. Failure, cancellation
 or an unexpected skip blocks it, including jobs whose dependency never started.
 
@@ -126,6 +126,31 @@ fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 attempt left attached and removes its partial DMGs. Any other failure ends
 the step.
 
+### Draft pull requests
+
+A draft pull request runs `draft` mode: the changes job, the Linux x64 core
+suite, type checks and UI tests, and the focused telemetry and E2E type checks,
+each only when its paths changed. Windows, macOS, desktop packages, E2E,
+stress, Docker and the APK wait. Its gate is named `CI draft`, so branch
+protection never reads a draft's green gate as `CI required` on a head that
+later turns ready. `ready_for_review` starts the `pr` run, and
+`converted_to_draft` cancels a full run in progress. CodeRabbit reviews drafts
+(`.coderabbit.yaml`).
+
+Of the 5,632 runner minutes spent by the 86 pull request runs started on
+2026-10-18 between 12:34 and 21:35 UTC, 2,476 went to runs a newer push
+cancelled, a median 9.8 minutes after the push they tested: the time a review
+bot takes to answer. A green full run
+cost 86 runner minutes; a draft run of the same core change costs about 11,
+all on Linux.
+
+An agent's pull request flow:
+
+1. `gh pr create --draft`.
+2. Fix the draft's CI failures and review findings, batching pushes.
+3. `gh pr ready <number>` once the draft gate is green and the threads are answered.
+4. After that, push only for a full-run failure or a new finding.
+
 ## Build cost
 
 Cargo, Vitest, the Bun store and BuildKit save caches only from `main`. Cargo namespaces
@@ -200,22 +225,28 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 495,400 |
 | UI files, excluding `.br` and `.gz` copies | 4,883,400 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,500,100 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,500,900 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-19, the sign-in card (PR #604) merged with `origin/main` at
-`75ee7714` measures 494,857 entry bytes, 4,882,834 UI bytes and 4,499,604 core
+`a30478ff` measures 494,857 entry bytes, 4,882,834 UI bytes and 4,500,422 core
 JavaScript bytes with `measure()` after fresh `bun run build:ui` and
-`bun run build:core` on Windows, against 492,249, 4,869,493 and 4,493,171
-recorded below for PR #603. The card adds 13,341 UI bytes: 2,608 in the
+`bun run build:core` on Windows, against 492,249 and 4,869,493 recorded below
+for PR #603 and 4,494,324 for PR #616. The card adds 13,341 UI bytes: 2,608 in the
 entry chunk (its loader, card routing and contracts), about 1,540 of
 sentences, and the rest in the lazy `SignInCard` chunk (its browser hosted on
 the Agents page, and `lib/thread-holds.ts`, which shares a hidden thread's
 subscription between cards) and the browser surface it splits from the
 panel's chunk. `browser login`, `browser/sign-in.ts` and the `browser.signIn`
-routes add 6,433 core bytes. The entry, UI and core JavaScript limits rise to 495,400,
-4,883,400 and 4,500,100; `main.js` stays.
+routes add 6,098 core bytes. The entry, UI and core JavaScript limits rise to
+495,400, 4,883,400 and 4,500,900; `main.js` stays.
+
+On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
+4,494,324 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,493,506 for that main: the wait
+for a new process's command line (`whenCommandLineReads`) adds 818 bytes. The
+core JavaScript limit rises to 4,494,400; the other limits stay.
 
 On 2026-10-18, automatic resumes (PR #603) merged with `origin/main` at
 `e22bb094` measure 492,249 entry bytes, 4,869,493 UI bytes and 4,493,171 core
