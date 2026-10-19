@@ -389,9 +389,43 @@ test('a finished subagent is put away as done once its result reached the parent
   runs.get(done)!.finish('README checked.');
   await read('README checked');
 
-  // Archiving the parent puts away every child that stopped working, the stopped one included.
+  await waitFor(() => h.core.threads.require(done).archived);
+  // An archived parent keeps the rest of its family as it was, for its restore.
   await owner.call('threads.archive', { threadId });
-  await waitFor(() => h.core.threads.require(done).archived && h.core.threads.require(stopped).archived);
+  await owner.call('threads.archive', { threadId, archived: false });
+  expect(state(stopped)).toEqual({ archived: false, done: false });
+}, 20_000);
+
+test('a finished subagent stays open while an answer waits for it, and once the user reopened it by hand', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  const child = (await spawn('asks')).thread.id;
+  /** The parent reads its mail until a turn of it holds `text`. */
+  const read = async (text: string) => {
+    await waitFor(() => {
+      const turn = h.core.threads.require(threadId).status === 'running' ? runs.get(threadId) : undefined;
+      if (turn && !turn.ctx.prompt.includes(text)) turn.finish('Read.');
+      return turn?.ctx.prompt.includes(text) === true;
+    }, 5000);
+    runs.get(threadId)!.finish('Read.');
+  };
+  // The user answers its question while its turn runs: the answer waits for that turn to end.
+  const { questionId } = await owner.call('questions.ask', { threadId: child, text: 'Which value?', options: ['First', 'Second'] });
+  await owner.call('questions.answer', { threadId: child, questionId, optionIds: ['2'] });
+  expect(h.core.threads.deferred.deferredAnswers.get(child)?.length).toBe(1);
+  runs.get(child)!.finish();
+  await read('Tests passed');
+  // The held answer opens its next turn instead of being archived with it.
+  await waitFor(() => h.core.threads.require(child).status === 'running', 5000);
+  expect(h.core.threads.require(child).archived).toBe(false);
+  expect(runs.get(child)!.ctx.prompt).toContain('Second');
+  runs.get(child)!.finish('Used the second value.');
+  await read('Used the second value');
+  await waitFor(() => h.core.threads.require(child).archived);
+
+  // Reopened from its done notice, it stays open for the work it already finished.
+  expect((await owner.call('threads.archive', { threadId: child, archived: false })).archived).toBe(false);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(h.core.threads.require(child).archived).toBe(false);
 }, 20_000);
 
 test('a core that left its finished subagents open retires them on start', async () => {

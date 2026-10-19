@@ -309,18 +309,21 @@ A child is archived as done (`doneAt` set) once it is over, so a conversation
 does not keep every agent it started open (`delegation/retirement.ts`):
 
 - a delegated agent, once its last turn ended done, nothing it runs in the
-  background is pending, it watches no pull request, its result reached the
-  parent and no letter waits for it;
+  background is pending or about to wake it, it watches no pull request, no
+  question or held answer waits, its result reached the parent and no letter
+  waits for it;
 - a workflow step's conversation, once its run is done; a failed or stopped
-  run keeps its steps, since a retry continues a step in its own conversation;
-- every child of an archived conversation, once it stopped working.
+  run keeps its steps, since a retry continues a step in its own conversation.
 
-A stopped or failed child stays open for `delegate resume`. Every child stays
-in the team's list and opens from it. A child put away as done comes back when
-its parent writes to it (`delegate send`) or the user sends it a prompt
-(`turns.start`); a child archived another way, or whose parent is archived,
-stays archived. On start, the core applies the same rules to the children an
-older core left open.
+A stopped or failed child stays open for `delegate resume`. Archiving the
+parent leaves the rest of its family as it was, and restoring it brings that
+family back unchanged. Every child stays in the team's list and opens from it.
+A child put away as done comes back when its parent writes to it
+(`delegate send`) or the user sends it a prompt (`turns.start`); a child
+archived another way, or whose parent is archived, stays archived. One the
+user reopens from its done notice stays open until its next turn ends. On
+start, the core applies the same rules to the children an older core left
+open.
 
 ### Questions from a child
 

@@ -85,6 +85,8 @@ async function completedFamily() {
   });
   const children = harness.core.journal.listThreads().filter(thread => thread.parentThreadId === f.threadId);
   expect(children).toHaveLength(2);
+  // Both finished and told their parent: they are put away as done.
+  expect(children.map(child => [child.archived, child.doneAt != null])).toEqual([[true, true], [true, true]]);
   for (const thread of [harness.core.threads.require(f.threadId), ...children]) await f.client.call('threads.markRead', { threadId: thread.id });
   return { ...f, children, runId: run.id };
 }
@@ -311,6 +313,8 @@ test('retained child activity, unread results, protected input and undelivered f
 test('pending and retained side answers on a root or retained descendant keep the merged family visible', async () => {
   const f = await completedFamily();
   const child = f.children[0]!;
+  // Its finished step was put away as done; the user reopened it.
+  await f.client.call('threads.archive', { threadId: child.id, archived: false });
   const descendant = { ...harness.core.threads.require(child.id), id: 'thr_archive_descendant', parentThreadId: child.id };
   harness.core.journal.putThread(descendant);
   harness.core.journal.putTurn({ ...harness.core.journal.listTurns(child.id).at(-1)!, id: 'trn_archive_descendant', threadId: descendant.id });
@@ -338,6 +342,8 @@ test('pending and retained side answers on a root or retained descendant keep th
 test('a child turn admitted during final Git validation keeps its merged parent visible', async () => {
   const f = await completedFamily();
   const childId = f.children[0]!.id;
+  // Its finished step was put away as done; the user reopened it.
+  await f.client.call('threads.archive', { threadId: childId, archived: false });
   restoreDriver?.();
   restoreDriver = setDriver('echo', { protocol: 'echo', startTurn() {
     let finish!: () => void;

@@ -630,11 +630,13 @@ async function watchingChild(setup: Awaited<ReturnType<typeof watchedThread>>, r
   const { owner, threadId } = setup;
   const parent = harness!.core.threads.require(threadId);
   await owner.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: parent.providerId, accountId: parent.accountId, model: parent.model!, effort: null }] } });
-  const child = (await owner.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Open the pull request and see it to green', requestId })).thread.id as ThreadId;
-  await settled(child);
+  // The child watches during its turn, as `boite pr watch` does: a child that finished without one is put away.
+  const child = (await owner.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Open the pull request and see it to green [sleep:300]', requestId })).thread.id as ThreadId;
   harness!.core.journal.setSetting(`linked-pull-requests:${child}`, harness!.core.journal.getSetting(`linked-pull-requests:${threadId}`));
   const agent = await connect(harness!.url, harness!.core.agents.tokenFor(child), { client: { name: 'boite-cli', version: 'test' } });
   try { await agent.call('threads.watchPullRequest', { threadId: child }); } finally { agent.close(); }
+  expect(harness!.core.journal.listTurns(child).some(turn => turn.status === 'running' || turn.status === 'queued')).toBe(true);
+  await settled(child);
   return child;
 }
 
