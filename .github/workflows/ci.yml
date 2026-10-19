@@ -490,6 +490,8 @@ jobs:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
         run: |
+          # Scratch for the PR proof, reverted before merge: shard 1 hangs on purpose under a 10 min budget.
+          if ($env:E2E_SHARD -eq '1') { bun scripts/ci/flaky.ts --job-started $env:BOITE_JOB_STARTED_MS --job-minutes 10 scripts/ci/hang-probe.scratch.ts; exit $LASTEXITCODE }
           $files = @(bun scripts/ci/e2e-shards.ts $env:E2E_SHARD 3)
           if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw 'No browser or core E2E files for this shard' }
           # A quarantined test that fails runs once more (scripts/ci/quarantine.json).
