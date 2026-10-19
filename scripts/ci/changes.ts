@@ -80,22 +80,33 @@ export const CORE_ALL: CoreRunner[] = [...CORE_PR, { os: 'macos-15-intel', name:
 
 // `pr` gates a merge, `warm` follows it on main, `full` is a release or a
 // manual run. Main runs the extra portable architectures, the Intel Mac core
-// suite, and refreshes caches.
+// suite, and refreshes caches. `draft` is a draft pull request: only the Linux
+// checks run, under a gate named `CI draft`, and marking it ready runs `pr`
+// (docs/ci.md#draft-pull-requests).
 // A push event alone provides no proof that its tree passed PR tests, so every
 // mode runs the affected suites. A main push compares with the last main commit
 // whose CI passed, not the previous push: a cancelled or failed run's changes
 // are tested again, so a green main commit has every suite passing on some tree
 // that its later changes did not affect. The nightly publishes on that alone.
-export type Mode = 'pr' | 'warm' | 'full';
+export type Mode = 'draft' | 'pr' | 'warm' | 'full';
 
-export function ciMode(event: string, force: boolean): Mode {
+export function ciMode(event: string, force: boolean, draft = false): Mode {
   if (force) return 'full';
-  if (event === 'pull_request') return 'pr';
+  if (event === 'pull_request') return draft ? 'draft' : 'pr';
   if (event === 'push') return 'warm';
   return 'full';
 }
 
+// A draft keeps the Linux core suite, type checks, UI tests and focused checks;
+// Windows, macOS, desktop packages, E2E, stress, Docker and the APK wait for
+// the ready pull request.
+const CORE_DRAFT: CoreRunner[] = CORE_PR.slice(0, 1);
+
 export function plan(checks: ReturnType<typeof affectedChecks>, mode: Mode) {
+  if (mode === 'draft') {
+    const draft = plan({ ...checks, desktop: false, server: false, android: false, stress: false }, 'pr');
+    return { ...draft, coreRunners: JSON.stringify(CORE_DRAFT) };
+  }
   return {
     ...checks,
     // Full suites already cover these focused checks.
@@ -148,7 +159,7 @@ if (import.meta.main) {
     checks = affectedChecks(files);
     workflows = needsWorkflowLint(files);
   }
-  const mode = ciMode(process.env.GITHUB_EVENT_NAME ?? '', force);
+  const mode = ciMode(process.env.GITHUB_EVENT_NAME ?? '', force, process.env.DRAFT === 'true');
   const output = Object.entries({ ...plan(checks, mode), workflows, mode }).map(([key, value]) => `${key}=${value}\n`).join('');
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, output);
   process.stdout.write(output);

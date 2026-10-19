@@ -1,0 +1,42 @@
+import type { Translation } from '../../i18n.svelte';
+
+export const fr: Translation = {
+  mobile: {
+    clearSearch: 'Effacer la recherche',
+    atWork: '{count} en cours', atWorkFilter: 'Afficher seulement les conversations en cours',
+    draftTitle: 'Que voulez-vous faire ?', draftHint: 'Lancez une tâche, posez une question ou reprenez votre travail.',
+    pairTitle: 'Votre Boite, sur votre téléphone',
+    pairBody: 'Sur l’une de vos machines, ouvrez Réglages, Machines, Ajouter un appareil, puis scannez son QR code ici.',
+    pairStep: 'Sur votre ordinateur : Réglages, Machines, Ajouter un appareil.',
+    pairInstalled: 'Vous venez d’installer Boite ? Ajoutez-la ici aussi : sur iPhone, l’application garde sa connexion séparément du navigateur.',
+    pairPrivacy: 'Le QR code ne sert qu’une fois et expire en quelques minutes. Ce téléphone atteint ensuite toutes les machines du groupe.',
+    scanInApp: "Utilisez le bouton Scanner ici plutôt que l'app Appareil photo : celle-ci ouvre le lien dans Safari, qui garde sa propre connexion.",
+    pairingRequired: 'Ajouter cette application à votre groupe',
+    offlineTitle: 'En attente de votre ordinateur',
+    offlineBody: 'Gardez Boite ouverte sur votre ordinateur et vérifiez votre connexion. Si vous utilisez Tailscale, gardez-le connecté sur les deux appareils.',
+    localNetworkTitle: 'Autorisez le réseau local',
+    localNetworkBody: 'Vos machines sont sur votre réseau local, et votre navigateur en bloque Boite. Dans le navigateur qui fait tourner l’application (Chrome ou un autre), ouvrez Paramètres, Paramètres des sites, Réseau local et autorisez {host}. Sous Android, autorisez aussi Appareils à proximité pour ce navigateur dans ses paramètres d’application.',
+    troubleshoot: 'Dépanner', troubleshootSteps: 'Vérifications de la connexion',
+    checkLocalNetwork: 'Réseau local',
+    checkLocalNetworkHint: 'Dans le navigateur qui fait tourner l’application : Paramètres, Paramètres des sites, Réseau local, autorisez {host}.',
+    localNetworkStates: { granted: 'Autorisé', denied: 'Bloqué', prompt: 'Sans réponse' },
+    checkNearby: 'Appareils à proximité',
+    checkNearbyHint: 'Dans les paramètres Android : Applications, le navigateur qui fait tourner l’application, Autorisations, Appareils à proximité, Autoriser. Android le demande en plus du réseau local.',
+    checkReach: 'Joindre {host}', checkOpen: 'Ouvrir',
+    checkReachHint: 'Ouvrez-la dans un onglet du navigateur. Si la page ne charge pas, ce téléphone ne joint pas la machine : vérifiez Tailscale, le VPN ou le Wi-Fi.',
+    localNetworkAsk: 'Quand votre navigateur le demande, autorisez Boite à accéder aux appareils de votre réseau local : vos machines s’y trouvent.',
+    emptyTitle: 'Commencez une conversation',
+    emptyBody: 'Confiez une tâche à un agent. Vos conversations apparaîtront ici.',
+    emptyActivity: 'Tout est à jour',
+    computer: 'Ordinateur connecté',
+    pairAgain: 'Rajouter',
+    settingsDevice: 'Ce téléphone',
+    settingsPhone: 'Notifications',
+    settingsPrivacy: 'Confidentialité',
+    settingsMachine: 'Machine',
+    settingsBack: 'Retour aux réglages',
+    navigation: 'Navigation', threads: 'Conversations', activity: 'Activité', project: 'Choisir un projet',
+    waitingElsewhere: '{count} en attente de vous',
+    search: 'Trouver une conversation', noActivity: "Aucun agent n'attend votre réponse.", noThreads: 'Aucune conversation ne correspond.'
+  }
+};
