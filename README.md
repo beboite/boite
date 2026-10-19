@@ -3,7 +3,7 @@
 </p>
 <h1 align="center">boite <sub>[bwat]</sub></h1>
 <p align="center">
-  <a href="https://github.com/beboite/boite/releases">Download</a> ·
+  <a href="https://github.com/mtsu-dev/boite/releases">Download</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="docs/server.md">Self-host</a>
 </p>
@@ -37,7 +37,7 @@ Codex or [another supported agent](docs/providers.md) with your existing account
 Boite is open source and in beta. Desktop builds are available for Windows,
 macOS and Linux, including Apple Silicon and Linux ARM64.
 
-1. [Download a desktop release](https://github.com/beboite/boite/releases).
+1. [Download a desktop release](https://github.com/mtsu-dev/boite/releases).
 2. Install and sign in to your agents, then connect them in Settings, Providers.
 3. Open a project, choose a model and start a conversation.
 

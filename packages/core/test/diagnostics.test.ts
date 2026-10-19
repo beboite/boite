@@ -17,7 +17,7 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
     'spawn failed in /home/meetsu/projects/secret-game/src/main.rs and D:\\Dev\\Factory\\Cargo.toml',
     'data at /home/meetsu/.local/share/boite2/logs, config ~/.claude and /home/other/x, C:\\Users\\nuno\\AppData',
     'secret-game crashed on nuno-x870 for meetsu@example.com via Work Account',
-    'GET https://api.anthropic.com/v1/messages 529, https://git.net.tasbem.ch/nuno/brain.git refused, https://github.com/klNuno/boite/pull/3 and https://github.com/beboite/boite/issues/9',
+    'GET https://api.anthropic.com/v1/messages 529, https://git.net.tasbem.ch/nuno/brain.git refused, https://github.com/klNuno/boite/pull/3 and https://github.com/mtsu-dev/boite/issues/9',
     'peer 192.168.1.39 and 100.64.0.15:3773, loopback 127.0.0.1:3773, build 10.0.19045.4529, v1.2.3, at 14:03:22, mac aa:bb:cc:dd:ee:ff, fe80::1c2b:3a4d',
     'thread thr_yrbzgyt5xjtjbq334d7m turn trn_1f992a9ph60nzwzzp8sv',
     'opened file:///home/meetsu/projects/secret-game/index.html.',
@@ -35,7 +35,7 @@ test('the anonymizer replaces paths, names, addresses and private hosts and keep
   for (const personal of ['Doe', 'bobby', 'meetsu', 'secret-game', 'Factory', 'nuno-x870', 'example.com', 'Work Account', 'tasbem', 'klNuno', '192.168.1.39', '100.64.0.15', 'other', 'C:\\Users\\nuno', 'aa:bb:cc', 'fe80']) {
     expect(text).not.toContain(personal);
   }
-  for (const kept of ['https://api.anthropic.com/v1/messages', 'beboite/boite/issues/9', '127.0.0.1:3773', '10.0.19045.4529', 'v1.2.3', '14:03:22', 'thr_yrbzgyt5xjtjbq334d7m', 'trn_1f992a9ph60nzwzzp8sv', '<data>/logs', '~/.claude', '<user>', '<host>', '<email>', '<ip>']) {
+  for (const kept of ['https://api.anthropic.com/v1/messages', 'mtsu-dev/boite/issues/9', '127.0.0.1:3773', '10.0.19045.4529', 'v1.2.3', '14:03:22', 'thr_yrbzgyt5xjtjbq334d7m', 'trn_1f992a9ph60nzwzzp8sv', '<data>/logs', '~/.claude', '<user>', '<host>', '<email>', '<ip>']) {
     expect(text).toContain(kept);
   }
   // A client chooses its record's source and event: they are anonymized too.
@@ -203,7 +203,7 @@ test('an issue is a draft until submitted, and without gh the user gets a prefil
     const draft = await owner.call('diagnostics.issue', { title: `Window froze in ${harness.dataDir}`, description: 'It stopped answering after a turn.' });
     expect(draft.body).toContain('the real timeline line');
     expect(draft.body).not.toContain('fake-tail-line');
-    expect(draft).toMatchObject({ repository: 'beboite/boite', url: null, gh: 'missing', error: null });
+    expect(draft).toMatchObject({ repository: 'mtsu-dev/boite', url: null, gh: 'missing', error: null });
     expect(draft.title).not.toContain(harness.dataDir);
     expect(draft.body).toContain('### Environment');
     expect(new URL(draft.prefillUrl).searchParams.get('title')).toBe(draft.title);
@@ -218,7 +218,7 @@ test('an issue is a draft until submitted, and without gh the user gets a prefil
     try {
       const refused = await agent.call('diagnostics.issue', { threadId, title: 'Window froze', description: 'x', includeLogs: false, submit: true });
       expect(refused).toMatchObject({ url: null, error: expect.stringContaining('an agent cannot publish') });
-      expect(refused.prefillUrl).toStartWith('https://github.com/beboite/boite/issues/new?');
+      expect(refused.prefillUrl).toStartWith('https://github.com/mtsu-dev/boite/issues/new?');
     } finally { agent.close(); }
     for (const params of [{ title: 'no', description: 'x' }, { title: 'Valid title', description: '' }, { title: 'two\nlines', description: 'x' }]) {
       try { await owner.call('diagnostics.issue', params); throw new Error('accepted'); }

@@ -64,12 +64,12 @@ export function fakePlugins(): PluginState[] {
     {
       ...base, id: 'douane', name: 'Douane', origin: 'recommended',
       description: 'Your Claude, Codex, Grok and Copilot subscriptions behind one local gateway, with quota routing and a dashboard. Boite\'s subscription proxy can point at it.',
-      homepage: 'https://github.com/beboite/douane', version: '0.3.0', availableVersion: '0.3.0', status: 'installed', source: null,
-      artifact: { url: 'https://github.com/beboite/douane/releases/download/v0.3.0/douane-windows-x64.exe', sha256: '7e1a3c5b9d2f4a6c8e0b1d3f5a7c9e2b4d6f8a0c1e3b5d7f9a2c4e6b8d0f1a3c' },
+      homepage: 'https://github.com/mtsu-dev/douane', version: '0.3.0', availableVersion: '0.3.0', status: 'installed', source: null,
+      artifact: { url: 'https://github.com/mtsu-dev/douane/releases/download/v0.3.0/douane-windows-x64.exe', sha256: '7e1a3c5b9d2f4a6c8e0b1d3f5a7c9e2b4d6f8a0c1e3b5d7f9a2c4e6b8d0f1a3c' },
       commands: gatewayCommands('douane'), pools: [],
       gateway: runningGateway('0.3.0', 4343, Date.parse('2026-10-10T08:00:00Z')),
       updates: {
-        source: { url: 'https://github.com/beboite/douane', ref: 'main' }, checking: false,
+        source: { url: 'https://github.com/mtsu-dev/douane', ref: 'main' }, checking: false,
         checkedAt: Date.parse('2026-10-10T08:01:00Z'), nextCheckAt: Date.parse('2026-10-10T14:01:00Z'),
         available: null, ignored: null, error: null
       }

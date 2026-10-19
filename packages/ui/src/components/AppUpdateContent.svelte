@@ -43,7 +43,7 @@
     {#if update.version}
       <h3>{update.channel === 'nightly' ? strings.appUpdate.nightly : strings.appUpdate.stable} {update.version}</h3>
       {#if age}<p class="published" data-testid="app-update-published">{fill(strings.appUpdate.released, { time: age })}</p>{/if}
-      <a class="changelog" href={`https://github.com/beboite/boite/releases/tag/v${encodeURIComponent(update.version)}`} target="_blank" rel="noopener noreferrer" data-testid="app-update-changelog"><span class="ui-label">{strings.appUpdate.changelog}</span><ExternalLink size={13} /></a>
+      <a class="changelog" href={`https://github.com/mtsu-dev/boite/releases/tag/v${encodeURIComponent(update.version)}`} target="_blank" rel="noopener noreferrer" data-testid="app-update-changelog"><span class="ui-label">{strings.appUpdate.changelog}</span><ExternalLink size={13} /></a>
     {/if}
 
     <div class="status" class:ready={update.phase === 'ready'} class:error={update.phase === 'error'} role="status" aria-live="polite" data-testid="app-update-status">

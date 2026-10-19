@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Use
-[GitHub's private vulnerability reporting](https://github.com/beboite/boite/security/advisories/new).
+[GitHub's private vulnerability reporting](https://github.com/mtsu-dev/boite/security/advisories/new).
 Do not report vulnerabilities in public issues, pull requests or discussions.
 
 Include the affected version or commit, platform, reproduction steps and what

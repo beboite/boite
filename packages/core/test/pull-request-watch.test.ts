@@ -88,9 +88,9 @@ test('remarks count when someone else wrote them, once each, a bot rewriting one
   expect(evaluate(conflict.next, { ...detail([]), mergeable: 'CONFLICTING' }, null).changes).toEqual([]);
 });
 
-// Bodies as CodeRabbit and mtsu-patrol posted them on beboite/boite #441, #567 and #583, trimmed.
+// Bodies as CodeRabbit and mtsu-patrol posted them on mtsu-dev/boite #441, #567 and #583, trimmed.
 const QUOTA = '<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n\n> [!WARNING]\n> ## Review limit reached\n> \n> You\'ve used all free OSS reviews for now. Wait for the free limit to reset to keep reviewing this public repository.\n> \n> **Next included review available in 35 minutes.**';
-const WALKTHROUGH = '<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- review_stack_entry_start -->\n\n<a href="https://app.coderabbit.ai/change-stack/beboite/boite/pull/566"><picture><img alt="Review in Change Stack →" height="32"></picture></a>\n\n<!-- walkthrough_start -->\n\n<details>\n<summary><strong>📝 Walkthrough</strong></summary>\n\nThis pull request adds sleeping for idle browser tabs.';
+const WALKTHROUGH = '<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- review_stack_entry_start -->\n\n<a href="https://app.coderabbit.ai/change-stack/mtsu-dev/boite/pull/566"><picture><img alt="Review in Change Stack →" height="32"></picture></a>\n\n<!-- walkthrough_start -->\n\n<details>\n<summary><strong>📝 Walkthrough</strong></summary>\n\nThis pull request adds sleeping for idle browser tabs.';
 const CR_REVIEW = (count: number) => `**Actionable comments posted: ${count}**\n\n---\n\n<!-- autofix_checkbox_start -->\n- [ ] <!-- {"checkboxId":"4b0d0e0a"} --> 🪄 Fix comments: Fix CodeRabbit comments on this PR\n<!-- autofix_checkbox_end -->`;
 const CR_OUTSIDE = '**Actionable comments posted: 0**\n\n> [!CAUTION]\n> Some comments are outside the diff and can’t be posted inline due to GitHub limitations.\n> \n> **⚠️ Outside diff range comments (1)**';
 const CR_INLINE = '**🎯 Functional Correctness** | **🟡 Minor** | **⚡ Quick win**\n\n**Pass the kept pause origin to `stop`.**\n\nThe comment on Line 242 says that saving other settings of a paused team keeps the recorded pause origin.';
@@ -99,7 +99,7 @@ const CR_WITHDRAW = '@klNuno, you’re right. I withdraw this finding. Thanks fo
 const CR_CONCEDE = '@klNuno You’re right about the retry, but the fix is still incomplete: the cancellation handler does not release its lock.';
 const CR_PUSHBACK = '@klNuno Thanks for the update, but the fix is incomplete: `stop` still drops the recorded origin when the team has live work.';
 const PATROL_REVIEW = '<!-- mtsu-patrol:297ca19b-7b01-4632-8bc8-075409846b6b -->\n\n**Actionable comments posted: 0**\n\n<details>\n<summary>Outside diff range comments (1)</summary>\n\n`L90-L104`: **Missing letter marks landed, pending letter never flashes**';
-const PATROL_SUMMARY = (posted: boolean, head: string) => `<!-- mtsu-patrol:summary -->\n<!-- mtsu-patrol:9017fed0 -->\n\nThis pull request makes a discussion opened on a missing letter land at the end.\n\n${posted ? '**Comments posted**: no critical or major finding.\n\n1 minor in [the review](https://github.com/beboite/boite/pull/441#pullrequestreview-5485468072).' : '**No comments posted**: the reviewers raised no finding.'}\n\n<details>\n<summary>Review details</summary>\n\n- Compared commits: \`e7b2b8c\` to \`${head}\`\n\n</details>`;
+const PATROL_SUMMARY = (posted: boolean, head: string) => `<!-- mtsu-patrol:summary -->\n<!-- mtsu-patrol:9017fed0 -->\n\nThis pull request makes a discussion opened on a missing letter land at the end.\n\n${posted ? '**Comments posted**: no critical or major finding.\n\n1 minor in [the review](https://github.com/mtsu-dev/boite/pull/441#pullrequestreview-5485468072).' : '**No comments posted**: the reviewers raised no finding.'}\n\n<details>\n<summary>Review details</summary>\n\n- Compared commits: \`e7b2b8c\` to \`${head}\`\n\n</details>`;
 
 test('a bot wakes the agent for findings only: quota notices, summaries, empty counts and in-place rewrites stay quiet', () => {
   const at = '2026-10-15T09:30:00Z', later = '2026-10-15T09:50:00Z';
@@ -168,7 +168,7 @@ test('CI wakes on its first failure and on its verdict, not on each check that f
   const rabbit = { name: 'CodeRabbit', context: true, status: 'PENDING' };
   let memory = initialMemory(since);
   const step = (runs: Run[]) => { const result = evaluate(memory, detail(runs), null); memory = result.next; return result.changes; };
-  // beboite/boite requires "PR title", done in seconds, and "CI required", which exists only once every job finished.
+  // mtsu-dev/boite requires "PR title", done in seconds, and "CI required", which exists only once every job finished.
   expect(step([title, job('Core tests', running), job('Build UI', running), rabbit])).toEqual([]);
   expect(step([title, job('Core tests'), job('Build UI', running), rabbit])).toEqual([]);
   expect(step([title, job('Core tests'), job('Build UI'), gate(running), rabbit])).toEqual([]);
@@ -227,7 +227,7 @@ test('the base branch names what it requires through its rulesets and its classi
 });
 
 test('a draft passes on the required checks it reports, without waiting for one it never reports', () => {
-  // beboite/boite's draft run names its planning job apart, so a draft never satisfies the ruleset (docs/ci.md#draft-pull-requests).
+  // mtsu-dev/boite's draft run names its planning job apart, so a draft never satisfies the ruleset (docs/ci.md#draft-pull-requests).
   const required = ['Plan and repository checks', 'Build UI'];
   const draft = parseDetail(detailJson([{ name: 'Plan and repository checks (draft)' }, { name: 'Build UI' }], { isDraft: true }));
   expect(draft.draft).toBe(true);
@@ -407,7 +407,7 @@ test('a watch reads first without waking, wakes once per change with links, and 
 
 test('a check the base branch requires holds "passed" back until it reported', async () => {
   const { owner, threadId, github, watches, drive } = await watchedThread();
-  // beboite/boite's ruleset requires "PR title", done in seconds, and "CI required", created only once every other job ended.
+  // mtsu-dev/boite's ruleset requires "PR title", done in seconds, and "CI required", created only once every other job ended.
   github.rules = ['PR title', 'CI required'];
   const title = { name: 'PR title', workflow: 'pr title', required: true };
   github.runs = [{ ...title, status: 'IN_PROGRESS', conclusion: '' }];

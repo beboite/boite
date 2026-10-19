@@ -71,7 +71,7 @@
   {/if}
   {#if desktopOffered && !desktopHere}<p class="status">{strings.desktopUpdate.elsewhere}</p>{/if}
   {#if desktopVersion && (desktopOffered || desktopActive)}
-    <a class="release" href={`https://github.com/beboite/boite/releases/tag/v${encodeURIComponent(desktopVersion)}`} target="_blank" rel="noopener noreferrer"><span class="ui-label">{strings.serverUpdate.release}</span><ExternalLink size={12} /></a>
+    <a class="release" href={`https://github.com/mtsu-dev/boite/releases/tag/v${encodeURIComponent(desktopVersion)}`} target="_blank" rel="noopener noreferrer"><span class="ui-label">{strings.serverUpdate.release}</span><ExternalLink size={12} /></a>
   {/if}
   {:else}
   <div class="update-row">
@@ -100,7 +100,7 @@
     {/if}
     {#if state.version && updater.offered}
       <div class="metadata">
-        <a class="release" href={`https://github.com/beboite/boite/releases/tag/v${encodeURIComponent(state.version)}`} target="_blank" rel="noopener noreferrer"><span class="ui-label">{strings.serverUpdate.release}</span><ExternalLink size={12} /></a>
+        <a class="release" href={`https://github.com/mtsu-dev/boite/releases/tag/v${encodeURIComponent(state.version)}`} target="_blank" rel="noopener noreferrer"><span class="ui-label">{strings.serverUpdate.release}</span><ExternalLink size={12} /></a>
         <details class="update-details" data-testid="server-update-details">
           <summary data-testid="server-update-details-toggle">{strings.serverUpdate.details}</summary>
           <p>{strings.serverUpdate.timing}</p>
@@ -115,7 +115,7 @@
       <summary>{strings.serverUpdate.manualTitle}</summary>
       <p>{updater.legacy ? strings.serverUpdate.legacy : state?.mode === 'docker' ? strings.serverUpdate.docker : strings.serverUpdate.manual}</p>
       {#if state?.mode === 'docker'}<code>docker compose pull &amp;&amp; docker compose up -d</code>{/if}
-      <a class="release" href="https://github.com/beboite/boite/blob/main/docs/server.md" target="_blank" rel="noopener noreferrer"><span class="ui-label">{strings.serverUpdate.guide}</span><ExternalLink size={12} /></a>
+      <a class="release" href="https://github.com/mtsu-dev/boite/blob/main/docs/server.md" target="_blank" rel="noopener noreferrer"><span class="ui-label">{strings.serverUpdate.guide}</span><ExternalLink size={12} /></a>
     </details>
   {/if}
   {/if}

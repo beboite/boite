@@ -8,7 +8,7 @@ prove every desktop interaction or real provider login.
 
 ## Installing a release
 
-[Desktop downloads](https://github.com/beboite/boite/releases) include Windows
+[Desktop downloads](https://github.com/mtsu-dev/boite/releases) include Windows
 x64, macOS Intel and Apple Silicon, and Linux x64 and ARM64.
 
 On macOS 13 or newer, drag Boite to Applications. Developer ID releases are

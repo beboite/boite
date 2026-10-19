@@ -1,6 +1,6 @@
 services:
   boite-server:
-    image: ${BOITE_IMAGE:-ghcr.io/beboite/boite/boite-server:latest}
+    image: ${BOITE_IMAGE:-ghcr.io/mtsu-dev/boite/boite-server:latest}
     ports:
       - "${BOITE_BIND:-127.0.0.1}:7337:7337"
     volumes:

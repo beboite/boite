@@ -8,7 +8,7 @@ const fresh = { elapsedMs: 0 };
 function run(fields: Partial<CiRun> = {}): CiRun {
   return {
     id: 10, head_sha: sha, head_branch: 'main', event: 'push', status: 'completed', conclusion: 'success',
-    run_attempt: 1, html_url: 'https://github.com/beboite/boite/actions/runs/10', ...fields,
+    run_attempt: 1, html_url: 'https://github.com/mtsu-dev/boite/actions/runs/10', ...fields,
   };
 }
 

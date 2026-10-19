@@ -16,7 +16,7 @@ only when they hold a plugin:
 - Recommended: the plugins Boite ships a manifest for and that are not
   installed yet, in the order Boite lists them. Today that is
   [Bots](https://github.com/beboite/bots), the desktop companion, and
-  [Douane](https://github.com/beboite/douane), the subscription gateway. A row there
+  [Douane](https://github.com/mtsu-dev/douane), the subscription gateway. A row there
   carries the name, version, a link to the source, the description and
   Install, with no state line.
 - Add from a git URL: any repository with a `boite-plugin.json` at its root.
@@ -277,7 +277,7 @@ calls it is refused, and neither receives it.
 ## Gateways
 
 A plugin that provides `gateway` is a subscription gateway speaking Douane's
-runtime contract, such as [Douane](https://github.com/beboite/douane). Boite
+runtime contract, such as [Douane](https://github.com/mtsu-dev/douane). Boite
 runs it in the background; the subscription proxy's local mode points at it
 ([providers](providers.md#douane-on-this-machine)).
 

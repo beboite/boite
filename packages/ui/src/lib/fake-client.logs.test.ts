@@ -105,10 +105,10 @@ test('fake diagnostics: summary, export and issue for the owner; report for the 
     for (const params of [[], { thread: 'x' }]) await expect(client.call('diagnostics.summary', params as never)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
 
     const draft = await client.call('diagnostics.issue', { title: 'The window froze', description: 'It froze while C:\\Users\\you\\code was open.' });
-    expect(draft).toMatchObject({ repository: 'beboite/boite', url: null, gh: 'missing', error: null });
+    expect(draft).toMatchObject({ repository: 'mtsu-dev/boite', url: null, gh: 'missing', error: null });
     expect(draft.body).toContain('### What happened');
     expect(draft.body).not.toContain('C:\\Users\\you');
-    expect(draft.prefillUrl.startsWith('https://github.com/beboite/boite/issues/new?')).toBe(true);
+    expect(draft.prefillUrl.startsWith('https://github.com/mtsu-dev/boite/issues/new?')).toBe(true);
     expect(draft.exportPath).toMatch(/boite-diagnostics-.*\.txt$/);
     const withoutLogs = await client.call('diagnostics.issue', { title: 'The window froze', description: 'Again.', includeLogs: false });
     expect(withoutLogs.exportPath).toBeNull();

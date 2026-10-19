@@ -45,7 +45,7 @@ test('shows the release link, age, installed channel and ready action', async ()
   expect(text).toContain('Boite Nightly');
   expect(text).toContain('2.0.0-nightly.8');
   expect(text).not.toContain('Update downloads resume correctly');
-  expect(document.querySelector<HTMLAnchorElement>('[data-testid=app-update-changelog]')?.href).toBe('https://github.com/beboite/boite/releases/tag/v2.0.0-nightly.8');
+  expect(document.querySelector<HTMLAnchorElement>('[data-testid=app-update-changelog]')?.href).toBe('https://github.com/mtsu-dev/boite/releases/tag/v2.0.0-nightly.8');
   expect(document.querySelector('[data-testid=app-update-published]')?.textContent).toContain('Released');
   expect(document.querySelector('[data-testid=app-update-install]')).not.toBeNull();
   stop();
