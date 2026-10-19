@@ -4,6 +4,8 @@
   import { checkSettingsPatch, type WorktreeStorage } from '@boite/contracts';
   import Menu from './Menu.svelte';
   import InfoTip from './InfoTip.svelte';
+  import SaveStatus from './SaveStatus.svelte';
+  import { Autosave, TYPING_MS } from '../lib/autosave.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -14,32 +16,31 @@
   let draft = $state<{ owner: Store; value: Draft } | null>(null);
   let busy = $state(false);
   let error = $state('');
+  /** What a save sends: the mode, and the folder only while one is typed. */
+  const patch = () => ({ worktreeStorage: { mode: current.mode, directory: current.directory.trim() || null } as WorktreeStorage });
+  const save = new Autosave(write, () => checkSettingsPatch(patch()).ok ? null : s.storageInvalid);
+  $effect(() => () => void save.flush());
   let saved = $derived<WorktreeStorage>(store.settings?.worktreeStorage ?? { mode: 'project', directory: null });
   let current = $derived<Draft>(draft?.owner === store ? draft.value : { mode: saved.mode, directory: saved.directory ?? '' });
-  let changed = $derived(current.mode !== saved.mode || current.directory.trim() !== (saved.directory ?? ''));
   let items = $derived([
     { id: 'project', label: s.storageProject, active: current.mode === 'project' },
     { id: 'shared', label: s.storageShared, active: current.mode === 'shared' }
   ]);
 
-  function edit(patch: Partial<Draft>) {
-    draft = { owner: store, value: { ...current, ...patch } };
+  /** A change saves by itself: a folder being typed waits for a pause, a picked mode or folder saves now. */
+  function edit(value: Partial<Draft>, delay = 0) {
+    draft = { owner: store, value: { ...current, ...value } };
     error = '';
+    save.change('', delay);
   }
 
-  async function save() {
-    if (busy) return;
+  async function write() {
     const owner = store;
     const submitted = current;
-    const worktreeStorage = { mode: current.mode, directory: current.directory.trim() || null } as WorktreeStorage;
-    if (!checkSettingsPatch({ worktreeStorage }).ok) { error = s.storageInvalid; return; }
-    busy = true;
-    try {
-      const ok = await owner.saveSettings({ worktreeStorage });
-      if (store !== owner) return;
-      if (ok && current === submitted) draft = null;
-      error = ok ? '' : s.storageSaveFailed;
-    } finally { busy = false; }
+    const ok = await owner.saveSettings(patch());
+    if (store !== owner) return;
+    if (ok && current === submitted) draft = null;
+    if (!ok) throw new Error(s.storageSaveFailed);
   }
 
   async function browse() {
@@ -56,10 +57,11 @@
   }
 </script>
 
-<form data-testid="worktree-storage" onsubmit={event => { event.preventDefault(); void save(); }}>
+<form data-testid="worktree-storage" onsubmit={event => { event.preventDefault(); void save.flush(); }}>
   <fieldset disabled={busy || !store.settings || store.connection !== 'ready'}>
   <div class="switch-row">
     <span class="ui-label-box"><span class="ui-label">{s.storage}</span><InfoTip topic={s.storage} text={`${current.mode === 'project' ? `${s.storageProjectHint} .boite/worktrees` : s.storageSharedHint} ${s.storageNewOnly}`} /></span>
+    <SaveStatus {save} />
     <Menu {items} label={s.storage} placement="bottom" align="end" testid="worktree-storage-mode"
       onpick={id => edit({ mode: id as Draft['mode'] })}>
       <span class="ui-label">{current.mode === 'project' ? s.storageProject : s.storageShared}</span><ChevronDown size={13} />
@@ -69,7 +71,7 @@
     <label for="{uid}-directory">{s.storageDirectory}</label>
     <div class="directory">
       <input id="{uid}-directory" data-testid="worktree-storage-directory" type="text" value={current.directory}
-        oninput={event => edit({ directory: event.currentTarget.value })} disabled={busy}
+        oninput={event => edit({ directory: event.currentTarget.value }, TYPING_MS)} onchange={() => void save.flush()} disabled={busy}
         placeholder={s.storagePlaceholder} spellcheck="false" autocomplete="off" />
       {#if store.pickerAvailable}
         <button type="button" class="icon" aria-label={s.storageBrowse} title={s.storageBrowse} disabled={busy} onclick={() => void browse()}><FolderOpen size={16} /></button>
@@ -77,7 +79,6 @@
     </div>
   {/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
-  <button type="submit" data-testid="worktree-storage-save" disabled={busy || !store.settings || !changed || store.connection !== 'ready'}><span class="ui-label">{strings.common.save}</span></button>
   </fieldset>
 </form>
 

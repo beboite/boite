@@ -232,8 +232,9 @@ group needs its exact origin under Advanced, Allowed browser origins, on each
 machine it opens a socket on. Origins contain a scheme,
 host and optional port, with no wildcard. A pasted address keeps only its
 origin: the core drops a trailing `/` or a path, since the browser's `Origin`
-header never carries one, and a line given twice is kept once. Save the list on
-that core.
+header never carries one, and a line given twice is kept once. The list saves
+on that core by itself after a pause in typing; until every line is an origin,
+nothing is sent and the card says so.
 Removing an origin blocks new connections from it; existing authenticated
 connections must be revoked separately if they should lose access immediately.
 
