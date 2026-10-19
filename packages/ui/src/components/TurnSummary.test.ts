@@ -200,6 +200,19 @@ test('mid-turn compaction hides reply activity without labelling the whole turn 
   expect(document.querySelector('[data-testid=turn-provider-signal]')).toBeNull();
 });
 
+test('mid-turn compaction counts from when the compacting phase began', () => {
+  vi.useFakeTimers({ now: STARTED + 300_000 });
+  running = mount(TurnSummary, { target: document.body, props: {
+    turn: turn({ status: 'running', finishedAt: null }),
+    progress: { turnId: 'turn-1', phase: 'compacting', detail: null, at: Date.now() - 1_000, since: Date.now() - 83_000, providerAt: Date.now() },
+  } });
+  flushSync();
+  expect(text('compaction-elapsed')).toBe('Elapsed: 1m 23s');
+  vi.advanceTimersByTime(2_000);
+  flushSync();
+  expect(text('compaction-elapsed')).toBe('Elapsed: 1m 25s');
+});
+
 test.each([
   ['done', 'Context compacted', 'Compacted in 4m 41s'],
   ['error', 'Compaction failed', 'Elapsed: 4m 41s'],

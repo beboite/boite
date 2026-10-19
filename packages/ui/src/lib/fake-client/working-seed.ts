@@ -50,7 +50,7 @@ export function seedWorking(ctx: FakeContext, count: number): () => void {
       ctx.emit('thread.load', { threadId: id, load: structuredClone(thread.load) });
       const at = Date.now();
       const detail = PROGRESS[(tick + index) % PROGRESS.length] ?? null;
-      ctx.emit('thread.updated', { ...toSummary(thread), progress: { turnId: thread.turns[0]!.id, phase: detail === null ? 'thinking' : 'tool', detail, at, providerAt: at } });
+      ctx.emit('thread.updated', { ...toSummary(thread), progress: { turnId: thread.turns[0]!.id, phase: detail === null ? 'thinking' : 'tool', detail, at, since: at, providerAt: at } });
     }
   }, 1000);
   return () => clearInterval(timer);

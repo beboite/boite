@@ -91,6 +91,8 @@ export interface ThreadProgress {
   phase: 'starting' | 'thinking' | 'compacting' | 'retrying' | 'tool' | 'working' | 'waiting';
   detail: string | null;
   at: Timestamp;
+  /** When the current phase began: `at` of its first event in a row. An older core leaves it out. */
+  since?: Timestamp;
   /** Latest provider signal, including status notifications that do not advance activity. */
   providerAt?: Timestamp | null;
 }
