@@ -19,8 +19,15 @@
   import type { Store } from '../lib/store.svelte';
   import SurfaceIcon from './SurfaceIcon.svelte';
   import { chatPrefs, setChatPref } from '../lib/chat-prefs.svelte';
+  import { featureOn } from '../lib/features.svelte';
+  import { setFeature } from '../lib/features';
 
-  let { store }: { store: Store } = $props();
+  /**
+   * `phone`: what a phone reads and looks like. The column width, the terminal,
+   * the workspace and the header's buttons are the desktop's; the chat's files
+   * and previews switch, on the desktop's General page, joins the display here.
+   */
+  let { store, phone = false }: { store: Store; phone?: boolean } = $props();
   const uid = $props.id();
 
   // The owner's buttons (the terminal, Add a project) are not a paired device's to hide.
@@ -206,6 +213,7 @@
       </div>
     </div>
     <ThemeColors />
+    {#if !phone}
     <div class="switch-row">
       <span class="text ui-label">{strings.settings.chatWidth}</span>
       <div class="segmented" role="group" aria-label={strings.settings.chatWidth}>
@@ -227,6 +235,7 @@
       <input type="checkbox" role="switch" checked={terminalGpu} data-testid="terminal-gpu"
         onchange={(event) => { terminalGpu = event.currentTarget.checked; setTerminalGpu(terminalGpu); }} />
     </label>
+    {/if}
     <label class="switch-row">
       <span class="text ui-label">{strings.settings.groupChanges}</span>
       <input type="checkbox" role="switch" checked={chatPrefs.groupChanges} data-testid="chat-group-changes" onchange={event => setChatPref('groupChanges', event.currentTarget.checked)} />
@@ -235,6 +244,13 @@
       <span class="text ui-label">{strings.settings.expandDiffs}</span>
       <input type="checkbox" role="switch" checked={chatPrefs.expandDiffs} data-testid="chat-expand-diffs" onchange={event => setChatPref('expandDiffs', event.currentTarget.checked)} />
     </label>
+    {#if phone}
+      <label class="switch-row" for="{uid}-chat-artifacts">
+        <span class="text ui-label-box"><span class="ui-label" id="{uid}-chat-artifacts-name">{strings.features.chatArtifacts.title}</span><InfoTip topic={strings.features.chatArtifacts.title} text={strings.features.chatArtifacts.hint} /></span>
+        <input id="{uid}-chat-artifacts" aria-labelledby="{uid}-chat-artifacts-name" type="checkbox" role="switch" checked={featureOn('chat-artifacts')} data-testid="setting-chat-artifacts"
+          onchange={event => setFeature('chat-artifacts', event.currentTarget.checked)} />
+      </label>
+    {/if}
     {#if hasMaterial}
       <div class="switch-row">
         <span class="text ui-label">
@@ -291,6 +307,7 @@
     {/if}
   </section>
 
+  {#if !phone}
   <!-- What the tour's question set, each piece on its own. -->
   <section class="card" id="settings-workspace">
     <h2>{strings.settings.workspace}</h2>
@@ -346,6 +363,7 @@
       </div>
     {/each}
   </section>
+  {/if}
 </div>
 
 <style>

@@ -60,19 +60,25 @@ for (const width of [1280, 390]) {
       await revealProject('t-scheduler');
       await option('other');
       await page.waitFor(`!document.querySelector('${root} ${id('project-shelf-toggle')}') && document.querySelector('${root} [data-project-id="${empty}"]')`);
-      await option('merged');
-      await revealProject(merged);
-      expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.client.call('threads.get', {threadId:'t-parser'}).then(t=>t.archived)`)).toBe(true);
-      await shot('projects-visible');
-      await showThreadView(page, 'recent', prefix);
-      await page.waitFor(`document.querySelector('${row(merged)}')`);
-      await option('merged');
-      expect(await page.evaluate('globalThis.__boiteTest.workspace.machines[0].store.client.sweepMergedPrArchives()')).toBe(1);
-      await page.waitFor(`!document.querySelector('${row(merged)}')`);
-      await page.click(id(`${prefix}project-filter`));
-      await page.evaluate(`Array.from(document.querySelectorAll('${id(`${prefix}project-filter-menu`)} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-boite'])).click()`);
-      await option('merged');
-      expect(await page.evaluate('globalThis.__boiteTest.workspace.machines.map(m => m.store.projects.find(p => p.id === "p-boite").autoArchiveMergedPr)')).toEqual([true, false]);
+      if (width < 720) {
+        // A project's own switches stay on the desktop: the phone's panel holds the view and the groups.
+        expect(await page.evaluate(`document.querySelector('${menu} [data-value=merged], ${menu} [data-value="order:manual"]') === null`)).toBe(true);
+        await shot('projects-visible');
+      } else {
+        await option('merged');
+        await revealProject(merged);
+        expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.client.call('threads.get', {threadId:'t-parser'}).then(t=>t.archived)`)).toBe(true);
+        await shot('projects-visible');
+        await showThreadView(page, 'recent', prefix);
+        await page.waitFor(`document.querySelector('${row(merged)}')`);
+        await option('merged');
+        expect(await page.evaluate('globalThis.__boiteTest.workspace.machines[0].store.client.sweepMergedPrArchives()')).toBe(1);
+        await page.waitFor(`!document.querySelector('${row(merged)}')`);
+        await page.click(id(`${prefix}project-filter`));
+        await page.evaluate(`Array.from(document.querySelectorAll('${id(`${prefix}project-filter-menu`)} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-boite'])).click()`);
+        await option('merged');
+        expect(await page.evaluate('globalThis.__boiteTest.workspace.machines.map(m => m.store.projects.find(p => p.id === "p-boite").autoArchiveMergedPr)')).toEqual([true, false]);
+      }
       await page.waitFor(`document.querySelector('${menu} [role=switch]')`);
       await shot('recent-options');
       // Each switch draws one knob, the shared one from app.css, not a second of its own.

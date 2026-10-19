@@ -123,16 +123,14 @@ test('working grouping persists on the device, retains attention and works on th
   await page.click(phoneToggle('working'));
   await page.type(id('mobile-search'), 'Finish the trace');
   await page.waitFor(`document.querySelector(${JSON.stringify(phoneRow(main))})`);
-  await page.click(id('mobile-menu'));
-  await page.click(id('mobile-settings'));
-  await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
-  expect(await page.evaluate(`document.querySelector('${id('setting-group-working-threads')}').checked`)).toBe(true);
+  // The phone groups from the display options at the end of its search field.
+  await page.click(id('mobile-grouping-options'));
+  await page.waitFor(`document.querySelector('${id('mobile-grouping-options-menu')} [data-value=working]')?.getAttribute('aria-checked') === 'true'`);
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await capture('recent-settings-phone.png');
-  await page.click(id('setting-group-working-threads'));
+  await page.click(`${id('mobile-grouping-options-menu')} [data-value=working]`);
   expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.recent.v1')).groupWorking`)).toBe(false);
-  await page.click(id('mobile-menu'));
-  await page.click(id('mobile-conversations'));
+  await page.click(id('mobile-grouping-options'));
   await page.type(id('mobile-search'), '');
   await page.waitFor(`!document.querySelector('${phoneToggle('working')}')`);
   await page.waitFor(`document.querySelector(${JSON.stringify(phoneRow(main))})`);

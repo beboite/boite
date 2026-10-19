@@ -226,9 +226,10 @@ test('pending agent updates remain in Machines after the tour closes', async () 
   await page.click('[data-testid=onboarding-skip]');
   await page.waitFor(`!document.querySelector('[data-testid=onboarding]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid=harness-update-notices]') === null`)).toBe(true);
+  // A phone's settings open on the machine itself, which leads to Machines.
   await mobileAction(page, 'mobile-settings');
-  await page.waitFor(`document.querySelector('[data-testid=settings-tab-machines]')`);
-  await page.click('[data-testid=settings-tab-machines]');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-connection]')`);
+  await page.click('[data-testid=mobile-settings-connection]');
   await page.waitFor(`document.querySelectorAll('[data-testid=harness-update-row-run]').length === 2`);
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.harnessUpdates.filter(update => update.pending).length`)).toBe(2);
 }, 20_000);

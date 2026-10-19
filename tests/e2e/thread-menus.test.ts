@@ -31,7 +31,8 @@ for (const width of [1280, 390]) {
       expect((await page.text(`${menu} [data-value=archive]`)).trim()).toBe('Archive');
       expect(await page.evaluate(`Array.from(document.querySelectorAll('${menu} [role=menuitem]')).every(row => row.querySelector('svg'))`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${menu} [data-value=delete]').previousElementSibling.getAttribute('role')`)).toBe('separator');
-      await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+      // The phone's chat body is covered by the list here: its transitions never finish, so settle by what is drawn.
+      await page.settleAnimations();
       expect(await page.evaluate(`(() => { const r = document.querySelector('${menu}').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; })()`)).toBe(true);
       await page.screenshot(join(import.meta.dir, '.artifacts', `thread-menu-row-${width}.png`));
       await page.click(`${menu} [data-value=archive]`);
@@ -54,13 +55,10 @@ for (const width of [1280, 390]) {
       await page.click('[data-testid=undo-action]');
       await page.waitFor(`globalThis.__boiteTest.workspace.active.threads.some(t => t.id === ${JSON.stringify(idleId)})`);
       if (width < 720) {
-        // Newly shared row actions must reach the phone's title editor and project picker.
+        // A phone's row menu keeps rename, which reaches the title editor; moving a thread is a desktop action.
         await page.click('[data-testid=mobile-thread-menu-t-bench]');
-        await page.click(`${menu} [data-value=move]`);
-        await page.waitFor(`document.querySelector('[data-testid=context-menu] [data-value=p-notes]')`);
-        await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
-        await page.waitFor(`!document.querySelector('[data-testid=context-menu]')`);
-        await page.click('[data-testid=mobile-thread-menu-t-bench]');
+        await page.waitFor(`document.querySelector('${menu} [data-value=rename]')`);
+        expect(await page.evaluate(`document.querySelector('${menu} [data-value=move]') === null`)).toBe(true);
         await page.click(`${menu} [data-value=rename]`);
         await page.waitFor(`document.querySelector('[data-testid=thread-rename-input]')`);
         await page.type('[data-testid=thread-rename-input]', 'Restored thread from phone');
@@ -71,7 +69,7 @@ for (const width of [1280, 390]) {
       await page.click('[data-testid=thread-menu-trigger]');
       await page.waitFor(`document.querySelector('${menu} [data-value=archive]')`);
       expect(await page.evaluate(`document.querySelector('${menu} [data-value=archive]').disabled`)).toBe(false);
-      await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+      await page.settleAnimations();
       await page.screenshot(join(import.meta.dir, '.artifacts', `thread-menu-header-${width}.png`));
       await page.click(`${menu} [data-value=archive]`);
       await page.waitFor(`!globalThis.__boiteTest.workspace.active.threads.some(t => t.id === 't-bench')`);

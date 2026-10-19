@@ -31,9 +31,12 @@ export const fr: Translation = {
     computer: 'Ordinateur connecté',
     pairAgain: 'Rajouter',
     settingsDevice: 'Ce téléphone',
-    settingsPhone: 'Application et notifications',
+    settingsPhone: 'Notifications',
+    settingsPrivacy: 'Confidentialité',
+    settingsMachine: 'Machine',
     settingsBack: 'Retour aux réglages',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activité', project: 'Choisir un projet',
+    waitingElsewhere: '{count} en attente de vous',
     search: 'Trouver une conversation', noActivity: "Aucun agent n'attend votre réponse.", noThreads: 'Aucune conversation ne correspond.'
   }
 };

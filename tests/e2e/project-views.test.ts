@@ -68,11 +68,9 @@ test('copy path stays readable with a long working directory in conversation men
   })()`);
   await page.send('Browser.grantPermissions', { origin: new URL(url).origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
   await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-  for (const opener of ['thread-row', 'thread-title', 'thread-menu-trigger']) {
-    const phone = opener === 'thread-menu-trigger';
-    await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 360 : 1300, height: phone ? 800 : 850, deviceScaleFactor: 1, mobile: phone });
-    if (phone) await page.click(id(opener));
-    else await page.evaluate(`(() => {
+  for (const opener of ['thread-row', 'thread-title']) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
+    await page.evaluate(`(() => {
       const { workspace } = globalThis.__boiteTest;
       const owner = workspace.active;
       const machine = workspace.machines.find(m => m.store === owner);
@@ -81,7 +79,7 @@ test('copy path stays readable with a long working directory in conversation men
         : document.querySelector('${id(opener)}');
       target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 180 }));
     })()`);
-    const menu = id(phone ? 'thread-menu-trigger-menu' : 'context-menu');
+    const menu = id('context-menu');
     const copy = `${menu} [data-value=copy]`;
     await page.waitFor(`document.querySelector('${copy}')`);
     await capture(`copy-path-${opener}.png`);
@@ -95,6 +93,13 @@ test('copy path stays readable with a long working directory in conversation men
     // clipboard write is asynchronous and nothing awaits it.
     await page.waitFor(`navigator.clipboard.readText().then(text => text === ${JSON.stringify(cwd)})`);
   }
+  // A phone leaves the path to the desktop: its title menu has no Copy path.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
+  await page.click(id('thread-menu-trigger'));
+  await page.waitFor(`document.querySelector('${id('thread-menu-trigger-menu')} [data-value=rename]')`);
+  expect(await page.evaluate(`document.querySelector('${id('thread-menu-trigger-menu')} [data-value=copy]')`)).toBeNull();
+  await page.click(id('thread-menu-trigger'));
+  await page.waitFor(`!document.querySelector('${id('thread-menu-trigger-menu')}')`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
   await page.send('Emulation.setFocusEmulationEnabled', { enabled: false });
 }, 20_000);
@@ -146,31 +151,21 @@ test('projects follow user activity, then keep a dragged custom order after relo
   expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
 }, 20_000);
 
-test('phone management scrolls on short screens and reorders the selected project', async () => {
+test('phone reorders a project from its group on a short screen and manages no project from its header', async () => {
   const keys = () => page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('project')}, ${id('mobile-project-group')}')).map(e => JSON.stringify([e.dataset.machineId, e.dataset.projectId]))`);
   const before = await keys();
-  await page.evaluate(`(() => { const [machine, project] = ${before[0]}; const owner = globalThis.__boiteTest.workspace.machines.find(m => m.id === machine).store; return globalThis.__boiteTest.workspace.select(owner, undefined, project); })()`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 240, deviceScaleFactor: 1, mobile: true });
   await page.send('Emulation.setTouchEmulationEnabled', { enabled: true });
   await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`document.querySelectorAll('${id('mobile-project-group')}').length === 4`);
-  await page.click(id('mobile-project-actions'));
-  await page.click(`${id('context-menu')} [data-value=manage]`);
-  await page.waitFor(`document.querySelector('${id('context-menu')} [data-value=remove]')`);
-  expect(await page.evaluate(`(() => { const r = document.querySelector('${id('context-menu')}').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()`)).toBe(true);
-  const key = async (key: string, code: number) => {
-    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: code, ...(key === 'Enter' ? { text: '\r' } : {}) });
-    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: code });
-  };
-  await key('End', 35);
-  await page.waitFor(`document.activeElement?.dataset.value === 'remove'`);
-  expect(await page.evaluate(`(() => { const r = document.activeElement.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()`)).toBe(true);
+  // Projects are managed on the desktop: the phone's header holds the picker, + and the menu.
+  expect(await page.evaluate(`document.querySelector('${id('mobile-project-actions')}') === null`)).toBe(true);
+  await page.click(`${id('mobile-project-group')} ${id('mobile-project-order')}`);
+  await page.waitFor(`document.querySelector('${id('mobile-project-order-menu')} [data-value=down]')`);
+  expect(await page.evaluate(`(() => { const r = document.querySelector('${id('mobile-project-order-menu')}').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()`)).toBe(true);
   await capture('project-management-short-phone.png');
-  await key('Home', 36);
-  await key('ArrowDown', 40);
-  expect(await page.evaluate(`document.activeElement?.dataset.value`)).toBe('move-down');
-  await key('Enter', 13);
-  await page.waitFor(`!document.querySelector('${id('context-menu')}')`);
+  await page.click(`${id('mobile-project-order-menu')} [data-value=down]`);
+  await page.waitFor(`!document.querySelector('${id('mobile-project-order-menu')}')`);
   expect(await keys()).toEqual([before[1]!, before[0]!, ...before.slice(2)]);
 }, 20_000);
 

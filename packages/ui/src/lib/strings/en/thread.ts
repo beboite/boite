@@ -44,6 +44,7 @@ export const strings = {
     /** The header's button: it shows or hides the panel, whatever surface is in it. */
     panel: 'Panel',
     panelHint: 'Browser, files and tools beside this conversation',
+    panelMenu: 'Browser, files and tools',
     terminalHint: "Terminal in this thread's folder",
     cwd: 'Working directory',
     model: 'Model',

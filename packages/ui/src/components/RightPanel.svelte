@@ -388,7 +388,7 @@
 
     <button
       type="button"
-      class="ghost small icon"
+      class="ghost small icon maximize"
       title={rightPanel.maximized ? strings.rightPanel.restore : strings.rightPanel.maximize}
       aria-label={rightPanel.maximized ? strings.rightPanel.restore : strings.rightPanel.maximize}
       aria-pressed={rightPanel.maximized}
@@ -741,6 +741,11 @@
     .closer {
       width: var(--touch-target);
       height: var(--touch-target);
+    }
+
+    /* The sheet already fills the screen. */
+    .maximize {
+      display: none;
     }
   }
 

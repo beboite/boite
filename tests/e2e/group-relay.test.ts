@@ -117,8 +117,8 @@ test('a phone that cannot reach a machine of its group reaches it through the ma
 
     // Settings names the machine that carries it.
     await mobileAction(page, 'mobile-settings');
-    await page.waitFor(`document.querySelector('${id('settings-tab-machines')}')`);
-    await page.click(id('settings-tab-machines'));
+    await page.waitFor(`document.querySelector('${id('mobile-settings-connection')}')`);
+    await page.click(id('mobile-settings-connection'));
     const member = `${id('machine-card')}[data-machine-id="${relay}"]`;
     await page.waitFor(`document.querySelector('${member} ${id('machine-card-status')}')?.textContent === 'Connected through ' + globalThis.__boiteTest.workspace.machines[0].label`);
     await page.evaluate(`document.querySelector('${member}').scrollIntoView({ block: 'center' })`);
