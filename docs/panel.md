@@ -267,7 +267,7 @@ Captures: [changes](images/panel-changes-desktop.png) · [files](images/panel-fi
 
 Every surface reads the thread's working directory through the core, never the
 browser's file system: `git.status`, `git.diff`, `files.list`, `files.read`,
-`files.write`, `todos.*`, `threads.tasks.*` in `packages/contracts/src/index.ts`.
+`files.write`, `todos.*`, `threads.tasks.*` in `packages/contracts/src/` (`git.ts`, `files.ts`, `todos.ts`, `threads.ts`).
 Paths are relative to the thread's cwd, or absolute inside it, and a path that
 resolves outside (a symlink out, a `..`) is refused by name. `files.write` also
 refuses a link to nothing, since the write would create its target.
