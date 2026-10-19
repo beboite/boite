@@ -223,21 +223,29 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 492,300 |
-| UI files, excluding `.br` and `.gz` copies | 4,872,200 |
+| UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,495,100 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,495,500 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
 On 2026-10-19, the rewind beside a working turn (PR #599) merged with
-`origin/main` at `38d5ca2f` measures 492,249 entry bytes, 4,871,447 UI bytes
-and 4,494,971 core JavaScript bytes with `measure()` after fresh
-`bun run build:ui` and `bun run build:core` on Linux, against 4,494,324 core
-JavaScript bytes recorded below for PR #616 on Windows: the `overlap` check
-that asks git which nested files the outer snapshot lists, and the busy
-answer, measured 574 core bytes on Linux before an earlier merge. The UI
-limit of 4,872,200 set by PR #614 holds its warning sentences. The core
-JavaScript limit rises to 4,495,100; the others stay.
+`origin/main` at `de93f43a` measures 492,249 entry bytes, 4,871,447 UI bytes
+and 4,495,401 core JavaScript bytes with `measure()` after fresh
+`bun run build:ui` and `bun run build:core` on Linux, against 4,494,827 core
+JavaScript bytes recorded below for PRs #622 and #623 on Windows: the
+`overlap` check that asks git which nested files the outer snapshot lists, and
+the busy answer, measured 574 core bytes on Linux before an earlier merge. The
+UI limit of 4,872,200 set by PR #614 holds its warning sentences. The core
+JavaScript limit rises to 4,495,500; the others stay.
+
+On 2026-10-19, PR #622 merged with `origin/main` at `68033379` measures
+4,494,650 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,494,397 for that main: holding a
+roster offer while one is on its way adds 253 bytes. PR #623, which opens Bun
+WebSockets without permessage-deflate, adds 177 more on top of both
+(4,494,827). The core JavaScript limit rises to 4,494,900 to cover the two;
+the other limits stay.
 
 On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
 4,494,324 core JavaScript bytes with the same rule after a fresh
