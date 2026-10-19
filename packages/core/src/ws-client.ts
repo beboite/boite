@@ -32,8 +32,8 @@ export type Frame =
   | { kind: 'ping'; payload: Uint8Array }
   | { kind: 'pong' }
   | { kind: 'close'; code: number; reason: string }
-  /** The stream broke here: what came before it stands, nothing after it is read. */
-  | { kind: 'invalid'; reason: string };
+  /** The stream broke here: what came before it stands, nothing after it is read. 1007 for text that is not UTF-8, else 1002. */
+  | { kind: 'invalid'; code: number; reason: string };
 
 /** What permessage-deflate leaves off the end of each message (RFC 7692 section 7.2.1). */
 const DEFLATE_TAIL = new Uint8Array([0x00, 0x00, 0xff, 0xff]);
@@ -68,7 +68,7 @@ export class FrameReader {
       if (!(error instanceof ProtocolError)) throw error;
       this.#broken = true;
       this.#held = []; this.#heldBytes = 0;
-      frames.push({ kind: 'invalid', reason: error.message });
+      frames.push({ kind: 'invalid', code: error.code, reason: error.message });
     }
     return frames;
   }
@@ -134,6 +134,7 @@ export class FrameReader {
       case 0x8: {
         if (payload.length === 1) throw new ProtocolError('a close frame of 1 B');
         const code = payload.length >= 2 ? (payload[0]! << 8) | payload[1]! : 1005;
+        if (payload.length >= 2 && !sendableCloseCode(code)) throw new ProtocolError(`a close frame with code ${code}`);
         return { kind: 'close', code, reason: this.#text(payload.subarray(2)) };
       }
       case 0x9:
@@ -164,12 +165,20 @@ export class FrameReader {
     try {
       return this.#decoder.decode(bytes);
     } catch {
-      throw new ProtocolError('a text message that is not UTF-8');
+      throw new ProtocolError('a text message that is not UTF-8', 1007);
     }
   }
 }
 
-class ProtocolError extends Error {}
+class ProtocolError extends Error {
+  /** The close code the stream ends with. */
+  constructor(message: string, readonly code = 1002) { super(message); }
+}
+
+/** Whether a peer may send `code` in a close frame (RFC 6455 section 7.4 and the IANA registry). */
+function sendableCloseCode(code: number): boolean {
+  return (code >= 1000 && code <= 1003) || (code >= 1007 && code <= 1014) || (code >= 3000 && code <= 4999);
+}
 
 function inflated(deflated: Uint8Array): Uint8Array {
   try {
@@ -230,21 +239,36 @@ export class TextSocket {
   /** Whether `send` still reaches the server. */
   get open(): boolean { return this.#open; }
 
-  /** Only one listener: a devtools socket has one reader. It gets what arrived before it first. */
+  /** Bytes written but not yet taken by the connection; none once it ended. */
+  get bufferedAmount(): number {
+    let bytes = 0;
+    for (const chunk of this.#queue) bytes += chunk.length;
+    return bytes;
+  }
+
+  /**
+   * Only one listener: a devtools socket has one reader. It gets what arrived
+   * before it first, each message's microtasks run before the next, as in a read.
+   */
   onMessage(listener: (text: string) => void): void {
     this.#onMessage = listener;
-    for (const text of this.#inbox.splice(0)) listener(text);
+    for (let first = true; this.#inbox.length > 0 && this.#onMessage === listener; first = false) {
+      if (!first) drainMicrotasks();
+      const text = this.#inbox.shift()!;
+      reported(() => listener(text));
+    }
   }
 
   /** Called once; at once when the socket already closed. */
   onClose(listener: (event: CloseEvent) => void): void {
-    if (this.#closeEvent !== null) listener(this.#closeEvent);
+    if (this.#closeEvent !== null) reported(() => listener(this.#closeEvent!));
     else this.#onClose.push(listener);
   }
 
   #deliver(text: string): void {
-    if (this.#onMessage === null) this.#inbox.push(text);
-    else this.#onMessage(text);
+    const listener = this.#onMessage;
+    if (listener === null) this.#inbox.push(text);
+    else reported(() => listener(text));
   }
 
   send(text: string): void {
@@ -281,8 +305,13 @@ export class TextSocket {
     this.#closeEvent = event;
     this.#open = false;
     clearTimeout(this.#graceTimer);
+    // Nothing waiting leaves any more: a reader that stopped reading must not keep it alive.
+    this.#queue = [];
     this.#socket.end();
-    for (const listener of this.#onClose) listener(event);
+    const listeners = this.#onClose;
+    this.#onClose = [];
+    this.#onMessage = null;
+    for (const listener of listeners) reported(() => listener(event));
   }
 
   /**
@@ -336,8 +365,8 @@ export class TextSocket {
             }
             client!.#ended({ code: frame.code, reason: frame.reason });
           } else if (frame.kind === 'invalid') {
-            client!.#write(encodeFrame(0x8, new Uint8Array([1002 >> 8, 1002 & 0xff])));
-            client!.#ended({ code: 1002, reason: frame.reason });
+            client!.#write(encodeFrame(0x8, new Uint8Array([frame.code >> 8, frame.code & 0xff])));
+            client!.#ended({ code: frame.code, reason: frame.reason });
           }
         }
       };
@@ -367,6 +396,8 @@ export class TextSocket {
             const status = head.split('\r\n', 1)[0] ?? '';
             if (!/^HTTP\/1\.1 101\b/.test(status)) { fail(`the server refused the WebSocket upgrade: ${status}`); return; }
             if (/^sec-websocket-accept:\s*(\S+)/im.exec(head)?.[1] !== accept) { fail('the server answered the upgrade with a wrong Sec-WebSocket-Accept'); return; }
+            const refused = upgradeRefusal(head);
+            if (refused !== null) { fail(refused); return; }
             const extensions = /^sec-websocket-extensions:\s*(.*)$/im.exec(head)?.[1]?.trim();
             if (extensions) {
               const refusal = deflateRefusal(extensions, options.deflate === true);
@@ -392,6 +423,25 @@ export class TextSocket {
         },
       }).catch((error: unknown) => fail(`could not connect to ${target.host}: ${error instanceof Error ? error.message : String(error)}`));
     });
+  }
+}
+
+/** Null when an upgrade answer says `Upgrade: websocket` and `Connection: Upgrade` and picks no subprotocol; else why not. */
+function upgradeRefusal(head: string): string | null {
+  const tokens = (name: string) => [...head.matchAll(new RegExp(`^${name}:(.*)$`, 'gim'))].flatMap(match => match[1]!.split(',').map(token => token.trim().toLowerCase()));
+  if (!tokens('upgrade').includes('websocket')) return 'the server answered the upgrade without Upgrade: websocket';
+  if (!tokens('connection').includes('upgrade')) return 'the server answered the upgrade without Connection: Upgrade';
+  // This client offers no subprotocol, so the server may not pick one.
+  const protocol = /^sec-websocket-protocol:\s*(.*)$/im.exec(head)?.[1]?.trim();
+  return protocol ? `the server picked a subprotocol nobody offered: ${protocol}` : null;
+}
+
+/** Runs a listener; what it throws goes where an uncaught error goes, as from a WebSocket's listener, and the reading goes on. */
+function reported(listener: () => void): void {
+  try {
+    listener();
+  } catch (error) {
+    reportError(error);
   }
 }
 

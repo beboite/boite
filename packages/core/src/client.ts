@@ -110,7 +110,8 @@ export async function connect(url: string, token: string, options: ConnectOption
       };
       if (!socket.open) { waiter.reject(new Error('the client is closed')); return; }
       pending.set(id, waiter);
-      socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+      try { socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params })); }
+      catch (error) { pending.delete(id); waiter.reject(error as Error); }
     });
   };
 

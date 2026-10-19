@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { createServer, type Socket } from 'node:net';
 import { constants as zlibConstants, deflateRawSync } from 'node:zlib';
 import { encodeFrame, FrameReader, TextSocket, type CloseEvent, type Frame } from '../src/ws-client.ts';
 
@@ -91,7 +92,7 @@ test('the frame reader refuses what Bun mistook for frames: reserved bits, masks
   const reader = new FrameReader();
   expect(reader.push(join([serverFrame(1, 'kept'), serverFrame(1, '{}', true, 4), serverFrame(1, 'lost')]))).toEqual([
     { kind: 'text', text: 'kept' },
-    { kind: 'invalid', reason: 'reserved bits 4 set on opcode 1 with no extension negotiated' },
+    { kind: 'invalid', code: 1002, reason: 'reserved bits 4 set on opcode 1 with no extension negotiated' },
   ]);
   expect(reader.push(serverFrame(1, 'later'))).toEqual([]);
 });
@@ -304,9 +305,9 @@ test('with deflate negotiated, a compressed message is read whole whatever its f
   expect(read(() => 1 + Math.floor(random() * 700))).toEqual(want);
 
   const refusal = (frames: Uint8Array[]) => new FrameReader({ inflate: true }).push(join(frames)).at(-1);
-  expect(refusal([serverFrame(1, 'a', false), serverFrame(0, 'b', true, 4)])).toEqual({ kind: 'invalid', reason: 'reserved bits 4 set on opcode 0' });
-  expect(refusal([serverFrame(9, 'p', true, 4)])).toEqual({ kind: 'invalid', reason: 'reserved bits 4 set on opcode 9' });
-  expect(refusal([serverFrame(1, '{}', true, 2)])).toEqual({ kind: 'invalid', reason: 'reserved bits 2 set on opcode 1' });
+  expect(refusal([serverFrame(1, 'a', false), serverFrame(0, 'b', true, 4)])).toEqual({ kind: 'invalid', code: 1002, reason: 'reserved bits 4 set on opcode 0' });
+  expect(refusal([serverFrame(9, 'p', true, 4)])).toEqual({ kind: 'invalid', code: 1002, reason: 'reserved bits 4 set on opcode 9' });
+  expect(refusal([serverFrame(1, '{}', true, 2)])).toEqual({ kind: 'invalid', code: 1002, reason: 'reserved bits 2 set on opcode 1' });
   expect(refusal([serverFrame(1, new Uint8Array([0xff, 0xff, 0xff]), true, 4)])).toMatchObject({ kind: 'invalid', reason: expect.stringContaining('does not inflate') });
 });
 
@@ -397,4 +398,119 @@ test('a close carries its code and reason, the reason cut to what a close frame 
     for (let waited = 0; closes.length < 2 && waited < 2_000; waited += 20) await Bun.sleep(20);
   } finally { await server.stop(true); }
   expect(closes).toEqual([[4001, 'the other machine dropped the connection'], [4001, 'é'.repeat(61)]]);
+});
+
+/** A server that answers the upgrade with `head` and sends `body` in the same write. */
+function answering(body: Uint8Array = new Uint8Array(0), head = 'Upgrade: websocket\r\nConnection: Upgrade\r\n') {
+  return Bun.listen({
+    hostname: '127.0.0.1', port: 0,
+    socket: {
+      data(socket, bytes) {
+        const key = /sec-websocket-key:\s*(\S+)/i.exec(new TextDecoder().decode(bytes))?.[1];
+        if (key === undefined) return;
+        const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+        socket.write(join([new TextEncoder().encode(`HTTP/1.1 101 Switching Protocols\r\n${head}Sec-WebSocket-Accept: ${accept}\r\n\r\n`), body]));
+      },
+    },
+  });
+}
+
+test('a listener that throws is reported, and the socket reads on', async () => {
+  const server = answering(join([serverFrame(1, 'A'), serverFrame(1, 'B')]));
+  const report = globalThis.reportError;
+  const reported: unknown[] = [];
+  globalThis.reportError = (error) => { reported.push(error); };
+  try {
+    const socket = await TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000);
+    const received: string[] = [];
+    await new Promise<void>((resolve) => socket.onMessage((text) => {
+      received.push(text);
+      if (text === 'B') resolve();
+      else throw new Error('a subscriber failed');
+    }));
+    expect(received).toEqual(['A', 'B']);
+    expect(reported.map((error) => (error as Error).message)).toEqual(['a subscriber failed']);
+    expect(socket.open).toBe(true);
+    socket.close();
+  } finally {
+    globalThis.reportError = report;
+    server.stop(true);
+  }
+});
+
+test('a socket that ended keeps nothing of what it could not send', async () => {
+  // A server that stops reading once upgraded.
+  const peers: Socket[] = [];
+  const server = createServer((peer) => {
+    peers.push(peer);
+    peer.once('data', (bytes) => {
+      const key = /sec-websocket-key:\s*(\S+)/i.exec(bytes.toString())![1];
+      const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+      peer.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+      peer.pause();
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const socket = await TextSocket.connect(`ws://127.0.0.1:${(server.address() as { port: number }).port}/`, 5_000);
+    const text = 'x'.repeat(4 << 20);
+    for (let i = 0; i < 4; i++) socket.send(text);
+    expect(socket.bufferedAmount).toBeGreaterThan(0);
+    const closed = new Promise<CloseEvent>((resolve) => socket.onClose(resolve));
+    socket.close();
+    expect((await closed).reason).toBe('the server did not answer the close');
+    expect(socket.bufferedAmount).toBe(0);
+  } finally {
+    for (const peer of peers) peer.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}, 15_000);
+
+test('an upgrade answer without Upgrade and Connection, or with a subprotocol nobody offered, is refused', async () => {
+  const cases: Array<[string, string]> = [
+    ['Connection: Upgrade\r\n', 'without Upgrade: websocket'],
+    ['Upgrade: websocket\r\n', 'without Connection: Upgrade'],
+    ['Upgrade: websocket\r\nConnection: keep-alive, Upgrade\r\nSec-WebSocket-Protocol: surprise\r\n', 'subprotocol nobody offered: surprise'],
+  ];
+  for (const [head, error] of cases) {
+    const server = answering(undefined, head);
+    try {
+      await expect(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000)).rejects.toThrow(error);
+    } finally { server.stop(true); }
+  }
+});
+
+test('a close code no peer may send ends in 1002, and text that is not UTF-8 in 1007', async () => {
+  const closeWith = (code: number) => serverFrame(8, new Uint8Array([code >> 8, code & 0xff]));
+  const cases: Array<[Uint8Array, number]> = [
+    ...[0, 999, 1004, 1005, 1006, 1015, 2000].map((code): [Uint8Array, number] => [closeWith(code), 1002]),
+    [closeWith(4001), 4001],
+    [serverFrame(1, new Uint8Array([0xc3, 0x28])), 1007],
+  ];
+  const ended: number[] = [];
+  for (const [frame] of cases) {
+    const server = answering(frame);
+    try {
+      const socket = await TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000);
+      ended.push((await new Promise<CloseEvent>((resolve) => socket.onClose(resolve))).code);
+    } finally { server.stop(true); }
+  }
+  expect(ended).toEqual(cases.map(([, code]) => code));
+});
+
+test('messages that came with the upgrade answer reach a late reader in order, each one\'s microtasks first', async () => {
+  const server = answering(join([serverFrame(1, 'answer'), serverFrame(1, 'event')]));
+  try {
+    const socket = await TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000);
+    // Both messages are in before anyone reads.
+    await Bun.sleep(50);
+    const order: string[] = [];
+    socket.onMessage((text) => {
+      order.push(text);
+      if (text === 'answer') void Promise.resolve().then(() => order.push('the caller resumed'));
+    });
+    await Bun.sleep(0);
+    expect(order).toEqual(['answer', 'the caller resumed', 'event']);
+    socket.close();
+  } finally { server.stop(true); }
 });
