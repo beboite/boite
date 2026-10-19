@@ -544,8 +544,11 @@ Without this, a first install would land the release the Boite build pinned,
 and an update could only reach the next pin.
 
 Codex and OpenCode ship a Windows x64 release the same way, from their GitHub
-releases; the Codex archive also carries `codex-command-runner.exe` and
-`codex-windows-sandbox-setup.exe`, unpacked beside the agent as upstream ships them. The
+releases; the Codex archive also carries `codex-code-mode-host.exe`,
+`codex-command-runner.exe` and `codex-windows-sandbox-setup.exe`, unpacked beside
+the agent as upstream ships them. Codex spawns the code-mode host from its own
+directory to run its tools, so a pin whose archive lacks it, as 0.155.1's
+did, leaves the agent unable to run any tool. The
 managed copy is the first executable candidate, so an update reaches the agent
 Boite runs even when an npm copy exists. `test/shipped-installs.live.test.ts`,
 opt-in behind `BOITE_E2E_INSTALLS=1`, downloads both and runs `--version`.
