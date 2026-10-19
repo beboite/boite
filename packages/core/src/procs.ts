@@ -664,13 +664,8 @@ export class ProcRegistry {
     void stop.finally(() => this.stops.delete(stop));
   }
 
-  /** Project removal must wait for exit records before deleting the projection. */
-  async stopAndWait(threadId: ThreadId): Promise<void> {
-    this.killTree(threadId);
-    await this.waitForExit(threadId);
-  }
-
-  /** Waits for exit records of the thread's processes, or of `pids` only, in a thread where newer ones may already run. */
+  /** Project removal must wait for exit records before deleting the projection; `waitForExit` waits alone, for `pids` only if given. */
+  async stopAndWait(threadId: ThreadId): Promise<void> { this.killTree(threadId); await this.waitForExit(threadId); }
   async waitForExit(threadId: ThreadId, pids?: number[]): Promise<void> {
     const deadline = Date.now() + 5000;
     while (pids ? pids.some((pid) => this.live.get(threadId)?.has(pid)) : this.liveCount(threadId) > 0) {
