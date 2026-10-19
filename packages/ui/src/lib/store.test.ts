@@ -2390,6 +2390,71 @@ describe('the shell core lost under a local store', () => {
     }
   });
 
+  test('a core that fails to start again is asked of the shell until it starts, less often each time', async () => {
+    // A full disk stopped the core and its first restart; the app never asked again and the thread looked frozen (#596).
+    vi.useFakeTimers();
+    const { store, client } = await localStore();
+    const fromTauri = vi.spyOn(endpoints, 'fromTauri')
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ url: 'http://127.0.0.1:42000', token: 'next', local: true });
+    const refused = vi.spyOn(endpoints, 'shellEndpointError').mockReturnValue('the core exited (exit code: 1) before it was ready: boite-core: database or disk is full');
+    const connect = vi.spyOn(store, 'connect').mockResolvedValue();
+    const open = vi.spyOn(store, 'openWhereLeft').mockResolvedValue();
+    try {
+      client.drop();
+      await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS + 100);
+      expect(fromTauri).toHaveBeenCalledTimes(1);
+      expect(store.error).toContain('database or disk is full');
+      expect(store.error).toContain(strings.errors.coreRetrying);
+      // The next ask waits twice as long.
+      await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS * 2 - 200);
+      expect(fromTauri).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(fromTauri).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS * 4);
+      expect(fromTauri).toHaveBeenCalledTimes(3);
+      expect(store.endpointUrl).toBe('http://127.0.0.1:42000');
+      await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS * 16);
+      expect(fromTauri).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+      fromTauri.mockRestore(); refused.mockRestore(); connect.mockRestore(); open.mockRestore();
+      delete window.__TAURI_INTERNALS__;
+      store.client?.close(); store.detach(); client.close();
+    }
+  });
+
+  test('a shell answer that comes back after the core did never starts a second retry chain', async () => {
+    vi.useFakeTimers();
+    const { store, client } = await localStore();
+    let answerFirst!: (value: null) => void;
+    const first = new Promise<null>((resolve) => { answerFirst = resolve; });
+    const fromTauri = vi.spyOn(endpoints, 'fromTauri').mockReturnValueOnce(first).mockResolvedValue(null);
+    const refused = vi.spyOn(endpoints, 'shellEndpointError').mockReturnValue('the core exited (exit code: 1) before it was ready');
+    try {
+      client.drop();
+      await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS + 100);
+      expect(fromTauri).toHaveBeenCalledTimes(1);
+      // The old core answers again, then drops while the first ask is still out.
+      await client.restore();
+      client.drop();
+      answerFirst(null);
+      await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS + 100);
+      expect(fromTauri).toHaveBeenCalledTimes(2);
+      // One chain: the next ask waits 8 s, not one ask per chain.
+      await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS * 2 - 200);
+      expect(fromTauri).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(fromTauri).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+      fromTauri.mockRestore(); refused.mockRestore();
+      delete window.__TAURI_INTERNALS__;
+      store.client?.close(); store.detach(); client.close();
+    }
+  });
+
   test('a core stopped on purpose stays stopped, and a refresh asks the shell for it again', async () => {
     vi.useFakeTimers();
     const { store, client } = await localStore();

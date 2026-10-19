@@ -20,7 +20,9 @@ match the SHA-256 captured at core startup. A mismatched core is stopped through
 `POST /shutdown` and replaced. Startup failure includes the last output lines.
 A resident core still starting after 60 seconds stays alive for the next endpoint
 request. After four seconds without a local response, the UI asks the shell to
-resolve the core again.
+resolve the core again. A start that fails again, for example on a full disk, is
+asked after 8, 16 and 32 seconds, then every minute, until a core answers; the
+error toast gives the shell's reason meanwhile.
 
 The shell's bundle identifier selects the stable or dev data directory. Stable
 and nightly update tracks share the regular installation's data; Boite Dev is

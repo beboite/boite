@@ -11,6 +11,7 @@ import { type KnownProcess, type ProcessIdentity, unseenIdentity } from './proce
 import { killBunChild, stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 import { ResourceCollection } from './resource-usage.ts';
+import { traceWrite } from './trace-writes.ts';
 import { orphansOf, parentAtStart } from './process-orphans.ts';
 import { forgetOnMissing, resolveSpawnCommand, startResolved } from './spawn-command.ts';
 import { BUSY_CPU_PERCENT, IDLE_LOAD_INTERVAL_MS, LOAD_INTERVAL_MS, LoadPace, worthPushing } from './load-pace.ts';
@@ -527,7 +528,7 @@ export class ProcRegistry {
     seen.set(record.pid, { identity, incarnations, recordedAt: record.startedAt });
 
     // The trace row only: a copy in the event log would be read by nothing.
-    this.journal.putProcess(record);
+    traceWrite(this.bus, threadId, () => this.journal.putProcess(record));
     this.bus.emit('process.started', { ...record });
   }
 
@@ -722,7 +723,7 @@ export class ProcRegistry {
       this.sweepTimers.delete(threadId);
       this.sweepOrphans(threadId);
       // A finished turn bounds the thread's trace too (journal/processes.ts).
-      if (!this.journal.isClosed()) this.journal.pruneProcesses(threadId);
+      if (!this.journal.isClosed()) traceWrite(this.bus, threadId, () => this.journal.pruneProcesses(threadId));
     }, this.orphanGraceMs);
     timer.unref();
     this.sweepTimers.set(threadId, timer);
@@ -784,7 +785,7 @@ export class ProcRegistry {
       if (fromJob.peakMemoryBytes !== null) record.peakMemoryBytes = fromJob.peakMemoryBytes;
       if (fromJob.ioBytes !== null) record.ioBytes = fromJob.ioBytes;
     }
-    this.journal.finishProcess(record);
+    traceWrite(this.bus, threadId, () => this.journal.finishProcess(record));
 
     this.bus.emit('process.exited', { ...record });
   }
@@ -811,7 +812,7 @@ export class ProcRegistry {
       // The thread's Job Object too: an id minted per call would otherwise hold
       // one kernel handle for the life of the core.
       this.platform.forget(threadId);
-      if (!this.journal.isClosed()) { this.journal.forgetProcessesWithoutThread(threadId); this.journal.pruneProcesses(threadId); }
+      if (!this.journal.isClosed()) traceWrite(this.bus, threadId, () => { this.journal.forgetProcessesWithoutThread(threadId); this.journal.pruneProcesses(threadId); });
     }, this.forgetDelayMs);
     timer.unref();
     this.forgetTimers.set(threadId, timer);
