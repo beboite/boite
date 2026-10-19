@@ -210,17 +210,20 @@ describe('cache keepalive', () => {
   test('turning the setting off, archiving and a user turn each hold the ping', async () => {
     const s = await setup(h);
     try {
+      // The ping is due 1 s after the last request, 900 ms after a turn ends: each hold below lands well
+      // before it, and each wait outlasts it. At 200 ms, a Linux arm64 run archived too late (#635).
+      CACHE_KEEPALIVE.marginMs = 300_000 - 1_000;
       // Off before the ping comes.
       await s.client.call('settings.set', { cacheKeepalive: { hours: 12 } });
       await s.spawn();
       await s.turn();
       await s.client.call('settings.set', { cacheKeepalive: null });
-      await pause(700);
+      await pause(1_200);
       expect(await s.pings()).toEqual([]);
 
       // Off from the start: nothing is planned.
       await s.turn();
-      await pause(700);
+      await pause(1_200);
       expect(await s.pings()).toEqual([]);
 
       // A user turn that runs past the ping's time: no ping while it runs.
@@ -230,7 +233,7 @@ describe('cache keepalive', () => {
       const started = s.client.next('turn.started', t => t.threadId === s.threadId && !t.execution?.operation);
       await s.client.call('turns.start', { threadId: s.threadId, prompt: 'long' });
       await started;
-      await pause(700);
+      await pause(1_200);
       expect(await s.pings()).toEqual([]);
       s.state.holdParent = false;
       const ended = s.client.next('turn.finished', t => t.threadId === s.threadId && !t.execution?.operation);
@@ -239,10 +242,10 @@ describe('cache keepalive', () => {
 
       // Archived before the ping comes.
       await s.client.call('threads.archive', { threadId: s.threadId, archived: true });
-      await pause(700);
+      await pause(1_200);
       expect(await s.pings()).toEqual([]);
     } finally { s.restore(); }
-  });
+  }, 10_000);
 
   test('a child result that comes in during a ping stops it and is delivered', async () => {
     const s = await setup(h);
