@@ -92,7 +92,7 @@ jobs:
       - name: Audit frozen dependencies
         run: bun audit
       - run: bun scripts/check-docs.ts
-      - run: bun test scripts/ci ./bench ./apps/shell/scripts
+      - run: bun test scripts/ci scripts/migrate ./bench ./apps/shell/scripts
       # Missing sentences are warnings here and in the nightly; release.yml refuses them.
       - run: bun scripts/ci/translations.ts
       - run: bun run check:architecture
