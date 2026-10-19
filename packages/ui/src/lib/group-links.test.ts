@@ -14,6 +14,7 @@ interface FakeStore {
   group: Group | null;
   groupKnown: boolean;
   ungrouped?: boolean;
+  pairingRequired?: boolean;
   endpointUrl: string | null;
   loadGroup: ReturnType<typeof vi.fn>;
 }
@@ -738,14 +739,63 @@ describe('a machine the device key opens', () => {
     const links = new GroupLinks(ws, { reach: vi.fn(async () => null), secure: () => false });
     await links.reconcile();
     // Reloaded: B is removed before it answers about its group, so it never does, and its key opens nothing
-    // there any more (run 39299531333 kept it connecting). The device key's next hello keeps what B said.
+    // there any more (run 39299531333 kept it connecting).
     Object.assign(storeOf(b), { connection: 'connecting', groupKnown: false, group: null });
-    rememberDevice('http://b.test', selfB);
     await links.reconcile();
     expect(removed).toEqual([]);
     storeOf(a).group = group(selfA, [both[0]!]);
     await links.reconcile();
     expect(removed).toEqual(['http://b.test']);
     localStorage.clear();
+  });
+
+  describe('not heard since the page opened, with the group it said last', () => {
+    const [selfA, selfB, selfC] = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
+    const seed = (signedGroup?: string) => localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([
+      { url: 'http://a.test', label: 'A', token: '', paired: true, signs: selfA },
+      { url: 'http://b.test', label: 'B', token: '', paired: true, signs: selfB, ...(signedGroup === undefined ? {} : { signedGroup }) },
+      { url: 'http://c.test', label: 'C', token: '', paired: true, signs: selfC }
+    ]));
+    const removedBy = async (machines: Machine[]) => {
+      const { workspace: ws, removed } = workspace(machines);
+      await new GroupLinks(ws, { reach: vi.fn(async () => null), secure: () => false }).reconcile();
+      return removed;
+    };
+    beforeEach(() => localStorage.clear());
+
+    it('stays while a machine the device key does not open says that group dropped it', async () => {
+      seed('old');
+      const a = machine('http://unsigned.test', { group: group(selfA, [core(selfA, ['http://unsigned.test'])], 'old') });
+      const b = machine('http://b.test', { connection: 'connecting', groupKnown: false });
+      expect(await removedBy([a, b])).toEqual([]);
+    });
+
+    it('stays when it never said its group, whatever group the others are in', async () => {
+      seed();
+      const a = machine('http://a.test', { group: group(selfA, [core(selfA, ['http://a.test'])], 'old') });
+      const b = machine('http://b.test', { connection: 'connecting', groupKnown: false });
+      expect(await removedBy([a, b])).toEqual([]);
+    });
+
+    it('stays while the group it moved to lists it, though its old group dropped it', async () => {
+      seed('old');
+      const a = machine('http://a.test', { group: group(selfA, [core(selfA, ['http://a.test'])], 'old') });
+      const b = machine('http://b.test', { connection: 'connecting', groupKnown: false });
+      const c = machine('http://c.test', { group: group(selfC, [core(selfC, ['http://c.test']), core(selfB, ['http://b.test'])], 'new') });
+      expect(await removedBy([a, b, c])).toEqual([]);
+    });
+
+    it('leaves once it refuses the device key and no group lists it, though no machine of its old group is left to say so', async () => {
+      seed('old');
+      const a = machine('http://a.test', { group: group(selfA, [core(selfA, ['http://a.test'])], 'new') });
+      const b = machine('http://b.test', { connection: 'connecting', groupKnown: false, pairingRequired: true });
+      expect(await removedBy([a, b])).toEqual(['http://b.test']);
+    });
+
+    it('is forgotten when the device key is let in there again: that was its word over another key', () => {
+      seed('old');
+      rememberDevice('http://b.test', selfB);
+      expect(readEnvironments().find((env) => env.url === 'http://b.test')?.signedGroup).toBeUndefined();
+    });
   });
 });

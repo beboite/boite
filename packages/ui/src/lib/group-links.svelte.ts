@@ -438,15 +438,19 @@ export class GroupLinks {
     for (const machine of [...this.workspace.machines]) {
       const signs = signsFor(machine.id);
       if (signs === undefined) continue;
+      const listedBy = (other: Machine): boolean => other.store.group!.cores.some((core) => core.coreId === signs);
+      const delistedIn = (groupId: string): boolean => signed.some((other) => other !== machine && other.store.group!.id === groupId && !listedBy(other));
+      const listed = signed.some((other) => other !== machine && listedBy(other));
+      const groupId = machine.store.group?.id;
       // Not heard since this page opened, it is in the group it said last: removed before it says it again, its
       // key no longer opens it, and the group's roster is the only word left (run 39299531333 kept it connecting).
-      const groupId = machine.store.group?.id ?? (machine.store.groupKnown ? undefined : remembered.get(machine.id));
-      const listedBy = (other: Machine): boolean => other.store.group!.cores.some((core) => core.coreId === signs);
+      // That word is older than any roster: a group that lists it now keeps it.
+      const cached = groupId === undefined && !machine.store.groupKnown ? remembered.get(machine.id) : undefined;
       // Its own group, as another machine of it says; or, refused there or out of every group by its own word, none of the device's groups lists it.
       // Removed, a machine may say it is in no group before the others drop it from their roster, then tell this device's hellos to come back.
       const delisted = groupId !== undefined
-        ? signed.some((other) => other !== machine && other.store.group!.id === groupId && !listedBy(other))
-        : (machine.store.pairingRequired || machine.store.ungrouped) && signed.length > 0 && !signed.some((other) => other !== machine && listedBy(other));
+        ? delistedIn(groupId)
+        : !listed && signed.length > 0 && ((machine.store.pairingRequired || machine.store.ungrouped) || (cached !== undefined && delistedIn(cached)));
       if (delisted) await this.#drop(machine, false);
     }
   }

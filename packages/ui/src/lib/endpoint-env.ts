@@ -179,9 +179,8 @@ export function rememberSession(endpoint: Endpoint, token: string): StoredEnviro
  */
 export function rememberDevice(url: string, coreId: string): StoredEnvironment[] {
   setDropped(url, null);
-  const list = readEnvironments().map((env) => (env.url === withoutTrailingSlashes(url)
-    ? { url: env.url, label: env.label, token: '', paired: true, signs: coreId, ...(env.signs === coreId && env.signedGroup !== undefined ? { signedGroup: env.signedGroup } : {}) }
-    : env));
+  // What the machine said of its group before that is not its word over the new key: it says it again.
+  const list = readEnvironments().map((env) => (env.url === withoutTrailingSlashes(url) ? { url: env.url, label: env.label, token: '', paired: true, signs: coreId } : env));
   storeEnvironments(list);
   const updated = upsertEnvironment({ url, token: '', paired: true, signs: coreId });
   const stored = readStoredEndpoint();
