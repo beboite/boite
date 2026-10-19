@@ -1,10 +1,12 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { AGENT_ENV, type ThreadId } from '@boite/contracts';
+import { AGENT_ENV, DEFAULT_DELEGATION_CONFIG, type ThreadId } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
+import { Core } from '../src/core.ts';
+import { Retirements } from '../src/delegation/retirement.ts';
 import { PullRequestWatches } from '../src/pull-request-watch.ts';
 import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
-import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const URL = 'https://github.com/example/repo/pull/7';
 let harness: TestCore | undefined;
@@ -481,6 +483,131 @@ test('an agent watches its own thread; a paired phone may stop a watch, never st
     await expect(phone.call('threads.watchPullRequest', { threadId })).rejects.toThrow('owner');
     expect(await phone.call('threads.unwatchPullRequest', { threadId })).toEqual([]);
   } finally { agent.close(); phone.close(); }
+});
+
+/** A parent with delegation on and a delegated agent that has the pull request linked; the agent's own token watches it. */
+async function watchingChild(setup: Awaited<ReturnType<typeof watchedThread>>, requestId: string) {
+  const { owner, threadId } = setup;
+  const parent = harness!.core.threads.require(threadId);
+  await owner.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: parent.providerId, accountId: parent.accountId, model: parent.model!, effort: null }] } });
+  const child = (await owner.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Open the pull request and see it to green', requestId })).thread.id as ThreadId;
+  await settled(child);
+  harness!.core.journal.setSetting(`linked-pull-requests:${child}`, harness!.core.journal.getSetting(`linked-pull-requests:${threadId}`));
+  const agent = await connect(harness!.url, harness!.core.agents.tokenFor(child), { client: { name: 'boite-cli', version: 'test' } });
+  try { await agent.call('threads.watchPullRequest', { threadId: child }); } finally { agent.close(); }
+  return child;
+}
+
+test('a delegated agent watches its pull request: the wake is its turn, its answer goes to the parent, and its stop ends the watch', async () => {
+  const setup = await watchedThread();
+  const { owner, threadId, github, drive, watches } = setup;
+  const child = await watchingChild(setup, 'first');
+  const sibling = await watchingChild(setup, 'second');
+  expect(watches.of(child)).toHaveLength(1);
+
+  github.runs = [{ name: 'test', conclusion: 'FAILURE' }];
+  github.updatedAt = '2026-10-15T09:31:00Z';
+  await drive();
+  await settled(child);
+  expect(wakes(child)).toHaveLength(1);
+  expect(wakeText(child, wakes(child)[0]!.id)).toContain('Checks failed on aaaaaaa');
+  // What the wake turn answers comes back to the parent like any result of the subagent.
+  const result = () => harness!.core.journal.db.query('SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND request_id = ?').get(child, threadId, `result:${wakes(child)[0]!.id}`);
+  await waitFor(() => result() !== null);
+
+  // The parent stopping this subagent ends its watch, not its sibling's.
+  await owner.call('delegation.stop', { threadId, agentId: child });
+  expect(watches.of(child)).toEqual([]);
+  expect(harness!.core.journal.getSetting(`pr-watches:${child}`)).toBeUndefined();
+  expect(watches.of(sibling)).toHaveLength(1);
+  // Its parent archived, the subagent watches nothing either.
+  await owner.call('threads.archive', { threadId });
+  expect(watches.of(sibling)).toEqual([]);
+});
+
+test('a persistent agent takes its next work and keeps a subagent that still watches its pull request until the watch ends', async () => {
+  const setup = await watchedThread();
+  const { threadId, watches } = setup;
+  const child = await watchingChild(setup, 'episode');
+  const idle = (await setup.owner.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Read the logs', requestId: 'idle' })).thread.id as ThreadId;
+  await settled(idle);
+  await waitFor(() => (harness!.core.journal.db.query("SELECT COUNT(*) AS n FROM delegation_messages WHERE recipient_id = ? AND status = 'delivered'").get(threadId) as { n: number }).n >= 2);
+  await settled(threadId);
+  const delegation = harness!.core.delegation;
+  const archived = (id: ThreadId) => harness!.core.journal.getThread(id)?.archived;
+  // The resident runtime starts each work item through beginEpisode: the fresh work runs, the settled subagent retires, the watching one stays.
+  const accepted = delegation.beginEpisode(threadId, 'next-work-item', delegation.config(threadId));
+  expect({ accepted, idle: archived(idle), child: archived(child), watches: watches.of(child).length }).toEqual({ accepted: true, idle: true, child: false, watches: 1 });
+  // Its watch over, it retires too.
+  watches.unwatch(child);
+  await waitFor(() => archived(child) === true);
+});
+
+for (const ending of ['merged by someone else', 'closed by someone else', 'a failed turn']) {
+  test(`a subagent a past episode left watching delivers its last result before it retires: ${ending}`, async () => {
+    const setup = await watchedThread();
+    const { owner, threadId, github, drive, watches } = setup;
+    const child = await watchingChild(setup, 'episode');
+    await waitFor(() => harness!.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND status = 'delivered'").get(child, threadId) !== null);
+    await settled(threadId);
+    expect(harness!.core.delegation.beginEpisode(threadId, 'next-work-item', harness!.core.delegation.config(threadId))).toBe(true);
+    const before = harness!.core.journal.listTurns(child).map(turn => turn.id);
+    if (ending === 'a failed turn') await owner.call('turns.start', { threadId: child, prompt: '[error]' });
+    else {
+      github.state = ending.startsWith('merged') ? 'MERGED' : 'CLOSED';
+      github.closedBy = 'someone-else';
+      await drive();
+    }
+    await waitFor(() => harness!.core.journal.getThread(child)?.archived === true);
+    expect(watches.of(child)).toEqual([]);
+    const last = harness!.core.journal.listTurns(child).find(turn => !before.includes(turn.id))!;
+    expect(harness!.core.journal.db.query('SELECT status FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(child, `result:${last.id}`)).toEqual({ status: 'delivered' });
+  });
+}
+
+test('a restart between a retiring subagent\'s last delivery and its archive retires it on start', async () => {
+  const child = await retiringOnDisk();
+  const restarted = new Core({ dataDir: harness!.dataDir, token: harness!.token });
+  try {
+    expect(restarted.threads.require(child).archived).toBe(true);
+    expect(restarted.journal.getSetting(`delegation-retiring:${child}`)).toBeUndefined();
+  } finally { await restarted.close(); }
+});
+
+test('a retirement that throws on start is logged and the core still starts', async () => {
+  const child = await retiringOnDisk();
+  const retire = spyOn(Retirements.prototype, 'check').mockImplementation(() => { throw new Error('journal busy'); });
+  let restarted: Core;
+  try { restarted = new Core({ dataDir: harness!.dataDir, token: harness!.token }); } finally { retire.mockRestore(); }
+  try {
+    expect(restarted.threads.require(child).archived).toBe(false);
+    expect((await restarted.logs.query({ threadId: child, level: 'warn' })).some(record => record.event === 'delegation.retire_failed' && record.message.includes('journal busy'))).toBe(true);
+  } finally { await restarted.close(); }
+});
+
+/** A retiring subagent whose watch ended on disk, its core gone down before the archive followed. */
+async function retiringOnDisk(): Promise<ThreadId> {
+  const setup = await watchedThread();
+  const { threadId } = setup;
+  const child = await watchingChild(setup, 'episode');
+  await waitFor(() => harness!.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND status = 'delivered'").get(child, threadId) !== null);
+  await settled(threadId);
+  expect(harness!.core.delegation.beginEpisode(threadId, 'next-work-item', harness!.core.delegation.config(threadId))).toBe(true);
+  harness!.core.journal.deleteSetting(`pr-watches:${child}`);
+  await harness!.core.close();
+  return child;
+}
+
+test('the parent\'s Stop ends its subagents\' watches, and a workflow step still cannot watch', async () => {
+  const setup = await watchedThread();
+  const { owner, threadId, watches } = setup;
+  const child = await watchingChild(setup, 'first');
+  expect(watches.of(child)).toHaveLength(1);
+  await owner.call('turns.stop', { threadId });
+  expect(watches.of(child)).toEqual([]);
+  // A child the core runs for a plan answers it once: no watch to wake it again.
+  spyOn(harness!.core.delegation, 'delegated').mockReturnValue(false);
+  await expect(owner.call('threads.watchPullRequest', { threadId: child })).rejects.toThrow('a workflow step or a reviewer cannot watch');
 });
 
 test('archive ends the watches and their saved state, and a merged pull request has nothing to watch', async () => {
