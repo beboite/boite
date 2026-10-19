@@ -1,6 +1,7 @@
 import { errorText } from './errors';
-import type { AgentEntityKind, AgentsSnapshot, RpcParams, RpcResult, AgentsRpcMethods, AgentHistoryCursor, AgentHistoryKind, AgentRecord, AgentsHistoryPage, AgentConversationMessage, AgentMission, AgentScope, AgentTeam, ThreadSummary } from '@boite/contracts';
+import type { AgentEntityKind, AgentsSnapshot, RpcParams, RpcResult, AgentsRpcMethods, AgentHistoryCursor, AgentHistoryKind, AgentRecord, AgentsHistoryPage, AgentConversationMessage, AgentMission, AgentScope, AgentTeam, ThreadSummary, AgentSelection as ExecutionSelection } from '@boite/contracts';
 import type { Store } from './store.svelte';
+import { strings } from './strings';
 import { agentThreadLive } from './agent-directory.svelte';
 
 export type AgentEntryKind = Extract<AgentEntityKind, 'profile' | 'group' | 'team' | 'mission'>;
@@ -40,6 +41,10 @@ export interface AgentChat {
 type Attention = ReturnType<typeof attentionOf>;
 
 export const chatKey = (kind: AgentChatKind, id: string) => `${kind}:${id}`;
+
+/** Whether two agent routes run the same model the same way. */
+export const sameSelection = (a: ExecutionSelection, b: ExecutionSelection) =>
+  a.providerId === b.providerId && a.accountId === b.accountId && a.model === b.model && (a.effort ?? null) === (b.effort ?? null) && a.permissionMode === b.permissionMode;
 
 /** The team each group carries: the oldest team naming it as its discussion. */
 export function teamsByGroup(snapshot: AgentsSnapshot): Map<string, AgentTeam> {
@@ -394,6 +399,24 @@ export class AgentsView {
       return result;
     } catch (error) { this.error = errorText(error); return null; }
     finally { this.pending = false; }
+  }
+  private saves: Promise<unknown> = Promise.resolve();
+  /**
+   * A settings card's save. Unlike `call`, it is never dropped while another
+   * call is pending and it throws when refused. Saves run one at a time, each
+   * building its params when its turn comes, after the snapshot the previous
+   * save refreshed: two cards of one agent never send the same revision.
+   */
+  save<M extends keyof AgentsRpcMethods>(method: M, params: () => RpcParams<M>): Promise<RpcResult<M>> {
+    const run = this.saves.then(async () => {
+      const client = this.store.client;
+      if (!client || this.disposed) throw new Error(strings.connection.unavailable);
+      const result = await client.call(method, $state.snapshot(params()) as RpcParams<M>);
+      await this.refresh();
+      return result;
+    });
+    this.saves = run.catch(() => undefined);
+    return run;
   }
   close(): void { this.disposed = true; this.off?.(); }
 }

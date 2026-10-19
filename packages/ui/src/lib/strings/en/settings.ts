@@ -1,6 +1,13 @@
 export const strings = {
 
   settings: {
+    autosave: {
+      saving: 'Saving',
+      saved: 'Saved',
+      failed: 'Not saved',
+      invalid: 'Not saved until every field is valid',
+      retry: 'Retry'
+    },
     heading: 'Settings',
     modelDefaults: 'Default models',
     modelDefaultsHint: 'For new threads. Saved on this device.',

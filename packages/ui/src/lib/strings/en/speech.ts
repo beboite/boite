@@ -41,7 +41,7 @@ export const strings = {
     link: 'Add from a link', linkPlaceholder: 'https://huggingface.co/.../ggml-model.bin',
     linkHint: 'An https link to a whisper.cpp ggml file, such as the ones on huggingface.co/ggerganov/whisper.cpp.',
     add: 'Add',
-    advanced: 'Advanced', executable: 'Whisper executable', modelPath: 'Model file', savePaths: 'Save paths',
+    advanced: 'Advanced', executable: 'Whisper executable', modelPath: 'Model file',
     pathHint: 'Leave both empty to use the models above. A model file set here wins over the list.',
     provider: 'Provider', providerHint: 'Both run Whisper Large v3 Turbo. Keys stay on this core.', groq: 'Groq', openrouter: 'OpenRouter',
     groqKey: 'Groq key', openrouterKey: 'OpenRouter key', keySaved: 'Saved', keyEmpty: 'Paste a key', keyReplace: 'Paste a new key to replace it',

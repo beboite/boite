@@ -1,9 +1,10 @@
 <script lang="ts">
   import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { Dices, Palette } from '@lucide/svelte';
-  import type { AgentEntities, AgentProfile, AgentGroup, AgentTeam, AgentMission, AgentSelection as ExecutionSelection, RpcParams } from '@boite/contracts';
+  import type { AgentEntities, AgentProfile, AgentGroup, AgentTeam, AgentMission, AgentSelection as ExecutionSelection, RpcParams, RpcResult } from '@boite/contracts';
+  import { Autosave, TYPING_MS } from '../../lib/autosave.svelte';
   import { fill, strings } from '../../lib/strings';
   import { confirm } from '../../lib/confirm.svelte';
   import type { AgentEntryKind, AgentsView, AgentSelection } from '../../lib/agents.svelte';
@@ -14,13 +15,15 @@
   import EffortSlider from '../EffortSlider.svelte';
   import Menu from '../Menu.svelte';
   import InfoTip from '../InfoTip.svelte';
+  import SaveStatus from '../SaveStatus.svelte';
   import { encodeRobot, robotOf, seededRobot } from '../../lib/robots';
   import AgentAvatar from './AgentAvatar.svelte';
   import RobotPicker from './RobotPicker.svelte';
 
   /**
-   * Creates a record, or edits one in its Settings tab (`embedded`). An agent's model, effort and
-   * permissions are edited beside it in `AgentRuntimeSettings`, which owns the allowed routes.
+   * Creates a record with its Create button, or edits one in its Settings tab (`embedded`), where
+   * every change saves by itself. An agent's model, effort and permissions are edited beside it in
+   * `AgentRuntimeSettings`, which owns the allowed routes.
    * A mission started from a conversation arrives with that conversation's members and team (`preset`).
    */
   let { view, kind, record = null, embedded = false, preset, heading, ondone, oncancel }: {
@@ -153,6 +156,41 @@
 
   function toggle(values: string[], id: string): string[] { return values.includes(id) ? values.filter(v => v !== id) : [...values, id]; }
 
+  type Saving = 'agents.profile.save' | 'agents.group.save' | 'agents.team.save' | 'agents.mission.save';
+  type Send = <M extends Saving>(method: M, params: () => RpcParams<M>) => Promise<RpcResult<M> | null>;
+  let form = $state<HTMLFormElement>();
+  /** The record as the core last returned it to this form. */
+  let base = initial.record;
+  const autosave = new Autosave(write, () => form?.checkValidity() === false || !name.trim() ? strings.settings.autosave.invalid : null);
+  // Leaving the tab sends a change still waiting for a typing pause.
+  onMount(() => () => { if (!creating) void autosave.flush(); });
+
+  /** An edit to an existing record: a typed field waits for a pause, anything else saves now. */
+  function edited(delay = 0) { if (!creating) autosave.change('', delay); }
+  function typing(event: Event) {
+    const field = event.target as HTMLInputElement;
+    if (field.type !== 'checkbox' && field.type !== 'radio') edited(TYPING_MS);
+  }
+  function committed(event: Event) {
+    const field = event.target as HTMLInputElement;
+    if (field.type === 'checkbox' || field.type === 'radio') edited(); else if (!creating) void autosave.flush();
+  }
+  /** Archiving stops the agent: it still asks, and only a confirmed archive is saved. */
+  async function pickStatus(next: AgentProfile['status']) {
+    const existing = stored() as AgentProfile | undefined;
+    if (existing && next === 'archived' && status !== 'archived' && !await confirm.ask({
+      title: fill(labels.archiveTitle, { name: existing.name }),
+      body: labels.archiveBody,
+      confirmLabel: labels.archive,
+      cancelLabel: strings.common.cancel,
+      danger: true,
+      requiredText: existing.name,
+      inputLabel: labels.archiveName,
+    })) return;
+    status = next;
+    edited();
+  }
+
   function stored(): AgentEntities[AgentEntryKind] | undefined {
     const snapshot = view.snapshot, id = initial.record?.id;
     if (!snapshot || !id) return undefined;
@@ -160,49 +198,55 @@
     return list.find(r => r.id === id);
   }
 
-  async function save() {
+  /**
+   * The record's save, its params built when `send` runs them. A profile's Settings tab saves beside
+   * the runtime card, which may have moved the revision and the model since this form last saved:
+   * keep the current route and revision, but only while every field this form edits is unchanged.
+   * Anything else keeps the revision it read, so a stale form is refused rather than written over
+   * newer values.
+   */
+  function save(send: Send): Promise<AgentEntities[AgentEntryKind] | null> {
+    const fields = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.avatar, r.status, r.tools]);
+    const read = () => {
+      const latest = stored();
+      // Projects this form followed from elsewhere count as read, not as a stale copy.
+      const projects = (r: AgentProfile) => projectKey(r.projectIds) === projectsRead || projectKey(r.projectIds) === projectKey((base as AgentProfile).projectIds);
+      const rebase = kind === 'profile' && !!latest && !!base && fields(latest as AgentProfile) === fields(base as AgentProfile) && projects(latest as AgentProfile);
+      return { latest, rebase, version: base ? { id: base.id, expectedRevision: (rebase ? latest! : base).revision } : {} };
+    };
+    if (kind === 'profile') return send('agents.profile.save', () => {
+      const { latest, rebase, version } = read();
+      // Cores from before 2026-10-16 refuse a profile without `accountIntegration`; newer ones ignore it.
+      const legacy = { accountIntegration: (profile as { accountIntegration?: string } | undefined)?.accountIntegration ?? 'provider' };
+      return { ...version, value: { ...legacy, name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, projectIds } };
+    });
+    if (kind === 'group') return send('agents.group.save', () => ({ ...read().version, value: { name, memberIds, mode, maxTurns, maxTurnsPerAgent: perAgent, paused } }));
+    if (kind === 'team') return send('agents.team.save', () => ({ ...read().version, value: { name, description, members: memberIds.map(agentId => ({ agentId, responsibility: responsibilities[agentId] ?? '' })), groupId, projectIds, paused } }));
+    return send('agents.mission.save', () => { const { latest, version } = read(); return { ...version, value: { title: name, objective, expectedResult, agentIds: memberIds, teamId, projectId, status: (latest as AgentMission | undefined)?.status ?? mission?.status ?? 'open', maxTurns, maxDurationMs: Math.round(minutes * 60000), maxTokens: tokens || null, resourceIds: resourceIds.filter(id => resourceOptions.some(r => r.id === id)) } }; });
+  }
+  async function create() {
     if (busy) return;
     saving = true;
     try {
-      const existing = kind === 'profile' ? stored() as AgentProfile | undefined : undefined;
-      if (existing && existing.status !== 'archived' && status === 'archived' && !await confirm.ask({
-        title: fill(labels.archiveTitle, { name: existing.name }),
-        body: labels.archiveBody,
-        confirmLabel: labels.archive,
-        cancelLabel: strings.common.cancel,
-        danger: true,
-        requiredText: existing.name,
-        inputLabel: labels.archiveName,
-      })) return;
-      // A profile's Settings tab saves beside the runtime card, which may have moved the revision and
-      // the model since this form opened: keep the current route and revision, but only while every
-      // field this form edits is unchanged. Anything else keeps the revision it read, so a stale
-      // form is refused rather than written over newer values.
-      const latest = stored();
-      const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.avatar, r.status, r.tools]);
-      // Projects this form followed from elsewhere count as read, not as a stale copy.
-      const rebase = kind === 'profile' && latest && profile && edited(latest as AgentProfile) === edited(profile) && projectKey((latest as AgentProfile).projectIds) === projectsRead;
-      const version = initial.record ? { id: initial.record.id, expectedRevision: (rebase ? latest : initial.record).revision } : {};
-      let result: AgentEntities[AgentEntryKind] | null = null;
-      if (kind === 'profile') {
-        // Cores from before 2026-10-16 refuse a profile without `accountIntegration`; newer ones ignore it.
-        const legacy = { accountIntegration: (profile as { accountIntegration?: string } | undefined)?.accountIntegration ?? 'provider' };
-        const value = { ...legacy, name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, projectIds };
-        if (creating && host !== view.store) return await createOn(host, value);
-        result = await view.call('agents.profile.save', { ...version, value });
+      let result: AgentEntities[AgentEntryKind] | null;
+      if (kind === 'profile' && host !== view.store) {
+        const legacy = { accountIntegration: 'provider' };
+        return await createOn(host, { ...legacy, name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : '', selection, status, tools, projectIds });
       }
-      if (kind === 'group') result = await view.call('agents.group.save', { ...version, value: { name, memberIds, mode, maxTurns, maxTurnsPerAgent: perAgent, paused } });
-      if (kind === 'team') result = await view.call('agents.team.save', { ...version, value: { name, description, members: memberIds.map(agentId => ({ agentId, responsibility: responsibilities[agentId] ?? '' })), groupId, projectIds, paused } });
-      if (kind === 'mission') result = await view.call('agents.mission.save', { ...version, value: { title: name, objective, expectedResult, agentIds: memberIds, teamId, projectId, status: (latest as AgentMission | undefined)?.status ?? mission?.status ?? 'open', maxTurns, maxDurationMs: Math.round(minutes * 60000), maxTokens: tokens || null, resourceIds: resourceIds.filter(id => resourceOptions.some(r => r.id === id)) } });
+      result = await save((method, params) => view.call(method, params()));
       if (result) ondone({ kind, id: result.id });
     } finally { saving = false; }
+  }
+  async function write() {
+    const result = await save((method, params) => view.save(method, params));
+    if (result) base = result;
   }
 </script>
 
 {#snippet actions()}
   <div class="agent-form-actions">
-    <button class="primary" type="submit" disabled={busy || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{creating ? labels.createAction : strings.common.save}</span></button>
-    {#if creating}<button type="button" class="ghost" onclick={oncancel}><span class="ui-label">{strings.common.cancel}</span></button>{/if}
+    <button class="primary" type="submit" disabled={busy || !name.trim() || kind === 'profile' && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{labels.createAction}</span></button>
+    <button type="button" class="ghost" onclick={oncancel}><span class="ui-label">{strings.common.cancel}</span></button>
   </div>
 {/snippet}
 
@@ -219,16 +263,16 @@
   </fieldset>
 {/snippet}
 
-<form class="agents-form" onsubmit={event => { event.preventDefault(); void save(); }} data-testid="agent-editor">
+<form class="agents-form" bind:this={form} onsubmit={event => { event.preventDefault(); if (creating) void create(); else void autosave.flush(); }} oninput={typing} onchange={committed} data-testid="agent-editor">
   <section class="card">
-    {#if embedded}<h2>{heading ?? labels.identity}</h2>{/if}
+    {#if embedded}<h2>{heading ?? labels.identity}{#if !creating}<SaveStatus save={autosave} />{/if}</h2>{/if}
     {#if kind === 'profile'}
       <!-- The robot and the name read as one identity: the picture beside the field that names it. -->
       <div class="agent-identity">
         <div class="agent-portrait">
           <AgentAvatar kind="profile" id={profile?.id ?? ''} {name} avatar={robotTouched ? encodeRobot(robot) : profile?.avatar ?? ''} size={72} />
           <div class="agent-portrait-tools">
-            <button type="button" class="ghost icon small" title={labels.robot.shuffle} aria-label={labels.robot.shuffle} onclick={() => { robot = seededRobot(secureId(), robot.family); robotTouched = true; }} data-testid="robot-shuffle"><Dices size={15} strokeWidth={1.75} /></button>
+            <button type="button" class="ghost icon small" title={labels.robot.shuffle} aria-label={labels.robot.shuffle} onclick={() => { robot = seededRobot(secureId(), robot.family); robotTouched = true; edited(); }} data-testid="robot-shuffle"><Dices size={15} strokeWidth={1.75} /></button>
             <button type="button" class="ghost icon small" class:active={dressing} aria-pressed={dressing} title={labels.robot.customize} aria-label={labels.robot.customize} onclick={() => { dressing = !dressing; }} data-testid="robot-customize"><Palette size={15} strokeWidth={1.75} /></button>
           </div>
         </div>
@@ -236,7 +280,7 @@
       </div>
       {#if dressing}
         <div class="agent-dressing">
-          <RobotPicker {robot} onpick={next => { robot = next; robotTouched = true; }} />
+          <RobotPicker {robot} onpick={next => { robot = next; robotTouched = true; edited(); }} />
           <button type="button" class="ghost small agent-add" onclick={() => { dressing = false; }}>{labels.robot.done}</button>
         </div>
       {/if}
@@ -261,13 +305,13 @@
       </fieldset>
       {#if embedded}
         <div class="agent-field"><span>{labels.status}</span>
-          <Menu placement="bottom" label={labels.status} items={(['active', 'paused', 'archived'] as const).map(id => ({ id, label: labels[id], active: status === id }))} onpick={id => { status = id as AgentProfile['status']; }}><span class="ui-label">{labels[status]}</span></Menu>
+          <Menu placement="bottom" label={labels.status} items={(['active', 'paused', 'archived'] as const).map(id => ({ id, label: labels[id], active: status === id }))} onpick={id => void pickStatus(id as AgentProfile['status'])}><span class="ui-label">{labels[status]}</span></Menu>
         </div>
       {/if}
     {:else if kind === 'group'}
       {@render members()}
       <div class="agent-field"><span class="agent-label ui-label-box"><span class="ui-label">{labels.mode}</span><InfoTip topic={labels.mode} text={labels.modeHint} /></span>
-        <Menu placement="bottom" label={labels.mode} items={(['mentions', 'round', 'autonomous'] as const).map(id => ({ id, label: labels[id], active: mode === id }))} onpick={id => { mode = id as AgentGroup['mode']; }}><span class="ui-label">{labels[mode]}</span></Menu>
+        <Menu placement="bottom" label={labels.mode} items={(['mentions', 'round', 'autonomous'] as const).map(id => ({ id, label: labels[id], active: mode === id }))} onpick={id => { mode = id as AgentGroup['mode']; edited(); }}><span class="ui-label">{labels[mode]}</span></Menu>
       </div>
     {:else if kind === 'team'}
       <label class="agent-field">{labels.description}<textarea bind:value={description} rows="2"></textarea></label>
@@ -279,7 +323,7 @@
       <label class="agent-field">{labels.objective}<textarea required bind:value={objective} rows="4" maxlength="32000"></textarea></label>
       <label class="agent-field">{labels.expectedResult}<textarea bind:value={expectedResult} rows="2" maxlength="8000"></textarea></label>
       <div class="agent-field"><span>{labels.team}</span>
-        <Menu placement="bottom" label={labels.team} items={[{ id: '', label: labels.noTeam }, ...(view.snapshot?.teams.map(t => ({ id: t.id, label: t.name })) ?? [])]} onpick={id => { teamId = id || null; memberIds = memberIds.filter(a => !id || view.snapshot?.teams.find(t => t.id === id)?.members.some(m => m.agentId === a)); }}><span class="ui-label">{view.snapshot?.teams.find(t => t.id === teamId)?.name ?? labels.noTeam}</span></Menu>
+        <Menu placement="bottom" label={labels.team} items={[{ id: '', label: labels.noTeam }, ...(view.snapshot?.teams.map(t => ({ id: t.id, label: t.name })) ?? [])]} onpick={id => { teamId = id || null; memberIds = memberIds.filter(a => !id || view.snapshot?.teams.find(t => t.id === id)?.members.some(m => m.agentId === a)); edited(); }}><span class="ui-label">{view.snapshot?.teams.find(t => t.id === teamId)?.name ?? labels.noTeam}</span></Menu>
       </div>
       {@render members()}
     {/if}
@@ -289,7 +333,6 @@
         <div class="agent-checks">{#each TOOLS as tool (tool)}<label class="agent-chip-check"><input type="checkbox" checked={tools.includes(tool)} onchange={() => { tools = toggle(tools, tool); }} /><span class="ui-label">{labels[tool]}</span></label>{/each}</div>
       </fieldset>
     {/if}
-    {#if embedded && kind === 'profile'}{@render actions()}{/if}
   </section>
 
   {#if kind === 'profile' && creating}
@@ -344,14 +387,14 @@
       <div class="agent-columns"><label class="agent-field">{labels.maxTurns}<input type="number" min="1" max="100" required bind:value={maxTurns} /></label><label class="agent-field">{labels.perAgent}<input type="number" min="1" max="20" required bind:value={perAgent} /></label></div>
     {:else if kind === 'team'}
       <div class="agent-field"><span>{labels.group}</span>
-        <Menu placement="bottom" label={labels.group} items={[{ id: '', label: labels.noGroup }, ...(view.snapshot?.groups.map(g => ({ id: g.id, label: g.name })) ?? [])]} onpick={id => { groupId = id || null; }}><span class="ui-label">{view.snapshot?.groups.find(g => g.id === groupId)?.name ?? labels.noGroup}</span></Menu>
+        <Menu placement="bottom" label={labels.group} items={[{ id: '', label: labels.noGroup }, ...(view.snapshot?.groups.map(g => ({ id: g.id, label: g.name })) ?? [])]} onpick={id => { groupId = id || null; edited(); }}><span class="ui-label">{view.snapshot?.groups.find(g => g.id === groupId)?.name ?? labels.noGroup}</span></Menu>
       </div>
       {#if view.store.projects.length}
         <fieldset class="agent-field"><legend>{labels.project}</legend><div class="agent-checks">{#each view.store.projects as project (project.id)}<label class="agent-chip-check"><input type="checkbox" checked={projectIds.includes(project.id)} onchange={() => { projectIds = toggle(projectIds, project.id); }} /><span class="ui-label">{project.name}</span></label>{/each}</div></fieldset>
       {/if}
     {:else}
       <div class="agent-field"><span>{labels.project}</span>
-        <Menu placement="bottom" label={labels.project} items={[{ id: '', label: labels.noProject }, ...view.store.projects.map(p => ({ id: p.id, label: p.name }))]} onpick={id => { projectId = id || null; }}><span class="ui-label">{view.store.projects.find(p => p.id === projectId)?.name ?? labels.noProject}</span></Menu>
+        <Menu placement="bottom" label={labels.project} items={[{ id: '', label: labels.noProject }, ...view.store.projects.map(p => ({ id: p.id, label: p.name }))]} onpick={id => { projectId = id || null; edited(); }}><span class="ui-label">{view.store.projects.find(p => p.id === projectId)?.name ?? labels.noProject}</span></Menu>
       </div>
       <div class="agent-columns">
         <label class="agent-field">{labels.maxTurns}<input required type="number" min="1" max="1000" bind:value={maxTurns} /></label>
@@ -366,5 +409,5 @@
   </details>
   {/if}
 
-  {#if !embedded || kind !== 'profile'}{@render actions()}{/if}
+  {#if creating}{@render actions()}{/if}
 </form>

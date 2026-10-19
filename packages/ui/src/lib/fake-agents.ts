@@ -40,8 +40,10 @@ export class FakeAgents {
   /** Each agent's folder under a chosen root, named after it the first time it was placed there. */
   private placed = new Map<string, string>();
   private runtime(id: string): AgentRuntimeConfig {
-    const agent = this.get('profile', id);
-    return structuredClone(this.configs.get(id) ?? { defaultRoute: agent.selection, allowedRoutes: [{ ...agent.selection, model: agent.selection.model ?? 'default', id: 'default', name: 'Default' }], subagents: { enabled: true, paused: false, profiles: [], anyModel: true }, compactAfterTurns: 12, maxRunMinutes: 10, autoMemory: true });
+    const agent = this.get('profile', id), saved = this.configs.get(id);
+    // As on the core, the profile owns the default route: a profile save is what the runtime reads next.
+    if (saved) return structuredClone({ ...saved, defaultRoute: agent.selection });
+    return structuredClone({ defaultRoute: agent.selection, allowedRoutes: [{ ...agent.selection, model: agent.selection.model ?? 'default', id: 'default', name: 'Default' }], subagents: { enabled: true, paused: false, profiles: [], anyModel: true }, compactAfterTurns: 12, maxRunMinutes: 10, autoMemory: true });
   }
   private closed = false;
   private pumping = false;

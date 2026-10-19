@@ -257,12 +257,9 @@
             </div>
           {/if}
           <div class="paths">
-            <label>{strings.speech.executable}<input data-testid="voice-executable" bind:value={config.executable} spellcheck="false" placeholder={status.canInstallRuntime ? '' : 'whisper-cli'} /></label>
-            <label>{strings.speech.modelPath}<input data-testid="voice-model-path" bind:value={config.modelPath} spellcheck="false" /></label>
-            <div class="actions">
-              <button type="button" class="small" data-testid="voice-save-paths" disabled={busy} onclick={() => void apply()}><span class="ui-label">{strings.speech.savePaths}</span></button>
-              <InfoTip topic={strings.speech.advanced} text={strings.speech.pathHint} />
-            </div>
+            <label>{strings.speech.executable}<input data-testid="voice-executable" bind:value={config.executable} onchange={() => void apply()} spellcheck="false" placeholder={status.canInstallRuntime ? '' : 'whisper-cli'} /></label>
+            <label>{strings.speech.modelPath}<input data-testid="voice-model-path" bind:value={config.modelPath} onchange={() => void apply()} spellcheck="false" /></label>
+            <div class="actions"><InfoTip topic={strings.speech.advanced} text={strings.speech.pathHint} /></div>
           </div>
         </details>
       </section>

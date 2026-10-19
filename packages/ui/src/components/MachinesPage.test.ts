@@ -92,12 +92,13 @@ test('sync stays on the list and the settings button edits the owning machine wi
   expect(query<HTMLInputElement>('[data-testid="memory-budget"]').value).toBe('40');
   expect(document.querySelector('[data-testid="setting-focus-guard"]')).toBeNull();
   input('[data-testid="memory-budget"]', '50');
-  query('[data-testid="memory-budget"]').closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  query('[data-testid="memory-budget"]').dispatchEvent(new Event('change', { bubbles: true }));
   await vi.waitFor(() => expect(target.store.settings?.agentMemoryBudgetPercent).toBe(50));
   expect(source.store.settings?.agentMemoryBudgetPercent).toBe(70);
 
   input('[data-testid="setting-warmProcessMinutes"]', '12');
-  query<HTMLButtonElement>('[data-testid="scheduler-save"]').click();
+  // The field saves by itself when it loses focus: there is no Save button.
+  query('[data-testid="setting-warmProcessMinutes"]').dispatchEvent(new Event('change', { bubbles: true }));
   await vi.waitFor(() => expect(target.store.settings?.warmProcessMinutes).toBe(12));
   expect(source.store.settings?.warmProcessMinutes).toBe(9);
   expect(document.querySelector('[data-testid="worktree-storage"]')).not.toBeNull();

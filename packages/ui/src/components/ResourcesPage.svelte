@@ -6,6 +6,8 @@
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
+  import SaveStatus from './SaveStatus.svelte';
+  import { Autosave, toggled, typed } from '../lib/autosave.svelte';
   import { threadTone } from '../lib/thread-state';
 
   let { store, limitsOnly = false }: { store: Store; limitsOnly?: boolean } = $props();
@@ -18,6 +20,11 @@
   const resources = $derived([...store.resources].sort((a, b) => b.load.memoryBytes - a.load.memoryBytes));
   const memoryEnabled = $derived(store.settings?.memoryProtection !== false);
   let confirming = $state<ThreadId | null>(null);
+  let limits = $state<HTMLFormElement>();
+  const limitsSave = new Autosave(async () => {
+    if (!await store.saveSettings({ agentCpuCapPercent: cpuCap, ...(memoryEnabled ? { agentMemoryBudgetPercent: memoryBudget, threadMemoryCapMb: memoryCap, memoryReserveMb: memoryReserve } : {}) })) throw new Error('');
+  }, () => limits?.checkValidity() === false ? strings.settings.autosave.invalid : null);
+  $effect(() => () => void limitsSave.flush());
 
   async function kill(threadId: ThreadId) {
     confirming = null;
@@ -54,20 +61,20 @@
     <h2 class="ui-label-box"><span class="ui-label">{strings.protection.quiet}</span><InfoTip topic={strings.protection.quiet} text={strings.protection.windows} /></h2>
     <label for="{uid}-focus-guard" class="switch-row">
       <span class="text"><span id="{uid}-focus-guard-name">{strings.settings.focusGuard}</span></span>
-      <input id="{uid}-focus-guard" aria-labelledby="{uid}-focus-guard-name" type="checkbox" role="switch" data-testid="setting-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={(event) => void store.saveSettings({focusGuard: event.currentTarget.checked})} />
+      <input id="{uid}-focus-guard" aria-labelledby="{uid}-focus-guard-name" type="checkbox" role="switch" data-testid="setting-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={(event) => void toggled(event.currentTarget, focusGuard => store.saveSettings({ focusGuard }))} />
     </label>
     <label for="{uid}-mute-agents" class="switch-row">
       <span class="text"><span id="{uid}-mute-agents-name">{strings.settings.muteAgents}</span></span>
-      <input id="{uid}-mute-agents" aria-labelledby="{uid}-mute-agents-name" type="checkbox" role="switch" data-testid="setting-mute-agents" checked={store.settings?.muteAgents ?? true} onchange={(event) => void store.saveSettings({muteAgents: event.currentTarget.checked})} />
+      <input id="{uid}-mute-agents" aria-labelledby="{uid}-mute-agents-name" type="checkbox" role="switch" data-testid="setting-mute-agents" checked={store.settings?.muteAgents ?? true} onchange={(event) => void toggled(event.currentTarget, muteAgents => store.saveSettings({ muteAgents }))} />
     </label>
     <label for="{uid}-reap-orphans" class="switch-row">
       <span class="text ui-label-box"><span class="ui-label" id="{uid}-reap-orphans-name">{strings.settings.reapOrphans}</span><InfoTip topic={strings.settings.reapOrphans} text={strings.settings.reapOrphansHint} /></span>
-      <input id="{uid}-reap-orphans" aria-labelledby="{uid}-reap-orphans-name" type="checkbox" role="switch" data-testid="setting-reap-orphans" checked={store.settings?.reapOrphans ?? true} onchange={(event) => void store.saveSettings({reapOrphans: event.currentTarget.checked})} />
+      <input id="{uid}-reap-orphans" aria-labelledby="{uid}-reap-orphans-name" type="checkbox" role="switch" data-testid="setting-reap-orphans" checked={store.settings?.reapOrphans ?? true} onchange={(event) => void toggled(event.currentTarget, reapOrphans => store.saveSettings({ reapOrphans }))} />
     </label>
   </section>
   {/if}
   <section class="card" id="settings-limits">
-    <h2>{strings.protection.limits}</h2>
+    <h2>{strings.protection.limits}<SaveStatus save={limitsSave} /></h2>
     <label for="{uid}-memory-protection" class="switch-row">
       <span class="text ui-label-box"><span class="ui-label" id="{uid}-memory-protection-name">{strings.settings.memoryProtection}</span><InfoTip topic={strings.settings.memoryProtection} text={strings.settings.memoryProtectionHint} /></span>
       <input id="{uid}-memory-protection" aria-labelledby="{uid}-memory-protection-name" type="checkbox" role="switch" data-testid="setting-memory-protection" checked={memoryEnabled} onchange={async (event) => {
@@ -75,7 +82,7 @@
         if (!await store.saveSettings({ memoryProtection: input.checked })) input.checked = memoryEnabled;
       }} />
     </label>
-    <form onsubmit={(event) => { event.preventDefault(); void store.saveSettings({agentCpuCapPercent: cpuCap, ...(memoryEnabled ? {agentMemoryBudgetPercent: memoryBudget, threadMemoryCapMb: memoryCap, memoryReserveMb: memoryReserve} : {})}); }}>
+    <form bind:this={limits} onsubmit={(event) => { event.preventDefault(); void limitsSave.flush(); }} {...typed(limitsSave)}>
       <label><span class="name"><span class="ui-label">{strings.settings.agentCpuCapPercent}</span><InfoTip topic={strings.settings.agentCpuCapPercent} text={strings.settings.agentCpuCapHint} /></span><input type="number" min="0" max="100" required bind:value={cpuCap} /></label>
       <label><span class="name"><span class="ui-label">{strings.settings.agentMemoryBudgetPercent}</span><InfoTip topic={strings.settings.agentMemoryBudgetPercent} text={strings.settings.agentMemoryBudgetHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.agentMemoryBudgetPercent} data-testid="memory-budget" type="number" min="10" max="90" step="1" required bind:value={memoryBudget} />
         {#if memoryEnabled && store.memory}<span class="hint" data-testid="memory-budget-resolved">{strings.resources.resolved(store.memory.limits.budgetMb)}</span>{/if}
@@ -86,7 +93,6 @@
       <label><span class="name"><span class="ui-label">{strings.settings.memoryReserveMb}</span><InfoTip topic={strings.settings.memoryReserveMb} text={strings.settings.memoryReserveHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.memoryReserveMb} data-testid="memory-reserve" type="number" min="0" required bind:value={memoryReserve} />
         {#if memoryEnabled && memoryReserve === 0 && store.memory}<span class="hint" data-testid="memory-reserve-auto">{strings.resources.auto(store.memory.limits.memoryReserveMb)}</span>{/if}
       </label>
-      <button type="submit" class="primary"><span class="ui-label">{strings.common.save}</span></button>
     </form>
   </section>
   <section class="card" data-testid="memory-status">
@@ -155,7 +161,6 @@
   dd { margin: 6px 0 0; font-variant-numeric: tabular-nums; }
   dd[data-state="critical"] { color: var(--color-danger); }
   form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
-  form button { justify-self: start; }
   form label { display: grid; gap: 6px; justify-items: start; }
   form .name { display: inline-flex; align-items: center; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }

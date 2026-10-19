@@ -369,6 +369,19 @@ choice off; listing profiles restricts children to them, without gaining other
 main routes. The subagent guide joins a fresh session while they are on. Provider/account probes determine availability.
 There is no silent fallback to an unapproved model.
 
+Every card of an identity's Settings tab saves by itself, with no Save button:
+a pick, a switch or a menu at once, a typed name or number after a pause in
+typing or when the field loses focus. The card title then reads Saving, Saved,
+or Not saved with the core's reason and a Retry; a refused save never reads as
+saved, and the agent keeps running on the route the core holds. Saves of one
+identity run one at a time, each on the revision the previous one returned, so
+the identity card and the model card never refuse each other. A value the form
+cannot send, such as an empty route name, waits until it is valid again, and a
+change still waiting when the tab closes is sent. Archiving still asks for the
+identity's name before anything is saved. Creating an identity, a team or a
+mission keeps its Create button, and so do the brain folder, an identity's
+brain files, memories, routines and the first roles that make a group a team.
+
 Account access grants each subscription to all identities or an explicit list.
 These grants also apply to their children. Revocation stops affected managed
 executions and pauses queued work for review. Routes are checked again just
