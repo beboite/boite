@@ -10,7 +10,7 @@
  */
 
 import { constants, existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
-import type { Stats } from 'node:fs';
+import type { BigIntStats, Stats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { open, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -130,13 +130,14 @@ export function existingInside(
   path: string,
   expect: 'file' | 'dir',
   what: string,
-): InsidePath & { stats: Stats; real: string } {
+): InsidePath & { stats: BigIntStats; real: string } {
   const found = resolveInside(cwd, path, what);
   let real: string;
-  let stats: Stats;
+  let stats: BigIntStats;
   try {
     real = realpathSync(found.absolute);
-    stats = statSync(real);
+    // Exact ids: NTFS ones pass 2^53, where numbers round neighbours together.
+    stats = statSync(real, { bigint: true });
   } catch {
     throw refused(`${what} does not exist: ${path}`, { what, path });
   }
@@ -160,7 +161,7 @@ async function writeAll(handle: FileHandle, data: Uint8Array): Promise<void> {
 }
 
 /** Open the real directory checked a moment ago. The handle stays on that inode if its path is renamed. */
-export async function openHeldDirectory(real: string, dev: number, ino: number, what: string, path: string): Promise<FileHandle> {
+export async function openHeldDirectory(real: string, dev: bigint, ino: bigint, what: string, path: string): Promise<FileHandle> {
   let handle: FileHandle;
   try {
     handle = await open(real, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | NOFOLLOW);
@@ -168,7 +169,7 @@ export async function openHeldDirectory(real: string, dev: number, ino: number, 
     throw refused(`${what} changed while it was opened: ${path}`, { what, path });
   }
   try {
-    const stats = await handle.stat();
+    const stats = await handle.stat({ bigint: true });
     if (!stats.isDirectory() || stats.dev !== dev || stats.ino !== ino) {
       throw refused(`${what} changed while it was opened: ${path}`, { what, path });
     }
@@ -195,7 +196,7 @@ export async function createExclusiveFile(dir: FileHandle, name: string, fallbac
 }
 
 /** Open the real file checked a moment ago, and refuse a symlink swapped in since. */
-export async function openChecked(real: string, flags: number, dev: number, ino: number, what: string, path: string): Promise<FileHandle> {
+export async function openChecked(real: string, flags: number, dev: bigint, ino: bigint, what: string, path: string): Promise<FileHandle> {
   let handle: FileHandle;
   try {
     handle = await open(real, flags | NOFOLLOW);
@@ -203,7 +204,7 @@ export async function openChecked(real: string, flags: number, dev: number, ino:
     throw refused(`${what} changed while it was opened: ${path}`, { what, path });
   }
   try {
-    const stats = await handle.stat();
+    const stats = await handle.stat({ bigint: true });
     if (!stats.isFile() || stats.dev !== dev || stats.ino !== ino) {
       throw refused(`${what} changed while it was opened: ${path}`, { what, path });
     }
@@ -349,13 +350,14 @@ export function mediaOf(path: string): { kind: 'image' | 'video' | 'audio' | 'bi
  */
 export async function readFileContent(core: Core, cwd: string, path: string): Promise<FileContent> {
   const found = existingInside(cwd, path, 'file', 'files.read path');
-  const modifiedAt = Math.round(found.stats.mtimeMs);
+  const modifiedAt = Math.round(Number(found.stats.mtimeNs) / 1e6);
+  const size = Number(found.stats.size);
   const media = mediaOf(found.relative);
   const handle = await openChecked(found.real, constants.O_RDONLY, found.stats.dev, found.stats.ino, 'files.read path', path);
   let ticketIdentity: string | null = null;
   try {
-    if (found.stats.size <= FILE_MAX_BYTES && media.mime === 'application/octet-stream') {
-      const data = Buffer.alloc(found.stats.size);
+    if (size <= FILE_MAX_BYTES && media.mime === 'application/octet-stream') {
+      const data = Buffer.alloc(size);
       let offset = 0;
       while (offset < data.length) {
         const { bytesRead } = await handle.read(data, offset, data.length - offset, offset);
@@ -389,7 +391,7 @@ export async function readFileContent(core: Core, cwd: string, path: string): Pr
   return {
     kind: media.kind,
     path: found.relative,
-    bytes: found.stats.size,
+    bytes: size,
     modifiedAt,
     mime: media.mime,
     // A path, not an address: the client knows which host it reached this core

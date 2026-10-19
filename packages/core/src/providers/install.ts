@@ -165,8 +165,8 @@ export class InstallManager {
     const currentDir = this.currentDir(providerId);
     let stamp: string;
     try {
-      const stat = statSync(join(currentDir, RELEASE_RECORD));
-      stamp = `${stat.dev}:${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+      const stat = statSync(join(currentDir, RELEASE_RECORD), { bigint: true });
+      stamp = `${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.size}`;
     } catch {
       this.#records.delete(providerId);
       return readReleaseRecord(currentDir);

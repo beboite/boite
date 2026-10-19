@@ -81,9 +81,9 @@ export function buildView(source: string, directory: string, cwd: string): Built
         // Read through the descriptor of the file that was checked: a link swapped in since is not followed.
         const fd = openSync(found.real, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
         try {
-          const stats = fstatSync(fd);
+          const stats = fstatSync(fd, { bigint: true });
           if (!stats.isFile() || stats.dev !== found.stats.dev || stats.ino !== found.stats.ino) loaded = `${address} changed while it was opened`;
-          else loaded = stats.size > VIEW_MAX_BYTES ? `${address} is over 4 MB` : { mime, data: readFileSync(fd) };
+          else loaded = stats.size > BigInt(VIEW_MAX_BYTES) ? `${address} is over 4 MB` : { mime, data: readFileSync(fd) };
         } finally { closeSync(fd); }
       } catch (error) { loaded = `${address}: ${messageOf(error)}`; }
     }

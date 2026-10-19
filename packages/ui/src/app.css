@@ -1428,6 +1428,50 @@ tr:last-child td {
   font-size: var(--text-md);
 }
 
+/*
+ * A form that saves by itself says what became of its last change at the
+ * right of the card title (`SaveStatus.svelte`), on agents' cards too.
+ */
+/* A status too long for the title's line, an error on a phone, takes the next line whole. */
+.card h2:has(> .save-status) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.save-status {
+  display: inline-flex;
+  flex: none;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: auto;
+  color: var(--color-muted-foreground);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.save-status[data-state='saved'] :is(svg) {
+  color: var(--color-success);
+}
+
+.save-status:is([data-state='error'], [data-state='invalid']) {
+  color: var(--color-danger);
+}
+
+.save-status .reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.save-status button {
+  flex: none;
+}
+
 /* A hint straight under a card title belongs to it; the rows start after. */
 .settings .page .card h2:has(+ .hint) {
   margin-bottom: 6px;

@@ -73,12 +73,12 @@ export function takeLock(file: string, busy: (holder: number) => string, clock: 
       const handle = openSync(file, 'wx');
       const key = startKey(process.pid);
       writeFileSync(handle, `${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }) }, null, 2)}\n`, 'utf8');
-      const { ino } = fstatSync(handle);
+      const { ino } = fstatSync(handle, { bigint: true });
       closeSync(handle);
       // Only the file this call made: its directory may have moved away, and another lock taken its path.
       return () => {
         try {
-          if (statSync(file).ino === ino) rmSync(file, { force: true });
+          if (statSync(file, { bigint: true }).ino === ino) rmSync(file, { force: true });
         } catch {
           // The directory may be gone already; nothing left to release.
         }

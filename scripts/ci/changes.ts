@@ -81,8 +81,7 @@ export const CORE_ALL: CoreRunner[] = [...CORE_PR, { os: 'macos-15-intel', name:
 // `pr` gates a merge, `warm` follows it on main, `full` is a release or a
 // manual run. Main runs the extra portable architectures, the Intel Mac core
 // suite, and refreshes caches. `draft` is a draft pull request: only the Linux
-// checks run, under a gate named `CI draft`, and marking it ready runs `pr`
-// (docs/ci.md#draft-pull-requests).
+// checks run, and marking it ready runs `pr` (docs/ci.md#draft-pull-requests).
 // A push event alone provides no proof that its tree passed PR tests, so every
 // mode runs the affected suites. A main push compares with the last main commit
 // whose CI passed, not the previous push: a cancelled or failed run's changes

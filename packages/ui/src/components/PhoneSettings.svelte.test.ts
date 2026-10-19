@@ -1,4 +1,4 @@
-import { afterEach, expect } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { test } from '../test/fake-client';
 import PhoneSettings from './PhoneSettings.svelte';
@@ -76,4 +76,36 @@ test('the phone screen turns notifications and each kind on and off, and a devic
   } finally {
     localStorage.clear();
   }
+});
+
+test('an address typed while the previous one is saving is the one saved next, and stays in the field', async ({ store }) => {
+  component = mount(PhoneSettings, { target: document.body, props: { store } });
+  flushSync();
+  const client = store.client!;
+  const call = client.call.bind(client);
+  const sent: unknown[] = [];
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  client.call = (async (method: string, params: { publicUrl?: string | null }) => {
+    if (method === 'settings.set' && 'publicUrl' in params) {
+      sent.push(params.publicUrl);
+      if (sent.length === 1) await held;
+    }
+    return call(method as never, params as never);
+  }) as typeof client.call;
+  const field = document.querySelector<HTMLInputElement>('[data-testid=phone-public-url]')!;
+  const type = (value: string) => {
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+  };
+  type('https://first.test');
+  await Promise.resolve();
+  type('https://second.test');
+  release();
+  await vi.waitFor(() => expect(store.settings?.publicUrl).toBe('https://second.test'));
+  flushSync();
+  expect(sent).toEqual(['https://first.test', 'https://second.test']);
+  expect(field.value).toBe('https://second.test');
 });

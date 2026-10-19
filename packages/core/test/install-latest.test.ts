@@ -4,6 +4,7 @@ import type { ProviderInstall } from '@boite/contracts';
 import { resolveLatestInstall } from '../src/providers/install-latest.ts';
 import { Rejection, validateDescriptor } from '../src/providers/validate.ts';
 import claudeShipped from '../src/providers/shipped/claude.json';
+import codexShipped from '../src/providers/shipped/codex.json';
 
 const SHA = 'a'.repeat(64);
 
@@ -103,5 +104,15 @@ describe('a descriptor that follows its publisher', () => {
       catch (error) { if (error instanceof Rejection) rejected = error; else throw error; }
       expect(rejected?.rejected.field).toBe(field);
     }
+  });
+});
+
+describe('the shipped Codex release for Windows', () => {
+  test('unpacks the helpers Codex spawns from its own directory beside the agent', () => {
+    const install = validateDescriptor(codexShipped, 'codex.json', new Set(), tmpdir()).profiles.windows?.install;
+    const [agent, ...helpers] = install?.files.map((file) => file.path) ?? [];
+    expect(agent).toBe('codex-x86_64-pc-windows-msvc.exe');
+    // Without the code-mode host every tool call fails to spawn it (#648).
+    expect(helpers.sort()).toEqual(['codex-code-mode-host.exe', 'codex-command-runner.exe', 'codex-windows-sandbox-setup.exe']);
   });
 });

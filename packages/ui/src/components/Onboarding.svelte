@@ -14,6 +14,7 @@
   import { readTheme, setTheme, type Theme } from '../lib/theme';
   import { work, type Profile } from '../lib/work-prefs.svelte';
   import type { Store } from '../lib/store.svelte';
+  import { toggled } from '../lib/autosave.svelte';
 
   let { store }: { store: Store } = $props();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
@@ -177,8 +178,8 @@
               <label class="row"><Bell size={18} /><span class="ui-label">{strings.settings.notifications}</span><input type="checkbox" role="switch" data-testid="onboarding-notifications" checked={store.notifications} onchange={event => void store.setNotifications(event.currentTarget.checked)} /></label>
               {#if inShell}<label class="row"><Minimize2 size={18} /><span class="ui-label">{strings.settings.closeToTray}</span><input type="checkbox" role="switch" data-testid="onboarding-tray" checked={tray} disabled={!trayReady || trayBusy} onchange={event => void setTray(event.currentTarget.checked)} /></label>{/if}
               {#if store.owner}
-                <label class="row"><AppWindow size={18} /><span class="ui-label">{strings.settings.focusGuard}</span><input type="checkbox" role="switch" data-testid="onboarding-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={event => void store.saveSettings({ focusGuard: event.currentTarget.checked })} /></label>
-                <label class="row"><VolumeX size={18} /><span class="ui-label">{strings.settings.muteAgents}</span><input type="checkbox" role="switch" data-testid="onboarding-mute" checked={store.settings?.muteAgents ?? true} onchange={event => void store.saveSettings({ muteAgents: event.currentTarget.checked })} /></label>
+                <label class="row"><AppWindow size={18} /><span class="ui-label">{strings.settings.focusGuard}</span><input type="checkbox" role="switch" data-testid="onboarding-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={event => void toggled(event.currentTarget, focusGuard => store.saveSettings({ focusGuard }))} /></label>
+                <label class="row"><VolumeX size={18} /><span class="ui-label">{strings.settings.muteAgents}</span><input type="checkbox" role="switch" data-testid="onboarding-mute" checked={store.settings?.muteAgents ?? true} onchange={event => void toggled(event.currentTarget, muteAgents => store.saveSettings({ muteAgents }))} /></label>
               {/if}
             </div>
             {#if error}<p role="alert">{error}</p>{/if}

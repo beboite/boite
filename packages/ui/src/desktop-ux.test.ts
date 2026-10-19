@@ -10,6 +10,7 @@ import { archiveThread } from './lib/archive';
 import { runCommand } from './lib/commands.svelte';
 import { undo } from './lib/undo.svelte';
 import { confirm } from './lib/confirm.svelte';
+import { strings } from './lib/strings';
 import { clampPanel, rightPanel } from './lib/right-panel.svelte';
 import { contactsRail } from './lib/contacts-rail.svelte';
 
@@ -290,28 +291,37 @@ test('Ctrl+Shift+T brings back the thread archived last on the machine, from thi
   expect(store.threads.find((t) => t.id === 't-trace')).toBeUndefined();
 });
 
-test('the scheduler never says Saved after a refused save, and refuses an out-of-range value itself', async () => {
+test('the scheduler saves a valid value by itself, never sends an out-of-range one and never says Saved after a refusal', async () => {
   await mountOnFake();
   store.showSettings('advanced');
-  await waitFor(() => document.querySelector('[data-testid=scheduler-save]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=setting-warmProcessMinutes]') !== null);
+  const status = () => document.querySelector<HTMLElement>('[data-testid=scheduler-settings] [data-testid=save-status]');
   const field = query<HTMLInputElement>('[data-testid=setting-warmProcessMinutes]');
+  const call = store.client!.call.bind(store.client!);
+  const spy = vi.spyOn(store.client!, 'call');
   field.value = '-1';
   field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new Event('change', { bubbles: true }));
   await waitFor(() => document.querySelector('[data-testid=setting-error-warmProcessMinutes]') !== null);
-  expect(query<HTMLButtonElement>('[data-testid=scheduler-save]').disabled).toBe(true);
+  await waitFor(() => status()?.dataset.state === 'invalid');
+  expect(spy.mock.calls.some(([method]) => method === 'settings.set')).toBe(false);
 
   field.value = '7';
   field.dispatchEvent(new Event('input', { bubbles: true }));
-  await waitFor(() => !query<HTMLButtonElement>('[data-testid=scheduler-save]').disabled);
-  const call = store.client!.call.bind(store.client!);
-  vi.spyOn(store.client!, 'call').mockImplementation((async (method: string, params: never) => {
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  await waitFor(() => status()?.dataset.state === 'saved');
+  expect(store.settings?.warmProcessMinutes).toBe(7);
+
+  spy.mockImplementation((async (method: string, params: never) => {
     if (method === 'settings.set') throw new Error('settings.set refused');
     return call(method as never, params);
   }) as never);
-  query<HTMLButtonElement>('[data-testid=scheduler-save]').click();
-  await waitFor(() => store.error !== null);
-  flushSync();
-  expect(document.querySelector('[data-testid=scheduler-saved]')).toBeNull();
+  field.value = '9';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  await waitFor(() => status()?.dataset.state === 'error');
+  expect(status()!.textContent).not.toContain(strings.settings.autosave.saved);
+  expect(store.settings?.warmProcessMinutes).toBe(7);
 });
 
 test('the LAN switch saves when it flips, like every other switch in Settings', async () => {
