@@ -225,16 +225,17 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 492,300 |
 | UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,494,700 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,494,900 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-19, the console host check after that wait (`startedAs`) measures
-4,494,605 core JavaScript bytes on the #616 branch at `cd872447`, with the same
-rule after a fresh `bun run build:core` on Windows, against 4,494,324 without
-it: 281 bytes. The core JavaScript limit rises to 4,494,700, which also leaves
-room for the 60 bytes of the cancelled login's wait (`cancelLoginRun`); the
-other limits stay.
+On 2026-10-19, PR #622 merged with `origin/main` at `68033379` measures
+4,494,650 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,494,397 for that main: holding a
+roster offer while one is on its way adds 253 bytes. PR #623, which opens Bun
+WebSockets without permessage-deflate, adds 177 more on top of both
+(4,494,827). The core JavaScript limit rises to 4,494,900 to cover the two;
+the other limits stay.
 
 On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
 4,494,324 core JavaScript bytes with the same rule after a fresh
