@@ -123,9 +123,9 @@ tests that failed at least three first attempts. A fixed test leaves the list;
 `flaky.test.ts` fails when an entry no longer exists in its file.
 The `flake-loop` workflow measures a flaky test before and after its fix. It
 runs on a pull request that carries the `flake-loop` label, or by hand: the
-quarantined browser files four at a time on macOS arm64, once with the temp
-folder on the disk and once on a RAM disk, with disk throughput logged each
-second (`iostat.txt`), `cli.test.ts` four copies at a time on every OS, and
+quarantined browser files four at a time on macOS arm64, once with Spotlight
+indexing and once without, with disk throughput and load logged each second
+(`iostat.txt`) and the busiest processes every 5 s (`top.txt`), `cli.test.ts` four copies at a time on every OS, and
 `coordination-bridge-live.test.ts` and `machines.test.ts` alone and each E2E
 shard whole on Windows, with the runner's disk latency, queue length and
 Defender CPU logged every second (`perf.csv`).

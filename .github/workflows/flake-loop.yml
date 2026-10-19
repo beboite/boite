@@ -26,43 +26,43 @@ env:
 
 jobs:
   browser:
-    name: Core browser files (${{ matrix.name }}, ${{ matrix.parallel }} at once, temp on ${{ matrix.temp }})
+    name: Core browser files (${{ matrix.name }}, ${{ matrix.parallel }} at once, Spotlight ${{ matrix.spotlight }})
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Chromium stopped answering with its processes idle and a load of 9 to 29:
-          # does the runner's disk stall it? The same loop with the temp folder in RAM.
-          - { os: macos-15, name: macOS arm64, parallel: 4, temp: disk }
-          - { os: macos-15, name: macOS arm64, parallel: 4, temp: ram }
+          # Chromium stopped answering at a load of 25 to 53, with Spotlight's mdworker_shared and mds
+          # the busiest processes, temp folder on disk or in RAM alike (run 39197082818). The same loop
+          # with indexing off.
+          - { os: macos-15, name: macOS arm64, parallel: 4, spotlight: on }
+          - { os: macos-15, name: macOS arm64, parallel: 4, spotlight: off }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     env:
       BOITE_CDP_TRACE: '1'
-      FLAKE_LOOP_TITLE: Core browser files, ${{ matrix.name }}, ${{ matrix.parallel }} at once, temp on ${{ matrix.temp }}
+      FLAKE_LOOP_TITLE: Core browser files, ${{ matrix.name }}, ${{ matrix.parallel }} at once, Spotlight ${{ matrix.spotlight }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - name: Temp folder in RAM
-        if: matrix.temp == 'ram'
+      - name: Spotlight off
+        if: matrix.spotlight == 'off'
         run: |
-          # 2 GiB in 512-byte sectors.
-          device=$(hdiutil attach -nomount ram://4194304 | tr -d '[:space:]')
-          diskutil erasevolume APFS boite-ram "$device"
-          mkdir -p /Volumes/boite-ram/tmp
-          echo "TMPDIR=/Volumes/boite-ram/tmp/" >> "$GITHUB_ENV"
+          sudo mdutil -a -i off
+          mdutil -a -s
       - run: |
           mkdir -p flake-loop
           # Disk throughput and load each second, to line a stall up with the disk.
           (while true; do echo "$(date -u +%H:%M:%S) $(iostat -d -c 2 -w 1 disk0 | tail -1) $(sysctl -n vm.loadavg)"; done > flake-loop/iostat.txt 2>&1 &)
+          # The five busiest processes every 5 s, to see what indexes or scans while Chromium stalls.
+          (while true; do echo "== $(date -u +%H:%M:%S)"; ps -Aro pcpu,rss,comm | head -6; sleep 5; done > flake-loop/top.txt 2>&1 &)
           bun scripts/ci/flake-loop.ts --runs "$RUNS" --parallel ${{ matrix.parallel }} --cwd packages/core --out flake-loop test/browser-sharing.test.ts test/browser.test.ts test/browser-sleep.test.ts test/browser-profile-lifecycle.test.ts
       - uses: ./.github/actions/upload-artifact
         if: always()
         with:
-          name: flake-loop-browser-${{ matrix.os }}-${{ matrix.parallel }}-${{ matrix.temp }}
+          name: flake-loop-browser-${{ matrix.os }}-${{ matrix.parallel }}-spotlight-${{ matrix.spotlight }}
           path: flake-loop/
 
   cli:
