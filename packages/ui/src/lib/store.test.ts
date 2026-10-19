@@ -2428,8 +2428,9 @@ describe('the shell core lost under a local store', () => {
   test('a shell answer that comes back after the core did never starts a second retry chain', async () => {
     vi.useFakeTimers();
     const { store, client } = await localStore();
-    const first = Promise.withResolvers<null>();
-    const fromTauri = vi.spyOn(endpoints, 'fromTauri').mockReturnValueOnce(first.promise).mockResolvedValue(null);
+    let answerFirst!: (value: null) => void;
+    const first = new Promise<null>((resolve) => { answerFirst = resolve; });
+    const fromTauri = vi.spyOn(endpoints, 'fromTauri').mockReturnValueOnce(first).mockResolvedValue(null);
     const refused = vi.spyOn(endpoints, 'shellEndpointError').mockReturnValue('the core exited (exit code: 1) before it was ready');
     try {
       client.drop();
@@ -2438,7 +2439,7 @@ describe('the shell core lost under a local store', () => {
       // The old core answers again, then drops while the first ask is still out.
       await client.restore();
       client.drop();
-      first.resolve(null);
+      answerFirst(null);
       await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS + 100);
       expect(fromTauri).toHaveBeenCalledTimes(2);
       // One chain: the next ask waits 8 s, not one ask per chain.
