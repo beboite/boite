@@ -398,12 +398,37 @@ test('one invitation groups two real cores: the page connects the second by itse
       return { workspace, firstGroup: group(firstGroup), secondGroup: group(secondGroup),
         sessions: sessions.map(session => ({ id: session.id, role: session.role, group: session.group })) };
     };
+    // SCRATCH timeline: each machine's store every 100 ms, with which store object it is and what this device's storage says.
+    const t0 = Date.now();
+    const timeline: string[] = [];
+    let polling = true;
+    const probe = `(() => { const tags = globalThis.__tags ??= new WeakMap(); let n = globalThis.__tagN ??= 0;
+      const tag = (s) => { if (!tags.has(s)) { globalThis.__tagN = ++n; tags.set(s, n); } return tags.get(s); };
+      return JSON.stringify({ m: globalThis.__boiteTest.workspace.machines.map(m => [m.id.slice(-5), m.coreId ? 'brought' : '-', tag(m.store), m.store.connection,
+        m.store.groupKnown, m.store.group === null ? null : m.store.group?.cores.length, m.store.ungrouped, m.store.pairingRequired, m.store.error ?? null]),
+        envs: JSON.parse(localStorage.getItem('boite.envs') ?? '[]').map(e => [e.url.slice(-5), !!e.signs, !!e.token]),
+        core: (JSON.parse(localStorage.getItem('boite.core') ?? 'null') ?? {}).url?.slice(-5) ?? null }); })()`;
+    let previous = '';
+    const poll = (async () => {
+      while (polling) {
+        const now = String(await page.evaluate(probe).catch((error) => `probe failed: ${error}`));
+        if (now !== previous) timeline.push(`${Date.now() - t0} ${now}`);
+        previous = now;
+        await Bun.sleep(100);
+      }
+    })();
     await a.call('group.remove', { coreId: joined.self });
     try {
       await page.waitFor(`globalThis.__boiteTest.workspace.machines.length === 1`, 20_000);
     } catch (error) {
       console.error('Group removal state:', JSON.stringify(await removalState().catch(() => 'group diagnostics unavailable')));
+      polling = false;
+      await poll;
+      console.error(`Removal timeline:\n${timeline.join('\n')}`);
       throw error;
+    } finally {
+      polling = false;
+      await poll;
     }
     expect(await b.call('group.get', {})).toBeNull();
     expect((await b.call('sessions.list', {})).filter((session) => session.group)).toEqual([]);
