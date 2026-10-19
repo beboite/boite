@@ -63,7 +63,8 @@ test('an agent reads the app\'s language and experiments, and its card turns an 
   await page.waitFor(`document.querySelector('[data-testid="view-agents"]')`);
   await capture('experiment-applied-desktop.png');
 
-  // A sensitive switch shows in the card too, beside its warning.
+  // A sensitive switch shows in the card too, beside its warning, once the agent has read the card's report.
+  await page.waitFor(`window.__boiteTest.workspace.active.openThread.status === 'idle'`);
   await page.evaluate(`window.__boiteTest.workspace.active.client.call('turns.start', { threadId: ${JSON.stringify(thread)}, prompt: 'pair my phone [settings-lan]' })`);
   await page.waitFor(`document.querySelector('${DOCKED} [data-testid="setting-sensitive-hint"]') && document.querySelector('${DOCKED} [data-testid="setting-switch"]')`);
   await capture('sensitive-desktop.png');
