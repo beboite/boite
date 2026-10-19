@@ -88,7 +88,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           workspaces: apps/shell/src-tauri -> target
-          shared-key: desktop-release-v1
+          shared-key: desktop-release-v2
           save-if: false
       - name: Shell Rust tests
         run: bun run test:shell --release
@@ -111,7 +111,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           workspaces: apps/shell/src-tauri -> target
-          shared-key: desktop-release-v1
+          # v2: v1 held crates built with an explicit release profile, which no build uses any more.
+          shared-key: desktop-release-v2
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Set nightly artifact version
         if: inputs.channel == 'nightly' && inputs.version != ''
@@ -205,7 +206,8 @@ jobs:
         with:
           workspaces: apps/shell/src-tauri -> target
           # Per runner and target: a cache built on Ubuntu 24.04 restored on 22.04 left crates rustc could not load.
-          shared-key: desktop-portable-${{ env.PORTABLE_RUNNER }}${{ env.BOITE_TARGET && format('-{0}', env.BOITE_TARGET) || '' }}-v1
+          # v2: v1 held crates built with an explicit release profile, which no build uses any more.
+          shared-key: desktop-portable-${{ env.PORTABLE_RUNNER }}${{ env.BOITE_TARGET && format('-{0}', env.BOITE_TARGET) || '' }}-v2
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Set nightly artifact version
         if: inputs.channel == 'nightly' && inputs.version != ''
