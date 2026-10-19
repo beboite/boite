@@ -31,6 +31,7 @@
 - [Chat files and previews](chat-files.md): files an agent publishes, file links, inline previews, and the pages an agent draws in its answer.
 - [Experiments](experiments.md): browser comments, resident agents, edge scrollbars, load on press and other unfinished switches.
 - [The thread terminal](terminal.md): the shell under the chat, and sign-ins that need one.
+- [The project board](board.md): the project's todos in four columns in the terminal's drawer, a card started as a `/goal2`.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.
 - [Titles](titles.md): automatic and manual conversation titles.
 - [Session import](imports.md): bringing in a Claude Code conversation.

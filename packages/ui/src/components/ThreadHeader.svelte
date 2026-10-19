@@ -5,7 +5,7 @@
   import { entrust } from '../lib/thread-entrust';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ChevronDown, FolderInput, GitBranch, GitPullRequest, Network, PanelRight, Search, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
+  import { ChevronDown, FolderInput, GitBranch, GitPullRequest, Network, PanelRight, Search, SquareKanban, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { pendingLine } from '../lib/thread-move.svelte';
@@ -79,14 +79,15 @@
   let delegated = $derived(!!thread && (store.subagents(thread.id) !== null || store.threads.some(row => row.parentThreadId === thread!.id)
     || (store.delegation?.agents.length ?? 0) > 0 || (store.delegation?.nativeAgents?.length ?? 0) > 0));
   /**
-   * A phone's header is the title and this one menu: the panel, ticked when
-   * open, then the thread's own actions. The terminal, the coordination and
-   * what only the desktop does with a thread stay there.
+   * A phone's header is the title and this one menu: the panel and the
+   * project board, ticked when open, then the thread's own actions. The
+   * terminal, the coordination and what only the desktop does with a thread stay there.
    */
   let phoneItems = $derived.by((): MenuItem[] => {
     if (!thread) return [];
     return [
       { id: 'panel', label: strings.thread.panelMenu, glyph: PanelRight, active: store.panelOpen },
+      ...(store.boardAvailable() ? [{ id: 'board', label: strings.board.open, glyph: SquareKanban, active: store.boardShown }] : []),
       separator('sep-panel'),
       ...threadMenuItems(store, thread, { phone: true, tools: [
         { id: 'find', label: strings.keyboard.commands.find, glyph: Search },
@@ -100,6 +101,7 @@
     if (!open) return;
     if (action === 'coordination') coordinationThreadId = open.id;
     else if (action === 'panel') store.togglePanel();
+    else if (action === 'board') store.toggleBoard();
     else if (action === 'agents') store.panel.toggleKind('agents');
     else if (action === 'find') {
       store.findOpen = true;
@@ -267,6 +269,21 @@
           <SquareTerminal size={16} strokeWidth={1.75} />
         </button>
         {/if}
+      {/if}
+      <!-- The project board, in the drawer under the chat: a phone's way to it, and the owner's beside Ctrl+J. -->
+      {#if thread && store.boardAvailable()}
+        <button
+          type="button"
+          class="ghost trace in-title-menu"
+          class:on={store.boardShown}
+          title={store.keyLabel('terminal') ? `${strings.board.open} (${store.keyLabel('terminal')})` : strings.board.open}
+          aria-label={strings.board.open}
+          aria-pressed={store.boardShown}
+          data-testid="board-toggle"
+          onclick={() => store.toggleBoard()}
+        >
+          <SquareKanban size={16} strokeWidth={1.75} />
+        </button>
       {/if}
       <!-- A paired device opens the panel too: the Agents and Workflows surfaces are
            its to follow, and the panel's menu offers only what available() allows. -->

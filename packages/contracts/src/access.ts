@@ -90,6 +90,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // A phone can manage continued prompts in the same thread it can already send to.
   'threads.activity.set',
   'threads.activity.control',
+  // The project board on a phone: the cards are the user's own list, and a card started there is a `/goal2`
+  // the phone could already start by hand. `done` and removal stay the user's, which a paired device is.
+  'todos.list', 'todos.add', 'todos.update', 'todos.remove',
   'messages.list',
   'messages.toolOutput', // Read only the output of a tool in the conversation the phone can already read.
   'messages.toolPart', // The whole journalled tool call a phone's page deferred, in a conversation it can already read.
@@ -180,6 +183,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   // Invalidation naming the subscribed root; workflows.list applies the read scope.
   'workflows.changed',
   'collaboration.changed', 'thread.activity',
+  'todos.updated', // The whole list todos.list already answers the device.
   'project.added', 'project.removed', 'project.updated',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background', 'thread.btw',
   // The load `thread.updated` already carries to the same sockets, without the rest of the row.
