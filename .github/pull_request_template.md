@@ -13,6 +13,11 @@ Describe the problem and the resulting behavior. Link the issue it closes.
 List the commands run, their results, and anything not verified.
 Include desktop and phone captures for visual changes.
 
+<!--
+When CI's Bundle size job reports a measure growing more than 0.1 %, add a
+"## Bundle size" section saying what grows and why, then rerun that job.
+-->
+
 ## Affected paths
 
 Tick what this change touches and was checked on. Leave the rest empty.
