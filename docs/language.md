@@ -60,8 +60,8 @@ provider's own name.
 | File | What it holds |
 |---|---|
 | `packages/ui/src/lib/strings.ts` | What every component imports: `strings` in the language of the moment, and `fill`. |
-| `packages/ui/src/lib/strings.en.ts` | English. Every user-facing sentence of the UI, and the shape every translation mirrors. |
-| `packages/ui/src/lib/strings.fr.ts` | French, typed `Translation`: the English catalogue's shape, literals widened, every sentence optional. |
+| `packages/ui/src/lib/strings.en.ts` | English. Spreads one file per top-level block of `strings/en/` (`chat.ts`, `settings.ts`): every user-facing sentence of the UI, and the shape every translation mirrors. |
+| `packages/ui/src/lib/strings.fr.ts` | French, typed `Translation`: spreads `strings/fr/`, one file per English part with the same name, literals widened, every sentence optional. |
 | `packages/ui/src/lib/i18n.svelte.ts` | The choice, the detection, `fill`, and the proxy `strings.ts` re-exports. |
 | `packages/ui/catalogue-plugin.ts` | The build step that writes each translation over English, so its chunk is whole. |
 
@@ -89,8 +89,19 @@ imports `lib/i18n.svelte` for `setLocaleSetting` and the list of locales.
 
 ## Adding a sentence
 
-Put it in `strings.en.ts`, under the block its screen belongs to, then in
-`strings.fr.ts` at the same path.
+Put it in `strings/en/<part>.ts`, the file of the block its screen belongs to,
+then in `strings/fr/<part>.ts` at the same path. Two changes to different
+parts never edit the same file. A new block is a new part: a file in
+`strings/en/` and in every translation's folder, spread by each index;
+`scripts/ci/translations.ts` fails when one of them is missing.
+
+A branch cut before the split still edits the single `strings.en.ts` and
+`strings.fr.ts`, so merging main conflicts on both. Once `git merge origin/main`
+stops, run `bun scripts/migrate/split-catalogues.ts`: it splits the merge base
+and the branch versions with the codemod that made the split, replays each
+part's change onto main's part with `git merge-file`, adds a part the branch
+created to both indexes and stages the result. A part both sides changed on the
+same lines keeps conflict markers and is listed; resolve it like any conflict.
 
 English alone is enough to merge and to ship a nightly. A sentence French has
 not got shows in English, key by key, never per screen, and a dotted path never
@@ -112,9 +123,10 @@ switch. In a component, read `strings.x.y` in the markup or in a
 
 ## Adding a language
 
-1. Copy `strings.fr.ts` to `strings.<code>.ts`, translate it, keep the type,
-   and name its export after the code: `scripts/ci/translations.ts` finds a
-   catalogue by that file name and that export.
+1. Copy `strings.fr.ts` to `strings.<code>.ts` and `strings/fr/` to
+   `strings/<code>/`, translate them, keep the type, and name each export after
+   the code: `scripts/ci/translations.ts` finds a catalogue by those file names
+   and that export.
 2. Add the code to `Locale` and `LOCALES` in `i18n.svelte.ts`, and a dynamic
    import of the catalogue to `LOADERS`. The build finds the chunk by its file
    name and preloads it on a device that speaks the language.
