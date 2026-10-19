@@ -239,8 +239,12 @@ journal settings). A thread at rest with a watch reads as watching, not done,
 in the sidebar. The thread header carries a chip with the watched numbers;
 its menu shows each watch's last status and stops one, on a phone too. The
 owner's Tasks panel lists them the same way. A paired phone may stop a watch,
-never start one. Delegated agents and
-persistent agent sessions cannot watch: their parent or Agents owns the work.
+never start one. A delegated agent watches its own PR like a conversation:
+each wake is its next turn, and that turn's answer goes to its parent as a
+result. Its watches end when it is stopped (its own Stop, `boite delegate
+stop`, its turn failing) and when its parent stops, is archived or is
+removed. Workflow steps, goal reviewers and persistent agent sessions cannot
+watch: their run, their goal or Agents owns the work.
 At most 10 PRs per conversation.
 
 ## How an agent finds the core

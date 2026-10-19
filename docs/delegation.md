@@ -292,6 +292,14 @@ completion message. Replies do not grant user permission or override the task.
 Only direct parent-child messages are allowed. Delegation has one level;
 children ask the parent when another worker is needed.
 
+A child that opened a pull request waits on it with `boite pr watch`, never a
+polling loop (`sleep`, `gh pr checks`, a monitor that expires): its subagent
+note says so. Each wake (`docs/cli.md`, "Watching a pull request") opens the
+child's next turn, and that turn's answer goes to the parent as a result, so
+the parent hears only what the child made of a CI verdict or a review. The
+child's watches end when it is stopped, by its own Stop, `delegate stop` or a
+failed turn, and when its parent stops, is archived or is removed.
+
 ### Questions from a child
 
 A child can also ask through its own question tool (Claude's AskUserQuestion,

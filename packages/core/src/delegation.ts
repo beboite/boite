@@ -620,7 +620,8 @@ export class Delegation {
       ...(turn.startedAt !== null && turn.finishedAt !== null ? { durationMs: turn.finishedAt - turn.startedAt } : {}), data: { parent: root.id, status: turn.status },
     });
     // Stopping a child is final until an explicit new instruction; no failure retry loop.
-    if (turn.status !== 'done') this.stopped.add(thread.id);
+    // Its pull request watches end with it: they would only wake a child that no longer runs.
+    if (turn.status !== 'done') { this.stopped.add(thread.id); this.core.pullRequestWatches.endThread(thread.id); }
     // A child that is over leaves no question behind for its parent to find.
     if (live.length === 0) this.closeQuestions(thread.id, `the core, since the subagent's turn ended ${turn.status}`);
     const config = this.config(root.id);
@@ -643,7 +644,7 @@ export class Delegation {
     else deliver();
   }
   /** Is this thread a delegated agent the parent spawned, rather than a workflow step or a reviewer? */
-  private delegated(threadId: string): boolean {
+  delegated(threadId: string): boolean {
     return this.core.journal.db.query('SELECT 1 FROM delegated_agents WHERE thread_id = ?').get(threadId) !== null;
   }
   /** A delegated agent asked something: its parent learns at once. */
@@ -744,6 +745,7 @@ export class Delegation {
       // A child at rest on its own background work is at work too: stopping it ends that work.
       const waiting = withLoad(this.core, this.core.threads.require(id)).backgroundWait?.state === 'waiting';
       this.stopped.add(id);
+      this.core.pullRequestWatches.endThread(id);
       this.core.activity.pauseAll(id);
       this.core.coordination.pause(id);
       if (this.core.scheduler.stop(id) || waiting) stopped++;
@@ -827,7 +829,7 @@ export class Delegation {
     if (thread.parentThreadId) {
       const own = this.worktrees.get(threadId);
       const checkout = own ? `Own worktree ${own.path} on branch ${own.branch}: commit your work there; the parent merges it.` : 'Shared checkout: change only the files your task names.';
-      return config.enabled ? `\nYou are a Boite subagent of ${root.id}. Blocked: boite delegate send ${root.id} "<what blocks you>". Your final answer returns automatically. You cannot start subagents or workflows. ${checkout}\n` : '';
+      return config.enabled ? `\nYou are a Boite subagent of ${root.id}. Blocked: boite delegate send ${root.id} "<what blocks you>". Your final answer returns automatically. You cannot start subagents or workflows. Waiting on your PR: boite pr watch, never a polling loop; each wake opens your next turn and its answer goes to the parent. ${checkout}\n` : '';
     }
     // With delegation off, only a workflow request is worth the words; spawn would be refused anyway.
     const asked = request === undefined || /workflow/i.test(request) || (config.enabled && DELEGATION_WORDS.test(request));
