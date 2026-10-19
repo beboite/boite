@@ -139,6 +139,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'permissions.answer',
   'questions.list',
   'questions.answer',
+  'questions.openPage', // The address a pending question of the subscribed conversation carries, rechecked by the core.
   // Paired phones can dismiss the same question cards as the owner's chat.
   'questions.skip',
   // A phone says its own language and experiments, so the agent reads the screen the user reads; nothing the core trusts.

@@ -108,6 +108,7 @@ export function settleQuestion(
       ...(request.async === true ? { async: true } : {}),
       ...(request.setting === undefined ? {} : { setting: request.setting }),
       ...(request.agentSetting === undefined ? {} : { agentSetting: request.agentSetting }),
+      ...(request.open === undefined ? {} : { open: request.open }),
       answer
     }
   });
@@ -119,8 +120,8 @@ export function settleQuestion(
  * assistant message of the last turn, and nothing waits on it. The answer
  * comes back as a prompt quoting the question, once the thread is free.
  */
-export function askAsync(ctx: FakeContext, thread: Thread, turn: Turn, running: Message | null, text: string, labels: string[], multiple: boolean): string {
-  return drawAsync(ctx, thread, turn, running, { text, options: labels.map((label, index) => ({ id: String(index + 1), label })), allowText: true, multiple });
+export function askAsync(ctx: FakeContext, thread: Thread, turn: Turn, running: Message | null, text: string, labels: string[], multiple: boolean, open?: string): string {
+  return drawAsync(ctx, thread, turn, running, { text, options: labels.map((label, index) => ({ id: String(index + 1), label })), allowText: true, multiple, ...(open === undefined ? {} : { open: { url: open } }) });
 }
 
 /** The core's `requestSetting`: a settings card, drawn and answered like any card asked without stopping. */
@@ -170,7 +171,7 @@ function drawAsync(
   thread: Thread,
   turn: Turn,
   running: Message | null,
-  asked: { text: string; options: QuestionOption[]; allowText: boolean; multiple: boolean; setting?: SettingAsk; agentSetting?: AgentSettingAsk }
+  asked: { text: string; options: QuestionOption[]; allowText: boolean; multiple: boolean; setting?: SettingAsk; agentSetting?: AgentSettingAsk; open?: { url: string } }
 ): string {
   const questionId = `qst-${++ctx.seq}`;
   const text = asked.text;
@@ -318,7 +319,7 @@ export function requestMethods(ctx: FakeContext) {
           data: { threadId: params.threadId }
         });
       }
-      return { questionId: askAsync(ctx, thread, turn, null, asked.text, asked.labels, asked.multiple) };
+      return { questionId: askAsync(ctx, thread, turn, null, asked.text, asked.labels, asked.multiple, params.open) };
     },
     'settings.request': async (params) => {
       const thread = ctx.thread(params.threadId);

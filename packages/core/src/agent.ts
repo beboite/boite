@@ -247,6 +247,17 @@ export function registerAgentMethods(core: Core): void {
     // rather than believing the user saw something.
     return { shown: core.subscribers.hasSubscribers(thread.id) };
   });
+  // The page a pending question carries, for whoever answers it: a paired phone
+  // names a question, never a surface, and only in the conversation it watches.
+  core.router.register('questions.openPage', async (params, { connection }) => {
+    const thread = core.threads.require(params.threadId);
+    if (connection.identity.principal !== 'owner' && (thread.archived || !connection.subscriptions.has(thread.id))) throw refused('subscribe to the active conversation before opening its page');
+    const url = core.threads.listQuestions(thread.id).find((question) => question.id === params.questionId)?.open?.url;
+    if (url === undefined) throw refused(`questions.openPage: ${params.questionId} is not a pending question with a page`, { questionId: params.questionId });
+    const surface = checkSurface(thread.cwd, { kind: 'browser', url });
+    if (surface.kind === 'browser') await core.browser.command({ threadId: thread.id, action: { kind: 'open', url: surface.url } });
+    return { ok: true } as const;
+  });
   core.router.register('threads.tasks.set', (params) => setTasks(core, params));
   core.router.register('threads.tasks.get', (params) => {
     core.threads.require(params.threadId);

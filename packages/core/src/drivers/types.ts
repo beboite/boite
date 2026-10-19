@@ -71,6 +71,8 @@ export interface QuestionAsk {
   setting?: SettingAsk;
   /** An agent setting card (`agents.settings.request`), always asynchronous. */
   agentSetting?: AgentSettingAsk;
+  /** A page the card opens (`boite ask --open`). */
+  open?: { url: string };
 }
 
 /**

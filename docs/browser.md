@@ -123,6 +123,17 @@ is left out, since the copy cannot carry that scope. The cookies cross the conne
 action is the owner's alone and never automatic. Signing in directly works
 too: show the agent's browser and sign in there.
 
+An agent that meets a login page asks with `boite ask --open <url> "<site and
+why>" "Signed in" Skip`. The question card gets an Open button: it opens the
+page as `boite browse` does, in a new tab of the conversation's browser and
+its default profile, and shows the panel on the Browser tab, going to the
+thread first from the Agents page or another conversation. It calls
+`questions.openPage`, which names the question rather than an address, so a
+paired phone subscribed to the conversation opens the page too, and the core
+reads and checks the address again. The address must
+be http or https and carry no user name or password. Such a question never
+goes to a delegated agent's parent: only the user can sign in.
+
 A conversation has at most 8 tabs and a machine 24. A page that opens a
 window, a sign-in popup for instance, adds a tab to the same conversation; past
 the limit the window is closed. A tab still attaching counts toward both
