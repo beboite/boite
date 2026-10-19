@@ -225,7 +225,7 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 495,500 |
 | UI files, excluding `.br` and `.gz` copies | 4,889,500 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,518,500 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,519,000 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
@@ -262,6 +262,17 @@ After one catalogue file per part (#614, `origin/main` at `38d5ca2f`), with
 the checklist's sentences moved into `strings/<language>/activity.ts` and
 `experiments.ts`, it measures 495,189 entry bytes and 4,889,347 UI bytes on
 Linux; the UI limit rises to 4,889,500.
+After the roster offer (#622) and WebSockets without permessage-deflate (#623,
+`origin/main` at `de93f43a`) it measures 4,518,700 core JavaScript bytes on
+Linux, the UI unchanged; the core JavaScript limit rises to 4,519,000.
+
+On 2026-10-19, PR #622 merged with `origin/main` at `68033379` measures
+4,494,650 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,494,397 for that main: holding a
+roster offer while one is on its way adds 253 bytes. PR #623, which opens Bun
+WebSockets without permessage-deflate, adds 177 more on top of both
+(4,494,827). The core JavaScript limit rises to 4,494,900 to cover the two;
+the other limits stay.
 
 On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
 4,494,324 core JavaScript bytes with the same rule after a fresh
