@@ -185,6 +185,10 @@ export class BrowserPage {
   /** When devtools last sent anything, and how its socket closed. */
   #heardAt = performance.now();
   #closedBy: string | null = null;
+  /** Messages Bun handed over, and those that were not devtools JSON: a lost frame shows as a gap with the relay's count. */
+  #heard = 0;
+  #unread = 0;
+  #firstUnread = '';
   #stderr: () => string = () => '';
   #pageErrors: string[] = [];
   /** Requests the page sent and has not finished loading, reported when a wait times out. */
@@ -599,6 +603,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     const ui = (globalThis as { __boiteUiTrace?: () => string }).__boiteUiTrace?.() ?? 'not traced';
     const stderr = this.#stderr().trim().split('\n').slice(-12).join('\n');
     return `\nTrace: last devtools message ${Math.round(now - this.#heardAt)} ms ago; socket ${this.#closedBy ?? `state ${this.#socket.readyState}`}; browser ${this.#proc === null ? 'attached' : this.#proc.exitCode === null ? `pid ${this.#proc.pid} running` : `exited ${this.#proc.exitCode} (signal ${this.#proc.signalCode})`}
+Messages: ${this.#heard} delivered, ${this.#unread} unreadable${this.#firstUnread ? ` (first ${this.#firstUnread})` : ''}
 Test loop delays over 50 ms in 30 s: ${lags.length ? lags.slice(-8).join(', ') : 'none'}
 UI server: ${ui}
 Relay: ${relays.get(this.#socket)?.report() ?? 'none'}
@@ -615,11 +620,14 @@ ${stderr || '(empty)'}`;
 
   #receive(raw: string): void {
     this.#heardAt = performance.now();
-    if (raw === '') return;
+    this.#heard++;
+    if (raw === '') { this.#unread++; this.#firstUnread ||= 'a binary or empty message'; return; }
     let frame: { id?: unknown; method?: string; params?: { exceptionDetails?: { text?: string; exception?: { description?: string } }; requestId?: string; request?: { url?: string }; response?: { status?: number }; errorText?: string }; result?: unknown; error?: { message?: string } };
     try {
       frame = JSON.parse(raw) as typeof frame;
     } catch {
+      this.#unread++;
+      this.#firstUnread ||= JSON.stringify(raw.slice(0, 80));
       return;
     }
     if (typeof frame.id !== 'number') {

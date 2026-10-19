@@ -23,7 +23,7 @@ test('the relay check reads a well-formed browser stream however the reads cut i
   for (const cut of [1, 2, 3, 7, 125, 4096, stream.length]) {
     const check = new FrameCheck();
     for (let at = 0; at < stream.length; at += cut) check.push(stream.subarray(at, at + cut));
-    expect(check.report()).toStartWith(`browser stream (extensions none) well-formed over 6 frames and ${stream.length} bytes`);
+    expect(check.report()).toStartWith(`browser stream (extensions none) well-formed over 6 frames, 4 messages and ${stream.length} bytes`);
   }
 });
 

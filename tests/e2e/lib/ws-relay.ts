@@ -24,6 +24,8 @@ export class FrameCheck {
   /** The `Sec-WebSocket-Extensions` the browser accepted; `permessage-deflate` lets a message's first frame set RSV1. */
   #extensions = '';
   #frames = 0;
+  /** Complete data messages, to compare with what the test's socket delivered. */
+  #messages = 0;
   #recent: Frame[] = [];
   #chunks: Array<{ at: number; length: number; ms: number }> = [];
   #error: string | null = null;
@@ -67,6 +69,7 @@ export class FrameCheck {
       const frame = { at: this.#offset + at, opcode: first & 0x0f, fin: (first & 0x80) !== 0, compressed: (first & 0x40) !== 0, length };
       this.#error = problem(first, second, frame, this.#extensions.includes('permessage-deflate'));
       this.#frames++;
+      if (frame.fin && frame.opcode <= 2) this.#messages++;
       this.#recent.push(frame);
       if (this.#recent.length > 12) this.#recent.shift();
       const payload = Math.min(length, rest - header);
@@ -90,7 +93,7 @@ export class FrameCheck {
   report(): string {
     const frames = this.#recent.map(frame => `${frame.at}:op${frame.opcode}${frame.compressed ? ' deflated' : ''}${frame.fin ? '' : ' unfinished'} ${frame.length} B`).join(', ');
     const reads = this.#chunks.map(chunk => `${chunk.at}+${chunk.length} at ${chunk.ms} ms`).join(', ');
-    return `browser stream (extensions ${this.#extensions || 'none'}) ${this.#error ? `malformed: ${this.#error}` : 'well-formed'} over ${this.#frames} frames and ${this.#total} bytes; last frames ${frames || 'none'}; last reads ${reads}`;
+    return `browser stream (extensions ${this.#extensions || 'none'}) ${this.#error ? `malformed: ${this.#error}` : 'well-formed'} over ${this.#frames} frames, ${this.#messages} messages and ${this.#total} bytes; last frames ${frames || 'none'}; last reads ${reads}`;
   }
 }
 
