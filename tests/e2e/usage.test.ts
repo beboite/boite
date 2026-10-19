@@ -7,6 +7,17 @@ let server: { close(): Promise<void> };
 let page: BrowserPage;
 let origin = '';
 
+/** `history.back()` the way a loaded runner lands it: once the next navigation has started, or after 250 ms. */
+const SLOW_BACK = `{
+  const back = History.prototype.back;
+  History.prototype.back = function () {
+    let landed = false;
+    const land = () => { if (!landed) { landed = true; back.call(history); } };
+    addEventListener('beforeunload', () => setTimeout(land, 0), { once: true });
+    setTimeout(land, 250);
+  };
+}`;
+
 async function capture(name: string) {
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
   await page.screenshot(join(import.meta.dir, '.artifacts', name));
@@ -46,11 +57,27 @@ async function openLimits() {
   await page.waitFor(`document.querySelector('[data-testid=limits-page]')`);
 }
 
+/**
+ * Leaves a phone settings page by its back arrow. The page pops its history entry with a `history.back()`
+ * that lands in a later task: a navigation sent before it lands is cancelled, or swapped for an older
+ * document from the back-forward cache, which freezes the page an evaluate is still waiting on.
+ */
+async function leavePhoneDetail() {
+  const overlay = await page.evaluate<string | undefined>('history.state?.boiteOverlay');
+  await page.click('[data-testid=mobile-settings-back]');
+  const popped = overlay === undefined ? '' : ` && history.state?.boiteOverlay !== ${JSON.stringify(overlay)}`;
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')${popped}`);
+}
+
 beforeAll(async () => {
   const port = await freePort();
   server = await startUi(port);
   origin = `http://127.0.0.1:${port}`;
   page = await BrowserPage.launch({ url: `${origin}/?fake=1`, windowSize: { width: 1280, height: 800 } });
+  // A loaded runner lands a phone panel's history pop late, after the next navigation has started. Every
+  // pop here is held until then, or 250 ms: a test that navigates before its pop landed fails each run.
+  await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SLOW_BACK });
+  await page.reload();
   await scheme('dark');
   await viewport(1280, 800);
 }, 60_000);
@@ -192,8 +219,7 @@ test('the phone page fits 390 px and is reachable from the phone settings list',
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-detail] [data-testid=usage-page]')`);
   expect(page.errors()).toEqual([]);
   // Leave the detail page the way a phone does, so its history entry is gone before the next navigation.
-  await page.click('[data-testid=mobile-settings-back]');
-  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
+  await leavePhoneDetail();
 }, 60_000);
 
 test('the limits tab is its own page, one card per account, no scrolling through the history', async () => {
@@ -212,8 +238,7 @@ test('the limits tab is its own page, one card per account, no scrolling through
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-detail] [data-testid=limits-page]')`);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   await capture('limits-phone-dark.png');
-  await page.click('[data-testid=mobile-settings-back]');
-  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
+  await leavePhoneDetail();
   await viewport(1280, 800);
   expect(page.errors()).toEqual([]);
 }, 60_000);
@@ -282,8 +307,7 @@ test('quotas expose banked resets, a confirmed budget and Codex credit balances 
   expect(await page.text(`${codex} [data-testid=quota-credits]`)).toContain('42 credits');
   await page.evaluate(`document.querySelector('${codex}').scrollIntoView({ block: 'center' })`);
   await capture('codex-credits-phone.png');
-  await page.click('[data-testid=mobile-settings-back]');
-  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
+  await leavePhoneDetail();
   await viewport(1280, 800);
   await page.waitFor(`document.querySelector('[data-testid=settings-tab-limits]')`);
   await viewport(320, 560, true);
