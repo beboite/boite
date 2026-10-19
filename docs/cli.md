@@ -231,7 +231,8 @@ and `updatedAt`. Only when it moves does the core read the checks one by one
 100 a page up to 10 pages each; remarks are read again every 30 minutes
 regardless, for edits the fingerprint cannot see. GitHub's rate limit pauses
 every read, from two minutes doubling up to 15; an unreachable GitHub or a
-missing `gh` pauses that watch the same way. Neither ends it.
+missing `gh` pauses that watch the same way. Neither ends it, even when the
+failed read is the one that asks who merged or closed it.
 
 A watch ends on merge or close, on Stop, on archive or Mark done, on removal
 and on unwatch. It survives a core restart (`pr-watches:<thread>` in the

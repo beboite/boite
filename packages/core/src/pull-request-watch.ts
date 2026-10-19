@@ -274,13 +274,16 @@ export class PullRequestWatches {
   /**
    * A merge or a close ends the watch. Someone else's is told first, with what
    * was still waiting; the agent's own account's, or one GitHub cannot name,
-   * ends it at once, since the agent did it or cannot be told who did.
+   * ends it at once, since the agent did it or cannot be told who did. A
+   * failed closer read throws to `#read`, which backs off as for any read; the
+   * next read finds the same state and asks again.
    */
   async #end(threadId: ThreadId, record: WatchRecord, runtime: Runtime, memo: Map<string, Promise<unknown>>, state: 'MERGED' | 'CLOSED'): Promise<void> {
-    const closer = await this.#shared(memo, `closer ${record.url}`, () => this.#graphql(threadId, record, CLOSER_QUERY).then(parseCloser)).catch(() => null);
+    const closer = await this.#shared(memo, `closer ${record.url}`, () => this.#graphql(threadId, record, CLOSER_QUERY).then(parseCloser));
     if (this.#find(threadId, record.url) !== record) return;
-    this.core.log('info', `pull request #${record.number} is ${state.toLowerCase()}${closer?.by ? ` by ${closer.by}` : ''}: its watch ended`, { source: 'pull-request-watch', threadId });
-    if (!closer?.by || closer.own) {
+    this.#answered(runtime, record);
+    this.core.log('info', `pull request #${record.number} is ${state.toLowerCase()}${closer.by ? ` by ${closer.by}` : ''}: its watch ended`, { source: 'pull-request-watch', threadId });
+    if (!closer.by || closer.own) {
       this.#remove(threadId, record.url);
     } else {
       record.ended = true;

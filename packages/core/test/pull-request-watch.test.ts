@@ -236,11 +236,13 @@ interface FakeGitHub {
   closedBy: string;
   /** Thrown instead of answering, once per call while set. */
   failure: string | null;
+  /** Thrown by the next closer query only, then cleared. */
+  closerFailure: string | null;
   calls: string[];
 }
 
 function fakeGitHub(): FakeGitHub {
-  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', closedBy: 'meetsu', failure: null, calls: [] };
+  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', closedBy: 'meetsu', failure: null, closerFailure: null, calls: [] };
 }
 
 /** What `gh` prints for each call a watch makes. */
@@ -250,6 +252,9 @@ async function answer(github: FakeGitHub, args: string[]): Promise<string> {
   github.calls.push(query ? (query.includes('mergedBy') ? 'closer' : query.includes('viewer') ? 'detail' : 'fingerprint') : path.replace(/^repos\/example\/repo\//, ''));
   if (github.failure) throw new Error(github.failure);
   if (query?.includes('mergedBy')) {
+    const failure = github.closerFailure;
+    github.closerFailure = null;
+    if (failure) throw new Error(failure);
     const by = { login: github.closedBy };
     return JSON.stringify({ data: { viewer: { login: 'meetsu' }, repository: { pullRequest: { state: github.state, mergedBy: github.state === 'MERGED' ? by : null,
       timelineItems: { nodes: github.state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
@@ -356,7 +361,7 @@ test('a watch reads first without waking, wakes once per change with links, and 
   expect(wakes(threadId)).toHaveLength(3);
 });
 
-test('a merge or a close by someone else is told with what still waited, then the watch ends', async () => {
+test('a merge or a close by someone else is told with what still waited, a failed closer read included, then the watch ends', async () => {
   const { owner, threadId, github, watches, drive } = await watchedThread();
   await owner.call('threads.watchPullRequest', { threadId });
   await owner.call('turns.start', { threadId, prompt: 'wait [sleep:600]' });
@@ -366,7 +371,11 @@ test('a merge or a close by someone else is told with what still waited, then th
   await drive();
   github.state = 'MERGED';
   github.closedBy = 'maintainer';
+  // GitHub fails to name the closer once: the watch backs off like any failed read and asks again.
+  github.closerFailure = 'error connecting to api.github.com';
+  github.calls = [];
   await drive();
+  expect(github.calls.filter(call => call === 'closer')).toHaveLength(2);
   // Told nothing yet, read no more, and the watch stays until it is told.
   github.calls = [];
   await drive();
