@@ -1,5 +1,7 @@
 import { afterAll } from 'bun:test';
 import { sweepStaleDirectories } from './e2e/lib/cleanup.ts';
+// The entry point a run stopped at its deadline asks (scripts/ci/hang-watch.ts).
+import './e2e/lib/hang-report.ts';
 
 // Tests never send production analytics. Telemetry tests inject their own relay.
 process.env.BOITE_TELEMETRY_URL = '';

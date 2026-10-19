@@ -1,6 +1,7 @@
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserPage } from './cdp.ts';
+import { reportOnHang } from './hang-report.ts';
 import { windowsProcessTree } from './process-tree.ts';
 
 /** The webview exposes its page target before the IPC bridge is injected. */
@@ -52,6 +53,16 @@ export async function describeShell(dataDir: string, shellPid: number, failure =
 export async function waitForShellPage(page: BrowserPage, shell: ShellUnderTest, timeoutMs = 15_000, probes: DiagnosisProbes = {}): Promise<void> {
   try {
     await page.waitFor(TAURI_READY, timeoutMs);
+    // A run stopped at its deadline (scripts/ci/hang-watch.ts) reports this
+    // shell's page, log tail and process tree while the shell runs.
+    const forget = reportOnHang(`shell ${shell.pid}`, async () => {
+      if (!running(shell.pid)) {
+        forget();
+        return '(exited)';
+      }
+      const [pageText, shellText] = await Promise.all([page.hangReport(), shellReport(shell.dataDir, shell.pid, probes.processTree ?? processTree)]);
+      return `${pageText}\n${shellText}`;
+    });
   } catch (error) {
     // The wait's failure is what the caller needs: a diagnosis that fails, or
     // cannot be saved, adds a line to it and never takes its place.
@@ -115,6 +126,15 @@ async function shellReport(dataDir: string, shellPid: number, tree = processTree
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function writeArtifact(name: string, text: string): void {

@@ -174,6 +174,41 @@ fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 attempt left attached and removes its partial DMGs. Any other failure ends
 the step.
 
+### Hung test runs
+
+A job cut by its `timeout-minutes` keeps no artifact, and its log can be lost
+too: E2E 2/3 of run 39321123064 (2026-10-19) left only the annotation
+`exceeded the maximum execution time of 35m0s`. So each E2E shard ends its own
+run first. Its first step notes when the job started; `scripts/ci/flaky.ts
+--job-started --job-minutes 35` runs `bun test` with the Bun inspector and
+stops it 4 minutes before the job's limit (`scripts/ci/hang-watch.ts`). From
+2026-10-12 to 2026-10-19, 2831 passing shards ran their tests in 7.6 min at the
+median and 19.2 min at most, the whole job in 24.5 min at most, so no healthy
+run gets less time. `--job-minutes` must equal the job's `timeout-minutes`
+(`e2e-harness.test.ts`).
+
+A stopped run fails with an annotation naming the test that was running and
+leaves `tests/e2e/.artifacts/hang/` in the shard's failure captures:
+
+| File | What it holds |
+| --- | --- |
+| `summary.txt` | The tests running and for how long, the last that ended, whether the test process answered, free memory each minute |
+| `tests.txt` | Every test that ended, with its status and duration: bun holds its own result lines while its output is a pipe |
+| `test-process.txt` | What the test process reports of itself: its file, memory, and each open browser page or shell (`tests/e2e/lib/hang-report.ts`), with the page's in-flight requests, errors and main-thread state, and the shell's log tail and process tree (`shell-diagnosis.ts`) |
+| `process-tree.txt` | The `bun test` process and every descendant, with memory, CPU time and command line |
+| `browsers.txt` | `/json/version` and `/json/list` of each browser in the tree |
+| `machine.txt` | Free memory and disk, and the 15 largest processes |
+| `output-tail.txt` | The end of the run's output |
+
+A test process that does not answer within 10 s on an open inspector is
+blocked in synchronous code; the summary says so and the files written from
+outside remain. An inspector that refuses the watch before any test ran leaves
+a warning, and the tests run once without it under the same deadline: a hang
+then reports no test names. An inspector that disconnects later is named in
+the summary with its time, and the tests listed are those seen before. Bun
+gives no list of open handles and no stack of a test that awaits: its
+inspector answers only when the JavaScript thread is free.
+
 ### Draft pull requests
 
 A draft pull request runs `draft` mode: the changes job, the Linux x64 core

@@ -456,6 +456,11 @@ jobs:
         run: |
           echo "::error::a rerun draft run whose planning did not pass or whose pull request is ready fails; rerun the latest ready run instead"
           exit 1
+      # The test step stops a run still going 4 min before the job's limit,
+      # which counts from about the job's start, and leaves a report for the failure
+      # captures (scripts/ci/hang-watch.ts, docs/ci.md#hung-test-runs).
+      - name: Note when the job started
+        run: Add-Content $env:GITHUB_ENV "BOITE_JOB_STARTED_MS=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -488,7 +493,8 @@ jobs:
           $files = @(bun scripts/ci/e2e-shards.ts $env:E2E_SHARD 3)
           if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { throw 'No browser or core E2E files for this shard' }
           # A quarantined test that fails runs once more (scripts/ci/quarantine.json).
-          bun scripts/ci/flaky.ts @files
+          # --job-minutes is the job's timeout-minutes (e2e-harness.test.ts).
+          bun scripts/ci/flaky.ts --job-started $env:BOITE_JOB_STARTED_MS --job-minutes 35 @files
       - uses: ./.github/actions/upload-artifact
         if: failure() || cancelled()
         with:
