@@ -208,13 +208,13 @@ On 2026-10-19, the sign-in card (PR #604) merged with `origin/main` at
 `75ee7714` measures 494,857 entry bytes, 4,882,834 UI bytes and 4,499,604 core
 JavaScript bytes with `measure()` after fresh `bun run build:ui` and
 `bun run build:core` on Windows, against 492,249, 4,869,493 and 4,493,171
-recorded below for PR #603. The lazy `SignInCard` chunk (its browser hosted
-on the Agents page and `lib/thread-holds.ts`, which shares a hidden thread's
+recorded below for PR #603. The card adds 13,341 UI bytes: 2,608 in the
+entry chunk (its loader, card routing and contracts), about 1,540 of
+sentences, and the rest in the lazy `SignInCard` chunk (its browser hosted on
+the Agents page, and `lib/thread-holds.ts`, which shares a hidden thread's
 subscription between cards) and the browser surface it splits from the
-panel's chunk add about 7,500 UI bytes, its loader, card routing and
-contracts about 2,600 entry bytes, the sentences about 1,540; `browser
-login`, `browser/sign-in.ts` and the `browser.signIn` routes add about 6,400
-core bytes. The entry, UI and core JavaScript limits rise to 495,400,
+panel's chunk. `browser login`, `browser/sign-in.ts` and the `browser.signIn`
+routes add 6,433 core bytes. The entry, UI and core JavaScript limits rise to 495,400,
 4,883,400 and 4,500,100; `main.js` stays.
 
 On 2026-10-18, automatic resumes (PR #603) merged with `origin/main` at
