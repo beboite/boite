@@ -17,11 +17,10 @@
  * `bun scripts/migrate/split-catalogues.ts --split` reruns the codemod on the
  * working tree of a tree that still has the single files.
  */
-import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { exists, git, mergeFile, mergeSides, show } from './git';
 
 type Node = { type: string; start: number; end: number; [key: string]: any };
 export const LIB = 'packages/ui/src/lib';
@@ -117,17 +116,7 @@ ${spread}
   return files;
 }
 
-function git(cwd: string, args: string[], input?: string): { status: number; stdout: string } {
-  const run = spawnSync('git', args, { cwd, input, encoding: 'utf8', maxBuffer: 64 << 20 });
-  return { status: run.status ?? 1, stdout: run.stdout };
-}
-
-function show(cwd: string, ref: string, path: string): string | undefined {
-  const run = git(cwd, ['show', `${ref}:${path}`]);
-  return run.status === 0 ? run.stdout : undefined;
-}
-
-const isSplit = (cwd: string, ref: string) => git(cwd, ['cat-file', '-e', `${ref}:${LIB}/strings/en`]).status === 0;
+const isSplit = (cwd: string, ref: string) => exists(cwd, ref, `${LIB}/strings/en`);
 
 /** Adds a part to an index after the part that precedes it on the branch, or last. */
 export function addToIndex(index: string, key: string, after: string | undefined, locale: 'en' | 'fr'): string {
@@ -145,19 +134,6 @@ export function addToIndex(index: string, key: string, after: string | undefined
 export function removeFromIndex(index: string, key: string, locale: 'en' | 'fr'): string {
   const line = (locale === 'en' ? enImport : frImport)(key);
   return index.split('\n').filter((l) => l !== line && l !== `  ...${key},`).join('\n');
-}
-
-function mergeFile(ours: string, base: string, theirs: string): { text: string; conflict: boolean } {
-  const dir = mkdtempSync(join(tmpdir(), 'catalogue-merge-'));
-  try {
-    const paths = ['ours', 'base', 'theirs'].map((name) => join(dir, name));
-    [ours, base, theirs].forEach((text, i) => writeFileSync(paths[i], text));
-    const run = spawnSync('git', ['merge-file', '-p', '-L', 'HEAD', '-L', 'merge base', '-L', 'main', ...paths], { encoding: 'utf8' });
-    if ((run.status ?? -1) < 0 || run.status === null) throw new Error(`git merge-file failed: ${run.stderr}`);
-    return { text: run.stdout, conflict: run.status !== 0 };
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
 }
 
 export interface MigrationResult {
@@ -254,13 +230,12 @@ function main() {
     return;
   }
 
-  // Mid-merge: HEAD is the branch, MERGE_HEAD main. After the merge commit: its two parents.
-  const merging = git(cwd, ['rev-parse', '--verify', '-q', 'MERGE_HEAD']).status === 0;
-  const [ours, theirs] = merging ? ['HEAD', 'MERGE_HEAD'] : ['HEAD^1', 'HEAD^2'];
-  if (!merging && git(cwd, ['rev-parse', '--verify', '-q', 'HEAD^2']).status !== 0) {
+  const sides = mergeSides(cwd);
+  if (!sides) {
     console.error('Merge main first: git merge origin/main, then rerun this command.');
     process.exit(2);
   }
+  const { ours, theirs, merging } = sides;
   if (isSplit(cwd, ours)) {
     console.log('The branch already has the split catalogues; nothing to migrate.');
     return;

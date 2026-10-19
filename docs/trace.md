@@ -339,6 +339,21 @@ still runs and was created before the child; a live original parent keeps its
 child. Termination uses the original held process handle and its descendants,
 not a newly opened PID. Each action emits a thread-correlated diagnostic.
 
+Git Bash (MSYS2) forks a copy of the shell to exec each command, and the copy
+exits as soon as the command runs, so a script's Windows parent is gone while
+its shell still runs. Each traced process keeps a reference to the parent the
+registry held at its start. An exited `sh`, `bash`, `dash` or `zsh` that
+exited with 0, whose own parent has its image and still runs, is such a fork:
+the process hangs from that live shell and stays while it runs, so `sh wait.sh`
+in a background task lives as long as its shell. Of 74,975 forks in a real
+trace, all exited with 0. No timing is read, since exit events can arrive late.
+One exited fork is passed over, never two: the `sleep` of a nested bash that
+exited or was stopped has the fork and that bash dead above it, and goes. Once
+the task's shell exits, the script is an orphan again and its own forked
+children go with it. A shell is a different image from the agent above it, so
+what an interrupted command leaves still qualifies, and any other exited parent
+of the same image, a Node worker under Node say, leaves an orphan.
+
 Processes directly launched by the core and children of live shells remain.
 Detached descendants and launcher children can qualify even when intentionally
 left running; `reapOrphans` controls that policy. Release paths include archive,

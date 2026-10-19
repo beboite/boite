@@ -506,7 +506,8 @@ export class PullRequests {
       signal?.throwIfAborted();
       const spawned = this.core.procs.spawn(scope, command, args, {
         cwd,
-        env: { GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0' }
+        // A lookup never writes the index back: the worktree cleanup reads its date as the last time an agent used git there.
+        env: { GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
       });
       const controller = new AbortController();
       const canceled = (): void => { controller.abort(new Error('pull request lookup canceled')); };
