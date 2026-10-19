@@ -25,6 +25,7 @@ import { rightPanel, type BoundPanel } from '../right-panel.svelte';
 import { strings } from '../strings';
 import type { Page, SettingsTab } from '../store.svelte';
 import type { StoreContext } from './context';
+import { contactsShown } from '../contacts-rail.svelte';
 
 /** The kinds are this device's whichever machine is shown: one state every Store's Layout reads. */
 const deviceKinds = $state({ list: readNotificationKinds() });
@@ -125,7 +126,7 @@ export class Layout {
 
   /** The Contacts page: one contact, or with none the way to add one. An experiment too: with it off, nothing leads there. */
   showHome(contact: string | null = null): void {
-    if (!experimentOn('contacts')) return;
+    if (!contactsShown(this.ctx.store)) return;
     this.ctx.threads.invalidateNavigation();
     this.contact = contact;
     this.page = 'home';

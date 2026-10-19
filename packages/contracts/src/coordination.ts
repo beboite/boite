@@ -195,7 +195,7 @@ export interface Contact {
   name: string;
   /** The machine name the contact's core announced. */
   machine: string;
-  /** Four words derived from both public keys; both owners see the same four. */
+  /** Eight words derived from both public keys; both owners see the same eight. */
   fingerprint: string;
   /**
    * `host`: this core shared its machine and the contact dials it, keeping a

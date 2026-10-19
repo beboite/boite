@@ -139,6 +139,22 @@ function grantOpensOther(ip: unknown, port: number): boolean {
   });
 }
 
+/** An IPv4 address as a number, or null for anything else. */
+function ipv4(text: string): number | null {
+  const parts = text.split('.');
+  if (parts.length !== 4 || parts.some(part => !/^\d{1,3}$/.test(part) || Number(part) > 255)) return null;
+  return parts.reduce((value, part) => value * 256 + Number(part), 0);
+}
+
+/** Whether a CIDR range takes in `ip`. A range this check cannot read (IPv6, a typo) may hold it. */
+function rangeHolds(range: string, ip: string): boolean {
+  const [base = '', bits = ''] = range.split('/');
+  const start = ipv4(base), address = ipv4(ip), size = Number(bits);
+  if (start === null || address === null || !/^\d{1,2}$/.test(bits) || size > 32) return true;
+  const block = 2 ** (32 - size);
+  return Math.floor(start / block) === Math.floor(address / block);
+}
+
 /**
  * Whether the policy lets a shared user reach this machine on more than
  * `port`. A rule applies when its source takes in shared users (`*` or
@@ -162,7 +178,7 @@ export function evaluatePolicy(raw: unknown, device: Pick<Device, 'name' | 'addr
     if (host.startsWith('tag:')) return device.tags.includes(host);
     if (host.startsWith('autogroup:')) return host === 'autogroup:tagged' ? device.tags.length > 0 : false;
     const alias = hosts[host];
-    if (typeof alias === 'string') return alias === ip || alias === `${ip}/32`;
+    if (typeof alias === 'string') return alias === ip || (alias.includes('/') && rangeHolds(alias, ip));
     // A user, a group or a CIDR this check does not resolve: assume it may be this machine.
     return true;
   };

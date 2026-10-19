@@ -6,6 +6,14 @@
 
 import { experimentOn } from './experiments.svelte';
 
+/**
+ * Whether this machine's contacts have a way in: the experiment is on and the
+ * client is the owner. A paired device may call none of `contacts.*`.
+ */
+export function contactsShown(store: { owner: boolean }): boolean {
+  return experimentOn('contacts') && store.owner;
+}
+
 /** The column's width; the right panel leaves it this much room. */
 export const CONTACTS_RAIL_WIDTH = 240;
 const FOLDED = 'boite.contacts-rail-folded';
@@ -19,9 +27,9 @@ class ContactsRail {
   /** Requests waiting on every listed machine, counted by the column while it is drawn. */
   waiting = $state(0);
 
-  /** Unfolded with the experiment on; App draws it only on a desktop-wide window. */
-  get shown(): boolean {
-    return experimentOn('contacts') && !this.folded;
+  /** Unfolded for this machine's owner; App draws it only on a desktop-wide window. */
+  shown(store: { owner: boolean }): boolean {
+    return contactsShown(store) && !this.folded;
   }
 
   toggle(): void {

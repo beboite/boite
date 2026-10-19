@@ -16,7 +16,7 @@
   /**
    * One contact, picked in the thread list: its name (a click renames it) and
    * how its link stands, what it asks, the projects each side shares with the
-   * other, then trust, the four check words and Remove.
+   * other, then trust, the eight check words and Remove.
    */
   let { view, contact, now }: { view: ContactsView; contact: Contact; now: number } = $props();
   const labels = $derived(strings.contacts);
@@ -191,7 +191,7 @@
   .share { padding-top: 12px; }
   .switch-row + .share { border-top: 1px solid var(--color-border); }
   .share :global(.trigger) { gap: 6px; }
-  /* The four words take the row's width under its words, as keycaps. */
+  /* The eight words take the row's width under its words, as keycaps. */
   :global(.settings .page) .stacked { flex-direction: column; align-items: stretch; gap: 12px; }
   @media (prefers-reduced-motion: reduce) { .name :global(svg) { transition: none; } }
   :global(html[data-motion='reduced']) .name :global(svg) { transition: none; }

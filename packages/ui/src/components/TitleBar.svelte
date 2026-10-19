@@ -12,8 +12,7 @@
   import { isMac } from '../lib/keybindings';
   import { linuxShell } from '../lib/shell-platform';
   import ProjectTile from './ProjectTile.svelte';
-  import { contactsRail } from '../lib/contacts-rail.svelte';
-  import { experimentOn } from '../lib/experiments.svelte';
+  import { contactsRail, contactsShown } from '../lib/contacts-rail.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -32,7 +31,7 @@
    */
   let foldable = $derived(store.booted && (store.page === 'chat' || store.page === 'home' || (store.page === 'agents' && !mobile.current)));
   /** The contacts column folds from the bar's other end, beside the pages that keep it. */
-  let contactsToggle = $derived(store.booted && experimentOn('contacts') && !mobile.current && (store.page === 'chat' || store.page === 'home'));
+  let contactsToggle = $derived(store.booted && contactsShown(store) && !mobile.current && (store.page === 'chat' || store.page === 'home'));
   function toggleSidebar() {
     if (mobile.current) store.sidebarOpen = !store.sidebarOpen;
     else store.toggleSidebar();

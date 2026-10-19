@@ -66,12 +66,12 @@ has no right edge: its list shows the contacts as a section under the
 projects, and the menu entry opens the page with no contact picked.
 
 A contact's page shows what it asks, the projects each side shares with the
-other with their read switch, then trust, the four check words and Remove. With
+other with their read switch, then trust, the eight check words and Remove. With
 no contact picked, the page lists the requests waiting for an answer, with
 Accept on a picked project and Refuse with a reason; decided ones fold under a
 count that says who decided. Invite makes a one-use link, copies it and says
 whether Tailscale shared the machine or why it could not; Join takes a pasted
-link and shows the four words to compare. The Tailscale row says the policy
+link and shows the eight words to compare. The Tailscale row says the policy
 state; Configure unfolds the API key (stored or cleared, never shown back), the
 policy lines to paste when it is open, and the weakest model tier a contact's
 request may run on.

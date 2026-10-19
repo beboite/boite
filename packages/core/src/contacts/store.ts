@@ -70,6 +70,9 @@ type StoredRequest = ContactRequest & { pendingSend?: true; remoteId?: string };
 type Frame = { t: 'req'; id: string; body: string; signature: string } | { t: 'res'; id: string; status: number; body: string; signature: string };
 /** What the server keeps on a contact's link socket. */
 export interface ContactSocketData { contact: { coreId: string; routeId: string } }
+/** What a contact reads when the concierge refuses: never the model's own words. */
+const CONCIERGE_REFUSAL = 'Nothing on this Boite fits this request.';
+
 interface LinkSocket { send(data: string): unknown; close(code?: number, reason?: string): void }
 
 export class ContactStore {
@@ -525,8 +528,11 @@ export class ContactStore {
     this.background(this.concierge.decide(this.requestView(request), projects).then(verdict => {
       const current = this.requests().find(entry => entry.id === id);
       if (current?.status !== 'pending' || !this.find(current.coreId)?.trusted) return;
-      if (verdict.accept) this.settle(id, true, verdict.projectId, undefined, 'concierge');
-      else this.settle(id, false, undefined, verdict.reason, 'concierge');
+      if (verdict.accept) { this.settle(id, true, verdict.projectId, undefined, 'concierge'); return; }
+      // The contact wrote the request the model read, and the model saw every project here:
+      // its reason stays in this core's log, and the contact reads fixed words.
+      this.core.log('info', `contacts: the concierge refused ${request.contact}'s request: ${verdict.reason}`, { source: 'contacts' });
+      this.settle(id, false, undefined, CONCIERGE_REFUSAL, 'concierge');
     }, (error: unknown) => {
       this.core.log('warn', `contacts: the concierge did not decide ${request.contact}'s request (${messageOf(error)}); it waits for the owner`, { source: 'contacts' });
     }).finally(() => this.deciding.delete(id)));

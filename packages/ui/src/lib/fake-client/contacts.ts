@@ -1,18 +1,49 @@
 /** Contacts: another owner's Boite, linked for agent work on the projects each side opens. Seeded with Chris. */
-import { RpcErrorCode, type Contact, type ContactRequest, type ContactsState, type ContactTailscale } from '@boite/contracts';
+import { RpcErrorCode, type Contact, type ContactRequest, type ContactsState, type ContactTailscale, type ModelTier } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { encodeInvite, INVITE_PREFIX, inviteShare, readInvite } from '../contact-link';
 import type { FakeContext, FakeMethods } from './context';
+import { coordinationConfig, trusts } from './coordination';
 
 const DAY = 24 * 60 * 60_000;
 const WORDS = ['amber', 'orbit', 'lantern', 'meadow', 'falcon', 'cobalt', 'harbor', 'velvet', 'thistle', 'glacier', 'ember', 'quartz'];
-const POLICY_FIX = `"grants": [
-  { "src": ["autogroup:shared"], "dst": ["autogroup:self:8777"], "ip": ["tcp:8777"] }
-]`;
+/** The core's fix (`contacts/tailscale.ts`): an `acls` rule naming this machine's address and Boite's port. */
+const POLICY_FIX = [
+  '// Add to "acls": shared users reach Boite on this machine only.',
+  JSON.stringify({ action: 'accept', src: ['autogroup:shared'], dst: ['100.101.102.103:8777'] }),
+  '// Then remove "*" and "autogroup:shared" from the "src" of every other rule that reaches this machine.'
+].join('\n');
+const MAX_PENDING = 32;
+const DECLINED = 'The owner declined this request.';
+const SMALL = new Set(['haiku', 'lite', 'oss', 'mini', 'nano']);
+const FRONTIER = new Set(['opus', 'fable', 'sol', 'luna']);
+
+/** An invitation from another owner's Boite, with its Tailscale share: what tests join, since a core refuses its own links. */
+export const FAKE_CONTACT_INVITE = encodeInvite({
+  v: 1, c: 'core-dana', k: 'fake-public-key-core-dana', x: 'fake-box-core-dana', m: 'dana-laptop', u: 'http://dana-laptop.tail9c1e.ts.net:8777',
+  t: '0123456789abcdef'.repeat(4), e: 4_102_444_800_000, s: 'https://login.tailscale.com/admin/invite/fake-dana-share'
+});
 
 const refuse = (message: string, field?: string) =>
   new RpcFailure({ code: RpcErrorCode.Refused, message, ...(field === undefined ? {} : { data: { field } }) });
-const invalid = (message: string, field: string) => new RpcFailure({ code: RpcErrorCode.InvalidParams, message, data: { field } });
+const invalid = (message: string, field?: string) =>
+  new RpcFailure({ code: RpcErrorCode.InvalidParams, message, ...(field === undefined ? {} : { data: { field } }) });
+
+/** Like the core's `text()`: 1 to `max` characters, not blank, kept as written; the error names no field. */
+function text(value: unknown, field: string, max: number): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalid(`${field}: expected 1 to ${max} characters`);
+  return value;
+}
+
+/** The core's `modelTier` (`contacts/tier.ts`): 1 frontier, 2 mid or unknown, 3 small. */
+function modelTier(providerId: string, model: string | null | undefined): ModelTier {
+  const name = `${providerId} ${model ?? ''}`.toLowerCase();
+  const words = name.split(/[^a-z0-9]+/).filter(Boolean);
+  if (words.some(word => SMALL.has(word))) return 3;
+  if (words.some(word => FRONTIER.has(word)) || /(^|[^a-z0-9])gpt-?6(?![0-9])/.test(name)) return 1;
+  if (words.includes('gemini') && words.includes('pro')) return 1;
+  return 2;
+}
 
 const states = new WeakMap<FakeContext, ContactsState>();
 /** Shares an invitee without a key was sent to: the next join with the link goes through, as once the owner accepted it. */
@@ -32,7 +63,7 @@ function seed(ctx: FakeContext): ContactsState {
     coreId: 'core-chris',
     name: 'Chris',
     machine: 'chris-desktop',
-    fingerprint: 'amber orbit lantern meadow',
+    fingerprint: 'amber orbit lantern meadow falcon cobalt harbor velvet',
     role: 'host',
     trusted: false,
     grants: mine ? [{ projectId: mine.id, readThreads: false, grantedAt: at - 3 * DAY }] : [],
@@ -92,15 +123,25 @@ function contactOf(state: ContactsState, coreId: unknown): Contact {
   return contact;
 }
 
+/** A contact by name (any case, spaces as hyphens) or core id, as the core's `named` finds it. */
+function named(state: ContactsState, value: unknown): Contact {
+  if (typeof value !== 'string' || !value.trim()) throw invalid('contact: expected the name or core id of a contact; see boite agents contacts', 'contact');
+  const wanted = value.trim().toLowerCase();
+  const found = state.contacts.find(contact => contact.coreId === wanted)
+    ?? state.contacts.find(contact => contact.name.toLowerCase() === wanted || contact.name.replace(/\s+/g, '-').toLowerCase() === wanted);
+  if (!found) throw invalid(`contact: ${value} is not one of this core's contacts; see boite agents contacts`, 'contact');
+  return found;
+}
+
 function words(seed: number): string {
-  return [0, 1, 2, 3].map(step => WORDS[(seed * 7 + step * 5) % WORDS.length]).join(' ');
+  return [0, 1, 2, 3, 4, 5, 6, 7].map(step => WORDS[(seed * 7 + step * 5) % WORDS.length]).join(' ');
 }
 
 export function contactMethods(ctx: FakeContext) {
   const changed = () => ctx.emit('contacts.updated', {});
   const project = (projectId: unknown) => {
     const found = ctx.projects.find(entry => entry.id === projectId);
-    if (!found) throw invalid(`projectId: ${String(projectId)} is not a project of this machine`, 'projectId');
+    if (!found || found.archived) throw invalid('projectId: expected an unarchived project of this core', 'projectId');
     return found;
   };
   return {
@@ -122,9 +163,13 @@ export function contactMethods(ctx: FakeContext) {
       const link = typeof params?.link === 'string' ? params.link.trim() : '';
       if (!link.startsWith(INVITE_PREFIX)) throw invalid(`link: expected an invitation starting with ${INVITE_PREFIX}`, 'link');
       const card = readInvite(link);
-      if (!card) throw invalid('link: the invitation is damaged; ask for a new one', 'link');
+      if (!card || typeof card.c !== 'string' || !card.c) throw invalid('link: the invitation is damaged; ask for a new one', 'link');
       const machine = typeof card.m === 'string' && card.m ? card.m : 'new-contact';
       const state = stateOf(ctx);
+      const coreId = card.c;
+      if (coreId === state.self.coreId) throw invalid('link: this invitation is this core\'s own', 'link');
+      if (state.contacts.some(entry => entry.coreId === coreId)) throw refuse('link: already a contact; remove it first to link again');
+      if (trusts(ctx, coreId)) throw refuse('link: that core is already one of your machines');
       // Like the core: without a key nothing accepts the share, and the inviter stays out of reach until the owner does.
       const share = inviteShare(link);
       const seen = opened.get(ctx) ?? new Set<string>();
@@ -134,9 +179,13 @@ export function contactMethods(ctx: FakeContext) {
         throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `could not reach ${machine} at ${String(card.u)}: accept its Tailscale share, then join again` });
       }
       const seq = ++ctx.seq;
+      // Like the core: a name another contact has gets a number.
+      const taken = new Set(state.contacts.map(entry => entry.name.toLowerCase()));
+      let name = machine;
+      for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = `${machine} ${n}`;
       const contact: Contact = {
-        coreId: `core-${machine}-${seq}`, name: machine, machine, fingerprint: words(seq), role: 'guest',
-        url: `http://${machine}.tail4f2a.ts.net:8777`, trusted: false, grants: [], offers: [],
+        coreId, name, machine, fingerprint: words(seq), role: 'guest',
+        url: typeof card.u === 'string' ? card.u : `http://${machine}.tail4f2a.ts.net:8777`, trusted: false, grants: [], offers: [],
         link: 'connected', lastSeenAt: ctx.now(), addedAt: ctx.now()
       };
       state.contacts.push(contact);
@@ -145,17 +194,17 @@ export function contactMethods(ctx: FakeContext) {
     },
     'contacts.update': async (params) => {
       const state = stateOf(ctx);
+      if (params?.trusted !== undefined && typeof params.trusted !== 'boolean') throw invalid('trusted: expected a boolean', 'trusted');
+      const name = params?.name === undefined ? undefined : text(params.name, 'name', 100).trim();
+      if (name !== undefined && state.contacts.some(entry => entry.coreId !== params.coreId && entry.name.toLowerCase() === name.toLowerCase())) {
+        throw invalid('name: expected a name no other contact has', 'name');
+      }
       const contact = contactOf(state, params?.coreId);
-      if (params.name !== undefined) {
-        const name = typeof params.name === 'string' ? params.name.trim() : '';
-        if (!name || name.length > 80) throw invalid('name: expected 1 to 80 characters', 'name');
+      if (name !== undefined) {
         contact.name = name;
         for (const request of state.requests) if (request.coreId === contact.coreId) request.contact = name;
       }
-      if (params.trusted !== undefined) {
-        if (typeof params.trusted !== 'boolean') throw invalid('trusted: expected true or false', 'trusted');
-        contact.trusted = params.trusted;
-      }
+      if (params.trusted !== undefined) contact.trusted = params.trusted;
       changed();
       return structuredClone(contact);
     },
@@ -170,8 +219,9 @@ export function contactMethods(ctx: FakeContext) {
       return structuredClone(contact);
     },
     'contacts.revoke': async (params) => {
-      const contact = contactOf(stateOf(ctx), params?.coreId);
-      if (!contact.grants.some(entry => entry.projectId === params.projectId)) throw invalid(`projectId: ${String(params.projectId)} is not open to ${contact.name}`, 'projectId');
+      if (typeof params?.projectId !== 'string') throw invalid('projectId: expected a project id', 'projectId');
+      // Like the core: closing a project that was not open answers the contact as it is.
+      const contact = contactOf(stateOf(ctx), params.coreId);
       contact.grants = contact.grants.filter(entry => entry.projectId !== params.projectId);
       changed();
       return structuredClone(contact);
@@ -184,11 +234,10 @@ export function contactMethods(ctx: FakeContext) {
       return { ok: true as const };
     },
     'contacts.decide': async (params) => {
+      if (typeof params?.accept !== 'boolean') throw invalid('accept: expected a boolean', 'accept');
       const state = stateOf(ctx);
-      const request = state.requests.find(entry => entry.id === params?.id);
-      if (!request) throw invalid(`id: ${String(params?.id)} is not a request of this machine`, 'id');
-      if (request.direction !== 'in') throw refuse('only the contact that was asked decides this request', 'id');
-      if (request.status !== 'pending') throw refuse(`this request was already ${request.status}`, 'id');
+      const request = state.requests.find(entry => entry.id === params.id && entry.direction === 'in');
+      if (!request || request.status !== 'pending') throw invalid('id: expected a pending request from a contact', 'id');
       if (params.accept) {
         const opened = project(params.projectId);
         const contact = state.contacts.find(entry => entry.coreId === request.coreId);
@@ -196,10 +245,11 @@ export function contactMethods(ctx: FakeContext) {
         request.status = 'accepted';
         request.project = { id: opened.id, name: opened.name };
       } else {
-        const reason = typeof params.reason === 'string' ? params.reason.trim() : '';
-        if (!reason) throw invalid('reason: a refusal needs a reason the asking agent can read', 'reason');
+        // Like the core: no reason reads as the owner's plain no, a blank one is refused.
+        const reason: unknown = params.reason;
+        const why = reason === undefined || reason === null || reason === '' ? DECLINED : text(reason, 'reason', 500);
         request.status = 'refused';
-        request.reason = reason;
+        request.reason = why;
       }
       request.decidedBy = 'owner';
       request.decidedAt = ctx.now();
@@ -222,20 +272,38 @@ export function contactMethods(ctx: FakeContext) {
       changed();
       return structuredClone(state.tailscale);
     },
-    'collaboration.contacts': async () => stateOf(ctx).contacts.map(contact => ({
-      name: contact.name, coreId: contact.coreId, projects: contact.offers.map(offer => offer.name), link: contact.link
-    })),
+    'collaboration.contacts': async (params) => {
+      ctx.thread(params?.threadId);
+      // A thread that keeps to this machine sees no contact.
+      const config = coordinationConfig(ctx, params.threadId);
+      if (config.mode === 'off' || !config.remote) return [];
+      return stateOf(ctx).contacts.map(contact => ({ name: contact.name, coreId: contact.coreId, projects: contact.offers.map(offer => offer.name), link: contact.link }));
+    },
     'collaboration.ask': async (params) => {
       const state = stateOf(ctx);
-      const contact = state.contacts.find(entry => entry.name === params?.contact || entry.coreId === params?.contact);
-      if (!contact) throw invalid(`contact: ${String(params?.contact)} is not a contact of this machine`, 'contact');
-      const text = typeof params.text === 'string' ? params.text.trim() : '';
-      if (!text) throw invalid('text: say what kind of project the agent should work on', 'text');
-      const thread = ctx.threads.get(params.threadId);
+      const thread = ctx.thread(params?.threadId);
+      const config = coordinationConfig(ctx, params.threadId);
+      if (!config.remote) throw refuse('threadId: cross-machine coordination is disabled for this thread', 'threadId');
+      if (config.paused) throw refuse('coordination paused by the owner');
+      const contact = named(state, params.contact);
+      // The asking thread's model is at least the tier the owner set for contacts.
+      const tier = modelTier(thread.providerId, thread.model);
+      const { minTier } = state.settings;
+      if (tier > minTier) {
+        throw new RpcFailure({
+          code: RpcErrorCode.Refused,
+          message: `threadId: this thread runs ${thread.providerId} ${thread.model ?? '(default model)'}, tier ${tier}; contacts take tier ${minTier} or better, set in Contacts`,
+          data: { field: 'threadId', expected: `a thread on a model of tier ${minTier} or better` }
+        });
+      }
+      const body = text(params.text, 'text', 4000);
+      if (state.requests.filter(request => request.coreId === contact.coreId && request.direction === 'out' && request.status === 'pending').length >= MAX_PENDING) {
+        throw refuse(`at most ${MAX_PENDING} requests may wait at ${contact.name}; wait for an answer`);
+      }
       const request: ContactRequest = {
         id: `creq-${++ctx.seq}`, direction: 'out', coreId: contact.coreId, contact: contact.name,
-        from: { coreId: ctx.identity.coreId, threadId: params.threadId, title: thread?.title ?? params.threadId, machine: ctx.identity.name, resources: '', status: 'running', mode: 'team' },
-        text, createdAt: ctx.now(), status: 'pending'
+        from: { coreId: ctx.identity.coreId, threadId: params.threadId, title: thread.title, machine: ctx.identity.name, resources: '', status: 'running', mode: 'team' },
+        text: body, createdAt: ctx.now(), status: 'pending'
       };
       state.requests.unshift(request);
       changed();

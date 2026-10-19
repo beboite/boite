@@ -13,6 +13,7 @@
 import type { ProjectId, ThreadId } from '@boite/contracts';
 import type { SettingsTab, Store } from './store.svelte';
 import { workspace } from './workspace.svelte';
+import { contactsShown } from './contacts-rail.svelte';
 
 export type View =
   | { store: Store; page: 'thread'; threadId: ThreadId }
@@ -94,11 +95,13 @@ export function currentView(): View | null {
 }
 
 /** A machine that left, or a thread or project that was deleted, is not a place to return to. */
-function exists(view: View): boolean {
+export function exists(view: View): boolean {
   const { store } = view;
   if (store !== workspace.active && !workspace.machines.some((machine) => machine.store === store)) return false;
   if (view.page === 'thread') return store.threads.some((thread) => thread.id === view.threadId);
   if (view.page === 'draft') return view.projectId === null || store.projects.some((project) => project.id === view.projectId);
+  // Contacts turned off, or a client that is no longer the owner, has no Contacts page to show.
+  if (view.page === 'home') return contactsShown(store);
   return true;
 }
 

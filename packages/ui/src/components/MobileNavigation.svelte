@@ -32,14 +32,14 @@
   import { compareThreads } from '../lib/thread-order';
   import { needsUser } from '../lib/thread-state';
   import { minuteClock } from '../lib/clock.svelte';
-  import { experimentOn } from '../lib/experiments.svelte';
+  import { contactsShown } from '../lib/contacts-rail.svelte';
 
   let { store, recover = false, screen = $bindable('chat') }: { store: Store; recover?: boolean; screen: 'chat' | 'threads' | 'activity' } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
   // The contacts under the projects, loaded with their experiment; a desktop window shows them in the column on the right.
   let SidebarContacts = $state<typeof import('./home/SidebarContacts.svelte').default>();
   $effect(() => {
-    if (!experimentOn('contacts') || SidebarContacts) return;
+    if (!contactsShown(store) || SidebarContacts) return;
     void import('./home/SidebarContacts.svelte').then(module => { SidebarContacts = module.default; }).catch(() => {});
   });
   let search = $state('');
@@ -196,7 +196,7 @@
 </header>
 
 {#snippet contacts()}
-  {#if SidebarContacts && experimentOn('contacts')}<div class="contacts-slot"><SidebarContacts {store} {machines} /></div>{/if}
+  {#if SidebarContacts && contactsShown(store)}<div class="contacts-slot"><SidebarContacts {store} {machines} /></div>{/if}
 {/snippet}
 
 {#if narrow.current && store.page === 'chat' && (screen !== 'chat' || recover)}

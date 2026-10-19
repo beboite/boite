@@ -12,7 +12,7 @@
    * The two ways a contact starts, as two Settings rows. Invite makes a
    * one-time link and copies it at once; its expiry and how the Tailscale
    * share went show under the row. Join takes the link another owner sent and
-   * then shows the four words to compare with them. A link that shares the
+   * then shows the eight words to compare with them. A link that shares the
    * inviter through Tailscale, pasted where no API key can accept it, first
    * offers the share to accept by hand.
    */

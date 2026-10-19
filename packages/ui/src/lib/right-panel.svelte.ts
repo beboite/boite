@@ -181,9 +181,9 @@ function parse(raw: string): Record<string, PanelState> {
  * left and the contacts column on the right. A phone gives the panel the
  * whole screen.
  */
-export function panelSibling(layout: { sidebarCollapsed: boolean; sidebarWidth: number }, viewport: number): number {
+export function panelSibling(layout: { sidebarCollapsed: boolean; sidebarWidth: number; owner: boolean }, viewport: number): number {
   if (viewport <= 720) return 0;
-  return (layout.sidebarCollapsed ? 0 : layout.sidebarWidth) + (contactsRail.shown ? CONTACTS_RAIL_WIDTH : 0);
+  return (layout.sidebarCollapsed ? 0 : layout.sidebarWidth) + (contactsRail.shown(layout) ? CONTACTS_RAIL_WIDTH : 0);
 }
 
 export function clampPanel(width: number, viewport: number, sibling: number): number {

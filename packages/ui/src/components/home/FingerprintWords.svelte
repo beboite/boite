@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fingerprintWords } from '../../lib/contacts.svelte';
 
-  /** The four words both owners compare, drawn as keycaps so they read one by one. */
+  /** The eight words both owners compare, drawn as keycaps so they read one by one. */
   let { fingerprint, testid }: { fingerprint: string; testid?: string } = $props();
   const words = $derived(fingerprintWords(fingerprint));
 </script>
@@ -15,7 +15,7 @@
 </div>
 
 <style>
-  /* Four in a row or two by two, never three and one. */
+  /* Two rows of four, or four rows of two on a narrow card. */
   .fit { container-type: inline-size; }
   .words { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
   @container (min-width: 440px) { .words { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

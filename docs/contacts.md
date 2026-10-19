@@ -47,8 +47,8 @@ but opens none, and the invitee exposes nothing.
    Two owners who invite and join each other at once end with one
    relationship: the core with the smaller core id hosts and the other
    dials it, a rule both cores compute alone.
-4. Both apps show the same four words, derived from both public keys. Two
-   owners who read the same four words know nobody sat between them.
+4. Both apps show the same eight words, derived from both public keys. Two
+   owners who read the same eight words know nobody sat between them.
 5. The invitee's core keeps a WebSocket open to the inviter at
    `/coordination/contact/link` and redials with backoff, from one second to
    a minute. It dials with a hello in its headers: from, to, the time and a

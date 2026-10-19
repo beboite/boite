@@ -31,13 +31,13 @@ test('model tiers: frontier, mid and small models by provider and id, the smalle
   expect(attestedTier(undefined)).toBe(2);
 });
 
-test('the fingerprint is four words of a 256-word list, the same from either side', () => {
+test('the fingerprint is eight words of a 256-word list, the same from either side', () => {
   expect(WORDS).toHaveLength(256);
   expect(new Set(WORDS).size).toBe(256);
   const key = () => generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString();
   const [a, b, c] = [key(), key(), key()];
   const words = fingerprintWords(a, b);
-  expect(words.split(' ')).toHaveLength(4);
+  expect(words.split(' ')).toHaveLength(8);
   for (const word of words.split(' ')) expect(WORDS).toContain(word);
   expect(fingerprintWords(b, a)).toBe(words);
   expect(fingerprintWords(a, c)).not.toBe(words);
@@ -121,6 +121,10 @@ test('the tailnet policy: restricted when shared users reach only Boite\'s port,
   expect(open({ acls: [{ action: 'accept', src: ['autogroup:member'], dst: ['*:*'] }, fixed] }).policy).toBe('restricted');
   expect(open({ hosts: { nas: '100.64.0.9' }, acls: [{ action: 'accept', src: ['*'], dst: ['nas:*'] }, fixed] }).policy).toBe('restricted');
   expect(open({ acls: [{ action: 'accept', src: ['*'], dst: ['tag:other:*'] }] }).policy).toBe('restricted');
+  // A host alias that is a range holding this machine is this machine; one that does not is another.
+  expect(open({ hosts: { tailnet: '100.64.0.0/10' }, acls: [{ action: 'accept', src: ['*'], dst: ['tailnet:*'] }, fixed] }).policy).toBe('open');
+  expect(open({ hosts: { lab: '100.100.0.0/16' }, acls: [{ action: 'accept', src: ['*'], dst: ['lab:*'] }, fixed] }).policy).toBe('restricted');
+  expect(open({ hosts: { v6: 'fd7a:115c:a1e0::/48' }, acls: [{ action: 'accept', src: ['*'], dst: ['v6:*'] }, fixed] }).policy).toBe('open');
   // What it cannot resolve reads as this machine.
   expect(open({ acls: [{ action: 'accept', src: ['*'], dst: ['group:eng:*'] }] }).policy).toBe('open');
   expect(open({ grants: [{ src: ['autogroup:shared'], dst: ['tag:boite'], ip: ['tcp:4317'] }] }).policy).toBe('restricted');

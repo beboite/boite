@@ -1,7 +1,10 @@
 /**
- * The four words two owners compare after linking. They come from both
- * signing keys, so both cores read the same four, and a machine sitting
- * between them, holding keys of its own, would show different ones.
+ * The eight words two owners compare after linking. They come from both
+ * signing keys, so both cores read the same eight, and a machine sitting
+ * between them, holding keys of its own, would show different ones. Eight
+ * bytes, not four: a machine in the middle picks both keys it shows, so it
+ * needs only a collision between two hashes, about 2^32 tries per side here
+ * against 2^16 with four words.
  */
 import { createHash } from 'node:crypto';
 
@@ -25,8 +28,8 @@ export const WORDS: readonly string[] = [
   'hedge', 'jasper', 'lichen', 'llama', 'lynx', 'maize', 'marsh', 'nova', 'orca', 'peach', 'quail', 'sable', 'sage', 'tide', 'wren', 'yak',
 ];
 
-/** Four words from SHA-256 of both public keys, sorted so the order of the two does not matter. */
+/** Eight words from SHA-256 of both public keys, sorted so the order of the two does not matter. */
 export function fingerprintWords(publicKeyA: string, publicKeyB: string): string {
   const digest = createHash('sha256').update([publicKeyA, publicKeyB].sort().join('\n')).digest();
-  return [...digest.subarray(0, 4)].map(byte => WORDS[byte]!).join(' ');
+  return [...digest.subarray(0, 8)].map(byte => WORDS[byte]!).join(' ');
 }

@@ -33,7 +33,7 @@ export const fr: Translation = {
     closeConfirm: 'Arrêter',
     about: 'Ce contact',
     words: 'Mots de contrôle',
-    wordsTip: 'Les deux propriétaires voient les mêmes quatre mots. Si l\'autre en lit d\'autres, quelqu\'un s\'est placé entre vous : retirez le contact.',
+    wordsTip: 'Les deux propriétaires voient les mêmes huit mots. Si l\'autre en lit d\'autres, quelqu\'un s\'est placé entre vous : retirez le contact.',
     role: { host: 'Il se connecte à votre machine', guest: 'Vous vous connectez à sa machine' },
     added: 'Ajouté {time}',
     remove: 'Retirer',
@@ -81,7 +81,7 @@ export const fr: Translation = {
       acceptShare: 'Accepter le partage Tailscale',
       acceptShareTip: 'Cette invitation partage l\'autre machine via Tailscale. Sans clé d\'API ici, acceptez d\'abord le partage dans votre navigateur, puis rejoignez.',
       compare: 'À comparer avec {name}',
-      compareTip: 'Lisez-vous ces quatre mots, au téléphone ou en personne. Les mêmes mots sur les deux écrans veulent dire que personne ne s\'est placé entre vous.',
+      compareTip: 'Lisez-vous ces huit mots, au téléphone ou en personne. Les mêmes mots sur les deux écrans veulent dire que personne ne s\'est placé entre vous.',
       done: 'Terminé'
     },
     tailscale: {

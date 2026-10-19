@@ -34,7 +34,7 @@ export const strings = {
     closeConfirm: 'Stop sharing',
     about: 'This contact',
     words: 'Check words',
-    wordsTip: 'Both owners see the same four words. If the other owner reads different ones, someone sits between you: remove the contact.',
+    wordsTip: 'Both owners see the same eight words. If the other owner reads different ones, someone sits between you: remove the contact.',
     role: { host: 'It dials your machine', guest: 'You dial its machine' },
     added: 'Added {time}',
     remove: 'Remove',
@@ -82,7 +82,7 @@ export const strings = {
       acceptShare: 'Accept the Tailscale share',
       acceptShareTip: 'This invitation shares the other machine through Tailscale. Without an API key here, accept the share in your browser first, then join.',
       compare: 'Compare with {name}',
-      compareTip: 'Read these four words to each other, on a call or in person. The same words on both screens mean nobody sat between you.',
+      compareTip: 'Read these eight words to each other, on a call or in person. The same words on both screens mean nobody sat between you.',
       done: 'Done'
     },
     tailscale: {

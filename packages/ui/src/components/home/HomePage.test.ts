@@ -2,7 +2,9 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { confirm } from '../../lib/confirm.svelte';
 import { setExperiment } from '../../lib/experiments';
+import { inviteShare } from '../../lib/contact-link';
 import { FakeClient } from '../../lib/fake-client';
+import { FAKE_CONTACT_INVITE } from '../../lib/fake-client/contacts';
 import { Store, store as primary } from '../../lib/store.svelte';
 import { strings } from '../../lib/strings';
 import { workspace } from '../../lib/workspace.svelte';
@@ -87,7 +89,7 @@ test('his page draws the link, both ways of sharing and the check words; rename,
   expect(one('contact-link')!.textContent).toBe(strings.contacts.link.connected);
   expect(one('contact-shared')!.querySelector('[data-testid^="contact-grant-"]')?.textContent).toContain('boite');
   expect(one('contact-offer-chris-website')!.textContent).toContain('website');
-  expect(one('contact-words')!.querySelectorAll('li')).toHaveLength(4);
+  expect(one('contact-words')!.querySelectorAll('li')).toHaveLength(8);
   // Only what he asks shows on his page, and nothing of the page that adds a contact.
   expect(one('contact-requests')!.querySelector('[data-testid="contact-request-creq-pending"]')).not.toBeNull();
   expect(one('home-add')).toBeNull();
@@ -139,7 +141,7 @@ test('accept shares the project picked in the menu; refuse waits for a reason; r
   expect((await contacts(store)).contacts).toEqual([]);
 });
 
-test('Invite makes a link with its share; a joined link shows the four words; Configure unfolds the key, the policy and the tier', async () => {
+test('Invite makes a link with its share; a joined link shows the eight words; Configure unfolds the key, the policy and the tier', async () => {
   const store = await draw();
   one<HTMLButtonElement>('contact-invite-create')!.click();
   await vi.waitFor(() => { flushSync(); expect(one('contact-invite')).not.toBeNull(); });
@@ -147,9 +149,10 @@ test('Invite makes a link with its share; a joined link shows the four words; Co
   expect(link.startsWith('boite://contact#')).toBe(true);
   expect(one('contact-invite-share')!.dataset.status).toBe('created');
 
-  type(one<HTMLInputElement>('contact-join-link')!, link);
+  // A core refuses its own link: the join takes another owner's.
+  type(one<HTMLInputElement>('contact-join-link')!, FAKE_CONTACT_INVITE);
   one<HTMLButtonElement>('contact-join')!.click();
-  await vi.waitFor(() => { flushSync(); expect(one('contact-joined-words')?.querySelectorAll('li')).toHaveLength(4); });
+  await vi.waitFor(() => { flushSync(); expect(one('contact-joined-words')?.querySelectorAll('li')).toHaveLength(8); });
 
   // The Tailscale row says the policy is open without unfolding anything.
   expect(one('contact-policy')!.dataset.policy).toBe('open');
@@ -169,11 +172,9 @@ test('Invite makes a link with its share; a joined link shows the four words; Co
 
 test('a link that shares the inviter, pasted without an API key, offers the share first and keeps it after a join that cannot reach', async () => {
   await draw();
-  // Made while the key is set, the invitation carries its Tailscale share.
-  one<HTMLButtonElement>('contact-invite-create')!.click();
-  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-share')?.dataset.status).toBe('created'); });
-  const link = one<HTMLInputElement>('contact-invite-link')!.value;
-  const share = one<HTMLAnchorElement>('contact-invite-share')!.href;
+  // Another owner's invitation, made while that owner's key was set, carries its Tailscale share.
+  const link = FAKE_CONTACT_INVITE;
+  const share = inviteShare(link);
   one<HTMLButtonElement>('contact-configure')!.click();
   flushSync();
   one<HTMLButtonElement>('contact-key-clear')!.click();
@@ -188,6 +189,6 @@ test('a link that shares the inviter, pasted without an API key, offers the shar
   expect(one('contact-join-share')).not.toBeNull();
   // Accepted meanwhile: the same link joins.
   one<HTMLButtonElement>('contact-join')!.click();
-  await vi.waitFor(() => { flushSync(); expect(one('contact-joined-words')?.querySelectorAll('li')).toHaveLength(4); });
+  await vi.waitFor(() => { flushSync(); expect(one('contact-joined-words')?.querySelectorAll('li')).toHaveLength(8); });
   expect(one('contact-join-share')).toBeNull();
 });

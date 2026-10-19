@@ -30,6 +30,7 @@
   import { activeLocale } from './lib/i18n.svelte';
   import { retryOrReload } from './lib/retry-load';
   import { experimentOn } from './lib/experiments.svelte';
+  import { contactsShown } from './lib/contacts-rail.svelte';
   import { installWhipEscape } from './lib/whip.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
@@ -191,13 +192,12 @@
   // The contacts column on the right loads with its experiment, on a desktop-wide window.
   let ContactsRail = $state<typeof import('./components/home/ContactsRail.svelte').default>();
   $effect(() => {
-    if (!experimentOn('contacts') || narrow.current || ContactsRail) return;
+    if (!contactsShown(store) || narrow.current || ContactsRail) return;
     void import('./components/home/ContactsRail.svelte').then(module => { ContactsRail = module.default; }).catch(() => {});
   });
   $effect(() => {
-    if (experimentOn('contacts')) return;
-    for (const machine of workspace.machines) if (machine.store.page === 'home') machine.store.showChat();
-    if (store.page === 'home') store.showChat();
+    for (const machine of workspace.machines) if (machine.store.page === 'home' && !contactsShown(machine.store)) machine.store.showChat();
+    if (store.page === 'home' && !contactsShown(store)) store.showChat();
   });
   let settingsLoadError = $state('');
   $effect(() => {
@@ -602,7 +602,7 @@
           onclick={() => (store.sidebarOpen = false)}
         ></button>
       {/if}
-      {#if store.page === 'home' && experimentOn('contacts')}
+      {#if store.page === 'home' && contactsShown(store)}
         <!-- Contacts take the chat's card; the thread list stays beside them. -->
         <main>
           <div class="thread-chat framed">
@@ -640,7 +640,7 @@
         {/key}
       {/if}
       {/if}
-      {#if ContactsRail && experimentOn('contacts') && !narrow.current}
+      {#if ContactsRail && contactsShown(store) && !narrow.current}
         {#key store}<ContactsRail {store} />{/key}
       {/if}
     {/if}
