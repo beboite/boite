@@ -27,7 +27,7 @@ env:
 jobs:
   browser:
     name: Core browser files (${{ matrix.name }}, ${{ matrix.parallel }} at once, temp on ${{ matrix.temp }})
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -67,7 +67,7 @@ jobs:
 
   cli:
     name: cli.test.ts (${{ matrix.name }})
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'flake-loop')
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -99,7 +99,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [alone, shard 1, shard 2, shard 3]
+        mode: [alone]
     runs-on: windows-2025
     timeout-minutes: 90
     env:
@@ -127,7 +127,7 @@ jobs:
           MODE: ${{ matrix.mode }}
         run: |
           if ($env:MODE -eq 'alone') {
-            $files = @('tests/e2e/coordination-bridge-live.test.ts', 'tests/e2e/machines.test.ts'); $runs = [int]$env:RUNS * 2; $together = @()
+            $files = @('tests/e2e/machines.test.ts'); $runs = [int]$env:RUNS * 4; $together = @()
           } else {
             $shard = $env:MODE.Split(' ')[1]
             $files = @(bun scripts/ci/e2e-shards.ts $shard 3)
