@@ -9,21 +9,21 @@ import type { AnswerAttachment, Attachment, FileAttachment, ImageAttachment, Mes
  * the copy need not be read again. Agents editing a copy change its mtime.
  * FAT and exFAT report inode 0, which leaves size and mtime to decide.
  */
-const verified = new Map<string, { size: number; mtimeMs: number; ino: number }>();
+const verified = new Map<string, { size: bigint; mtimeNs: bigint; ino: bigint }>();
 const VERIFIED_MAX = 1024;
 
 function remember(path: string): void {
-  const stat = lstatSync(path);
+  const stat = lstatSync(path, { bigint: true });
   verified.delete(path);
-  verified.set(path, { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino });
+  verified.set(path, { size: stat.size, mtimeNs: stat.mtimeNs, ino: stat.ino });
   if (verified.size > VERIFIED_MAX) verified.delete(verified.keys().next().value!);
 }
 
 function untouched(path: string): boolean {
   const known = verified.get(path);
   if (known === undefined) return false;
-  const stat = lstatSync(path, { throwIfNoEntry: false });
-  return stat !== undefined && stat.isFile() && stat.size === known.size && stat.mtimeMs === known.mtimeMs && stat.ino === known.ino;
+  const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+  return stat !== undefined && stat.isFile() && stat.size === known.size && stat.mtimeNs === known.mtimeNs && stat.ino === known.ino;
 }
 
 function storeFile(dataDir: string, file: FileAttachment | Extract<MessagePart, { type: 'file' }>): { line: string; path: string } {

@@ -347,7 +347,7 @@ describe('files.write', () => {
     const moved = join(root, 'sub-real');
     const outside = mkdtempSync(join(tmpdir(), 'boite-held-out-'));
     mkdirSync(parent);
-    const stats = statSync(parent);
+    const stats = statSync(parent, { bigint: true });
     const dir = await openHeldDirectory(parent, stats.dev, stats.ino, 'files.write path directory', 'sub');
     try {
       renameSync(parent, moved);
