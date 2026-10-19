@@ -15,20 +15,20 @@ interface Traced {
  * looked up in the system (`runningSince`), and one found running there keeps
  * its child. Whatever the core spawned has the core as its parent and is never taken.
  *
- * An exited `sh`, `bash`, `dash` or `zsh` with the image of its own parent,
- * which exited with 0 within seconds of its child's start, is a fork, not a
- * shell: Git Bash (MSYS2) forks a copy of the shell to exec each command, and
- * that copy exits once the command runs. A process under such forks hangs from
- * the first ancestor past them, and stays while that one runs. A background
- * `sh wait.sh` keeps its live shell that way; what an interrupted command left
- * still goes, since its shell is a different image from the agent above it, or
- * was stopped. Any other exited parent of the same image (a Node worker under
- * Node, a nested bash that was killed) is a real parent and leaves an orphan.
+ * An exited `sh`, `bash`, `dash` or `zsh` that exited with 0, whose own parent
+ * has its image and still runs, is a fork, not a shell: Git Bash (MSYS2) forks
+ * a copy of the shell to exec each command, and that copy exits once the
+ * command runs. Its child hangs from that live shell and stays while it runs,
+ * so a background `sh wait.sh` keeps its shell. One exited fork is passed over,
+ * never two: the `sleep` of a nested bash that exited or was stopped has the
+ * fork and that bash dead above it, and goes. What an interrupted command left
+ * goes too, since its shell is a different image from the agent above it, and
+ * so does what an exited Node worker left under a live Node.
  */
 export function orphansOf<T extends Traced>(byPid: ReadonlyMap<number, T>, now: number, graceMs: number, runningSince: (pid: number) => number | null): Map<number, T> {
   const entries = [...byPid.values()];
   const stopping = new Map<number, T>();
-  // Who each process hangs from: its parent pid, or the live process past its forks.
+  // Who each process hangs from: its parent pid, or the shell that forked its exited parent.
   const children = new Map<number, T[]>();
   for (const entry of entries) {
     const { record } = entry;
@@ -74,21 +74,14 @@ export function parentAtStart<T extends Traced>(byPid: ReadonlyMap<number, T>, c
 }
 
 /**
- * The live process above `entry` once its exited parent and the forks above
- * it are passed, or undefined when its parent still runs, was never seen, or
- * exited without being a fork of the one above it.
+ * The live shell whose fork was `entry`'s parent and exited, or undefined when
+ * the parent still runs, was never seen, or is no such fork.
  */
 function forkerOf<T extends Traced>(entry: T, byPid: ReadonlyMap<number, T>): T | undefined {
-  let child: Traced = entry;
-  let link = entry.parent ?? null;
-  if (link === null || running(link, byPid)) return undefined;
-  while (!running(link, byPid)) {
-    const above: Traced | null = link.parent ?? null;
-    if (above === null || !shellFork(link, above, child)) return undefined;
-    child = link;
-    link = above;
-  }
-  return byPid.get(link.record.pid);
+  const fork = entry.parent ?? null;
+  if (fork === null || running(fork, byPid)) return undefined;
+  const shell = fork.parent ?? null;
+  return shell !== null && running(shell, byPid) && shellFork(fork, shell) ? byPid.get(shell.record.pid) : undefined;
 }
 
 function running(entry: Traced, byPid: ReadonlyMap<number, Traced>): boolean {
@@ -97,18 +90,15 @@ function running(entry: Traced, byPid: ReadonlyMap<number, Traced>): boolean {
 
 /** `fork` exists only in an MSYS2 or Cygwin program, and these shells fork for every command. */
 const FORKING_SHELL = /(?:^|[\\/])(?:ba|da|z)?sh\.exe$/i;
-/**
- * How soon after its child starts a fork that exec'd it exits. In 74,975 such
- * forks of Boite's trace, all exited with 0, at a median of 19 ms and at most
- * 3.1 s under load; a shell that was stopped exits with another code or later.
- */
-const FORK_EXIT_MS = 5000;
 
-/** `fork` is a copy of `shell` that exec'd `child` and exited, not a shell that ran it and was stopped. */
-function shellFork(fork: Traced, shell: Traced, child: Traced): boolean {
-  const { exe, exitCode, exitedAt } = fork.record;
-  return FORKING_SHELL.test(exe) && exe.toLowerCase() === shell.record.exe.toLowerCase()
-    && exitCode === 0 && exitedAt !== null && exitedAt - nativeBirth(child) <= FORK_EXIT_MS;
+/**
+ * `fork` is a copy of `shell` that exec'd a command and exited. In 74,975 such
+ * forks of a real trace, all exited with 0; no timing is read, since exit
+ * events can arrive late.
+ */
+function shellFork(fork: Traced, shell: Traced): boolean {
+  const exe = fork.record.exe;
+  return FORKING_SHELL.test(exe) && exe.toLowerCase() === shell.record.exe.toLowerCase() && fork.record.exitCode === 0;
 }
 
 function nativeBirth(entry: Traced): number {

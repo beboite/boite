@@ -202,7 +202,6 @@ describe('orphan sweep', () => {
   test('a script under a background shell that still runs outlives the fork stubs Git Bash left exited', () => {
     const sink = job.sink();
     const exit = { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
-    // A fork exits within seconds of its child's start: births a second before the exits.
     const born = Date.now() - 1000;
     const bash = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
     const sh = 'C:\\Program Files\\Git\\usr\\bin\\sh.exe';
@@ -217,8 +216,11 @@ describe('orphan sweep', () => {
     sink.exited(THREAD, 132, exit);
     sink.started(THREAD, 134, { exe: sh, commandLine: null, parentPid: 133, startedAt: born + 40 });
     sink.started(THREAD, 135, { exe: 'C:\\Program Files\\Git\\usr\\bin\\sleep.exe', commandLine: null, parentPid: 134, startedAt: born + 50 });
-    sink.exited(THREAD, 134, exit);
-    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104]);
+    // An exit event can arrive seconds late: the sweep reads no timing.
+    const late = Date.now() + 6000;
+    setSystemTime(late);
+    try { sink.exited(THREAD, 134, exit); } finally { setSystemTime(); }
+    expect(procs.sweepOrphans(THREAD, late + GRACE_MS).sort()).toEqual([103, 104]);
 
     // The task's shell goes, though its launcher stays: the script is an orphan now.
     sink.exited(THREAD, 131, exit);
@@ -228,7 +230,6 @@ describe('orphan sweep', () => {
   test('what an orphan shell ran through a fork stub goes with it', () => {
     const sink = job.sink();
     const exit = { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
-    // A fork exits within seconds of its child's start: births a second before the exits.
     const born = Date.now() - 1000;
     const bash = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
     // An interrupted command: the launcher goes, its MSYS bash and the sleep it forked stay.
@@ -252,7 +253,7 @@ describe('orphan sweep', () => {
     expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104, 162]);
   });
 
-  test('a nested bash that was stopped, or exited long after its child started, leaves an orphan', () => {
+  test('the sleep of a nested bash that was stopped, or exited with 0, is an orphan under the live outer bash', () => {
     const sink = job.sink();
     const bash = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
     const sleep = 'C:\\Program Files\\Git\\usr\\bin\\sleep.exe';
@@ -270,11 +271,11 @@ describe('orphan sweep', () => {
     nested(180, now - 1000);
     expect(procs.sweepOrphans(THREAD, now + GRACE_MS).sort()).toEqual([103, 104]);
 
-    // The inner bash is stopped while its sleep runs; the other one exits with 0, a minute later.
+    // One inner bash is stopped while its sleep runs, the other exits with 0
+    // at once: two exited processes above each sleep, the fork and that bash.
     sink.exited(THREAD, 171, exit(1));
-    setSystemTime(now + 60_000);
-    try { sink.exited(THREAD, 181, exit(0)); } finally { setSystemTime(); }
-    expect(procs.sweepOrphans(THREAD, now + 60_000 + GRACE_MS).sort()).toEqual([173, 183]);
+    sink.exited(THREAD, 181, exit(0));
+    expect(procs.sweepOrphans(THREAD, now + GRACE_MS).sort()).toEqual([173, 183]);
   });
 
   test('a new turn inside the grace cancels the sweep', async () => {
