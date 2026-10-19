@@ -6,7 +6,7 @@
  * out before it ran. The base branch's rules name it in advance.
  */
 
-import type { WatchCheck, WatchDetail } from './pull-request-watch-read.ts';
+import { rateLimited, type WatchCheck, type WatchDetail } from './pull-request-watch-read.ts';
 
 type Row = Record<string, unknown>;
 const row = (value: unknown): Row => value && typeof value === 'object' && !Array.isArray(value) ? value as Row : {};
@@ -70,24 +70,36 @@ type Log = (message: string) => void;
  * The required contexts per repository and base, read again after
  * `RULES_TTL_MS`. A failed read keeps what was known before (nothing when it
  * never answered), waits `RULES_RETRY_MS` and is logged: the watch goes on
- * with what the checks say of themselves.
+ * with what the checks say of themselves. A rate limit is thrown instead, so
+ * the watch pauses every read until it passes.
  */
 export class RequiredContexts {
-  readonly #held = new Map<string, { contexts: string[]; until: number; reading: Promise<string[]> | null }>();
+  readonly #held = new Map<string, { contexts: string[]; until: number; read: number; reading: Promise<string[]> | null }>();
+  #reads = 0;
 
   constructor(private readonly ttlMs = RULES_TTL_MS, private readonly retryMs = RULES_RETRY_MS) {}
 
+  /** Which read answers for `key` while it holds; null once it expired, which asks for another. */
+  stamp(key: string): number | null {
+    const held = this.#held.get(key);
+    return held && Date.now() < held.until ? held.read : null;
+  }
+
   async of(key: string, repository: string, base: string, load: Load, log: Log): Promise<string[]> {
-    const held = this.#held.get(key) ?? { contexts: [], until: 0, reading: null };
+    const held = this.#held.get(key) ?? { contexts: [], until: 0, read: 0, reading: null };
     this.#held.set(key, held);
     if (Date.now() < held.until) return held.contexts;
     held.reading ??= this.#read(repository, base, load).then(contexts => {
       held.contexts = contexts;
       held.until = Date.now() + this.ttlMs;
+      held.read = ++this.#reads;
       return contexts;
     }, (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (rateLimited(message)) throw error;
       held.until = Date.now() + this.retryMs;
-      log(`reading the checks ${base} requires: ${error instanceof Error ? error.message : String(error)}`);
+      held.read = ++this.#reads;
+      log(`reading the checks ${base} requires: ${message}`);
       return held.contexts;
     }).finally(() => { held.reading = null; });
     return held.reading;

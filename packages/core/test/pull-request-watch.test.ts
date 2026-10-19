@@ -423,6 +423,45 @@ test('a failed read of what the base branch requires ends nothing and pauses not
   expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('All 1 required check passed on aaaaaaa.');
 });
 
+test('rules that expire or failed are read again while the fingerprint stands still, against the checks already read', async () => {
+  const { owner, threadId, github, watches, drive } = await watchedThread();
+  // "old" is required, then the ruleset swaps it for C, which already passed: nothing on the pull request moves.
+  github.rules = ['A', 'old'];
+  github.runs = [{ name: 'A', required: true }, { name: 'C' }];
+  await owner.call('threads.watchPullRequest', { threadId });
+  github.rules = ['A', 'C'];
+  github.calls = [];
+  const now = Date.now();
+  const driveAt = async (minutes: number) => {
+    const clock = spyOn(Date, 'now').mockReturnValue(now + minutes * 60_000);
+    try { await drive(); } finally { clock.mockRestore(); }
+  };
+  await driveAt(11);
+  await settled(threadId);
+  expect(github.calls.filter(call => call !== 'fingerprint')).toEqual(['rules/branches/main?per_page=100', 'branches/main']);
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('All 2 required checks passed on aaaaaaa.');
+
+  // A failed read is tried again after two minutes, not after the half-hour reread.
+  github.rulesFailure = 'gh: Server Error (HTTP 502)';
+  await driveAt(22);
+  github.rulesFailure = null;
+  github.rules = ['A', 'C', 'B'];
+  github.calls = [];
+  await driveAt(25);
+  expect(github.calls.filter(call => call !== 'fingerprint')).toEqual(['rules/branches/main?per_page=100', 'branches/main']);
+  expect(watches.of(threadId)[0]!.seen?.checks).toEqual({ total: 3, running: 1, failed: 0 });
+});
+
+test('a rate limit on the rules pauses every read like any other', async () => {
+  const { owner, threadId, github, watches } = await watchedThread({ intervalMs: 40, coalesceMs: 0 });
+  github.rulesFailure = 'gh: API rate limit exceeded for user ID 1. (HTTP 403)';
+  await owner.call('threads.watchPullRequest', { threadId });
+  expect(watches.of(threadId)[0]!.paused).toMatchObject({ reason: 'rate-limit' });
+  github.calls = [];
+  await watches.pass();
+  expect(github.calls).toEqual([]);
+});
+
 test('a merge or a close by someone else is told with what still waited, a failed closer read included, then the watch ends', async () => {
   const { owner, threadId, github, watches, drive } = await watchedThread();
   await owner.call('threads.watchPullRequest', { threadId });

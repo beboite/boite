@@ -45,8 +45,11 @@ interface WatchRecord {
   ended?: boolean;
 }
 
-/** What only lives in memory: the next read, and why the last one got no answer. */
-interface Runtime { nextReadAt: number; failures: number; paused: PullRequestWatch['paused']; reading: boolean }
+/**
+ * What only lives in memory: the next read, why the last one got no answer,
+ * and the checks it read with which read of the base branch's rules judged them.
+ */
+interface Runtime { nextReadAt: number; failures: number; paused: PullRequestWatch['paused']; reading: boolean; detail: WatchDetail | null; rules: number | null }
 
 type Gh = (threadId: ThreadId, args: string[]) => Promise<string>;
 
@@ -86,7 +89,7 @@ export class PullRequestWatches {
       if (!records.length || !thread || thread.archived) { core.journal.deleteSetting(key); continue; }
       this.#records.set(threadId, records);
       // A restart reads each watch again soon, a few seconds apart.
-      for (const record of records) this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Date.now() + 2_000 * ++stagger, failures: 0, paused: null, reading: false });
+      for (const record of records) this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Date.now() + 2_000 * ++stagger, failures: 0, paused: null, reading: false, detail: null, rules: null });
     }
     this.#unsubscribe = core.bus.onAny((name, payload) => {
       if (this.#closed) return;
@@ -137,7 +140,7 @@ export class PullRequestWatches {
     const record: WatchRecord = { url: address.url, host: address.host, repository: address.repository, number: address.number, since,
       memory: initialMemory(since), fingerprint: null, remarksReadAt: 0, seen: null, pending: [], pendingSince: null };
     this.#records.set(threadId, [...records, record]);
-    this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Number.POSITIVE_INFINITY, failures: 0, paused: null, reading: false });
+    this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Number.POSITIVE_INFINITY, failures: 0, paused: null, reading: false, detail: null, rules: null });
     try {
       const state = await this.#read(threadId, record, new Map(), true);
       if (state !== 'OPEN' && state !== null) throw refused(`pull request #${record.number} is ${state.toLowerCase()}; there is nothing to watch`, { field: 'url', expected: 'an open pull request' });
@@ -230,17 +233,23 @@ export class PullRequestWatches {
       }
       const statusMoved = record.fingerprint?.status !== fingerprint.status;
       const remarksDue = record.fingerprint?.remarks !== fingerprint.remarks || now - record.remarksReadAt >= this.#timing.rereadMs;
-      if (!statusMoved && !remarksDue) {
+      // The base branch's rules are not in the fingerprint: once they expire the checks are judged again.
+      const kept = runtime.detail;
+      const rulesDue = !kept || (kept.base !== '' && this.#required.stamp(rulesKey(record, kept.base)) !== runtime.rules);
+      if (!statusMoved && !remarksDue && !rulesDue) {
         this.#answered(runtime, record);
         runtime.nextReadAt = now + this.#timing.intervalMs;
         return 'OPEN';
       }
-      const read = await this.#shared(memo, `detail ${record.url}`, () => this.#graphql(threadId, record, DETAIL_QUERY).then(parseDetail));
+      // Rules alone expired: the checks already read are judged against them, with no detail read.
+      const read = statusMoved || remarksDue || !kept ? await this.#shared(memo, `detail ${record.url}`, () => this.#graphql(threadId, record, DETAIL_QUERY).then(parseDetail)) : kept;
       const detail = withRequired(read, await this.#requiredOf(threadId, record, read.base));
       const remarks = remarksDue ? await this.#shared(memo, `remarks ${record.url}`, () => this.#remarks(threadId, record)) : null;
       // A stop or an unwatch that landed during the reads wins.
       if (this.#find(threadId, record.url) !== record) return 'OPEN';
       const { changes, next } = evaluate(record.memory, detail, remarks);
+      runtime.detail = read;
+      runtime.rules = read.base ? this.#required.stamp(rulesKey(record, read.base)) : null;
       record.memory = next;
       record.fingerprint = { ...fingerprint, remarks: remarks === null ? record.fingerprint?.remarks ?? '' : fingerprint.remarks };
       if (remarks !== null) record.remarksReadAt = now;
@@ -318,10 +327,10 @@ export class PullRequestWatches {
     return this.gh(threadId, ['api', 'graphql', '--hostname', record.host, '-f', `query=${query}`, '-f', `owner=${owner}`, '-f', `name=${name}`, '-F', `number=${record.number}`]);
   }
 
-  /** What the base branch requires, cached per repository and base: a failed read only logs and keeps what was known. */
+  /** What the base branch requires, cached per repository and base: a failed read logs and keeps what was known, a rate limit throws. */
   #requiredOf(threadId: ThreadId, record: WatchRecord, base: string): Promise<string[]> {
     if (!base) return Promise.resolve([]);
-    return this.#required.of(`${record.host} ${record.repository} ${base}`, record.repository, base,
+    return this.#required.of(rulesKey(record, base), record.repository, base,
       path => this.gh(threadId, ['api', '--hostname', record.host, path]),
       message => this.core.log('warn', `pull request watch ${record.url}: ${message}`, { source: 'pull-request-watch', threadId }));
   }
@@ -426,6 +435,7 @@ export class PullRequestWatches {
 }
 
 const runtimeKey = (threadId: string, url: string) => `${threadId}\n${url.toLowerCase()}`;
+const rulesKey = (record: WatchRecord, base: string) => `${record.host} ${record.repository} ${base}`;
 
 function seenOf(detail: WatchDetail, memory: WatchMemory, now: number): PullRequestWatchSeen {
   return {

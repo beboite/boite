@@ -235,9 +235,13 @@ and `updatedAt`. Only when it moves does the core read the checks one by one
 regardless, for edits the fingerprint cannot see. What the base branch
 requires costs two REST reads (`rules/branches/<base>` and
 `branches/<base>`) per repository and base every 10 minutes, shared by every
-watch on it; a 404 means nothing is required. A failed read is logged, keeps
-the last answer (or the checks' own `isRequired` when there is none), is tried
-again after two minutes and neither pauses nor ends the watch. GitHub's rate limit pauses
+watch on it; a 404 means nothing is required. The rules are not in the
+fingerprint: when they expire, the next pass reads them even if the
+fingerprint stood still and judges the checks it last read against them, with
+no detail read (one detail read after a restart, which keeps no checks). A
+failed read is logged, keeps the last answer (or the checks' own `isRequired`
+when there is none), is tried again after two minutes and neither pauses nor
+ends the watch; a rate-limited one pauses every read like any other. GitHub's rate limit pauses
 every read, from two minutes doubling up to 15; an unreachable GitHub or a
 missing `gh` pauses that watch the same way. Neither ends it, even when the
 failed read is the one that asks who merged or closed it.
