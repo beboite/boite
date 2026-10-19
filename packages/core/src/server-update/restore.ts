@@ -238,11 +238,11 @@ export function openDataDir(dataDir: string, prepare: (dataDir: string) => void,
   const file = rollbackRecord(dataDir);
   for (let attempt = 0; attempt < 3 && !existsSync(file); attempt++) {
     prepare(dataDir);
-    const directory = statSync(dataDir).ino;
+    const directory = statSync(dataDir, { bigint: true }).ino;
     const release = lockData(dataDir);
     // A rollback records itself before it moves anything, and holds the data lock while it does: one that
     // began meanwhile is finished below. The directory locked must still be the one at the path.
-    if (!existsSync(file) && statSync(dataDir).ino === directory) return release;
+    if (!existsSync(file) && statSync(dataDir, { bigint: true }).ino === directory) return release;
     release();
   }
   return withMaintenance(dataDir, lock, () => {

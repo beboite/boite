@@ -21,7 +21,7 @@ async function snapshot(core: Core, cwd: string, path: string): Promise<{ part: 
   const destination = join(directory, id);
   let completed = false;
   try {
-    const opened = await source.stat();
+    const opened = await source.stat({ bigint: true });
     if (!opened.isFile() || opened.dev !== found.stats.dev || opened.ino !== found.stats.ino) {
       throw refused('artifacts.publish path changed while opening; try again', { path });
     }
