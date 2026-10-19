@@ -22,6 +22,12 @@ export interface StoredEnvironment {
   epoch?: number;
   /** This device's key opens it, signed for this machine id; `token` is empty. */
   signs?: string;
+  /**
+   * The group that machine last said it is in, over that key: a reload knows
+   * it before the machine answers, and the group's word that it left still
+   * counts when the machine was removed before it said it again.
+   */
+  signedGroup?: string;
 }
 
 export const ENVIRONMENTS_STORAGE_KEY = 'boite.envs';
@@ -123,6 +129,8 @@ export function upsertEnvironment(entry: {
     // A key written for that address replaces the device key's word; an empty one keeps it.
     ...signsOf({ signs: entry.signs ?? (entry.token === '' ? list[at]?.signs : undefined) })
   };
+  // What the machine said of its group holds as long as the same key opens the same machine.
+  if (next.signs !== undefined && next.signs === list[at]?.signs && list[at]?.signedGroup !== undefined) next.signedGroup = list[at].signedGroup;
   if (at === -1) {
     list.push(next);
   } else {
@@ -130,6 +138,17 @@ export function upsertEnvironment(entry: {
   }
   storeEnvironments(list);
   return list;
+}
+
+/** Keeps the group a machine this device's key opens said it is in (`signedGroup`); null forgets it. */
+export function rememberSignedGroup(url: string, groupId: string | null): void {
+  const at = withoutTrailingSlashes(url);
+  const list = readEnvironments();
+  const entry = list.find((env) => env.url === at);
+  if (entry === undefined || entry.signs === undefined || (entry.signedGroup ?? null) === groupId) return;
+  if (groupId === null) delete entry.signedGroup;
+  else entry.signedGroup = groupId;
+  storeEnvironments(list);
 }
 
 /** The machine was paired by hand since: it is no longer the group's to drop. */
@@ -160,7 +179,9 @@ export function rememberSession(endpoint: Endpoint, token: string): StoredEnviro
  */
 export function rememberDevice(url: string, coreId: string): StoredEnvironment[] {
   setDropped(url, null);
-  const list = readEnvironments().map((env) => (env.url === withoutTrailingSlashes(url) ? { url: env.url, label: env.label, token: '', paired: true, signs: coreId } : env));
+  const list = readEnvironments().map((env) => (env.url === withoutTrailingSlashes(url)
+    ? { url: env.url, label: env.label, token: '', paired: true, signs: coreId, ...(env.signs === coreId && env.signedGroup !== undefined ? { signedGroup: env.signedGroup } : {}) }
+    : env));
   storeEnvironments(list);
   const updated = upsertEnvironment({ url, token: '', paired: true, signs: coreId });
   const stored = readStoredEndpoint();

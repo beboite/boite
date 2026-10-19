@@ -3,7 +3,7 @@ import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, withoutTrailingSlashes, ty
 import { WsClient, type SocketFactory, type SocketLike } from './client';
 import { browserSocket } from './ws-client-utils';
 import { deviceKey } from './device-key';
-import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, rememberGroupAddresses, removeBrought, signsFor, type Endpoint, type StoredEnvironment } from './endpoint';
+import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, rememberGroupAddresses, rememberSignedGroup, removeBrought, signsFor, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -432,10 +432,15 @@ export class GroupLinks {
    */
   async #pruneSigned(anchors: readonly Machine[]): Promise<void> {
     const signed = anchors.filter((other) => signsFor(other.id) !== undefined && other.store.group != null);
+    // What each says of its group over this device's key is kept: a reload knows it before the machine answers again.
+    for (const machine of anchors) if (signsFor(machine.id) !== undefined) rememberSignedGroup(machine.id, machine.store.group?.id ?? null);
+    const remembered = new Map(readEnvironments().map((env) => [env.url, env.signedGroup]));
     for (const machine of [...this.workspace.machines]) {
       const signs = signsFor(machine.id);
       if (signs === undefined) continue;
-      const groupId = machine.store.group?.id;
+      // Not heard since this page opened, it is in the group it said last: removed before it says it again, its
+      // key no longer opens it, and the group's roster is the only word left (run 39299531333 kept it connecting).
+      const groupId = machine.store.group?.id ?? (machine.store.groupKnown ? undefined : remembered.get(machine.id));
       const listedBy = (other: Machine): boolean => other.store.group!.cores.some((core) => core.coreId === signs);
       // Its own group, as another machine of it says; or, refused there or out of every group by its own word, none of the device's groups lists it.
       // Removed, a machine may say it is in no group before the others drop it from their roster, then tell this device's hellos to come back.

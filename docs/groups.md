@@ -464,7 +464,9 @@ the hidden page is shown; nothing is tried by the clock while the page is
 hidden. A device signs
 its own way in there and is done: what a member lists is all it needs, and a
 machine its key opens that another one of the group no longer lists leaves its
-list. Its page's own machine, waiting for the device to be added, is taken over
+list. The group such a machine last said it is in is kept with its key
+(`signedGroup`), so a machine removed before a reloaded page heard from it
+again leaves too: its key opens nothing there any more. Its page's own machine, waiting for the device to be added, is taken over
 the same way. The rest of this section is about clients that use tickets, the
 desktop app and a client paired the older way: they ask a connected member
 for a ticket and connect. Who is in a group is read off the machines this

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type Group, type GroupCore } from '@boite/contracts';
 import type { SocketLike } from './client';
-import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, rememberSession, removeBrought, type Endpoint } from './endpoint';
+import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, rememberDevice, rememberSession, removeBrought, type Endpoint } from './endpoint';
 import { GroupLinks, usableAddresses } from './group-links.svelte';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -716,6 +716,33 @@ describe('a machine the device key opens', () => {
     expect(removed).toEqual([]);
     Object.assign(storeOf(b), { connection: 'connecting', groupKnown: false });
     await links.reconcile();
+    storeOf(a).group = group(selfA, [both[0]!]);
+    await links.reconcile();
+    expect(removed).toEqual(['http://b.test']);
+    localStorage.clear();
+  });
+
+  it('leaves once its group stopped listing it, when it was removed before the reloaded page heard its group again', async () => {
+    const [selfA, selfB, selfC] = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([
+      { url: 'http://a.test', label: 'A', token: '', paired: true, signs: selfA },
+      { url: 'http://b.test', label: 'B', token: '', paired: true, signs: selfB },
+      { url: 'http://c.test', label: 'C', token: '', paired: true, signs: selfC }
+    ]));
+    const both = [core(selfA, ['http://a.test']), core(selfB, ['http://b.test'])];
+    const a = machine('http://a.test', { group: group(selfA, both) });
+    const b = machine('http://b.test', { group: group(selfB, both) });
+    // A machine of another group, not reached yet since the page opened: it has said nothing.
+    const c = machine('http://c.test', { connection: 'connecting', groupKnown: false });
+    const { workspace: ws, removed } = workspace([a, b, c]);
+    const links = new GroupLinks(ws, { reach: vi.fn(async () => null), secure: () => false });
+    await links.reconcile();
+    // Reloaded: B is removed before it answers about its group, so it never does, and its key opens nothing
+    // there any more (run 39299531333 kept it connecting). The device key's next hello keeps what B said.
+    Object.assign(storeOf(b), { connection: 'connecting', groupKnown: false, group: null });
+    rememberDevice('http://b.test', selfB);
+    await links.reconcile();
+    expect(removed).toEqual([]);
     storeOf(a).group = group(selfA, [both[0]!]);
     await links.reconcile();
     expect(removed).toEqual(['http://b.test']);
