@@ -82,3 +82,45 @@ test("settings reveal sections and protection switches persist across navigation
     await server.close();
   }
 }, 60_000);
+
+// French names run long ("Machines et mises à jour"): a tile once let its label
+// spill over the next one, and the page hugged the left of a wide window.
+test("settings home keeps every tile's words inside it and centres its column", async () => {
+  const port = await freePort();
+  const server = await startUi(port);
+  const page = await BrowserPage.launch({
+    url: `http://127.0.0.1:${port}/?fake=1&open=recent`,
+    windowSize: { width: 1440, height: 900 },
+  });
+  try {
+    await page.evaluate("localStorage.setItem('boite.locale', 'fr')");
+    await page.evaluate("location.reload()");
+    await page.waitFor('document.querySelector("[data-testid=nav-settings]")');
+    await page.click("[data-testid=nav-settings]");
+    await page.waitFor('document.querySelector("[data-testid=settings-home-machines]")');
+    await page.evaluate("document.fonts.ready");
+    for (const width of [1920, 1440, 1100, 900]) {
+      await page.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
+      const layout = JSON.parse(String(await page.evaluate(`(() => {
+        const frame = document.querySelector('.settings section.framed').getBoundingClientRect();
+        const search = document.querySelector('[data-testid=settings-search]').closest('label').getBoundingClientRect();
+        const tiles = [...document.querySelectorAll('[data-testid^=settings-home-]')].filter(tile => tile.tagName === 'BUTTON');
+        const spills = tiles.filter(tile => {
+          const box = tile.getBoundingClientRect();
+          return [...tile.querySelectorAll('span')].some(part => {
+            const inner = part.getBoundingClientRect();
+            return part.scrollWidth > part.clientWidth + 1 || inner.right > box.right + 0.5 || inner.bottom > box.bottom + 0.5;
+          });
+        }).map(tile => tile.dataset.testid);
+        const heights = [...new Set(tiles.map(tile => Math.round(tile.getBoundingClientRect().height)))];
+        return JSON.stringify({ left: search.left - frame.left, right: frame.right - search.right, spills, heights });
+      })()`)));
+      expect({ width, spills: layout.spills }).toEqual({ width, spills: [] });
+      expect({ width, heights: layout.heights }).toEqual({ width, heights: [layout.heights[0]] });
+      if (width >= 1440) expect(Math.abs(layout.left - layout.right)).toBeLessThanOrEqual(2);
+    }
+  } finally {
+    await page.close();
+    await server.close();
+  }
+}, 60_000);

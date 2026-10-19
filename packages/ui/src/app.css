@@ -1376,8 +1376,12 @@ tr:last-child td {
   overflow: auto;
 }
 
+/* The 880 px column stands in the middle of a wide window rather than against
+   its left edge. The gutter is reserved on both sides, so a scrollbar does not
+   push the column off centre. */
 .settings .page {
-  padding: 36px clamp(20px, 4vw, 64px);
+  padding: 36px max(clamp(20px, 4vw, 64px), calc((100% - var(--settings-width)) / 2));
+  scrollbar-gutter: stable both-edges;
 }
 
 .settings .page > header {
