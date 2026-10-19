@@ -523,6 +523,22 @@ test('a delegated agent watches its pull request: the wake is its turn, its answ
   expect(watches.of(sibling)).toEqual([]);
 });
 
+test('a persistent agent keeps a subagent that still watches its pull request when it takes its next work', async () => {
+  const setup = await watchedThread();
+  const { threadId, watches } = setup;
+  const child = await watchingChild(setup, 'episode');
+  await waitFor(() => harness!.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND status = 'delivered'").get(child, threadId) !== null);
+  await settled(threadId);
+  const delegation = harness!.core.delegation;
+  // The resident runtime starts each work item through beginEpisode: a fresh episode retires settled subagents.
+  const accepted = delegation.beginEpisode(threadId, 'next-work-item', delegation.config(threadId));
+  expect({ accepted, archived: harness!.core.journal.getThread(child)?.archived, watches: watches.of(child).length }).toEqual({ accepted: false, archived: false, watches: 1 });
+  // Once the watch ends, the next work item retires it as before.
+  watches.unwatch(child);
+  expect(delegation.beginEpisode(threadId, 'next-work-item', delegation.config(threadId))).toBe(true);
+  expect(harness!.core.journal.getThread(child)?.archived).toBe(true);
+});
+
 test('the parent\'s Stop ends its subagents\' watches, and a workflow step still cannot watch', async () => {
   const setup = await watchedThread();
   const { owner, threadId, watches } = setup;

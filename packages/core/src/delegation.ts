@@ -169,7 +169,8 @@ export class Delegation {
   beginEpisode(rootId: string, episodeId: string, config: DelegationConfig): boolean {
     if (this.core.journal.getSetting(`delegation-episode:${rootId}`) === episodeId) return true;
     const children = this.rows(rootId).map(row => this.core.threads.require(row.thread_id));
-    if (children.some(t => this.busy(t)) || this.inbox(rootId).length) return false;
+    // A subagent watching its pull request is still at work: archiving it would end the watch.
+    if (children.some(t => this.busy(t) || (!t.archived && this.core.pullRequestWatches.of(t.id).length > 0)) || this.inbox(rootId).length) return false;
     this.core.journal.db.transaction(() => {
       for (const child of children.filter(t => !t.archived)) {
         this.core.threads.releaseAgent(child.id);

@@ -298,7 +298,9 @@ note says so. Each wake (`docs/cli.md`, "Watching a pull request") opens the
 child's next turn, and that turn's answer goes to the parent as a result, so
 the parent hears only what the child made of a CI verdict or a review. The
 child's watches end when it is stopped, by its own Stop, `delegate stop` or a
-failed turn, and when its parent stops, is archived or is removed.
+failed turn, and when its parent stops, is archived or is removed. A persistent
+agent does not take its next work item while one of its children still watches
+a pull request, since starting that work would archive the child.
 
 ### Questions from a child
 
