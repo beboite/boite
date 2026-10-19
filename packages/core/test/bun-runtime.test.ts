@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { removeDir } from '../src/fs-retry.ts';
@@ -104,6 +104,42 @@ test('an archive whose checksum differs is refused and nothing is cached', async
   try {
     await expect(bunRuntime(target, { version: '9.9.9', cacheRoot, releases: server.url })).rejects.toThrow(`SHASUMS256.txt says ${'a'.repeat(64)}`);
     expect(existsSync(join(cacheRoot, `${target}-v9.9.9`))).toBe(false);
+  } finally {
+    server.stop();
+  }
+});
+
+for (const [name, bytes] of [['empty', new Uint8Array()], ['changed', new TextEncoder().encode('not the runtime')]] as const) {
+  test(`a cached runtime left ${name} is downloaded again`, async () => {
+    const body = new TextEncoder().encode('#!/bin/sh\necho runtime\n');
+    const zip = zipOf(`${asset}/${exe}`, body);
+    const sum = new Bun.CryptoHasher('sha256').update(zip).digest('hex');
+    const server = release({ 'SHASUMS256.txt': `${sum}  ${asset}.zip\n`, [`${asset}.zip`]: zip });
+    try {
+      const path = await bunRuntime(target, { version: '9.9.9', cacheRoot, releases: server.url });
+      writeFileSync(path, bytes);
+      server.asked.length = 0;
+      expect(await bunRuntime(target, { version: '9.9.9', cacheRoot, releases: server.url })).toBe(path);
+      expect(server.asked).toEqual(['/bun-v9.9.9/SHASUMS256.txt', `/bun-v9.9.9/${asset}.zip`]);
+      expect(readFileSync(path, 'utf8')).toBe('#!/bin/sh\necho runtime\n');
+    } finally {
+      server.stop();
+    }
+  });
+}
+
+test('a cached runtime with no record of its checksum is downloaded again', async () => {
+  const body = new TextEncoder().encode('#!/bin/sh\necho runtime\n');
+  const zip = zipOf(`${asset}/${exe}`, body);
+  const sum = new Bun.CryptoHasher('sha256').update(zip).digest('hex');
+  const server = release({ 'SHASUMS256.txt': `${sum}  ${asset}.zip\n`, [`${asset}.zip`]: zip });
+  const path = join(cacheRoot, `${target}-v9.9.9`, exe);
+  mkdirSync(join(cacheRoot, `${target}-v9.9.9`));
+  writeFileSync(path, 'left by an older build');
+  try {
+    expect(await bunRuntime(target, { version: '9.9.9', cacheRoot, releases: server.url })).toBe(path);
+    expect(server.asked).toEqual(['/bun-v9.9.9/SHASUMS256.txt', `/bun-v9.9.9/${asset}.zip`]);
+    expect(readFileSync(path, 'utf8')).toBe('#!/bin/sh\necho runtime\n');
   } finally {
     server.stop();
   }

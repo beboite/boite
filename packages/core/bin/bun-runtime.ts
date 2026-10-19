@@ -9,10 +9,12 @@
  * with a deadline for each stretch without data and for the whole download,
  * checked against that release's SHASUMS256.txt, and kept under
  * `node_modules/.cache/boite-bun-runtime/<target>-v<version>`, the directory
- * `apps/shell/scripts/stage-sidecar.ts` keeps the Windows runtime in.
+ * `apps/shell/scripts/stage-sidecar.ts` keeps the Windows runtime in. The
+ * SHA-256 of the unpacked runtime is kept beside it and checked at every use:
+ * a cut, emptied or replaced copy, or one with no such record, is fetched again.
  * `compile.ts` passes it to `bun build --compile-executable-path`.
  */
-import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export interface RuntimeOptions {
@@ -38,14 +40,15 @@ export function runtimeAsset(target: string): string {
   return target.replace('-arm64', '-aarch64');
 }
 
-/** The cached runtime for `target`, downloaded and checked first when it is missing. */
+/** The cached runtime for `target`, downloaded and checked first when it is missing or not the one cached. */
 export async function bunRuntime(target: string, options: RuntimeOptions = {}): Promise<string> {
   const version = options.version ?? Bun.version;
   const asset = runtimeAsset(target);
   const exe = target.includes('-windows-') ? 'bun.exe' : 'bun';
   const dir = join(options.cacheRoot ?? RUNTIME_CACHE, `${target}-v${version}`);
   const cached = join(dir, exe);
-  if (existsSync(cached)) return cached;
+  const record = `${cached}.sha256`;
+  if (existsSync(cached) && existsSync(record) && sha256(readFileSync(cached)) === readFileSync(record, 'utf8').trim()) return cached;
 
   const release = `${options.releases ?? RELEASES}/bun-v${version}`;
   const limits = { stallMs: options.stallMs ?? STALL_MS, totalMs: options.totalMs ?? TOTAL_MS };
@@ -53,7 +56,7 @@ export async function bunRuntime(target: string, options: RuntimeOptions = {}): 
   const expected = sums.split('\n').map(line => line.trim().split(/\s+/)).find(([, file]) => file === `${asset}.zip`)?.[0];
   if (expected === undefined) throw new Error(`${release}/SHASUMS256.txt lists no ${asset}.zip`);
   const zip = await download(`${release}/${asset}.zip`, limits);
-  const actual = new Bun.CryptoHasher('sha256').update(zip).digest('hex');
+  const actual = sha256(zip);
   if (actual !== expected) throw new Error(`${release}/${asset}.zip has SHA-256 ${actual}, SHASUMS256.txt says ${expected}`);
 
   // Unpacked beside the cache entry and renamed into it, so a cut run never counts as cached.
@@ -69,11 +72,18 @@ export async function bunRuntime(target: string, options: RuntimeOptions = {}): 
     if (process.platform !== 'win32') chmodSync(extracted, 0o755);
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
+    // The record goes in last: an entry cut before it is fetched again.
     renameSync(extracted, cached);
+    writeFileSync(record, `${sha256(readFileSync(cached))}
+`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
   return cached;
+}
+
+function sha256(data: Uint8Array): string {
+  return new Bun.CryptoHasher('sha256').update(data).digest('hex');
 }
 
 /** A whole file, refused once `stallMs` pass with no byte or `totalMs` in all. */
