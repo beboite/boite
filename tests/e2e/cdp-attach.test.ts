@@ -60,12 +60,17 @@ test('a devtools message that is not JSON fails the waiting call at once and eve
   } finally { await page?.close(); await server.stop(true); }
 }, 10_000);
 
-test('a request the UI server answered before its devtools event arrived is reported answered, from its send time', async () => {
+test('requests in flight say what each UI server did with them, timed from when Chrome sent them', async () => {
   let middleware: ((request: IncomingMessage, response: ServerResponse, next: () => void) => void) | undefined;
   requestLog.configureServer({ middlewares: { use(handler) { middleware = handler; } } });
   const ui = createHttpServer((request, response) => middleware!(request, response, () => response.end('export {}')));
   await new Promise<void>((resolve) => ui.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${(ui.address() as AddressInfo).port}`;
+  // A second UI server that never gets its request: known from the moment it listens.
+  const idle = createHttpServer((_request, response) => response.end());
+  requestLog.configurePreviewServer({ middlewares: { use() {} }, httpServer: idle });
+  await new Promise<void>((resolve) => idle.listen(0, '127.0.0.1', resolve));
+  const idleBase = `http://127.0.0.1:${(idle.address() as AddressInfo).port}`;
   let devtools: ServerWebSocket<unknown> | undefined;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0,
     fetch(request, self) {
@@ -86,15 +91,16 @@ test('a request the UI server answered before its devtools event arrived is repo
     for (const chunk of ['RightPanel.js', 'CommandPalette.js']) expect(await (await fetch(`${base}/assets/${chunk}`)).text()).toBe('export {}');
     // A loaded runner: the server answered both before devtools reported them.
     await Bun.sleep(30);
-    const willBeSent = (requestId: string, chunk: string, wallTime?: number) => JSON.stringify({ method: 'Network.requestWillBeSent', params: { requestId, loaderId: 'l', frameId: 'f', wallTime, request: { url: `${base}/assets/${chunk}` } } });
-    devtools!.send(willBeSent('1', 'RightPanel.js', sent / 1_000));
-    devtools!.send(willBeSent('2', 'CommandPalette.js'));
+    const willBeSent = (requestId: string, url: string, wallTime?: number) => JSON.stringify({ method: 'Network.requestWillBeSent', params: { requestId, loaderId: 'l', frameId: 'f', wallTime, request: { url } } });
+    devtools!.send(willBeSent('1', `${base}/assets/RightPanel.js`, sent / 1_000));
+    devtools!.send(willBeSent('2', `${base}/assets/CommandPalette.js`));
+    devtools!.send(willBeSent('3', `${idleBase}/assets/SettingsShell.js`, sent / 1_000));
     const failure = await page.waitFor('false', 1_300).then(() => 'answered', (error: unknown) => String(error));
     const line = (chunk: string) => failure.split('","').find((entry) => entry.includes(chunk)) ?? `no line for ${chunk} in ${failure}`;
     expect(line('RightPanel.js')).toMatch(/; the UI server answered 200 \d+ ms after it was sent/);
     expect(line('CommandPalette.js')).toMatch(/; no send time; newest record: the UI server answered 200 \d+ ms before devtools reported it/);
-    expect(failure).not.toContain('never got it');
-  } finally { await page?.close(); await server.stop(true); ui.close(); }
+    expect(line('SettingsShell.js')).toMatch(/; the UI server never got it/);
+  } finally { await page?.close(); await server.stop(true); ui.close(); idle.close(); }
 }, 10_000);
 
 test('the failure probe tells a closed port at once from one that accepts and never answers', async () => {

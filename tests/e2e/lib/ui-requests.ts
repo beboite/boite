@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 /**
  * What the Vite servers of this test process did with each request, for a
@@ -14,7 +15,8 @@ const served: Served[] = [];
 const ports = new Set<number>();
 
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
-interface WithMiddlewares { middlewares: { use(handler: Middleware): unknown } }
+interface Listening { listening: boolean; address(): AddressInfo | string | null; once(event: 'listening', listener: () => void): unknown }
+interface WithMiddlewares { middlewares: { use(handler: Middleware): unknown }; httpServer?: Listening | null }
 
 function record(req: IncomingMessage, res: ServerResponse, next: () => void): void {
   const port = req.socket.localPort ?? 0;
@@ -27,11 +29,24 @@ function record(req: IncomingMessage, res: ServerResponse, next: () => void): vo
   next();
 }
 
-/** Added first, so it sees every request, the ones Vite's own middlewares answer included. */
+/**
+ * Added first, so it sees every request, the ones Vite's own middlewares answer
+ * included. The port is known once the server listens, not at its first
+ * request: a server that got nothing yet is still told apart from a core.
+ */
+function track(server: WithMiddlewares): void {
+  server.middlewares.use(record);
+  const http = server.httpServer;
+  if (!http) return;
+  const register = () => { const address = http.address(); if (address !== null && typeof address === 'object') ports.add(address.port); };
+  if (http.listening) register();
+  else http.once('listening', register);
+}
+
 export const requestLog = {
   name: 'boite-e2e-request-log',
-  configureServer(server: WithMiddlewares) { server.middlewares.use(record); },
-  configurePreviewServer(server: WithMiddlewares) { server.middlewares.use(record); },
+  configureServer: track,
+  configurePreviewServer: track,
 };
 
 /** Chrome's `wallTime` and `Date.now()` read the same system clock, in ticks that can be coarse on Windows. */
