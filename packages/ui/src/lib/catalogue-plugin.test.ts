@@ -20,7 +20,7 @@ export const fr: Translation = {
 `;
 
 test('a translation ships whole: its sentences over English, English for the rest, in English order', () => {
-  const source = overEnglish(english, french, 'fr');
+  const source = overEnglish(english, french, 'fr', 'common');
   // The sample's one type annotation stripped, the module run as a function body.
   const module = { fr: new Function(source.replace('export const fr = ', 'return ').replace(/\(n: number\)/g, '(n)'))() as Record<string, unknown> };
   expect(module.fr).toEqual({
@@ -35,6 +35,6 @@ test('a translation ships whole: its sentences over English, English for the res
 });
 
 test('a catalogue entry that is not a plain key and value is refused with its file', () => {
-  expect(() => overEnglish(english, `export const fr = { ...other };`, 'fr')).toThrow(/strings\.fr\.ts: a catalogue holds plain/);
-  expect(() => overEnglish(english, `export const de = {};`, 'fr')).toThrow(/strings\.fr\.ts: expected export const fr/);
+  expect(() => overEnglish(english, `export const fr = { ...other };`, 'fr', 'common')).toThrow(/strings\/fr\/common\.ts: a catalogue holds plain/);
+  expect(() => overEnglish(english, `export const de = {};`, 'fr', 'common')).toThrow(/strings\/fr\/common\.ts: expected export const fr/);
 });

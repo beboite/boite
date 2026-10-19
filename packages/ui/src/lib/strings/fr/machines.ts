@@ -1,0 +1,47 @@
+import type { Translation } from '../../i18n.svelte';
+
+export const fr: Translation = {
+  machines: {
+    heading: 'Machines', local: 'Ce PC', projects: 'Projets', recent: 'Récent',
+    intro: 'Chaque machine exécute ses propres agents sur ses propres fichiers.',
+    details: 'Détails', address: 'Adresse', updateFailed: 'Mise à jour échouée',
+    label: 'Nom de la machine', icon: 'Icône de la machine', icons: { desktop: 'Ordinateur fixe', laptop: 'Portable', server: 'Serveur', rack: 'Baie', cloud: 'Cloud', cpu: 'Processeur' }, link: "Lien d'une autre machine", add: 'Ajouter une machine', adding: 'Connexion', connect: 'Connecter',
+    addHint: "Sur une machine de votre groupe, ouvrez Réglages, Machines, Ajouter un appareil, copiez le lien et collez-le ici.",
+    scan: 'Scanner le code', pasteLink: 'Coller le lien', scanTitle: 'Scannez le code',
+    linkInsecure: "Ce lien mène à une adresse HTTP simple, que l'appli ne peut pas ouvrir. Ajoutez l'appareil depuis une machine qui a une adresse HTTPS.",
+    scanHint: "Sur l'une de vos machines, ouvrez Réglages, Machines, Ajouter un appareil et visez son QR code avec la caméra.",
+    scanStarting: 'Démarrage de la caméra', scanClose: 'Fermer la caméra',
+    scanErrors: {
+      insecure: "La caméra demande une adresse HTTPS. Ouvrez Boite par son adresse HTTPS, ou collez le lien.",
+      denied: "L'accès à la caméra a été refusé. Autorisez-le pour ce site dans les réglages du navigateur, ou collez le lien.",
+      missing: 'Aucune caméra trouvée sur cet appareil. Collez le lien à la place.',
+      failed: "La caméra n'a pas pu démarrer. Collez le lien à la place."
+    },
+    linkReaches: 'Ce lien connecte à {host}.', linkReplaces: 'Ce lien connecte à {host}, listée ici sous le nom {machine}. Il remplace la clé enregistrée pour elle.', linkConnected: 'Ce lien vise {host}, déjà connectée ici sous le nom {machine}.',
+    remove: 'Retirer la machine', removeTitle: 'Retirer {machine} ?',
+    removeBody: 'Boite oublie cette machine sur cet appareil.',
+    open: 'Ouvrir la machine', invalidUrl: "L'URL d'une machine doit être une adresse HTTP ou HTTPS, sans identifiants, sans requête ni fragment.",
+    duplicate: 'Cette machine est déjà connectée.', refreshPr: 'Actualiser la pull request',
+    manual: 'Connecter avec une URL et un jeton',
+    filter: 'Filtrer les machines', all: 'Toutes les machines',
+    main: 'Machine principale', mainLast: 'La dernière utilisée',
+    mainHint: "Boite s'ouvre sur cette machine. Si elle est éteinte, Boite s'ouvre sur une autre.",
+    mainLastHint: "Boite s'ouvre sur la dernière machine utilisée.",
+    timeout: "La machine n'a pas répondu en 12 secondes. Vérifiez son adresse et ses origines navigateur, puis reconnectez-la.",
+    linkTitle: 'Se connecter à {host} ?',
+    linkBody: "Le lien ouvert dirige cette page vers une machine à laquelle cet appareil ne s'est jamais connecté. Cette machine verra tout ce que vous tapez ici. Ne vous connectez que si vous avez créé ce lien ou si vous faites confiance à qui vous l'a envoyé. Annuler garde votre machine actuelle.",
+    linkConfirm: 'Se connecter',
+    browserOrigins: 'Origines navigateur autorisées',
+    browserOriginsHint: "Les machines du groupe, et les adresses où elles sont servies, sont autorisées toutes seules. N'ajoutez ici qu'une page servie par quelque chose hors du groupe. Une origine http(s) exacte par ligne.",
+    settings: 'Réglages de cette machine', settingsHint: 'Les limites de ressources, le maintien des processus, les mises à jour des agents et le stockage des worktrees concernent uniquement cette machine.',
+    synced: 'Préférences communes synchronisées avec {source}.',
+    syncBrainAbsent: 'Connectez un dossier brain sur cette machine pour copier aussi ses options.',
+    syncKeysAbsent: "L’une des deux machines a un Boite sans raccourcis clavier : ils sont restés tels quels.",
+    syncStopped: 'La copie s’est arrêtée sur {stage} : {error}. Ce qui précède reste copié.',
+    syncStages: { settings: 'les réglages', keybindings: 'les raccourcis clavier', brain: 'les options du brain' },
+    syncProviders: "À connecter sur cette machine : {providers}. Une connexion ne quitte jamais la machine où elle a été faite.",
+    syncOpenProviders: 'Ouvrir ses fournisseurs',
+    threadFailed: 'Une conversation a échoué ici : {thread}',
+    agentLinkAddressRequired: 'Mettez les deux machines à jour pour utiliser le relais de l’app, ou définissez une adresse HTTPS joignable pour {machine} dans les réglages généraux.',
+  }
+};
