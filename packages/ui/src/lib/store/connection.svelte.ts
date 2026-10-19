@@ -304,6 +304,10 @@ export class Connection {
       onUnauthorized: (error) => {
         if (this.ctx.client === client && !this.localCore) this.#authenticationFailed(error);
       },
+      // Removed or gone from its group, the machine tells this device's hello so before any `group.get` can: the same word.
+      onUngrouped: () => {
+        if (this.ctx.client === client) this.ctx.store.ungrouped = true;
+      },
       // Revoked from the desktop: the dead key goes here and in the
       // remembered cores, and the page says what to do rather than
       // retrying every ten seconds.

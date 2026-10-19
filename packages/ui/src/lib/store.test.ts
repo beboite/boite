@@ -2230,6 +2230,53 @@ test('connecting a second account moves the composer to that account, not the fi
   expect(store.prefs.accountId).toBe('a-claude-main');
 });
 
+test('a machine that refuses the hello because it is in no group is taken at its word, and tried again all the same', async () => {
+  vi.useFakeTimers();
+  const hellos: number[] = [];
+  // First the machine has not heard of this device yet, then it was taken out of its group and has none.
+  let data: { reason: string } | undefined;
+  class OutSocket {
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onclose: ((event?: { code?: number }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor() {
+      setTimeout(() => this.onopen?.(), 10);
+    }
+    send(raw: string): void {
+      const frame = JSON.parse(raw) as { id: number; method: string };
+      if (frame.method !== 'hello') return;
+      hellos.push(frame.id);
+      const error = { code: RpcErrorCode.Unavailable, message: data === undefined ? 'this machine has not heard of this device yet' : 'this machine belongs to no group', ...(data === undefined ? {} : { data }) };
+      setTimeout(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, error }) }), 10);
+    }
+    close(): void {
+      this.onclose?.({ code: 1000 });
+    }
+  }
+  vi.stubGlobal('WebSocket', OutSocket);
+  const store = new Store();
+  try {
+    // A key of its own rather than the device key, whose making this test leaves out: the client hears a refusal the same.
+    void store.connectEndpoint({ url: 'https://out.example', token: 'key', paired: true }).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(hellos).toHaveLength(1);
+    expect(store.ungrouped).toBe(false);
+    data = { reason: 'ungrouped' };
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(hellos).toHaveLength(2);
+    expect(store.ungrouped).toBe(true);
+    expect(store.groupKnown).toBe(false);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(hellos.length).toBeGreaterThan(2);
+  } finally {
+    store.client?.close();
+    store.detach();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});
+
 test('a machine on a slow link keeps its connection when the lists take longer than the handshake deadline', async () => {
   vi.useFakeTimers();
   const sockets: SlowLinkSocket[] = [];

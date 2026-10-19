@@ -4,7 +4,7 @@ import { RELEASE_VERSION } from './release';
 import type { DeviceKey } from './device-key';
 import {
   PROTOCOL_VERSION, RPC_MAX_FRAME_BYTES, RpcCloseCode, RpcErrorCode,
-  type ClientName, type CoreInfo, type DeviceHello, type Principal,
+  type ClientName, type CoreInfo, type DeviceHello, type Principal, type UngroupedData,
   type RpcEventName, type RpcMethodName, type RpcParams, type RpcResult, type ThreadId
 } from '@boite/contracts';
 import type { CallOptions, ClientState, EventHandler, ObservableClient, Session, SocketLike, WsClientOptions } from './client';
@@ -16,7 +16,7 @@ import {
 } from './ws-client-utils';
 
 export class WsClient implements ObservableClient {
-  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'device' | 'grant' | 'ticket' | 'paired' | 'relay' | 'signer' | 'onDevice' | 'onSession' | 'onRevoked' | 'onUnauthorized'>> & {
+  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'device' | 'grant' | 'ticket' | 'paired' | 'relay' | 'signer' | 'onDevice' | 'onSession' | 'onRevoked' | 'onUnauthorized' | 'onUngrouped'>> & {
     clientName: ClientName;
     version: string;
     device: () => string | null;
@@ -39,6 +39,7 @@ export class WsClient implements ObservableClient {
   #onSession: ((session: Session) => unknown) | null;
   #onRevoked: (() => void) | null;
   #onUnauthorized: ((error: RpcFailure) => void) | null;
+  #onUngrouped: (() => void) | null;
   #principal: Principal | null = null;
   #socket: SocketLike | null = null;
   #state: ClientState = 'idle';
@@ -87,6 +88,7 @@ export class WsClient implements ObservableClient {
     this.#onSession = options.onSession ?? null;
     this.#onRevoked = options.onRevoked ?? null;
     this.#onUnauthorized = options.onUnauthorized ?? null;
+    this.#onUngrouped = options.onUngrouped ?? null;
     this.#remote = !isLoopbackUrl(options.url);
   }
 
@@ -391,6 +393,8 @@ export class WsClient implements ObservableClient {
               (error instanceof RpcFailure &&
                 (error.code === RpcErrorCode.InvalidParams || (grant !== null && error.code === RpcErrorCode.Unauthorized)));
             if (error instanceof RpcFailure && error.code === RpcErrorCode.Unauthorized) this.#onUnauthorized?.(error);
+            // Out of every group, the machine says so: tried again all the same, as a group that lets it in again tells it of this device.
+            if (error instanceof RpcFailure && error.code === RpcErrorCode.Unavailable && (error.data as Partial<UngroupedData> | undefined)?.reason === 'ungrouped') this.#onUngrouped?.();
             if (permanent) this.close();
             else socket.close();
             if (revoked) this.#onRevoked?.();

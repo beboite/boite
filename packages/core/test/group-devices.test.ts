@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { deviceAdmitInput, deviceHelloInput, type PushPayload, type RpcEvents } from '@boite/contracts';
+import { deviceAdmitInput, deviceHelloInput, RpcErrorCode, type PushPayload, type RpcEvents } from '@boite/contracts';
 import { createECDH, generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import { connect, type CoreClient } from '../src/client.ts';
 import { appOrigin, isAllowedOrigin } from '../src/server.ts';
@@ -105,6 +105,33 @@ test('a phone added on one member says hello on every member with one key, and o
   // A device a machine never heard of is told to come back, never that it was removed.
   const stranger = phoneKey();
   await refused(a, open(a.url, { device: helloFor(stranger, 'f'.repeat(64), id(a)) }), 'has not heard of this device yet');
+});
+
+test('a machine taken out of its group tells the phone so on its next hello, and says nothing of the others', async () => {
+  const [a, b] = await pair();
+  const phone = phoneKey();
+  const added = await a.core.group.clients.addDevice();
+  const grant = new URL(added.url).searchParams.get('grant')!;
+  const deviceId = (await open(a.url, { grant, device: { publicKey: phone.publicKey, name: 'Phone', sig: phone.sign(deviceAdmitInput(grant, phone.publicKey)) } })).device!;
+  await waitFor(() => b.core.group.view('owner')?.devices.some((device) => device.id === deviceId) === true);
+  const refusal = async (h: TestCore, hello: Promise<unknown>): Promise<unknown> => {
+    const open = h.server.connections();
+    const error = await hello.then(() => null, (failure: unknown) => (failure as { rpc?: unknown }).rpc ?? failure);
+    await settled(h, open);
+    return error;
+  };
+  // A member that has not heard of a device says so with no reason: the device comes back, and the machine is not out.
+  expect(await refusal(a, open(a.url, { device: helloFor(phoneKey(), 'f'.repeat(64), id(a)) }))).toEqual({
+    code: RpcErrorCode.Unavailable, message: 'this machine has not heard of this device yet: its group tells it within seconds'
+  });
+  // a takes b out: b hears of it, keeps no roster, and says it is in no group.
+  a.core.group.remove(id(b));
+  await waitFor(() => b.core.group.view('owner') === null);
+  expect(await refusal(b, open(b.url, { device: helloFor(phone, deviceId, id(b)) }))).toEqual({
+    code: RpcErrorCode.Unavailable, message: 'this machine belongs to no group', data: { reason: 'ungrouped' }
+  });
+  // Its word was of itself: the member that took it out still lets the phone in.
+  expect((await open(a.url, { device: helloFor(phone, deviceId, id(a)) })).principal).toBe('session');
 });
 
 test('a phone paired the older way hands over its key and keeps both until revoked, and removing a machine keeps the phones it added', async () => {

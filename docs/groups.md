@@ -463,21 +463,31 @@ other addresses, and the next try comes at once when the network comes back or
 the hidden page is shown; nothing is tried by the clock while the page is
 hidden. A device signs
 its own way in there and is done: what a member lists is all it needs, and a
-machine its key opens that another one of the group took out leaves its list.
-A group's view carries its removals (`removed`, each with the admission
-`epoch` it ends): a member that never heard of an admission omits the machine
-too, so an omission is no removal. The group such a machine last said it is
-in is kept with its key (`signedGroup`), so a machine removed before a
-reloaded page heard from it again leaves too: its key opens nothing there any
-more. One rule decides: the machine's group is the one it says now, else the
-one it said last while no roster of another group lists it (it moved); it
-leaves once a roster of that group, from another machine the key opens, holds
-a removal of it as recent as any admission such a roster lists. Its own word
-names the group, never an admission: a machine taken out still answers, with
-any epoch it likes, and a machine its group took out answers for nobody. With
-no group to go by, a machine that refuses the key or says it is in no group
-leaves once no roster lists it. The key let in there again
-forgets what it said last. Its page's own machine, waiting for the device to be added, is taken over
+machine its key opens that another one of the group no longer lists leaves its
+list. A machine out of every group says so, to `group.get` or on the hello it
+refuses the key with (`reason: 'ungrouped'`, `UngroupedData`), and leaves on
+that word once no machine the key opens lists it; so does one that refuses the
+key. That word is of itself only, and a machine that says nothing, off or not
+answered yet, says nothing of anybody. The page checks no signature: a
+removal is a member's word that nobody signs, and the admissions members sign
+and check are left out of the group's view. What it cannot tell apart stays as
+it was:
+
+| the machine | the other machines the key opens | it |
+| --- | --- | --- |
+| removed while the page reloaded, refuses the hello: no group | none lists it | leaves |
+| same | one not caught up lists it | stays until that one hears |
+| refuses the key | none lists it | leaves |
+| says nothing: off, behind, moved | any | stays |
+| answers its group | one of that group omits it | leaves |
+| answers its group | only a machine paired with a token, or brought by the group, omits it | stays |
+
+A roster that omits a machine drops it whoever holds that roster: a removed
+machine that still answers can drop the one that removed it, and one not
+caught up drops a machine let in since, until it hears. Rosters the page can
+check would end that.
+
+Its page's own machine, waiting for the device to be added, is taken over
 the same way. The rest of this section is about clients that use tickets, the
 desktop app and a client paired the older way: they ask a connected member
 for a ticket and connect. Who is in a group is read off the machines this

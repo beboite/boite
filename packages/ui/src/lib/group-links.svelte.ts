@@ -3,7 +3,7 @@ import { groupRelayUrl, parseGroupRelayUrl, RPC_PATH, withoutTrailingSlashes, ty
 import { WsClient, type SocketFactory, type SocketLike } from './client';
 import { browserSocket } from './ws-client-utils';
 import { deviceKey } from './device-key';
-import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, rememberGroupAddresses, rememberSignedGroup, removeBrought, signsFor, type Endpoint, type StoredEnvironment } from './endpoint';
+import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, rememberGroupAddresses, removeBrought, signsFor, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -229,11 +229,12 @@ export class GroupLinks {
     };
     const stop = $effect.root(() => {
       $effect(() => {
-        // Read so the effect follows them: the list, each connection, each roster.
+        // Read so the effect follows them: the list, each connection, each roster, a machine's word that it has none.
         for (const machine of this.workspace.machines) {
           void machine.store.connection;
           void machine.store.group;
           void machine.store.groupKnown;
+          void machine.store.ungrouped;
         }
         void this.workspace.settled;
         untrack(() => void this.reconcile());
@@ -424,47 +425,26 @@ export class GroupLinks {
   }
 
   /**
-   * A machine this device's key opens that its group took out, by one rule
-   * (docs/groups.md): its group is the one it says now, else the one it said
-   * last over this key while no roster of another group lists it. It leaves
-   * once a roster of that group, from another machine the key opens, holds a
-   * removal of it as recent as any admission such a roster lists. Its own word
-   * names the group, never an admission: a machine taken out still answers
-   * with one. An omission is no removal, as a member that never heard of the
-   * admission omits it too. With no group to go by, refused or out of every
-   * group by its own word, it leaves once no roster lists it. Nothing is
-   * marked: the key itself opens nothing there once that machine heard of its
-   * own removal, and a machine let back in is listed again.
+   * A machine this device's key opens that its group no longer lists: another
+   * machine the key opens, in that group, has the last word, as for a machine
+   * the group brought. Nothing is marked: the key itself opens nothing there
+   * once that machine heard of its own removal, and a machine let back in is
+   * listed again.
    */
   async #pruneSigned(anchors: readonly Machine[]): Promise<void> {
     const signed = anchors.filter((other) => signsFor(other.id) !== undefined && other.store.group != null);
-    // What each says of its group over this device's key is kept: a reload knows it before the machine answers again.
-    for (const machine of anchors) if (signsFor(machine.id) !== undefined) rememberSignedGroup(machine.id, machine.store.group?.id ?? null);
-    const remembered = new Map(readEnvironments().map((env) => [env.url, env.signedGroup]));
-    // Taken out by another roster of its group: as recent as any admission the others list, whatever its own says.
-    const removedBy = (rosters: readonly Machine[], coreId: string, groupId: string): boolean => {
-      const ofGroup = rosters.map((other) => other.store.group!).filter((group) => group.id === groupId);
-      const ended = Math.max(0, ...ofGroup.flatMap((group) => (group.removed ?? []).filter((out) => out.coreId === coreId).map((out) => out.epoch)));
-      const admitted = Math.max(0, ...ofGroup.flatMap((group) => group.cores.filter((core) => core.coreId === coreId).map((core) => core.epoch)));
-      return ended > 0 && ended >= admitted;
-    };
-    // A machine its group took out answers for nobody.
-    const trusted = signed.filter((other) => !removedBy(signed.filter((by) => by !== other), other.store.group!.self, other.store.group!.id));
     for (const machine of [...this.workspace.machines]) {
       const signs = signsFor(machine.id);
       if (signs === undefined) continue;
-      const rosters = trusted.filter((other) => other !== machine);
+      const groupId = machine.store.group?.id;
       const listedBy = (other: Machine): boolean => other.store.group!.cores.some((core) => core.coreId === signs);
-      const removedIn = (groupId: string): boolean => removedBy(rosters, signs, groupId);
-      // Not heard since this page opened, it is in the group it said last: removed before it says it again, its
-      // key no longer opens it, and the group's removal is the only word left (run 39299531333 kept it connecting).
-      // A roster of another group that lists it says it moved since.
-      const said = machine.store.groupKnown ? undefined : remembered.get(machine.id);
-      const last = said !== undefined && !rosters.some((other) => other.store.group!.id !== said && listedBy(other)) ? said : undefined;
-      const groupId = machine.store.group?.id ?? last;
-      // Removed, a machine may say it is in no group before the others drop it from their roster, then tell this device's hellos to come back.
-      const refused = machine.store.group == null && (machine.store.pairingRequired || machine.store.ungrouped) && rosters.length > 0 && !rosters.some(listedBy);
-      if (refused || (groupId !== undefined && removedIn(groupId))) await this.#drop(machine, false);
+      // Its own group, as another machine of it says; or, refused there or out of every group by its own word, none of the device's groups lists it.
+      // Removed, a machine says it is in no group, to `group.get` or by refusing this device's hello, maybe before the others drop it from their roster.
+      // That word is of itself only: a machine that says nothing, offline or not answered yet, is no word of anything.
+      const delisted = groupId !== undefined
+        ? signed.some((other) => other !== machine && other.store.group!.id === groupId && !listedBy(other))
+        : (machine.store.pairingRequired || machine.store.ungrouped) && signed.length > 0 && !signed.some((other) => other !== machine && listedBy(other));
+      if (delisted) await this.#drop(machine, false);
     }
   }
 

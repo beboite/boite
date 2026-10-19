@@ -382,9 +382,9 @@ test('one invitation groups two real cores: the page connects the second by itse
     await page.evaluate(`document.querySelector('${id('main-machine')}').scrollIntoView({ block: 'center' })`);
     await capture('main-machine-phone.png');
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-    // The removal below can reach the second machine before the reloaded page read its group: it then drops
-    // the phone's key and never says which group it was in (run 39299531333). That read is held a second and
-    // a half here, so the removal lands before it each run, and the page has the group's word alone.
+    // The removal below can reach the second machine before the reloaded page read its group (run 39299531333):
+    // it closes the phone's socket, and the hello it refuses next is all the page hears of it, saying it is in no
+    // group. That read is held a second and a half here, so the removal lands before it each run.
     const { identifier: held } = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `{
       const send = WebSocket.prototype.send;
       WebSocket.prototype.send = function (data) {
@@ -401,7 +401,7 @@ test('one invitation groups two real cores: the page connects the second by itse
       const [workspace, firstGroup, secondGroup, sessions] = await Promise.all([
         page.evaluate(`globalThis.__boiteTest.workspace.machines.map(machine => ({ id: machine.id, coreId: machine.coreId,
           groupId: machine.groupId, connection: machine.store.connection, booted: machine.store.booted,
-          groupKnown: machine.store.groupKnown, group: machine.store.group?.id,
+          groupKnown: machine.store.groupKnown, ungrouped: machine.store.ungrouped, group: machine.store.group?.id,
           members: machine.store.group?.cores.map(core => core.coreId) }))`),
         a.call('group.get', {}), b.call('group.get', {}), b.call('sessions.list', {})
       ]);
@@ -416,10 +416,7 @@ test('one invitation groups two real cores: the page connects the second by itse
       console.error('Group removal state:', JSON.stringify(await removalState().catch(() => 'group diagnostics unavailable')));
       throw error;
     }
-    // The page lets it go on the first machine's word; the second hears of its removal from it in the background
-    // (`group.remove` in core group.ts), which nothing orders before that word.
-    const left = async () => (await b.call('group.get', {})) === null && !(await b.call('sessions.list', {})).some((session) => session.group);
-    for (const end = Date.now() + 10_000; !await left() && Date.now() < end;) await Bun.sleep(50);
+    // The page lets it go on its own word, which it says once it heard of its removal: it is out of the group by then.
     expect(await b.call('group.get', {})).toBeNull();
     expect((await b.call('sessions.list', {})).filter((session) => session.group)).toEqual([]);
     await page.send('Emulation.clearDeviceMetricsOverride', {});

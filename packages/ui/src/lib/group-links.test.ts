@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type Group, type GroupCore } from '@boite/contracts';
 import type { SocketLike } from './client';
-import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, rememberDevice, rememberSession, removeBrought, type Endpoint } from './endpoint';
+import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, rememberSession, removeBrought, type Endpoint } from './endpoint';
 import { GroupLinks, usableAddresses } from './group-links.svelte';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -14,7 +14,6 @@ interface FakeStore {
   group: Group | null;
   groupKnown: boolean;
   ungrouped?: boolean;
-  pairingRequired?: boolean;
   endpointUrl: string | null;
   loadGroup: ReturnType<typeof vi.fn>;
 }
@@ -722,164 +721,79 @@ describe('a machine the device key opens', () => {
     expect(removed).toEqual(['http://b.test']);
     localStorage.clear();
   });
+});
 
-  it('leaves once its group stopped listing it, when it was removed before the reloaded page heard its group again', async () => {
-    const [selfA, selfB, selfC] = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
-    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([
-      { url: 'http://a.test', label: 'A', token: '', paired: true, signs: selfA },
-      { url: 'http://b.test', label: 'B', token: '', paired: true, signs: selfB },
-      { url: 'http://c.test', label: 'C', token: '', paired: true, signs: selfC }
-    ]));
-    const both = [core(selfA, ['http://a.test']), core(selfB, ['http://b.test'])];
-    const a = machine('http://a.test', { group: group(selfA, both) });
-    const b = machine('http://b.test', { group: group(selfB, both) });
-    // A machine of another group, not reached yet since the page opened: it has said nothing.
-    const c = machine('http://c.test', { connection: 'connecting', groupKnown: false });
-    const { workspace: ws, removed } = workspace([a, b, c]);
+/**
+ * The rows of the rule in docs/groups.md, and of PR #672: what a removed machine
+ * the device key opens says of itself decides, and only for itself.
+ */
+describe('a removed machine the device key opens', () => {
+  const ids = { a: 'a'.repeat(64), b: 'b'.repeat(64), c: 'c'.repeat(64), d: 'd'.repeat(64) };
+  type Name = keyof typeof ids;
+  const url = (name: Name) => `http://${name}.test`;
+  /** What `self` answers to `group.get`: group `id`, listing `names` (at `epochs`, 1 by default). */
+  const says = (self: Name, names: Name[], id = 'grp', epochs: Partial<Record<Name, number>> = {}): Partial<FakeStore> =>
+    ({ group: group(ids[self], names.map((name) => core(ids[name], [url(name)], epochs[name] ?? 1)), id) });
+  /** Not heard since the page opened: offline, or its `group.get` not answered yet. */
+  const silent: Partial<FakeStore> = { connection: 'connecting', groupKnown: false };
+  /** It refused this device's hello saying it is in no group: removed, and told so. */
+  const out: Partial<FakeStore> = { connection: 'connecting', groupKnown: false, ungrouped: true };
+
+  /** Reconciles twice with these machines, the device key opening each but those in `unsigned`, and gives what left. */
+  async function left(machines: Partial<Record<Name, Partial<FakeStore>>>, extra: { unsigned?: Name[]; brought?: Machine[] } = {}): Promise<string[]> {
+    const names = Object.keys(machines) as Name[];
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify(names.map((name) => (extra.unsigned?.includes(name)
+      ? { url: url(name), label: name, token: `key-${name}`, paired: true }
+      : { url: url(name), label: name, token: '', paired: true, signs: ids[name] }))));
+    const { workspace: ws, removed } = workspace([...names.map((name) => machine(url(name), machines[name]!)), ...(extra.brought ?? [])]);
     const links = new GroupLinks(ws, { reach: vi.fn(async () => null), secure: () => false });
     await links.reconcile();
-    // Reloaded: B is removed before it answers about its group, so it never does, and its key opens nothing
-    // there any more (run 39299531333 kept it connecting).
-    Object.assign(storeOf(b), { connection: 'connecting', groupKnown: false, group: null });
     await links.reconcile();
-    expect(removed).toEqual([]);
-    storeOf(a).group = { ...group(selfA, [both[0]!]), removed: [{ coreId: selfB, epoch: 1 }] };
-    await links.reconcile();
-    expect(removed).toEqual(['http://b.test']);
-    localStorage.clear();
+    return removed.filter((id) => !extra.brought?.some((entry) => entry.id === id)).sort();
+  }
+
+  it('1. #672: reloaded, it refuses the hello in no group and its group no longer lists it: it leaves', async () => {
+    expect(await left({ a: says('a', ['a']), b: out })).toEqual([url('b')]);
   });
 
-  // One rule, rows as in docs/groups.md: its group is the one it says now, else the one it said last while no roster
-  // of another group lists it; there, a removal from another roster as recent as any admission such a roster lists
-  // takes it out, an omission does not, and its own word on its admission counts for nothing. With no group, a
-  // refusal leaves once no roster lists it.
-  describe('one rule decides whether it leaves', () => {
-    const [selfA, selfB, selfC] = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
-    const [cA, cC] = [core(selfA, ['http://a.test']), core(selfC, ['http://c.test'])];
-    const cB = (epoch = 1) => core(selfB, ['http://b.test'], epoch);
-    const seed = (signedGroup?: string) => localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([
-      { url: 'http://a.test', label: 'A', token: '', paired: true, signs: selfA },
-      { url: 'http://b.test', label: 'B', token: '', paired: true, signs: selfB, ...(signedGroup === undefined ? {} : { signedGroup }) },
-      { url: 'http://c.test', label: 'C', token: '', paired: true, signs: selfC }
-    ]));
-    /** A roster of `id` that holds the removal of B's admission `epoch`. */
-    const removing = (self: string, cores: GroupCore[], id: string, epoch = 1): Group => ({ ...group(self, cores, id), removed: [{ coreId: selfB, epoch }] });
-    const removedBy = async (machines: Machine[]) => {
-      const { workspace: ws, removed } = workspace(machines);
-      await new GroupLinks(ws, { reach: vi.fn(async () => null), secure: () => false }).reconcile();
-      return removed;
-    };
-    /** B, not heard since the page opened. */
-    const silent = (store: Partial<FakeStore> = {}) => machine('http://b.test', { connection: 'connecting', groupKnown: false, ...store });
-    beforeEach(() => localStorage.clear());
+  it('2. it refuses the hello in no group while a roster still lists it (Sol delta): it stays until that one hears', async () => {
+    expect(await left({ a: says('a', ['a', 'c']), b: out, c: says('c', ['a', 'b', 'c']) })).toEqual([]);
+  });
 
-    it('1. says G now, a roster of G removes its admission and a staler one lists it: leaves', async () => {
-      seed();
-      const a = machine('http://a.test', { group: removing(selfA, [cA, cC], 'old') });
-      const b = machine('http://b.test', { group: group(selfB, [cA, cB(), cC], 'old') });
-      const c = machine('http://c.test', { group: group(selfC, [cA, cB(), cC], 'old') });
-      expect(await removedBy([a, b, c])).toEqual(['http://b.test']);
-    });
+  it('3. it refuses the device key (Sol r1) and no roster lists it: it leaves', async () => {
+    expect(await left({ a: says('a', ['a', 'c'], 'other'), b: { connection: 'closed', groupKnown: false, pairingRequired: true } as Partial<FakeStore>, c: says('c', ['a', 'c'], 'other') })).toEqual([url('b')]);
+  });
 
-    it('2. says G now, a roster of G omits it without a removal: stays', async () => {
-      seed();
-      const a = machine('http://a.test', { group: group(selfA, [cA], 'old') });
-      const b = machine('http://b.test', { group: group(selfB, [cA, cB()], 'old') });
-      expect(await removedBy([a, b])).toEqual([]);
-    });
+  it.each([
+    ['4. moved to another group that lists it (Sol r1)', { a: says('a', ['a']), b: silent, c: says('c', ['b', 'c'], 'other') }],
+    ['5. one roster never heard of its admission, another lists it (Sol r3)', { a: says('a', ['a', 'c']), b: silent, c: says('c', ['a', 'b', 'c']) }],
+    ['5b. the same with a readmission at 2 (Sol r3)', { a: says('a', ['a', 'c']), b: silent, c: says('c', ['a', 'b', 'c'], 'grp', { b: 2 }) }],
+    ['6. removed while it was off, and not heard since (Sol r1)', { a: says('a', ['a']), b: silent }]
+  ] as const)('%s: silent, it stays', async (_name, machines) => {
+    expect(await left(machines)).toEqual([]);
+  });
 
-    it('3. said G last, a roster of G removes it and a staler one lists it: leaves', async () => {
-      seed('old');
-      const a = machine('http://a.test', { group: removing(selfA, [cA, cC], 'old') });
-      const c = machine('http://c.test', { group: group(selfC, [cA, cB(), cC], 'old') });
-      expect(await removedBy([a, silent(), c])).toEqual(['http://b.test']);
-    });
+  it('7. only a machine paired by hand with a token omits it (Sol r1): it stays', async () => {
+    expect(await left({ a: says('a', ['a']), b: says('b', ['a', 'b']) }, { unsigned: ['a'] })).toEqual([]);
+  });
 
-    it.each([1, 2])('4. said G last, a roster of G that never heard of admission %i omits it while another lists it: stays', async (epoch) => {
-      seed('old');
-      const a = machine('http://a.test', { group: group(selfA, [cA, cC], 'old') });
-      const c = machine('http://c.test', { group: group(selfC, [cA, cB(epoch), cC], 'old') });
-      expect(await removedBy([a, silent(), c])).toEqual([]);
-    });
+  it('8. removed at 1, it answers its group with an admission 2 of its own (Sol r4): its group omits it, it leaves', async () => {
+    expect(await left({ a: says('a', ['a']), b: says('b', ['a', 'b'], 'grp', { b: 2 }) })).toEqual([url('b')]);
+  });
 
-    it('5. said G last, a roster of G removes admission 1 and another lists it again at 2: stays', async () => {
-      seed('old');
-      const a = machine('http://a.test', { group: removing(selfA, [cA, cC], 'old') });
-      const c = machine('http://c.test', { group: group(selfC, [cA, cB(2), cC], 'old') });
-      expect(await removedBy([a, silent(), c])).toEqual([]);
-    });
+  it('9. a machine the group brought lists it at 2 (Sol r4): it vouches for nothing, it leaves', async () => {
+    const brought = machine(url('d'), says('d', ['a', 'b', 'd'], 'grp', { b: 2 }), { coreId: ids.d });
+    expect(await left({ a: says('a', ['a']), b: says('b', ['a', 'b']) }, { brought: [brought] })).toEqual([url('b')]);
+  });
 
-    it('6. said G last, G removes it, a roster of another group lists it: it moved, and stays', async () => {
-      seed('old');
-      const a = machine('http://a.test', { group: removing(selfA, [cA], 'old') });
-      const c = machine('http://c.test', { group: group(selfC, [cC, cB()], 'new') });
-      expect(await removedBy([a, silent(), c])).toEqual([]);
-    });
+  it.each([
+    ['10. two removed machines list each other (Sol r5)', {}],
+    ['11. a chain of readmissions they made up, 2 and 3 (Sol r5)', { b: 3, c: 2 }]
+  ] as const)('%s: both leave', async (_name, epochs) => {
+    expect(await left({ a: says('a', ['a']), b: says('b', ['a', 'b', 'c'], 'grp', epochs), c: says('c', ['a', 'b', 'c'], 'grp', epochs) })).toEqual([url('b'), url('c')]);
+  });
 
-    it('7. refuses the device key and no roster lists it, with no roster of the group it said last: leaves', async () => {
-      seed('old');
-      const a = machine('http://a.test', { group: group(selfA, [cA], 'new') });
-      expect(await removedBy([a, silent({ pairingRequired: true })])).toEqual(['http://b.test']);
-    });
-
-    it('8. refuses the device key while a roster lists it: stays', async () => {
-      seed('old');
-      const a = machine('http://a.test', { group: group(selfA, [cA, cB()], 'new') });
-      expect(await removedBy([a, silent({ pairingRequired: true })])).toEqual([]);
-    });
-
-    it('9. never said its group and does not refuse the key, whatever a roster removes: stays', async () => {
-      seed();
-      const a = machine('http://a.test', { group: removing(selfA, [cA], 'old') });
-      expect(await removedBy([a, silent()])).toEqual([]);
-    });
-
-    it('10. only a machine the device key does not open removes it: stays', async () => {
-      seed('old');
-      const a = machine('http://unsigned.test', { group: removing(selfA, [core(selfA, ['http://unsigned.test'])], 'old') });
-      expect(await removedBy([a, silent()])).toEqual([]);
-    });
-
-    it('11. the device key let in there again forgets the group it said last: that was its word over another key', () => {
-      seed('old');
-      rememberDevice('http://b.test', selfB);
-      expect(readEnvironments().find((env) => env.url === 'http://b.test')?.signedGroup).toBeUndefined();
-    });
-
-    it('12. says G now under an admission 2 no other roster lists, while a roster of G removes 1: leaves', async () => {
-      seed();
-      // Taken out, it still answers, and its own roster is no member's word that it was let back in.
-      const a = machine('http://a.test', { group: removing(selfA, [cA], 'old') });
-      const b = machine('http://b.test', { group: group(selfB, [cA, cB(2)], 'old') });
-      expect(await removedBy([a, b])).toEqual(['http://b.test']);
-    });
-
-    it('13. said G last, a roster of G removes it and no roster lists it: leaves, and the group alone was kept', async () => {
-      seed();
-      const a = machine('http://a.test', { group: group(selfA, [cA, cB(2)], 'old') });
-      const b = machine('http://b.test', { group: group(selfB, [cA, cB(2)], 'old') });
-      const { workspace: ws, removed } = workspace([a, b]);
-      const links = new GroupLinks(ws, { reach: vi.fn(async () => null), secure: () => false });
-      await links.reconcile();
-      expect(readEnvironments().find((env) => env.url === 'http://b.test')?.signedGroup).toBe('old');
-      Object.assign(storeOf(b), { connection: 'connecting', groupKnown: false, group: null });
-      storeOf(a).group = removing(selfA, [cA], 'old', 2);
-      await links.reconcile();
-      expect(removed).toEqual(['http://b.test']);
-    });
-
-    it('14. said G last, a roster of G removes it, and a machine the group brought, removed too, lists it at 2: leaves', async () => {
-      seed('old');
-      const a = machine('http://a.test', { group: { ...group(selfA, [cA], 'old'), removed: [{ coreId: selfB, epoch: 1 }, { coreId: selfC, epoch: 1 }] } });
-      const c = machine('http://c.test', { group: group(selfC, [cA, cB(2), cC], 'old') }, { coreId: selfC });
-      expect(await removedBy([a, silent(), c])).toContain('http://b.test');
-    });
-
-    it('15. said G last, a roster of G removes it, and a machine the key opens that G removed too lists it at 2: leaves', async () => {
-      seed('old');
-      const a = machine('http://a.test', { group: { ...group(selfA, [cA], 'old'), removed: [{ coreId: selfB, epoch: 1 }, { coreId: selfC, epoch: 1 }] } });
-      const c = machine('http://c.test', { group: group(selfC, [cA, cB(2), cC], 'old') });
-      expect(await removedBy([a, silent(), c])).toContain('http://b.test');
-    });
+  it('12. removed, it answers a roster without the machine that removed it (Sol r5): it leaves', async () => {
+    expect(await left({ a: says('a', ['a']), b: says('b', ['b']) })).toContain(url('b'));
   });
 });

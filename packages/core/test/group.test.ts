@@ -468,10 +468,7 @@ test('a removed machine is told, leaves, and its keys die on the members that st
   await hangUp(a, key);
   expect(a.core.sessions.list(null)).toHaveLength(1);
 
-  const after = a.core.group.remove(id(b));
-  expect(after.cores.map((core) => core.coreId).sort()).toEqual([id(a), id(c)].sort());
-  // The removal and the admission it ends show to clients: a member that never heard of b omits it without one.
-  expect(after.removed).toEqual([{ coreId: id(b), epoch: 1 }]);
+  expect(a.core.group.remove(id(b)).cores.map((core) => core.coreId).sort()).toEqual([id(a), id(c)].sort());
   expect(() => a.core.group.remove(id(b))).toThrow('not a machine of this group');
   expect(() => a.core.group.remove(id(a))).toThrow('group.leave');
   expect(a.core.sessions.list(null)).toEqual([]);

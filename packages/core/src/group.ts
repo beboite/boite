@@ -188,7 +188,6 @@ export class GroupStore {
       name: roster.name,
       self: this.selfId(),
       cores: liveCores(roster).map((core) => ({ coreId: core.coreId, name: core.name, ...(core.os ? { os: core.os } : {}), addresses: reachOf(roster, core), epoch: core.epoch })),
-      ...(roster.cores.some((core) => core.removed) ? { removed: roster.cores.filter((core) => core.removed).map((core) => ({ coreId: core.coreId, epoch: core.epoch })) } : {}),
       // Who else is in the group is the owner's to read; a device sees itself.
       devices: principal === 'owner' ? devices : devices.filter((entry) => entry.id === device),
       ...(device === undefined ? {} : { device }),

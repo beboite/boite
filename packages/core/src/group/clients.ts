@@ -11,7 +11,7 @@
 import { randomUUID, verify } from 'node:crypto';
 import { hostname } from 'node:os';
 import { deviceAdmitInput, deviceHelloInput, DEVICE_LINK_JOIN, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
-import type { DeviceHello, DeviceInvite, Group, GroupTicket, PairingRole } from '@boite/contracts';
+import type { DeviceHello, DeviceInvite, Group, GroupTicket, PairingRole, UngroupedData } from '@boite/contracts';
 import { invalidParams, messageOf, refused, unauthorized, unavailable } from '../errors.ts';
 import type { GroupStore } from '../group.ts';
 import { newToken } from '../ids.ts';
@@ -115,8 +115,11 @@ export class GroupClients {
     // heard of yet, its roster behind the member that admitted it, is told to come back; so is a clock that is off.
     const roster = this.group.roster;
     const raw = (typeof hello === 'object' && hello !== null ? hello : {}) as Partial<DeviceHello>;
-    const known = typeof raw.id === 'string' ? roster?.deviceKeys?.find((device) => device.id === raw.id) : undefined;
-    if (roster === null || known === undefined) throw unavailable('this machine has not heard of this device yet: its group tells it within seconds');
+    // Out of every group, removed or gone, it says so: its own word, which the app takes as a `group.get` answering
+    // none. Unavailable, not Unauthorized: a group that lets it in again tells it of the device, and the key opens it then.
+    if (roster === null) throw unavailable('this machine belongs to no group', { reason: 'ungrouped' } satisfies UngroupedData);
+    const known = typeof raw.id === 'string' ? roster.deviceKeys?.find((device) => device.id === raw.id) : undefined;
+    if (known === undefined) throw unavailable('this machine has not heard of this device yet: its group tells it within seconds');
     const entry = liveDeviceKeys(roster).find((device) => device === known);
     if (entry === undefined) throw unauthorized('this device was removed from the group');
     if (typeof raw.at !== 'number' || Math.abs(now - raw.at) > DEVICE_HELLO_SKEW_MS) {

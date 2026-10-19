@@ -15,8 +15,11 @@ export class Pairing {
   group = $state<Group | null>(null);
   /** The core answered `group.get` at least once on this connection: null then means no group, not no answer yet. */
   groupKnown = $state(false);
-  /** The core last answered that it is in no group. A new connection that has not answered yet does not take that back. */
-  ungrouped = false;
+  /**
+   * The core last answered that it is in no group, to `group.get` or by refusing a hello. A new connection that has
+   * not answered yet does not take that back. Followed, so the group links hear a refusal no roster change comes with.
+   */
+  ungrouped = $state(false);
   constructor(private readonly ctx: StoreContext) {}
 
   /**
