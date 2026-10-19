@@ -17,7 +17,8 @@ export class Pairing {
   groupKnown = $state(false);
   /**
    * The core last answered that it is in no group, to `group.get` or by refusing a hello. A new connection that has
-   * not answered yet does not take that back. Followed, so the group links hear a refusal no roster change comes with.
+   * not answered yet does not take that back, unless this device's key opened it. Followed, so the group links hear a
+   * refusal no roster change comes with.
    */
   ungrouped = $state(false);
   constructor(private readonly ctx: StoreContext) {}

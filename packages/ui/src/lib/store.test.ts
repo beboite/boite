@@ -5,6 +5,7 @@ import { RpcFailure, WsClient, droppedFailure, type SocketLike } from './client'
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
 import * as endpoints from './endpoint';
+import * as deviceKeys from './device-key';
 import { Store } from './store.svelte';
 import { LOCAL_RECOVERY_MS } from './store/connection.svelte';
 import { resumeAnchor } from './thread-rows';
@@ -2230,11 +2231,11 @@ test('connecting a second account moves the composer to that account, not the fi
   expect(store.prefs.accountId).toBe('a-claude-main');
 });
 
-test('a machine that refuses the hello because it is in no group is taken at its word, and tried again all the same', async () => {
+test('a machine that refuses the hello of the device key in no group is taken at its word, until that key opens it again', async () => {
   vi.useFakeTimers();
   const hellos: number[] = [];
-  // First the machine has not heard of this device yet, then it was taken out of its group and has none.
-  let data: { reason: string } | undefined;
+  // It has not heard of this device yet, then it was taken out of its group, then a group let it in again.
+  let phase: 'unheard' | 'out' | 'back' = 'unheard';
   class OutSocket {
     onopen: (() => void) | null = null;
     onmessage: ((event: { data: unknown }) => void) | null = null;
@@ -2245,33 +2246,50 @@ test('a machine that refuses the hello because it is in no group is taken at its
     }
     send(raw: string): void {
       const frame = JSON.parse(raw) as { id: number; method: string };
-      if (frame.method !== 'hello') return;
+      const answer = (body: Record<string, unknown>) => setTimeout(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, ...body }) }), 10);
+      // Its group read is never answered: what the page holds then is the hello's word alone.
+      if (frame.method === 'group.get') return;
+      if (frame.method !== 'hello') return void answer({ error: { code: RpcErrorCode.NotFound, message: `${frame.method} is not in this fixture` } });
       hellos.push(frame.id);
-      const error = { code: RpcErrorCode.Unavailable, message: data === undefined ? 'this machine has not heard of this device yet' : 'this machine belongs to no group', ...(data === undefined ? {} : { data }) };
-      setTimeout(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, error }) }), 10);
+      if (phase === 'back') return void answer({ result: { core: { protocolVersion: PROTOCOL_VERSION, coreId: 'b'.repeat(64) }, principal: 'session' } });
+      answer({ error: phase === 'unheard'
+        ? { code: RpcErrorCode.Unavailable, message: 'this machine has not heard of this device yet' }
+        : { code: RpcErrorCode.Unavailable, message: 'this machine belongs to no group', data: { reason: 'ungrouped' } } });
     }
     close(): void {
       this.onclose?.({ code: 1000 });
     }
   }
   vi.stubGlobal('WebSocket', OutSocket);
+  const id = 'd'.repeat(64);
+  const key = vi.spyOn(deviceKeys, 'deviceKey').mockResolvedValue({
+    publicKey: 'key', id,
+    hello: () => ({ id, at: Date.now(), nonce: 'n'.repeat(16), sig: 'sig' }),
+    admit: (_grant, name) => ({ publicKey: 'key', name, sig: 'sig' }),
+    enroll: () => ({ publicKey: 'key', at: Date.now(), sig: 'sig' })
+  });
   const store = new Store();
   try {
-    // A key of its own rather than the device key, whose making this test leaves out: the client hears a refusal the same.
-    void store.connectEndpoint({ url: 'https://out.example', token: 'key', paired: true }).catch(() => undefined);
+    void store.connectEndpoint({ url: 'https://out.example', token: '', paired: true, signs: 'b'.repeat(64) }).catch(() => undefined);
     await vi.advanceTimersByTimeAsync(100);
     expect(hellos).toHaveLength(1);
     expect(store.ungrouped).toBe(false);
-    data = { reason: 'ungrouped' };
+    phase = 'out';
     await vi.advanceTimersByTimeAsync(2_000);
     expect(hellos).toHaveLength(2);
     expect(store.ungrouped).toBe(true);
     expect(store.groupKnown).toBe(false);
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(hellos.length).toBeGreaterThan(2);
+    // Tried again all the same, and opened again: a group of that machine knows the device, whatever it reads later.
+    phase = 'back';
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(hellos).toHaveLength(3);
+    expect(store.connection).toBe('ready');
+    expect(store.groupKnown).toBe(false);
+    expect(store.ungrouped).toBe(false);
   } finally {
     store.client?.close();
     store.detach();
+    key.mockRestore();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   }

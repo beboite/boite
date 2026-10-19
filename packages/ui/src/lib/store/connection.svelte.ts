@@ -82,6 +82,8 @@ export class Connection {
   #recoveryGeneration = 0;
   /** The endpoint came with neither a token nor a grant: the page's own origin, asked with nothing. */
   #keyless = false;
+  /** Its hellos carry this device's key: one that opens says a group of that machine knows the device. */
+  #signed = false;
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -272,6 +274,7 @@ export class Connection {
     const began = Date.now();
     // A phone or a browser is a device of its group: one key, signed for each machine. The desktop app is its machine's own.
     const admitting = window.__TAURI_INTERNALS__ === undefined && endpoint.grant !== undefined;
+    this.#signed = endpoint.signs !== undefined || admitting;
     const client = new WsClient({
       url,
       token: endpoint.token,
@@ -583,6 +586,8 @@ export class Connection {
     const loginRevision = accounts.loginRevision;
     // What this connection said of its group before does not speak for what it is now.
     s.groupKnown = false;
+    // Opened by this device's key, the machine is in a group again, before its `group.get` says which.
+    if (this.#signed) s.ungrouped = false;
     const revisions = { ...this.ctx.metadataRevision };
     const projectRead = this.ctx.projectReads.begin();
     const threadRead = this.ctx.threadReads.begin();

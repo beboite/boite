@@ -43,13 +43,13 @@ const SESSION_WINDOW_MS = 15000;
 /** Whether the Boite running these tests mutes the fixture's session itself (`host-mutes.ts`). */
 async function hostMutesAgents(): Promise<boolean> {
   coInitialize();
-  const probe = openSessions();
-  const child = Bun.spawn(['bun', FIXTURE], { stdout: 'ignore', stderr: 'ignore' });
+  let probe: AudioSessions | null = null;
+  let child: ReturnType<typeof Bun.spawn> | null = null;
   /** Every session of the fixture, each released once seen. */
   const each = (see: (session: AudioSession) => void): boolean => {
     let found = false;
     for (const session of probe?.list() ?? []) {
-      if (session.pid === child.pid) {
+      if (session.pid === child?.pid) {
         found = true;
         see(session);
       }
@@ -57,7 +57,10 @@ async function hostMutesAgents(): Promise<boolean> {
     }
     return found;
   };
+  // Inside the try, so a probe or a fixture that fails to start still leaves COM and the child cleaned up.
   try {
+    probe = openSessions();
+    child = Bun.spawn(['bun', FIXTURE], { stdout: 'ignore', stderr: 'ignore' });
     return await hostMutes({
       read: () => {
         let muted: boolean | null = null;
@@ -70,8 +73,8 @@ async function hostMutesAgents(): Promise<boolean> {
       }
     }, { appearMs: 10_000, muteMs: MUTE_WINDOW_MS, remuteMs: 1500 });
   } finally {
-    child.kill();
-    await child.exited;
+    child?.kill();
+    await child?.exited;
     probe?.release();
     coUninitialize();
   }
