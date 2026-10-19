@@ -181,17 +181,29 @@ suite, type checks and UI tests, and the focused telemetry and E2E type checks,
 each only when its paths changed. Windows, macOS, desktop packages, E2E,
 stress, Docker and the APK wait: their checks skip.
 
-A skip passes in a ruleset, so a draft must not satisfy it. In a draft run
-every `ci.yml` job reports its name plus ` (draft)`
-(`${{ github.event.pull_request.draft && 'Build UI (draft)' || 'Build UI' }}`),
-skipped or not, and a reusable workflow's jobs follow their caller
-(`Desktop (draft) / Linux x64`). A rerun keeps its run's event, so even an old
-draft run rerun after `ready_for_review` reports no required name: those come
-only from full runs, and a full run that failed or was cancelled keeps blocking.
-After `ready_for_review`, the required names stay expected until the `pr` run
-creates them. `converted_to_draft` cancels a full run in progress. Only
-`PR title`, which checks the title whatever the mode, reports the same name.
-CodeRabbit reviews drafts (`.coderabbit.yaml`).
+A skip passes in a ruleset, so a draft must not satisfy it:
+
+- The planning job reports `Plan and repository checks (draft)` and the
+  reusable workflows `Desktop (draft) / Linux x64` and so on. Only a job that
+  runs or a caller evaluates its name: a skipped job reports the expression
+  itself, so the other jobs keep their fixed names.
+- After `ready_for_review`, the required planning name stays expected until
+  the `pr` run creates it, then pending until it ends.
+- A rerun keeps its event, so an old draft run rerun once the pull request is
+  ready would put skips back under the required names. Its planning job reads
+  the pull request's draft flag; when it is no longer a draft, or GitHub does
+  not answer, every other job runs only to fail with "rerun the latest ready
+  run instead".
+- `converted_to_draft` cancels a full run in progress and fails `Plan and
+  repository checks` at once, so that run's earlier planning success cannot
+  merge next to skips; the next push runs the draft checks.
+- A pull request reopened as a draft over a partial full run is the one case
+  left: its draft run puts skips back next to that run's planning success. A
+  draft cannot merge, and marking it ready runs a full run whose planning
+  replaces that success before anything else.
+
+`PR title` reports the same name in both modes. CodeRabbit reviews drafts
+(`.coderabbit.yaml`).
 
 Of the 5,632 runner minutes spent by the 86 pull request runs started on
 2026-10-18 between 12:34 and 21:35 UTC, 2,476 went to runs a newer push
