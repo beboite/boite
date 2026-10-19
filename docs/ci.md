@@ -247,8 +247,12 @@ on 2026-10-17, recompiling only the shell crate took 8 min 57 s with fat LTO and
 `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1` only on the steps that build a shipped
 shell (the Windows installer, the Debian package, the macOS bundle) and only
 when `sign-updates` is on: the nightly and a release. Other steps and runs set
-`false` and `16`, Cargo's defaults, so `test:shell --release` keeps them even in
-a release run. Both desktop jobs get 60 minutes instead of 35 when publishing.
+neither, so `test:shell --release` keeps Cargo's defaults even in a release run.
+Setting the defaults explicitly is not the same: `CODEGEN_UNITS=16` passes
+`-C codegen-units=16` to rustc, which changes every crate's fingerprint, so the
+installer build recompiled 203 to 260 crates the test build had just compiled
+(`LTO=false` alone left them fresh, 2026-10-19). Both desktop jobs get 60
+minutes instead of 35 when publishing.
 The cache is saved from `main`, so a publishing run also
 compiles its dependencies with LTO, an estimated 7 to 8 minutes more per
 platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:

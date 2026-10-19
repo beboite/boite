@@ -120,11 +120,6 @@ jobs:
         run: bun scripts/ci/nightly-build.ts
       - name: Build installer once
         env:
-          # A published shell is built with fat LTO over one codegen unit, about
-          # 7 more minutes; only this step, so the Rust tests keep Cargo's
-          # defaults. `false` and `16` are those defaults (docs/releasing.md).
-          CARGO_PROFILE_RELEASE_LTO: ${{ inputs.sign-updates && 'fat' || 'false' }}
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ inputs.sign-updates && '1' || '16' }}
           BUILD_CHANNEL: ${{ inputs.channel }}
           BOITE_SIGN_UPDATES: ${{ inputs.sign-updates && '1' || '0' }}
           # Only a published installer reports to the analytics relay; a pull
@@ -132,6 +127,14 @@ jobs:
           BOITE_RELEASE_TELEMETRY: ${{ inputs.sign-updates && '1' || '' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
         run: |
+          # A published shell is built with fat LTO over one codegen unit, about
+          # 7 more minutes; only this step, so the Rust tests keep Cargo's
+          # defaults. Any other build sets neither: even `16`, the default,
+          # changes every crate's fingerprint and misses the cache (docs/ci.md#build-cost).
+          if ($env:BOITE_SIGN_UPDATES -eq '1') {
+            $env:CARGO_PROFILE_RELEASE_LTO = 'fat'
+            $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = '1'
+          }
           if ($env:BUILD_CHANNEL -eq 'nightly') {
             bun run build:shell:nightly
           } elseif ($env:BUILD_CHANNEL -eq 'stable') {
@@ -245,11 +248,13 @@ jobs:
         if: runner.os == 'Linux'
         env:
           # Fat LTO for a published shell, as in the Windows job.
-          CARGO_PROFILE_RELEASE_LTO: ${{ inputs.sign-updates && 'fat' || 'false' }}
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ inputs.sign-updates && '1' || '16' }}
+          SHIP_PROFILE: ${{ inputs.sign-updates && '1' || '0' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
         run: |
           export TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:-${THROWAWAY_UPDATER_KEY:-}}"
+          if [ "$SHIP_PROFILE" = 1 ]; then
+            export CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+          fi
           # shellcheck disable=SC2086 # BUNDLE_CONFIGS holds several arguments.
           bun apps/shell/scripts/tauri.ts build $BUNDLE_CONFIGS --bundles deb
           sudo dpkg -i "$BUNDLE_DIR"/deb/*.deb
@@ -282,8 +287,7 @@ jobs:
         if: runner.os == 'macOS'
         env:
           # Fat LTO for a published shell, as in the Windows job.
-          CARGO_PROFILE_RELEASE_LTO: ${{ inputs.sign-updates && 'fat' || 'false' }}
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ inputs.sign-updates && '1' || '16' }}
+          SHIP_PROFILE: ${{ inputs.sign-updates && '1' || '0' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           DEVELOPER_ID_CERTIFICATE: ${{ inputs.sign-updates && secrets.APPLE_CERTIFICATE || '' }}
           DEVELOPER_ID_PASSWORD: ${{ inputs.sign-updates && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
@@ -293,6 +297,9 @@ jobs:
           NOTARY_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.APPLE_API_PRIVATE_KEY || '' }}
         run: |
           export TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:-${THROWAWAY_UPDATER_KEY:-}}"
+          if [ "$SHIP_PROFILE" = 1 ]; then
+            export CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+          fi
           if [ -n "$DEVELOPER_ID_CERTIFICATE" ] && [ -n "$DEVELOPER_ID_PASSWORD" ] && [ -n "$DEVELOPER_ID_IDENTITY" ] \
             && [ -n "$NOTARY_ISSUER" ] && [ -n "$NOTARY_KEY_ID" ] && [ -n "$NOTARY_PRIVATE_KEY" ]; then
             # Tauri imports the certificate into a temporary keychain, signs the
