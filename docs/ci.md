@@ -14,7 +14,7 @@ requests reviews; approval is not required. The `release tags` policy protects
 
 `scripts/ci/changes.ts` selects jobs from changed paths. Unknown paths run the
 complete suite; renames affect both the old and new path. Every run has a
-`CI required` gate, including documentation-only changes. It requires success
+`CI required` gate, or `CI draft` on a draft, including documentation-only changes. It requires success
 for selected jobs and an intentional skip for the others. Failure, cancellation
 or an unexpected skip blocks it, including jobs whose dependency never started.
 
@@ -155,6 +155,31 @@ fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 37213994348 and cost a rerun. Before retrying, it detaches what the failed
 attempt left attached and removes its partial DMGs. Any other failure ends
 the step.
+
+### Draft pull requests
+
+A draft pull request runs `draft` mode: the changes job, the Linux x64 core
+suite, type checks and UI tests, and the focused telemetry and E2E type checks,
+each only when its paths changed. Windows, macOS, desktop packages, E2E,
+stress, Docker and the APK wait. Its gate is named `CI draft`, so branch
+protection never reads a draft's green gate as `CI required` on a head that
+later turns ready. `ready_for_review` starts the `pr` run, and
+`converted_to_draft` cancels a full run in progress. CodeRabbit reviews drafts
+(`.coderabbit.yaml`).
+
+Of the 5,632 runner minutes spent by the 86 pull request runs started on
+2026-10-18 between 12:34 and 21:35 UTC, 2,476 went to runs a newer push
+cancelled, a median 9.8 minutes after the push they tested: the time a review
+bot takes to answer. A green full run
+cost 86 runner minutes; a draft run of the same core change costs about 11,
+all on Linux.
+
+An agent's pull request flow:
+
+1. `gh pr create --draft`.
+2. Fix the draft's CI failures and review findings, batching pushes.
+3. `gh pr ready <number>` once the draft gate is green and the threads are answered.
+4. After that, push only for a full-run failure or a new finding.
 
 ## Build cost
 
