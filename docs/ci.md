@@ -467,9 +467,10 @@ domain's DNS names `beboite.github.io`.
 
 ## Pull request reviews
 
-`.coderabbit.yaml` enables advisory reviews and chat replies, excluding drafts
-and generated artifacts. CodeRabbit is not a required check. Its installed App,
-plan eligibility and quotas are external prerequisites.
+`.coderabbit.yaml` enables advisory reviews and chat replies, drafts included
+(`auto_review.drafts`), and skips generated artifacts. CodeRabbit is not a
+required check. Its installed App, plan eligibility and quotas are external
+prerequisites.
 
 Follow the [PR rules](../AGENTS.md#follow-through-on-pull-requests): inspect CI
 and review findings together, verify and group fixes before pushing, and report
