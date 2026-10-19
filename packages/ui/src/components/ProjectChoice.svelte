@@ -1,112 +1,118 @@
 <script lang="ts">
-  import { tick, type Snippet } from 'svelte';
+  import { tick, untrack, type Snippet } from 'svelte';
   import { Check, FolderOpen, Search } from '@lucide/svelte';
   import type { Project, ProjectId } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
-  import { floating } from '../lib/floating';
-  import { fitMenu } from '../lib/menu-fit';
-  import { projectName } from '../lib/format';
+  import { focusComposer } from '../lib/focus';
+  import { mobileOverlay } from '../lib/mobile-history';
+  import { homePath, projectName } from '../lib/format';
+  import { scoreFields, type SearchField } from '../lib/palette';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { workspace } from '../lib/workspace.svelte';
+  import { workspace, type Machine } from '../lib/workspace.svelte';
+  import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
 
   /**
    * The draft's project dropdown: a search field over every machine's drafts
    * and projects, grouped by machine when there are several, and for the owner
    * the way to open a folder. The keyboard stays in the field: the arrows move
-   * the highlighted row and Enter takes it.
+   * the highlighted row and Enter takes it. Typing ranks every machine's rows
+   * in one list, each word on the name, the machine or the folder ("boite m2"),
+   * and a pick hands the keyboard back to the composer. The find chord opens it
+   * on a draft (`store.projectChoiceRequest`).
    */
-  let { store, testid, children }: { store: Store; testid: string; children: Snippet } = $props();
+  /** `phone`: the copy the phone's welcome draws; the find chord opens the one the width shows. */
+  let { store, testid, phone = false, children }: { store: Store; testid: string; phone?: boolean; children: Snippet } = $props();
 
   const OPEN_FOLDER = 'open-folder';
 
   interface Row {
     id: string;
     label: string;
+    /** The folder, home folded to `~`: what tells two projects of one name apart. */
     hint: string;
+    /** The full folder or the drafts' explanation, under the pointer. */
+    title: string;
     active: boolean;
     tile: { project: Project; store: Store } | null;
-    /** Name, path and machine, lowercased without accents: what the search reads. */
-    haystack: string;
-    name: string;
+    machine: Machine;
+    /** What a query word may land on: the name, the machine, the folder. */
+    fields: SearchField[];
   }
 
   interface Group {
     /** The machine's id: two machines can carry the same label. */
     id: string;
-    label: string;
+    /** Null on one machine, or on a ranked list where every row names its own. */
+    machine: Machine | null;
     rows: Row[];
   }
 
   const popover = new Closing();
-  let root = $state<HTMLDivElement | undefined>(undefined);
+  /** One machine names no machine. */
+  let several = $derived(workspace.machines.length > 1);
   let trigger = $state<HTMLButtonElement | undefined>(undefined);
   let input = $state<HTMLInputElement | undefined>(undefined);
   let list = $state<HTMLDivElement | undefined>(undefined);
-  let panel = $state<HTMLDivElement | undefined>(undefined);
   const listId = `project-choice-${Math.random().toString(36).slice(2)}`;
   let query = $state('');
   let highlight = $state(0);
-
-  function fold(text: string): string {
-    return text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-  }
+  /** Opened by the find chord: the search takes the keys even on a phone, where a tap leaves the keyboard down. */
+  let byKeyboard = false;
 
   /** Every machine's drafts first, whether the core has made them yet or not, then its live projects. */
   let groups = $derived.by<Group[]>(() => {
     const machines = workspace.machinesOr(store);
-    const several = workspace.machines.length > 1;
-    return machines.map((machine) => {
+    // The machine on screen first: its projects are the likeliest pick.
+    const ordered = [...machines.filter((m) => m.store === store), ...machines.filter((m) => m.store !== store)];
+    const fields = (name: string, machine: Machine, path: string): SearchField[] => [
+      { text: name },
+      ...(several ? [{ text: machine.label, penalty: 5 }] : []),
+      ...(path ? [{ text: path, penalty: 15 }] : [])
+    ];
+    return ordered.map((machine) => {
       const here = machine.store === store;
       const drafts = machine.store.draftsProject;
-      const place = several ? machine.label : '';
       const rows: Row[] = [
         {
           id: JSON.stringify([machine.id, null]),
           label: strings.drafts.name,
-          hint: strings.drafts.hint,
+          hint: drafts ? homePath(drafts.path) : '',
+          title: strings.drafts.hint,
           active: here && store.draftInDrafts,
           tile: drafts ? { project: drafts, store: machine.store } : null,
-          haystack: fold(`${strings.drafts.name} ${place}`),
-          name: fold(strings.drafts.name)
+          machine,
+          fields: fields(strings.drafts.name, machine, '')
         },
         ...machine.store.projects
           .filter((entry) => entry.id !== drafts?.id && entry.archived !== true)
           .map((entry) => ({
             id: JSON.stringify([machine.id, entry.id]),
             label: projectName(entry),
-            hint: entry.path,
+            hint: homePath(entry.path),
+            title: entry.path,
             active: here && entry.id === store.draft?.projectId,
             tile: { project: entry, store: machine.store },
-            haystack: fold(`${projectName(entry)} ${entry.path} ${place}`),
-            name: fold(projectName(entry))
+            machine,
+            fields: fields(projectName(entry), machine, entry.path)
           }))
       ];
-      return { id: machine.id, label: place, rows };
+      return { id: machine.id, machine: several ? machine : null, rows };
     });
   });
 
-  /**
-   * Every word has to appear somewhere in the row. A name that starts with the
-   * query comes first, then a name that holds it, then a path or a machine.
-   */
+  /** Typed, one list over every machine, best first, the palette's ranking (`lib/palette.ts`). */
+  let typed = $derived(query.trim().length > 0);
   let shown = $derived.by<Group[]>(() => {
-    const words = fold(query).split(/\s+/).filter((word) => word.length > 0);
-    if (words.length === 0) return groups;
-    const whole = words.join(' ');
-    const rank = (row: Row) => (row.name.startsWith(whole) ? 0 : row.name.includes(whole) ? 1 : 2);
-    return groups
-      .map((group) => ({
-        id: group.id,
-        label: group.label,
-        rows: group.rows
-          .filter((row) => words.every((word) => row.haystack.includes(word)))
-          .map((row, at) => ({ row, at, rank: rank(row) }))
-          .sort((a, b) => a.rank - b.rank || a.at - b.at)
-          .map(({ row }) => row)
-      }))
-      .filter((group) => group.rows.length > 0);
+    if (!typed) return groups;
+    const ranked = groups
+      .flatMap((group) => group.rows)
+      .map((row, at) => ({ row, at, score: scoreFields(query, row.fields) }))
+      .filter((entry): entry is { row: Row; at: number; score: number } => entry.score !== null && entry.score >= 0)
+      .sort((a, b) => b.score - a.score || a.at - b.at)
+      .map((entry) => entry.row);
+    return ranked.length ? [{ id: 'ranked', machine: null, rows: ranked }] : [];
   });
 
   /** What the arrows walk: the rows in screen order, then opening a folder. */
@@ -118,37 +124,61 @@
     highlight = 0;
   });
 
+  /**
+   * The find chord on a draft: only the copy on screen opens, the phone's
+   * heading or the computer's. Each machine's store counts its own asks, so a
+   * draft moved to another machine starts from that one's count and opens nothing.
+   */
+  let seen = untrack(() => ({ store, request: store.projectChoiceRequest }));
+  $effect(() => {
+    const owner = store;
+    const request = owner.projectChoiceRequest;
+    if (seen.store !== owner || request === seen.request) {
+      seen = { store: owner, request };
+      return;
+    }
+    seen = { store: owner, request };
+    untrack(() => {
+      if (!trigger || window.matchMedia('(max-width: 720px)').matches !== phone) return;
+      if (popover.open) input?.focus({ preventScroll: true });
+      else open(true);
+    });
+  });
+
   /** The field takes the keyboard on a desktop; on a phone it would raise the keyboard over the list. */
   $effect(() => {
     if (!popover.open) return;
     void tick().then(() => {
-      // Typing shrinks the list: the popover keeps the height it opened at, so
-      // the field does not slide toward the trigger under the cursor.
-      if (panel) panel.style.minHeight = `${panel.offsetHeight}px`;
-      if (!window.matchMedia('(max-width: 720px)').matches) input?.focus({ preventScroll: true });
+      if (byKeyboard || !window.matchMedia('(max-width: 720px)').matches) input?.focus({ preventScroll: true });
       const at = order.findIndex((id) => shown.some((group) => group.rows.some((row) => row.id === id && row.active)));
       if (at >= 0) move(at);
     });
-    // A viewport that shrinks afterwards, a phone's keyboard or a shorter
-    // window, lowers the cap `floating` sets: the frozen height gives way to it.
-    const release = () => panel?.style.removeProperty('min-height');
-    window.addEventListener('resize', release);
-    window.visualViewport?.addEventListener('resize', release);
-    return () => {
-      window.removeEventListener('resize', release);
-      window.visualViewport?.removeEventListener('resize', release);
-    };
   });
 
-  function open() {
+  // A phone's Back closes the list, as it did when `floating` held it.
+  $effect(() => { if (popover.open) return mobileOverlay(() => close(false)); });
+
+  /**
+   * The list opens where the command palette does, under the title bar and
+   * centred, on `<body>`: from the heading it had only the space above it,
+   * three rows on a laptop.
+   */
+  function portal(node: HTMLElement) {
+    document.body.append(node);
+    return { destroy: () => node.remove() };
+  }
+
+  function open(keyboard = false) {
+    byKeyboard = keyboard;
     query = '';
     highlight = 0;
     popover.show();
   }
 
+  /** Closed from the keyboard, it gives the keys to the composer: the next thing typed is the prompt. */
   function close(refocus: boolean) {
     popover.hide();
-    if (refocus) trigger?.focus({ preventScroll: true });
+    if (refocus && !focusComposer()) trigger?.focus({ preventScroll: true });
   }
 
   function move(at: number) {
@@ -157,7 +187,7 @@
     list?.querySelector<HTMLElement>(`#${listId}-${at}`)?.scrollIntoView?.({ block: 'nearest' });
   }
 
-  function pick(id: string) {
+  async function pick(id: string) {
     popover.hide();
     if (id === OPEN_FOLDER) {
       store.projectPickerOpen = true;
@@ -166,14 +196,11 @@
     const [machineId, projectId] = JSON.parse(id) as [string, ProjectId | null];
     const target = workspace.machines.find((m) => m.id === machineId)?.store ?? store;
     if (target === store) store.setDraftProject(projectId);
-    else if (projectId !== null) void workspace.select(target, undefined, projectId);
-    else void workspace.select(target).then(() => target.startDraft(null));
-  }
-
-  function onWindowPointerdown(event: PointerEvent) {
-    if (!popover.open) return;
-    if (root && event.target instanceof Node && root.contains(event.target)) return;
-    popover.hide();
+    else if (projectId !== null) await workspace.select(target, undefined, projectId);
+    else await workspace.select(target).then(() => target.startDraft(null));
+    // Another machine draws its own composer: the focus waits for it.
+    await tick();
+    focusComposer();
   }
 
   function onTriggerKeydown(event: KeyboardEvent) {
@@ -184,10 +211,16 @@
     }
     if (popover.open || event.key !== 'ArrowDown') return;
     event.preventDefault();
-    open();
+    open(true);
   }
 
   function onkeydown(event: KeyboardEvent) {
+    if (event.key === 'Tab') {
+      // Modal: the page behind the scrim takes no keys. The rows are walked with the arrows.
+      event.preventDefault();
+      input?.focus({ preventScroll: true });
+      return;
+    }
     if (event.key === 'Escape') {
       event.stopPropagation();
       // A first Escape clears what was typed, the next one closes.
@@ -199,9 +232,10 @@
       // Enter also confirms an input method's candidate: that one is not a pick.
       if (event.isComposing || event.keyCode === 229) return;
       const id = order[highlight];
-      if (!id) return;
       event.preventDefault();
-      pick(id);
+      // A query nothing answers takes nothing: Enter is not a way to open a folder.
+      if (!id || (id === OPEN_FOLDER && typed && empty)) return;
+      void pick(id);
       return;
     }
     if (order.length === 0) return;
@@ -216,9 +250,7 @@
   const optionId = (id: string) => `${listId}-${order.indexOf(id)}`;
 </script>
 
-<svelte:window onpointerdown={onWindowPointerdown} />
-
-<div class="choice" bind:this={root}>
+<div class="choice">
   <button
     type="button"
     class="trigger"
@@ -236,16 +268,22 @@
 
   {#if popover.shown}
     <div
+      class="scrim"
+      class:closing={popover.closing}
+      role="presentation"
+      use:portal
+      use:popover.attach
+      onanimationend={popover.end}
+      onclick={(event) => { if (event.target === event.currentTarget) close(false); }}
+    >
+    <div
       class="popover"
       class:closing={popover.closing}
       role="dialog"
+      aria-modal="true"
       aria-label={strings.thread.changeProject}
       tabindex="-1"
       {onkeydown}
-      bind:this={panel}
-      use:popover.attach
-      use:floating={{ anchor: () => trigger ?? null, placement: 'top', cap: 460, fit: fitMenu, dismiss: () => popover.hide() }}
-      onanimationend={popover.end}
       data-testid="{testid}-menu"
     >
       <label class="search">
@@ -270,7 +308,7 @@
 
       <div class="rows" role="listbox" id={listId} aria-label={strings.thread.changeProject} bind:this={list} data-testid="{testid}-list">
         {#each shown as group (group.id)}
-          {#if group.label}<div class="group ui-label" role="presentation">{group.label}</div>{/if}
+          {#if group.machine}<div class="group ui-label" role="presentation"><MachineIcon icon={group.machine.icon} os={group.machine.store.core?.os} size={12} />{group.machine.label}</div>{/if}
           {#each group.rows as row (row.id)}
             <button
               type="button"
@@ -283,16 +321,15 @@
               id={optionId(row.id)}
               data-row
               data-value={row.id}
-              title={row.hint}
+              title={row.title}
               onpointermove={() => (highlight = order.indexOf(row.id))}
-              onclick={() => pick(row.id)}
+              onclick={() => void pick(row.id)}
             >
-              {#if row.tile}<ProjectTile project={row.tile.project} store={row.tile.store} size={22} />{:else}<span class="blank" aria-hidden="true"><FolderOpen size={14} strokeWidth={1.75} /></span>{/if}
-              <span class="text">
-                <span class="name ui-label">{row.label}</span>
-                <span class="hint ui-label">{row.hint}</span>
-              </span>
-              {#if row.active}<span class="check" aria-hidden="true"><Check size={15} strokeWidth={2} /></span>{/if}
+              {#if row.tile}<ProjectTile project={row.tile.project} store={row.tile.store} size={20} />{:else}<span class="blank" aria-hidden="true"><FolderOpen size={14} strokeWidth={1.75} /></span>{/if}
+              <span class="name ui-label">{row.label}</span>
+              <span class="hint ui-label">{row.hint}</span>
+              {#if typed && several}<span class="machine ui-label"><MachineIcon icon={row.machine.icon} os={row.machine.store.core?.os} size={12} />{row.machine.label}</span>{/if}
+              <span class="check" aria-hidden="true">{#if row.active}<Check size={15} strokeWidth={2} />{/if}</span>
             </button>
           {/each}
         {/each}
@@ -303,18 +340,19 @@
         <button
           type="button"
           class="row folder"
-          class:highlight={order[highlight] === OPEN_FOLDER}
+          class:highlight={order[highlight] === OPEN_FOLDER && !(typed && empty)}
           tabindex="-1"
           id={optionId(OPEN_FOLDER)}
           data-row
           data-value={OPEN_FOLDER}
           onpointermove={() => (highlight = order.indexOf(OPEN_FOLDER))}
-          onclick={() => pick(OPEN_FOLDER)}
+          onclick={() => void pick(OPEN_FOLDER)}
         >
           <span class="blank" aria-hidden="true"><FolderOpen size={14} strokeWidth={1.75} /></span>
           <span class="name ui-label">{strings.drafts.pickFolder}</span>
         </button>
       {/if}
+    </div>
     </div>
   {/if}
 </div>
@@ -344,8 +382,26 @@
     background: var(--color-hover);
   }
 
+  .scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: min(14vh, 120px);
+    background: var(--color-scrim);
+    animation: fade var(--dur-2) var(--ease-out-quint);
+  }
+
+  .scrim.closing {
+    animation-name: fade-out;
+    pointer-events: none;
+  }
+
   .popover {
-    width: min(420px, calc(100vw - 24px));
+    width: min(520px, calc(100vw - 24px));
+    max-height: min(70vh, 520px);
     display: flex;
     flex-direction: column;
     padding: 6px;
@@ -359,10 +415,8 @@
     letter-spacing: normal;
     line-height: normal;
     text-align: left;
-    z-index: 40;
     overflow: hidden;
     animation: pop var(--dur-2) var(--ease-out-quint);
-    transform-origin: bottom left;
   }
 
   .popover.closing {
@@ -419,20 +473,24 @@
   }
 
   .group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     padding: 8px 8px 4px;
     color: var(--color-muted-foreground);
     font-size: var(--text-xs);
     font-weight: 500;
   }
 
+  /* One line a project: its tile, its name, its folder, then the machine and the mark. */
   .row {
     display: flex;
     align-items: center;
     gap: 10px;
     width: 100%;
     height: auto;
-    min-height: 44px;
-    padding: 6px 8px;
+    min-height: var(--row);
+    padding: 4px 8px;
     border: none;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -441,8 +499,10 @@
     cursor: pointer;
   }
 
+  /* The row Enter takes, as in the command palette: the accent's wash and a bar on its edge. */
   .row.highlight {
-    background: var(--color-hover);
+    background: var(--color-accent-soft);
+    box-shadow: inset 2px 0 0 var(--color-accent);
   }
 
   .row:active {
@@ -453,6 +513,16 @@
   .check {
     flex: none;
     display: inline-flex;
+    width: 15px;
+    color: var(--color-accent);
+  }
+
+  .machine {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--text-xs);
     color: var(--color-muted-foreground);
   }
 
@@ -466,15 +536,9 @@
     color: var(--color-muted-foreground);
   }
 
-  .text {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
-
   .name {
+    flex: none;
+    max-width: 55%;
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
@@ -483,6 +547,7 @@
 
   .folder .name {
     flex: 1;
+    max-width: none;
     font-weight: 400;
     color: var(--color-muted-foreground);
   }
@@ -491,8 +556,10 @@
     color: var(--color-foreground);
   }
 
-  /* One line each: a long path ends in an ellipsis, the full one is in the title. */
+  /* After the name, filling the line: a long path ends in an ellipsis, the full one is in the title. */
   .hint {
+    flex: 1;
+    min-width: 0;
     font-size: var(--text-xs);
     color: var(--color-muted-foreground);
     white-space: nowrap;
@@ -526,6 +593,7 @@
   }
 
   @media (max-width: 720px) {
+    .scrim { padding-top: 12px; }
     .search { height: var(--control-touch); }
     .row { min-height: var(--touch-target); }
   }

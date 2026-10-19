@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { rankItems, scoreMatch, type PaletteItem } from './palette';
+import { rankItems, scoreFields, scoreMatch, sectionRows, type PaletteItem } from './palette';
 
 describe('scoreMatch', () => {
   test('a prefix beats a word start, which beats a substring, which beats scattered letters', () => {
@@ -61,5 +61,38 @@ describe('rankItems', () => {
       { id: 'b', kind: 'thread', label: 'Boite release notes', hint: 'notes' }
     ];
     expect(rankItems('boite', rows).map((item) => item.id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('scoreFields', () => {
+  const boite = [{ text: 'Boite' }, { text: 'm2', penalty: 5 }, { text: '/home/boite/projects/boite', penalty: 15 }];
+  const other = [{ text: 'Boite' }, { text: 'PC', penalty: 5 }, { text: 'D:/Dev/boite', penalty: 15 }];
+
+  test('each word may land on its own field: the name, then the machine', () => {
+    expect(scoreFields('boite m2', boite)).not.toBeNull();
+    expect(scoreFields('boite m2', other)).toBeNull();
+    expect(scoreFields('m2 boi', boite)).not.toBeNull();
+  });
+
+  test('the name outranks the machine and the folder, and every word has to land', () => {
+    expect(scoreFields('boite', boite)!).toBeGreaterThan(scoreFields('m2', boite)!);
+    expect(scoreFields('m2', boite)!).toBeGreaterThan(scoreFields('projects', boite)!);
+    expect(scoreFields('boite zzz', boite)).toBeNull();
+  });
+});
+
+describe('sectionRows', () => {
+  test('a section stands where its best row ranked and keeps its rows together', () => {
+    const ranked: PaletteItem[] = [
+      { id: 'a', kind: 'thread', label: 'A', section: 'boite' },
+      { id: 'cmd', kind: 'command', label: 'Command' },
+      { id: 'b', kind: 'thread', label: 'B', section: 'notes' },
+      { id: 'c', kind: 'thread', label: 'C', section: 'boite' }
+    ];
+    expect(sectionRows(ranked).map((section) => [section.id, section.items.map((item) => item.id)])).toEqual([
+      ['boite', ['a', 'c']],
+      ['command', ['cmd']],
+      ['notes', ['b']]
+    ]);
   });
 });
