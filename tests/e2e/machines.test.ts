@@ -382,8 +382,21 @@ test('one invitation groups two real cores: the page connects the second by itse
     await page.evaluate(`document.querySelector('${id('main-machine')}').scrollIntoView({ block: 'center' })`);
     await capture('main-machine-phone.png');
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    // A loaded runner can let the removal below reach the second machine before the reloaded page read its
+    // group: it then drops the phone's key and closes, and the page never learns it was in the group. That
+    // read is held a second and a half here, so a removal sent before the page heard it fails each run.
+    const { identifier: held } = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `{
+      const send = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        if (new URL(this.url).host !== ${JSON.stringify(new URL(second.url).host)} || typeof data !== 'string' || !data.includes('"method":"group.get"')) return send.call(this, data);
+        setTimeout(() => { if (this.readyState === WebSocket.OPEN) send.call(this, data); }, 1500);
+      };
+    }` }) as { identifier: string };
     await page.reload();
+    await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: held });
     await page.waitFor(`${machines(2)} && globalThis.__boiteTest.workspace.active.endpointUrl === ${JSON.stringify(awake.url)}`, 20_000);
+    // Ready is not told: each machine has said which group it is in before one of them leaves it.
+    await page.waitFor(`globalThis.__boiteTest.workspace.machines.every(machine => machine.store.groupKnown)`, 20_000);
 
     // Removed from the group: the second machine leaves, drops the phone's key, and the page lets it go.
     const removalState = async () => {
