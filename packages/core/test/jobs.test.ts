@@ -4,7 +4,7 @@ import type { Pointer } from 'bun:ffi';
 import { RpcErrorCode } from '@boite/contracts';
 import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
 import { cpuRateOfGlobalJob, memoryLimitOfJob, releaseThreadJob, sampleThreadJob } from '../src/platform/windows/jobs.ts';
-import { commandLineOf, consoleHost, whenCommandLineReads, type ProcessReads } from '../src/platform/windows/process-reads.ts';
+import { commandLineOf, consoleHost, startedAs, whenCommandLineReads, type ProcessReads } from '../src/platform/windows/process-reads.ts';
 import { jobPacketAction, MSG_JOB_MEMORY_LIMIT, MSG_NEW_PROCESS } from '../src/platform/windows/jobs-packets.ts';
 import { resolveMemoryLimits } from '../src/memory-limits.ts';
 import { processPlatform } from '../src/platform/index.ts';
@@ -331,6 +331,24 @@ test('a process the job reports before Windows wrote its command line gets it on
   const ready: (string | null)[] = [];
   expect(whenCommandLineReads(late, 1, 'ping -n 1 127.0.0.1', line => ready.push(line))).toBeNull();
   expect(ready).toEqual(['ping -n 1 127.0.0.1']);
+});
+
+test('a process that read neither its name nor its command line at its start is named once the wait ends, and a console host leaves', () => {
+  // Windows CI, 2026-10-19: a console host entered prepared-drivers.test.ts's trace as `unknown`, with no command line.
+  const named = (image: string | null): ProcessReads => ({
+    ...lateParameters(Infinity),
+    imageName(_proc, buffer, size) {
+      if (image === null) return false;
+      buffer.set(new Uint16Array(new Uint8Array(Buffer.from(image, 'utf16le')).buffer));
+      size[0] = image.length;
+      return true;
+    },
+  });
+  expect(startedAs(named(String.raw`C:\Windows\System32\conhost.exe`), 1, null, null)).toBeNull();
+  expect(startedAs(named(null), 1, null, String.raw`\??\C:\Windows\system32\conhost.exe 0x4`)).toBeNull();
+  expect(startedAs(named(String.raw`C:\bun\bun.exe`), 1, null, null)).toBe(String.raw`C:\bun\bun.exe`);
+  expect(startedAs(named(null), 1, String.raw`C:\bun\bun.exe`, 'bun -e 1')).toBe(String.raw`C:\bun\bun.exe`);
+  expect(startedAs(named(null), 1, null, null)).toBe('unknown');
 });
 
 describe('the jobs Worker packet filter', () => {

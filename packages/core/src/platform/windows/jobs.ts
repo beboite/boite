@@ -29,6 +29,7 @@ import {
   imageNameOf,
   ioBytesOf,
   parentPidOf,
+  startedAs,
   whenCommandLineReads,
   workingSetOf,
 } from './process-reads.ts';
@@ -762,10 +763,17 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
   }
   const identity = creationIdentityOf(api, handle);
   tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });
-  const record = { exe: exe ?? 'unknown', parentPid: parentPidOf(api, handle), ...identity };
+  const record = { parentPid: parentPidOf(api, handle), ...identity };
   const waiting = whenCommandLineReads(api, handle, commandLine, (line) => {
     awaitingCommandLine.delete(pid);
-    sink?.started(threadId, pid, { ...record, commandLine: line });
+    const name = startedAs(api, handle, exe, line);
+    if (name === null) {
+      tracked.delete(pid);
+      ignored.add(pid);
+      api.close(handle);
+      return;
+    }
+    sink?.started(threadId, pid, { ...record, exe: name, commandLine: line });
   });
   if (waiting !== null) awaitingCommandLine.set(pid, waiting);
 }
@@ -794,8 +802,9 @@ function reportExit(threadId: string, pid: number): void {
     sink?.exited(threadId, pid, { exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
     return;
   }
-  // Its start goes out first, with whatever command line it has by now.
+  // Its start goes out first, with whatever command line it has by now, unless that shows a console host.
   awaitingCommandLine.get(pid)?.flush();
+  if (ignored.delete(pid)) return;
   tracked.delete(pid);
   const exit: NativeProcessExit = {
     ...entry.identity,
