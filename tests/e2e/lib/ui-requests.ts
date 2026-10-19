@@ -34,20 +34,40 @@ export const requestLog = {
   configurePreviewServer(server: WithMiddlewares) { server.middlewares.use(record); },
 };
 
+/** Chrome's `wallTime` and `Date.now()` read the same system clock, in ticks that can be coarse on Windows. */
+const CLOCK_SLACK_MS = 50;
+
+function relative(time: number, reference: number, what: string): string {
+  const ms = time - reference;
+  return `${Math.abs(ms)} ms ${ms < 0 ? 'before' : 'after'} ${what}`;
+}
+
+function describe(entry: Served, reference: number, what: string): string {
+  if (entry.finished !== undefined) return `the UI server answered ${entry.status} ${relative(entry.finished, reference, what)}`;
+  if (entry.closed !== undefined) return `the UI server's connection closed ${relative(entry.closed, reference, what)}, before the answer was written`;
+  return `the UI server got it ${relative(entry.at, reference, what)} and is still answering`;
+}
+
 /**
- * The UI server's side of a request the browser sent at `sentAt`, or null when
- * no server of this process listens on its port (a core serves that page).
+ * The UI server's side of a request Chrome sent at `sentAt` (its `wallTime`),
+ * or null when no server of this process listens on its port (a core serves
+ * that page). Without a send time, only the newest record of the path can be
+ * told, against `receivedAt`, when its devtools event reached us: that event
+ * can come after the server answered, so no window can rule the server out.
  */
-export function uiServerSide(url: string, sentAt: number): string | null {
+export function uiServerSide(url: string, sentAt: number | null, receivedAt: number): string | null {
   let parsed: URL;
   try { parsed = new URL(url); } catch { return null; }
   const port = Number(parsed.port);
   if (!ports.has(port)) return null;
   const path = parsed.pathname + parsed.search;
-  // Same process, same clock: the server cannot see it before the browser sent it.
-  const entry = served.findLast((candidate) => candidate.port === port && candidate.path === path && candidate.at >= sentAt - 5);
+  if (sentAt === null) {
+    const newest = served.findLast((candidate) => candidate.port === port && candidate.path === path);
+    if (newest === undefined) return 'the UI server has no record of it';
+    return `no send time; newest record: ${describe(newest, receivedAt, 'devtools reported it')}`;
+  }
+  // The server cannot see it before Chrome sent it.
+  const entry = served.findLast((candidate) => candidate.port === port && candidate.path === path && candidate.at >= sentAt - CLOCK_SLACK_MS);
   if (entry === undefined) return 'the UI server never got it';
-  if (entry.finished !== undefined) return `the UI server answered ${entry.status} ${entry.finished - sentAt} ms after it was sent`;
-  if (entry.closed !== undefined) return `the UI server's connection closed ${entry.closed - sentAt} ms after it was sent, before the answer was written`;
-  return `the UI server got it ${entry.at - sentAt} ms after it was sent and is still answering`;
+  return describe(entry, sentAt, 'it was sent');
 }

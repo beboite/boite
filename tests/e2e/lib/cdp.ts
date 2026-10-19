@@ -106,7 +106,10 @@ interface Pending {
 
 interface InFlight {
   url: string;
+  /** When its devtools event reached us, which can be after the server answered it. */
   at: number;
+  /** When Chrome sent it (`wallTime`), on the same clock as `Date.now()`. */
+  wall?: number;
   answered: boolean;
   frameId?: string;
   loaderId?: string;
@@ -625,7 +628,8 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
    * it answers while JavaScript runs and waits like any call while the thread
    * is in a layout, a synchronous IPC or a native wait (Edge 155, a busy loop
    * against a synchronous XHR). The browser endpoint gives each process's CPU.
-   * The probes run side by side, so the report adds about a second.
+   * The probes run side by side: about a second, up to 5 s when the browser
+   * endpoint answers slowly (its fetch, upgrade and two calls have 1 s each).
    */
   async #busyReport(): Promise<string> {
     const asked = Date.now();
@@ -696,13 +700,14 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
   /** What a stalled page is still waiting on: whether the server never answered or the body never arrived. */
   #inFlight(): string[] {
     const now = Date.now();
-    return [...this.#requests.values()].filter((request) => now - request.at > 1_000).slice(0, 10).map((request) => {
+    return [...this.#requests.values()].filter((request) => now - (request.wall ?? request.at) > 1_000).slice(0, 10).map((request) => {
+      const sentAt = request.wall ?? request.at;
       const wire = request.cache ? 'served from the cache'
-        : request.headers !== undefined ? `the network service had its headers ${request.headers - request.at} ms after it was sent`
+        : request.headers !== undefined ? `the network service had its headers by ${request.headers - sentAt} ms after it was sent`
           : request.sent !== undefined ? 'the network service sent it and has no headers'
             : 'nothing from the network service (not sent, or a service worker holds it)';
-      const server = uiServerSide(request.url, request.at);
-      return `${request.url} ${request.answered ? 'answered, body pending' : 'no response'} for ${now - request.at} ms: ${wire}${server === null ? '' : `; ${server}`}`;
+      const server = uiServerSide(request.url, request.wall ?? null, request.at);
+      return `${request.url} ${request.answered ? 'answered, body pending' : 'no response'} for ${now - sentAt} ms: ${wire}${server === null ? '' : `; ${server}`}`;
     });
   }
 
@@ -725,7 +730,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
       method?: string;
       params?: {
         exceptionDetails?: { text?: string; exception?: { description?: string } };
-        requestId?: string; frameId?: string; loaderId?: string; request?: { url?: string }; response?: { status?: number }; errorText?: string;
+        requestId?: string; frameId?: string; loaderId?: string; wallTime?: number; request?: { url?: string }; response?: { status?: number }; errorText?: string;
         frame?: { id: string; loaderId: string };
         callFrames?: { functionName: string; url: string; location: { lineNumber: number; columnNumber: number } }[];
       };
@@ -771,7 +776,8 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
         if (frame.method === 'Network.requestWillBeSent' && !url.startsWith('data:')) {
           const early = this.#early.get(id);
           this.#early.delete(id);
-          this.#requests.set(id, { url, at: Date.now(), answered: false, frameId: frame.params?.frameId, loaderId: frame.params?.loaderId, ...early });
+          const wallTime = frame.params?.wallTime;
+          this.#requests.set(id, { url, at: Date.now(), wall: typeof wallTime === 'number' ? wallTime * 1_000 : undefined, answered: false, frameId: frame.params?.frameId, loaderId: frame.params?.loaderId, ...early });
         } else if (frame.method === 'Network.requestWillBeSentExtraInfo' || frame.method === 'Network.responseReceivedExtraInfo') {
           // The browser process sends these, and not always after Blink's own event.
           const step = frame.method === 'Network.requestWillBeSentExtraInfo' ? 'sent' : 'headers';
