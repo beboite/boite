@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import type { Subprocess } from 'bun';
 import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
+import { TextSocket } from './ws-client.ts';
 
 /**
  * Marks the tour seen before any script of the page runs, and only where no
@@ -156,7 +157,7 @@ async function stopBrowser(proc: Subprocess, userDataDir: string | null, watch: 
 }
 
 export class BrowserPage {
-  #socket: WebSocket;
+  #socket: TextSocket;
   #proc: Subprocess | null;
   #watch: ParentDeathWatch | null;
   #userDataDir: string | null;
@@ -174,18 +175,16 @@ export class BrowserPage {
   /** The browser's pid, null for a page `attach` drives. */
   get pid(): number | null { return this.#proc?.pid ?? null; }
 
-  private constructor(socket: WebSocket, proc: Subprocess | null, userDataDir: string | null, watch: ParentDeathWatch | null = null) {
+  private constructor(socket: TextSocket, proc: Subprocess | null, userDataDir: string | null, watch: ParentDeathWatch | null = null) {
     this.#socket = socket;
     this.#proc = proc;
     this.#watch = watch;
     this.#userDataDir = userDataDir;
-    socket.addEventListener('message', (event: MessageEvent) => {
-      this.#receive(typeof event.data === 'string' ? event.data : '');
-    });
-    socket.addEventListener('close', () => {
+    socket.onMessage((text) => this.#receive(text));
+    socket.onClose(({ code, reason }) => {
       for (const pending of this.#pending.values()) {
         clearTimeout(pending.timer);
-        pending.reject(new Error('the devtools socket closed, the browser exited or was killed (bun test kills every process a file started when one of its tests or hooks times out)'));
+        pending.reject(new Error(`the devtools socket closed (${code} ${reason}), the browser exited or was killed (bun test kills every process a file started when one of its tests or hooks times out)`));
       }
       this.#pending.clear();
     });
@@ -354,7 +353,7 @@ export class BrowserPage {
     // waited out its whole timeout: after `bun test` killed the browser of a
     // file whose test timed out, every later test of that file spent 20 s on a
     // "Runtime.evaluate timed out" that looked like a hung renderer.
-    if (this.#socket.readyState !== WebSocket.OPEN) {
+    if (!this.#socket.open) {
       return Promise.reject(new Error(`the devtools socket closed before ${method}: the browser exited or was killed. bun test kills every process a file started when one of its tests or hooks times out, so look for the file's first failure`));
     }
     const id = this.#nextId++;
@@ -415,19 +414,19 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     const deadline = Date.now() + timeoutMs;
     let last = '';
     while (Date.now() < deadline) {
-      if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw new Error('the browser is closed');
+      if (this.#closed || !this.#socket.open) throw new Error('the browser is closed');
       try {
         const remaining = Math.max(1, deadline - Date.now());
         const ok = await this.evaluate<boolean>(`(async () => !!(await (${expression})))()`, Math.min(CALL_TIMEOUT_MS, remaining));
         if (ok) return;
         last = 'it stayed false';
       } catch (error) {
-        if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw error;
+        if (this.#closed || !this.#socket.open) throw error;
         last = error instanceof Error ? error.message : String(error);
       }
       await Bun.sleep(Math.min(POLL_MS, Math.max(0, deadline - Date.now())));
     }
-    if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw new Error('the browser is closed');
+    if (this.#closed || !this.#socket.open) throw new Error('the browser is closed');
     // A separate, bounded grace preserves useful diagnostics after the condition consumes its budget.
     const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`, WAIT_DIAGNOSTIC_TIMEOUT_MS).catch(() => 'page diagnostic timed out');
     throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
@@ -706,23 +705,13 @@ export async function probeDebuggingPort(port: number): Promise<string> {
   }
 }
 
-function openSocket(target: TargetInfo): Promise<WebSocket> {
+/** Bun's own WebSocket client closes sound devtools streams with 1002: see `ws-client.ts`. */
+async function openSocket(target: TargetInfo): Promise<TextSocket> {
   const url = target.webSocketDebuggerUrl;
   if (url === undefined) throw new Error('the page target has no debugger url');
-  return new Promise<WebSocket>((resolve, reject) => {
-    const socket = new WebSocket(url);
-    // A socket that never opened is closed with its refusal: nothing else
-    // holds it, and a late open would keep its connection for the whole run.
-    const fail = (message: string) => {
-      clearTimeout(timer);
-      socket.close();
-      reject(new Error(message));
-    };
-    const timer = setTimeout(() => fail('the devtools socket did not open'), CONNECT_TIMEOUT_MS);
-    socket.addEventListener('open', () => {
-      clearTimeout(timer);
-      resolve(socket);
-    }, { once: true });
-    socket.addEventListener('error', () => fail('the devtools socket failed to open'), { once: true });
-  });
+  try {
+    return await TextSocket.connect(url, CONNECT_TIMEOUT_MS);
+  } catch (error) {
+    throw new Error(`the devtools socket did not open: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
 }
