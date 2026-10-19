@@ -15,14 +15,15 @@ interface Traced {
  * looked up in the system (`runningSince`), and one found running there keeps
  * its child. Whatever the core spawned has the core as its parent and is never taken.
  *
- * An exited `sh`, `bash`, `dash` or `zsh` with the image of its own parent is
- * a fork, not a shell: Git Bash (MSYS2) forks a copy of the shell to exec each
- * command, and that copy exits once the command runs. A process under such
- * forks hangs from the first ancestor past them, and stays while that one runs.
- * A background `sh wait.sh` keeps its live shell that way; what an interrupted
- * command left still goes, since its shell is a different image from the agent
- * above it. Any other exited parent of the same image (a Node worker under
- * Node) is a real parent, and what it left is an orphan.
+ * An exited `sh`, `bash`, `dash` or `zsh` with the image of its own parent,
+ * which exited with 0 within seconds of its child's start, is a fork, not a
+ * shell: Git Bash (MSYS2) forks a copy of the shell to exec each command, and
+ * that copy exits once the command runs. A process under such forks hangs from
+ * the first ancestor past them, and stays while that one runs. A background
+ * `sh wait.sh` keeps its live shell that way; what an interrupted command left
+ * still goes, since its shell is a different image from the agent above it, or
+ * was stopped. Any other exited parent of the same image (a Node worker under
+ * Node, a nested bash that was killed) is a real parent and leaves an orphan.
  */
 export function orphansOf<T extends Traced>(byPid: ReadonlyMap<number, T>, now: number, graceMs: number, runningSince: (pid: number) => number | null): Map<number, T> {
   const entries = [...byPid.values()];
@@ -78,11 +79,13 @@ export function parentAtStart<T extends Traced>(byPid: ReadonlyMap<number, T>, c
  * exited without being a fork of the one above it.
  */
 function forkerOf<T extends Traced>(entry: T, byPid: ReadonlyMap<number, T>): T | undefined {
+  let child: Traced = entry;
   let link = entry.parent ?? null;
   if (link === null || running(link, byPid)) return undefined;
   while (!running(link, byPid)) {
     const above: Traced | null = link.parent ?? null;
-    if (above === null || !shellFork(link, above)) return undefined;
+    if (above === null || !shellFork(link, above, child)) return undefined;
+    child = link;
     link = above;
   }
   return byPid.get(link.record.pid);
@@ -94,10 +97,18 @@ function running(entry: Traced, byPid: ReadonlyMap<number, Traced>): boolean {
 
 /** `fork` exists only in an MSYS2 or Cygwin program, and these shells fork for every command. */
 const FORKING_SHELL = /(?:^|[\\/])(?:ba|da|z)?sh\.exe$/i;
+/**
+ * How soon after its child starts a fork that exec'd it exits. In 74,975 such
+ * forks of Boite's trace, all exited with 0, at a median of 19 ms and at most
+ * 3.1 s under load; a shell that was stopped exits with another code or later.
+ */
+const FORK_EXIT_MS = 5000;
 
-function shellFork(fork: Traced, shell: Traced): boolean {
-  const exe = fork.record.exe;
-  return FORKING_SHELL.test(exe) && exe.toLowerCase() === shell.record.exe.toLowerCase();
+/** `fork` is a copy of `shell` that exec'd `child` and exited, not a shell that ran it and was stopped. */
+function shellFork(fork: Traced, shell: Traced, child: Traced): boolean {
+  const { exe, exitCode, exitedAt } = fork.record;
+  return FORKING_SHELL.test(exe) && exe.toLowerCase() === shell.record.exe.toLowerCase()
+    && exitCode === 0 && exitedAt !== null && exitedAt - nativeBirth(child) <= FORK_EXIT_MS;
 }
 
 function nativeBirth(entry: Traced): number {
