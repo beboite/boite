@@ -5,15 +5,24 @@
  * the member ends its wait. A round that finds an offer of the same roster
  * still on its way waits for that one instead of sending it again: two rounds
  * that overlap (a change and the tick) would count two failures for one
- * silence and double the wait.
+ * silence and double the wait. An offer that fails after the member was
+ * heard from does not count: its silence is older than its last word.
  */
 export class SyncBackoff {
   private readonly waits = new Map<string, { failures: number; nextAt: number; digest: string }>();
   private readonly sending = new Map<string, Promise<void>>();
+  private readonly heardAt = new Map<string, number>();
+  private clock = 0;
 
   constructor(private readonly firstMs: number, private readonly maxMs: number) {}
 
-  failed(coreId: string, digest: string, now = Date.now()): void {
+  /** A mark to give `failed`: taken before an offer goes out. */
+  mark(): number {
+    return this.clock;
+  }
+
+  failed(coreId: string, digest: string, since: number, now = Date.now()): void {
+    if ((this.heardAt.get(coreId) ?? -1) > since) return;
     const failures = (this.waits.get(coreId)?.failures ?? 0) + 1;
     this.waits.set(coreId, { failures, digest, nextAt: now + Math.min(this.firstMs * 2 ** failures, this.maxMs) });
   }
@@ -21,6 +30,7 @@ export class SyncBackoff {
   /** The member answered, or asked something itself: it is up. */
   heard(coreId: string): void {
     this.waits.delete(coreId);
+    this.heardAt.set(coreId, ++this.clock);
   }
 
   waiting(coreId: string, digest: string, now = Date.now()): boolean {
@@ -41,5 +51,6 @@ export class SyncBackoff {
 
   clear(): void {
     this.waits.clear();
+    this.heardAt.clear();
   }
 }
