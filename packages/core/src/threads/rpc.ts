@@ -1,5 +1,6 @@
 import { stat } from 'node:fs/promises';
-import { pullRequestAddress, type AccountId, type ProviderId, type ThreadId } from '@boite/contracts';
+import { pullRequestAddress, type AccountId, type ClientPreferences, type ProviderId, type SentFrom, type ThreadId } from '@boite/contracts';
+import type { Connection } from '../router.ts';
 import type { Core } from '../core.ts';
 import { invalidParams, refused } from '../errors.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
@@ -214,7 +215,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('turns.start', async (params, ctx) => {
     await requireCwd(core, params.threadId);
     const attachments = await core.attachmentUploads.resolve(ctx.connection.id, params.attachments ?? [], params.attachmentIds);
-    return core.threads.startTurn(params.threadId, params.prompt, attachments, params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, undefined, ctx.connection.sentFrom ?? null);
+    return core.threads.startTurn(params.threadId, params.prompt, attachments, params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, undefined, promptOrigin(ctx.connection, core.clients.use(ctx.connection)));
   });
   core.router.register('turns.stop', (params, ctx) => {
     const by = ctx.connection.identity.principal === 'agent' ? `agent of ${ctx.connection.identity.threadId}` : `${ctx.connection.identity.principal} from ${ctx.connection.sentFrom?.client ?? 'a client'}`;
@@ -253,4 +254,10 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     });
     return { ok: true } as const;
   });
+}
+
+/** Where a prompt comes from, with the language its app speaks once the app said it. */
+function promptOrigin(connection: Connection, preferences: ClientPreferences | null): SentFrom | null {
+  const from = connection.sentFrom ?? null;
+  return from === null || preferences === null ? from : { ...from, language: preferences.language };
 }

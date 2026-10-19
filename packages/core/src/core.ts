@@ -32,6 +32,7 @@ import { Router } from './router.ts';
 import { Scheduler } from './scheduler.ts';
 import { SessionStore } from './sessions.ts';
 import { SettingsStore } from './settings.ts';
+import { ClientPreferencesBook } from './client-preferences.ts';
 import { eraseIncognitoRoot } from './threads/incognito.ts';
 import { removeTranscripts } from './threads/transcript-purge.ts';
 import { ThreadStore } from './threads.ts';
@@ -145,6 +146,8 @@ export class Core {
   readonly journal: Journal;
   readonly router: Router;
   readonly settings: SettingsStore;
+  /** What the user's apps say of themselves: language, experiments, the names they give settings. */
+  readonly clients: ClientPreferencesBook;
   readonly providers: ProviderRegistry;
   readonly accounts: AccountStore;
   readonly workforce: AgentStore;
@@ -331,6 +334,7 @@ export class Core {
     this.#stopMoves = scheduleInlineValueMoves(this.journal, (message) => this.log('error', message));
     this.router = new Router();
     this.settings = new SettingsStore(this);
+    this.clients = new ClientPreferencesBook((preferences, before) => this.threads.cards.settleClient(preferences, before));
     this.providers = new ProviderRegistry(this.dataDir);
     this.providers.loadSwitches(this.journal.getSetting(PROVIDER_SWITCHES));
     this.accounts = new AccountStore(this);

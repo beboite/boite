@@ -5,7 +5,7 @@ import type { NativeAgentUpdate } from './delegation';
 import type { MessageId, ProjectId, RequestId, ThreadId, Timestamp, TurnId } from './ids';
 import type { RpcMethods } from './index';
 import type { QuestionAnswer, QuestionOption } from './questions';
-import type { SettingAsk } from './setting-requests.ts';
+import type { AppLanguage, SettingAsk } from './setting-requests.ts';
 import type { ActivityTurn } from './threads';
 import type { Turn } from './turns';
 import type { InlineView } from './view.ts';
@@ -110,6 +110,8 @@ export interface ArtifactContent { url: string; bytes: number; mimeType: string;
 export interface SentFrom {
   client: 'shell' | 'pwa';
   device: string | null;
+  /** The language the app spoke when the prompt left it (`client.preferences`); unset when it had not said. */
+  language?: AppLanguage;
 }
 
 /** The longest `hello` `client.device` the core keeps. */

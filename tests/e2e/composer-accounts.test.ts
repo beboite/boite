@@ -52,7 +52,7 @@ test('queued prompts keep their thread, and browser project and account actions 
     await page.waitFor('document.querySelector("[data-testid=thread-header][data-status]")?.dataset.status === "idle"');
     const userMessages = (await client.call('threads.get', { threadId: a.id })).messages.filter(message => message.role === 'user');
     // The page says hello as the web app in a desktop browser, and each prompt keeps that origin for the agent.
-    const sentFrom = { client: 'pwa', device: 'browser' } as const;
+    const sentFrom = { client: 'pwa', device: 'browser', language: 'en' } as const;
     expect(userMessages.map(message => message.parts)).toEqual([
       [{ type: 'text', text: 'hold here [permission]', sentFrom }],
       [{ type: 'text', text: 'queued only for A\n\nsecond queued for A\n\nthird queued for A', sentFrom }]
