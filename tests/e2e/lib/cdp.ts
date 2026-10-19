@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
-import { cpus, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import type { Subprocess } from 'bun';
@@ -478,9 +478,8 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     }
     if (this.#closed || !this.#socket.open) throw new Error('the browser is closed');
     // A separate, bounded grace preserves useful diagnostics after the condition consumes its budget.
-    const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`, WAIT_DIAGNOSTIC_TIMEOUT_MS).catch(() => null);
-    const page = state === null ? `"page diagnostic timed out"\n${await this.#busyReport()}` : JSON.stringify(state);
-    throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${page}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
+    const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`, WAIT_DIAGNOSTIC_TIMEOUT_MS).catch(() => 'page diagnostic timed out');
+    throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
   }
 
   async navigate(url: string): Promise<void> {
@@ -626,24 +625,24 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
    * it answers while JavaScript runs and waits like any call while the thread
    * is in a layout, a synchronous IPC or a native wait (Edge 155, a busy loop
    * against a synchronous XHR). The browser endpoint gives each process's CPU.
+   * The probes run side by side, so the report adds about a second.
    */
   async #busyReport(): Promise<string> {
     const asked = Date.now();
-    if (await this.send('Runtime.evaluate', { expression: '1' }, 1_000).then(() => true, () => false)) {
-      return `Main thread: answered again ${Date.now() - asked} ms later`;
-    }
-    const interrupt = Date.now();
-    const [inScript, cpu] = await Promise.all([
-      this.send('Performance.getMetrics', {}, 1_000).then(() => Date.now() - interrupt, () => null),
+    const [again, inScript, cpu] = await Promise.all([
+      this.send('Runtime.evaluate', { expression: '1' }, 1_000).then(() => Date.now() - asked, () => null),
+      this.send('Performance.getMetrics', {}, 1_000).then(() => Date.now() - asked, () => null),
       this.#processCpu(),
     ]);
     const lines = [
-      inScript === null
-        ? 'Main thread: not in JavaScript: Performance.getMetrics, a V8 interrupt, got no answer in 1 s either (a layout, a synchronous IPC or a native wait)'
-        : `Main thread: running JavaScript: Performance.getMetrics, a V8 interrupt, answered in ${inScript} ms`,
+      again !== null
+        ? `Main thread: answered again ${again} ms later`
+        : inScript === null
+          ? 'Main thread: not in JavaScript: Performance.getMetrics, a V8 interrupt, got no answer in 1 s either (a layout, a synchronous IPC or a native wait)'
+          : `Main thread: running JavaScript: Performance.getMetrics, a V8 interrupt, answered in ${inScript} ms`,
       `CPU over 1 s: ${cpu}`,
     ];
-    if (HANG_STACK) lines.push(`Stack: ${await this.#pausedStack()}`);
+    if (HANG_STACK && again === null) lines.push(`Stack: ${await this.#pausedStack()}`);
     return lines.join('\n');
   }
 
@@ -661,7 +660,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     }
   }
 
-  /** CPU seconds per second of each process of the browser and of the runner's cores, over one second. */
+  /** CPU seconds per second of each process of the browser, over one second. */
   async #processCpu(): Promise<string> {
     if (this.#debugPort === null) return 'no browser endpoint';
     let socket: TextSocket | undefined;
@@ -679,7 +678,6 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
         replies.set(id, (found) => { clearTimeout(timer); resolve(found); });
         browser.send(JSON.stringify({ id, method: 'SystemInfo.getProcessInfo', params: {} }));
       });
-      const runner = runnerCpu();
       const before = await processes(1);
       const started = performance.now();
       await Bun.sleep(1_000);
@@ -687,7 +685,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
       const seconds = (performance.now() - started) / 1_000;
       const used = after.map((process) => ({ process, rate: (process.cpuTime - (before.find((candidate) => candidate.id === process.id)?.cpuTime ?? 0)) / seconds }));
       const busy = used.filter(({ rate }) => rate >= 0.05).map(({ process, rate }) => `${process.type} ${process.id} ${rate.toFixed(2)}`);
-      return `${busy.join(', ') || 'no process'} at 0.05 s/s or more, ${used.length - busy.length} below; ${await runner}`;
+      return `${busy.join(', ') || 'no process'} at 0.05 s/s or more, ${used.length - busy.length} below`;
     } catch (error) {
       return `could not read it: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
@@ -811,36 +809,6 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     // Pairing and ticket query strings belong to the test, never to its failure log.
     this.#networkFailures.push(`${request.url.split(/[?#]/, 1)[0]} ${reason}`);
     if (this.#networkFailures.length > 10) this.#networkFailures.shift();
-  }
-}
-
-/** How long the runner's CPU reading may take: a cold WMI query took 2 s on a workstation. */
-const RUNNER_CPU_TIMEOUT_MS = 5_000;
-
-/**
- * The runner's CPU over about a second and its busiest processes, another
- * browser or a scanner among them. Bun 1.4's `os.cpus()` times do not move on
- * Windows, so there they come from WMI's formatted counters.
- */
-async function runnerCpu(): Promise<string> {
-  const cores = cpus().length;
-  if (process.platform !== 'win32') {
-    const total = (list: ReturnType<typeof cpus>) => list.reduce((sum, core) => sum + Object.values(core.times).reduce((a, b) => a + b, 0), 0);
-    const idle = (list: ReturnType<typeof cpus>) => list.reduce((sum, core) => sum + core.times.idle, 0);
-    const before = cpus();
-    await Bun.sleep(1_000);
-    const after = cpus();
-    return `runner ${Math.round(100 * (1 - (idle(after) - idle(before)) / Math.max(1, total(after) - total(before))))} % of ${cores} cores`;
-  }
-  try {
-    const query = Bun.spawn(['powershell', '-NoProfile', '-Command',
-      `$total = (Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'").PercentProcessorTime; $top = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Where-Object { $_.Name -notin '_Total', 'Idle' } | Sort-Object PercentProcessorTime -Descending | Select-Object -First 6 | ForEach-Object { "$($_.Name) $($_.PercentProcessorTime) %" }; "runner $total % of ${cores} cores, busiest processes (% of one core): $($top -join ', ')"`,
-    ], { stdout: 'pipe', stderr: 'pipe', windowsHide: true, timeout: RUNNER_CPU_TIMEOUT_MS });
-    const [stdout, stderr] = await Promise.all([new Response(query.stdout).text(), new Response(query.stderr).text(), query.exited]);
-    if (query.signalCode !== null) return `no runner CPU within ${RUNNER_CPU_TIMEOUT_MS} ms`;
-    return stdout.trim() || `no runner CPU; powershell said: ${stderr.slice(0, 200)}`;
-  } catch (error) {
-    return `no runner CPU: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
 
