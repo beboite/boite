@@ -663,8 +663,13 @@ export class ProcRegistry {
   /** Project removal must wait for exit records before deleting the projection. */
   async stopAndWait(threadId: ThreadId): Promise<void> {
     this.killTree(threadId);
+    await this.waitForExit(threadId);
+  }
+
+  /** Waits for exit records of the thread's processes, or of `pids` only, in a thread where newer ones may already run. */
+  async waitForExit(threadId: ThreadId, pids?: number[]): Promise<void> {
     const deadline = Date.now() + 5000;
-    while (this.liveCount(threadId) > 0) {
+    while (pids ? pids.some((pid) => this.live.get(threadId)?.has(pid)) : this.liveCount(threadId) > 0) {
       if (Date.now() >= deadline) throw new Error(`processes of ${threadId} did not exit within five seconds`);
       await new Promise<void>((resolve) => setTimeout(resolve, 25));
     }

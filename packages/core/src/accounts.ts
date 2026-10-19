@@ -633,13 +633,15 @@ export class AccountStore {
     const run = this.logins.get(accountId);
     if (run !== undefined) {
       run.cancelled = true;
+      const pids = this.core.procs.liveOf(loginThreadId(accountId)).map(process => process.pid);
       this.core.procs.killTree(loginThreadId(accountId));
       run.acp?.kill();
       await this.core.procs.stopAndWait(`check:${accountId}`);
       await run.done;
       // The login has closed, but on Windows its pid leaves the registry only
-      // once the Job Object reports the exit: wait for that too.
-      await this.core.procs.stopAndWait(loginThreadId(accountId));
+      // once the Job Object reports the exit: wait for that too. A sign-in
+      // started again meanwhile runs in the same thread and is not waited for.
+      await this.core.procs.waitForExit(loginThreadId(accountId), pids);
     }
     return { ok: true };
   }

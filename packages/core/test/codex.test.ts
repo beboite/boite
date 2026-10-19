@@ -1877,6 +1877,36 @@ test('cancelling a Codex device login closes its process and releases the instal
   }
 });
 
+test('a sign-in started again while the cancelled one leaves does not hold up the cancel', async () => {
+  process.env['CODEX_FAKE_LOGIN_WAIT'] = '1';
+  const client = await startCore();
+  await codexAccount(client);
+  harness!.core.providers.require('codex-fake').login = { command: ['unused-cli-login'] };
+  const { id: accountId } = await client.call('accounts.add', { providerId: 'codex-fake', label: 'Isolated' });
+  const link = client.next('account.login', event => event.accountId === accountId && event.url !== null);
+  await client.call('accounts.login', { accountId });
+  await link;
+  // The cancelled login reads as failed before Windows reports its exit, and the
+  // client may sign in again at once: that new process is not the cancel's to wait for.
+  const registry = harness!.core.procs as unknown as { onJobExited(...args: unknown[]): void };
+  const onJobExited = registry.onJobExited;
+  registry.onJobExited = (...args) => { setTimeout(() => onJobExited.apply(registry, args), 300); };
+  try {
+    const failed = client.next('account.login', event => event.accountId === accountId && event.state === 'failed');
+    const cancel = client.call('accounts.loginCancel', { accountId });
+    await failed;
+    const again = client.next('account.login', event => event.accountId === accountId && event.url !== null);
+    await client.call('accounts.login', { accountId });
+    await again;
+    expect(await cancel).toEqual({ ok: true });
+    expect(harness!.core.procs.liveCount(`login:${accountId}`)).toBe(1);
+  } finally {
+    delete (registry as Partial<typeof registry>).onJobExited;
+  }
+  await client.call('accounts.loginCancel', { accountId });
+  expect(harness!.core.procs.liveCount(`login:${accountId}`)).toBe(0);
+});
+
 describe('native Codex fork', () => {
   async function completed(client: CoreClient, threadId: string, prompt: string) {
     const finished = client.next('turn.finished', turn => turn.threadId === threadId);
