@@ -28,9 +28,12 @@ prerequisites, adjacent runtime files and shell E2E coverage.
 - Native process code belongs behind `ProcessPlatform` in `packages/core/src/platform/`.
   Drivers and RPC handlers must not import an OS backend. The shell's OS
   integration belongs in `apps/shell/src-tauri/src/platform/`.
-- Change `packages/contracts/src/index.ts` before implementing an RPC method,
-  event or shared type. Update the real core and the in-memory client together.
-  Follow [Adding an RPC method](docs/development.md#adding-an-rpc-method).
+- Change the contract before implementing an RPC method, event or shared type:
+  the domain file in `packages/contracts/src/` (`threads.ts`, `providers.ts`),
+  which `index.ts` re-exports. Update the real core and the in-memory client
+  together. Follow [Adding an RPC method](docs/development.md#adding-an-rpc-method);
+  a branch still editing the single `index.ts` runs
+  `bun scripts/migrate/split-contracts.ts` after merging main.
 - Tests and benches use a fresh temporary `BOITE_DATA_DIR`. Real data directories
   and CLI logins are only for explicitly enabled live tests.
 - Kill only a process whose PID the test captured at spawn, or use
@@ -51,8 +54,10 @@ prerequisites, adjacent runtime files and shell E2E coverage.
   webview of that window.
 - UI colors, radii and durations come from `app.css`, strings from
   `lib/strings.ts`, which serves them in the language the app speaks. Write
-  English in `lib/strings.en.ts` and mirror it in every translation
-  ([docs/language.md](docs/language.md)). No native `<select>`,
+  English in `lib/strings/en/<part>.ts` and mirror it in the same part of every translation
+  ([docs/language.md](docs/language.md)); a branch still editing the single
+  `strings.en.ts` runs `bun scripts/migrate/split-catalogues.ts` after merging
+  main. No native `<select>`,
   `window.confirm` or hard-coded hex.
 - Each connected machine owns its client and Store. Route actions through the
   owning Store; project and thread IDs can collide between machines.

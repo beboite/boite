@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { announce, failedTests, namePattern, quarantined } from '../../../scripts/ci/flaky.ts';
 
 // Fresh processes avoid reusing native runtime state between test files.
 const core = resolve(import.meta.dir, '..');
@@ -26,6 +27,7 @@ const files = [...new Bun.Glob('**/*.test.ts').scanSync({ cwd: resolve(core, 'te
 if (!files.length) throw new Error(`${resolve(core, 'test')}: expected at least one .test.ts file`);
 const running = new Set<Bun.Subprocess>();
 const failures: string[] = [];
+const retried: string[] = [];
 const totals = { pass: 0, skip: 0, fail: 0 };
 const started = performance.now();
 let next = 0;
@@ -41,8 +43,8 @@ function stop() {
 process.once('SIGINT', stop);
 process.once('SIGTERM', stop);
 
-async function runFile(file: string) {
-  const child = Bun.spawn([process.execPath, 'test', resolve(core, 'test', file), ...args], {
+async function attempt(file: string, extra: string[]) {
+  const child = Bun.spawn([process.execPath, 'test', resolve(core, 'test', file), ...args, ...extra], {
     cwd: core, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', windowsHide: true,
     env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
   });
@@ -56,15 +58,11 @@ async function runFile(file: string) {
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
     ]);
-    console.log(`\n=== ${file} (exit ${code}${overdue ? `, ended after ${fileDeadlineMs} ms without finishing` : ''}) ===`);
+    const label = extra.length ? `${file}, retry` : file;
+    console.log(`\n=== ${label} (exit ${code}${overdue ? `, ended after ${fileDeadlineMs} ms without finishing` : ''}) ===`);
     if (stdout) process.stdout.write(stdout);
     if (stderr) process.stderr.write(stderr);
-    const output = (stdout + '\n' + stderr).replace(/\x1b\[[0-9;]*m/g, '');
-    for (const field of ['pass', 'skip', 'fail'] as const) {
-      totals[field] += Number(output.match(new RegExp(`(?:^|\\n)\\s*(\\d+) ${field}\\s*(?:\\n|$)`))?.[1] ?? 0);
-    }
-    if (code !== 0) failures.push(file);
-    completed++;
+    return { code, overdue, output: (stdout + '\n' + stderr).replace(/\x1b\[[0-9;]*m/g, '') };
   } finally {
     clearTimeout(deadline);
     // Also reap a captured process if reading its output failed.
@@ -72,6 +70,27 @@ async function runFile(file: string) {
     await child.exited;
     running.delete(child);
   }
+}
+
+async function runFile(file: string) {
+  const first = await attempt(file, []);
+  for (const field of ['pass', 'skip', 'fail'] as const) {
+    totals[field] += Number(first.output.match(new RegExp(`(?:^|\\n)\\s*(\\d+) ${field}\\s*(?:\\n|$)`))?.[1] ?? 0);
+  }
+  // A known flaky test gets one more run on its own (scripts/ci/quarantine.json).
+  const retry = first.code !== 0 && !first.overdue && !halted
+    ? quarantined(failedTests(first.output), [resolve(core, 'test', file)])
+    : undefined;
+  if (retry) {
+    announce(retry);
+    const second = await attempt(file, ['-t', namePattern(retry)]);
+    if (second.code === 0) {
+      totals.fail -= retry.length;
+      totals.pass += retry.length;
+      retried.push(...retry.map(entry => `${file} > ${entry.test}`));
+    } else failures.push(file);
+  } else if (first.code !== 0) failures.push(file);
+  completed++;
 }
 
 try {

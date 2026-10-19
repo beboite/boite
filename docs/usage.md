@@ -289,8 +289,8 @@ ran on. `packages/core/src/pricing/rates.json` lists those rates in USD per
 million tokens for the text models Anthropic, OpenAI, Google, xAI, DeepSeek,
 Moonshot, Z.ai, MiniMax, Mistral, Alibaba and Meta released since 2025, with
 the date it was generated. Each model is four numbers (input, output, cache
-read, cache write) because the table ships in the core bundle, which
-`scripts/ci/budgets.json` caps. `bun scripts/model-rates.ts` regenerates it from
+read, cache write) because the table ships in the core bundle, whose size CI
+checks ([bundle growth](ci.md#bundle-growth)). `bun scripts/model-rates.ts` regenerates it from
 [models.dev](https://models.dev), the catalogue OpenCode prices with; a path
 argument reads a saved copy instead. `packages/core/src/pricing/index.ts`
 matches a model and computes the cost.
@@ -408,9 +408,14 @@ The resume is a `resume` turn with the request id `limit-resume_<turnId>`,
 labelled "Resumed after the usage limit reset", whose prompt asks the agent to
 continue without repeating work.
 
-`turns.cancelRetry` and `turns.stop` cancel either kind; a paired phone may
-call both, since cancelling spends nothing. `?fake=1&retry=capacity` and
-`?fake=1&retry=usage-limit` put each banner on a fake thread.
+Any other failure resumes by itself as an automatic resume
+([restart handoff](restart-handoff.md#turns-that-stop-before-their-answer)),
+shown as `retry` with `kind: 'auto-continue'`.
+
+`turns.cancelRetry` and `turns.stop` cancel every kind; a paired phone may
+call both, since cancelling spends nothing. `?fake=1&retry=capacity`,
+`?fake=1&retry=usage-limit` and `?fake=1&retry=auto-continue` put each banner
+on a fake thread.
 
 ## Paired devices
 

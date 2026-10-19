@@ -14,7 +14,7 @@ requests reviews; approval is not required. The `release tags` policy protects
 
 `scripts/ci/changes.ts` selects jobs from changed paths. Unknown paths run the
 complete suite; renames affect both the old and new path. Every run has a
-`CI required` gate, including documentation-only changes. It requires success
+`CI required` gate, or `CI draft` on a draft, including documentation-only changes. It requires success
 for selected jobs and an intentional skip for the others. Failure, cancellation
 or an unexpected skip blocks it, including jobs whose dependency never started.
 
@@ -24,13 +24,17 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | `apps/shell/` | Windows installer, Rust and native shell E2E; three browser/core E2E shards; portable desktop matrix |
 | `tests/e2e/` | Desktop and E2E checks plus `check:e2e`; `tests/e2e/lib/` also selects stress |
 | `Dockerfile`, `.dockerignore`, `docker/` | Native x64 and ARM64 Docker smoke tests |
-| `packages/ui/` | Full type checks and UI tests, desktop/E2E, Docker and stress |
+| `packages/ui/` | Full type checks and UI tests, desktop/E2E without the shell's Rust tests, Docker and stress; `preview-picker.js` and `preview-highlight.js`, which `browser.rs` embeds, add them |
 | `apps/android/`, `android.yml`, `scripts/ci/android-apk.ts` | Unsigned APK build |
 | `telemetry/` | Full type checks and UI tests plus the existing relay behavior suite |
 | `tests/stress/`, `bench/agent-stress.ts`, `bench/lib/` | Full type checks, UI tests and stress |
 | Other `bench/` files, `scripts/architecture/` | Full type checks and UI tests |
-| Core, contracts, dependencies, shared builds, other workflows and unknown paths | All checks |
+| `packages/core/` | All checks except the shell's Rust tests and the APK |
+| `packages/contracts/` | All checks except the shell's Rust tests |
+| Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
+
+A pull request whose selection includes desktop also runs [Bundle growth](#bundle-growth).
 
 The changes job always installs frozen dependencies, runs `bun audit`, local
 link checks, `bun test scripts/ci ./bench ./apps/shell/scripts`, architecture
@@ -75,9 +79,14 @@ an Intel-only core failure now shows on the main push.
 
 `desktop.yml` holds the desktop builds: the Windows installer job and one job
 per portable platform, named after it (`Desktop / macOS x64`). `ci.yml` calls
-it with the Rust tests; the nightly calls it without them. On Windows they run
-in `Desktop / Windows x64 Rust tests`, a job of their own beside the installer
-build; portable jobs keep them in line. Only `CI required`
+it with the Rust tests when the `shellRust` plan output is on; the nightly calls
+it without them. On Windows they run in `Desktop / Windows x64 Rust tests`, a
+job of their own beside the installer build; portable jobs keep them in line.
+The tests compile `apps/shell/src-tauri` and the two page scripts `browser.rs`
+embeds, and start inline fake cores, so `shellRust` follows those paths and the
+ones that select every check. 7 of the 100 PRs before 2026-10-19 touched them,
+yet all ran the tests: 3.6 runner minutes on Windows, 3.5 on Apple Silicon and
+0.9 on Linux per green PR run. Only `CI required`
 and `PR title` are required checks, so a display name can change freely, except
 the `release.yml` job names that `server-provenance.ts` checks.
 
@@ -102,13 +111,47 @@ a running publication finishes, while newer pending work can supersede older
 pending work.
 
 Artifact uploads retry once, replacing a name reserved by the failed attempt.
-A second failure fails the job. Tests and builds are not retried, with one
-exception. `scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
+A second failure fails the job. Tests and builds are not retried, with two
+exceptions. Tests listed in `scripts/ci/quarantine.json` with their reason run
+once more, alone and in a fresh process, when they fail in the core suite or
+an E2E shard (`scripts/ci/flaky.ts`); the job fails if they fail again, and the
+retry leaves a warning on the run. The retry only happens when every failure
+of that file (core) or shard (E2E) is quarantined and bun named each one: a
+crash, a timed-out file or any other failing test fails at once. The list
+started on 2026-10-18 from the 80 runs that passed on rerun since 2026-10-16:
+tests that failed at least three first attempts. A fixed test leaves the list;
+`flaky.test.ts` fails when an entry no longer exists in its file.
+`scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
 three attempts at most, when hdiutil reports `Resource busy`. That runner
 fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 37213994348 and cost a rerun. Before retrying, it detaches what the failed
 attempt left attached and removes its partial DMGs. Any other failure ends
 the step.
+
+### Draft pull requests
+
+A draft pull request runs `draft` mode: the changes job, the Linux x64 core
+suite, type checks and UI tests, and the focused telemetry and E2E type checks,
+each only when its paths changed. Windows, macOS, desktop packages, E2E,
+stress, Docker and the APK wait. Its gate is named `CI draft`, so branch
+protection never reads a draft's green gate as `CI required` on a head that
+later turns ready. `ready_for_review` starts the `pr` run, and
+`converted_to_draft` cancels a full run in progress. CodeRabbit reviews drafts
+(`.coderabbit.yaml`).
+
+Of the 5,632 runner minutes spent by the 86 pull request runs started on
+2026-10-18 between 12:34 and 21:35 UTC, 2,476 went to runs a newer push
+cancelled, a median 9.8 minutes after the push they tested: the time a review
+bot takes to answer. A green full run
+cost 86 runner minutes; a draft run of the same core change costs about 11,
+all on Linux.
+
+An agent's pull request flow:
+
+1. `gh pr create --draft`.
+2. Fix the draft's CI failures and review findings, batching pushes.
+3. `gh pr ready <number>` once the draft gate is green and the threads are answered.
+4. After that, push only for a full-run failure or a new finding.
 
 ## Build cost
 
@@ -181,12 +224,45 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 492,200 |
-| UI files, excluding `.br` and `.gz` copies | 4,868,600 |
+| UI entry chunk | 492,300 |
+| UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,478,300 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,494,900 |
 
 The total JavaScript measure excludes native binaries and source maps.
+
+On 2026-10-19, PR #622 merged with `origin/main` at `68033379` measures
+4,494,650 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,494,397 for that main: holding a
+roster offer while one is on its way adds 253 bytes. PR #623, which opens Bun
+WebSockets without permessage-deflate, adds 177 more on top of both
+(4,494,827). The core JavaScript limit rises to 4,494,900 to cover the two;
+the other limits stay.
+
+On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
+4,494,324 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,493,506 for that main: the wait
+for a new process's command line (`whenCommandLineReads`) adds 818 bytes. The
+core JavaScript limit rises to 4,494,400; the other limits stay.
+
+On 2026-10-18, automatic resumes (PR #603) merged with `origin/main` at
+`e22bb094` measure 492,249 entry bytes, 4,869,493 UI bytes and 4,493,171 core
+JavaScript bytes with `measure()` after fresh `bun run build:ui` and
+`bun run build:core` on Windows, against 492,112, 4,869,093 and 4,479,099
+recorded below for PR #595: `threads/auto-continue.ts` (the plans, their
+journal record, the crash and background triggers and their prompts) adds
+14,072 core bytes, and the banner's resume wording adds 137 entry and 400 UI
+bytes. The entry and core JavaScript limits rise to 492,300 and 4,493,700; the
+other limits stay.
+
+On 2026-10-18, PR #595 merged with `origin/main` at `80c2da06` measures
+492,112 entry bytes, 4,869,093 UI bytes and 4,479,099 core JavaScript bytes
+with `measure()` after fresh `bun run build:ui` and `bun run build:core` on
+Windows, against 491,872, 4,867,996 and 4,477,807 recorded below for PR #594:
+`files.locate` (the walk that finds a chat link named by the tail of its path)
+adds 1,292 core bytes, and the link's lookup in `Prose.svelte` with its store
+call and strings adds 240 entry and 1,097 UI bytes. The UI and core JavaScript
+limits rise to 4,869,600 and 4,479,600; the other limits stay.
 
 On 2026-10-18, keeping the prompt cache warm (PR #594) merged with
 `origin/main` at `3a19eb57` measures 491,872 entry bytes, 4,867,996 UI bytes
@@ -954,6 +1030,33 @@ total limit 4,070,000; the entry chunk (518,508 bytes) and `main.js` limits are
 unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
+
+### Bundle growth
+
+`bundle-size.yml` builds the UI and the core on Linux for every push to main,
+one job that the next push never cancels, and measures four sizes with
+`scripts/ci/budgets.ts`: the UI entry chunk, the UI files without their `.br`
+and `.gz` copies, the core `dist/main.js`, and all emitted core JavaScript with
+lazy chunks and workers, excluding native binaries and source maps. It keeps
+them 90 days as the `bundle-sizes` artifact. The `Bundle size` job in `ci.yml`
+measures a pull request the same way when the desktop build covers its change. No file in the repository
+holds a limit, so a pull request never edits a shared one to grow:
+`scripts/ci/budgets.json` and the dated size notes above are no longer read.
+
+A pull request is checked twice:
+
+- Against its base: the sizes `bundle-size.yml` kept for the base commit, or
+  the base built in the same job when that run is missing or still going. A measure
+  growing more than 0.1 % fails until the pull request body explains it under
+  a `## Bundle size` heading. The body is read when the job runs: after
+  editing it, rerun the failed jobs (`gh run rerun <run-id> --failed`).
+- Against a ceiling: the sizes `bundle-size.yml` kept for the newest published
+  nightly or release, plus 2 %. A reason does not lift it; only publishing
+  does, so a pull request over it waits for the next nightly or shrinks.
+
+The job summary shows each measure, its base, the growth and the ceiling.
+Reproduce a measurement with `bun run build:ui && bun run build:core &&
+bun scripts/ci/budgets.ts measure sizes.json`.
 
 ### E2E preparation
 

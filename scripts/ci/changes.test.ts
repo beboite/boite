@@ -3,15 +3,38 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { affectedChecks, ciMode, lastGreen, needsCodeChecks, needsWorkflowLint, plan } from './changes.ts';
 
-const none = { core: false, web: false, desktop: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
-const allChecks = { core: true, web: true, desktop: true, server: true, android: true, telemetry: true, e2eTypes: true, stress: true };
+const none = { core: false, web: false, desktop: false, shellRust: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
+const allChecks = { core: true, web: true, desktop: true, shellRust: true, server: true, android: true, telemetry: true, e2eTypes: true, stress: true };
 
 test('checks follow runtime boundaries and combine changed paths', () => {
-  expect(affectedChecks(['apps/shell/src-tauri/src/main.rs'])).toEqual({ ...none, desktop: true });
+  expect(affectedChecks(['apps/shell/src-tauri/src/main.rs'])).toEqual({ ...none, desktop: true, shellRust: true });
   expect(affectedChecks(['Dockerfile'])).toEqual({ ...none, server: true });
   expect(affectedChecks(['packages/ui/src/app.css'])).toEqual({ ...none, web: true, desktop: true, server: true, stress: true });
-  expect(affectedChecks(['packages/core/src/main.ts'])).toEqual(allChecks);
+  expect(affectedChecks(['packages/core/src/main.ts'])).toEqual({ ...allChecks, shellRust: false, android: false });
   expect(affectedChecks(['tests/e2e/ui.test.ts', 'docker/compose.yml'])).toEqual({ ...none, desktop: true, server: true, e2eTypes: true });
+});
+
+test('the shell Rust tests run only for the inputs they compile', () => {
+  // browser.rs embeds two page scripts; the rest of the UI, the core and the contracts never reach the crate.
+  for (const file of ['apps/shell/src-tauri/src/lib.rs', 'apps/shell/src-tauri/Cargo.lock', 'packages/ui/src/lib/preview-picker.js', 'packages/ui/src/lib/preview-highlight.js', '.cargo/config.toml', 'package.json', 'bun.lock']) {
+    expect(affectedChecks([file]).shellRust).toBe(true);
+  }
+  for (const file of ['packages/core/src/main.ts', 'packages/contracts/src/index.ts', 'packages/ui/src/App.svelte', 'packages/ui/src/lib/attention.ts', 'tests/e2e/shell.test.ts', 'Dockerfile']) {
+    const checks = affectedChecks([file]);
+    expect(checks.shellRust).toBe(false);
+    // The desktop builds and their smoke tests still run where the file reaches them.
+    if (file.startsWith('packages/')) expect(checks.desktop).toBe(true);
+  }
+  expect(affectedChecks(['packages/core/src/main.ts', 'apps/shell/src-tauri/src/lib.rs']).shellRust).toBe(true);
+  for (const mode of ['pr', 'warm', 'full'] as const) {
+    expect(plan(affectedChecks(['packages/core/src/main.ts']), mode).shellRust).toBe(false);
+    expect(plan(affectedChecks(['unknown']), mode).shellRust).toBe(true);
+  }
+});
+
+test('the APK follows the contracts it reads, not the core', () => {
+  expect(affectedChecks(['packages/core/src/main.ts']).android).toBe(false);
+  expect(affectedChecks(['packages/contracts/src/index.ts']).android).toBe(true);
 });
 
 test('only the wrapper and its own pipeline build the APK', () => {
@@ -24,7 +47,7 @@ test('ordinary benches and architecture scripts keep the cheap type-check route'
   for (const file of ['bench/retitle.ts', 'scripts/architecture/check.ts']) {
     expect(affectedChecks([file])).toEqual({ ...none, web: true });
   }
-  expect(affectedChecks(['bench/retitle.ts', 'packages/core/src/main.ts'])).toEqual(allChecks);
+  expect(affectedChecks(['bench/retitle.ts', 'packages/core/src/main.ts'])).toEqual({ ...allChecks, shellRust: false, android: false });
 });
 
 test('telemetry-only changes require behavioral relay coverage on PRs and main', () => {
@@ -53,9 +76,10 @@ test('stress fixtures and their bench helpers require the bounded stress suite',
 });
 
 test('shared inputs and unknown files fail open to every check', () => {
-  for (const file of ['bun.lock', 'package.json', 'packages/contracts/src/index.ts', '.github/workflows/ci.yml', 'new-config.json']) {
+  for (const file of ['bun.lock', 'package.json', '.github/workflows/ci.yml', 'new-config.json']) {
     expect(Object.values(affectedChecks([file])).every(Boolean)).toBe(true);
   }
+  expect(affectedChecks(['packages/contracts/src/index.ts'])).toEqual({ ...allChecks, shellRust: false });
   expect(Object.values(affectedChecks(['README.md', '.coderabbit.yaml'])).some(Boolean)).toBe(false);
 });
 
@@ -79,6 +103,9 @@ test('runtime, build inputs and unknown files require the complete suite', () =>
 
 test('pull requests, main pushes and forced runs pick their mode', () => {
   expect(ciMode('pull_request', false)).toBe('pr');
+  expect(ciMode('pull_request', false, true)).toBe('draft');
+  expect(ciMode('pull_request', true, true)).toBe('full');
+  expect(ciMode('push', false, true)).toBe('warm');
   expect(ciMode('push', false)).toBe('warm');
   expect(ciMode('push', true)).toBe('full');
   expect(ciMode('workflow_dispatch', false)).toBe('full');
@@ -100,6 +127,17 @@ test('main pushes run affected tests while warming the extra portable architectu
   expect(full).toMatchObject({ core: true, e2e: true });
   expect(JSON.parse(full.portable)).toHaveLength(4);
   expect(plan(affectedChecks(['README.md']), 'warm')).toMatchObject({ ...none, e2e: false });
+});
+
+test('a draft runs only the Linux checks and leaves the rest to the ready pull request', () => {
+  const all = affectedChecks(['packages/core/src/main.ts']);
+  const draft = plan(all, 'draft');
+  expect(draft).toMatchObject({ core: true, web: true, desktop: false, e2e: false, server: false, android: false, stress: false });
+  expect(JSON.parse(draft.coreRunners)).toEqual([{ os: 'ubuntu-24.04', name: 'Linux x64' }]);
+  // Focused checks still stand in for absent full suites.
+  expect(plan(affectedChecks(['tests/e2e/ui.test.ts']), 'draft')).toMatchObject({ e2eTypes: true, desktop: false, e2e: false });
+  expect(plan(affectedChecks(['telemetry/src/index.ts']), 'draft')).toMatchObject({ web: true, telemetry: true });
+  expect(plan(affectedChecks(['README.md']), 'draft')).toMatchObject({ ...none, e2e: false });
 });
 
 test('pull requests run the core suite without the Intel Mac; main, releases and manual runs keep it', () => {
@@ -131,20 +169,25 @@ test('focused checks are covered by the full core and web jobs when both apply',
 const python = Bun.which(process.platform === 'win32' ? 'python' : 'python3');
 test.skipIf(!python)('the actual required gate rejects failed, cancelled and unexpected job skips', () => {
   const workflow = readFileSync(join(import.meta.dir, '../../.github/workflows/ci.yml'), 'utf8');
-  expect(workflow).toContain('name: CI required');
+  expect(workflow).toContain("name: ${{ github.event.pull_request.draft == true && 'CI draft' || 'CI required' }}");
   const match = /          python3 - <<'PY'\n([\s\S]+?)          PY/.exec(workflow);
   if (!match) throw new Error('ci.yml: missing required gate Python script');
   const script = match[1]!.replace(/^ {10}/gm, '');
   const names = ['core', 'web', 'desktop', 'server', 'android', 'telemetry', 'e2e-types', 'stress', 'e2e'];
   const outputFor = (name: string) => name === 'e2e-types' ? 'e2eTypes' : name;
-  const cases: { jobs: object; success: boolean }[] = [];
+  const cases: { jobs: object; success: boolean; event?: string }[] = [];
   for (const selected of [names, ['web', 'telemetry'], ['desktop', 'e2e-types', 'e2e'], ['web', 'stress'], []]) {
     const outputs = Object.fromEntries(names.map(name => [outputFor(name), String(selected.includes(name))]));
     const jobs = { changes: { result: 'success', outputs }, ...Object.fromEntries(names.map(name => [name, {
       result: selected.includes(name) ? 'success' : 'skipped',
     }])) } as Record<string, { result: string; outputs?: Record<string, string> }>;
+    // The bundle size job runs with desktop, on pull requests only.
+    const desktop = selected.includes('desktop');
+    jobs.size = { result: desktop ? 'success' : 'skipped' };
     cases.push({ jobs, success: true });
-    for (const name of ['changes', ...selected]) {
+    cases.push({ jobs: { ...jobs, size: { result: 'skipped' } }, success: true, event: 'push' });
+    cases.push({ jobs: { ...jobs, size: { result: desktop ? 'skipped' : 'success' } }, success: false });
+    for (const name of ['changes', ...selected, ...(desktop ? ['size'] : [])]) {
       for (const result of ['failure', 'cancelled', 'skipped']) {
         cases.push({ jobs: { ...jobs, [name]: { ...jobs[name], result } }, success: false });
       }
@@ -160,6 +203,7 @@ script = compile(os.environ['GATE_SCRIPT'], 'ci.yml', 'exec')
 cases = json.load(sys.stdin)
 for index, case in enumerate(cases):
     os.environ['RESULTS'] = json.dumps(case['jobs'])
+    os.environ['EVENT'] = case.get('event', 'pull_request')
     try:
         exec(script, {})
         success = True

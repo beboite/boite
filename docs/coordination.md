@@ -39,7 +39,9 @@ automatic coordination; Resume enables it again. Stop
 and a failed turn pause coordination too. A core restart pauses conversations
 with unfinished turns or pending messages; idle conversations without pending
 work remain reachable. A pause the core applied by itself ends with your next
-message in that conversation, so the agent can be woken again; a pause you set
+message in that conversation, with a turn that resumes it after a restart or a
+failure, or with its parent's message to a subagent, so the agent can be woken
+again; a pause you set
 in Communication settings stays until you resume it. Paired devices can read the panel;
 only an owner
 connection can change permissions.

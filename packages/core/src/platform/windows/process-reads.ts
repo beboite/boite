@@ -96,6 +96,37 @@ export function commandLineOf(api: ProcessReads, handle: number): string | null 
   return Buffer.from(text.buffer, 0, length).toString('utf16le');
 }
 
+/**
+ * Gives `done` the command line once it reads, `first` being the read already
+ * made. A job reports a new process before Windows has written its parameters:
+ * on windows-2025 a ping's name and parent read while its command line was
+ * still empty. The line is read again every `retryMs`, `tries` times at most,
+ * then `done` gets null. Null when `done` ran already; otherwise `flush`
+ * settles at once with what reads now, for a process that exits first, and
+ * `cancel` drops it.
+ */
+export function whenCommandLineReads(api: ProcessReads, handle: number, first: string | null, done: (line: string | null) => void, tries = 20, retryMs = 5): { flush(): void; cancel(): void } | null {
+  if (first !== null || !api.hasNt) { done(first); return null; }
+  let settled = false;
+  let attempt = 0;
+  const settle = (line: string | null) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    done(line);
+  };
+  const poll = () => {
+    const line = commandLineOf(api, handle);
+    if (line !== null || ++attempt >= tries) settle(line);
+    else timer = setTimeout(poll, retryMs);
+  };
+  let timer = setTimeout(poll, retryMs);
+  return {
+    flush: () => settle(commandLineOf(api, handle)),
+    cancel: () => { settled = true; clearTimeout(timer); },
+  };
+}
+
 function readPointer(api: ProcessReads, handle: number, address: bigint): bigint | null {
   const buffer = new Uint8Array(8);
   if (!api.readMemory(handle, address, buffer)) return null;
