@@ -449,11 +449,6 @@ jobs:
       BOITE_E2E_FAKE_UI: tests/e2e/.artifacts/fake-ui
       E2E_SHARD: 1
     steps: &e2e-steps
-      # The test step stops a run still going 4 min before the job's limit,
-      # which counts from about here, and leaves a report for the failure
-      # captures (scripts/ci/hang-watch.ts, docs/ci.md#hung-test-runs).
-      - name: Note when the job started
-        run: Add-Content $env:GITHUB_ENV "BOITE_JOB_STARTED_MS=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
       # A stale draft run, or a rerun draft run whose planning did not pass,
       # fails here rather than skip (changes job).
       - name: Stop a stale draft run
@@ -461,6 +456,11 @@ jobs:
         run: |
           echo "::error::a rerun draft run whose planning did not pass or whose pull request is ready fails; rerun the latest ready run instead"
           exit 1
+      # The test step stops a run still going 4 min before the job's limit,
+      # which counts from about the job's start, and leaves a report for the failure
+      # captures (scripts/ci/hang-watch.ts, docs/ci.md#hung-test-runs).
+      - name: Note when the job started
+        run: Add-Content $env:GITHUB_ENV "BOITE_JOB_STARTED_MS=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
