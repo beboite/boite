@@ -44,6 +44,8 @@ export function createBrowserFixture() {
   let later = laterGate();
   /** The user agent of the last request for each path: what a site sees. */
   const agents = new Map<string, string | null>();
+  /** How many freezes of an `/animated` page have landed: the page says so from its `freeze` event. */
+  let freezes = 0;
   beforeAll(() => {
     site = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => {
       const path = new URL(request.url).pathname;
@@ -65,7 +67,9 @@ export function createBrowserFixture() {
       // Draws `hz` times a second, like a video or an animation slower than the screen.
       if (path === '/ticking') return new Response(`<title>Ticking</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},${1000 / Number(new URL(request.url).searchParams.get('hz') ?? 10)})</script>`, { headers: { 'content-type': 'text/html' } });
       // Animates every frame and every 16 ms; `gaps()` returns the longest pause of each since it was last called, the one still running included: a read right after a wake can run before the next frame.
-      if (path === '/animated') return new Response('<title>Animated</title><script>let last=performance.now(),gap=0,tick=Date.now(),tickGap=0;function draw(t){gap=Math.max(gap,t-last);last=t;requestAnimationFrame(draw)}requestAnimationFrame(draw);setInterval(()=>{const now=Date.now();tickGap=Math.max(tickGap,now-tick);tick=now},16);window.gaps=()=>{const r=[Math.round(Math.max(gap,performance.now()-last)),Math.max(tickGap,Date.now()-tick)];gap=0;tickGap=0;return r}</script>', { headers: { 'content-type': 'text/html' } });
+      // It tells `/animated/frozen` when its freeze lands. With `busy`, it works that many ms as it is hidden, the way a loaded runner's renderer was still running it after the browser had answered the freeze.
+      if (path === '/animated/frozen') { freezes++; return new Response(null, { status: 204 }); }
+      if (path === '/animated') return new Response(`<title>Animated</title><script>let last=performance.now(),gap=0,tick=Date.now(),tickGap=0;const busy=${Number(new URL(request.url).searchParams.get('busy') ?? 0)};function draw(t){gap=Math.max(gap,t-last);last=t;requestAnimationFrame(draw)}requestAnimationFrame(draw);const ticked=()=>{const now=Date.now();tickGap=Math.max(tickGap,now-tick);tick=now};setInterval(ticked,16);document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden'||!busy)return;for(const end=Date.now()+busy;Date.now()<end;);ticked()});document.addEventListener('freeze',()=>navigator.sendBeacon('/animated/frozen'));window.gaps=()=>{const r=[Math.round(Math.max(gap,performance.now()-last)),Math.max(tickGap,Date.now()-tick)];gap=0;tickGap=0;return r}</script>`, { headers: { 'content-type': 'text/html' } });
       if (path === '/moving') return new Response('<title>Moving</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},16)</script>', { headers: { 'content-type': 'text/html' } });
       return new Response('missing', { status: 404 });
     } });
@@ -169,6 +173,7 @@ export function createBrowserFixture() {
     real, url, evaluate, fakeHost, agents,
     releaseLaterDialog() { later.release(); },
     laterDialogDone() { return later.done; },
+    frozen() { return freezes; },
     get harness() { return harness; },
     get owner() { return owner; },
     get agent() { return agent; },
