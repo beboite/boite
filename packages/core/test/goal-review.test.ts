@@ -12,6 +12,9 @@ beforeEach(async () => { h = await startTestCore(); });
 afterEach(async () => { restore?.(); restore = undefined; await h.stop(); });
 
 const isReview = (ctx: TurnContext) => ctx.prompt.includes('You review a Boite goal');
+/** A checklist pass: here it lists the objective as one item and sees it done after the first turn. */
+const tracked = (ctx: TurnContext) => h.core.activity.ownsTracker(ctx.thread.id);
+const checklist = (ctx: TurnContext) => ctx.prompt.includes('Say which open items') ? '```json\n{"done":[1]}\n```' : '```json\n{"items":[{"text":"Do the objective","source":"objective"}]}\n```';
 
 /** An echo agent that answers with `answer(ctx)` and finishes at once. */
 function agent(answer: (ctx: TurnContext) => string): () => void {
@@ -19,7 +22,7 @@ function agent(answer: (ctx: TurnContext) => string): () => void {
     protocol: 'echo',
     startTurn(ctx) {
       const id = ctx.emit.startMessage('assistant');
-      ctx.emit.part(id, 0, { type: 'text', text: answer(ctx) });
+      ctx.emit.part(id, 0, { type: 'text', text: tracked(ctx) ? checklist(ctx) : answer(ctx) });
       ctx.emit.complete(id, 'complete');
       return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
     },
@@ -72,10 +75,11 @@ test('a reviewed goal sends its claim to a fresh reviewer and works on the findi
   expect((h.core.journal.db.query('SELECT count(*) AS n FROM delegation_messages').get() as { n: number }).n).toBe(0);
   const thread = await client.call('threads.get', { threadId });
   const prompts = thread.messages.filter(m => m.role === 'user').map(m => m.parts[0]);
-  expect(prompts).toEqual([
-    { type: 'text', text: '/goal2 Fix the parser', activity: { kind: 'goal', iteration: 1 } },
-    { type: 'text', text: '/goal2 Fix the parser', activity: { kind: 'goal', iteration: 2, review: { round: 1, feedback: '- The parser test fails: expected 2, got 3' } } },
-  ]);
+  // The first turn may start before or after the checklist is written; the second always follows its check.
+  expect(prompts).toHaveLength(2);
+  expect(prompts[0]).toMatchObject({ type: 'text', text: '/goal2 Fix the parser', activity: { kind: 'goal', iteration: 1 } });
+  expect(prompts[0]).not.toHaveProperty('activity.review');
+  expect(prompts[1]).toEqual({ type: 'text', text: '/goal2 Fix the parser', activity: { kind: 'goal', iteration: 2, review: { round: 1, feedback: '- The parser test fails: expected 2, got 3' }, checklist: { open: [], bounced: false } } });
 });
 
 test('a reviewed goal stops for the user after five failed reviews, and each reply allows one more', async () => {
@@ -116,7 +120,7 @@ test('pausing a reviewed goal stops its reviewer, and resuming starts a fresh re
     startTurn(ctx) {
       const id = ctx.emit.startMessage('assistant');
       if (!isReview(ctx)) {
-        ctx.emit.part(id, 0, { type: 'text', text: 'Done.\n[BOITE_GOAL_COMPLETE]' });
+        ctx.emit.part(id, 0, { type: 'text', text: tracked(ctx) ? checklist(ctx) : 'Done.\n[BOITE_GOAL_COMPLETE]' });
         ctx.emit.complete(id, 'complete');
         return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
       }

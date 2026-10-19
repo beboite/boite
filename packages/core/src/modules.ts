@@ -88,6 +88,7 @@ export function registerModules(core: Core): void {
   registerProjectMethods(core);
   registerProviderMethods(core);
   const probe = registerProbeMethods(core);
+  core.activity.useProbe(probe);
   core.router.register('delegation.result', params => core.delegation.resultPage(params));
   core.router.register('delegation.wait', (params, ctx) => core.delegation.wait(params, ctx.connection));
   core.router.register('delegation.get', params => core.delegation.get(params.threadId));

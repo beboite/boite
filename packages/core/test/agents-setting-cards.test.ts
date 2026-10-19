@@ -120,3 +120,23 @@ test("an agent asks about its own settings from its conversation; a change from 
   await waitFor(() => cards(self).length === 0);
   expect(drawn(self, helpers!.id)!.answer).toBeNull();
 });
+
+test('an agent whose stored model its provider no longer lists still takes a projects card; a new unlisted model is refused', async () => {
+  const { h, owner, worker, notes, agent, run, profile, cards } = await setup();
+  // A gateway once listed `echo/echo`; the provider lists only `echo` now.
+  const { id: _id, revision, createdAt: _c, updatedAt: _u, ...draft } = profile();
+  h.core.workforce.records.update('profile', agent.id, revision, { ...draft, selection: { ...draft.selection, model: 'echo/echo', effort: 'medium' } });
+
+  await owner.call('turns.start', { threadId: worker, prompt: 'Prepare the release' });
+  await waitFor(() => h.core.journal.listTurns(worker).some(t => t.status === 'done'));
+  const asked = await run(['settings', 'agent', 'request', 'projects', '+Notes', '--agent', 'Ada', '--why', 'Watch the notes.'], worker);
+  expect(asked.err).toBe('');
+  const [card] = cards(worker);
+  await owner.call('agents.settings.apply', { threadId: worker, questionId: card!.id });
+  expect(profile().projectIds).toEqual([notes.id]);
+  expect(profile().selection).toMatchObject({ model: 'echo/echo', effort: 'medium' });
+
+  // Choosing a model is still checked.
+  await expect(owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), selection: { ...profile().selection, model: 'echo/other' } } }))
+    .rejects.toThrow('the provider does not offer this model');
+});

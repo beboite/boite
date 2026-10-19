@@ -1,9 +1,22 @@
 /** The project todo lists every thread of a project shares. */
-import { TODO_STATUSES, type Todo } from '@boite/contracts';
+import { TODO_STATUSES, type Thread, type Todo, type TodoGoal } from '@boite/contracts';
 import { refusal, todoText } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 
-/** The project's cards, the ones already done last, the core's order. */
+/** A `/goal2`'s state as its card shows it, as the core reads it on every send. */
+function goalOf(thread: Thread | undefined): TodoGoal | null {
+  const goal = thread?.activity?.goal;
+  if (!goal?.review) return null;
+  return { status: goal.status, reviewing: goal.review.phase === 'reviewing', checklist: goal.checklist ?? null };
+}
+
+/** The conversation a card still links: one gone or moved to another project no longer counts, as in the core. */
+function liveLink(ctx: FakeContext, todo: Todo): string | null {
+  const thread = todo.goalThreadId ? ctx.threads.get(todo.goalThreadId) : undefined;
+  return thread && thread.projectId === todo.projectId ? thread.id : null;
+}
+
+/** The project's cards, the ones already done last, the core's order, each linked one with its goal. */
 function projectTodos(ctx: FakeContext, projectId: string | null): Todo[] {
   if (projectId === null) throw refusal('this agent session has no project');
   const rank = (todo: Todo): number => (todo.status === 'done' ? 1 : 0);
@@ -11,7 +24,34 @@ function projectTodos(ctx: FakeContext, projectId: string | null): Todo[] {
     ctx.todos
       .filter((todo) => todo.projectId === projectId)
       .sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt)
+      .map((todo) => {
+        if (!todo.goalThreadId) return todo;
+        const link = liveLink(ctx, todo);
+        if (link === null) return { ...todo, goalThreadId: null };
+        const goal = goalOf(ctx.threads.get(link));
+        return goal ? { ...todo, goal } : todo;
+      })
   );
+}
+
+/**
+ * A linked conversation's goal moved: its board hears it, and a review that
+ * passed after the card last moved leaves the open card claimed, as the core does.
+ */
+export function followGoal(ctx: FakeContext, thread: Thread): void {
+  const linked = ctx.todos.filter((todo) => todo.goalThreadId === thread.id);
+  if (!linked.length || thread.projectId === null) return;
+  const goal = thread.activity?.goal;
+  const verdict = goal?.review?.verdicts.at(-1);
+  const passedAt = goal?.status === 'complete' && verdict?.verdict === 'pass' ? verdict.finishedAt : null;
+  for (const todo of linked) {
+    if (passedAt !== null && todo.status === 'open' && todo.updatedAt < passedAt) {
+      todo.status = 'claimed';
+      todo.threadId = thread.id;
+      todo.updatedAt = ctx.now();
+    }
+  }
+  emitTodos(ctx, thread.projectId);
 }
 
 /** A list is shared by the project, so the whole of it travels on every change. */
@@ -51,12 +91,20 @@ export function todoMethods(ctx: FakeContext) {
       if (params.status !== undefined && !TODO_STATUSES.includes(params.status)) {
         throw refusal(`a todo is ${TODO_STATUSES.join(', ')}, not ${String(params.status)}`);
       }
+      if (params.goalThreadId && ctx.threads.get(params.goalThreadId)?.projectId !== thread.projectId) {
+        throw refusal(`goalThreadId ${params.goalThreadId} is not a conversation of this card's project`);
+      }
+      const linked = liveLink(ctx, todo);
+      if (params.goalThreadId && linked !== null && linked !== params.goalThreadId) {
+        throw refusal(`todo ${params.todoId} already works in conversation ${linked}; unlink it with goalThreadId null first`);
+      }
       if (params.text !== undefined) todo.text = todoText(params.text);
       if (params.status !== undefined) todo.status = params.status;
+      if (params.goalThreadId !== undefined) todo.goalThreadId = params.goalThreadId;
       todo.threadId = thread.id;
       todo.updatedAt = ctx.now();
       emitTodos(ctx, thread.projectId);
-      return structuredClone(todo);
+      return projectTodos(ctx, thread.projectId).find((one) => one.id === todo.id)!;
     },
     'todos.remove': async (params) => {
       const thread = ctx.thread(params.threadId);

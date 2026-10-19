@@ -62,6 +62,10 @@ export class SettingsStore {
         });
       }
     }
+    const tracker = checked.patch.goalTracker;
+    if (tracker !== undefined && tracker !== null && this.core.providers.get(tracker.providerId) === undefined) {
+      throw invalidParams(`goalTracker names ${tracker.providerId}, which is not a loaded provider`, { field: 'goalTracker', expected: this.core.providers.available().map(provider => provider.id) });
+    }
     return checked.patch;
   }
 

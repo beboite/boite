@@ -265,6 +265,11 @@ settings. Methods absent from the list remain owner-only, including newly
 added methods. A refusal names the method, such as
 `projects.add is for the owner only`.
 
+A paired device reads and moves the project's todos for the board
+([board.md](board.md)): `todos.list`, `todos.add`, `todos.update` and
+`todos.remove`, with `todos.updated` for every project. It confirms and removes
+cards as the owner does; an agent only claims one.
+
 The Changes and Files panels are read-only on a paired device: `git.status`,
 `git.diff`, `files.list` and `files.read`, never `files.write`, Tasks or the
 trace. The core runs git itself, refuses a device diff against any revision but

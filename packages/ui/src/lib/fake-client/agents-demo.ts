@@ -1,5 +1,6 @@
 import type { AgentMessageFile, ArtifactContent, Message, Turn } from '@boite/contracts';
 import { requestAgentSetting } from './agent-settings';
+import { askAsync } from './requests';
 import type { FakeContext } from './context';
 import { FAKE_MEDIA } from './files';
 
@@ -57,4 +58,5 @@ function askForAnotherProject(ctx: FakeContext): void {
   const turn: Turn = { id: `turn-agents-demo-${++ctx.seq}`, threadId: thread.id, status: 'done', queuedAt: at, startedAt: at, finishedAt: at + 60_000, usage: null, error: null };
   thread.turns.push(turn);
   requestAgentSetting(ctx, thread, turn, { threadId: thread.id, key: 'projects', value: { add: [next.id] }, reason: `${next.name} has threads nobody follows. Entrust it to me and I will watch them the way I watch the others.` });
+  askAsync(ctx, thread, turn, null, 'dashboard.example.com: to read the failed deploy logs on the staging dashboard.', ['Signed in', 'Skip'], false, 'https://dashboard.example.com/login');
 }

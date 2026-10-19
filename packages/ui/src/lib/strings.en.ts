@@ -63,6 +63,7 @@ import { strings as composer } from './strings/en/composer';
 import { strings as rightPanel } from './strings/en/rightPanel';
 import { strings as changes } from './strings/en/changes';
 import { strings as tasks } from './strings/en/tasks';
+import { strings as board } from './strings/en/board';
 import { strings as files } from './strings/en/files';
 import { strings as browserTools } from './strings/en/browserTools';
 import { strings as browser } from './strings/en/browser';
@@ -151,6 +152,7 @@ export const strings = {
   ...rightPanel,
   ...changes,
   ...tasks,
+  ...board,
   ...files,
   ...browserTools,
   ...browser,

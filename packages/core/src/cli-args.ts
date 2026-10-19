@@ -12,6 +12,8 @@ export interface Parsed {
   requestId?: string;
   worktree: boolean;
   title?: string;
+  /** `boite ask --open <url>`: the page the card opens. */
+  open?: string;
   name?: string;
   model?: string;
   effort?: string;
@@ -74,6 +76,7 @@ export function parse(argv: string[]): Parsed {
     else if (numeric !== undefined) parsed[numeric] = number(arg, next());
     else if (arg === '--request-id') parsed.requestId = next();
     else if (arg === '--title') parsed.title = next();
+    else if (arg === '--open') parsed.open = next();
     else if (arg === '--name') parsed.name = next();
     else if (arg === '--project') parsed.project = next();
     else if (arg === '--why') parsed.why = next();

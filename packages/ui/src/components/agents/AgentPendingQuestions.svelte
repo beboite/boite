@@ -6,6 +6,7 @@
   import AgentSettingCard from '../AgentSettingCardLoader.svelte';
   import SettingRequestCard from '../SettingRequestCardLoader.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
+  import { openQuestionPage } from '../../lib/question-page';
 
   /**
    * The cards a persistent agent's hidden session threads wait on, drawn in its
@@ -61,6 +62,9 @@
       </header>
       <p class="agent-ask-question">{question.text}</p>
       <form class="agent-ask-answers" onsubmit={e => { e.preventDefault(); void send(question, chosen); }}>
+        {#if question.open}
+          <button type="button" class="chip" title={question.open.url} onclick={() => openQuestionPage(store, question.threadId, question.id)} data-testid="question-open">{strings.chat.questionOpenPage}</button>
+        {/if}
         {#each question.options as option (option.id)}
           <button type="button" class="chip" class:on={chosen.includes(option.id)} aria-pressed={question.multiple ? chosen.includes(option.id) : undefined}
             title={option.description} disabled={sending[question.id]} onclick={() => pick(question, option.id)} data-testid="agent-question-option">{option.label}</button>

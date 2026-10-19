@@ -6,6 +6,12 @@ import shellConfig from '../../../../apps/shell/src-tauri/tauri.conf.json';
 
 export const UPDATE_PUBLIC_KEY = shellConfig.plugins.updater.pubkey;
 const REPOSITORY = 'https://github.com/beboite/boite';
+/**
+ * Where a release's files may live. The repository moves from beboite to
+ * mtsu-dev: manifests published before the move name the old owner, later ones
+ * the new, and GitHub redirects the old addresses.
+ */
+const OWNERS = ['https://github.com/mtsu-dev/boite', REPOSITORY];
 const API = 'https://api.github.com/repos/beboite/boite/releases?per_page=100';
 const MAX_ARCHIVE_BYTES = 160 * 1024 * 1024;
 const MAX_UNPACKED_BYTES = 400 * 1024 * 1024;
@@ -44,11 +50,11 @@ export async function findServerOffer(current: string, arch: string, signal: Abo
   const payload = manifest.platforms?.[target];
   if (!payload) return null; // Releases published before server bundles are never installation offers.
   const file = `boite-server_${version}_${arch}.zip`;
-  const expected = `${REPOSITORY}/releases/download/v${version}/${file}`;
-  if (payload.url !== expected || typeof payload.signature !== 'string' || payload.signature.length > 8192) {
+  const url = OWNERS.map(owner => `${owner}/releases/download/v${version}/${file}`).find(expected => payload.url === expected);
+  if (!url || typeof payload.signature !== 'string' || payload.signature.length > 8192) {
     throw new Error(`Update payload must be the signed ${file} of this release`);
   }
-  return { version, publishedAt: release.published_at, url: expected, signature: payload.signature };
+  return { version, publishedAt: release.published_at, url, signature: payload.signature };
 }
 
 interface Minisign { prehashed: boolean; key: KeyObject; signed: Buffer; comment: string; global: Buffer }

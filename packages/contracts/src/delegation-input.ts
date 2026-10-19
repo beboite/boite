@@ -1,7 +1,7 @@
 import type { DelegationInput, PermissionRequest, QuestionAnswer, QuestionRequest } from './index';
 
-/** Settings cards are the owner's to decide: they never go to a delegated agent's parent. */
-export const delegationAnswerable = (question: QuestionRequest): boolean => question.setting === undefined && question.agentSetting === undefined;
+/** Settings cards and pages to sign in to are the owner's: they never go to a delegated agent's parent. */
+export const delegationAnswerable = (question: QuestionRequest): boolean => question.setting === undefined && question.agentSetting === undefined && question.open === undefined;
 
 /** What a delegated child waits on from someone, oldest first. */
 export function delegationNeeds(questions: QuestionRequest[], permissions: PermissionRequest[]): DelegationInput[] {

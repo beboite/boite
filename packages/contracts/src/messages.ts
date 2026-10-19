@@ -197,6 +197,8 @@ export type MessagePart =
       setting?: SettingAsk;
       /** An agent setting card: see `QuestionRequest.agentSetting`. */
       agentSetting?: AgentSettingAsk;
+      /** A page to open: see `QuestionRequest.open`. */
+      open?: { url: string };
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is

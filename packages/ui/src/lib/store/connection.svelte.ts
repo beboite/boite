@@ -170,6 +170,7 @@ export class Connection {
             delegationDemo: params.get('team') === '1',
             agentsDemo: params.get('agents') === '1',
             subagentsDemo: params.get('subagents') === '1',
+            boardDemo: params.get('board') === '1',
             watchDemo: params.get('watch') === '1',
             uninstalled: params.get('uninstalled') === '1',
             ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {}),

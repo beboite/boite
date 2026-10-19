@@ -165,7 +165,7 @@
   .live { display: flex; align-items: center; gap: 6px; margin-left: auto; }
   .live > span[aria-hidden] { width: 6px; height: 6px; border-radius: 50%; background: var(--color-success); }
   .live.paused > span[aria-hidden] { background: var(--color-muted-foreground); }
-  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+  .toolbar { display: flex; gap: 12px; align-items: center; max-width: var(--settings-width); margin-bottom: 16px; }
   .search { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 0 12px; border: 1px solid var(--color-edge); border-radius: var(--radius-md); }
   .search input { width: 100%; min-width: 0; border: 0; background: transparent; padding: 10px 0; }
   .agent { margin-bottom: 12px; padding: 16px; }

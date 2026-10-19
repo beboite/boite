@@ -351,7 +351,7 @@ boite diff [file]                open the changes surface, or one file's diff
 boite browse <url>               open the url in a new tab of this conversation's browser (http, https)
 boite open trace|tasks|changes|files [dir]
 boite status                     git status: branch, upstream, one row per change
-boite ask <question> [option ...] [--multiple]
+boite ask <question> [option ...] [--multiple] [--open <url>]
 boite task list|add <text>|start <id>|done <id>|remove <id>|clear
 boite todo list|add <text>|claim <id>
 boite agents list|inbox
@@ -508,7 +508,7 @@ Task ids are `t1`, `t2` and so on, allocated by the CLI; `start 2` and
 progress, `[x]` completed. A todo is a card of the project's list, shared by
 every thread of the project: an agent adds one or claims one, which marks it
 finished and awaiting the user's confirmation; `done` and removal are the user's
-in the Tasks surface. An agent's add is refused once the project holds 200 open
+in the Tasks surface and on the project board ([board.md](board.md)). An agent's add is refused once the project holds 200 open
 or claimed cards, with the count in the refusal; the user's adds have no limit.
 
 `ask` draws a question card in the thread without stopping the agent: the
@@ -516,7 +516,8 @@ thread does not turn `waiting` and the card stays open after the turn ends.
 A core restart keeps it too: an open card is read back from the journal at
 startup, for as long as events are kept (30 days).
 Each extra argument is an option label; with none the question takes free
-text, and `--multiple` lets the user pick several. The answer reaches the agent
+text, and `--multiple` lets the user pick several. `--open <url>` adds an Open
+button for a page the user must sign in to (docs/browser.md). The answer reaches the agent
 as a message that quotes the question, `> question` then the answer: steered
 into the running turn when the agent takes steering (Codex, pi, Muse, Grok),
 handed to Claude at the main agent's next tool call through the PostToolUse

@@ -360,6 +360,13 @@ export class Store {
   terminalShown(...args: Parameters<Terminals['terminalShown']>) { return this.#ctx.terminals.terminalShown(...args); }
   terminalSession(...args: Parameters<Terminals['terminalSession']>) { return this.#ctx.terminals.terminalSession(...args); }
   toggleTerminal(...args: Parameters<Terminals['toggleTerminal']>) { return this.#ctx.terminals.toggleTerminal(...args); }
+  get boardShown() { return this.#ctx.terminals.boardShown; }
+  get drawerTab() { return this.#ctx.terminals.drawerTab; }
+  boardAvailable(...args: Parameters<Terminals['boardAvailable']>) { return this.#ctx.terminals.boardAvailable(...args); }
+  toggleDrawer(...args: Parameters<Terminals['toggleDrawer']>) { return this.#ctx.terminals.toggleDrawer(...args); }
+  toggleBoard(...args: Parameters<Terminals['toggleBoard']>) { return this.#ctx.terminals.toggleBoard(...args); }
+  showBoard(...args: Parameters<Terminals['showBoard']>) { return this.#ctx.terminals.showBoard(...args); }
+  hideBoard(...args: Parameters<Terminals['hideBoard']>) { return this.#ctx.terminals.hideBoard(...args); }
   hideTerminal(...args: Parameters<Terminals['hideTerminal']>) { return this.#ctx.terminals.hideTerminal(...args); }
   openTerminal(...args: Parameters<Terminals['openTerminal']>) { return this.#ctx.terminals.openTerminal(...args); }
   loginTerminal(...args: Parameters<Terminals['loginTerminal']>) { return this.#ctx.terminals.loginTerminal(...args); }
@@ -737,6 +744,8 @@ export class Store {
   unwatchPullRequest(...args: Parameters<Workbench['unwatchPullRequest']>) { return this.#ctx.workbench.unwatchPullRequest(...args); }
   updateTodo(...args: Parameters<Workbench['updateTodo']>) { return this.#ctx.workbench.updateTodo(...args); }
   removeTodo(...args: Parameters<Workbench['removeTodo']>) { return this.#ctx.workbench.removeTodo(...args); }
+  startCardGoal(...args: Parameters<Workbench['startCardGoal']>) { return this.#ctx.workbench.startCardGoal(...args); }
+  resumeCardGoal(...args: Parameters<Workbench['resumeCardGoal']>) { return this.#ctx.workbench.resumeCardGoal(...args); }
   refreshResources(...args: Parameters<Workbench['refreshResources']>) { return this.#ctx.workbench.refreshResources(...args); }
   killTree(...args: Parameters<Workbench['killTree']>) { return this.#ctx.workbench.killTree(...args); }
 }

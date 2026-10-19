@@ -67,6 +67,7 @@ import { fr as composer } from './strings/fr/composer';
 import { fr as rightPanel } from './strings/fr/rightPanel';
 import { fr as changes } from './strings/fr/changes';
 import { fr as tasks } from './strings/fr/tasks';
+import { fr as board } from './strings/fr/board';
 import { fr as files } from './strings/fr/files';
 import { fr as browserTools } from './strings/fr/browserTools';
 import { fr as browser } from './strings/fr/browser';
@@ -155,6 +156,7 @@ export const fr: Translation = {
   ...rightPanel,
   ...changes,
   ...tasks,
+  ...board,
   ...files,
   ...browserTools,
   ...browser,

@@ -77,6 +77,7 @@ import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
 import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
+import { followGoal } from './todos';
 import type { FakeWorktree } from './worktrees';
 
 /**
@@ -116,6 +117,8 @@ export interface FakeClientOptions {
   subagentsDemo?: boolean;
   /** An agent with an entrusted project, a picture, a memory pass and a notice, on `?fake=1&agents=1`. */
   agentsDemo?: boolean;
+  /** The project board with cards at work and under review, on `?fake=1&board=1`. */
+  boardDemo?: boolean;
   /** Two pull request watches on the trace thread, one paused by GitHub's rate limit, on `?fake=1&watch=1`. */
   watchDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
@@ -375,7 +378,7 @@ export class FakeContext {
       version: '2.0.0-beta.1',
       coreId,
       protocolVersion: PROTOCOL_VERSION,
-      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true },
+      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true },
       os: 'windows',
       channel: 'stable',
       pid: 4242,
@@ -516,5 +519,6 @@ export class FakeContext {
 
   publishActivity(thread: Thread): void {
     this.emit('thread.activity', { threadId: thread.id, activity: structuredClone(thread.activity!) });
+    followGoal(this, thread);
   }
 }

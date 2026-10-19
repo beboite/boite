@@ -44,6 +44,8 @@ export interface CoreInfo {
     desktopUpdates?: boolean;
     /** `subscriptionProxy.movePlan` and `subscriptionProxy.move`: this machine's logins move into Douane. */
     gatewayMove?: boolean;
+    /** `todos.update` takes `goalThreadId`, a card carries its goal, and a paired device reads and moves cards: the project board. */
+    projectBoard?: boolean;
   };
   /** The fingerprint of this core's identity key: the id its group knows it by, and the one a device signs its hello for. */
   coreId?: string;
