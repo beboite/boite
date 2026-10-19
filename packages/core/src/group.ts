@@ -537,6 +537,7 @@ export class GroupStore {
     const stillMember = (): boolean => this.roster !== null && !this.closed && this.roster.id === roster.id
       && liveCores(this.roster).some((core) => core.coreId === entry.coreId);
     let answer: unknown;
+    const since = this.backoff.mark();
     try {
       answer = await this.core.coordination.request(peerOf(entry), 'group.sync', roster);
     } catch (error) {
@@ -546,7 +547,7 @@ export class GroupStore {
         this.disband();
       }
       // Anything else is a machine that is off or unreachable: it is asked again later, sooner if the roster changes.
-      else if (stillMember()) this.backoff.failed(entry.coreId, digestOf(roster));
+      else if (stillMember()) this.backoff.failed(entry.coreId, digestOf(roster), since);
       return;
     }
     this.backoff.heard(entry.coreId);
@@ -563,7 +564,7 @@ export class GroupStore {
     if (this.roster !== null && digestOf(this.roster) === digestOf(theirs)) this.acked.set(entry.coreId, digestOf(theirs));
   }
 
-  /** Every member that has not agreed on the current roster is offered it, unless it is waiting out a failed offer of that same roster. */
+  /** Every member that has not agreed on the current roster is offered it once, unless it is waiting out a failed offer of that same roster. */
   private async syncPending(): Promise<void> {
     const roster = this.roster;
     if (roster === null || this.closed) return;
@@ -571,7 +572,7 @@ export class GroupStore {
     const self = this.selfId();
     await Promise.allSettled(liveCores(roster)
       .filter((core) => core.coreId !== self && this.acked.get(core.coreId) !== digest && !this.backoff.waiting(core.coreId, digest))
-      .map((core) => this.syncWith(core)));
+      .map((core) => this.backoff.offer(core.coreId, digest, () => this.syncWith(core))));
   }
 
   private kick(): void {

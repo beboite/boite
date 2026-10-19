@@ -1,4 +1,4 @@
-import { TRACE_LIMIT, lastAgentText, requestExcerpt, type ProviderInstallState, type RpcEventName, type ThreadId, type TurnId } from '@boite/contracts';
+import { TRACE_LIMIT, lastAgentText, requestExcerpt, requestKind, type ProviderInstallState, type RpcEventName, type ThreadId, type TurnId } from '@boite/contracts';
 import type { Client, EventHandler } from '../client';
 import { noteThisComputer } from '../device';
 import { noteQuestionAsked } from '../question-reply.svelte';
@@ -13,6 +13,7 @@ import { strings } from '../strings';
 import { needsUser } from '../thread-state';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
+import { reportPreferences } from '../client-preferences.svelte';
 import { lightPage } from './reading-pages.svelte';
 import type { StoreContext } from './context';
 import { probeKey } from './models.svelte';
@@ -67,6 +68,9 @@ export function listen(ctx: StoreContext, client: Client): void {
       })
     );
   }
+
+  // After the state handler above, so a reconnect has its principal and core first.
+  if (observable(client)) ctx.off.push(reportPreferences(client, current));
 
   on('core.updateChanged', snapshot => ctx.serverUpdater.apply(snapshot));
   on('core.desktopUpdateChanged', ({ status }) => { if (!s.localCore) ctx.serverUpdater.applyDesktop(status); });
@@ -175,8 +179,8 @@ export function listen(ctx: StoreContext, client: Client): void {
     if (!finishNotifies(s.threads, turn)) return;
     // The start of the reply, as the core's push says it. An error's own text
     // is often a stack or a provider's JSON: the thread shows it, not the toast.
-    if (turn.status === 'done') layout.notify('done', turn.threadId, () => lastReply(turn.threadId, turn.id));
-    else if (turn.status === 'error') layout.notify('error', turn.threadId, null);
+    if (turn.status === 'done') layout.notify('finished', turn.threadId, () => lastReply(turn.threadId, turn.id));
+    else if (turn.status === 'error') layout.notify('errors', turn.threadId, null);
   });
 
   /** What the agent last wrote in the turn: from the thread on screen, else a short read of its tail. */
@@ -230,7 +234,7 @@ export function listen(ctx: StoreContext, client: Client): void {
 
   on('permission.requested', (request) => {
     requests.mergePermissions([request], 'one');
-    layout.notify('needs-you', request.threadId, requestExcerpt(request) || null);
+    layout.notify(requestKind(request), request.threadId, requestExcerpt(request) || null);
   });
   on('permission.resolved', ({ requestId, threadId, decision }) => {
     threads.invalidateSync(threadId);
@@ -248,7 +252,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('question.asked', (request) => {
     noteQuestionAsked(s, request);
     requests.mergeQuestions([request], 'one');
-    layout.notify('needs-you', request.threadId, requestExcerpt(request) || null);
+    layout.notify(requestKind(request), request.threadId, requestExcerpt(request) || null);
   });
   on('question.answered', ({ questionId }) => {
     requests.resolveQuestion(questionId);

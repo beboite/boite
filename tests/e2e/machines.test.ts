@@ -372,8 +372,8 @@ test('one invitation groups two real cores: the page connects the second by itse
     // From the phone, the owner names the machine it paired with as its main one. The window is on the other
     // machine, where a start opened again until now: from this choice on, a start opens on the main one.
     await mobileAction(page, 'mobile-settings');
-    await page.waitFor(`document.querySelector('${id('settings-tab-machines')}')`);
-    await page.click(id('settings-tab-machines'));
+    await page.waitFor(`document.querySelector('${id('mobile-settings-connection')}')`);
+    await page.click(id('mobile-settings-connection'));
     await page.waitFor(`document.querySelector('${id('main-machine-pick')}')`);
     await page.click(id('main-machine-pick'));
     await page.waitFor(`document.querySelector('${id('main-machine-pick-menu')}')`);

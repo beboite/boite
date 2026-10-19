@@ -1,4 +1,4 @@
-import { mobileAction } from './lib/mobile.ts';
+import { openMobileMenu } from './lib/mobile.ts';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
@@ -222,7 +222,7 @@ test('Whip phone controls stay reachable with agents and disable mid-hit', async
   await page.waitFor(`document.querySelector('${button}')`);
   button = '[data-testid=whip-button-mobile]';
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.click('[data-testid=mobile-menu]');
+  await openMobileMenu(page);
   await page.waitFor('document.querySelector("[data-testid=whip-button-mobile]")');
   await settled();
   expect(await page.evaluate(`(() => {
@@ -233,11 +233,12 @@ test('Whip phone controls stay reachable with agents and disable mid-hit', async
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-phone.png'));
   // The phone control lives in a modal menu rather than beside bottom tabs.
   expect(await page.evaluate(`document.querySelector('[data-testid=mobile-tabs]') === null`)).toBe(true);
-  await mobileAction(page, 'mobile-settings');
-  await page.click('[data-testid=settings-tab-experiments]');
+  // A phone's settings list has no Experiments: the page stays reachable for a test.
+  await page.evaluate(`__boiteTest.workspace.active.showSettings('experiments')`);
+  await page.waitFor(`document.querySelector('${toggle}')`);
   await page.click('[data-testid=experiment-resident-agents]');
   await page.navigate(url);
-  await page.click('[data-testid=mobile-menu]');
+  await openMobileMenu(page);
   await page.waitFor('document.querySelector("[data-testid=mobile-agents]")');
   await settled();
   expect(await page.evaluate(`(() => {
@@ -251,16 +252,17 @@ test('Whip phone controls stay reachable with agents and disable mid-hit', async
   await verifyRope('whip-rope-phone.png', true);
   // Throwing closes the phone menu so the touch gesture reaches the canvas.
   expect(await page.evaluate(`document.querySelector('[data-testid=mobile-menu-dialog]') === null`)).toBe(true);
-  await page.click('[data-testid=mobile-menu]');
+  await openMobileMenu(page);
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await page.click(button);
   expect(await page.evaluate(`document.getElementById('app').getAnimations().length`)).toBe(0);
   expect(await page.evaluate(`document.querySelector('[data-testid=whip-canvas]') === null`)).toBe(true);
-  await mobileAction(page, 'mobile-settings');
-  await page.click('[data-testid=settings-tab-experiments]');
+  // A phone's settings list has no Experiments: the page stays reachable for a test.
+  await page.evaluate(`__boiteTest.workspace.active.showSettings('experiments')`);
+  await page.waitFor(`document.querySelector('${toggle}')`);
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   // Switching the experiment off mid-hit stops the shake with the rope.
-  await page.click('[data-testid=mobile-menu]');
+  await openMobileMenu(page);
   expect(await page.evaluate(`(async () => {
     const running = await ${crack()};
     if (!running) return 'no shake';

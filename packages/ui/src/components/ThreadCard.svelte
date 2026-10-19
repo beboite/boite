@@ -328,14 +328,18 @@
     flex: 0 1 auto;
     margin-left: auto;
   }
+  /* Centred on the title's line, 21 px under the row's 1 px border and top padding: 26 px buttons at 5 px
+     sat 1.5 px above it. A whole pixel keeps the icons sharp, so they stay half a pixel high. */
   .actions {
     position: absolute;
     right: 5px;
-    top: 5px;
+    top: 6px;
     opacity: 0;
     background: var(--color-surface-2);
   }
-  .done { position: absolute; right: 32px; top: 5px; opacity: 0; background: var(--color-surface-2); color: var(--color-muted-foreground); }
+  .done { position: absolute; right: 32px; top: 6px; opacity: 0; background: var(--color-surface-2); color: var(--color-muted-foreground); }
+  /* A card with a second line pads its top by one pixel more. */
+  .meta .actions, .meta .done { top: 7px; }
   .thread:hover .done, .thread:focus-within .done { opacity: 1; }
   .thread:hover .actions,
   .thread:focus-within .actions {

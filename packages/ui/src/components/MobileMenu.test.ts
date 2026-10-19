@@ -15,8 +15,8 @@ afterEach(async () => { if (app) await unmount(app); app = undefined; store.deta
 const click = (id: string) => document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!.click();
 
 test('top menu gives access to every destination without a permanent bottom bar', async () => {
-  const navigate = vi.fn(), create = vi.fn();
-  app = mount(MobileMenu, { target: document.body, props: { store, place: 'Computer', waiting: 2, screen: 'chat', navigate, create, projects: [], pickProject: vi.fn() } }); await settle();
+  const navigate = vi.fn();
+  app = mount(MobileMenu, { target: document.body, props: { store, place: 'Computer', waiting: 2, screen: 'chat', navigate } }); await settle();
   expect(document.querySelector('nav')).toBeNull();
   for (const [id, destination] of [['mobile-conversations', 'threads'], ['mobile-activity', 'activity']]) {
     click('mobile-menu'); await settle(); click(id!); await settle();
@@ -25,16 +25,18 @@ test('top menu gives access to every destination without a permanent bottom bar'
   }
   click('mobile-menu'); await settle(); click('mobile-settings'); await settle();
   expect(store.page).toBe('settings'); expect(document.querySelector('dialog')).toBeNull();
-  click('mobile-menu'); await settle(); click('mobile-menu-new'); await settle();
-  expect(create).toHaveBeenCalledOnce(); expect(document.querySelector('dialog')).toBeNull();
   expect(document.querySelector('[data-testid="mobile-tabs"]')).toBeNull();
+  // A project and a new thread are the header's: its picker and its +.
+  click('mobile-menu'); await settle();
+  expect(document.querySelector('[data-testid="mobile-menu-project"]')).toBeNull();
+  expect(document.querySelector('[data-testid="mobile-menu-new"]')).toBeNull();
 });
 
 test('dismissing the menu leaves the draft and current destination untouched', async () => {
-  const navigate = vi.fn(), create = vi.fn();
-  app = mount(MobileMenu, { target: document.body, props: { store, place: 'Computer', waiting: 0, screen: 'chat', navigate, create, projects: [], pickProject: vi.fn() } }); await settle();
+  const navigate = vi.fn();
+  app = mount(MobileMenu, { target: document.body, props: { store, place: 'Computer', waiting: 0, screen: 'chat', navigate } }); await settle();
   click('mobile-menu'); await settle();
   document.querySelector('dialog')!.dispatchEvent(new Event('cancel', { cancelable: true })); await settle();
-  expect(navigate).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled(); expect(store.page).toBe('chat');
+  expect(navigate).not.toHaveBeenCalled(); expect(store.page).toBe('chat');
   expect(document.querySelector('dialog')).toBeNull();
 });

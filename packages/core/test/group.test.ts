@@ -525,10 +525,12 @@ test('a member that stops answering waits longer each time, unless the roster ch
   /** Offers to b made by one more round. */
   const round = async () => { const before = offers; await store.syncPending(); return offers - before; };
   try {
-    // A change goes out at once; b does not answer.
+    // A change goes out at once; b does not answer. A round that starts while that offer is
+    // on its way (the 15 second tick under a loaded runner) does not send it twice: two
+    // failures would make the first wait a minute.
     a.core.group.rename('Studio');
-    await settle();
-    expect(offers).toBeGreaterThan(0);
+    await Promise.all([store.syncPending(), settle()]);
+    expect(offers).toBe(1);
     expect(await round()).toBe(0);
     // Its 30 second wait over, it is offered the same roster again and fails again: the next wait is a minute.
     setSystemTime(new Date(Date.now() + 31_000));
@@ -554,6 +556,51 @@ test('a member that stops answering waits longer each time, unless the roster ch
   } finally {
     setSystemTime();
     for (const undo of restore) undo();
+  }
+});
+
+test('an offer that fails after the member was heard from does not make it wait', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  type Store = { syncPending(): Promise<void>; pending: Set<Promise<unknown>> };
+  const store = a.core.group as unknown as Store;
+  const settle = async () => {
+    await Bun.sleep(0);
+    for (const side of [store, b.core.group as unknown as Store]) while (side.pending.size > 0) await Promise.allSettled([...side.pending]);
+  };
+  await settle();
+  type Exchange = (peer: { coreId: string }, operation: string, payload: unknown) => Promise<unknown>;
+  const wire = a.core.coordination as unknown as { exchange: Exchange };
+  const real = wire.exchange.bind(wire);
+  // a's offer to b fails, but only after b's own request reached a: the failure is older than what a heard.
+  let offers = 0;
+  let release!: () => void;
+  const late = new Promise<void>((resolve) => { release = resolve; });
+  let failing = true;
+  wire.exchange = async (peer, operation, payload) => {
+    if (operation === 'group.sync' && peer.coreId === id(b)) {
+      offers += 1;
+      if (failing) { await late; throw new Error('peer request failed'); }
+    }
+    return real(peer, operation, payload);
+  };
+  try {
+    a.core.group.rename('Studio');
+    const offered = store.syncPending();
+    await waitFor(() => offers === 1);
+    await b.core.coordination.request(b.core.group.peers().find((peer) => peer.coreId === id(a))!, 'directory', {});
+    release();
+    await Promise.all([offered, settle()]);
+    failing = false;
+    // b answered after that offer went out: the next round offers the roster again at once.
+    const before = offers;
+    await store.syncPending();
+    expect(offers - before).toBe(1);
+    await waitFor(() => b.core.group.view('owner')?.name === 'Studio');
+  } finally {
+    wire.exchange = real;
   }
 });
 

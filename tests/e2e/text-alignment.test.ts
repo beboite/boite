@@ -23,7 +23,7 @@ test('text and icons share a vertical centre across reading fonts, menus and pho
     ['[data-testid="composer-effort"]', '[data-testid="composer-effort"]'],
     ['[data-testid="composer-mode"]', '[data-testid="composer-mode"]'],
   ];
-  for (const font of ['inter', 'geist', 'plex', 'atkinson', 'figtree', 'source', 'dm', 'system']) {
+  for (const font of ['inter', 'atkinson', 'source', 'plex', 'system']) {
     await page.evaluate(`(async () => {
       document.documentElement.dataset.font = '${font}';
       const style = getComputedStyle(document.body);

@@ -43,8 +43,8 @@ test('owner controls consent on desktop and phone; captures both layouts', async
   await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
   await page.screenshot(join(import.meta.dir, '.artifacts/telemetry-desktop.png'));
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.waitFor(`document.querySelector('[data-testid="mobile-settings-phone"]')`);
-  await page.click('[data-testid="mobile-settings-phone"]');
+  await page.waitFor(`document.querySelector('[data-testid="mobile-settings-privacy"]')`);
+  await page.click('[data-testid="mobile-settings-privacy"]');
   await page.waitFor(`document.querySelector('${card} input')`);
   await page.evaluate(`document.querySelector('${card}').scrollIntoView(); document.fonts.ready`);
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);

@@ -12,6 +12,7 @@ test('a pull request reports the same fixed check names whichever jobs run', () 
   expect(names).toEqual([
     'Android / apk',
     'Build UI',
+    'Bundle size',
     ...CORE_ALL.map((runner) => `Core tests (${runner.name})`),
     ...PORTABLE_ALL.map((platform) => `Desktop / ${platform.name}`),
     'Desktop / Windows x64',

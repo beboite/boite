@@ -1,3 +1,4 @@
+import { openLimitsTab } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
@@ -45,7 +46,7 @@ test('limits identify the owning machine in the desktop glance and desktop and p
     if (width === 1280) await page.click('[data-testid="nav-limits"]');
     else {
       await page.click('[data-testid="nav-settings"]');
-      await page.click('[data-testid="settings-tab-limits"]');
+      await openLimitsTab(page);
     }
     await page.waitFor(`document.querySelector('${scope}')?.dataset.remote === 'true'`);
     expect((await page.text(scope)).trim()).toBe('Account limits for Builder');
@@ -90,7 +91,7 @@ for (const view of ['tray', 'desktop', 'phone', 'sidebar']) {
       await page.click('[data-testid="nav-limits"]');
     } else if (view !== 'tray') {
       await page.click('[data-testid="nav-settings"]');
-      await page.click('[data-testid="settings-tab-limits"]');
+      await openLimitsTab(page);
     }
     const refresh = `[data-testid="${view === 'tray' ? 'quota' : view === 'sidebar' ? 'limits-glance' : 'limits'}-refresh"]`;
     await page.waitFor(`document.querySelector('${refresh}')?.getAttribute('aria-busy') === 'false' && document.querySelector('[role="meter"]')`);
@@ -170,7 +171,7 @@ for (const width of [1280, 390]) {
     await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width === 390 });
     await page.navigate(`${origin}/?fake=1&open=recent`);
     await page.click('[data-testid="nav-settings"]');
-    await page.click('[data-testid="settings-tab-limits"]');
+    await openLimitsTab(page);
     await page.waitFor(`document.querySelector('[data-testid="limits-refresh"]')?.getAttribute('aria-busy') === 'false'`);
     expect(await page.evaluate(`document.querySelector('[data-testid="usage-limit-provider"][data-account-id="a-codex"] strong').textContent`)).toBe('Default');
     const tracked = '[data-testid="tracked-account"][data-account-id="a-codex"]';
@@ -261,7 +262,7 @@ for (const width of [1280, 390]) {
     await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width === 390 });
     await page.navigate(`${origin}/?fake=1&open=recent&quotaExtras=1`);
     await page.click('[data-testid="nav-settings"]');
-    await page.click('[data-testid="settings-tab-limits"]');
+    await openLimitsTab(page);
     const codex = '[data-testid="usage-limit-provider"][data-account-id="a-codex"]';
     const claude = '[data-testid="usage-limit-provider"][data-account-id="a-claude-main"]';
     const reset = `${codex} [data-testid="quota-use-reset"]`;

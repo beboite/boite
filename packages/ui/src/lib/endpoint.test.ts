@@ -55,13 +55,13 @@ test('a machine reached through the page\'s own core is not that core, and its r
 test('a tapped notification names its thread, and the member it is on only as a machine id beside a thread', () => {
   const member = 'a'.repeat(64);
   window.history.replaceState(null, '', `/?thread=t1&member=${member}&keep=1`);
-  expect(takeNotificationTarget()).toEqual({ thread: 't1', member });
+  expect(takeNotificationTarget()).toEqual({ thread: 't1', member, key: null });
   // Both are taken off the address, and nothing else.
   expect(window.location.search).toBe('?keep=1');
   window.history.replaceState(null, '', '/?thread=t1&member=https://evil.test');
-  expect(takeNotificationTarget()).toEqual({ thread: 't1', member: null });
+  expect(takeNotificationTarget()).toEqual({ thread: 't1', member: null, key: null });
   window.history.replaceState(null, '', `/?member=${member}`);
-  expect(takeNotificationTarget()).toEqual({ thread: null, member: null });
+  expect(takeNotificationTarget()).toEqual({ thread: null, member: null, key: null });
   expect(window.location.search).toBe('');
   window.history.replaceState(null, '', '/');
 });
@@ -480,4 +480,14 @@ test('the machine the owner chose is the one a start opens on, wherever the grou
 
   storeMainMachine(null);
   expect(readMainMachine()).toBeNull();
+});
+
+test('a page notice about a machine with no group id brings its key back through the address', () => {
+  const key = JSON.stringify(['https://remote.test', 't-2']);
+  window.history.replaceState(null, '', `/?thread=t-2&key=${encodeURIComponent(key)}&keep=1`);
+  expect(takeNotificationTarget()).toEqual({ thread: 't-2', member: null, key });
+  expect(window.location.search).toBe('?keep=1');
+  // A member id wins: the key is only for a machine without one.
+  window.history.replaceState(null, '', `/?thread=t-2&member=${'a'.repeat(64)}&key=${encodeURIComponent(key)}`);
+  expect(takeNotificationTarget().key).toBeNull();
 });

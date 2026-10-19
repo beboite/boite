@@ -33,6 +33,28 @@ export function contains(root: string, path: string): boolean {
   return child === '' || (!isAbsolute(child) && child !== '..' && !child.startsWith(`..${sep}`));
 }
 
+/**
+ * Whether turns in these two folders can change the same snapshot file. A
+ * folder inside another shares its files when the outer snapshot would list
+ * one of them: git decides what it lists (a repository or worktree of its own
+ * shows as one directory entry, files the outer index tracks still count), and
+ * a plain walk lists all but the skipped folders.
+ */
+export async function overlap(core: Core, threadId: string, a: string, b: string): Promise<boolean> {
+  if (contains(a, b)) return listsAny(core, threadId, resolve(a), resolve(b));
+  if (contains(b, a)) return listsAny(core, threadId, resolve(b), resolve(a));
+  return false;
+}
+
+async function listsAny(core: Core, threadId: string, root: string, path: string): Promise<boolean> {
+  const inner = relative(root, path);
+  if (!inner) return true;
+  const listed = await git(core, threadId, root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', inner.split(sep).join('/')], 5000);
+  // Same fallback as `snapshot`: without git, every folder but the skipped ones is walked.
+  if (listed.code !== 0) return !inner.split(sep).some(part => SKIP.has(part));
+  return listed.stdout.split('\0').some(name => name && !name.endsWith('/'));
+}
+
 export function same(a: FileEntry | undefined, b: FileEntry | undefined): boolean {
   return a?.hash === b?.hash && a?.mode === b?.mode && a?.link === b?.link && a?.unbacked === b?.unbacked;
 }

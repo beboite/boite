@@ -44,7 +44,7 @@
         // before the stylesheet so the first frame is drawn in it. The sans face
         // only: the first screen draws no mono text, and on a slow link a mono
         // file would compete with the entry chunk.
-        var faces = { geist: 'Geist-latin', inter: 'Inter-latin', plex: 'IBMPlexSans-latin', atkinson: 'AtkinsonHyperlegibleNext-latin', figtree: 'Figtree-latin', source: 'SourceSans3-latin', dm: 'DMSans-latin', system: '' };
+        var faces = { inter: 'Inter-latin', atkinson: 'AtkinsonHyperlegibleNext-latin', source: 'SourceSans3-latin', plex: 'IBMPlexSans-latin', system: '' };
         var face = localStorage.getItem('boite.font');
         if (face === null || !Object.prototype.hasOwnProperty.call(faces, face)) face = 'inter';
         if (face !== 'inter') document.documentElement.dataset.font = face;

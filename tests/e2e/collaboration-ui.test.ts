@@ -180,13 +180,20 @@ test('the chat shows one row per discussion, and the panel lists discussions and
   await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
 
-  // The same title menu exposes settings on phones and desktops.
+  // A phone's title menu keeps the thread's own actions; the discussion settings are a desktop page.
+  await page.click('[data-testid="thread-menu-trigger"]');
+  await page.waitFor(`document.querySelector('[role=menu]:not(.closing) [data-value=rename]')`);
+  expect(await page.evaluate(`document.querySelector('[role=menu]:not(.closing) [data-value="coordination"]') === null`)).toBe(true);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' });
+  await page.waitFor(`!document.querySelector('[role=menu]:not(.closing)')`);
+
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.click('[data-testid="thread-menu-trigger"]');
   await page.click('[data-value="coordination"]');
   await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]')?.open`);
   await settled();
   expect(await page.evaluate(`document.activeElement.closest('[data-testid="coordination-dialog"]') !== null`)).toBe(true);
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-settings-phone.png'));
   await page.click('.options > summary');
   const budget = await page.evaluate<string>(`document.querySelector('[data-testid="coordination-budget"]')?.textContent ?? ''`);
   expect(budget).toContain('sent this hour');
@@ -194,21 +201,20 @@ test('the chat shows one row per discussion, and the panel lists discussions and
   expect(await page.evaluate(`document.querySelectorAll('[data-testid="coordination-contact"]').length`)).toBeGreaterThan(0);
   await page.click('[data-testid="coordination-mode-off"]');
   await page.waitFor(`document.querySelector('[data-testid="coordination-mode-off"]').getAttribute('aria-checked') === 'true'`);
-  await page.evaluate('history.back()');
-  await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]') === null`);
-  expect(await page.evaluate(`document.activeElement.dataset.testid`)).toBe('thread-menu-trigger');
-
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
-  await page.click('[data-testid="thread-menu-trigger"]');
-  await page.click('[data-value="coordination"]');
-  await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]')?.open`);
-  expect(await page.evaluate(`document.querySelector('[data-testid="coordination-mode-off"]').getAttribute('aria-checked')`)).toBe('true');
-  await settled();
   await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-settings-desktop.png'));
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
   await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' });
   await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]') === null`);
   expect(await page.evaluate(`document.activeElement.dataset.testid`)).toBe('thread-menu-trigger');
+
+  // The choice holds when the dialog opens again.
+  await page.click('[data-testid="thread-menu-trigger"]');
+  await page.click('[data-value="coordination"]');
+  await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]')?.open`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="coordination-mode-off"]').getAttribute('aria-checked')`)).toBe('true');
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' });
+  await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]') === null`);
 
   await page.click('[data-testid="thread-menu-trigger"]');
   await page.click('[data-value="coordination"]');

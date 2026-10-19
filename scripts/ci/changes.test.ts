@@ -183,8 +183,9 @@ test.skipIf(!python)('the actual required gate rejects failed, cancelled and une
   const callers = ['desktop', 'server', 'android'];
   const outputNames = ['core', 'web', 'desktop', 'server', 'android', 'telemetry', 'e2eTypes', 'stress', 'e2e'];
   const jobFor: Record<string, string> = { 'e2e-types': 'e2eTypes' };
-  const ids = [...coreJobs, 'web', 'telemetry', 'e2e-types', 'stress', ...shards, ...callers];
-  const cases: { jobs: object; success: boolean }[] = [];
+  // The bundle size job runs with desktop, on pull requests only.
+  const ids = [...coreJobs, 'web', 'telemetry', 'e2e-types', 'stress', 'size', ...shards, ...callers];
+  const cases: { jobs: object; success: boolean; event?: string }[] = [];
   const draft = JSON.stringify(CORE_ALL.slice(0, 1));
   for (const [selected, coreRunners] of [
     [outputNames, plan(affectedChecks(['packages/core/src/main.ts']), 'pr').coreRunners],
@@ -195,11 +196,13 @@ test.skipIf(!python)('the actual required gate rejects failed, cancelled and une
     const runners = (JSON.parse(coreRunners) as { os: string }[]).map(runner => runner.os);
     const required = (id: string) => coreJobs.includes(id) ? selected.includes('core') && runners.includes(runnerOf(id)!)
       : shards.includes(id) ? selected.includes('desktop') && selected.includes('e2e')
+      : id === 'size' ? selected.includes('desktop')
       : selected.includes(jobFor[id] ?? id);
     const jobs = { changes: { result: 'success', outputs }, ...Object.fromEntries(ids.map(id => [id, {
       result: required(id) || callers.includes(id) ? 'success' : 'skipped',
     }])) } as Record<string, { result: string; outputs?: object }>;
     cases.push({ jobs, success: true });
+    cases.push({ jobs: { ...jobs, size: { result: 'skipped' } }, success: true, event: 'push' });
     for (const id of ['changes', ...ids.filter(required)]) {
       for (const result of ['failure', 'cancelled', 'skipped']) {
         cases.push({ jobs: { ...jobs, [id]: { ...jobs[id], result } }, success: false });
@@ -221,6 +224,7 @@ script = compile(os.environ['GATE_SCRIPT'], 'ci.yml', 'exec')
 cases = json.load(sys.stdin)
 for index, case in enumerate(cases):
     os.environ['RESULTS'] = json.dumps(case['jobs'])
+    os.environ['EVENT'] = case.get('event', 'pull_request')
     try:
         exec(script, {})
         success = True

@@ -334,3 +334,28 @@ test('an unsaved edit survives a tab switch and its tab asks before closing, at 
   await phone(false);
   await onStore(`store.panel.closeAll();`);
 }, 60_000);
+
+test('the tab strip keeps its chevrons still at every width down to the narrowest', async () => {
+  await onStore(`store.panel.closeAll(); store.panel.open('agents'); store.panel.open('messages');`);
+  await page.waitFor(`document.querySelectorAll('${id('panel-tab')}').length === 2`);
+  // Each width gets a few frames to settle, then must hold: the chevrons used to
+  // come and go on every frame where the tabs overflowed by a few pixels.
+  const flipping = await page.evaluate<number[]>(`(async () => {
+    const { rightPanel } = await import('/src/lib/right-panel.svelte.ts');
+    const before = rightPanel.width;
+    const frame = () => new Promise(requestAnimationFrame);
+    const chevrons = () => document.querySelector('${id('panel-titlebar')}').querySelectorAll('.chev').length;
+    const flipping = [];
+    for (let width = 300; width <= 420; width += 2) {
+      rightPanel.width = width;
+      for (let i = 0; i < 3; i++) await frame();
+      let last = chevrons(), flips = 0;
+      for (let i = 0; i < 8; i++) { await frame(); const now = chevrons(); if (now !== last) flips++; last = now; }
+      if (flips > 0) flipping.push(width);
+    }
+    rightPanel.width = before;
+    return flipping;
+  })()`);
+  expect(flipping).toEqual([]);
+  await onStore(`store.panel.closeAll();`);
+}, 60_000);

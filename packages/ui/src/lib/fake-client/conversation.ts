@@ -22,6 +22,7 @@ export const ASYNC_QUESTION_OPTIONS = ['5173', '4173'];
 export const SETTING_MARKERS: [string, { reason: string } & ({ key: string; value: unknown } | { page: string; section?: string })][] = [
   ['[settings]', { reason: 'Your Rust builds stall at the CPU cap. 90% leaves room for the game you are running.', key: 'agentCpuCapPercent', value: 90 }],
   ['[settings-lan]', { reason: 'To pair your phone over Wi-Fi, this computer has to be reachable on the local network.', key: 'listenOnLan', value: true }],
+  ['[settings-experiment]', { reason: 'The Agents page and Niggies only show with the Agents experiment on.', key: 'experiment.resident-agents', value: true }],
   ['[settings-open]', { reason: 'Claude is not signed in yet. Sign in here, then send me a message.', page: 'accounts', section: 'provider-claude' }],
 ];
 
