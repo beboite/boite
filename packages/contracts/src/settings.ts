@@ -122,6 +122,11 @@ export interface Settings {
    */
   titleModel?: TitleModel | null;
   /**
+   * The model that writes and checks every `/goal2` checklist. Null or
+   * missing: `GOAL_TRACKER_DEFAULTS`, else the conversation's own model.
+   */
+  goalTracker?: GoalTrackerModel | null;
+  /**
    * When the core compacts a conversation by itself, between two turns. Null
    * or missing: never, each agent keeps its own behaviour. Missing on older cores.
    */
@@ -173,6 +178,14 @@ export interface TitleModel {
   providerId: ProviderId;
   /** A model id that provider lists. */
   model: string;
+}
+
+/** One provider's model and reasoning level, picked in Settings, Experiments to keep `/goal2` checklists. */
+export interface GoalTrackerModel {
+  providerId: ProviderId;
+  model: string;
+  /** One of the model's levels; null for a model without them. */
+  effort: string | null;
 }
 
 export interface SettingsRpcMethods {

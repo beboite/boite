@@ -939,6 +939,52 @@ test('a fake reviewed goal fails its first review, works on the finding and pass
   expect(thread.messages.filter(m => m.role === 'user').map(m => m.parts[0]?.type === 'text' && m.parts[0].text)).toEqual(['/goal2 Rename the empty state', '/goal2 Rename the empty state']);
 });
 
+test('a fake reviewed goal keeps a checklist and sends a claim back while items stay open', async ({ createClient }) => {
+  vi.useFakeTimers();
+  const client = await createClient({ delayMs: 1 });
+  const { id: threadId } = await newThread(client);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Rename the empty state, add a test and update the docs. Keep the old label', review: true } });
+  await vi.runAllTimersAsync();
+  const thread = await client.call('threads.get', { threadId });
+  const goal = thread.activity!.goal!;
+  // One item per clause, two ticked per turn: the first claim went back with two still open.
+  expect(goal.checklist!.items.map(item => [item.text, item.status, item.bounced ?? 0])).toEqual([
+    ['Rename the empty state', 'done', 0], ['Add a test', 'done', 0], ['Update the docs', 'done', 1], ['Keep the old label', 'done', 1],
+  ]);
+  expect(goal).toMatchObject({ status: 'complete', iterations: 3, checklist: { phase: 'idle', error: null } });
+  expect(goal.review!.verdicts.map(v => v.verdict)).toEqual(['fail', 'pass']);
+  expect((await client.call('threads.get', { threadId: goal.checklist!.threadId! })).parentThreadId).toBe(threadId);
+});
+
+test('a message sent while the fake tracker still writes the first list waits for it, as the core runs its passes', async ({ createClient }) => {
+  vi.useFakeTimers();
+  const client = await createClient({ delayMs: 1 });
+  const { id: threadId } = await newThread(client);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Rename the empty state and add a test', review: true } });
+  // The claim's check waits behind the first list, so the thread is free for a message before either ran.
+  const free = async () => { const thread = await client.call('threads.get', { threadId }); return thread.status === 'idle' && thread.activity?.goal?.review?.phase === 'reviewing' && thread.activity.goal.checklist?.items.length === 0; };
+  for (let i = 0; i < 100 && !(await free()); i++) await vi.advanceTimersByTimeAsync(5);
+  expect(await free()).toBe(true);
+  await client.call('turns.start', { threadId, prompt: 'Also update the docs' });
+  await vi.runAllTimersAsync();
+  const goal = (await client.call('threads.get', { threadId })).activity!.goal!;
+  expect(goal.checklist!.items.map(item => [item.text, item.added ?? false])).toEqual([['Rename the empty state', false], ['Add a test', false], ['Also update the docs', true]]);
+  expect(goal.status).toBe('complete');
+});
+
+test('a fake goal removed while its tracker writes the first list stops the checklist conversation, as the core stops its turn', async ({ createClient }) => {
+  vi.useFakeTimers();
+  const client = await createClient({ delayMs: 1 });
+  const { id: threadId } = await newThread(client);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Rename the empty state', review: true } });
+  const tracker = (await client.call('threads.get', { threadId })).activity!.goal!.checklist!.threadId!;
+  await client.call('threads.activity.control', { threadId, kind: 'goal', action: 'remove' });
+  await vi.runAllTimersAsync();
+  const child = await client.call('threads.get', { threadId: tracker });
+  expect(child.status).toBe('idle');
+  expect(child.turns.at(-1)).toMatchObject({ status: 'error', error: 'Stopped' });
+});
+
 test('a task list set after the fake claim, before its review starts, still gets a verdict', async ({ createClient }) => {
   vi.useFakeTimers();
   const client = await createClient({ delayMs: 1 });

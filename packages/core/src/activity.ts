@@ -5,6 +5,8 @@ import { activityResult, parseVerdict, reviewPrompt } from './activity-prompt.ts
 import { checkAttachmentArray, checkAttachments } from './threads/inputs.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
 import type { ChildRoute } from './delegation/routes.ts';
+import { GoalTracker, modelRead, newChecklist } from './goal-tracker.ts';
+import type { ProviderProbe } from './providers/probe.ts';
 
 const empty = (): ThreadActivity => ({ goal: null, loop: null, tasks: [] });
 type PendingAttachments = Partial<Record<'goal' | 'loop', Attachment[]>>;
@@ -13,6 +15,8 @@ export interface GoalOutcome { threadId: string; outcome: 'complete' | 'blocked'
 /** Reviews of a `/goal2` before it stops for the user. */
 export const GOAL_REVIEW_ROUNDS = 5;
 const newReview = (): GoalReview => ({ phase: 'working', maxRounds: GOAL_REVIEW_ROUNDS, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] });
+/** Completion claims one open checklist item may send back before the review decides alone. */
+export const CHECKLIST_BOUNCES = 2;
 /** The review a reviewer conversation's first turn answers. */
 interface ReviewRun { threadId: string; generation: number; round: number }
 
@@ -27,11 +31,27 @@ export class ActivityStore {
   private readonly reviewers = new Set<string>();
   /** Reviewer conversation to the review its first turn answers, until that turn ends. */
   private readonly reviewing = new Map<string, ReviewRun>();
+  /** Goals whose last completion claim the checklist sent back: their next turn says so. */
+  private readonly bounced = new Set<string>();
+  /** Keeps each `/goal2`'s checklist ([goal-tracker](./goal-tracker.ts)). */
+  readonly tracker: GoalTracker;
+  /** Reads an agent's models before a reviewer starts on one; set by `modules.ts`. */
+  private probe: ProviderProbe | null = null;
+  /** Goals whose reviewer waits for its agent's models to be read. */
+  private readonly readingModels = new Set<string>();
+  /** The goal generation and round whose reviewer already had its models read: one read per review. */
+  private readonly modelsRead = new Map<string, string>();
   private closed = false;
 
   /** `threadJsonChecked`: the core validated visible thread JSON just before, with nothing written since. */
   constructor(private readonly core: Core, threadJsonChecked = false) {
     if (!threadJsonChecked) core.journal.validateVisibleThreadJson();
+    this.tracker = new GoalTracker(core, {
+      goal: threadId => this.states.get(threadId)?.goal ?? null,
+      generation: threadId => this.generations.get(`${threadId}:goal`) ?? 0,
+      save: threadId => this.save(threadId),
+      checked: threadId => this.checklistChecked(threadId),
+    });
     const savedThreads = core.journal.db.query(`SELECT threads.id FROM threads JOIN settings ON settings.key = 'activity:' || threads.id
       WHERE threads.id NOT IN (SELECT thread_id FROM thread_deletions) ORDER BY threads.rowid`).all() as { id: string }[];
     for (const thread of savedThreads) {
@@ -42,6 +62,7 @@ export class ActivityStore {
       for (const verdict of review?.verdicts ?? []) this.reviewers.add(verdict.threadId);
       // The interrupted review is not adopted: resuming starts a fresh one.
       if (review?.reviewerThreadId) { this.reviewers.add(review.reviewerThreadId); review.reviewerThreadId = null; changed = true; }
+      if (saved.goal?.checklist && this.tracker.adopt(thread.id, saved.goal.checklist)) changed = true;
       for (const run of saved.loop?.history ?? []) {
         if (run.status === 'running') { run.status = 'error'; run.summary = 'Core restarted before this iteration finished.'; run.finishedAt = Date.now(); changed = true; }
       }
@@ -65,6 +86,10 @@ export class ActivityStore {
         if (review) this.reviewEnded(review, threadId, 'The reviewer conversation was removed. Resume to review again.');
         for (const [reviewer, run] of this.reviewing) if (run.threadId === threadId) this.reviewing.delete(reviewer);
         this.reviewers.delete(threadId);
+        this.tracker.removed(threadId);
+        this.bounced.delete(threadId);
+        this.readingModels.delete(threadId);
+        this.modelsRead.delete(threadId);
         this.clearTimer(threadId);
         this.states.delete(threadId);
         core.journal.deleteSetting(`activity:${threadId}`);
@@ -72,6 +97,9 @@ export class ActivityStore {
       }
     });
   }
+
+  /** How reviewers and checklist trackers read an agent's models before starting on one. */
+  useProbe(probe: ProviderProbe): void { this.probe = probe; this.tracker.useProbe(probe); }
 
   /** Called after the goal's new state is saved. Returns the unsubscribe. */
   onGoal(listener: (event: GoalOutcome) => void): () => void {
@@ -97,6 +125,15 @@ export class ActivityStore {
   /** A `/goal2` reviewer: its answers go to the goal, never to the parent as mail. */
   ownsReviewer(threadId: string): boolean { return this.reviewers.has(threadId); }
 
+  /** A `/goal2` checklist's tracker: its answers go to the checklist, never to the parent as mail. */
+  ownsTracker(threadId: string): boolean { return this.tracker.owns(threadId); }
+
+  /** A message of the user on a thread whose `/goal2` runs: its checklist may change. */
+  userMessage(threadId: string, text: string): void {
+    const goal = this.states.get(threadId)?.goal;
+    if (goal?.checklist && goal.status !== 'complete') this.tracker.message(threadId, text);
+  }
+
   set(params: RpcParams<'threads.activity.set'>): ThreadActivity {
     const thread = this.core.journal.getThread(params.threadId);
     if (thread?.agentSessionId) throw refused('persistent agent sessions are scheduled through Agents, not thread goals or loops');
@@ -111,7 +148,8 @@ export class ActivityStore {
       if (params.goal && params.goal.review !== undefined && typeof params.goal.review !== 'boolean') throw invalidParams('goal.review must be a boolean');
       if (params.goal?.review && thread.parentThreadId) throw refused('a reviewed goal starts reviewer conversations; start it in a top-level thread');
       this.stopReview(params.threadId);
-      state.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null, ...(params.goal.review ? { review: newReview() } : {}) };
+      this.bounced.delete(params.threadId);
+      state.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null, ...(params.goal.review ? { review: newReview(), checklist: newChecklist() } : {}) };
     }
     if (params.loop !== undefined) {
       if (params.loop !== null) validateLoop(params.loop);
@@ -127,6 +165,10 @@ export class ActivityStore {
     this.saveAttachments(params.threadId, pending);
     this.states.set(params.threadId, state);
     this.save(params.threadId);
+    if (params.goal !== undefined) {
+      if (state.goal?.checklist) this.tracker.begin(params.threadId);
+      else this.tracker.stop(params.threadId);
+    }
     this.schedule(params.threadId, 0);
     return this.get(params.threadId);
   }
@@ -161,6 +203,8 @@ export class ActivityStore {
     if (state.loop && state.loop.status !== 'active') state.loop.nextRunAt = null;
     if (params.kind === 'loop' && params.action === 'resume' && state.loop) state.loop.nextRunAt = Date.now();
     this.states.set(params.threadId, state);
+    // A paused goal's checklist still follows the conversation; a removed or finished one stops, on the state just stored.
+    if (params.kind === 'goal' && (params.action === 'remove' || params.action === 'complete')) { this.tracker.stop(params.threadId); this.bounced.delete(params.threadId); }
     this.save(params.threadId);
     this.schedule(params.threadId, 0);
     return this.get(params.threadId);
@@ -228,9 +272,12 @@ export class ActivityStore {
   private finished(turn: Turn): void {
     const review = this.reviewing.get(turn.threadId);
     if (review) { this.reviewFinished(turn, review); return; }
+    if (this.tracker.finished(turn)) return;
     const owned = this.ownTurns.get(turn.id);
     this.ownTurns.delete(turn.id);
     const state = this.states.get(turn.threadId);
+    // Every finished turn of the conversation, the user's included: the goal's next turn waits for this check.
+    if (turn.status === 'done' && !turn.execution?.operation && state?.goal?.checklist && state.goal.status !== 'complete') this.tracker.turnEnded(turn.threadId, turn.id);
     const current = owned && owned.generation === (this.generations.get(`${turn.threadId}:${owned.kind}`) ?? 0);
     if (current && owned.kind === 'loop' && state?.loop) {
       const run = state.loop.history?.find(run => run.turnId === turn.id);
@@ -290,15 +337,19 @@ export class ActivityStore {
       return;
     }
     const review = kind === 'goal' ? state.goal!.review : undefined;
+    // The checklist's check of the last turn decides what the next turn hears, or whether a claim goes back.
+    if (kind === 'goal' && this.tracker.holds(threadId)) return;
     if (review?.phase === 'reviewing') { this.startReview(threadId, thread); return; }
     const last = review?.verdicts.at(-1);
     // Only the first turn after a review carries its findings; later ones have them in the history.
     const feedback = review && last && last.verdict !== 'pass' && review.delivered < review.verdicts.length ? { round: last.round, feedback: last.summary } : undefined;
+    const list = kind === 'goal' ? state.goal!.checklist : undefined;
+    const checklist = list?.items.length ? { open: list.items.filter(item => item.status === 'open').map(item => item.text), bounced: this.bounced.delete(threadId) } : undefined;
     const prompt = `/${review ? 'goal2' : kind} ${kind === 'goal' ? state.goal!.objective : state.loop!.prompt}`;
     const iteration = state[kind]!.iterations + 1;
     try {
       const pending = this.pendingAttachments(threadId);
-      const turnActivity: ActivityTurn = { kind, iteration, ...(feedback ? { review: feedback } : {}) };
+      const turnActivity: ActivityTurn = { kind, iteration, ...(feedback ? { review: feedback } : {}), ...(checklist ? { checklist } : {}) };
       const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, turnActivity);
       delete pending[kind];
       this.saveAttachments(threadId, pending);
@@ -349,13 +400,23 @@ export class ActivityStore {
   private startReview(threadId: string, parent: ThreadSummary): void {
     const goal = this.states.get(threadId)?.goal;
     const review = goal?.review;
-    if (!goal || !review || goal.status !== 'active' || review.phase !== 'reviewing') return;
+    if (!goal || !review || goal.status !== 'active' || review.phase !== 'reviewing' || this.readingModels.has(threadId)) return;
     for (const run of this.reviewing.values()) if (run.threadId === threadId) return;
     const round = review.verdicts.length + 1;
     const generation = this.generations.get(`${threadId}:goal`) ?? 0;
     let reviewer: string | null = null;
     try {
       const route = this.reviewerRoute(parent);
+      // An account change since the last read forgets its agent's models: read them, as a spawn does, then
+      // start through the scheduler, which finds the goal as it is then: replaced, paused or still reviewing.
+      const attempt = `${generation}:${round}`;
+      const read = this.modelsRead.get(threadId) === attempt ? null : modelRead(this.core, this.probe, route);
+      if (read) {
+        this.modelsRead.set(threadId, attempt);
+        this.readingModels.add(threadId);
+        void read.catch(() => undefined).then(() => { this.readingModels.delete(threadId); this.schedule(threadId, 0); });
+        return;
+      }
       const provider = this.core.providers.require(route.providerId);
       assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(route.accountId), () => this.core.providers.launcherScriptOnly(provider.id));
       const claim = review.claimTurnId ? this.answer({ threadId, id: review.claimTurnId }) : '';
@@ -363,7 +424,7 @@ export class ActivityStore {
       this.reviewing.set(reviewer, { threadId, generation, round });
       review.reviewerThreadId = reviewer;
       this.save(threadId);
-      this.core.threads.startTurn(reviewer, reviewPrompt(goal.objective, claim, round), [], undefined, 'delegation', undefined, undefined, `Review the goal: ${goal.objective}`.slice(0, 500));
+      this.core.threads.startTurn(reviewer, reviewPrompt(goal.objective, claim, round, goal.checklist?.items ?? []), [], undefined, 'delegation', undefined, undefined, `Review the goal: ${goal.objective}`.slice(0, 500));
     } catch (error) {
       if (reviewer) this.reviewing.delete(reviewer);
       review.reviewerThreadId = null;
@@ -407,6 +468,26 @@ export class ActivityStore {
     else this.save(run.threadId);
   }
 
+  /**
+   * The checklist read the agent's last turn. A completion claim with an item
+   * still open goes back to the agent instead of to a reviewer, at most
+   * `CHECKLIST_BOUNCES` times per item; after that the review judges alone.
+   */
+  private checklistChecked(threadId: string): void {
+    const goal = this.states.get(threadId)?.goal;
+    const review = goal?.review;
+    if (goal?.status === 'active' && review?.phase === 'reviewing' && !review.reviewerThreadId && goal.checklist) {
+      const open = goal.checklist.items.filter(item => item.status === 'open' && (item.bounced ?? 0) < CHECKLIST_BOUNCES);
+      if (open.length) {
+        for (const item of open) item.bounced = (item.bounced ?? 0) + 1;
+        Object.assign(review, { phase: 'working', claimTurnId: null });
+        this.bounced.add(threadId);
+        this.save(threadId);
+      }
+    }
+    this.schedule(threadId, 0);
+  }
+
   private stopReview(threadId: string): void {
     for (const [reviewer, run] of this.reviewing) {
       if (run.threadId !== threadId) continue;
@@ -422,7 +503,7 @@ export class ActivityStore {
     this.core.bus.emit('thread.activity', { threadId, activity });
   }
 
-  close(): void { this.closed = true; for (const threadId of this.states.keys()) this.pauseAll(threadId); }
+  close(): void { this.closed = true; this.tracker.close(); for (const threadId of this.states.keys()) this.pauseAll(threadId); }
 }
 
 export function validateLoop(loop: NonNullable<RpcParams<'threads.activity.set'>['loop']>): void {

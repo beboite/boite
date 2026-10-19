@@ -1,4 +1,4 @@
-import type { ModelFavorite, ModelFavorites, Settings, TitleModel } from './index.ts';
+import type { GoalTrackerModel, ModelFavorite, ModelFavorites, Settings, TitleModel } from './index.ts';
 import { BROWSER_PROFILE_NAME_MAX, BROWSER_PROFILES_MAX, browserProfileIdError, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE, type BrowserProfile } from './browser';
 
 // Both supported hosts expose URL; contracts otherwise need no DOM or Node types.
@@ -273,6 +273,15 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       return { ok: false, field: 'titleModel', message: `titleModel must be null or { providerId, model }, two non-empty strings, the model at most ${TITLE_MODEL_MAX} characters` };
     }
     next.titleModel = { providerId: text(providerId), model: text(model) };
+  }
+  if (patch.goalTracker !== undefined && patch.goalTracker !== null) {
+    const { providerId, model, effort } = (typeof patch.goalTracker === 'object' ? patch.goalTracker : {}) as Partial<GoalTrackerModel>;
+    const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+    const level = effort === null || effort === undefined ? null : text(effort);
+    if (text(providerId).length === 0 || text(model).length === 0 || text(model).length > TITLE_MODEL_MAX || level === '' || (level?.length ?? 0) > 40) {
+      return { ok: false, field: 'goalTracker', message: `goalTracker must be null or { providerId, model, effort }: two non-empty strings, the model at most ${TITLE_MODEL_MAX} characters, and the effort a level name or null` };
+    }
+    next.goalTracker = { providerId: text(providerId), model: text(model), effort: level };
   }
   if (patch.autoCompact !== undefined && patch.autoCompact !== null) {
     const { tokens, moments } = (typeof patch.autoCompact === 'object' ? patch.autoCompact : {}) as Partial<AutoCompact>;

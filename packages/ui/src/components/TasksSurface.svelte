@@ -3,6 +3,7 @@
   import type { Todo } from '@boite/contracts';
   import { watchStatus } from '../lib/pull-request-watch';
   import InfoTip from './InfoTip.svelte';
+  import GoalChecklist from './GoalChecklistLoader.svelte';
   import { time } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -11,12 +12,22 @@
   const sectionId = $props.id();
 
   let draft = $state('');
-  let open = $state({ activity: true, watches: true, tasks: true, todos: true });
+  let open = $state({ activity: true, reviews: true, watches: true, tasks: true, todos: true });
+  /** A long objective shows three lines until pressed, so the checklist under it stays in view. */
+  let wholeObjective = $state(false);
 
   let thread = $derived(store.openThread);
   let activity = $derived(thread?.activity ?? null);
   let tasks = $derived(activity?.tasks ?? []);
   let watches = $derived(thread?.pullRequestWatches ?? []);
+  /** A `/goal2`'s checklist, from the first list its tracker writes, as the goal bar's button that leads here. Dropped items count for nothing. */
+  let checklist = $derived(activity?.goal?.checklist && (activity.goal.checklist.items.length > 0 || activity.goal.checklist.phase !== 'idle' || activity.goal.checklist.error) ? activity.goal.checklist : null);
+  let listed = $derived(checklist?.items.filter((item) => item.status !== 'cancelled') ?? []);
+  let ticked = $derived(listed.filter((item) => item.status === 'done').length);
+  /** The section says what it holds: a goal, a loop, or both. */
+  let activityLabel = $derived(activity?.goal && !activity.loop ? strings.activity.goal : activity?.loop && !activity.goal ? strings.activity.loop : strings.tasks.goalSection);
+  /** A `/goal2`'s reviews, newest first, with what each reviewer found: the bar keeps only their dots. */
+  let verdicts = $derived([...(activity?.goal?.review?.verdicts ?? [])].reverse());
   let todos = $derived(thread?.projectId ? (store.todos[thread.projectId] ?? []) : []);
 
   // The project's list is the same for every thread of it, so it is read once
@@ -53,32 +64,55 @@
       onclick={() => (open.activity = !open.activity)}
     >
       <ChevronRight size={13} strokeWidth={1.75} class={open.activity ? 'fold-caret open' : 'fold-caret'} />
-      <span class="section-label ui-label">{strings.tasks.goalSection}</span>
+      <span class="section-label ui-label">{activityLabel}</span>
     </button>
     <div class="disclosure-fold" id="{sectionId}-activity" class:open={open.activity} inert={!open.activity}>
       <div><div class="body">
         {#if activity?.goal}
-          <div class="line" data-testid="tasks-goal">
+          {@const goal = activity.goal}
+          <div class="entry" data-testid="tasks-goal">
             <Target size={13} strokeWidth={1.75} />
-            <span class="text ui-label" title={activity.goal.objective}>{activity.goal.objective}</span>
-            <span class="meta ui-label">{fill(strings.tasks.iterations, { count: String(activity.goal.iterations) })}</span>
-            {#if activity.goal.status === 'paused' && activity.goal.blocked}
-              <span class="state blocked ui-label-box" title={strings.activity.blockedHint} data-testid="tasks-goal-blocked"><span class="ui-label">{strings.activity.blocked}</span></span>
-            {:else}
-              <span class="state ui-label-box" class:live={activity.goal.status === 'active'}><span class="ui-label">{strings.activity[activity.goal.status]}</span></span>
-            {/if}
+            <div class="entry-copy">
+              <button type="button" class="ghost objective" aria-expanded={wholeObjective} title={wholeObjective ? undefined : goal.objective} onclick={() => (wholeObjective = !wholeObjective)}>
+                <span class="clamp" class:whole={wholeObjective}>{goal.objective}</span>
+              </button>
+              <span class="entry-meta">
+                {#if goal.status === 'paused' && goal.blocked}
+                  <span class="state blocked ui-label-box" title={strings.activity.blockedHint} data-testid="tasks-goal-blocked"><span class="ui-label">{strings.activity.blocked}</span></span>
+                {:else}
+                  <span class="state ui-label-box" class:live={goal.status === 'active'}><span class="ui-label">{strings.activity[goal.status]}</span></span>
+                {/if}
+                <span class="meta ui-label">{fill(strings.tasks.iterations, { count: String(goal.iterations) })}</span>
+              </span>
+            </div>
           </div>
+          {#if checklist}
+            <!-- A `/goal2`'s checklist: the goal above, cut into what the user asked for, where the goal bar's line leads. -->
+            <div class="goal-checklist" data-testid="tasks-checklist">
+              {#if listed.length > 0}
+                <div class="progress-row" data-testid="tasks-checklist-progress">
+                  <progress max={listed.length} value={ticked} aria-hidden="true"></progress>
+                  <span class="meta ui-label">{fill(strings.activity.checklistCount, { done: String(ticked), total: String(listed.length) })}</span>
+                </div>
+              {/if}
+              <GoalChecklist {store} {checklist} dense />
+            </div>
+          {/if}
         {/if}
         {#if activity?.loop}
-          <div class="line" data-testid="tasks-loop">
+          <div class="entry" data-testid="tasks-loop">
             <Repeat size={13} strokeWidth={1.75} />
-            <span class="text ui-label" title={activity.loop.prompt}>{activity.loop.prompt}</span>
-            {#if activity.loop.nextRunAt}
-              <span class="meta ui-label">{fill(strings.tasks.nextRun, { time: time(activity.loop.nextRunAt) })}</span>
-            {:else}
-              <span class="meta ui-label">{fill(strings.tasks.iterations, { count: String(activity.loop.iterations) })}</span>
-            {/if}
-            <span class="state ui-label-box" class:live={activity.loop.status === 'active'}><span class="ui-label">{strings.activity[activity.loop.status]}</span></span>
+            <div class="entry-copy">
+              <span class="text ui-label" title={activity.loop.prompt}>{activity.loop.prompt}</span>
+              <span class="entry-meta">
+                <span class="state ui-label-box" class:live={activity.loop.status === 'active'}><span class="ui-label">{strings.activity[activity.loop.status]}</span></span>
+                {#if activity.loop.nextRunAt}
+                  <span class="meta ui-label">{fill(strings.tasks.nextRun, { time: time(activity.loop.nextRunAt) })}</span>
+                {:else}
+                  <span class="meta ui-label">{fill(strings.tasks.iterations, { count: String(activity.loop.iterations) })}</span>
+                {/if}
+              </span>
+            </div>
           </div>
         {/if}
         {#if !activity?.goal && !activity?.loop}
@@ -87,6 +121,37 @@
       </div></div>
     </div>
   </section>
+
+  {#if verdicts.length > 0}
+    <section data-testid="tasks-reviews">
+      <button
+        type="button"
+        class="ghost head"
+        aria-expanded={open.reviews}
+        aria-controls="{sectionId}-reviews"
+        data-testid="tasks-section-reviews"
+        title={open.reviews ? strings.tasks.collapse : strings.tasks.expand}
+        onclick={() => (open.reviews = !open.reviews)}
+      >
+        <ChevronRight size={13} strokeWidth={1.75} class={open.reviews ? 'fold-caret open' : 'fold-caret'} />
+        <span class="section-label ui-label">{strings.activity.reviews}</span>
+      </button>
+      <div class="disclosure-fold" id="{sectionId}-reviews" class:open={open.reviews} inert={!open.reviews}>
+        <div><div class="body">
+          {#each verdicts as verdict (verdict.threadId)}
+            <div class="review" data-testid="tasks-review" data-verdict={verdict.verdict}>
+              <div class="review-head">
+                <span class="ui-label">{fill(strings.activity.reviewRound, { round: String(verdict.round) })}</span>
+                <span class="verdict-name ui-label">{strings.activity[verdict.verdict]}</span>
+                <button type="button" class="ghost small open-review" onclick={() => void store.open(verdict.threadId)}>{strings.activity.openReview}</button>
+              </div>
+              {#if verdict.summary}<p class="review-summary">{verdict.summary}</p>{/if}
+            </div>
+          {/each}
+        </div></div>
+      </div>
+    </section>
+  {/if}
 
   {#if watches.length > 0}
     <section>
@@ -129,6 +194,7 @@
     </section>
   {/if}
 
+  {#if tasks.length > 0}
   <section>
     <button
       type="button"
@@ -141,14 +207,12 @@
     >
       <ChevronRight size={13} strokeWidth={1.75} class={open.tasks ? 'fold-caret open' : 'fold-caret'} />
       <span class="section-label ui-label">{strings.tasks.agentSection}</span>
-      {#if tasks.length > 0}
-        <span class="meta ui-label">
-          {fill(strings.activity.taskCount, {
-            done: String(tasks.filter((task) => task.status === 'completed').length),
-            total: String(tasks.length)
-          })}
-        </span>
-      {/if}
+      <span class="meta ui-label">
+        {fill(strings.activity.taskCount, {
+          done: String(tasks.filter((task) => task.status === 'completed').length),
+          total: String(tasks.length)
+        })}
+      </span>
     </button>
     <div class="disclosure-fold" id="{sectionId}-tasks" class:open={open.tasks} inert={!open.tasks}>
       <div><div class="body">
@@ -165,12 +229,11 @@
             </span>
             <span class="text ui-label" title={task.text}>{task.text}</span>
           </div>
-        {:else}
-          <p class="empty">{strings.tasks.noTasks}</p>
         {/each}
       </div></div>
     </div>
   </section>
+  {/if}
 
   <section>
     <button
@@ -297,6 +360,47 @@
     min-width: 0;
   }
 
+  /* A review: its round and verdict on one line, what the reviewer found under it. */
+  .review {
+    padding: 6px 0;
+    font-size: var(--text-sm);
+  }
+
+  .review + .review {
+    border-top: 1px solid var(--color-border);
+  }
+
+  .review-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--control-sm);
+  }
+
+  .verdict-name {
+    flex: 1;
+    font-weight: 600;
+    color: var(--verdict, var(--color-muted-foreground));
+  }
+
+  [data-verdict='pass'] { --verdict: var(--color-success); }
+  [data-verdict='partial'] { --verdict: var(--color-live); }
+  [data-verdict='fail'], [data-verdict='missing'] { --verdict: var(--color-danger); }
+
+  .open-review {
+    flex: none;
+    padding-inline: 6px;
+    color: var(--color-accent);
+  }
+
+  .review-summary {
+    margin: 4px 0 0;
+    color: var(--color-muted-foreground);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+
   .head {
     display: flex;
     align-items: center;
@@ -376,6 +480,96 @@
     min-width: 0;
     overflow-wrap: anywhere;
   }
+
+  /* A goal or a loop: its icon, then its words over one line of state. */
+  .entry {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px 0;
+    font-size: var(--text-sm);
+    color: var(--color-foreground);
+  }
+
+  .entry > :global(svg) {
+    flex: none;
+    height: 1.45em;
+    color: var(--color-muted-foreground);
+  }
+
+  .entry-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    line-height: 1.45;
+  }
+
+  .objective {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    padding: 0;
+    border-radius: var(--radius-sm);
+    font-weight: 400;
+    color: inherit;
+    text-align: left;
+    line-height: inherit;
+    white-space: normal;
+  }
+
+  .objective:active:not(:disabled) { transform: none; }
+
+  .clamp {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+
+  .clamp.whole {
+    display: block;
+  }
+
+  .entry-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  /* The checklist under its goal: how far it got, in the goal bar's colours, then each request. */
+  .goal-checklist {
+    padding: 2px 0 2px;
+  }
+
+  .progress-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 20px;
+  }
+
+  progress {
+    flex: 1;
+    min-width: 0;
+    appearance: none;
+    height: 4px;
+    border: none;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--color-surface-3);
+  }
+
+  progress::-webkit-progress-bar { background: var(--color-surface-3); }
+  progress::-webkit-progress-value { background: var(--color-accent); transition: width var(--dur-3); }
+  progress::-moz-progress-bar { background: var(--color-accent); }
+
+  @media (prefers-reduced-motion: reduce) { progress::-webkit-progress-value { transition: none; } }
 
   .meta {
     font-size: var(--text-xs);

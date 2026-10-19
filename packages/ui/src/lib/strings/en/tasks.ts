@@ -7,7 +7,6 @@ export const strings = {
     nextRun: 'Next run {time}',
     iterations: '{count} iterations',
     agentSection: 'Agent tasks',
-    noTasks: 'The agent has reported no task list',
     todoSection: 'Project todos',
     noTodos: 'No todo on this project',
     addPlaceholder: 'Add a todo',
