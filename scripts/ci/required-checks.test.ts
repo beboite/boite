@@ -56,6 +56,25 @@ test('every job a needs chain runs through is in the list, so a skip after a fai
 // workflows' callers, which always run, name themselves "(draft)"; every
 // other job runs only to fail when a draft run is rerun once the pull request
 // is ready, and a conversion to draft fails the required planning name.
+// How each direct job's condition starts, and what it decides for a run. A
+// draft rerun runs the job (to fail it) whenever planning did not pass, a
+// cancellation included, so its skips never replace a ready run's results.
+const STALE = "always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true'";
+type Run = { draft: boolean; attempt: number; changes: 'success' | 'failure' | 'cancelled'; stale?: 'true' | 'false'; cancelled: boolean };
+const runsStale = (run: Run) => run.draft && run.attempt > 1 && run.changes !== 'success' || !run.cancelled && run.stale === 'true';
+
+test('a draft rerun whose planning failed or was cancelled before the stale step runs its direct jobs to fail them', () => {
+  // Planning failed at setup: no stale output, success() false.
+  expect(runsStale({ draft: true, attempt: 2, changes: 'failure', cancelled: false })).toBe(true);
+  expect(runsStale({ draft: true, attempt: 2, changes: 'cancelled', cancelled: true })).toBe(true);
+  expect(runsStale({ draft: true, attempt: 2, changes: 'success', stale: 'true', cancelled: false })).toBe(true);
+  // A first draft run whose planning fails, or one a newer push cancels, costs no runner.
+  expect(runsStale({ draft: true, attempt: 1, changes: 'failure', cancelled: false })).toBe(false);
+  expect(runsStale({ draft: true, attempt: 1, changes: 'cancelled', cancelled: true })).toBe(false);
+  expect(runsStale({ draft: false, attempt: 2, changes: 'failure', cancelled: false })).toBe(false);
+  expect(runsStale({ draft: true, attempt: 2, changes: 'success', stale: 'false', cancelled: false })).toBe(false);
+});
+
 test('a draft passes no required name, rerun or converted', () => {
   const ci = loadWorkflow('ci.yml');
   const changes = ci.jobs.changes as Job & { steps: { id?: string; if?: string; run?: string }[]; permissions: Record<string, string> };
@@ -80,9 +99,9 @@ test('a draft passes no required name, rerun or converted', () => {
     }
     // Every other job keeps a fixed name, and a stale draft run makes it run and fail.
     expect(jobNames(job, id).draft).toBe(jobNames(job, id).ready);
-    expect(job.if).toStartWith("${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (");
+    expect(job.if).toStartWith(`\${{ ${STALE} || success() && (`);
     const [stop] = (job as Job & { steps: { if?: string; run?: string }[] }).steps;
-    expect(stop!.if).toBe("needs.changes.outputs.stale == 'true'");
+    expect(stop!.if).toBe("needs.changes.result != 'success' || needs.changes.outputs.stale == 'true'");
     expect(stop!.run).toContain('exit 1');
   }
   expect(draftNames).toContain('Desktop (draft) / Linux x64');
@@ -120,7 +139,7 @@ test('each core job runs on its CORE_ALL runner when coreRunners lists it', () =
   expect(jobs.map(([id, job]) => ({ os: job['runs-on'], name: jobNames(job, id).ready })))
     .toEqual(CORE_ALL.map((runner) => ({ os: runner.os, name: `Core tests (${runner.name})` })));
   for (const [, job] of jobs) {
-    expect(job.if).toBe(`\${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"${job['runs-on']}"')) }}`);
+    expect(job.if).toBe(`\${{ ${STALE} || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"${job['runs-on']}"')) }}`);
   }
   // The quoted label cannot match a longer one.
   const pr = JSON.stringify(CORE_ALL.filter((runner) => runner.os !== 'ubuntu-24.04'));

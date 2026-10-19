@@ -93,7 +93,8 @@ jobs:
           exit 1
       # A rerun keeps its event: an old draft run rerun once the pull request
       # is ready would put skips back under the required names. Its direct jobs
-      # then run only to fail; an unreadable flag counts as ready.
+      # then run only to fail; an unreadable flag counts as ready, and so does
+      # a rerun whose planning fails or is cancelled before this step.
       - id: stale
         if: github.event.pull_request.draft
         env:
@@ -164,15 +165,16 @@ jobs:
   core-linux-x64:
     name: Core tests (Linux x64)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04"')) }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04"')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps: &core-steps
-      # A stale draft run fails here rather than skip (changes job).
+      # A stale draft run, or a rerun draft run whose planning did not pass,
+      # fails here rather than skip (changes job).
       - name: Stop a stale draft run
-        if: needs.changes.outputs.stale == 'true'
+        if: needs.changes.result != 'success' || needs.changes.outputs.stale == 'true'
         run: |
-          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          echo "::error::a rerun draft run whose planning did not pass or whose pull request is ready fails; rerun the latest ready run instead"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -188,7 +190,7 @@ jobs:
   core-linux-arm64:
     name: Core tests (Linux arm64)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04-arm"')) }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"ubuntu-24.04-arm"')) }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps: *core-steps
@@ -196,7 +198,7 @@ jobs:
   core-windows-x64:
     name: Core tests (Windows x64)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"windows-2025"')) }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"windows-2025"')) }}
     runs-on: windows-2025
     timeout-minutes: 15
     steps: *core-steps
@@ -204,7 +206,7 @@ jobs:
   core-macos-arm64:
     name: Core tests (macOS arm64)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15"')) }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15"')) }}
     runs-on: macos-15
     timeout-minutes: 15
     steps: *core-steps
@@ -212,7 +214,7 @@ jobs:
   core-macos-x64:
     name: Core tests (macOS x64)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15-intel"')) }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"macos-15-intel"')) }}
     runs-on: macos-15-intel
     timeout-minutes: 15
     steps: *core-steps
@@ -220,15 +222,16 @@ jobs:
   web:
     name: Type checks and UI tests
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.web == 'true') }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      # A stale draft run fails here rather than skip (changes job).
+      # A stale draft run, or a rerun draft run whose planning did not pass,
+      # fails here rather than skip (changes job).
       - name: Stop a stale draft run
-        if: needs.changes.outputs.stale == 'true'
+        if: needs.changes.result != 'success' || needs.changes.outputs.stale == 'true'
         run: |
-          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          echo "::error::a rerun draft run whose planning did not pass or whose pull request is ready fails; rerun the latest ready run instead"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -252,15 +255,16 @@ jobs:
   telemetry:
     name: Telemetry relay tests
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.telemetry == 'true') }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.telemetry == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      # A stale draft run fails here rather than skip (changes job).
+      # A stale draft run, or a rerun draft run whose planning did not pass,
+      # fails here rather than skip (changes job).
       - name: Stop a stale draft run
-        if: needs.changes.outputs.stale == 'true'
+        if: needs.changes.result != 'success' || needs.changes.outputs.stale == 'true'
         run: |
-          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          echo "::error::a rerun draft run whose planning did not pass or whose pull request is ready fails; rerun the latest ready run instead"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -271,15 +275,16 @@ jobs:
   e2e-types:
     name: E2E type check
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.e2eTypes == 'true') }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.e2eTypes == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      # A stale draft run fails here rather than skip (changes job).
+      # A stale draft run, or a rerun draft run whose planning did not pass,
+      # fails here rather than skip (changes job).
       - name: Stop a stale draft run
-        if: needs.changes.outputs.stale == 'true'
+        if: needs.changes.result != 'success' || needs.changes.outputs.stale == 'true'
         run: |
-          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          echo "::error::a rerun draft run whose planning did not pass or whose pull request is ready fails; rerun the latest ready run instead"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -293,15 +298,16 @@ jobs:
   ui:
     name: Build UI
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.stress == 'true' || (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true')) }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.stress == 'true' || (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      # A stale draft run fails here rather than skip (changes job).
+      # A stale draft run, or a rerun draft run whose planning did not pass,
+      # fails here rather than skip (changes job).
       - name: Stop a stale draft run
-        if: needs.changes.outputs.stale == 'true'
+        if: needs.changes.result != 'success' || needs.changes.outputs.stale == 'true'
         run: |
-          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          echo "::error::a rerun draft run whose planning did not pass or whose pull request is ready fails; rerun the latest ready run instead"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -329,18 +335,19 @@ jobs:
   stress:
     name: Stress fixtures
     needs: [changes, ui]
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.stress == 'true') }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.stress == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 15
     env:
       BOITE_E2E_PREBUILT_UI: '1'
       BOITE_STRESS_ARTIFACTS: tests/e2e/.artifacts/stress
     steps:
-      # A stale draft run fails here rather than skip (changes job).
+      # A stale draft run, or a rerun draft run whose planning did not pass,
+      # fails here rather than skip (changes job).
       - name: Stop a stale draft run
-        if: needs.changes.outputs.stale == 'true'
+        if: needs.changes.result != 'success' || needs.changes.outputs.stale == 'true'
         run: |
-          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          echo "::error::a rerun draft run whose planning did not pass or whose pull request is ready fails; rerun the latest ready run instead"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -367,7 +374,7 @@ jobs:
   size:
     name: Bundle size
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (github.event_name == 'pull_request' && needs.changes.outputs.desktop == 'true') }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (github.event_name == 'pull_request' && needs.changes.outputs.desktop == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -377,11 +384,12 @@ jobs:
       # The pull request body, read at run time so a rerun sees an edit.
       pull-requests: read
     steps:
-      # A stale draft run fails here rather than skip (changes job).
+      # A stale draft run, or a rerun draft run whose planning did not pass,
+      # fails here rather than skip (changes job).
       - name: Stop a stale draft run
-        if: needs.changes.outputs.stale == 'true'
+        if: needs.changes.result != 'success' || needs.changes.outputs.stale == 'true'
         run: |
-          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          echo "::error::a rerun draft run whose planning did not pass or whose pull request is ready fails; rerun the latest ready run instead"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -428,7 +436,7 @@ jobs:
   e2e-1:
     name: E2E 1/3
     needs: [changes, ui]
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 35
     env:
@@ -436,11 +444,12 @@ jobs:
       BOITE_E2E_FAKE_UI: tests/e2e/.artifacts/fake-ui
       E2E_SHARD: 1
     steps: &e2e-steps
-      # A stale draft run fails here rather than skip (changes job).
+      # A stale draft run, or a rerun draft run whose planning did not pass,
+      # fails here rather than skip (changes job).
       - name: Stop a stale draft run
-        if: needs.changes.outputs.stale == 'true'
+        if: needs.changes.result != 'success' || needs.changes.outputs.stale == 'true'
         run: |
-          echo "::error::this draft run was rerun after the pull request went ready; rerun the latest ready run instead"
+          echo "::error::a rerun draft run whose planning did not pass or whose pull request is ready fails; rerun the latest ready run instead"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -486,7 +495,7 @@ jobs:
   e2e-2:
     name: E2E 2/3
     needs: [changes, ui]
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 35
     env:
@@ -498,7 +507,7 @@ jobs:
   e2e-3:
     name: E2E 3/3
     needs: [changes, ui]
-    if: ${{ !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
+    if: ${{ always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true' || success() && (needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 35
     env:
