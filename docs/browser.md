@@ -178,6 +178,11 @@ while the page is being frozen waits for the freeze, wakes the page and only
 then runs, and the page is visible and focused again when it does. A tab
 closed while asleep is woken first, and a freeze that fails is tried again after the wait. A page asleep keeps its state; its timers
 resume where they stopped, and a page that reads the clock sees the time pass.
+The browser answers the freeze once it has passed it to the renderer, not once
+the renderer has applied it: a busy renderer runs the page until it gets to it
+(a few hundred milliseconds on a loaded macOS runner on 2026-10-19), so a tab
+counted asleep may still run that long. Its page's `freeze` event says when
+the freeze landed.
 
 Each call of a freeze or a wake has 5 seconds. A frozen page still answers
 DevTools at once (measured on Windows on 2026-10-19), so a call that misses
@@ -439,7 +444,8 @@ page, a worker, a request and a popup send without `Headless`, with
 `navigator.webdriver` false and full client hints, cookies kept per
 profile across a restart, a profile copied in by the owner, an MP4 recording
 read back, a recording discarded at the end of a turn, a page that sleeps
-once nobody uses it and meets the next command and viewer awake and focused,
+once nobody uses it and meets the next command and viewer awake and focused
+(its page busy 400 ms each time it is hidden, so each freeze lands late),
 one kept awake by `browser.remoteWatch`, and a machine without a browser. `browser-sleep.test.ts` checks, with the page
 stubbed, that a command arriving during a freeze runs after the wake, and that
 a held or closed tab never sleeps, that a running turn holds an unused

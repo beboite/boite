@@ -44,7 +44,8 @@ export async function describeShell(dataDir: string, shellPid: number, failure =
  * Waits for the shell page's IPC bridge (`TAURI_READY`). A page that never
  * gets it fails with what the attach did not show: the target the test
  * attached to, `/json/list` at the failure, the frame and its navigation
- * history as devtools reports them, the shell's `shell.webview.*` records
+ * history as devtools reports them, each main-frame navigation event and
+ * document request the page saw since the attach, the shell's `shell.webview.*` records
  * (`shell.webview.page-load` started and finished), its log tail and process
  * tree. The text also goes to `tests/e2e/.artifacts/shell-<pid>-not-ready.txt`,
  * which the desktop job uploads as `desktop-failure-captures`.
@@ -90,11 +91,14 @@ async function notReadyReport(page: BrowserPage, shell: ShellUnderTest, tree: (s
   const webview = typeof records === 'string'
     ? records
     : records.filter(record => record.event.startsWith('shell.webview.')).slice(-WEBVIEW_RECORDS).map(record => record.text).join('\n') || '  (none)';
+  const navigations = page.navigationLog();
   return [
     `Attached target: ${JSON.stringify(page.target)}`,
     `/json/list of port ${shell.port} now: ${targets}`,
     `Page.getFrameTree: ${frames}`,
     `Page.getNavigationHistory: ${history}`,
+    `Main frame navigation since the devtools socket opened (${navigations.length}):`,
+    navigations.map(line => `  ${line}`).join('\n') || '  (none: devtools reported no navigation of this page)',
     `Shell ${shell.pid} webview records (newest ${WEBVIEW_RECORDS} shell.webview.* of the log tail):`,
     webview,
     shellText,
