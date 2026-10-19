@@ -415,6 +415,9 @@ describe('agy driver', () => {
     const { accountId } = await agyAccount(client);
     const core = harness!.core;
     const spawn = core.procs.spawnChild.bind(core.procs);
+    const procs = core.procs as unknown as { onJobExited(...args: unknown[]): void };
+    const jobExited = procs.onJobExited.bind(core.procs);
+    const lateExit = spyOn(procs, 'onJobExited').mockImplementation((...args) => { setTimeout(() => jobExited(...args), 300); });
     const releases: Array<() => void> = [];
     const childSpies: Array<{ mockRestore(): void }> = [];
     const spawnSpy = spyOn(core.procs, 'spawnChild').mockImplementation((...args) => {
@@ -438,12 +441,16 @@ describe('agy driver', () => {
         }),
       ]);
       expect(result.models.map(model => model.id)).toEqual(['default', 'gemini-3.8-flash', 'gemini-3.1-pro', 'claude-opus-4-6-thinking', 'gemini-solo-high']);
+      // The probe answers before its cleanup, and on Windows the pid leaves the registry only once its
+      // job reports the exit: late here, as on a loaded machine.
+      await core.procs.waitForExit(`probe:agy-fake:${accountId}`);
       expect(core.procs.liveCount(`probe:agy-fake:${accountId}`)).toBe(0);
       expect(core.providers.installs.leaseCount('agy-fake')).toBe(0);
     } finally {
       clearTimeout(timer);
       for (const release of releases) release();
       spawnSpy.mockRestore();
+      lateExit.mockRestore();
       for (const spy of childSpies) spy.mockRestore();
       await Promise.allSettled([request]);
     }
