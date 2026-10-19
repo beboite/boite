@@ -520,3 +520,5 @@ gh api repos/beboite/boite/topics --method PUT --input .github/topics.json
 ```
 
 This changes topics only; the About description is separate repository metadata.
+
+<!-- probe for #645, closed unmerged -->
