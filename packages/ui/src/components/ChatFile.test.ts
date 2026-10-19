@@ -222,7 +222,7 @@ test('a video the device cannot play offers its download, and a failed one can a
     expect(query<HTMLAnchorElement>('[data-testid=media-fallback-download]').href).toBe(url);
   } finally { canPlayType.mockRestore(); }
 });
-test('a video mounted again keeps the size it loaded at while its metadata comes back', () => {
+test('a video mounted again keeps the size it loaded at while its metadata comes back', async () => {
   // The timeline mounts a row again when it scrolls back over it: a player that
   // starts at the browser's default size moved the rows below, and the window
   // dropped and mounted it again in a loop.
@@ -240,5 +240,23 @@ test('a video mounted again keeps the size it loaded at while its metadata comes
     const clip = query<HTMLElement>('.clip');
     expect(clip.classList.contains('boxed')).toBe(true);
     expect(clip.getAttribute('style')).toContain('aspect-ratio: 1280 / 720');
+    unmount(running!, { outro: false }); running = null;
+
+    // An artifact whose ticket is still on its way: the reserved box sits in the card the player will,
+    // not a full-width one where it stood taller and dropped once loaded.
+    const artifact = { type: 'artifact' as const, id: 'clip', name: 'clip.mp4', mimeType: 'video/mp4', bytes: 2048 };
+    const loaded = vi.fn(async () => ({ ok: true, value: { name: 'clip.mp4', mimeType: 'video/mp4', bytes: 2048, url: 'blob:clip' } }));
+    running = mount(ChatFile, { target: document.body, props: { ...props, file: artifact, store: { readArtifact: loaded } as unknown as Store } });
+    await vi.waitFor(() => query('video'));
+    const player = query<HTMLVideoElement>('video');
+    Object.defineProperties(player, { videoWidth: { value: 1280 }, videoHeight: { value: 720 } });
+    player.dispatchEvent(new Event('loadedmetadata')); flushSync();
+    const width = query<HTMLElement>('.clip').style.width;
+    unmount(running!, { outro: false }); running = null;
+
+    const pending = vi.fn(() => new Promise(() => {}));
+    running = mount(ChatFile, { target: document.body, props: { ...props, file: artifact, store: { readArtifact: pending } as unknown as Store } }); flushSync();
+    expect(query<HTMLElement>('[data-testid=artifact-reserved] .clip').style.width).toBe(width);
+    expect(query('[data-testid=chat-file]').classList.contains('inline-media')).toBe(true);
   } finally { canPlayType.mockRestore(); }
 });
