@@ -34,6 +34,8 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
+A pull request whose selection includes desktop also runs [Bundle growth](#bundle-growth).
+
 The changes job always installs frozen dependencies, runs `bun audit`, local
 link checks, `bun test scripts/ci ./bench ./apps/shell/scripts`, architecture
 checks and their tests, and translation validation. Changes to workflows,
@@ -225,20 +227,9 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 492,300 |
 | UI files, excluding `.br` and `.gz` copies | 4,869,600 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,501,900 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,494,900 |
 
 The total JavaScript measure excludes native binaries and source maps.
-
-On 2026-10-19, settings cards that draw their switch in the chat, with the
-app's language, experiments and setting names reported to the core
-(`client.preferences`, PR #609), merged with `origin/main` at `de93f43a`
-measure 489,108 entry bytes, 4,875,358 UI bytes and 4,501,755 core JavaScript
-bytes with `measure()` after fresh `bun run build:ui` and `bun run build:core`
-on Linux. Against 492,249 entry and 4,871,151 UI bytes for `38d5ca2f` built
-the same way and the 4,494,827 core bytes recorded below for PR #623, the
-entry loses 3,141 bytes, the UI gains 4,207 and the core 6,928 (the client
-preferences book, the experiment checks and the CLI's app line). The UI and
-core JavaScript limits rise to 4,875,400 and 4,501,900; the other limits stay.
 
 On 2026-10-19, PR #622 merged with `origin/main` at `68033379` measures
 4,494,650 core JavaScript bytes with the same rule after a fresh
@@ -1039,6 +1030,33 @@ total limit 4,070,000; the entry chunk (518,508 bytes) and `main.js` limits are
 unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
+
+### Bundle growth
+
+`bundle-size.yml` builds the UI and the core on Linux for every push to main,
+one job that the next push never cancels, and measures four sizes with
+`scripts/ci/budgets.ts`: the UI entry chunk, the UI files without their `.br`
+and `.gz` copies, the core `dist/main.js`, and all emitted core JavaScript with
+lazy chunks and workers, excluding native binaries and source maps. It keeps
+them 90 days as the `bundle-sizes` artifact. The `Bundle size` job in `ci.yml`
+measures a pull request the same way when the desktop build covers its change. No file in the repository
+holds a limit, so a pull request never edits a shared one to grow:
+`scripts/ci/budgets.json` and the dated size notes above are no longer read.
+
+A pull request is checked twice:
+
+- Against its base: the sizes `bundle-size.yml` kept for the base commit, or
+  the base built in the same job when that run is missing or still going. A measure
+  growing more than 0.1 % fails until the pull request body explains it under
+  a `## Bundle size` heading. The body is read when the job runs: after
+  editing it, rerun the failed jobs (`gh run rerun <run-id> --failed`).
+- Against a ceiling: the sizes `bundle-size.yml` kept for the newest published
+  nightly or release, plus 2 %. A reason does not lift it; only publishing
+  does, so a pull request over it waits for the next nightly or shrinks.
+
+The job summary shows each measure, its base, the growth and the ceiling.
+Reproduce a measurement with `bun run build:ui && bun run build:core &&
+bun scripts/ci/budgets.ts measure sizes.json`.
 
 ### E2E preparation
 
