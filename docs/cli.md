@@ -206,8 +206,10 @@ with one message, a `pull-request` turn, when:
   job when none is required), once per head; again when a required check
   appears already passed or after one of them failed. The base branch's
   rulesets and classic protection name the required checks in advance: one
-  that has not reported on the head yet, such as `CI required` before the
-  rest of its workflow ended, counts as running, as GitHub's "Expected". A commit status such as
+  that has not reported on the head yet, such as a job created once its
+  dependencies ended, counts as running, as GitHub's "Expected". A draft,
+  which cannot merge, waits only for the required checks it reports: a
+  repository may keep a required name for its ready run alone. A commit status such as
   CodeRabbit's holds nothing while it stays pending, unless the base branch
   requires it or commit statuses are the only checks;
 - someone other than the account `gh` signs in as posts a comment, a review or

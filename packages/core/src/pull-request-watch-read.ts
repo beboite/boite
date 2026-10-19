@@ -23,11 +23,11 @@ const SNIPPET = 200;
 /**
  * One cheap GraphQL query (one point of GitHub's budget) whose answer moves
  * when anything a watch reports may have moved. `status` follows the state,
- * the mergeability, the head and the checks; `remarks` follows comments,
+ * the draft flag, the mergeability, the head and the checks; `remarks` follows comments,
  * reviews, their edits and the pull request's own update time.
  */
 export const FINGERPRINT_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-state mergeable headRefOid updatedAt
+state isDraft mergeable headRefOid updatedAt
 comments(first:50,orderBy:{field:UPDATED_AT,direction:DESC}){totalCount nodes{lastEditedAt}}
 reviews(last:50){totalCount nodes{lastEditedAt}}
 reviewThreads{totalCount}
@@ -36,7 +36,7 @@ commits(last:1){nodes{commit{statusCheckRollup{state contexts{checkRunCountsBySt
 
 /** The detailed read, made only when the fingerprint moved: the checks one by one, with whether the base branch requires each. */
 export const DETAIL_QUERY = `query($owner:String!,$name:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){pullRequest(number:$number){
-url state mergeable headRefOid baseRefName
+url state isDraft mergeable headRefOid baseRefName
 commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){totalCount nodes{__typename
 ... on CheckRun{name status conclusion detailsUrl startedAt completedAt isRequired(pullRequestNumber:$number) checkSuite{workflowRun{workflow{name}}}}
 ... on StatusContext{context state targetUrl createdAt isRequired(pullRequestNumber:$number)}
@@ -95,7 +95,7 @@ export function parseFingerprint(raw: string): Fingerprint {
   const comments = row(pr.comments), reviews = row(pr.reviews);
   return {
     state: prState(pr.state),
-    status: [pr.state, pr.mergeable, pr.headRefOid, counts(contexts.checkRunCountsByState), counts(contexts.statusContextCountsByState)].map(String).join(' '),
+    status: [pr.state, pr.isDraft, pr.mergeable, pr.headRefOid, counts(contexts.checkRunCountsByState), counts(contexts.statusContextCountsByState)].map(String).join(' '),
     remarks: [comments.totalCount, newestEdit(comments), reviews.totalCount, newestEdit(reviews), row(pr.reviewThreads).totalCount, pr.updatedAt].map(String).join(' '),
   };
 }
@@ -114,6 +114,8 @@ export interface WatchDetail {
   state: Fingerprint['state'];
   head: string;
   base: string;
+  /** A draft cannot merge: a required context it never reports does not hold its verdict. */
+  draft: boolean;
   mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
   checks: WatchCheck[];
   /** The account `gh` signs in as: what it writes is the agent's own. */
@@ -165,6 +167,7 @@ export function parseDetail(raw: string): WatchDetail {
     state: prState(pr.state),
     head: text(pr.headRefOid, 64) || text(commit.oid, 64),
     base: text(pr.baseRefName, 255),
+    draft: pr.isDraft === true,
     mergeable: mergeable === 'MERGEABLE' || mergeable === 'CONFLICTING' ? mergeable : 'UNKNOWN',
     checks: [...runs.values()].map(entry => entry.check),
     viewer: text(row(data.viewer).login, 100),
