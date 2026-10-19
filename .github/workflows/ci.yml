@@ -103,6 +103,8 @@ jobs:
             echo "stale=true" >> "$GITHUB_OUTPUT"
             echo "::error::pull request #$NUMBER is no longer a draft (draft: $draft): this draft run fails its checks; rerun the latest ready run instead"
           fi
+      - name: Probe only, planning fails after the stale step
+        run: exit 1
       # The conversion cancels a full run, whose planning may have passed
       # under the required name: failing it keeps that success from merging
       # next to the draft's skips. The next push runs the draft checks.
