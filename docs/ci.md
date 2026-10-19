@@ -225,21 +225,29 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | UI entry chunk | 495,300 |
 | UI files, excluding `.br` and `.gz` copies | 4,945,700 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 4,563,300 |
+| All emitted core JavaScript, including lazy chunks and workers | 4,563,800 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-19, contacts (PR #602) merged with `origin/main` at `38d5ca2f`
-measure 495,270 entry bytes, 4,944,672 UI bytes and 4,562,798 core JavaScript
+On 2026-10-19, contacts (PR #602) merged with `origin/main` at `de93f43a`
+measure 495,270 entry bytes, 4,944,672 UI bytes and 4,563,293 core JavaScript
 bytes with `measure()` after fresh `bun run build:ui` and `bun run build:core`
-on Windows, against 492,249, 4,871,151 and 4,494,397 measured the same way for
+on Windows, against 492,249, 4,871,151 and 4,494,827 measured the same way for
 that main. The Home surface loads on first open: its chunk is 36,618 bytes of
 JavaScript and 21,882 of CSS, and its strings, `strings/<locale>/contacts.ts`,
 sit in the catalogue chunks. The entry grows 3,021 bytes for the Home switch,
 the remote chip and the lazy loader's wiring. The contact store, join, link,
-concierge and Tailscale client add 68,401 core bytes. The UI and core
-JavaScript limits rise to 4,945,700 and 4,563,300; the entry limit of 495,300
+concierge and Tailscale client add 68,466 core bytes. The UI and core
+JavaScript limits rise to 4,945,700 and 4,563,800; the entry limit of 495,300
 still holds, and the `main.js` limit stays.
+
+On 2026-10-19, PR #622 merged with `origin/main` at `68033379` measures
+4,494,650 core JavaScript bytes with the same rule after a fresh
+`bun run build:core` on Windows, against 4,494,397 for that main: holding a
+roster offer while one is on its way adds 253 bytes. PR #623, which opens Bun
+WebSockets without permessage-deflate, adds 177 more on top of both
+(4,494,827). The core JavaScript limit rises to 4,494,900 to cover the two;
+the other limits stay.
 
 On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
 4,494,324 core JavaScript bytes with the same rule after a fresh

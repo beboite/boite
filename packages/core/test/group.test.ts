@@ -525,10 +525,12 @@ test('a member that stops answering waits longer each time, unless the roster ch
   /** Offers to b made by one more round. */
   const round = async () => { const before = offers; await store.syncPending(); return offers - before; };
   try {
-    // A change goes out at once; b does not answer.
+    // A change goes out at once; b does not answer. A round that starts while that offer is
+    // on its way (the 15 second tick under a loaded runner) does not send it twice: two
+    // failures would make the first wait a minute.
     a.core.group.rename('Studio');
-    await settle();
-    expect(offers).toBeGreaterThan(0);
+    await Promise.all([store.syncPending(), settle()]);
+    expect(offers).toBe(1);
     expect(await round()).toBe(0);
     // Its 30 second wait over, it is offered the same roster again and fails again: the next wait is a minute.
     setSystemTime(new Date(Date.now() + 31_000));
