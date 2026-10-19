@@ -15,8 +15,13 @@
 
   let { view, agent }: { view: AgentsView; agent: AgentProfile } = $props();
   let config = $state<AgentRuntimeConfig | null>(null);
-  /** The configuration and revision this card last read or saved: what its own changes and another writer's are measured against. */
-  let base: { config: AgentRuntimeConfig; revision: number } | null = null;
+  /**
+   * What each field's next change is measured against: the value it showed
+   * when it was edited, and the revision of the agent that holds it. `behind`
+   * marks a base older than that revision for some field, so the next save
+   * reads the core and merges instead of writing on the revision blindly.
+   */
+  let base: { config: AgentRuntimeConfig; revision: number; behind: boolean } | null = null;
   const FIELDS = ['defaultRoute', 'allowedRoutes', 'subagents', 'compactAfterTurns', 'maxRunMinutes', 'autoMemory'] as const;
   /** Equal values whatever the order of their keys: the core writes a route's keys in its own order. */
   const canon = (value: unknown) => JSON.stringify(value, (_key, v: unknown) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
@@ -49,7 +54,7 @@
   onMount(() => {
     const revision = agent.revision;
     void view.call('agents.runtime.get', { agentId: agent.id }).then(value => {
-      if (value) base = { config: $state.snapshot(value) as AgentRuntimeConfig, revision };
+      if (value) base = { config: $state.snapshot(value) as AgentRuntimeConfig, revision, behind: false };
       config = value;
     });
     // Leaving the tab sends a change still waiting for a typing pause.
@@ -105,7 +110,7 @@
       const known = base!;
       const latest = view.snapshot?.profiles.find(p => p.id === agent.id);
       sending = sent;
-      if (!latest || latest.revision === known.revision) return { agentId: agent.id, expectedRevision: known.revision, config: sent };
+      if (!latest || latest.revision === known.revision && !known.behind) return { agentId: agent.id, expectedRevision: known.revision, config: sent };
       const stored = await view.store.client!.call('agents.runtime.get', { agentId: agent.id });
       const [mine, theirs, was] = [shape(sent), shape(stored), shape(known.config)];
       const merged: Record<string, unknown> = { ...sent };
@@ -118,9 +123,17 @@
       // A write newer than the snapshot's revision makes the core refuse this one: nothing is overwritten.
       return { agentId: agent.id, expectedRevision: latest.revision, config: sending };
     });
-    base = { config: sending, revision: saved.revision };
-    // What another writer changed shows in the fields nobody touched since this save left.
-    if (config && sending !== sent) for (const key of FIELDS) if (same(config[key], sent[key])) (config as unknown as Record<string, unknown>)[key] = sending[key];
+    // A field nobody touched since this save left shows what was saved, another writer's value included.
+    // A field edited meanwhile was edited from what it showed, the value sent: that stays its base, and
+    // when the save adopted another value there, the next save merges and reports the conflict.
+    const next: Record<string, unknown> = { ...sending };
+    let behind = false;
+    if (config) for (const key of FIELDS) {
+      if (same(config[key], sent[key])) { if (sending !== sent) (config as unknown as Record<string, unknown>)[key] = sending[key]; continue; }
+      next[key] = sent[key];
+      if (!same(shape(sending)[key], shape(sent)[key])) behind = true;
+    }
+    base = { config: next as unknown as AgentRuntimeConfig, revision: saved.revision, behind };
   }
 </script>
 

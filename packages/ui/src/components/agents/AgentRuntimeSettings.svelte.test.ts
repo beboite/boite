@@ -195,3 +195,45 @@ test('another writer saving while this card\'s last save comes back still confli
   expect((await real('agents.runtime.get', { agentId: agent().id })).maxRunMinutes).toBe(37);
   expect(document.querySelector<HTMLElement>('[data-testid=agent-runtime] [data-testid=save-status]')?.dataset.state).toBe('error');
 });
+
+/** Another window saves `maxRunMinutes: 37`, then this card picks a model with one of its calls held, and the field it still shows as 10 is typed to 50 meanwhile. */
+async function editDuringMerge(held: 'agents.runtime.get' | 'agents.runtime.configure') {
+  const { client, view, agent } = await open();
+  const real = client.call.bind(client);
+  const initial = await real('agents.runtime.get', { agentId: agent().id });
+  await real('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...initial, maxRunMinutes: 37 } });
+  await view.refresh();
+  await idle();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let calls = 0;
+  client.call = (async (method: string, params: never) => {
+    const first = method === held && ++calls === 1;
+    if (first && held === 'agents.runtime.get') await gate;
+    const result = await real(method as never, params);
+    if (first && held === 'agents.runtime.configure') await gate;
+    return result;
+  }) as typeof client.call;
+  await pick('claude-sonnet-5-5');
+  const minutes = document.querySelectorAll<HTMLInputElement>('[data-testid=agent-runtime] input[type=number]')[1]!;
+  expect(minutes.value).toBe('10');
+  minutes.value = '50';
+  minutes.dispatchEvent(new Event('input', { bubbles: true }));
+  minutes.dispatchEvent(new Event('change', { bubbles: true }));
+  await idle();
+  release();
+  await idle();
+  await idle();
+  const stored = await real('agents.runtime.get', { agentId: agent().id });
+  expect([stored.defaultRoute.model, stored.maxRunMinutes]).toEqual(['claude-sonnet-5-5', 37]);
+  expect(document.querySelector<HTMLElement>('[data-testid=agent-runtime] [data-testid=save-status]')?.dataset.state).toBe('error');
+  expect(minutes.value).toBe('50');
+}
+
+test('an edit made while a save reads the other writer\'s values to merge them conflicts with them, from the value it showed', async () => {
+  await editDuringMerge('agents.runtime.get');
+});
+
+test('an edit made while a merged save is on its way conflicts with the value that save adopted', async () => {
+  await editDuringMerge('agents.runtime.configure');
+});
