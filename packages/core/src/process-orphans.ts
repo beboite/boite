@@ -15,12 +15,14 @@ interface Traced {
  * looked up in the system (`runningSince`), and one found running there keeps
  * its child. Whatever the core spawned has the core as its parent and is never taken.
  *
- * An exited parent with the image of its own parent is a fork, not a shell:
- * Git Bash (MSYS2) forks a copy of the shell to exec each command, and that
- * copy exits once the command runs. A process under such forks hangs from the
- * first ancestor past them, and stays while that one runs. A background
- * `sh wait.sh` keeps its live shell that way; what an interrupted command left
- * still goes, since its shell is a different image from the agent above it.
+ * An exited `sh`, `bash`, `dash` or `zsh` with the image of its own parent is
+ * a fork, not a shell: Git Bash (MSYS2) forks a copy of the shell to exec each
+ * command, and that copy exits once the command runs. A process under such
+ * forks hangs from the first ancestor past them, and stays while that one runs.
+ * A background `sh wait.sh` keeps its live shell that way; what an interrupted
+ * command left still goes, since its shell is a different image from the agent
+ * above it. Any other exited parent of the same image (a Node worker under
+ * Node) is a real parent, and what it left is an orphan.
  */
 export function orphansOf<T extends Traced>(byPid: ReadonlyMap<number, T>, now: number, graceMs: number, runningSince: (pid: number) => number | null): Map<number, T> {
   const entries = [...byPid.values()];
@@ -80,7 +82,7 @@ function forkerOf<T extends Traced>(entry: T, byPid: ReadonlyMap<number, T>): T 
   if (link === null || running(link, byPid)) return undefined;
   while (!running(link, byPid)) {
     const above: Traced | null = link.parent ?? null;
-    if (above === null || !sameImage(link, above)) return undefined;
+    if (above === null || !shellFork(link, above)) return undefined;
     link = above;
   }
   return byPid.get(link.record.pid);
@@ -90,9 +92,12 @@ function running(entry: Traced, byPid: ReadonlyMap<number, Traced>): boolean {
   return byPid.get(entry.record.pid) === entry;
 }
 
-function sameImage(a: Traced, b: Traced): boolean {
-  const exe = a.record.exe.toLowerCase();
-  return exe !== 'unknown' && exe === b.record.exe.toLowerCase();
+/** `fork` exists only in an MSYS2 or Cygwin program, and these shells fork for every command. */
+const FORKING_SHELL = /(?:^|[\\/])(?:ba|da|z)?sh\.exe$/i;
+
+function shellFork(fork: Traced, shell: Traced): boolean {
+  const exe = fork.record.exe;
+  return FORKING_SHELL.test(exe) && exe.toLowerCase() === shell.record.exe.toLowerCase();
 }
 
 function nativeBirth(entry: Traced): number {

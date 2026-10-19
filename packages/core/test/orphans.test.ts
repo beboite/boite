@@ -237,6 +237,17 @@ describe('orphan sweep', () => {
     expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104, 141, 143]);
   });
 
+  test('an exited parent of the same image that is no shell fork leaves an orphan', () => {
+    const sink = job.sink();
+    const node = 'C:\\tools\\node.exe';
+    // A live Node service whose worker started a detached process and quit.
+    sink.started(THREAD, 160, { exe: node, commandLine: null, parentPid: 100, startedAt: 5000 });
+    sink.started(THREAD, 161, { exe: node, commandLine: null, parentPid: 160, startedAt: 5010 });
+    sink.started(THREAD, 162, { exe: node, commandLine: null, parentPid: 161, startedAt: 5020 });
+    sink.exited(THREAD, 161, { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
+    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104, 162]);
+  });
+
   test('a new turn inside the grace cancels the sweep', async () => {
     bus.emit(...turn('turn.finished'));
     bus.emit(...turn('turn.started'));

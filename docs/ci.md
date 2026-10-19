@@ -204,11 +204,11 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-19, the orphan sweep's fork lineage measures 4,494,217 core
+On 2026-10-19, the orphan sweep's fork lineage measures 4,494,292 core
 JavaScript bytes after a fresh `bun run build:core` on Windows, against
 4,493,506 for `origin/main` at `53cb2781` built the same way:
 `process-orphans.ts` (the parent link each process keeps, the walk past exited
-forks) adds 711 bytes. The core JavaScript limit rises to 4,494,300; the other
+forks) adds 786 bytes. The core JavaScript limit rises to 4,494,300; the other
 limits stay.
 
 On 2026-10-18, automatic resumes (PR #603) merged with `origin/main` at

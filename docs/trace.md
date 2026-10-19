@@ -342,12 +342,14 @@ not a newly opened PID. Each action emits a thread-correlated diagnostic.
 Git Bash (MSYS2) forks a copy of the shell to exec each command, and the copy
 exits as soon as the command runs, so a script's Windows parent is gone while
 its shell still runs. Each traced process keeps a reference to the parent the
-registry held at its start. An exited parent with the same image as its own
-parent is such a fork: the process hangs from the first live ancestor past the
-forks and stays while that one runs, so `sh wait.sh` in a background task lives
-as long as its shell. Once that shell exits, the script is an orphan again and
-its own forked children go with it. A shell is a different image from the agent
-above it, so what an interrupted command leaves still qualifies.
+registry held at its start. An exited `sh`, `bash`, `dash` or `zsh` with the
+same image as its own parent is such a fork: the process hangs from the first
+live ancestor past the forks and stays while that one runs, so `sh wait.sh` in
+a background task lives as long as its shell. Once that shell exits, the script
+is an orphan again and its own forked children go with it. A shell is a
+different image from the agent above it, so what an interrupted command leaves
+still qualifies, and any other exited parent of the same image, a Node worker
+under Node say, leaves an orphan.
 
 Processes directly launched by the core and children of live shells remain.
 Detached descendants and launcher children can qualify even when intentionally
