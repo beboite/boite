@@ -326,12 +326,27 @@ test('a notification of another member reaches a phone through the machine it in
   await expect(b.core.coordination.request(b.core.group.peers()[0]!, 'group.push', { id: 'y', device: `${id(a)}:${phone.session!.id}`, push: { title: 't', body: 1, threadId: null, tag: 'x' } }))
     .rejects.toThrow('push.body');
 
+  // The phone kept only approvals on a: b still sends every kind with its kind, and a filters at home.
+  await phone.call('push.kinds', { kinds: ['approvals'] });
+  const forwarded: string[] = [];
+  const forward = b.core.push.forward;
+  b.core.push.forward = (peer, payload) => { forwarded.push(payload.push.kind ?? 'none'); return forward(peer, payload); };
+  b.core.bus.emit('question.asked', { id: 'muted', threadId, text: 'Which branch?' } as RpcEvents['question.asked']);
+  b.core.bus.emit('permission.requested', { id: 'kept', threadId, turnId: 't', toolName: 'Edit', input: {}, description: null, createdAt: Date.now() });
+  await waitFor(() => onA.length === 4);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(forwarded.sort()).toEqual(['approvals', 'questions']);
+  expect(onA).toHaveLength(4);
+  expect(onA[3]).toMatchObject({ tag: `${id(b).slice(0, 16)}:request-kept`, kind: 'approvals', core: id(b) });
+  b.core.push.forward = forward;
+  await phone.call('push.kinds', { kinds: ['approvals', 'questions', 'finished', 'errors'] });
+
   // Revoked on a: b drops its key and forwards nothing more.
   a.core.sessions.revoke(phone.session!.id);
   await waitFor(() => b.core.sessions.list(null).length === 0);
   b.core.bus.emit('question.asked', { id: 'revoked', threadId, text: 'Which branch?' } as RpcEvents['question.asked']);
   await new Promise((resolve) => setTimeout(resolve, 200));
-  expect(onA).toHaveLength(3);
+  expect(onA).toHaveLength(4);
   owner.close();
   phone.close();
 });

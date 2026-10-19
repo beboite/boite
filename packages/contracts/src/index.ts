@@ -97,7 +97,7 @@ export { PREVIEW_REFERENCES_PER_TURN, previewReferencesError, previewPrompt } fr
 export { previewToolOutputs, previewToolPart, inputPreview, longerThan, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS, TOOL_OUTPUT_FOLDED_CHARS, TOOL_INPUT_INLINE_CHARS, TOOL_INPUT_PREVIEW_CHARS, TOOL_DOCUMENTS_INLINE_CHARS } from './message-preview';
 export { forTransport, projectLiveMessage, projectLivePart, projectMessage, MESSAGE_SENT_MAX_BYTES, type TransportOptions } from './transport.ts';
 export { boundedMessageWindow } from './message-window.ts';
-export { lastAgentText, notificationExcerpt, requestExcerpt, NOTIFICATION_TEXT_CHARS } from './notification-text';
+export { lastAgentText, notificationExcerpt, requestExcerpt, requestKind, NOTIFICATION_TEXT_CHARS } from './notification-text';
 export { nativeAgentsOfTool, collectNativeAgents } from './native-agents.ts';
 export { collectProcessAgents, processAgentCommand } from './process-agents.ts';
 
@@ -181,10 +181,12 @@ export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, CACHE_K
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export {
-  REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
-  checkSettingRequest, effectiveSetting, isRequestableSetting, isSettingsPage, readSettings, sameSetting, settingAnswerText, settledSetting,
-  type RequestableSetting, type SettingAsk, type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck,
-  type SettingRequestParams, type SettingsPage,
+  APP_LANGUAGES, CLIENT_APP_PATTERN, CLIENT_LABELS_MAX, CLIENT_LABEL_CHARS, EXPERIMENT_IDS, REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
+  checkClientPreferences, checkSettingRequest, settledExperiment, currentSetting, effectiveSetting, experimentOf, isExperimentId, isRequestableSetting, isSettingsPage, readSettings,
+  sameClientPreferences, sameSetting, settingAnswerText, settledSetting,
+  type AppLanguage, type ClientPreferences, type ExperimentId, type ExperimentSettingKey, type RequestableKey, type RequestableSetting, type SettingAsk,
+  type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck, type SettingRequestParams, type SettingsPage,
+  type SettingsReading,
 } from './setting-requests.ts';
 export {
   AGENT_PROJECTS_MAX, AGENT_RUN_MINUTES, AGENT_SETTING_KEYS, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,

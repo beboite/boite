@@ -1,9 +1,12 @@
 export const strings = {
 
   palette: {
-    placeholder: 'Search threads, or type a command',
+    placeholder: 'Search threads, projects or commands',
+    projects: 'Projects',
+    /** Extra words a project row answers to: picking one starts a thread there. */
+    newThreadWords: 'new thread start draft',
+    find: 'Find in this thread',
     terminal: 'Show or hide the terminal',
-    threads: 'Threads',
     commands: 'Commands',
     empty: 'Nothing matches.',
     hint: 'Enter to open, Esc to close',

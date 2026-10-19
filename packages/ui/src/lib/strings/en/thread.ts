@@ -44,6 +44,7 @@ export const strings = {
     /** The header's button: it shows or hides the panel, whatever surface is in it. */
     panel: 'Panel',
     panelHint: 'Browser, files and tools beside this conversation',
+    panelMenu: 'Browser, files and tools',
     terminalHint: "Terminal in this thread's folder",
     cwd: 'Working directory',
     model: 'Model',
@@ -53,6 +54,8 @@ export const strings = {
     start: 'Start a thread',
     inWorktree: 'in a worktree',
     inProject: 'in',
+    /** Before the machine the draft's project is on, which ends the heading. */
+    onMachine: 'on',
     using: 'using',
     onEffort: 'on {effort} effort',
     draftMode: {

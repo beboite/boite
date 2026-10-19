@@ -1,10 +1,13 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { AGENT_ENV, type ThreadId } from '@boite/contracts';
+import { AGENT_ENV, DEFAULT_DELEGATION_CONFIG, type ThreadId } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
+import { Core } from '../src/core.ts';
+import { Retirements } from '../src/delegation/retirement.ts';
 import { PullRequestWatches } from '../src/pull-request-watch.ts';
 import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
-import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { parseProtection, parseRules, withRequired } from '../src/pull-request-required.ts';
+import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const URL = 'https://github.com/example/repo/pull/7';
 let harness: TestCore | undefined;
@@ -208,6 +211,21 @@ test('CI wakes on its first failure and on its verdict, not on each check that f
   expect(step([{ name: 'jenkins', context: true, status: 'SUCCESS' }])).toEqual([{ kind: 'passed', head, count: 1, required: false }]);
 });
 
+test('the base branch names what it requires through its rulesets and its classic protection, reported or not', () => {
+  expect(parseRules(JSON.stringify([{ type: 'deletion' }, { type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'CI required', integration_id: 15368 }, { context: 'PR title' }] } }]))).toEqual(['CI required', 'PR title']);
+  expect(parseRules('[]')).toEqual([]);
+  expect(parseProtection(JSON.stringify({ protection: { enabled: true, required_status_checks: { enforcement_level: 'everyone', contexts: ['lint'], checks: [{ context: 'build', app_id: null }] } } }))).toEqual(['lint', 'build']);
+  expect(parseProtection(JSON.stringify({ protection: { enabled: false, required_status_checks: { enforcement_level: 'off', contexts: [], checks: [] } } }))).toEqual([]);
+  // A check run matches by its own name, its workflow aside; a context with no check yet waits as GitHub's "Expected".
+  const checks = withRequired(detail([{ name: 'CI required' }, { name: 'test' }]), ['CI required', 'PR title']).checks;
+  expect(checks.map(({ name, status, required, conclusion }) => ({ name, status, required, conclusion }))).toEqual([
+    { name: 'CI / CI required', status: 'passed', required: true, conclusion: 'SUCCESS' },
+    { name: 'CI / test', status: 'passed', required: false, conclusion: 'SUCCESS' },
+    { name: 'PR title', status: 'pending', required: true, conclusion: 'EXPECTED' },
+  ]);
+  expect(evaluate(initialMemory(since), withRequired(detail([{ name: 'CI required' }]), ['CI required', 'PR title']), null).changes).toEqual([]);
+});
+
 test('a burst folds into one set of changes, and failures of an older head drop once the new head passed', () => {
   const merged = mergeChanges(
     [{ kind: 'failed', head: 'old', checks: [{ name: 'test', conclusion: 'FAILURE', url: '' }] }, { kind: 'remarks', remarks: [{ id: 'a', author: 'x', body: '1', url: '', path: null, state: null }] }],
@@ -234,11 +252,18 @@ interface FakeGitHub {
   closedBy: string;
   /** Thrown instead of answering, once per call while set. */
   failure: string | null;
+  /** Thrown by the next closer query only, then cleared. */
+  closerFailure: string | null;
+  /** The contexts the base branch's rulesets and its classic protection require. */
+  rules: string[];
+  protection: string[];
+  /** Thrown by the reads of what the base branch requires while set. */
+  rulesFailure: string | null;
   calls: string[];
 }
 
 function fakeGitHub(): FakeGitHub {
-  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', closedBy: 'meetsu', failure: null, calls: [] };
+  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', closedBy: 'meetsu', failure: null, closerFailure: null, rules: [], protection: [], rulesFailure: null, calls: [] };
 }
 
 /** What `gh` prints for each call a watch makes. */
@@ -248,6 +273,9 @@ async function answer(github: FakeGitHub, args: string[]): Promise<string> {
   github.calls.push(query ? (query.includes('mergedBy') ? 'closer' : query.includes('viewer') ? 'detail' : 'fingerprint') : path.replace(/^repos\/example\/repo\//, ''));
   if (github.failure) throw new Error(github.failure);
   if (query?.includes('mergedBy')) {
+    const failure = github.closerFailure;
+    github.closerFailure = null;
+    if (failure) throw new Error(failure);
     const by = { login: github.closedBy };
     return JSON.stringify({ data: { viewer: { login: 'meetsu' }, repository: { pullRequest: { state: github.state, mergedBy: github.state === 'MERGED' ? by : null,
       timelineItems: { nodes: github.state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
@@ -259,6 +287,12 @@ async function answer(github: FakeGitHub, args: string[]): Promise<string> {
     return JSON.stringify({ data: { repository: { pullRequest: { state: github.state, mergeable: github.mergeable, headRefOid: github.head, updatedAt: github.updatedAt,
       comments: { totalCount: github.comments.length, nodes: [] }, reviews: { totalCount: github.reviews.length, nodes: [] }, reviewThreads: { totalCount: 0 },
       commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { checkRunCountsByState: [...counts].map(([state, count]) => ({ state, count })), statusContextCountsByState: [] } } } }] } } } } });
+  }
+  if (/^repos\/example\/repo\/(?:rules\/)?branches\//.test(path)) {
+    if (github.rulesFailure) throw new Error(github.rulesFailure);
+    if (path.includes('rules/')) return JSON.stringify(github.rules.length ? [{ type: 'deletion' }, { type: 'required_status_checks', parameters: { required_status_checks: github.rules.map(context => ({ context, integration_id: 15368 })) } }] : []);
+    return JSON.stringify({ name: 'main', protected: true, protection: { enabled: github.protection.length > 0,
+      required_status_checks: { enforcement_level: github.protection.length ? 'non_admins' : 'off', contexts: github.protection, checks: github.protection.map(context => ({ context, app_id: null })) } } });
   }
   const page = Number(/[?&]page=(\d+)/.exec(path)![1]);
   const all = path.includes('/reviews') ? github.reviews : path.includes('pulls/') ? github.inline : github.comments;
@@ -301,7 +335,7 @@ test('a watch reads first without waking, wakes once per change with links, and 
   // A check still runs: the idle row keeps counting from the user's request, like a monitor.
   const summary = () => harness!.core.threads.list({}).find(thread => thread.id === threadId)!;
   expect(summary().requestSince).toBeNumber();
-  expect(github.calls).toEqual(['fingerprint', 'detail', 'issues/7/comments?per_page=100&page=1', 'pulls/7/reviews?per_page=100&page=1', 'pulls/7/comments?per_page=100&page=1']);
+  expect(github.calls).toEqual(['fingerprint', 'detail', 'rules/branches/main?per_page=100', 'branches/main', 'issues/7/comments?per_page=100&page=1', 'pulls/7/reviews?per_page=100&page=1', 'pulls/7/comments?per_page=100&page=1']);
 
   // Nothing moved: one fingerprint per pass, no detail, no wake.
   github.calls = [];
@@ -354,7 +388,94 @@ test('a watch reads first without waking, wakes once per change with links, and 
   expect(wakes(threadId)).toHaveLength(3);
 });
 
-test('a merge or a close by someone else is told with what still waited, then the watch ends', async () => {
+test('a check the base branch requires holds "passed" back until it reported', async () => {
+  const { owner, threadId, github, watches, drive } = await watchedThread();
+  // beboite/boite's ruleset requires "PR title", done in seconds, and "CI required", created only once every other job ended.
+  github.rules = ['PR title', 'CI required'];
+  const title = { name: 'PR title', workflow: 'pr title', required: true };
+  github.runs = [{ ...title, status: 'IN_PROGRESS', conclusion: '' }];
+  await owner.call('threads.watchPullRequest', { threadId });
+  github.runs = [title];
+  await drive();
+  await settled(threadId);
+  expect(wakes(threadId)).toHaveLength(0);
+  expect(watches.of(threadId)[0]!.seen?.checks).toEqual({ total: 2, running: 1, failed: 0 });
+  github.runs = [title, { name: 'CI required', required: true }];
+  await drive();
+  await settled(threadId);
+  expect(wakes(threadId)).toHaveLength(1);
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('All 2 required checks passed on aaaaaaa.');
+  // Read once per repository and base while it is fresh, the classic protection beside the rulesets.
+  expect(github.calls.filter(call => call.includes('branches/'))).toEqual(['rules/branches/main?per_page=100', 'branches/main']);
+
+});
+
+test('a failed read of what the base branch requires ends nothing and pauses nothing', async () => {
+  const { owner, threadId, github, watches, drive } = await watchedThread();
+  github.rules = ['test', 'CI required'];
+  github.rulesFailure = 'gh: Server Error (HTTP 502)';
+  await owner.call('threads.watchPullRequest', { threadId });
+  github.runs = [{ name: 'test', required: true }];
+  await drive();
+  await settled(threadId);
+  // It goes on with what the checks say of themselves.
+  expect(watches.of(threadId)[0]).toMatchObject({ paused: null, seen: { checks: { total: 1, running: 0, failed: 0 } } });
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('All 1 required check passed on aaaaaaa.');
+});
+
+test('rules that expire or failed are read again while the fingerprint stands still, against the checks already read', async () => {
+  const { owner, threadId, github, watches, drive } = await watchedThread();
+  // "old" is required, then the ruleset swaps it for C, which already passed: nothing on the pull request moves.
+  github.rules = ['A', 'old'];
+  github.runs = [{ name: 'A', required: true }, { name: 'C' }];
+  await owner.call('threads.watchPullRequest', { threadId });
+  github.rules = ['A', 'C'];
+  github.calls = [];
+  const now = Date.now();
+  const driveAt = async (minutes: number) => {
+    const clock = spyOn(Date, 'now').mockReturnValue(now + minutes * 60_000);
+    try { await drive(); } finally { clock.mockRestore(); }
+  };
+  await driveAt(11);
+  await settled(threadId);
+  expect(github.calls.filter(call => call !== 'fingerprint')).toEqual(['rules/branches/main?per_page=100', 'branches/main']);
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('All 2 required checks passed on aaaaaaa.');
+
+  // A failed read is tried again after two minutes, not after the half-hour reread.
+  github.rulesFailure = 'gh: Server Error (HTTP 502)';
+  await driveAt(22);
+  github.rulesFailure = null;
+  github.rules = ['A', 'C', 'B'];
+  github.calls = [];
+  await driveAt(25);
+  expect(github.calls.filter(call => call !== 'fingerprint')).toEqual(['rules/branches/main?per_page=100', 'branches/main']);
+  expect(watches.of(threadId)[0]!.seen?.checks).toEqual({ total: 3, running: 1, failed: 0 });
+});
+
+test('a check the rules stop requiring stops counting as required, even on the checks already read', async () => {
+  const { owner, threadId, github, drive } = await watchedThread();
+  github.rules = ['A', 'B'];
+  github.runs = [{ name: 'A', required: true }, { name: 'B', conclusion: 'FAILURE', required: true }];
+  await owner.call('threads.watchPullRequest', { threadId });
+  // B leaves the ruleset; nothing on the pull request moves.
+  github.rules = ['A'];
+  const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 11 * 60_000);
+  try { await drive(); } finally { clock.mockRestore(); }
+  await settled(threadId);
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('All 1 required check passed on aaaaaaa.');
+});
+
+test('a rate limit on the rules pauses every read like any other', async () => {
+  const { owner, threadId, github, watches } = await watchedThread({ intervalMs: 40, coalesceMs: 0 });
+  github.rulesFailure = 'gh: API rate limit exceeded for user ID 1. (HTTP 403)';
+  await owner.call('threads.watchPullRequest', { threadId });
+  expect(watches.of(threadId)[0]!.paused).toMatchObject({ reason: 'rate-limit' });
+  github.calls = [];
+  await watches.pass();
+  expect(github.calls).toEqual([]);
+});
+
+test('a merge or a close by someone else is told with what still waited, a failed closer read included, then the watch ends', async () => {
   const { owner, threadId, github, watches, drive } = await watchedThread();
   await owner.call('threads.watchPullRequest', { threadId });
   await owner.call('turns.start', { threadId, prompt: 'wait [sleep:600]' });
@@ -364,7 +485,11 @@ test('a merge or a close by someone else is told with what still waited, then th
   await drive();
   github.state = 'MERGED';
   github.closedBy = 'maintainer';
+  // GitHub fails to name the closer once: the watch backs off like any failed read and asks again.
+  github.closerFailure = 'error connecting to api.github.com';
+  github.calls = [];
   await drive();
+  expect(github.calls.filter(call => call === 'closer')).toHaveLength(2);
   // Told nothing yet, read no more, and the watch stays until it is told.
   github.calls = [];
   await drive();
@@ -481,6 +606,131 @@ test('an agent watches its own thread; a paired phone may stop a watch, never st
     await expect(phone.call('threads.watchPullRequest', { threadId })).rejects.toThrow('owner');
     expect(await phone.call('threads.unwatchPullRequest', { threadId })).toEqual([]);
   } finally { agent.close(); phone.close(); }
+});
+
+/** A parent with delegation on and a delegated agent that has the pull request linked; the agent's own token watches it. */
+async function watchingChild(setup: Awaited<ReturnType<typeof watchedThread>>, requestId: string) {
+  const { owner, threadId } = setup;
+  const parent = harness!.core.threads.require(threadId);
+  await owner.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: parent.providerId, accountId: parent.accountId, model: parent.model!, effort: null }] } });
+  const child = (await owner.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Open the pull request and see it to green', requestId })).thread.id as ThreadId;
+  await settled(child);
+  harness!.core.journal.setSetting(`linked-pull-requests:${child}`, harness!.core.journal.getSetting(`linked-pull-requests:${threadId}`));
+  const agent = await connect(harness!.url, harness!.core.agents.tokenFor(child), { client: { name: 'boite-cli', version: 'test' } });
+  try { await agent.call('threads.watchPullRequest', { threadId: child }); } finally { agent.close(); }
+  return child;
+}
+
+test('a delegated agent watches its pull request: the wake is its turn, its answer goes to the parent, and its stop ends the watch', async () => {
+  const setup = await watchedThread();
+  const { owner, threadId, github, drive, watches } = setup;
+  const child = await watchingChild(setup, 'first');
+  const sibling = await watchingChild(setup, 'second');
+  expect(watches.of(child)).toHaveLength(1);
+
+  github.runs = [{ name: 'test', conclusion: 'FAILURE' }];
+  github.updatedAt = '2026-10-15T09:31:00Z';
+  await drive();
+  await settled(child);
+  expect(wakes(child)).toHaveLength(1);
+  expect(wakeText(child, wakes(child)[0]!.id)).toContain('Checks failed on aaaaaaa');
+  // What the wake turn answers comes back to the parent like any result of the subagent.
+  const result = () => harness!.core.journal.db.query('SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND request_id = ?').get(child, threadId, `result:${wakes(child)[0]!.id}`);
+  await waitFor(() => result() !== null);
+
+  // The parent stopping this subagent ends its watch, not its sibling's.
+  await owner.call('delegation.stop', { threadId, agentId: child });
+  expect(watches.of(child)).toEqual([]);
+  expect(harness!.core.journal.getSetting(`pr-watches:${child}`)).toBeUndefined();
+  expect(watches.of(sibling)).toHaveLength(1);
+  // Its parent archived, the subagent watches nothing either.
+  await owner.call('threads.archive', { threadId });
+  expect(watches.of(sibling)).toEqual([]);
+});
+
+test('a persistent agent takes its next work and keeps a subagent that still watches its pull request until the watch ends', async () => {
+  const setup = await watchedThread();
+  const { threadId, watches } = setup;
+  const child = await watchingChild(setup, 'episode');
+  const idle = (await setup.owner.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Read the logs', requestId: 'idle' })).thread.id as ThreadId;
+  await settled(idle);
+  await waitFor(() => (harness!.core.journal.db.query("SELECT COUNT(*) AS n FROM delegation_messages WHERE recipient_id = ? AND status = 'delivered'").get(threadId) as { n: number }).n >= 2);
+  await settled(threadId);
+  const delegation = harness!.core.delegation;
+  const archived = (id: ThreadId) => harness!.core.journal.getThread(id)?.archived;
+  // The resident runtime starts each work item through beginEpisode: the fresh work runs, the settled subagent retires, the watching one stays.
+  const accepted = delegation.beginEpisode(threadId, 'next-work-item', delegation.config(threadId));
+  expect({ accepted, idle: archived(idle), child: archived(child), watches: watches.of(child).length }).toEqual({ accepted: true, idle: true, child: false, watches: 1 });
+  // Its watch over, it retires too.
+  watches.unwatch(child);
+  await waitFor(() => archived(child) === true);
+});
+
+for (const ending of ['merged by someone else', 'closed by someone else', 'a failed turn']) {
+  test(`a subagent a past episode left watching delivers its last result before it retires: ${ending}`, async () => {
+    const setup = await watchedThread();
+    const { owner, threadId, github, drive, watches } = setup;
+    const child = await watchingChild(setup, 'episode');
+    await waitFor(() => harness!.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND status = 'delivered'").get(child, threadId) !== null);
+    await settled(threadId);
+    expect(harness!.core.delegation.beginEpisode(threadId, 'next-work-item', harness!.core.delegation.config(threadId))).toBe(true);
+    const before = harness!.core.journal.listTurns(child).map(turn => turn.id);
+    if (ending === 'a failed turn') await owner.call('turns.start', { threadId: child, prompt: '[error]' });
+    else {
+      github.state = ending.startsWith('merged') ? 'MERGED' : 'CLOSED';
+      github.closedBy = 'someone-else';
+      await drive();
+    }
+    await waitFor(() => harness!.core.journal.getThread(child)?.archived === true);
+    expect(watches.of(child)).toEqual([]);
+    const last = harness!.core.journal.listTurns(child).find(turn => !before.includes(turn.id))!;
+    expect(harness!.core.journal.db.query('SELECT status FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(child, `result:${last.id}`)).toEqual({ status: 'delivered' });
+  });
+}
+
+test('a restart between a retiring subagent\'s last delivery and its archive retires it on start', async () => {
+  const child = await retiringOnDisk();
+  const restarted = new Core({ dataDir: harness!.dataDir, token: harness!.token });
+  try {
+    expect(restarted.threads.require(child).archived).toBe(true);
+    expect(restarted.journal.getSetting(`delegation-retiring:${child}`)).toBeUndefined();
+  } finally { await restarted.close(); }
+});
+
+test('a retirement that throws on start is logged and the core still starts', async () => {
+  const child = await retiringOnDisk();
+  const retire = spyOn(Retirements.prototype, 'check').mockImplementation(() => { throw new Error('journal busy'); });
+  let restarted: Core;
+  try { restarted = new Core({ dataDir: harness!.dataDir, token: harness!.token }); } finally { retire.mockRestore(); }
+  try {
+    expect(restarted.threads.require(child).archived).toBe(false);
+    expect((await restarted.logs.query({ threadId: child, level: 'warn' })).some(record => record.event === 'delegation.retire_failed' && record.message.includes('journal busy'))).toBe(true);
+  } finally { await restarted.close(); }
+});
+
+/** A retiring subagent whose watch ended on disk, its core gone down before the archive followed. */
+async function retiringOnDisk(): Promise<ThreadId> {
+  const setup = await watchedThread();
+  const { threadId } = setup;
+  const child = await watchingChild(setup, 'episode');
+  await waitFor(() => harness!.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND status = 'delivered'").get(child, threadId) !== null);
+  await settled(threadId);
+  expect(harness!.core.delegation.beginEpisode(threadId, 'next-work-item', harness!.core.delegation.config(threadId))).toBe(true);
+  harness!.core.journal.deleteSetting(`pr-watches:${child}`);
+  await harness!.core.close();
+  return child;
+}
+
+test('the parent\'s Stop ends its subagents\' watches, and a workflow step still cannot watch', async () => {
+  const setup = await watchedThread();
+  const { owner, threadId, watches } = setup;
+  const child = await watchingChild(setup, 'first');
+  expect(watches.of(child)).toHaveLength(1);
+  await owner.call('turns.stop', { threadId });
+  expect(watches.of(child)).toEqual([]);
+  // A child the core runs for a plan answers it once: no watch to wake it again.
+  spyOn(harness!.core.delegation, 'delegated').mockReturnValue(false);
+  await expect(owner.call('threads.watchPullRequest', { threadId: child })).rejects.toThrow('a workflow step or a reviewer cannot watch');
 });
 
 test('archive ends the watches and their saved state, and a merged pull request has nothing to watch', async () => {

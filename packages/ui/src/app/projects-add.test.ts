@@ -3,6 +3,7 @@ import { flushSync } from 'svelte';
 import { type RpcMethodName } from '@boite/contracts';
 import { store } from '../lib/store.svelte';
 import { work } from '../lib/work-prefs.svelte';
+import { projectMenu } from '../lib/project-menu';
 import { query, showMobileThreads, test, type, waitFor } from '../test/app';
 
 vi.mock('@tauri-apps/plugin-opener', () => import('../test/opener'));
@@ -49,30 +50,29 @@ test('browser Add project keeps refused paths and Escape returns to its button',
   }
 });
 
-test('the phone cannot manage an unrelated project from a draft without a folder', async ({ app: _app }) => {
-  expect(store.projects.length).toBeGreaterThan(0);
-  store.startDraft(null);
-  await showMobileThreads();
-  await waitFor(() => query('[data-testid=mobile-project]').textContent?.includes('Drafts') === true);
-  expect(store.openProject).toBeNull();
-  expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
+test('the phone list header holds the project picker, the new thread and the menu, and no project management', async ({ app: _app }) => {
   store.startDraft('p-boite');
-  await waitFor(() => document.querySelector('[data-testid=mobile-project-actions]') !== null);
-  await store.open('t-trace');
-  if (!store.openThread) throw new Error('the thread did not open');
-  store.openThread.projectId = null;
-  flushSync();
-  expect(store.openProject).toBeNull();
+  await showMobileThreads();
+  await waitFor(() => query('[data-testid=mobile-project]').textContent?.includes('boite') === true);
+  expect(document.querySelector('[data-testid=mobile-new]')).not.toBeNull();
+  expect(document.querySelector('[data-testid=mobile-menu]')).not.toBeNull();
   expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
+  // Adding a project is the picker's last row.
+  query<HTMLButtonElement>('[data-testid=mobile-project]').click();
+  await waitFor(() => document.querySelector('[data-value=add-project]') !== null);
+  query<HTMLButtonElement>('[data-value=add-project]').click();
+  await waitFor(() => store.projectPickerOpen);
 });
 
-test('the phone cannot archive an already archived project or offer a misleading undo', async ({ app: _app }) => {
-  await store.open('t-trace');
-  await showMobileThreads();
-  const project = store.openProject!;
+test('a project menu cannot archive an already archived project or offer a misleading undo', async ({ app: _app }) => {
+  const row = query('[data-testid=project-row]');
+  const project = store.projects.find(p => p.id === row.getAttribute('data-project-id'))!;
   const archive = vi.spyOn(store, 'archiveProject');
+  // The menu opens on the row; once archived the row leaves the list, and the menu is asked for the archived project itself.
   const openManagement = async () => {
-    query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
+    const current = store.projects.find(p => p.id === project.id)!;
+    if (current.archived) projectMenu(new MouseEvent('contextmenu', { clientX: 10, clientY: 10 }), store, current);
+    else query(`[data-testid=project-row][data-project-id="${project.id}"]`).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     await waitFor(() => document.querySelector('[data-value=manage]') !== null);
     query<HTMLButtonElement>('[data-value=manage]').click();
     await waitFor(() => document.querySelector('[data-value=archive-project]') !== null);

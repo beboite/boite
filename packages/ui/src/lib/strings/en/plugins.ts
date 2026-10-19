@@ -1,6 +1,8 @@
 export const strings = {
   plugins: {
     heading: 'Plugins',
+    /** The machine whose plugins the page shows. */
+    machine: 'Machine',
     /** A desktop app asked to show a thread or an agent on a machine this window does not have. */
     revealUnknownMachine: 'The thread or agent an app asked to show is on a machine this window is not connected to. Add it in Settings, Machines and updates.',
     revealMachineOffline: 'The thread or agent an app asked to show is on {machine}, which is not connected right now.',

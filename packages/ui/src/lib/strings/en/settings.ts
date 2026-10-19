@@ -88,6 +88,8 @@ export const strings = {
     themeGrain: 'Grain',
     reading: 'Reading',
     font: 'Text font',
+    /** What the reading studies found, behind the label's "i": why there is a choice at all. */
+    fontHint: 'No face reads fastest for everyone: in a 2022 study each reader was about 35% faster in their best face than in their worst, and taste seldom picked the fastest. Try each one on its sample.',
     fontSystem: 'System',
     /** Drawn in every face of the picker: mixed case, digits, and the glyphs that get confused (Il1, O0, rn). */
     fontSample: 'Rerun the 12 failing tests in Il1/O0/rn.ts',
@@ -159,6 +161,8 @@ export const strings = {
     notifications: 'Notify me when a thread finishes or asks something',
     notificationsHint: 'Only for a thread you are not looking at. This machine only.',
     notificationsDenied: 'Notifications are blocked for Boite on this system; allow them in its settings.',
+    notificationKinds: { approvals: 'Approvals', questions: 'Questions', finished: 'Finished', errors: 'Errors' },
+    notificationKindsHint: 'Approvals: permissions, plans and changes to apply. Questions: what an agent asks you. This device only.',
     focusGuard: 'Keep agent windows out of the foreground',
     muteAgents: 'Mute agent audio',
     reapOrphans: 'Stop what agents leave running',

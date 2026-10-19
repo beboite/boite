@@ -15,6 +15,7 @@ import { delegatedResultPage, DelegationWaits } from './delegation/results.ts';
 import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
 import { permissionWake, questionWake, worktreeLine } from './delegation/messages.ts';
 import { ChildWorktrees } from './delegation/worktrees.ts';
+import { Retirements } from './delegation/retirement.ts';
 import { pauseHold, pauseOver } from './delegation/pauses.ts';
 import { dropRestartCuts, recordRestartCut, resumeRestartCuts } from './delegation/restart.ts';
 import { DELEGATION_WORDS, delegationPrompt, subagentGuide } from './delegation/guide.ts';
@@ -34,6 +35,7 @@ function teamState(thread: ThreadSummary): string {
 export class Delegation {
   readonly waits: DelegationWaits;
   readonly worktrees: ChildWorktrees;
+  readonly retirements: Retirements;
   private closed = false;
   private readonly delivering = new Set<string>();
   private readonly jobs = new Set<Promise<void>>();
@@ -54,6 +56,7 @@ export class Delegation {
       if (thread?.parentThreadId) this.changed(thread.parentThreadId);
     });
     this.waits = new DelegationWaits(core, threadId => this.rows(threadId).map(row => this.member(row)), threadId => this.worktrees.isSettling(threadId));
+    this.retirements = new Retirements(core, thread => this.busy(thread) || this.worktrees.isSettling(thread.id), threadId => this.lastTurn(threadId));
     // A core that died preserves relationships/results, but restarts no paid work: a team
     // with mail still to deliver or a child turn cut short waits until its agent or its
     // owner resumes it. A team with nothing pending has nothing to restart and stays usable.
@@ -99,7 +102,7 @@ export class Delegation {
           const state = teamState(thread);
           const previous = this.summaries.get(thread.id);
           this.summaries.set(thread.id, state);
-          if (name === 'thread.updated' && previous !== state) this.changed(thread.parentThreadId);
+          if (name === 'thread.updated') { if (previous !== state) this.changed(thread.parentThreadId); this.retirements.check(thread.id); }
         }
       }
       if (name === 'thread.removed' && !(payload as { undoable?: boolean }).undoable) this.remove((payload as { threadId: string }).threadId);
@@ -167,13 +170,7 @@ export class Delegation {
     const children = this.rows(rootId).map(row => this.core.threads.require(row.thread_id));
     if (children.some(t => this.busy(t)) || this.inbox(rootId).length) return false;
     this.core.journal.db.transaction(() => {
-      for (const child of children.filter(t => !t.archived)) {
-        this.core.threads.releaseAgent(child.id);
-        const now = Date.now();
-        const archived = { ...child, archived: true, archivedAt: now, updatedAt: now };
-        this.core.journal.putThread(archived);
-        this.core.bus.emit('thread.updated', archived);
-      }
+      for (const child of children.filter(t => !t.archived)) this.retirements.begin(child, episodeId);
       this.core.journal.setSetting(`delegation-episode:${rootId}`, episodeId);
       this.core.journal.setSetting(`delegation-turns:${rootId}`, 0);
       this.saveConfig(rootId, config);
@@ -504,6 +501,7 @@ export class Delegation {
     });
     const thread = this.core.journal.getThread(letter.to.threadId);
     if (thread) this.changed(thread.parentThreadId ?? thread.id);
+    this.retirements.check(letter.from.threadId);
   }
   /** Who wrote a letter, from the side of the thread that reads it. */
   private relationTo(threadId: string): (letter: AgentLetter) => 'your parent' | 'your subagent' | undefined {
@@ -615,8 +613,8 @@ export class Delegation {
       source: 'delegation', event: 'delegation.finished', threadId: thread.id, turnId: turn.id,
       ...(turn.startedAt !== null && turn.finishedAt !== null ? { durationMs: turn.finishedAt - turn.startedAt } : {}), data: { parent: root.id, status: turn.status },
     });
-    // Stopping a child is final until an explicit new instruction; no failure retry loop.
-    if (turn.status !== 'done') this.stopped.add(thread.id);
+    // Stopping a child is final until an explicit new instruction, and ends its pull request watches; no failure retry loop.
+    if (turn.status !== 'done') { this.stopped.add(thread.id); this.core.pullRequestWatches.endThread(thread.id); }
     // A child that is over leaves no question behind for its parent to find.
     if (live.length === 0) this.closeQuestions(thread.id, `the core, since the subagent's turn ended ${turn.status}`);
     const config = this.config(root.id);
@@ -639,7 +637,7 @@ export class Delegation {
     else deliver();
   }
   /** Is this thread a delegated agent the parent spawned, rather than a workflow step or a reviewer? */
-  private delegated(threadId: string): boolean {
+  delegated(threadId: string): boolean {
     return this.core.journal.db.query('SELECT 1 FROM delegated_agents WHERE thread_id = ?').get(threadId) !== null;
   }
   /** A delegated agent asked something: its parent learns at once. */
@@ -740,6 +738,7 @@ export class Delegation {
       // A child at rest on its own background work is at work too: stopping it ends that work.
       const waiting = withLoad(this.core, this.core.threads.require(id)).backgroundWait?.state === 'waiting';
       this.stopped.add(id);
+      this.core.pullRequestWatches.endThread(id);
       this.core.activity.pauseAll(id);
       this.core.coordination.pause(id);
       if (this.core.scheduler.stop(id) || waiting) stopped++;
@@ -823,7 +822,7 @@ export class Delegation {
     if (thread.parentThreadId) {
       const own = this.worktrees.get(threadId);
       const checkout = own ? `Own worktree ${own.path} on branch ${own.branch}: commit your work there; the parent merges it.` : 'Shared checkout: change only the files your task names.';
-      return config.enabled ? `\nYou are a Boite subagent of ${root.id}. Blocked: boite delegate send ${root.id} "<what blocks you>". Your final answer returns automatically. You cannot start subagents or workflows. ${checkout}\n` : '';
+      return config.enabled ? `\nYou are a Boite subagent of ${root.id}. Blocked: boite delegate send ${root.id} "<what blocks you>". Your final answer returns automatically. You cannot start subagents or workflows. Waiting on your PR: boite pr watch, never a polling loop; each wake opens your next turn and its answer goes to the parent. ${checkout}\n` : '';
     }
     // With delegation off, only a workflow request is worth the words; spawn would be refused anyway.
     const asked = request === undefined || /workflow/i.test(request) || (config.enabled && DELEGATION_WORDS.test(request));

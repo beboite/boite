@@ -8,6 +8,7 @@ export const strings = {
     pullRequestUnsupported: 'Update Boite on the machine hosting this thread to show its pull request. This core does not support pull request lookup yet.',
     noEndpoint: 'No core endpoint could be resolved.',
     coreStart: 'The core on this computer did not start: {reason}',
+    coreRetrying: 'Boite tries again by itself.',
     connect: 'Could not connect to the core.',
     clipboard: 'The clipboard refused the text.',
     revoked: 'This device was removed from the group. Add it again with a new code from one of your machines.',

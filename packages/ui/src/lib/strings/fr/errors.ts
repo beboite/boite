@@ -10,6 +10,7 @@ export const fr: Translation = {
     pullRequestUnsupported: "Mettez Boite à jour sur la machine qui héberge cette conversation pour afficher sa pull request. Ce cœur ne sait pas encore les chercher.",
     noEndpoint: "Aucun point de connexion n'a pu être résolu.",
     coreStart: "Le cœur de cet ordinateur n'a pas démarré : {reason}",
+    coreRetrying: 'Boite réessaie tout seul.',
     connect: 'Connexion au cœur impossible.',
     clipboard: 'Le presse-papiers a refusé le texte.',
     revoked: "Cet appareil a été retiré du groupe. Rajoutez-le avec un nouveau code depuis l'une de vos machines.",

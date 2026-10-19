@@ -93,6 +93,14 @@ test('a labelled push speaks the words the page left, and the core body stands i
   expect(sw.notification).toHaveBeenLastCalledWith('Review', expect.objectContaining({ body: 'The agent encountered an error' }));
 });
 
+test('a page notice about a machine with no group id keeps that machine in the address it opens', async () => {
+  const sw = worker();
+  const key = JSON.stringify(['https://remote.test', 't-2']);
+  sw.matchAll.mockResolvedValue([]);
+  await sw.emit('notificationclick', { notification: { close: vi.fn(), data: { threadId: 't-2', key } } });
+  expect(sw.openWindow).toHaveBeenCalledWith(`https://boite.test/?thread=t-2&key=${encodeURIComponent(key)}`);
+});
+
 test('a window that refuses focus gets the thread opened instead', async () => {
   const sw = worker();
   sw.focus.mockRejectedValue(new Error('not allowed'));

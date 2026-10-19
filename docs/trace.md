@@ -26,7 +26,9 @@ settings enable them.
 
 The registry owns spawn, exit, journal process rows and thread events. A process
 row is written whole at start; the exit updates its exit columns only, without
-copying it into the operational event journal. A thread keeps its newest 2,000
+copying it into the operational event journal. On a full disk a row is skipped
+instead of stopping the core: the process runs untraced, and a `trace.disk-full`
+warning is logged at most once a minute (`trace-writes.ts`). A thread keeps its newest 2,000
 rows, every live row and the rows a process agent card reads (the agent CLI and
 its parent, `native-agents.ts`). Older rows are deleted when a finished turn's
 sweep runs, when the registry forgets an idle thread, and every 500 exits of a
@@ -338,6 +340,21 @@ an orphan. Before stopping it, the platform checks whether the untracked parent
 still runs and was created before the child; a live original parent keeps its
 child. Termination uses the original held process handle and its descendants,
 not a newly opened PID. Each action emits a thread-correlated diagnostic.
+
+Git Bash (MSYS2) forks a copy of the shell to exec each command, and the copy
+exits as soon as the command runs, so a script's Windows parent is gone while
+its shell still runs. Each traced process keeps a reference to the parent the
+registry held at its start. An exited `sh`, `bash`, `dash` or `zsh` that
+exited with 0, whose own parent has its image and still runs, is such a fork:
+the process hangs from that live shell and stays while it runs, so `sh wait.sh`
+in a background task lives as long as its shell. Of 74,975 forks in a real
+trace, all exited with 0. No timing is read, since exit events can arrive late.
+One exited fork is passed over, never two: the `sleep` of a nested bash that
+exited or was stopped has the fork and that bash dead above it, and goes. Once
+the task's shell exits, the script is an orphan again and its own forked
+children go with it. A shell is a different image from the agent above it, so
+what an interrupted command leaves still qualifies, and any other exited parent
+of the same image, a Node worker under Node say, leaves an orphan.
 
 Processes directly launched by the core and children of live shells remain.
 Detached descendants and launcher children can qualify even when intentionally

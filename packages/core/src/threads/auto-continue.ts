@@ -246,6 +246,19 @@ export class AutoContinues {
   }
 
   /**
+   * Background work an agent update ended with the agent's process: the
+   * thread resumes like work that ended without waking it, which a session
+   * ended on purpose otherwise does not (`watchBackground`). False when it
+   * is not the user's own conversation or a resume is already planned.
+   */
+  resumeCut(threadId: ThreadId, prompt: string): boolean {
+    const thread = this.core.journal.getThread(threadId);
+    const turn = this.lastTurn(threadId);
+    if (thread === null || turn === null || !this.eligible(thread, turn) || this.planned(threadId)) return false;
+    return this.plan(threadId, turn, 'background', this.withHeldWork(threadId, prompt));
+  }
+
+  /**
    * Conversations of the user's only: a delegated agent answers its parent,
    * which hears of its failure, and a persistent agent its runtime. A
    * compaction, a coordination wake or a cache ping is not worth repeating.

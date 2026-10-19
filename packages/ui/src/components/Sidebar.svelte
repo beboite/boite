@@ -235,13 +235,6 @@
                   >{#if rollup.kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{:else}<span class="dot" aria-hidden="true"></span>{/if}{#if rollup.count > 1}<span class="ui-label">{rollup.count}</span>{/if}</span
                 >{/if}
             </button>
-            <button
-              class="ghost small icon project-actions"
-              data-testid="project-menu"
-              title={strings.sidebar.projectMenu}
-              aria-label={strings.sidebar.projectMenu}
-              onclick={(e) => openProjectMenu(e, machine, project)}><Ellipsis size={15} /></button
-            >
             {#each residentsOf(owner, project.id).slice(0, 2) as resident (resident.id)}
               <!-- An agent the owner entrusted this project to: its robot, and the way to its conversation. -->
               <button type="button" class="ghost icon small resident-mark" title={fill(strings.resident.lookedAfterBy, { name: resident.name })} aria-label={fill(strings.resident.lookedAfterBy, { name: resident.name })}
@@ -250,6 +243,13 @@
               </button>
             {/each}
             <ProjectThreadCounters {entry} working={lists.working.length} {controls} {collapsed} {away} />
+            <button
+              class="ghost small icon project-actions"
+              data-testid="project-menu"
+              title={strings.sidebar.projectMenu}
+              aria-label={strings.sidebar.projectMenu}
+              onclick={(e) => openProjectMenu(e, machine, project)}><Ellipsis size={15} /></button
+            >
           </div>
           <div class="disclosure-fold" class:open={!collapsed} inert={collapsed}>
             <div>
@@ -448,21 +448,15 @@
     color: var(--color-danger);
   }
   .resident-mark { flex: none; width: var(--control-sm); height: var(--control-sm); padding: 0; }
-  /* The menu takes no width at rest: it lands over the end of the header, which
-     makes room for it, so the counters never move. */
+  /* The menu keeps its slot at the right end even while hidden, so it sits at
+     the same place on every project and the counters never move. */
   .project-actions {
-    position: relative;
-    z-index: 1;
-    margin-left: calc(-2px - var(--control-sm));
+    flex: none;
     opacity: 0;
   }
   .head:hover .project-actions,
   .head:focus-within .project-actions {
     opacity: 1;
-  }
-  .head:hover .toggle,
-  .head:focus-within .toggle {
-    padding-right: calc(var(--control-sm) + 4px);
   }
   .none {
     padding: 4px 10px;
@@ -478,9 +472,6 @@
   @media (max-width: 720px) {
     .project-actions {
       opacity: 1;
-    }
-    .toggle {
-      padding-right: calc(var(--control-sm) + 4px);
     }
   }
 </style>

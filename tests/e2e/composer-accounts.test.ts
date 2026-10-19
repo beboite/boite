@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'bun:test';
@@ -52,7 +53,7 @@ test('queued prompts keep their thread, and browser project and account actions 
     await page.waitFor('document.querySelector("[data-testid=thread-header][data-status]")?.dataset.status === "idle"');
     const userMessages = (await client.call('threads.get', { threadId: a.id })).messages.filter(message => message.role === 'user');
     // The page says hello as the web app in a desktop browser, and each prompt keeps that origin for the agent.
-    const sentFrom = { client: 'pwa', device: 'browser' } as const;
+    const sentFrom = { client: 'pwa', device: 'browser', language: 'en' } as const;
     expect(userMessages.map(message => message.parts)).toEqual([
       [{ type: 'text', text: 'hold here [permission]', sentFrom }],
       [{ type: 'text', text: 'queued only for A\n\nsecond queued for A\n\nthird queued for A', sentFrom }]
@@ -61,8 +62,8 @@ test('queued prompts keep their thread, and browser project and account actions 
     expect((await client.call('threads.get', { threadId: b.id })).messages).toHaveLength(0);
 
     await page.send('Emulation.setDeviceMetricsOverride', { width: 420, height: 860, deviceScaleFactor: 1, mobile: true });
-    await page.click(selector('mobile-menu'));
-    await page.click(selector('mobile-menu-project'));
+    await mobileAction(page, 'mobile-conversations');
+    await page.click(selector('mobile-project'));
     await page.click('[data-value="add-project"]');
     await page.waitFor('document.querySelector("[data-testid=project-path]")');
     await page.screenshot(join(artifacts, 'phone-add-project.png'));

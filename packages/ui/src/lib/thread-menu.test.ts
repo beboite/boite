@@ -40,3 +40,10 @@ test('a pick from any thread menu, the phone list included, reaches the entrust 
   // A row the view added itself stays the view's.
   expect(pickThreadAction(store, thread(), 'coordination', { rename })).toBe(false);
 });
+
+test('a phone menu keeps pin, rename, the view\'s tools, archive and delete, and leaves the desktop rows behind', () => {
+  const store = stub();
+  const ids = threadMenuItems(store, thread({ branch: 'boite/port' }), { phone: true, showDone: true, prLoading: false, tools: [{ id: 'find', label: 'Find' }] })
+    .filter(item => !item.separator).map(item => item.id);
+  expect(ids).toEqual(['pin', 'rename', 'find', 'done', 'archive', 'delete']);
+});

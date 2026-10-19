@@ -21,7 +21,7 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | Change | Selected checks |
 | --- | --- |
 | `docs/*.md` and nested Markdown, listed root policies, issue/PR templates, CODEOWNERS, labeler rules, topics, `.coderabbit.yaml` | Changes job only |
-| `apps/shell/` | Windows installer, Rust and native shell E2E; three browser/core E2E shards; portable desktop matrix |
+| `apps/shell/` | Windows installer, Rust and native shell E2E; three browser/core E2E shards; portable desktop jobs |
 | `tests/e2e/` | Desktop and E2E checks plus `check:e2e`; `tests/e2e/lib/` also selects stress |
 | `Dockerfile`, `.dockerignore`, `docker/` | Native x64 and ARM64 Docker smoke tests |
 | `packages/ui/` | Full type checks and UI tests, desktop/E2E without the shell's Rust tests, Docker and stress; `preview-picker.js` and `preview-highlight.js`, which `browser.rs` embeds, add them |
@@ -59,6 +59,35 @@ job built (below) and retains fixture evidence under `tests/e2e/.artifacts/stres
 disabled. See [performance](performance.md#concurrent-agent-stress) for workloads
 and [portability](portability.md) for what these fixtures cannot prove.
 
+### Check names
+
+Every job a pull request can run has a fixed name, whether it runs or skips, so
+a ruleset can require the jobs themselves instead of waiting for the `CI
+required` gate, which starts only after the last job ends and then queues for a
+runner. A skipped matrix job reports its unexpanded template
+(`Core tests (${{ matrix.name }})`) and a skipped caller of a reusable workflow
+reports its own name (`Desktop`), never the inner ones. So:
+
+- The core suite is one job per runner of `CORE_ALL` (`core-linux-x64` and so
+  on), each skipped unless `coreRunners` lists its label; the E2E suite is
+  `E2E 1/3` to `E2E 3/3`. YAML anchors (`&core-steps`, `&e2e-steps`) keep one
+  step list.
+- `desktop.yml`, `server-verify.yml` and `android.yml` take an `enabled` input,
+  default on. `ci.yml` always calls them and turns it off when their paths did
+  not change: every inner job skips, costs no runner, and reports
+  `Desktop / Linux x64` as it would running. The portable jobs are one per
+  platform of `PORTABLE_ALL`, each skipped unless `platforms` lists its id.
+- A job skipped because its dependency failed counts as passed in a ruleset, so
+  a ruleset without the gate must require every job of each needs chain
+  (`Plan and repository checks`, `Build UI`).
+
+`bun scripts/ci/required-checks.ts` prints the names a pull request reports;
+with `--ruleset <file>` it compares them with
+`gh api repos/beboite/boite/rulesets/<id>` output and fails on a name to add or
+one no run reports. Its tests refuse a matrix or an expression in a name, and
+check each written-out job against `CORE_ALL` and `PORTABLE_ALL`. The ruleset
+still requires `CI required` and `PR title`.
+
 ### Run modes and platforms
 
 PRs against any branch use `pr` mode and compare with their base. Main pushes
@@ -87,8 +116,9 @@ embeds, and start inline fake cores, so `shellRust` follows those paths and the
 ones that select every check. 7 of the 100 PRs before 2026-10-19 touched them,
 yet all ran the tests: 3.6 runner minutes on Windows, 3.5 on Apple Silicon and
 0.9 on Linux per green PR run. Only `CI required`
-and `PR title` are required checks, so a display name can change freely, except
-the `release.yml` job names that `server-provenance.ts` checks.
+and `PR title` are required checks today; see [check names](#check-names)
+before renaming a job. The `release.yml` job names that
+`server-provenance.ts` checks stay fixed too.
 
 Intel macOS packages are cross-built on the Apple Silicon runner with
 `BOITE_TARGET=x86_64-apple-darwin`. The core compiles for `bun-darwin-x64`, and
@@ -104,7 +134,12 @@ checks against Debian, extracted AppImage and macOS application bundles.
 These verify startup, UI serving, authenticated RPC and a fixture echo turn
 outside the checkout. Native WebView2 E2E remains Windows-only.
 
-New commits cancel older ordinary runs for the same PR or main ref. Stable
+New commits cancel an older run of the same PR. A main run is never cancelled:
+the newest push waits behind it and replaces any push still waiting, so each
+run tests everything merged since the last green commit. After the green run
+of 2026-10-18 20:52 UTC, the next merge cancelled 11 of the 12 main runs
+started before 2026-10-19 03:30 and the twelfth failed, so the nightly had no
+green commit to publish (`commit-ci.ts`). Stable
 release and publication groups include the ref and SHA, so different versions
 do not replace each other's pending run. Nightlies retain one shared group:
 a running publication finishes, while newer pending work can supersede older
@@ -412,7 +447,9 @@ group. Workspace minor/patch updates share another PR; majors are separate.
 
 The labeler uses `.github/labeler.yml` for `core`, `ui`, `shell`, `server`, `ci`
 and `documentation`. It runs on `pull_request_target` without checking out or
-executing PR code, with write scope limited to pull-request labels.
+executing PR code, with write scope limited to pull-request labels. A newer
+push cancels the pull request's labeler run still queued or running: on
+2026-10-19, 43 labeler runs were queued at once.
 
 ## Releases and server images
 

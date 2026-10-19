@@ -18,6 +18,11 @@ export class RpcFailure extends Error {
   }
 }
 
+/** SQLite could not grow its file: the disk, or the database's page limit, is full. */
+export function diskFull(error: unknown): boolean {
+  return error instanceof Error && (error as { code?: unknown }).code === 'SQLITE_FULL';
+}
+
 export function invalidParams(message: string, data?: unknown): RpcFailure {
   return new RpcFailure(RpcErrorCode.InvalidParams, message, data);
 }

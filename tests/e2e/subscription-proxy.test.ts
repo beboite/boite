@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startDevUi } from './lib/ui.ts';
-import { mobileAction } from './lib/mobile.ts';
+import { mobileAction, openLimitsTab } from './lib/mobile.ts';
 import { pairingUrlOf, startCore } from './lib/core.ts';
 import { connect } from '../../packages/core/src/client.ts';
 
@@ -109,7 +109,7 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
   await capture('boite-proxy-grok-desktop.png');
 
   // Limits shows Douane's own entries, grouped by provider, instead of its dashboard.
-  await page.click('[data-testid="settings-tab-limits"]');
+  await openLimitsTab(page);
   await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 3');
   await expectNoNativeOpenCode();
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]") === null')).toBe(true);
@@ -123,7 +123,7 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
   await page.waitFor('document.querySelector("[data-testid=limits-glance]") === null');
 
   await page.click('[data-testid="nav-settings"]');
-  await page.click('[data-testid="settings-tab-limits"]');
+  await openLimitsTab(page);
   await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 3');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor('document.querySelector("[data-testid=mobile-settings-detail] [data-testid=gateway-quotas]")');
@@ -174,7 +174,7 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   await page.waitFor('document.querySelector("[data-testid=mobile-settings-detail]")');
   await page.click('[data-testid="mobile-settings-back"]');
   await page.waitFor('document.querySelector("[data-testid=mobile-settings-home]")');
-  await page.click('[data-testid="settings-tab-limits"]');
+  await openLimitsTab(page);
   await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.src === ${JSON.stringify(`${dashboard}/management.html#/quota`)} && document.querySelector('[data-testid=subscription-proxy-slot]')?.getAttribute('aria-busy') === 'false'`);
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]").getBoundingClientRect().width <= 390')).toBe(true);
@@ -197,7 +197,7 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   await page.click('[data-testid="mobile-settings-back"]');
   await page.waitFor('document.querySelector("[data-testid=mobile-settings-home]")');
-  await page.click('[data-testid="settings-tab-limits"]');
+  await openLimitsTab(page);
   await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-opencode]")?.checked === true');
   await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-grok]")?.checked === true');
   expect(await page.evaluate('document.querySelectorAll("[data-testid=quota-monitor][aria-label^=OpenCode]").length')).toBe(2);
@@ -243,10 +243,11 @@ test('the Douane plugin: its row in Plugins and the proxy card pointing at it, a
 
     // The phone has no Plugins page (plugins are the desktop's to manage): the proxy card under Limits.
     await local.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    await local.waitFor('document.querySelector("[data-testid=mobile-menu]")');
+    await local.waitFor('document.querySelector("[data-testid=mobile-header]")');
     await mobileAction(local, 'mobile-settings');
     await local.waitFor('document.querySelector("[data-testid=mobile-settings-home]")');
-    await local.click('[data-testid="settings-tab-limits"]');
+    await local.click('[data-testid="settings-tab-usage"]');
+    await local.click('[data-testid="mobile-usage-tab-limits"]');
     await local.waitFor('document.querySelector("[data-testid=subscription-proxy-settings]")');
     await local.evaluate('document.querySelector("[data-testid=subscription-proxy-settings]").closest("details").open = true');
     await local.waitFor('document.querySelector("[data-testid=subscription-proxy-plugin]")?.dataset.state === "running"');

@@ -51,6 +51,8 @@
   const spent = $derived(since === null ? null : Math.max(0, (turn.finishedAt ?? now) - since));
   /** This turn's own share, shown on hover when the request spans several turns. */
   const ownLabel = $derived(own !== null && spent !== null && spent - own >= 1000 ? fill(strings.chat.turnOwnTime, { time: elapsed(own) }) : undefined);
+  /** A compaction inside a turn counts from when its phase began, which an older core does not send. */
+  const compactionSpent = $derived(compactOperation ? spent : observed?.since == null ? null : Math.max(0, now - observed.since));
   const elapsedLabel = $derived(compactOperation ? turn.status === 'done' ? strings.chat.compactedFor : strings.chat.compactionElapsed : running ? strings.chat.workingFor : strings.chat.workedFor);
   const usage = $derived(turn.usage);
   const total = $derived(usage === null ? 0 : totalTokens(usage));
@@ -77,9 +79,8 @@
       <LoaderCircle size={18} class="spinner compaction-icon" aria-hidden="true" />
       <div class="compaction-copy">
         <span class="compaction-title ui-label">{strings.chat.compacting}</span>
-        <!-- Provider activity timestamps do not tell us when a mid-turn compaction began. -->
-        {#if compactOperation && spent !== null}
-          <span class="compaction-elapsed ui-label" data-testid="compaction-elapsed">{fill(strings.chat.compactionElapsed, { time: elapsed(spent) })}</span>
+        {#if compactionSpent !== null}
+          <span class="compaction-elapsed ui-label" data-testid="compaction-elapsed">{fill(strings.chat.compactionElapsed, { time: elapsed(compactionSpent) })}</span>
         {/if}
       </div>
     {:else}

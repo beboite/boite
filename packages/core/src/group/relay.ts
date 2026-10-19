@@ -29,7 +29,6 @@
 
 import type { ServerWebSocket } from 'bun';
 import { FILE_ROUTE, GROUP_RELAY_ROUTE, PROTOCOL_VERSION, RPC_PATH, RpcErrorCode, VIEW_ROUTE } from '@boite/contracts';
-import { SOCKET_OPTIONS } from '../client.ts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
 import { OUTBOUND_CONGESTION_TIMEOUT_MS, OUTBOUND_MAX_BUFFERED_BYTES } from '../server/connection.ts';
@@ -389,7 +388,7 @@ export class RelayPipe {
       const opened = await new Promise<Upstream | null>((resolve) => {
         let socket: Upstream;
         try {
-          socket = new WebSocket(`${target.replace(/^http/, 'ws')}${RPC_PATH}`, SOCKET_OPTIONS as unknown as string[]);
+          socket = new WebSocket(`${target.replace(/^http/, 'ws')}${RPC_PATH}`);
         } catch {
           resolve(null);
           return;

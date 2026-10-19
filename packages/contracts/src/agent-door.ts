@@ -1,7 +1,7 @@
 import type { ContextPreset, ContextRequest } from './context-mode';
 import type { AgentAddress } from './coordination';
 import type { ProjectId, ProviderId, ThreadId, TurnId } from './ids';
-import type { SettingReading } from './setting-requests.ts';
+import type { SettingsReading } from './setting-requests.ts';
 import type { ThreadSummary } from './threads';
 
 /**
@@ -129,10 +129,12 @@ export interface AgentDoorRpcMethods {
    */
   'agent.projects': { params: { threadId: ThreadId }; result: AgentProject[] };
   /**
-   * The settings an agent may ask about (`REQUESTABLE_SETTINGS`), each with
-   * its value and the page it sits on, so it reads before it proposes.
+   * The settings an agent may ask about (`REQUESTABLE_SETTINGS`, then the
+   * experiments of the app the user last used), each with its value, the page
+   * it sits on and its name in that app, so it reads before it proposes. `app`
+   * says which language the user reads Boite in.
    */
-  'agent.settings': { params: { threadId: ThreadId }; result: SettingReading[] };
+  'agent.settings': { params: { threadId: ThreadId }; result: SettingsReading };
   /**
    * The agent registers an existing folder as a project, as the owner does
    * from the sidebar, so `agent.spawn` and `agent.move` can name it. `path` is

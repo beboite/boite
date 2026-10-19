@@ -34,7 +34,7 @@ test('the switch counts the conversations at work on every machine, and says whe
   expect(workingThreads([first, second]).waiting).toBe(false);
 });
 
-test('the delegated agents under a listed thread add to the count, at any depth, and an archived one or one at rest does not', async () => {
+test('the delegated agents under a listed thread count apart from the rows, at any depth, and an archived one or one at rest does not', async () => {
   const store = await ready();
   const base = store.threads.find(thread => thread.id === 't-scheduler')!;
   const child = (id: string, parent: string, fields: Partial<ThreadSummary> = {}) => ({ ...base, id, parentThreadId: parent, status: 'running', ...fields }) as ThreadSummary;
@@ -43,14 +43,14 @@ test('the delegated agents under a listed thread add to the count, at any depth,
     child('c-1', 't-scheduler'), child('c-2', 't-scheduler'), child('g-1', 'c-1'),
     child('c-3', 't-scheduler', { status: 'idle' }), child('c-4', 't-scheduler', { archived: true }),
   ] as ThreadSummary[];
-  // The parent's turn ended and it waits on its children: one row, three agents.
-  expect(workingThreads([store])).toEqual({ count: 4, subagents: 3, waiting: false });
+  // The parent's turn ended and it waits on its children: one row, three agents. The count is the rows the list draws.
+  expect(workingThreads([store])).toEqual({ count: 1, subagents: 3, waiting: false });
   // A child asking the user counts as at work and turns the badge to the waiting colour.
   store.threads = store.threads.map(thread => thread.id === 'c-3' ? { ...thread, openQuestions: 1 } : thread);
-  expect(workingThreads([store])).toEqual({ count: 5, subagents: 4, waiting: true });
+  expect(workingThreads([store])).toEqual({ count: 1, subagents: 4, waiting: true });
   // A grandchild asking turns the badge too, though only its own parent's row reads Needs you.
   store.threads = store.threads.map(thread => thread.id === 'c-3' ? { ...thread, openQuestions: 0 } : thread.id === 'g-1' ? { ...thread, status: 'waiting' } : thread);
-  expect(workingThreads([store])).toEqual({ count: 4, subagents: 3, waiting: true });
+  expect(workingThreads([store])).toEqual({ count: 1, subagents: 3, waiting: true });
 });
 
 test('an entrusted thread mid-turn counts once among the agents at work', async () => {
