@@ -27,6 +27,8 @@ export const UI_VERSION: string = RELEASE_VERSION;
  * for it again. A core restarting on its own port is back well within it.
  */
 export const LOCAL_RECOVERY_MS = 4_000;
+/** The longest wait between two asks while the shell's core keeps failing to start. */
+export const LOCAL_RECOVERY_MAX_MS = 60_000;
 
 export function observable(client: Client): client is ObservableClient {
   return 'onState' in client;
@@ -76,6 +78,8 @@ export class Connection {
   reloading: { client: Client; generation: number; epoch: number; promise: Promise<void>; essential: Promise<void>; release: () => void } | null = null;
   #readEpoch = 0;
   #localRecovery: ReturnType<typeof setTimeout> | null = null;
+  /** Moves on every stop, so an ask still out from an earlier loss never reschedules. */
+  #recoveryGeneration = 0;
   /** The endpoint came with neither a token nor a grant: the page's own origin, asked with nothing. */
   #keyless = false;
 
@@ -354,20 +358,35 @@ export class Connection {
   /**
    * The core this shell started, lost for `LOCAL_RECOVERY_MS`: the shell is
    * asked for it again, which starts a new core when the old one exited (a
-   * crash, a kill), and the store follows it if it moved. A client closed on
+   * crash, a kill), and the store follows it if it moved. A start that fails
+   * (a full disk, #596) is asked again, twice as late each time up to
+   * `LOCAL_RECOVERY_MAX_MS`, until a core answers. A client closed on
    * purpose ("Stop this core") is not watched: that stop is meant to hold.
    */
   watchLocalCore(client: Client, state: ClientState): void {
     if (state !== 'connecting' || !this.localCore) {
       if (this.#localRecovery !== null) clearTimeout(this.#localRecovery);
       this.#localRecovery = null;
+      this.#recoveryGeneration += 1;
       return;
     }
     if (this.#localRecovery !== null) return;
+    this.#recoverLocalCore(client, LOCAL_RECOVERY_MS);
+  }
+
+  #recoverLocalCore(client: Client, delay: number): void {
+    const generation = this.#recoveryGeneration;
+    const lost = () => this.ctx.client === client && client.state === 'connecting';
     this.#localRecovery = setTimeout(() => {
-      this.#localRecovery = null;
-      if (this.ctx.client === client && client.state === 'connecting') void this.#followLocalCore(client);
-    }, LOCAL_RECOVERY_MS);
+      if (!lost()) { this.#localRecovery = null; return; }
+      void this.#followLocalCore(client).then((outcome) => {
+        if (generation !== this.#recoveryGeneration) return;
+        this.#localRecovery = null;
+        if (outcome !== 'refused' || !lost() || !this.localCore) return;
+        if (this.ctx.store.error !== null) this.ctx.store.error = `${this.ctx.store.error} ${strings.errors.coreRetrying}`;
+        this.#recoverLocalCore(client, Math.min(delay * 2, LOCAL_RECOVERY_MAX_MS));
+      });
+    }, delay);
   }
 
   /**

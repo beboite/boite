@@ -33,7 +33,7 @@ if (import.meta.main) {
   const version = nightlyVersion(base, date, sha, tags);
   const tag = `v${version}`;
   const reserved = tags.some((candidate) => candidate.name === tag);
-  // Every portable desktop platform, as the main CI runs them, for desktop.yml's matrix.
+  // Every portable desktop platform, as the main CI runs them, for desktop.yml's portable jobs.
   const output = `changed=${changed}\ntag=${tag}\nversion=${version}\nreserved=${reserved}\nplatforms=${JSON.stringify(PORTABLE_ALL)}\n`;
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, output);
   process.stdout.write(output);

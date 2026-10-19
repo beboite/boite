@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CircleAlert, CloudOff, GitPullRequest, LoaderCircle, Radar } from '@lucide/svelte';
+  import { Bot, CircleAlert, CloudOff, GitPullRequest, LoaderCircle, Radar } from '@lucide/svelte';
   import { pullRequestWatchWaits, type ThreadSummary } from '@boite/contracts';
   import { backgroundLabel } from '../lib/background';
   import { secondClock } from '../lib/clock.svelte';
@@ -78,7 +78,7 @@
     const atWork = count > 0 ? many(strings.sidebar.state.subagentsOne, strings.sidebar.state.subagentsMany, count) : null;
     const asks = asking > 0 ? many(strings.sidebar.state.subagentsAskingOne, strings.sidebar.state.subagentsAskingMany, asking) : null;
     const shown = count > 0 ? count : asking;
-    return { shown, asking: asking > 0, text: many(strings.sidebar.state.subagentsShortOne, strings.sidebar.state.subagentsShortMany, shown), label: [atWork, asks].filter(Boolean).join('\n') };
+    return { shown, asking: asking > 0, text: String(shown), label: [atWork, asks].filter(Boolean).join('\n') };
   });
 </script>
 
@@ -98,7 +98,7 @@
     {:else if kind === 'watching'}<GitPullRequest size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.watching}</span>
     {:else if kind === 'interrupted'}<CircleAlert size={11} aria-hidden="true" /><span class="ui-label">{strings.sidebar.state.interrupted}</span>
     {:else}<span class="ui-label">{label}</span>{/if}
-    {#if chip}<span class="agents" class:asking={chip.asking} class:pulse={kind === 'delegating'} data-testid="thread-subagents" data-count={chip.shown} role="img" title={chip.label} aria-label={chip.label}><span class="ui-label">{chip.text}</span></span>{/if}
+    {#if chip}<span class="agents" class:asking={chip.asking} class:pulse={kind === 'delegating'} data-testid="thread-subagents" data-count={chip.shown} role="img" title={chip.label} aria-label={chip.label}><Bot size={10} aria-hidden="true" /><span class="ui-label">{chip.text}</span></span>{/if}
   </span>
 {/if}
 
@@ -143,10 +143,11 @@
   .watching {
     color: var(--color-accent);
   }
-  /* The sub-agents chip: the state's own colour on a faint wash of it, the waiting colour once a child asks. */
+  /* The sub-agents chip: the state's own colour on a faint wash of it, the waiting colour once a child asks; the robot is the Threads badge's and stands for the word, so the chip is only the robot and the number. */
   .agents {
     display: inline-flex;
     align-items: center;
+    gap: 3px;
     height: 16px;
     padding: 0 5px;
     margin-left: 2px;
@@ -167,7 +168,7 @@
     flex: none;
     animation: spin 1s steps(60) infinite var(--loops);
   }
-  /* Waiting on its sub-agents, the chip itself breathes: no second robot beside it. */
+  /* Waiting on its sub-agents, the chip itself breathes: no second icon beside it. */
   .state :global(.pulse) {
     flex: none;
     animation: pulse 1.6s var(--loop-ease-out-quint-48) infinite var(--loops);

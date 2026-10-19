@@ -3,6 +3,10 @@ name: server verification
 on:
   workflow_call:
     inputs:
+      enabled:
+        description: Off skips both jobs, which still report their own check names; ci.yml turns it off when no server input changed.
+        type: boolean
+        default: true
       channel:
         type: string
         default: stable
@@ -14,26 +18,34 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: verify server (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            arch: amd64
-          - runner: ubuntu-24.04-arm
-            arch: arm64
-    runs-on: ${{ matrix.runner }}
+  # One job per architecture, not a matrix, so a skipped one reports its fixed
+  # name (docs/ci.md#check-names).
+  build-amd64:
+    name: verify server (amd64)
+    if: inputs.enabled
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
       contents: read
-    steps:
+    env:
+      SERVER_ARCH: amd64
+    steps: &verify-steps
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - uses: ./.github/actions/server-image
         with:
-          arch: ${{ matrix.arch }}
+          arch: ${{ env.SERVER_ARCH }}
           channel: ${{ inputs.channel }}
           version: ${{ inputs.version }}
+
+  build-arm64:
+    name: verify server (arm64)
+    if: inputs.enabled
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      SERVER_ARCH: arm64
+    steps: *verify-steps

@@ -11,6 +11,10 @@ name: android
 on:
   workflow_call:
     inputs:
+      enabled:
+        description: Off skips the build, which still reports its check name; ci.yml turns it off when nothing in the APK changed.
+        type: boolean
+        default: true
       release:
         description: Sign the APK and reuse the previous release's when nothing changed.
         type: boolean
@@ -27,6 +31,11 @@ on:
         required: false
   workflow_dispatch:
     inputs:
+      # Declared here too: an undeclared input reads as false and would skip the build.
+      enabled:
+        description: Build the APK.
+        type: boolean
+        default: true
       release:
         description: Sign the APK and reuse the previous release's when nothing changed.
         type: boolean
@@ -45,6 +54,7 @@ defaults:
 
 jobs:
   apk:
+    if: inputs.enabled
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
