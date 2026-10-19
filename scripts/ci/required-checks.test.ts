@@ -57,16 +57,17 @@ test('every job a needs chain runs through is in the list, so a skip after a fai
 // other job runs only to fail when a draft run is rerun once the pull request
 // is ready, and a conversion to draft fails the required planning name.
 // How each direct job's condition starts, and what it decides for a run. A
-// draft rerun runs the job (to fail it) whenever planning did not pass, a
-// cancellation included, so its skips never replace a ready run's results.
-const STALE = "always() && github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || !cancelled() && needs.changes.outputs.stale == 'true'";
+// draft rerun runs the job (to fail it) whenever planning failed, so its
+// skips never replace a ready run's results. A cancelled run reports its
+// pending jobs cancelled, not skipped (#653), which blocks without a runner.
+const STALE = "!cancelled() && (github.event.pull_request.draft && github.run_attempt > 1 && needs.changes.result != 'success' || needs.changes.outputs.stale == 'true')";
 type Run = { draft: boolean; attempt: number; changes: 'success' | 'failure' | 'cancelled'; stale?: 'true' | 'false'; cancelled: boolean };
-const runsStale = (run: Run) => run.draft && run.attempt > 1 && run.changes !== 'success' || !run.cancelled && run.stale === 'true';
+const runsStale = (run: Run) => !run.cancelled && (run.draft && run.attempt > 1 && run.changes !== 'success' || run.stale === 'true');
 
-test('a draft rerun whose planning failed or was cancelled before the stale step runs its direct jobs to fail them', () => {
+test('a draft rerun whose planning failed before the stale step runs its direct jobs to fail them', () => {
   // Planning failed at setup: no stale output, success() false.
   expect(runsStale({ draft: true, attempt: 2, changes: 'failure', cancelled: false })).toBe(true);
-  expect(runsStale({ draft: true, attempt: 2, changes: 'cancelled', cancelled: true })).toBe(true);
+  expect(runsStale({ draft: true, attempt: 2, changes: 'cancelled', cancelled: true })).toBe(false);
   expect(runsStale({ draft: true, attempt: 2, changes: 'success', stale: 'true', cancelled: false })).toBe(true);
   // A first draft run whose planning fails, or one a newer push cancels, costs no runner.
   expect(runsStale({ draft: true, attempt: 1, changes: 'failure', cancelled: false })).toBe(false);
