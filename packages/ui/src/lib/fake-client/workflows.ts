@@ -93,6 +93,7 @@ export class FakeWorkflows {
   #runs = new Map<string, WorkflowRun>();
   #requests = new Map<string, { fingerprint: string; runId: string }>();
   #templates = new Map<string, WorkflowTemplate>();
+  /** Retain replaced children for usage; workflows.output checks the current execution's thread id. */
   #steps = new Map<ThreadId, { runId: string; key: string }>();
   #timers = new Set<ReturnType<typeof setTimeout>>();
   #seq = 0;
@@ -485,13 +486,11 @@ export class FakeWorkflows {
         // Work on a copy: a refused retry leaves the run as it was, as the core does.
         const next = structuredClone(run);
         const targets = new Set(nodes.map(node => node.id));
-        const gone: ThreadId[] = [];
         for (const node of next.nodes) {
           const target = targets.has(node.id);
           for (const inst of node.instances) if (target && broken(inst.status)) {
             // An archived step conversation takes no turn: the retry gets a new one.
             const archived = inst.threadId !== null && this.#archived(inst.threadId);
-            if (archived) gone.push(inst.threadId!);
             Object.assign(inst, { status: 'waiting', finishedAt: null, ...(archived ? { threadId: null } : {}) });
           }
           // Stopped only because another step failed, it never ran: it waits again with the retried one.
@@ -503,7 +502,6 @@ export class FakeWorkflows {
         const holding = next.nodes.filter(node => broken(node.status) || node.instances.some(i => broken(i.status))).map(node => node.id);
         if (holding.length) throw refusal(`the run stays stopped while ${holding.join(', ')} ${holding.length === 1 ? 'has' : 'have'} failed; retry ${holding.length === 1 ? 'that step' : 'those steps'} too, or retry the whole run without naming a step`);
         this.#resumeTeam(run.rootThreadId);
-        for (const threadId of gone) this.#steps.delete(threadId);
         Object.assign(run, next, { status: 'running', error: null, finishedAt: null, delivered: false });
         break;
       }

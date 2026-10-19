@@ -2,6 +2,8 @@ import { expect } from 'vitest';
 import { test } from '../test/fake-client';
 import { RpcErrorCode, type WorkflowPlan, type WorkflowRun } from '@boite/contracts';
 import { STEP_GAP, STEP_MIN, edgesOf, fitsPhase, nodeProgress, phasesOf, retryable, routeOf, runProgress, shown } from './workflow-view';
+import { FakeContext } from './fake-client/context';
+import { seed } from './fake-client/seed';
 
 const plan: WorkflowPlan = {
   name: 'Check the lexer',
@@ -82,6 +84,33 @@ test('a failed step fails the run and only the owner retries it', async ({ creat
   const retried = await client.call('workflows.control', { threadId: 't-trace', runId: run.id, action: 'retry', stepId: 'try' });
   expect(retried.status).toBe('running');
   await until(() => client.call('workflows.get', { threadId: 't-trace', runId: run.id }), value => value.status === 'failed');
+});
+
+test('retry past an archived fake child retains its reported tokens without accepting its output', async () => {
+  const ctx = new FakeContext({ delayMs: 0 });
+  seed(ctx);
+  const workflows = ctx.workflows;
+  try {
+    let run!: WorkflowRun;
+    workflows.hold(() => { run = workflows.start('t-trace', { name: 'Retry usage', steps: [{ id: 'check', task: 'Check.' }] }, 'retry-usage', undefined, 'user'); });
+    await workflows.call('workflows.control', { threadId: 't-trace', runId: run.id, action: 'stop' });
+    const oldId = run.nodes[0]!.instances[0]!.threadId!;
+    const old = ctx.thread(oldId);
+    old.archived = true;
+    old.turns[0]!.usage = { inputTokens: 100, outputTokens: 50, cacheReadTokens: 200, cacheWriteTokens: 25, costUsdEquivalent: 0.01 };
+    let retried!: Promise<unknown>;
+    workflows.hold(() => { retried = workflows.call('workflows.control', { threadId: 't-trace', runId: run.id, action: 'retry' }); });
+    const running = await retried as WorkflowRun;
+    expect(running.nodes[0]!.instances[0]!.threadId).not.toBe(oldId);
+    expect(running.usage).toEqual(old.turns[0]!.usage);
+    expect(running.nodes[0]!.instances[0]!.usage).toEqual(old.turns[0]!.usage);
+    await expect(workflows.call('workflows.output', { threadId: oldId, value: 'stale' })).rejects.toThrow('is not running');
+    workflows.finish(run.id, 'check');
+    const done = await workflows.call('workflows.get', { threadId: 't-trace', runId: run.id }) as WorkflowRun;
+    expect(done.status).toBe('done');
+    expect(done.usage).toEqual({ inputTokens: 1500, outputTokens: 370, cacheReadTokens: 2800, cacheWriteTokens: 25, costUsdEquivalent: 0.01 + 0.018 });
+    expect(done.nodes[0]!.instances[0]!.usage).toEqual(done.usage);
+  } finally { workflows.close(); ctx.agents.close(); ctx.plugins.close(); }
 });
 
 test('retrying one of two failed steps names the other and leaves the run as it was', async ({ createClient }) => {
