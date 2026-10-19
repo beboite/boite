@@ -121,8 +121,13 @@ export class TestInspector {
       } catch {
         return;
       }
-      if (message.id !== undefined) this.#replies.get(message.id)?.(message.result);
-      else progress.handle(message);
+      if (message.id === undefined) {
+        progress.handle(message);
+        return;
+      }
+      // Only an id this watch sent has a reply waiting; any other is ignored.
+      const reply = typeof message.id === 'number' ? this.#replies.get(message.id) : undefined;
+      if (typeof reply === 'function') reply(message.result);
     });
   }
 
