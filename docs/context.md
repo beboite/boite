@@ -321,8 +321,14 @@ above 16 MiB is not copied: the snapshot keeps only its metadata, so a change
 by the removed turns makes the whole restore unavailable and nothing is
 restored; an unchanged one does not get in the way. Old turns without backups,
 overlapping turns in the same workspace, a cut inside a running turn and
-incomplete snapshots cannot restore code. The rewind
-answers `files: { status, count, reason? }`; `status` is `restored`, `unchanged`
+incomplete snapshots cannot restore code. Two folders overlap when one holds
+the other and the outer snapshot would list a file of the inner one: git
+lists a repository or worktree of its own (`.boite/worktrees/*`) as one
+directory entry, unless the outer index tracks its files; a plain walk lists
+all but the skipped folders. An edit made while another turn still works in an
+overlapping folder, such as a sub-agent winding down after a Stop, rewinds the
+messages and leaves every file as it is, with `busy: true`. The rewind
+answers `files: { status, count, reason?, busy? }`; `status` is `restored`, `unchanged`
 or `unavailable`. The client shows a warning for unavailable backups rather
 than claiming that the code was restored.
 
