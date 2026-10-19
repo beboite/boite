@@ -64,7 +64,12 @@ export const commandTable: readonly CommandDefinition[] = [
   { id: 'terminal-next-command', label: () => strings.keyboard.commands.terminalNextCommand, ownerOnly: true },
   { id: 'reopen-thread', label: () => strings.keyboard.commands.reopenThread, run: (store) => { void reopenLastArchived(store); } },
   { id: 'copy-answer', label: () => strings.keyboard.commands.copyAnswer, run: (store) => { const open = store.openThread; if (open) { const text = lastAnswer(open.messages); if (text) void store.copy(text); } } },
-  { id: 'find', label: () => strings.keyboard.commands.find, run: (store) => { const open = store.openThread; if (open) { store.showChat(); store.findOpen = true; store.findRequest += 1; } } },
+  // A new thread has nothing to find in yet: there the same chord picks its project.
+  { id: 'find', label: () => strings.keyboard.commands.find, run: (store) => {
+    const open = store.openThread;
+    if (open) { store.showChat(); store.findOpen = true; store.findRequest += 1; }
+    else if (store.draft && store.page === 'chat') store.projectChoiceRequest += 1;
+  } },
   { id: 'subagents', run: (store) => { store.showChat(); store.panel.toggleKind('agents'); } },
   { id: 'task-manager', run: (store) => { store.showSettings('task-manager'); } },
   { id: 'archived', run: (store) => { store.showSettings('general', 'archived'); } },

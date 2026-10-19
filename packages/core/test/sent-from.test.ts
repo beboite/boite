@@ -46,14 +46,22 @@ test('the agent hears which app sent a prompt when its session starts and when t
     expect(await send(phone, 'five')).not.toContain(NOTE);
     // The shell on this machine's loopback is named by the core.
     expect(await send(here, 'six')).toContain(`the Boite desktop app on the computer ${JSON.stringify(hostname())}.`);
+    // Once the app says its language, the agent hears it, and again when the user switches it.
+    await here.call('client.preferences', { app: 'app-here-0001', language: 'fr', experiments: [], labels: {} });
+    expect(await send(here, 'six-fr')).toContain(`the Boite desktop app on the computer ${JSON.stringify(hostname())}, which shows Boite in French.`);
+    expect(await send(here, 'six-fr again')).not.toContain(NOTE);
+    await here.call('client.preferences', { app: 'app-here-0001', language: 'en', experiments: [], labels: {} });
+    expect(await send(here, 'six-en')).toContain('which shows Boite in English.');
 
-    const users = h.core.journal.listMessages(threadId).filter(m => m.role === 'user').map(m => m.parts[0]);
+    let users = h.core.journal.listMessages(threadId).filter(m => m.role === 'user').map(m => m.parts[0]);
     expect(users[0]).toEqual({ type: 'text', text: 'one', sentFrom: { client: 'shell', device: 'office-pc' } });
     expect(users[3]).toEqual({ type: 'text', text: 'four' });
 
     // The Boite guide switch silences it with the rest of Boite's text.
     await office.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
     expect(await send(office, 'seven')).toBe('seven');
+    users = h.core.journal.listMessages(threadId).filter(m => m.role === 'user').map(m => m.parts[0]);
+    expect(users[6]).toEqual({ type: 'text', text: 'six-fr', sentFrom: { client: 'shell', device: hostname(), language: 'fr' } });
   } finally {
     restore();
     for (const client of clients) client.close();

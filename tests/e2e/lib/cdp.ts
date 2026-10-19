@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import type { Subprocess } from 'bun';
-import { SOCKET_OPTIONS } from '../../../packages/core/src/client.ts';
 import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
 
 /**
@@ -711,7 +710,7 @@ function openSocket(target: TargetInfo): Promise<WebSocket> {
   const url = target.webSocketDebuggerUrl;
   if (url === undefined) throw new Error('the page target has no debugger url');
   return new Promise<WebSocket>((resolve, reject) => {
-    const socket = new WebSocket(url, SOCKET_OPTIONS as unknown as string[]);
+    const socket = new WebSocket(url);
     // A socket that never opened is closed with its refusal: nothing else
     // holds it, and a late open would keep its connection for the whole run.
     const fail = (message: string) => {

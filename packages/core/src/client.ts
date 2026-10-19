@@ -81,21 +81,12 @@ export class SocketClosedError extends Error {
   }
 }
 
-/**
- * What every WebSocket this code opens with Bun's client passes: no
- * `permessage-deflate` offer. With the extension on, Bun 1.4.2 and 1.4.3
- * sometimes close a sound stream with 1002 ("control frame is fragmented",
- * "unsupported control frame", "unexpected opcode"): against the core's own
- * server and against Chrome's DevTools, whose bytes a relay checked frame by
- * frame and found well-formed. Uncompressed, a message is larger on the wire;
- * compressed, the connection drops.
- */
-export const SOCKET_OPTIONS = { perMessageDeflate: false } as const;
-
 export async function connect(url: string, token: string, options: ConnectOptions = {}): Promise<CoreClient> {
   const timeoutMs = options.timeoutMs ?? 5000;
   const deadline = Date.now() + timeoutMs;
-  const socket = new WebSocket(socketUrl(url), { ...SOCKET_OPTIONS, ...(options.headers === undefined ? {} : { headers: options.headers }) } as unknown as string[]);
+  const socket = options.headers === undefined
+    ? new WebSocket(socketUrl(url))
+    : new WebSocket(socketUrl(url), { headers: options.headers } as unknown as string[]);
   const pending = new Map<number, Pending>();
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   let nextId = 1;

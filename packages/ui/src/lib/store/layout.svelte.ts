@@ -29,6 +29,8 @@ export class Layout {
   /** The find bar over the open thread, and a count each ask bumps so a second Ctrl+F refocuses it. */
   findOpen = $state(false);
   findRequest = $state(0);
+  /** Bumped to open the draft's project dropdown from the keyboard. */
+  projectChoiceRequest = $state(0);
   page = $state<Page>('chat');
   settingsTab = $state<SettingsTab>('home');
   /** A settings card requested before its lazy page exists, with a fresh key for repeated asks. */

@@ -181,10 +181,12 @@ export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, CACHE_K
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export {
-  REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
-  checkSettingRequest, effectiveSetting, isRequestableSetting, isSettingsPage, readSettings, sameSetting, settingAnswerText, settledSetting,
-  type RequestableSetting, type SettingAsk, type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck,
-  type SettingRequestParams, type SettingsPage,
+  APP_LANGUAGES, CLIENT_APP_PATTERN, CLIENT_LABELS_MAX, CLIENT_LABEL_CHARS, EXPERIMENT_IDS, REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
+  checkClientPreferences, checkSettingRequest, settledExperiment, currentSetting, effectiveSetting, experimentOf, isExperimentId, isRequestableSetting, isSettingsPage, readSettings,
+  sameClientPreferences, sameSetting, settingAnswerText, settledSetting,
+  type AppLanguage, type ClientPreferences, type ExperimentId, type ExperimentSettingKey, type RequestableKey, type RequestableSetting, type SettingAsk,
+  type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck, type SettingRequestParams, type SettingsPage,
+  type SettingsReading,
 } from './setting-requests.ts';
 export {
   AGENT_PROJECTS_MAX, AGENT_RUN_MINUTES, AGENT_SETTING_KEYS, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,

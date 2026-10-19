@@ -109,7 +109,7 @@
           <img src="./icons/icon.svg" alt="" width="42" height="42" />
           <h1>{strings.mobile.draftTitle}</h1>
           <p>{strings.mobile.draftHint}</p>
-          <span class="project-choice"><ProjectChoice {store} testid="mobile-draft-project">{#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}<span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span><ChevronDown size={14} /></ProjectChoice></span>
+          <span class="project-choice"><ProjectChoice {store} testid="mobile-draft-project" phone>{#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}<span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span><ChevronDown size={14} /></ProjectChoice></span>
           {#if draftChoice}<small>{modePhrase(draftChoice.permissionMode, draftProvider)}</small>{/if}
           {#if store.draft?.worktree}<small>{strings.thread.inWorktree}</small>{/if}
         </div>
