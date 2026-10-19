@@ -324,7 +324,8 @@ export function staticResponse(file: string, pathname: string, acceptEncoding: s
  */
 function mayReadTodos(core: Core, connection: Connection, projectId: string): boolean {
   const identity = connection.identity;
-  if (identity.principal === 'owner') return true;
+  // A paired device is the user's, reading every project's threads and board as the owner does.
+  if (identity.principal === 'owner' || identity.principal === 'session') return true;
   if (identity.principal !== 'agent' || identity.threadId === null) return false;
   try {
     return core.threads.require(identity.threadId).projectId === projectId;

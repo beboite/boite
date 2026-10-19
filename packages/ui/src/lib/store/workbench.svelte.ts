@@ -18,6 +18,7 @@ import { TRACE_LIMIT } from '@boite/contracts';
 import { untrack } from 'svelte';
 import { strings } from '../strings';
 import { coreHref } from '../endpoint';
+import { titleFrom } from '../format';
 import type { FileAnswer } from '../store.svelte';
 import type { StoreContext } from './context';
 
@@ -236,10 +237,15 @@ export class Workbench {
     }
   }
 
+  /** The owner's, and a paired device's once its core serves the project board. */
+  #mayTodos(): boolean {
+    return this.ctx.store.owner || this.ctx.store.core?.features?.projectBoard === true;
+  }
+
   async loadTodos(threadId: ThreadId): Promise<void> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
-    if (!client || !this.ctx.store.owner) return;
+    if (!client || !this.#mayTodos()) return;
     try {
       const project = this.#projectOf(threadId);
       const todos = await client.call('todos.list', { threadId });
@@ -268,7 +274,7 @@ export class Workbench {
   async addTodo(threadId: ThreadId, text: string): Promise<void> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
-    if (!client || !this.ctx.store.owner || text.trim().length === 0) return;
+    if (!client || !this.#mayTodos() || text.trim().length === 0) return;
     try {
       await client.call('todos.add', { threadId, text: text.trim() });
     } catch (error) {
@@ -279,11 +285,11 @@ export class Workbench {
   async updateTodo(
     threadId: ThreadId,
     todoId: string,
-    patch: { status?: Todo['status']; text?: string }
+    patch: { status?: Todo['status']; text?: string; goalThreadId?: ThreadId | null }
   ): Promise<void> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
-    if (!client || !this.ctx.store.owner) return;
+    if (!client || !this.#mayTodos()) return;
     try {
       await client.call('todos.update', { threadId, todoId, ...patch });
     } catch (error) {
@@ -294,11 +300,45 @@ export class Workbench {
   async removeTodo(threadId: ThreadId, todoId: string): Promise<void> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
-    if (!client || !this.ctx.store.owner) return;
+    if (!client || !this.#mayTodos()) return;
     try {
       await client.call('todos.remove', { threadId, todoId });
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+    }
+  }
+
+  /**
+   * A card put in progress on the board: a new conversation of its project, on
+   * the agent, account, model and mode of the thread the board is open in, and
+   * in a worktree of its own when that thread has one, works on the card as a
+   * `/goal2`. The card links it first, so the goal's first change reaches the board.
+   */
+  async startCardGoal(threadId: ThreadId, todo: Todo): Promise<ThreadId | null> {
+    const s = this.ctx.store;
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    const from = s.openThread?.id === threadId ? s.openThread : s.threads.find((thread) => thread.id === threadId);
+    if (!client || !from?.projectId || !this.#mayTodos()) return null;
+    const created = await s.createThread({
+      projectId: from.projectId,
+      providerId: from.providerId,
+      accountId: from.accountId,
+      permissionMode: from.permissionMode,
+      effort: from.effort,
+      speed: from.speed ?? null,
+      ...(from.model ? { model: from.model } : {}),
+      ...(from.branch ? { worktree: {} } : {}),
+      title: titleFrom(todo.text) || undefined
+    }, { navigate: false });
+    if (!created || !this.ctx.currentClient(client, clientGeneration)) return null;
+    try {
+      await client.call('todos.update', { threadId, todoId: todo.id, status: 'open', goalThreadId: created.id });
+      await client.call('threads.activity.set', { threadId: created.id, goal: { objective: todo.text, review: true } });
+      return created.id;
+    } catch (error) {
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+      return null;
     }
   }
 

@@ -120,12 +120,15 @@
     // The drawer, then xterm.js and its stylesheet: only once a terminal is asked for.
     TerminalDrawer: () => import('./components/TerminalDrawer.svelte'),
     TerminalView: () => import('./components/TerminalView.svelte'),
+    // The project board, in the same drawer: only once it is asked for.
+    BoardDrawer: () => import('./components/BoardDrawer.svelte'),
     PluginUpdateNotice: () => import('./components/PluginUpdateNotice.svelte')
   };
   type Deferred = { [K in keyof typeof deferredLoaders]?: Awaited<ReturnType<(typeof deferredLoaders)[K]>>['default'] };
   let deferred = $state.raw<Deferred>({});
   const requested = new Set<keyof Deferred>();
   let terminalShown = $derived(store.openThread !== null && store.owner && store.terminalShown(store.openThread.id));
+  let boardShown = $derived(store.openThread !== null && store.boardShown && store.boardAvailable());
   function need(name: keyof Deferred): void {
     if (requested.has(name)) return;
     requested.add(name);
@@ -197,6 +200,10 @@
       need('TerminalDrawer');
       need('TerminalView');
     }
+  });
+
+  $effect(() => {
+    if (boardShown) need('BoardDrawer');
   });
 
   // A drawer left open before a reload or a reconnect opens again, with its tabs and splits.
@@ -283,6 +290,7 @@
   const scrim = new Closing();
   const panelSlot = new Closing();
   const terminalSlot = new Closing();
+  const boardSlot = new Closing();
   /** The error is cleared the moment Dismiss is pressed, so the exit plays on a copy. */
   let toastText = $state('');
   let toastThreadId = $state<string | null>(null);
@@ -367,6 +375,13 @@
       // the keyboard goes back to the composer first.
       if (document.activeElement?.closest('[data-testid=terminal-drawer]')) focusComposer();
       terminalSlot.hide();
+    }
+  });
+  $effect(() => {
+    if (boardShown && deferred.BoardDrawer) boardSlot.show();
+    else {
+      if (document.activeElement?.closest('[data-testid=board-drawer]')) focusComposer();
+      boardSlot.hide();
     }
   });
 
@@ -597,6 +612,14 @@
                 view={deferred.TerminalView}
                 closing={terminalSlot.closing} attach={terminalSlot.attach} onexit={terminalSlot.end} />
             {/key}
+          {/key}
+        {/if}
+        {#if boardSlot.shown && store.openThread && deferred.BoardDrawer}
+          {@const BoardDrawer = deferred.BoardDrawer}
+          <!-- Not keyed on the thread: the board is the project's, the same in each of its threads. -->
+          {#key store}
+            <BoardDrawer {store} threadId={store.openThread.id}
+              closing={boardSlot.closing} attach={boardSlot.attach} onexit={boardSlot.end} />
           {/key}
         {/if}
       </main>
