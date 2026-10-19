@@ -195,6 +195,13 @@ test('attachments survive a resume before the turn, and leave once no delivery c
     expect(unheard.recipientIds).toEqual([]);
     expect(held(unheard.id)).toBeUndefined();
 
+    // A reply past the group's turn limit: every delivery is limited, so nothing will ever take them.
+    const tight = await client.call('agents.group.save', { value: { name: 'Tight', memberIds: [agent.id], mode: 'round', maxTurns: 1, maxTurnsPerAgent: 1, paused: true } });
+    const opener = await client.call('agents.message.send', { scope: { kind: 'group', id: tight.id }, recipientIds: [], text: 'one turn', requestId: 'attach_opener' });
+    const over = await client.call('agents.message.send', { scope: { kind: 'group', id: tight.id }, recipientIds: [], text: 'one more', replyTo: opener.id, attachments: [notes('over')], requestId: 'attach_limited' });
+    expect(h.core.workforce.records.find('delivery', 'messageId', [over.id]).map(d => d.status)).toEqual(['limited']);
+    expect(held(over.id)).toBeUndefined();
+
     // An agent archived before its turn: the work is cancelled and the bytes go with it.
     h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
     const late = await client.call('agents.message.send', { scope, recipientIds: [], text: 'later', attachments: [notes('later')], requestId: 'attach_archived' });
