@@ -4,7 +4,8 @@ import { parseSync, type Plugin } from 'vite';
 
 /**
  * A translation as its module ships it: English with every sentence the
- * translation has written over it (`src/lib/i18n.svelte.ts`). A device loads
+ * translation has written over it (`src/lib/i18n.svelte.ts`), one part at a
+ * time: `strings/fr/chat.ts` over `strings/en/chat.ts`. A device loads
  * the one catalogue it speaks, and a sentence the translation lacks still
  * answers in English without the English chunk. The build and the tests both
  * run it, so what a test reads is what ships. `scripts/ci/translations.ts`
@@ -15,11 +16,12 @@ export function completeCatalogues(): Plugin {
     name: 'boite-complete-catalogues',
     enforce: 'pre',
     transform(code, id) {
-      const locale = /[\\/]src[\\/]lib[\\/]strings\.([a-z]{2})\.ts$/.exec(id)?.[1];
-      if (!locale || locale === 'en') return null;
-      const english = join(dirname(id), 'strings.en.ts');
+      // One file per part of the catalogue: `strings/fr/chat.ts` over `strings/en/chat.ts`.
+      const [, locale, part] = /[\\/]src[\\/]lib[\\/]strings[\\/]([a-z]{2})[\\/]([\w-]+)\.ts$/.exec(id) ?? [];
+      if (!locale || !part || locale === 'en') return null;
+      const english = join(dirname(id), '..', 'en', `${part}.ts`);
       this.addWatchFile(english);
-      return { code: overEnglish(readFileSync(english, 'utf8'), code, locale), map: null };
+      return { code: overEnglish(readFileSync(english, 'utf8'), code, locale, part), map: null };
     },
   };
 }
@@ -62,12 +64,14 @@ function keyOf(property: Property, file: string): string {
  * order, each sentence the translation's when it has one. Values are copied as
  * written, so a sentence that is a function (a count, a plural) stays one.
  */
-export function overEnglish(english: string, translation: string, locale: string): string {
+export function overEnglish(english: string, translation: string, locale: string, part: string): string {
+  const englishFile = `strings/en/${part}.ts`;
+  const translationFile = `strings/${locale}/${part}.ts`;
   const merge = (reference: Node, translated: Node | undefined): string => {
     const own = new Map<string, Node>();
-    for (const property of (translated?.properties ?? []) as Property[]) own.set(keyOf(property, `strings.${locale}.ts`), unwrap(property.value));
+    for (const property of (translated?.properties ?? []) as Property[]) own.set(keyOf(property, translationFile), unwrap(property.value));
     const entries = (reference.properties as Property[]).map((property) => {
-      const key = keyOf(property, 'strings.en.ts');
+      const key = keyOf(property, englishFile);
       const value = unwrap(property.value);
       const theirs = own.get(key);
       const name = english.slice(property.key.start, property.key.end);
@@ -76,6 +80,6 @@ export function overEnglish(english: string, translation: string, locale: string
     });
     return `{\n${entries.join(',\n')}\n}`;
   };
-  const merged = merge(catalogueObject(english, 'strings.en.ts', 'strings'), catalogueObject(translation, `strings.${locale}.ts`, locale));
+  const merged = merge(catalogueObject(english, englishFile, 'strings'), catalogueObject(translation, translationFile, locale));
   return `export const ${locale} = ${merged};\n`;
 }

@@ -14,7 +14,7 @@ requests reviews; approval is not required. The `release tags` policy protects
 
 `scripts/ci/changes.ts` selects jobs from changed paths. Unknown paths run the
 complete suite; renames affect both the old and new path. Every run has a
-`CI required` gate, including documentation-only changes. It requires success
+`CI required` gate, or `CI draft` on a draft, including documentation-only changes. It requires success
 for selected jobs and an intentional skip for the others. Failure, cancellation
 or an unexpected skip blocks it, including jobs whose dependency never started.
 
@@ -126,6 +126,31 @@ fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 attempt left attached and removes its partial DMGs. Any other failure ends
 the step.
 
+### Draft pull requests
+
+A draft pull request runs `draft` mode: the changes job, the Linux x64 core
+suite, type checks and UI tests, and the focused telemetry and E2E type checks,
+each only when its paths changed. Windows, macOS, desktop packages, E2E,
+stress, Docker and the APK wait. Its gate is named `CI draft`, so branch
+protection never reads a draft's green gate as `CI required` on a head that
+later turns ready. `ready_for_review` starts the `pr` run, and
+`converted_to_draft` cancels a full run in progress. CodeRabbit reviews drafts
+(`.coderabbit.yaml`).
+
+Of the 5,632 runner minutes spent by the 86 pull request runs started on
+2026-10-18 between 12:34 and 21:35 UTC, 2,476 went to runs a newer push
+cancelled, a median 9.8 minutes after the push they tested: the time a review
+bot takes to answer. A green full run
+cost 86 runner minutes; a draft run of the same core change costs about 11,
+all on Linux.
+
+An agent's pull request flow:
+
+1. `gh pr create --draft`.
+2. Fix the draft's CI failures and review findings, batching pushes.
+3. `gh pr ready <number>` once the draft gate is green and the threads are answered.
+4. After that, push only for a full-run failure or a new finding.
+
 ## Build cost
 
 Cargo, Vitest, the Bun store and BuildKit save caches only from `main`. Cargo namespaces
@@ -198,16 +223,16 @@ platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 493,400 |
-| UI files, excluding `.br` and `.gz` copies | 4,877,300 |
+| UI files, excluding `.br` and `.gz` copies | 4,878,900 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 4,497,300 |
 
 The total JavaScript measure excludes native binaries and source maps.
 
-On 2026-10-19, notification kinds, merged with `origin/main` at `68033379`,
-measures 492,415 entry bytes, 4,876,341 UI bytes and 4,496,312 core JavaScript
+On 2026-10-19, notification kinds, merged with `origin/main` at `38d5ca2f`,
+measures 492,415 entry bytes, 4,877,999 UI bytes and 4,496,312 core JavaScript
 bytes with `measure()` after fresh `bun run build:ui` and `bun run build:core`
-on Linux. Against main the limits become entry 493,400, UI 4,877,300, core
+on Linux. Against main the limits become entry 493,400, UI 4,878,900, core
 JavaScript 4,497,300, about a kilobyte above; the others stay.
 
 On 2026-10-19, PR #616 merged with `origin/main` at `ab30db2c` measures
