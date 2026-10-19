@@ -47,6 +47,9 @@ export class Retirements {
       if (kept === (turn?.id ?? '')) return;
       this.core.journal.deleteSetting(KEPT + threadId);
     }
+    const told = (sql: string, ...args: string[]) => this.core.journal.db.query(sql).get(threadId, ...args) !== null;
+    // Mail its parent sent it is more work.
+    if (told("SELECT 1 FROM delegation_messages WHERE recipient_id = ? AND status IN ('received', 'uncertain') LIMIT 1")) return;
     if (this.core.workflows.owns(threadId)) {
       // A failed or stopped run may retry the step in its own conversation.
       const run = this.core.journal.db.query('SELECT r.status FROM workflow_steps s JOIN workflow_runs r ON r.id = s.run_id WHERE s.thread_id = ?').get(threadId) as { status: string } | null;
@@ -54,11 +57,8 @@ export class Retirements {
       return;
     }
     if (!marked && !this.finished(thread, turn)) return;
-    const told = (sql: string, ...args: string[]) => this.core.journal.db.query(sql).get(threadId, ...args) !== null;
     if (turn && !told('SELECT 1 FROM delegation_messages WHERE sender_id = ? AND request_id = ?', `result:${turn.id}`)) return;
     if (told("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND status IN ('received', 'uncertain') LIMIT 1")) return;
-    // Mail its parent sent it is more work.
-    if (told("SELECT 1 FROM delegation_messages WHERE recipient_id = ? AND status IN ('received', 'uncertain') LIMIT 1")) return;
     this.retire(thread);
   }
 
