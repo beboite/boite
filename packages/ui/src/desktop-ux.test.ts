@@ -10,7 +10,7 @@ import { archiveThread } from './lib/archive';
 import { runCommand } from './lib/commands.svelte';
 import { undo } from './lib/undo.svelte';
 import { confirm } from './lib/confirm.svelte';
-import { rightPanel } from './lib/right-panel.svelte';
+import { clampPanel, rightPanel } from './lib/right-panel.svelte';
 import { contactsRail } from './lib/contacts-rail.svelte';
 
 /**
@@ -85,6 +85,32 @@ test('contacts stand in their own column on the right: the thread list keeps the
     expect(rail.classList.contains('collapsed')).toBe(false);
   } finally {
     if (contactsRail.folded) contactsRail.toggle();
+  }
+});
+
+test('a panel widened while the contacts column was folded gives the chat its room back when the column unfolds', async () => {
+  writeExperiments(['contacts']);
+  contactsRail.toggle();
+  const stored = rightPanel.width;
+  rightPanel.width = 700;
+  await mountOnFake();
+  try {
+    if (!store.panelOpen) store.togglePanel();
+    await waitFor(() => document.querySelector('[data-testid=right-panel]') !== null);
+    const width = () => query('[data-testid=right-panel]').style.getPropertyValue('--panel-width');
+    const list = store.sidebarCollapsed ? 0 : store.sidebarWidth;
+    const folded = clampPanel(700, window.innerWidth, list);
+    expect(width()).toBe(`${folded}px`);
+    query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
+    flushSync();
+    const unfolded = clampPanel(700, window.innerWidth, list + 240);
+    expect(unfolded).toBeLessThan(folded);
+    expect(width()).toBe(`${unfolded}px`);
+    // The width asked for stays, for the day the room comes back.
+    expect(rightPanel.width).toBe(700);
+  } finally {
+    if (contactsRail.folded) contactsRail.toggle();
+    rightPanel.width = stored;
   }
 });
 

@@ -1,7 +1,6 @@
 <script lang="ts">
   import { innerWidth } from 'svelte/reactivity/window';
-  import { CONTACTS_RAIL_WIDTH, contactsRail } from '../lib/contacts-rail.svelte';
-  import { PANEL_DEFAULT, PANEL_MIN, clampPanel, rightPanel } from '../lib/right-panel.svelte';
+  import { PANEL_DEFAULT, PANEL_MIN, clampPanel, panelSibling, rightPanel } from '../lib/right-panel.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import ResizeHandle from './ResizeHandle.svelte';
@@ -15,11 +14,7 @@
   let from = 0;
   let viewport = $derived(innerWidth.current ?? window.innerWidth);
 
-  /** What else shares the row with the chat: the thread list on the left and the contacts column on the right. */
-  function sibling(viewport = window.innerWidth): number {
-    if (viewport <= 720) return 0;
-    return (store.sidebarCollapsed ? 0 : store.sidebarWidth) + (contactsRail.shown ? CONTACTS_RAIL_WIDTH : 0);
-  }
+  const sibling = (viewport = window.innerWidth) => panelSibling(store, viewport);
 
   function clamp(width: number): number {
     return clampPanel(width, window.innerWidth, sibling());
