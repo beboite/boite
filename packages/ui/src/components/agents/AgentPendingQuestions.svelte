@@ -45,7 +45,7 @@
 
 {#each asked as question (question.id)}
   {#if question.signIn}
-    <SignInCard {store} threadId={question.threadId} questionId={question.id} text={question.text} signIn={question.signIn} answer={null} pending hostBrowser
+    <SignInCard {store} threadId={question.threadId} questionId={question.id} text={question.text} signIn={question.signIn} answer={null} pending
       respond={optionId => store.answerQuestion(question.threadId, question.id, [optionId])} skip={() => store.skipQuestion(question.threadId, question.id)} />
   {:else if question.agentSetting}
     <AgentSettingCard {store} threadId={question.threadId} questionId={question.id} text={question.text} setting={question.agentSetting} answer={null} pending

@@ -1,12 +1,10 @@
 <script lang="ts">
   import { Globe, KeyRound } from '@lucide/svelte';
-  import { onDestroy } from 'svelte';
   import type { QuestionAnswer, SignInAsk } from '@boite/contracts';
   import { errorText } from '../lib/errors';
   import { keepFocus } from '../lib/focus';
   import { liveViews, machineName } from '../lib/live-view.svelte';
   import { rightPanel } from '../lib/right-panel.svelte';
-  import { holdThread } from '../lib/thread-holds';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -14,7 +12,8 @@
    * A sign-in card an agent put in the conversation (`boite browser login`):
    * the sites it needs, and why. Open shows one in the conversation's browser,
    * in the panel and live, where the user signs in by hand; the card's
-   * profile keeps it for every conversation of that machine. Signed in tells
+   * profile keeps it for every conversation of that machine. From the Agents
+   * page or another thread, Open goes to this thread first. Signed in tells
    * the agent to go on. Nothing here sees a password.
    */
   let {
@@ -26,7 +25,6 @@
     answer,
     pending,
     docked = false,
-    hostBrowser = false,
     respond,
     skip
   }: {
@@ -41,12 +39,6 @@
     pending: boolean;
     /** Drawn inside the dock above the composer, whose own row names it: no frame, no heading. */
     docked?: boolean;
-    /**
-     * Drawn where no panel shows this thread (a persistent agent's
-     * conversation, whose session thread nobody opens): Open shows the
-     * browser in the card instead.
-     */
-    hostBrowser?: boolean;
     /** Answers the card with `done`. False gives it back. */
     respond: (optionId: 'done') => Promise<unknown>;
     skip: () => Promise<unknown>;
@@ -54,20 +46,10 @@
 
   let busy = $state(false), opening = $state<number | null>(null), opened = $state(false), failure = $state('');
   const hosts = $derived(signIn.sites.map((site) => site.host).join(', '));
-  // The panel's browser, loaded with the first Open of a card that hosts it.
-  let surface = $state.raw<Promise<typeof import('./AgentBrowserSurface.svelte')> | null>(null);
-  // Its browser streams only to a subscriber: the card holds the hidden thread's subscription while it shows it.
-  let hold: { client: NonNullable<Store['client']>; release: () => void } | null = null, gone = false;
-  onDestroy(() => { gone = true; hold?.release(); hold = null; });
 
   function path(url: string): string {
     // The query can hold a token: the card shows the path only, the title the whole address.
     try { const { pathname } = new URL(url); return pathname === '/' ? '' : pathname; } catch { return ''; }
-  }
-
-  /** The browser the user just asked for comes into view. */
-  function reveal(node: HTMLElement): void {
-    requestAnimationFrame(() => node.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }));
   }
 
   async function open(site: number): Promise<void> {
@@ -75,21 +57,13 @@
     if (!client || opening !== null) return;
     opening = site; failure = '';
     try {
-      if (hostBrowser && hold?.client !== client) {
-        hold?.release();
-        // Taken before the round trip, so a card that leaves meanwhile still lets it go.
-        const taken = holdThread(client, threadId, () => store.openThread?.id === threadId);
-        hold = { client, release: taken.release };
-        // A refused subscription holds nothing: the next Open asks again.
-        await taken.ready.catch((cause: unknown) => { taken.release(); if (hold?.release === taken.release) hold = null; throw cause; });
-      }
-      if (gone) return;
+      // The browser shows in this thread's panel: from the Agents page or another thread, go there first.
+      if (store.page !== 'chat' || store.openThread?.id !== threadId) { store.showChat(); await store.open(threadId); }
       await client.call('browser.signInOpen', { threadId, questionId, site });
       opened = true;
       // The user asked for this page: it shows live, without the cover.
       const key = store.threadKey(threadId);
       liveViews.show('agent-browser', key);
-      if (hostBrowser) { surface ??= import('./AgentBrowserSurface.svelte'); return; }
       const panel = rightPanel.for(key);
       const tab = panel.surfaces.find((surface) => surface.kind === 'agent-browser');
       if (tab) panel.activate(tab.id); else panel.open('agent-browser');
@@ -136,11 +110,6 @@
       <button type="button" class={opened ? 'primary' : 'ghost'} data-testid="sign-in-done" disabled={busy} onmousedown={keepFocus} onclick={() => finish(() => respond('done'))}><span class="ui-label">{strings.signInRequest.done}</span></button>
       <button type="button" class="ghost" data-testid="sign-in-skip" disabled={busy} onmousedown={keepFocus} onclick={() => finish(skip)}><span class="ui-label">{strings.signInRequest.skip}</span></button>
     </div>
-    {#if surface}
-      <div class="browser" data-testid="sign-in-browser" {@attach reveal}>
-        {#await surface then module}<module.default {store} {threadId} />{:catch cause}<p class="failure" role="alert">{errorText(cause)}</p>{/await}
-      </div>
-    {/if}
   </div>
 {/if}
 
@@ -186,17 +155,6 @@
   .site button { flex: none; }
 
   .kept { margin: 0; font-size: var(--text-xs); color: var(--color-subtle); }
-  /* The browser of an agent's conversation: tall enough to sign in, short enough that Signed in stays on a phone's screen. */
-  .browser {
-    display: flex;
-    flex-direction: column;
-    height: min(560px, 55dvh);
-    min-height: 0;
-    border: 1px solid var(--color-edge);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-  }
-  .browser > :global(*) { flex: 1; min-height: 0; }
   .failure { margin: 0; font-size: var(--text-sm); color: var(--color-danger); overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
