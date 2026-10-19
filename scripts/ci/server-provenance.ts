@@ -16,9 +16,11 @@ export type ServerProvenance = ReleaseIdentity & {
   digests: { amd64: string; arm64: string };
 };
 
+// `draft` needs `verify`, the whole of ci.yml, so its success proves every
+// verify job passed; the planning job proves verify ran in this attempt.
 const REQUIRED_JOBS = [
   'version',
-  'verify / CI required',
+  'verify / Plan and repository checks',
   'image / test and stage server (amd64)',
   'image / test and stage server (arm64)',
   'draft',

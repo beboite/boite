@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // The check names a pull request run reports on its head, whether each job
-// runs or skips, for a ruleset that requires them directly
-// (docs/ci.md#check-names). A name holds no expression: a skipped matrix job
-// reports its unexpanded template, so every required job is written out.
+// runs or skips: the ruleset requires each of them (docs/ci.md#check-names).
+// A name holds no expression: a skipped matrix job reports its unexpanded
+// template, so every required job is written out.
 
 const WORKFLOWS = join(import.meta.dir, '../../.github/workflows');
 
@@ -22,11 +22,6 @@ export type Load = (file: string) => Workflow;
 
 export const loadWorkflow: Load = (file) => Bun.YAML.parse(readFileSync(join(WORKFLOWS, file), 'utf8')) as Workflow;
 
-// The `CI required` gate leaves the ruleset in step 4 of the switch and the
-// workflow in step 5; a draft names it `CI draft`, so it is no fixed name.
-export const GATE_JOB = 'required';
-export const GATE_NAME = 'CI required';
-
 function list(value: string | string[] | undefined): string[] {
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
 }
@@ -43,9 +38,7 @@ export function jobChecks(file: string, id: string, job: Job, load: Load = loadW
 }
 
 export function workflowChecks(file: string, load: Load = loadWorkflow): string[] {
-  return Object.entries(load(file).jobs)
-    .filter(([id]) => !(file === 'ci.yml' && id === GATE_JOB))
-    .flatMap(([id, job]) => jobChecks(file, id, job, load));
+  return Object.entries(load(file).jobs).flatMap(([id, job]) => jobChecks(file, id, job, load));
 }
 
 /** The workflows a pull request starts on its head; pull_request_target runs the base's. */
@@ -64,31 +57,53 @@ export function requiredChecks(files: string[], load: Load = loadWorkflow): stri
   return names.sort();
 }
 
-type Ruleset = { rules?: { type: string; parameters?: { required_status_checks?: { context: string }[] } }[] };
+type Rule = { type: string; parameters?: { required_status_checks?: { context: string }[] } };
 
-/** Compares with `gh api repos/<owner>/<repo>/rulesets/<id>`; the gate may stay until step 4. */
-export function compareRuleset(names: string[], ruleset: Ruleset) {
-  const required = (ruleset.rules ?? []).filter((rule) => rule.type === 'required_status_checks')
+/**
+ * Compares with the rules for a branch (`gh api repos/<owner>/<repo>/rules/branches/main`,
+ * every ruleset that applies) or one ruleset (`.../rulesets/<id>`).
+ */
+export function compareRuleset(names: string[], rules: Rule[] | { rules?: Rule[] }) {
+  const required = (Array.isArray(rules) ? rules : rules.rules ?? []).filter((rule) => rule.type === 'required_status_checks')
     .flatMap((rule) => rule.parameters?.required_status_checks ?? []).map((check) => check.context);
   return {
     missing: names.filter((name) => !required.includes(name)),
-    unknown: required.filter((name) => !names.includes(name) && name !== GATE_NAME),
-    gate: required.includes(GATE_NAME),
+    unknown: [...new Set(required.filter((name) => !names.includes(name)))],
   };
+}
+
+/** The rules main's pull requests merge under, or undefined when this token cannot read them. */
+async function liveRules(): Promise<Rule[] | undefined> {
+  const { GITHUB_API_URL: api = 'https://api.github.com', GITHUB_REPOSITORY: repo = 'beboite/boite', GH_TOKEN: token } = process.env;
+  try {
+    const response = await fetch(`${api}/repos/${repo}/rules/branches/main`, {
+      headers: { accept: 'application/vnd.github+json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error(`answered ${response.status}`);
+    return await response.json() as Rule[];
+  } catch (error) {
+    console.log(`::warning::the rules for main are unreadable here (${error instanceof Error ? error.message : String(error)}); check names not compared`);
+    return undefined;
+  }
 }
 
 if (import.meta.main) {
   const files = [...new Bun.Glob('*.yml').scanSync(WORKFLOWS)].sort();
   const names = requiredChecks(files);
   const index = process.argv.indexOf('--ruleset');
-  if (index === -1) {
+  if (index === -1 && !process.argv.includes('--live')) {
     process.stdout.write(`${names.join('\n')}\n`);
   } else {
-    const { missing, unknown, gate } = compareRuleset(names, JSON.parse(readFileSync(process.argv[index + 1]!, 'utf8')));
-    for (const name of missing) console.log(`not required: ${name}`);
-    for (const name of unknown) console.log(`required but never reported: ${name}`);
-    if (gate) console.log(`still required: ${GATE_NAME}`);
-    if (missing.length || unknown.length) process.exit(1);
-    console.log(`The ruleset requires the ${names.length} check names a pull request reports`);
+    const rules = index === -1 ? await liveRules() : JSON.parse(readFileSync(process.argv[index + 1]!, 'utf8'));
+    if (rules === undefined) process.exit(0);
+    const { missing, unknown } = compareRuleset(names, rules);
+    // A pull request that adds or renames a job diverges until the ruleset
+    // follows its merge, so it only warns; main fails until the ruleset matches.
+    const level = process.env.GITHUB_EVENT_NAME === 'pull_request' ? 'warning' : 'error';
+    for (const name of missing) console.log(`::${level}::not required by the ruleset: ${name}`);
+    for (const name of unknown) console.log(`::${level}::required by the ruleset, reported by no pull request: ${name}`);
+    if ((missing.length || unknown.length) && level === 'error') process.exit(1);
+    if (!missing.length && !unknown.length) console.log(`The ruleset requires the ${names.length} check names a pull request reports`);
   }
 }

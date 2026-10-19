@@ -1,7 +1,8 @@
 # CI and publication
 
 Changes land through squash-merged pull requests. The repository's merge policy
-requires `CI required` and `PR title`, forbids direct pushes, force pushes and
+requires every check a pull request reports ([check names](#check-names)),
+`PR title` included, forbids direct pushes, force pushes and
 deletion of `main`, and permits admin bypass only when merging a PR. CODEOWNERS
 requests reviews; approval is not required. The `release tags` policy protects
 `v*` tags from movement and deletion while allowing their creation.
@@ -13,10 +14,10 @@ requests reviews; approval is not required. The `release tags` policy protects
 ## Checks
 
 `scripts/ci/changes.ts` selects jobs from changed paths. Unknown paths run the
-complete suite; renames affect both the old and new path. Every run has a
-`CI required` gate, or `CI draft` on a draft, including documentation-only changes. It requires success
-for selected jobs and an intentional skip for the others. Failure, cancellation
-or an unexpected skip blocks it, including jobs whose dependency never started.
+complete suite; renames affect both the old and new path. A job left out
+skips and still reports its check, which passes; a failed or cancelled job
+blocks the merge, and so does a job its failed dependency skipped, since that
+dependency is required too.
 
 | Change | Selected checks |
 | --- | --- |
@@ -61,10 +62,10 @@ and [portability](portability.md) for what these fixtures cannot prove.
 
 ### Check names
 
-Every job a pull request can run has a fixed name, whether it runs or skips, so
-a ruleset can require the jobs themselves instead of waiting for the `CI
-required` gate, which starts only after the last job ends and then queues for a
-runner. A skipped matrix job reports its unexpanded template
+Every job a pull request can run has a fixed name, whether it runs or skips, and
+the ruleset requires each one. It replaced a `CI required` gate job that
+started after the last job ended, then waited a median 8.5 minutes for a
+runner (38 runs, 2026-10-19). A skipped matrix job reports its unexpanded template
 (`Core tests (${{ matrix.name }})`) and a skipped caller of a reusable workflow
 reports its own name (`Desktop`), never the inner ones. So:
 
@@ -78,15 +79,21 @@ reports its own name (`Desktop`), never the inner ones. So:
   `Desktop / Linux x64` as it would running. The portable jobs are one per
   platform of `PORTABLE_ALL`, each skipped unless `platforms` lists its id.
 - A job skipped because its dependency failed counts as passed in a ruleset, so
-  a ruleset without the gate must require every job of each needs chain
-  (`Plan and repository checks`, `Build UI`).
+  the ruleset requires every job of each needs chain (`Plan and repository
+  checks`, `Build UI`).
 
-`bun scripts/ci/required-checks.ts` prints the names a pull request reports;
-with `--ruleset <file>` it compares them with
-`gh api repos/beboite/boite/rulesets/<id>` output and fails on a name to add or
-one no run reports. Its tests refuse a matrix or an expression in a name, and
-check each written-out job against `CORE_ALL` and `PORTABLE_ALL`. The ruleset
-still requires `CI required` and `PR title`.
+`bun scripts/ci/required-checks.ts` prints the names a pull request reports.
+Its tests pin all of them, refuse a matrix or an expression in a name, and
+check each written-out job against `CORE_ALL` and `PORTABLE_ALL`. The changes
+job runs it with `--live`, which reads the rules for `main`
+(`repos/beboite/boite/rules/branches/main`, public) and names a check the
+ruleset lacks or one no pull request reports: a warning on a pull request, an
+error on main. `--ruleset <file>` compares with saved `gh api` output instead.
+
+Adding or renaming a job: merge the pull request (it only warns), then edit
+the ruleset in the same sitting, since main's run fails until it matches. A
+required name that disappears blocks every pull request; one never added
+leaves that job unguarded.
 
 ### Run modes and platforms
 
@@ -115,10 +122,9 @@ The tests compile `apps/shell/src-tauri` and the two page scripts `browser.rs`
 embeds, and start inline fake cores, so `shellRust` follows those paths and the
 ones that select every check. 7 of the 100 PRs before 2026-10-19 touched them,
 yet all ran the tests: 3.6 runner minutes on Windows, 3.5 on Apple Silicon and
-0.9 on Linux per green PR run. Only `CI required`
-and `PR title` are required checks today; see [check names](#check-names)
-before renaming a job. The `release.yml` job names that
-`server-provenance.ts` checks stay fixed too.
+0.9 on Linux per green PR run. Every check name is required; see
+[check names](#check-names) before renaming a job. The `release.yml` job names
+that `server-provenance.ts` checks stay fixed too.
 
 Intel macOS packages are cross-built on the Apple Silicon runner with
 `BOITE_TARGET=x86_64-apple-darwin`. The core compiles for `bun-darwin-x64`, and
@@ -168,9 +174,10 @@ the step.
 A draft pull request runs `draft` mode: the changes job, the Linux x64 core
 suite, type checks and UI tests, and the focused telemetry and E2E type checks,
 each only when its paths changed. Windows, macOS, desktop packages, E2E,
-stress, Docker and the APK wait. Its gate is named `CI draft`, so branch
-protection never reads a draft's green gate as `CI required` on a head that
-later turns ready. `ready_for_review` starts the `pr` run, and
+stress, Docker and the APK wait: their checks skip, which a draft cannot
+merge on. `ready_for_review` starts the `pr` run, whose planning job is pending
+from its start and whose selected jobs report again under the same names,
+replacing the draft's skips before the pull request can merge.
 `converted_to_draft` cancels a full run in progress. CodeRabbit reviews drafts
 (`.coderabbit.yaml`).
 
@@ -185,7 +192,7 @@ An agent's pull request flow:
 
 1. `gh pr create --draft`.
 2. Fix the draft's CI failures and review findings, batching pushes.
-3. `gh pr ready <number>` once the draft gate is green and the threads are answered.
+3. `gh pr ready <number>` once the draft's checks pass and the threads are answered.
 4. After that, push only for a full-run failure or a new finding.
 
 ## Build cost

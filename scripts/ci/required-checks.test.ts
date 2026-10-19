@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { CORE_ALL, PORTABLE_ALL } from './changes.ts';
-import { compareRuleset, GATE_JOB, GATE_NAME, jobChecks, loadWorkflow, requiredChecks, type Workflow } from './required-checks.ts';
+import { compareRuleset, jobChecks, loadWorkflow, requiredChecks, type Workflow } from './required-checks.ts';
 
 const files = [...new Bun.Glob('*.yml').scanSync(`${import.meta.dir}/../../.github/workflows`)].sort();
 
@@ -38,26 +38,22 @@ test('a pull request reports the same fixed check names whichever jobs run', () 
     'Telemetry relay tests',
     'Type checks and UI tests',
   ].sort());
-  // labeler.yml runs the base's workflow through pull_request_target, so it
-  // is absent; so is the gate, which leaves once the ruleset requires these.
-  expect(names).not.toContain(GATE_NAME);
+  // labeler.yml runs the base's workflow through pull_request_target.
 });
 
 test('every job a needs chain runs through is in the list, so a skip after a failed dependency comes with a failed check', () => {
   const names = requiredChecks(files);
   const ci = loadWorkflow('ci.yml');
   for (const [id, job] of Object.entries(ci.jobs)) {
-    if (id === GATE_JOB) continue;
     for (const need of [job.needs ?? []].flat()) {
       for (const check of jobChecks('ci.yml', need, ci.jobs[need]!)) expect(names).toContain(check);
     }
   }
 });
 
-test('the gate waits for every job it judges', () => {
-  const gate = loadWorkflow('ci.yml').jobs[GATE_JOB]!;
-  const jobs = Object.keys(loadWorkflow('ci.yml').jobs).filter((id) => id !== GATE_JOB && id !== 'ui');
-  expect([gate.needs ?? []].flat().sort()).toEqual(jobs.sort());
+test('the changes job compares the names with the live rules for main', () => {
+  const steps = (loadWorkflow('ci.yml').jobs.changes as { steps: { run?: string }[] }).steps;
+  expect(steps.map((step) => step.run)).toContain('bun scripts/ci/required-checks.ts --live');
 });
 
 test('matrix jobs and computed names are refused', () => {
@@ -95,12 +91,15 @@ test('each portable desktop job builds its PORTABLE_ALL platform when platforms 
   }
 });
 
-test('the ruleset comparison names what to add and what no run reports, and tolerates the gate', () => {
-  const ruleset = (contexts: string[]) => ({ rules: [{ type: 'deletion' }, {
+test('the ruleset comparison names what to add and what no run reports', () => {
+  const rules = (contexts: string[]) => [{ type: 'deletion' }, {
     type: 'required_status_checks', parameters: { required_status_checks: contexts.map((context) => ({ context })) },
-  }] });
-  expect(compareRuleset(['A', 'B'], ruleset([GATE_NAME, 'A', 'B']))).toEqual({ missing: [], unknown: [], gate: true });
-  expect(compareRuleset(['A', 'B'], ruleset(['A', 'Core tests (${{ matrix.name }})']))).toEqual({
-    missing: ['B'], unknown: ['Core tests (${{ matrix.name }})'], gate: false,
+  }];
+  expect(compareRuleset(['A', 'B'], rules(['A', 'B']))).toEqual({ missing: [], unknown: [] });
+  // One ruleset's own rules, as `rulesets/<id>` answers.
+  expect(compareRuleset(['A', 'B'], { rules: rules(['A', 'B']) })).toEqual({ missing: [], unknown: [] });
+  // The removed gate, reported by no workflow, would block every pull request.
+  expect(compareRuleset(['A', 'B'], rules(['A', 'CI required', 'Core tests (${{ matrix.name }})']))).toEqual({
+    missing: ['B'], unknown: ['CI required', 'Core tests (${{ matrix.name }})'],
   });
 });

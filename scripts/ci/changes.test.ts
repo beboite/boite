@@ -1,8 +1,5 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { affectedChecks, CORE_ALL, ciMode, lastGreen, needsCodeChecks, needsWorkflowLint, plan } from './changes.ts';
-import { loadWorkflow } from './required-checks.ts';
+import { affectedChecks, ciMode, lastGreen, needsCodeChecks, needsWorkflowLint, plan } from './changes.ts';
 
 const none = { core: false, web: false, desktop: false, shellRust: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
 const allChecks = { core: true, web: true, desktop: true, shellRust: true, server: true, android: true, telemetry: true, e2eTypes: true, stress: true };
@@ -165,78 +162,4 @@ test('a main push compares with the last main commit whose CI passed, skipping c
 test('focused checks are covered by the full core and web jobs when both apply', () => {
   expect(plan(affectedChecks(['telemetry/src/index.ts', 'packages/core/src/main.ts']), 'warm'))
     .toMatchObject({ core: true, telemetry: false, web: true, e2eTypes: false });
-});
-
-const python = Bun.which(process.platform === 'win32' ? 'python' : 'python3');
-test.skipIf(!python)('the actual required gate rejects failed, cancelled and unexpected job skips', () => {
-  const workflow = readFileSync(join(import.meta.dir, '../../.github/workflows/ci.yml'), 'utf8');
-  expect(workflow).toContain("name: ${{ github.event.pull_request.draft == true && 'CI draft' || 'CI required' }}");
-  const match = /          python3 - <<'PY'\n([\s\S]+?)          PY/.exec(workflow);
-  if (!match) throw new Error('ci.yml: missing required gate Python script');
-  const script = match[1]!.replace(/^ {10}/gm, '');
-  // One job per core runner and E2E shard; callers of reusable workflows run
-  // with `enabled` off, so a caller left out may succeed or skip.
-  const ci = loadWorkflow('ci.yml').jobs;
-  const coreJobs = Object.keys(ci).filter(id => id.startsWith('core-'));
-  const runnerOf = (id: string) => ci[id]!['runs-on'];
-  const shards = ['e2e-1', 'e2e-2', 'e2e-3'];
-  const callers = ['desktop', 'server', 'android'];
-  const outputNames = ['core', 'web', 'desktop', 'server', 'android', 'telemetry', 'e2eTypes', 'stress', 'e2e'];
-  const jobFor: Record<string, string> = { 'e2e-types': 'e2eTypes' };
-  // The bundle size job runs with desktop, on pull requests only.
-  const ids = [...coreJobs, 'web', 'telemetry', 'e2e-types', 'stress', 'size', ...shards, ...callers];
-  const cases: { jobs: object; success: boolean; event?: string }[] = [];
-  const draft = JSON.stringify(CORE_ALL.slice(0, 1));
-  for (const [selected, coreRunners] of [
-    [outputNames, plan(affectedChecks(['packages/core/src/main.ts']), 'pr').coreRunners],
-    [outputNames, plan(affectedChecks(['packages/core/src/main.ts']), 'full').coreRunners],
-    [['core', 'web'], draft], [['web', 'telemetry'], draft], [['desktop', 'e2eTypes', 'e2e'], draft], [['web', 'stress'], draft], [[], draft],
-  ] as [string[], string][]) {
-    const outputs = { ...Object.fromEntries(outputNames.map(name => [name, String(selected.includes(name))])), coreRunners };
-    const runners = (JSON.parse(coreRunners) as { os: string }[]).map(runner => runner.os);
-    const required = (id: string) => coreJobs.includes(id) ? selected.includes('core') && runners.includes(runnerOf(id)!)
-      : shards.includes(id) ? selected.includes('desktop') && selected.includes('e2e')
-      : id === 'size' ? selected.includes('desktop')
-      : selected.includes(jobFor[id] ?? id);
-    const jobs = { changes: { result: 'success', outputs }, ...Object.fromEntries(ids.map(id => [id, {
-      result: required(id) || callers.includes(id) ? 'success' : 'skipped',
-    }])) } as Record<string, { result: string; outputs?: object }>;
-    cases.push({ jobs, success: true });
-    cases.push({ jobs: { ...jobs, size: { result: 'skipped' } }, success: true, event: 'push' });
-    for (const id of ['changes', ...ids.filter(required)]) {
-      for (const result of ['failure', 'cancelled', 'skipped']) {
-        cases.push({ jobs: { ...jobs, [id]: { ...jobs[id], result } }, success: false });
-      }
-    }
-    for (const id of ids.filter(id => !required(id))) {
-      if (callers.includes(id)) {
-        cases.push({ jobs: { ...jobs, [id]: { result: 'skipped' } }, success: true });
-        for (const result of ['failure', 'cancelled']) cases.push({ jobs: { ...jobs, [id]: { result } }, success: false });
-      } else {
-        cases.push({ jobs: { ...jobs, [id]: { result: 'success' } }, success: false });
-      }
-    }
-  }
-  // Execute the workflow's own script for every fixture in one Python process.
-  const result = Bun.spawnSync([python!, '-c', `
-import json, os, sys
-script = compile(os.environ['GATE_SCRIPT'], 'ci.yml', 'exec')
-cases = json.load(sys.stdin)
-for index, case in enumerate(cases):
-    os.environ['RESULTS'] = json.dumps(case['jobs'])
-    os.environ['EVENT'] = case.get('event', 'pull_request')
-    try:
-        exec(script, {})
-        success = True
-    except AssertionError:
-        success = False
-    assert success == case['success'], (index, case)
-print(f"Validated {len(cases)} required-gate results")
-`], {
-    env: { ...process.env, GATE_SCRIPT: script }, stdin: new TextEncoder().encode(JSON.stringify(cases)),
-    stdout: 'pipe', stderr: 'pipe', windowsHide: true,
-  });
-  expect(result.stderr.toString()).toBe('');
-  expect(result.exitCode).toBe(0);
-  expect(result.stdout.toString()).toContain(`Validated ${cases.length} required-gate results`);
 });

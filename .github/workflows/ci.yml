@@ -96,6 +96,12 @@ jobs:
         run: bun audit
       - run: bun scripts/check-docs.ts
       - run: bun test scripts/ci scripts/migrate ./bench ./apps/shell/scripts
+      # Branch protection requires each check name a pull request reports
+      # (docs/ci.md#check-names); a pull request warns, main fails on a gap.
+      - name: Compare check names with the ruleset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/ci/required-checks.ts --live
       # Missing sentences are warnings here and in the nightly; release.yml refuses them.
       - run: bun scripts/ci/translations.ts
       - run: bun run check:architecture
@@ -425,42 +431,3 @@ jobs:
     uses: ./.github/workflows/android.yml
     with:
       enabled: ${{ needs.changes.outputs.android == 'true' }}
-
-  required:
-    # A draft's gate has another name: a green `CI required` on a head is a
-    # full run, which branch protection may trust after the PR turns ready.
-    name: ${{ github.event.pull_request.draft == true && 'CI draft' || 'CI required' }}
-    if: always()
-    needs: [changes, core-linux-x64, core-linux-arm64, core-windows-x64, core-macos-arm64, core-macos-x64, web, telemetry, e2e-types, stress, size, desktop, e2e-1, e2e-2, e2e-3, server, android]
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Require all applicable checks
-        env:
-          RESULTS: ${{ toJSON(needs) }}
-          EVENT: ${{ github.event_name }}
-        run: |
-          python3 - <<'PY'
-          import json, os
-          jobs = json.loads(os.environ['RESULTS'])
-          assert jobs['changes']['result'] == 'success', jobs
-          outputs = jobs['changes']['outputs']
-          def require(name, required):
-              assert jobs[name]['result'] == ('success' if required else 'skipped'), jobs
-          for name in ('web', 'telemetry', 'e2e-types', 'stress'):
-              require(name, outputs[{'e2e-types': 'e2eTypes'}.get(name, name)] == 'true')
-          # The bundle size job runs with desktop, on pull requests only.
-          require('size', outputs['desktop'] == 'true' and os.environ['EVENT'] == 'pull_request')
-          # A core job is required when its runner is in this run's coreRunners.
-          runners = [runner['os'] for runner in json.loads(outputs['coreRunners'])]
-          core = {'core-linux-x64': 'ubuntu-24.04', 'core-linux-arm64': 'ubuntu-24.04-arm', 'core-windows-x64': 'windows-2025',
-                  'core-macos-arm64': 'macos-15', 'core-macos-x64': 'macos-15-intel'}
-          for name, runner in core.items():
-              require(name, outputs['core'] == 'true' and runner in runners)
-          for name in ('e2e-1', 'e2e-2', 'e2e-3'):
-              require(name, outputs['desktop'] == 'true' and outputs['e2e'] == 'true')
-          # A caller runs its reusable workflow with `enabled` off when not selected,
-          # which skips every job in it.
-          for name in ('desktop', 'server', 'android'):
-              assert jobs[name]['result'] == 'success' or (outputs[name] != 'true' and jobs[name]['result'] == 'skipped'), jobs
-          print('All applicable checks passed')
-          PY
