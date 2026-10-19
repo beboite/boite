@@ -105,8 +105,6 @@ export const fr: Translation = {
       delegatingMany: 'Attend {count} sous-agents',
       subagentsOne: '1 sous-agent au travail',
       subagentsMany: '{count} sous-agents au travail',
-      subagentsShortOne: '1 agent',
-      subagentsShortMany: '{count} agents',
       subagentsAskingOne: '1 sous-agent vous attend',
       subagentsAskingMany: '{count} sous-agents vous attendent',
       monitoring: 'Surveille',

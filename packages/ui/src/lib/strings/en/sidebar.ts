@@ -119,8 +119,6 @@ export const strings = {
       subagentsOne: '1 sub-agent at work',
       subagentsMany: '{count} sub-agents at work',
       /** The chip's own words, its count written out: the full sentence stays in its title. */
-      subagentsShortOne: '1 agent',
-      subagentsShortMany: '{count} agents',
       /** The same chip once a sub-agent asks the user something: the parent reads Needs you. */
       subagentsAskingOne: '1 sub-agent needs you',
       subagentsAskingMany: '{count} sub-agents need you',

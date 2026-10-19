@@ -78,7 +78,7 @@
     const atWork = count > 0 ? many(strings.sidebar.state.subagentsOne, strings.sidebar.state.subagentsMany, count) : null;
     const asks = asking > 0 ? many(strings.sidebar.state.subagentsAskingOne, strings.sidebar.state.subagentsAskingMany, asking) : null;
     const shown = count > 0 ? count : asking;
-    return { shown, asking: asking > 0, text: many(strings.sidebar.state.subagentsShortOne, strings.sidebar.state.subagentsShortMany, shown), label: [atWork, asks].filter(Boolean).join('\n') };
+    return { shown, asking: asking > 0, text: String(shown), label: [atWork, asks].filter(Boolean).join('\n') };
   });
 </script>
 
@@ -143,7 +143,7 @@
   .watching {
     color: var(--color-accent);
   }
-  /* The sub-agents chip: the state's own colour on a faint wash of it, the waiting colour once a child asks; the robot is the Threads badge's, so the two read as one count. */
+  /* The sub-agents chip: the state's own colour on a faint wash of it, the waiting colour once a child asks; the robot is the Threads badge's and stands for the word, so the chip is only the robot and the number. */
   .agents {
     display: inline-flex;
     align-items: center;
