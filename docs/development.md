@@ -624,10 +624,16 @@ and when, a last TCP and `/json/list` probe, the end of the shell's own
 Any other failure of a shell attach (the page socket, `Page.enable`) carries
 the same shell details. The whole text lands in
 `tests/e2e/.artifacts/shell-<pid>-diagnosis.txt`, which the
-`desktop-failure-captures` artifact keeps. The diagnosis gets 20 s at most and
-the process tree 10 s, so a stuck WMI query costs the tree, not the error. A
+`desktop-failure-captures` artifact keeps. The diagnosis gets 20 s at most. The
+process tree is read in the test process (`tests/e2e/lib/process-tree.ts`, a
+Toolhelp snapshot and each command line), in milliseconds: the PowerShell and
+WMI listing it replaced gave nothing within 10 s on a loaded runner. A
 missing `main-window` startup phase means the main webview was never built; a
 phase with no `shell.webview.page-load` means the page never started loading.
+The shell logs each main-page navigation as `shell.webview.navigation`: the URL
+the page was on when the watch began, each navigation's start and URL, whether
+its content is an error page, and how it ended (WebView2's `WebErrorStatus`
+and the HTTP status).
 A page that is exposed but never gets its IPC bridge fails in
 `waitForShellPage` with its frame tree, its navigation history and each
 main-frame navigation event and document request devtools saw since the
