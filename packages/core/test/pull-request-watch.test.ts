@@ -541,6 +541,28 @@ test('a persistent agent takes its next work and keeps a subagent that still wat
   await waitFor(() => archived(child) === true);
 });
 
+for (const ending of ['merged by someone else', 'closed by someone else', 'a failed turn']) {
+  test(`a subagent a past episode left watching delivers its last result before it retires: ${ending}`, async () => {
+    const setup = await watchedThread();
+    const { owner, threadId, github, drive, watches } = setup;
+    const child = await watchingChild(setup, 'episode');
+    await waitFor(() => harness!.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND recipient_id = ? AND status = 'delivered'").get(child, threadId) !== null);
+    await settled(threadId);
+    expect(harness!.core.delegation.beginEpisode(threadId, 'next-work-item', harness!.core.delegation.config(threadId))).toBe(true);
+    const before = harness!.core.journal.listTurns(child).map(turn => turn.id);
+    if (ending === 'a failed turn') await owner.call('turns.start', { threadId: child, prompt: '[error]' });
+    else {
+      github.state = ending.startsWith('merged') ? 'MERGED' : 'CLOSED';
+      github.closedBy = 'someone-else';
+      await drive();
+    }
+    await waitFor(() => harness!.core.journal.getThread(child)?.archived === true);
+    expect(watches.of(child)).toEqual([]);
+    const last = harness!.core.journal.listTurns(child).find(turn => !before.includes(turn.id))!;
+    expect(harness!.core.journal.db.query('SELECT status FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(child, `result:${last.id}`)).toEqual({ status: 'delivered' });
+  });
+}
+
 test('the parent\'s Stop ends its subagents\' watches, and a workflow step still cannot watch', async () => {
   const setup = await watchedThread();
   const { owner, threadId, watches } = setup;

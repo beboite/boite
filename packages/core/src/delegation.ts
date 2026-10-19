@@ -183,11 +183,16 @@ export class Delegation {
     })();
     return true;
   }
-  /** A subagent a past episode left watching its pull request retires once the watch and its turn are over. */
+  /** A subagent a past episode left watching its pull request retires once the watch and its turn are over and its last result reached the parent. */
   private retireIfDone(thread: ThreadSummary): void {
     if (this.core.journal.getSetting(`delegation-retiring:${thread.id}`) === undefined) return;
     if (thread.archived) { this.core.journal.deleteSetting(`delegation-retiring:${thread.id}`); return; }
-    if (this.busy(thread) || this.core.pullRequestWatches.of(thread.id).length) return;
+    if (this.busy(thread) || this.core.pullRequestWatches.of(thread.id).length || this.worktrees.isSettling(thread.id)) return;
+    // Its parent's inbox skips an archived sender: a result not yet created or handed over would be lost.
+    const turn = this.lastTurn(thread.id);
+    const told = (sql: string, ...args: string[]) => this.core.journal.db.query(sql).get(thread.id, ...args) !== null;
+    if (turn && !told('SELECT 1 FROM delegation_messages WHERE sender_id = ? AND request_id = ?', `result:${turn.id}`)) return;
+    if (told("SELECT 1 FROM delegation_messages WHERE sender_id = ? AND status IN ('received', 'uncertain') LIMIT 1")) return;
     this.retire(this.core.threads.require(thread.id));
   }
   /** Archives a subagent of a past episode. */
@@ -523,6 +528,9 @@ export class Delegation {
     });
     const thread = this.core.journal.getThread(letter.to.threadId);
     if (thread) this.changed(thread.parentThreadId ?? thread.id);
+    // A retiring subagent waits for its last letter to be handed over.
+    const sender = this.core.journal.getThread(letter.from.threadId);
+    if (sender?.parentThreadId) this.retireIfDone(sender);
   }
   /** Who wrote a letter, from the side of the thread that reads it. */
   private relationTo(threadId: string): (letter: AgentLetter) => 'your parent' | 'your subagent' | undefined {

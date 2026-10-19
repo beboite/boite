@@ -301,7 +301,7 @@ child's watches end when it is stopped, by its own Stop, `delegate stop` or a
 failed turn, and when its parent stops, is archived or is removed. When a
 persistent agent takes its next work item, it archives its finished children
 but keeps one that still watches a pull request; that child is archived once
-its last watch ends and its turn is over.
+its last watch ends, its turn is over and its last result reached the parent.
 
 ### Questions from a child
 
