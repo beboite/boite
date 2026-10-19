@@ -261,9 +261,10 @@ fn watch_navigations(webview: &ICoreWebView2) -> windows::core::Result<()> {
         let (mut id, mut success, mut status) = (0u64, BOOL::default(), COREWEBVIEW2_WEB_ERROR_STATUS::default());
         unsafe { args.NavigationId(&mut id)?; args.IsSuccess(&mut success)?; args.WebErrorStatus(&mut status)?; }
         let mut code = 0i32;
-        // Runtimes before 1.0.1185 do not say the HTTP status.
+        // Runtimes before 1.0.1185 do not say the HTTP status, and 0 means no response came.
         let http = args.cast::<ICoreWebView2NavigationCompletedEventArgs2>().ok()
-            .and_then(|more| unsafe { more.HttpStatusCode(&mut code) }.ok().map(|()| code));
+            .and_then(|more| unsafe { more.HttpStatusCode(&mut code) }.ok().map(|()| code))
+            .filter(|code| *code > 0);
         let success = success.as_bool();
         let (level, outcome) = if success { (Level::Info, "succeeded".to_string()) }
             else { (Level::Warn, format!("failed: {} ({})", error_name(status), status.0)) };
