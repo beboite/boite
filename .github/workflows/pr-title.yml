@@ -3,12 +3,14 @@ name: pr title
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
+  # The queue needs this required check on its group too (docs/ci.md#merge-queue).
+  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pr-title-${{ github.event.pull_request.number }}
+  group: pr-title-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -27,6 +29,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: package.json
+      # A group checks the squash title of its last commit, the one main receives.
       - env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_TITLE: ${{ github.event.pull_request.title || github.event.merge_group.head_commit.message }}
         run: bun scripts/ci/pr-title.ts

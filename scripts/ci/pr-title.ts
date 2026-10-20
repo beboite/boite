@@ -14,7 +14,8 @@ export function titleProblem(title: string): string | undefined {
 }
 
 if (import.meta.main) {
-  const title = process.env.PR_TITLE ?? '';
+  // A merge group passes its head commit's message: the squash title, then any body.
+  const title = (process.env.PR_TITLE ?? '').split('\n')[0]!;
   const problem = titleProblem(title);
   if (problem) {
     console.log(`::error title=Pull request title::${problem}`);
