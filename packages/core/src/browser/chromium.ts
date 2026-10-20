@@ -83,7 +83,9 @@ export function trimProfile(profileDir: string): void {
  * told to use the GPU. It is told to, and software rendering is off: a page
  * that needs WebGL on a machine without a usable GPU gets none, rather than
  * every core of the machine. On Linux ANGLE goes through EGL, which a
- * headless process reaches without a display.
+ * headless process reaches without a display. `gpu` false, in a macOS
+ * virtual machine, draws pages on the CPU and leaves WebGL off: see
+ * `drawsWithGpu`.
  *
  * Sites turn away a browser that says it is automated, so it says what the
  * same browser says with a window. `userAgent` replaces the one that names
@@ -93,9 +95,9 @@ export function trimProfile(profileDir: string): void {
  * page. The screen is 1920 × 1080 rather than headless Chrome's 800 × 600,
  * smaller than its own window.
  */
-export function chromiumArgs(profileDir: string, platform = process.platform, userAgent?: string): string[] {
+export function chromiumArgs(profileDir: string, platform = process.platform, userAgent?: string, gpu = true): string[] {
   return [
-    '--enable-gpu',
+    gpu ? '--enable-gpu' : '--disable-gpu',
     '--disable-software-rasterizer',
     ...(platform === 'linux' ? ['--use-gl=angle', '--use-angle=gl-egl'] : []),
     // Every tab of the agent counts as shown: none is throttled for being in the background.
@@ -126,6 +128,21 @@ export function chromiumArgs(profileDir: string, platform = process.platform, us
     ...(userAgent ? [`--user-agent=${userAgent}`] : []),
     'about:blank',
   ];
+}
+
+/**
+ * False in a macOS virtual machine, a CI runner among them. Its GPU is the
+ * hypervisor's paravirtual one, on which Chromium's GPU process loses its
+ * Metal device and restarts. The process that exits then stays a zombie with
+ * a thread in the kernel, opening the GPU's driver, and the browser's UI
+ * thread waits for it to end: no DevTools command was answered for 10 to 30
+ * seconds. On a macos-15 arm64 runner, 40 minutes of the browser tests gave
+ * 48 GPU restarts in 1180 browsers and 20 silences past 3 seconds. Without
+ * the GPU, 3177 browsers never took more than 1.6 seconds to answer. A Mac's
+ * own hardware keeps the GPU.
+ */
+export async function drawsWithGpu(platform = process.platform): Promise<boolean> {
+  return platform !== 'darwin' || !(await import('../platform/macos-vm.ts')).macVirtualMachine();
 }
 
 /**
