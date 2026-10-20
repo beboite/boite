@@ -21,7 +21,7 @@ import { createHash, createPublicKey, verify } from 'node:crypto';
 import { GROUP_MAX_CORES, PAIRING_ROLES, type Os, type PairingRole } from '@boite/contracts';
 import { invalidParams } from '../errors.ts';
 import { boxSigningInput, checkBox } from './seal.ts';
-import { checkDeviceKey, checkServedOrigins, deviceAdmitted, mergeDeviceKeys, mergeServedOrigins, type DeviceKeyEntry, type ServedOrigins } from './device-keys.ts';
+import { checkDeviceKey, checkServedOrigins, positive, text, wins, deviceAdmitted, mergeDeviceKeys, mergeServedOrigins, type DeviceKeyEntry, type ServedOrigins } from './device-keys.ts';
 
 export interface CoreEntry {
   coreId: string;
@@ -79,15 +79,7 @@ const OVERSHOOT = 2;
 export const ADDRESSES_MAX = 8;
 const OS: readonly Os[] = ['windows', 'linux', 'macos'];
 
-function text(value: unknown, field: string, max: number): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`, { field });
-  return value;
-}
 
-function revision(value: unknown, field: string): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 1) throw invalidParams(`${field}: expected a positive integer`, { field });
-  return value as number;
-}
 
 /** The key as this core writes it, and the id that is its fingerprint. */
 export function fingerprint(publicKey: string): { coreId: string; publicKey: string } {
@@ -153,9 +145,9 @@ export function checkCore(value: unknown, field = 'core'): CoreEntry {
   }
   return {
     ...card,
-    epoch: revision(raw['epoch'], `${field}.epoch`),
+    epoch: positive(raw['epoch'], `${field}.epoch`),
     admit: { by: admit.by, sig: text(admit.sig, `${field}.admit.sig`, 200) },
-    rev: revision(raw['rev'], `${field}.rev`),
+    rev: positive(raw['rev'], `${field}.rev`),
     ...(raw['removed'] === true ? { removed: true as const } : {}),
   };
 }
@@ -170,7 +162,7 @@ export function checkDevice(value: unknown, field = 'device'): DeviceEntry {
     id,
     name: text(raw['name'], `${field}.name`, 100),
     role: raw['role'] as PairingRole,
-    rev: revision(raw['rev'], `${field}.rev`),
+    rev: positive(raw['rev'], `${field}.rev`),
     ...(raw['removed'] === true ? { removed: true as const } : {}),
   };
 }
@@ -189,7 +181,7 @@ export function checkRoster(value: unknown): Roster {
   const roster: Roster = {
     id: text(raw['id'], 'roster.id', 64),
     name: text(raw['name'], 'roster.name', 80),
-    ...(raw['nameRev'] === undefined ? {} : { nameRev: revision(raw['nameRev'], 'roster.nameRev') }),
+    ...(raw['nameRev'] === undefined ? {} : { nameRev: positive(raw['nameRev'], 'roster.nameRev') }),
     founder: raw['founder'],
     cores: raw['cores'].map((core) => checkCore(core, 'roster.cores')),
     devices: raw['devices'].map((device) => checkDevice(device, 'roster.devices')),
@@ -301,12 +293,6 @@ export function digestOf(roster: Roster): string {
   return createHash('sha256').update(JSON.stringify(sorted(roster))).digest('hex');
 }
 
-/** Inside one epoch: the removal, then the later revision, then a fixed order so both sides agree. */
-function wins(a: { rev: number; removed?: true }, b: { rev: number; removed?: true }): boolean {
-  if ((a.removed === true) !== (b.removed === true)) return a.removed === true;
-  if (a.rev !== b.rev) return a.rev > b.rev;
-  return JSON.stringify(a) > JSON.stringify(b);
-}
 
 /**
  * The machines of both rosters. A remote entry of a later epoch is an

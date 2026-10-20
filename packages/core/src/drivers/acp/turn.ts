@@ -24,6 +24,7 @@ import { isOpenCode } from '../../providers/opencode.ts';
 import { normalizeAntigravityTool } from '../antigravity.ts';
 import { imageDocument } from '../documents.ts';
 import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
+import { stringify } from '../tool-text.ts';
 
 /**
  * The prompt cache lifetime of an ACP agent's turn, from the thread's model.
@@ -351,7 +352,7 @@ export class AcpTurn {
  */
 export function toolOutputText(output: unknown): string {
   if (typeof output === 'string') return output;
-  if (output === null || typeof output !== 'object' || Array.isArray(output)) return stringify(output);
+  if (output === null || typeof output !== 'object' || Array.isArray(output)) return stringify(output) ?? '';
   const record = output as Record<string, unknown>;
   const inner = record['output'];
   if (typeof inner === 'string') return inner;
@@ -366,7 +367,7 @@ export function toolOutputText(output: unknown): string {
       if (typeof content === 'string') return content;
     }
   }
-  return stringify(output);
+  return stringify(output) ?? '';
 }
 
 function toolStatus(status: ToolCallStatus): ToolStatus {
@@ -402,12 +403,3 @@ function mapUsage(usage: AcpUsage | null, costUsdEquivalent: number | null): Usa
   };
 }
 
-function stringify(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value === null || value === undefined) return '';
-  try {
-    return JSON.stringify(value) ?? '';
-  } catch {
-    return String(value);
-  }
-}

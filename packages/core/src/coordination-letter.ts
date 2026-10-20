@@ -4,17 +4,14 @@
  * letter so none reads as the user.
  */
 import type { AgentAddress, AgentContact, AgentLetter, AgentRelation } from '@boite/contracts';
-import { invalidParams } from './errors.ts';
+import { invalidParams, requiredText as text } from './errors.ts';
 
 /** How long a letter waits for delivery before it expires. */
 export const LETTER_TTL_MS = 15 * 60_000;
 /** A persistent agent's letters to the threads of its projects wait longer: it looks after them while the user is away, not within a quarter hour. */
 export const RESIDENT_LETTER_TTL_MS = 6 * 3_600_000;
 
-export function text(value: unknown, field: string, max = 4000): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`);
-  return value;
-}
+export { text };
 export function address(value: AgentAddress, field: string): AgentAddress {
   if (!value || typeof value !== 'object') throw invalidParams(`${field}: expected an agent address`);
   return { coreId: text(value.coreId, `${field}.coreId`, 100), threadId: text(value.threadId, `${field}.threadId`, 128) };

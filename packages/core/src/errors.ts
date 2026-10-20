@@ -27,6 +27,12 @@ export function invalidParams(message: string, data?: unknown): RpcFailure {
   return new RpcFailure(RpcErrorCode.InvalidParams, message, data);
 }
 
+/** A required string parameter up to `max` characters, or the refusal naming its field. */
+export function requiredText(value: unknown, field: string, max = 4000, data?: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`, data);
+  return value;
+}
+
 export function notFound(message: string, data?: unknown): RpcFailure {
   return new RpcFailure(RpcErrorCode.NotFound, message, data);
 }

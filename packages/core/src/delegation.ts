@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswerable as answerable, delegationNeeds as needsOf, delegationReply, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
 import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationResumed, DelegationView, PauseOrigin, PermissionRequest, Principal, QuestionRequest, RequestId, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { invalidParams, messageOf, refused } from './errors.ts';
+import { invalidParams, messageOf, refused, requiredText as text } from './errors.ts';
 import { checkContext } from './context-mode.ts';
 import { checkEffort, checkModel, checkSpeed } from './threads/selection.ts';
 import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
@@ -26,10 +26,6 @@ interface LetterRow { data: string; fingerprint: string }
 /** A permission the user answers within this time, watching the child, does not wake its parent. */
 export const PERMISSION_WAKE_MS = 30_000;
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-function text(value: unknown, field: string, max: number): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`);
-  return value;
-}
 /** Load and the derived live fields arrive in thread.updated without changing team history. */
 function teamState(thread: ThreadSummary): string {
   const { load, progress, runningSince, requestSince, backgroundWork, backgroundWait, pendingMove, moveNote, pendingAnswers, openQuestions, retry, pullRequestWatches, ...stored } = thread;
