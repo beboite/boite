@@ -11,6 +11,29 @@ requests reviews; approval is not required. The `release tags` policy protects
 `type(scope): summary`, with an optional scope and one of `feat`, `fix`, `perf`,
 `refactor`, `docs`, `test`, `ci`, `build`, `chore` or `revert`. Its body is empty.
 
+## Merge queue
+
+`main` takes pull requests through a squash merge queue, so each one is tested
+on the `main` it lands on, with the pull requests queued ahead of it. Without
+it, two pull requests green on their own can break `main` together: the ruleset
+does not require an up-to-date branch, and requiring one would rerun every open
+pull request's CI after each merge.
+
+`ci` and `PR title` also run on `merge_group`. A group runs `ci` in `pr` mode
+against its `main` base: the same path rules, skips and platforms as a pull
+request, with the diff covering every pull request ahead of it. `Bundle size`
+skips there, since it compares a pull request with its base. A group's `PR
+title` checks the squash title of its last commit, the one `main` receives.
+The queue builds up to five groups at once and merges each as soon as it passes,
+without waiting to fill a group. It removes a pull request whose group fails,
+or whose checks have not reported within 60 minutes. A green `ci` run takes
+about 12 minutes (2026-10-20), so a pull request lands that long after entering.
+
+An agent merges with `gh pr merge <number> --squash --match-head-commit <sha>`:
+the pull request enters the queue once its own checks pass, and lands when its
+group passes. One the queue removes needs a fix or a rebase, then the same
+command. `--admin` bypasses the queue and its checks.
+
 ## Checks
 
 `scripts/ci/changes.ts` selects jobs from changed paths. Unknown paths run the
@@ -102,7 +125,8 @@ compares with saved `gh api` output instead.
 
 ### Run modes and platforms
 
-PRs against any branch use `pr` mode and compare with their base. Main pushes
+PRs against any branch use `pr` mode and compare with their base; so do merge
+queue groups, against their `main` base. Main pushes
 use `warm`: they run affected core and E2E suites too, add Linux ARM64 and macOS
 Intel desktop legs, and save caches. A push event does not prove that an
 equivalent PR tree passed. A main push compares with the last main commit whose
