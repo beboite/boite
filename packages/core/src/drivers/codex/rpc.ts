@@ -84,6 +84,9 @@ export class CodexRpc {
       entry.reject(new CodexRpcError(typeof text === 'string' ? text : JSON.stringify(error), typeof code === 'number' ? code : null));
       return;
     }
+    // Promise continuations run after every notification in this pipe chunk;
+    // `onAccepted` marks the answer's place among them.
+    entry.onAccepted?.();
     entry.resolve(message['result']);
   }
 
