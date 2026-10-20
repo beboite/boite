@@ -457,6 +457,9 @@ agent's `--version`, and an agent's own updater can open a console window.
 
 Release notes come from Git commits, including commits without a pull request.
 Each subject links to its commit, and a comparison link opens the complete diff.
+Each line ends with its author and its `Co-authored-by` trailers: a GitHub
+noreply address becomes `@login`, which GitHub links and lists among the
+release's contributors; any other address shows the commit's name.
 Merge commits are excluded because the commits they merge are already listed.
 Subjects starting with `feat`, `fix` and `perf` get their own sections; every
 other subject goes under "Other changes". A list with no typed subject has no

@@ -6,7 +6,8 @@ export interface Release {
   prerelease: boolean;
   published_at: string | null;
 }
-export interface Commit { sha: string; subject: string }
+/** `authors` are the commit's author then its `Co-authored-by` trailers, as `Name <email>`. */
+export interface Commit { sha: string; subject: string; authors?: string[] }
 
 export function previousRelease(
   releases: Release[], current: string, ancestor: (tag: string) => boolean,
@@ -31,6 +32,20 @@ function escapeMarkdown(text: string): string {
 // or direct commits without a known type land under "Other changes".
 const SECTIONS = [['feat', 'Features'], ['fix', 'Fixes'], ['perf', 'Performance']] as const;
 
+// A GitHub noreply address names the account: `@login` links its profile and
+// lists it among the release's contributors. Any other address shows the name.
+function credit(author: string): string {
+  const match = /^(.*?)\s*<([^>]*)>$/.exec(author.trim());
+  const name = match ? match[1]! : author.trim();
+  const login = /^(?:\d+\+)?([\w-]+)@users\.noreply\.github\.com$/i.exec(match?.[2] ?? '')?.[1];
+  return login ? `@${login}` : escapeMarkdown(name);
+}
+
+function credits(authors: string[] = []): string {
+  const names = [...new Set(authors.map(credit).filter(Boolean))];
+  return names.length > 0 ? ` by ${names.join(', ')}` : '';
+}
+
 function commitType(subject: string): string | undefined {
   return /^(\w+)(?:\([^)]*\))?!?: /.exec(subject)?.[1];
 }
@@ -39,8 +54,8 @@ export function releaseNotes(
   commits: Commit[], repository: string, tag: string, previous?: string, announcement = '',
 ): string {
   const url = `https://github.com/${repository}`;
-  const list = (group: Commit[]) => group.map(({ sha, subject }) =>
-    `- ${escapeMarkdown(subject)} ([${sha.slice(0, 7)}](${url}/commit/${sha}))`,
+  const list = (group: Commit[]) => group.map(({ sha, subject, authors }) =>
+    `- ${escapeMarkdown(subject)} ([${sha.slice(0, 7)}](${url}/commit/${sha}))${credits(authors)}`,
   ).join('\n');
   const known = new Set<string>(SECTIONS.map(([type]) => type));
   const groups = [
@@ -78,10 +93,13 @@ if (import.meta.main) {
     return result.exitCode === 0;
   });
   const range = previous ? `refs/tags/${previous}..HEAD` : 'HEAD';
-  const commits = git(['log', '--no-merges', '--format=%H%x00%s', range])
-    .split('\n').filter(Boolean).map((line) => {
-      const separator = line.indexOf('\0');
-      return { sha: line.slice(0, separator), subject: line.slice(separator + 1) };
+  // One NUL-ended record per commit, its fields split by US: a trailer value
+  // never holds either, and every field stays on its own commit.
+  const commits = git(['log', '--no-merges', '-z',
+    '--format=%H%x1f%s%x1f%an <%ae>%x1f%(trailers:key=Co-authored-by,valueonly,separator=%x1f)', range])
+    .split('\0').filter(Boolean).map((record) => {
+      const [sha = '', subject = '', author = '', ...coauthors] = record.trim().split('\x1f');
+      return { sha, subject, authors: [author, ...coauthors].map((name) => name.trim()).filter(Boolean) };
     });
   const notes = releaseNotes(commits, repository, tag, previous, process.env.RELEASE_ANNOUNCEMENT);
   writeFileSync(process.argv[3] ?? 'release-notes.md', notes);
