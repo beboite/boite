@@ -536,6 +536,21 @@ or a one-second fallback after the child exits (`procs.ts`). Cleanup assertions
 must wait for both the expected PID set and install leases before checking them;
 the child exit callback alone does not establish that the trace row was removed.
 
+### Promise matchers under bun test
+
+Files run by `bun test` never use `expect(promise).rejects` or `.resolves`;
+`bun run check:architecture` refuses them. In Bun 1.4.3 those matchers run a
+nested event loop tick on a pending promise. On macOS the nested `kevent64`
+reuses the loop's `ready_polls`, and the outer tick drops the events it had not
+processed yet: a socket's one-shot write event is lost and the core closes the
+socket with 1013 after 10 seconds. On macos-15, `todos.test.ts` failed 23
+times in 7,308 runs with `.rejects` and 0 in 14,214 with an awaited
+`.catch()`. Await first, then match, with the helpers of
+`packages/core/test/settle.ts`: `expect(await thrown(promise)).toThrow(message)`,
+`expect(await rejection(promise)).toMatchObject(shape)` for other matchers,
+and `expect(await promise)` in place of `.resolves`. UI Vitest awaits its
+matchers and keeps them.
+
 ### Contract scenarios
 
 `tests/contract/scenarios.ts` drives RPC results and events through the same
