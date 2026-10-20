@@ -547,7 +547,8 @@ socket with 1013 after 10 seconds. On macos-15, `todos.test.ts` failed 23
 times in 7,308 runs with `.rejects` and 0 in 14,214 with an awaited
 `.catch()`. Await first, then match, with the helpers of
 `packages/core/test/settle.ts`: `expect(await thrown(promise)).toThrow(message)`,
-`expect(await rejection(promise)).toMatchObject(shape)` for other matchers,
+`expect((await rejection(promise)).reason).toMatchObject(shape)` for other
+matchers (boxed, so a thenable reason is not adopted),
 and `expect(await promise)` in place of `.resolves`. UI Vitest awaits its
 matchers and keeps them.
 

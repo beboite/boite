@@ -699,7 +699,7 @@ test('a member is asked on the address that answered last, and on the others onl
   expect(asked).toEqual(['x']);
   expect(await firstAnswer(['x', 'y', 'z'], send({ x: 'down', y: 'ok', z: 'silent' }), 20)).toBe('y');
   expect(await firstAnswer(['x', 'y'], send({ x: 'silent', y: 'ok' }), 20)).toBe('y');
-  expect(await rejection(firstAnswer(['x', 'y'], send({ x: 'down', y: 'down' }), 20))).toBeInstanceOf(AggregateError);
+  expect((await rejection(firstAnswer(['x', 'y'], send({ x: 'down', y: 'down' }), 20))).reason).toBeInstanceOf(AggregateError);
 
   // Two addresses that lead to the same core, as a tailnet name and its address do: the copy a second
   // one would carry is a replay there, refused and counted against the sender. It is never sent.

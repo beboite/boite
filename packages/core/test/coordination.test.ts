@@ -264,7 +264,7 @@ test('an unreachable coordination check names the destination without broadcasti
   one.h.core.coordination.trust(peer);
   const log = spyOn(one.h.core, 'log');
   try {
-    expect(await rejection(one.owner.call('collaboration.check', { coreId: peer.coreId }))).toMatchObject({
+    expect((await rejection(one.owner.call('collaboration.check', { coreId: peer.coreId }))).reason).toMatchObject({
       rpc: {
         code: RpcErrorCode.Unavailable,
         message: expect.stringContaining('Remote test machine at http://127.0.0.1:1'),

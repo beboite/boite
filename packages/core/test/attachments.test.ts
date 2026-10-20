@@ -81,7 +81,7 @@ test('malformed attachment arrays are refused before retry fingerprinting', asyn
   const client = await harness.connect();
   const { threadId } = await echoThread(harness, client);
   for (const attachments of [{}, [null]]) {
-    expect(await rejection(client.call('turns.start', { threadId, prompt: 'Read', clientRequestId: 'invalid-files', attachments: attachments as never }))).toMatchObject({ rpc: { code: RpcErrorCode.Refused, message: expect.stringContaining('attachment') } });
+    expect((await rejection(client.call('turns.start', { threadId, prompt: 'Read', clientRequestId: 'invalid-files', attachments: attachments as never }))).reason).toMatchObject({ rpc: { code: RpcErrorCode.Refused, message: expect.stringContaining('attachment') } });
   }
   expect(harness.core.journal.listTurns(threadId)).toEqual([]);
 });

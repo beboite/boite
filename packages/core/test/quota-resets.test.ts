@@ -52,7 +52,7 @@ test('Claude requires confirmation, claims the earliest usable private grant, th
   let broadcast: unknown;
   const off = core.bus.onAny((name, value) => { if (name === 'quotas.updated') broadcast = value; });
   try {
-    expect(await rejection(core.quotas.resets.reset(account.id, false))).toMatchObject({ data: { field: 'confirmed', expected: true } });
+    expect((await rejection(core.quotas.resets.reset(account.id, false))).reason).toMatchObject({ data: { field: 'confirmed', expected: true } });
     expect(fetcher).toHaveBeenCalledTimes(0);
     const client = await harness!.connect();
     const result = await client.call('quotas.reset', { accountId: account.id, confirmed: true });
@@ -87,7 +87,7 @@ test('an unanswered Claude claim retries the same grant and request after recons
       ] } });
   }, { preconnect: fetch.preconnect }));
   try {
-    expect(await rejection(core.quotas.resets.reset(account.id, true))).toMatchObject({ settled: false });
+    expect((await rejection(core.quotas.resets.reset(account.id, true))).reason).toMatchObject({ settled: false });
     const reopened = new QuotaStore(core);
     expect((await reopened.resets.reset(account.id, true)).outcome).toBe('alreadyRedeemed');
     expect(claims).toHaveLength(2);
@@ -109,9 +109,9 @@ test('Claude maps definitive outcomes and refuses cooldown or unconfirmed replie
       expect((await core.quotas.resets.reset(account.id, true)).outcome).toBe(outcome!);
     }
     answer = 'cooldown';
-    expect(await rejection(core.quotas.resets.reset(account.id, true))).toMatchObject({ settled: true });
+    expect((await rejection(core.quotas.resets.reset(account.id, true))).reason).toMatchObject({ settled: true });
     answer = 'unavailable';
-    expect(await rejection(core.quotas.resets.reset(account.id, true))).toMatchObject({ settled: false });
+    expect((await rejection(core.quotas.resets.reset(account.id, true))).reason).toMatchObject({ settled: false });
   } finally { fetcher.mockRestore(); version.mockRestore(); }
 });
 

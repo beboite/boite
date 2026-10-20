@@ -515,7 +515,7 @@ describe('a working directory outside the project', () => {
     const account = (await client.call('accounts.list', {})).find(entry => entry.providerId === 'echo');
     const creation = client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', cwd });
     expect(await thrown(creation)).toThrow('the working directory must resolve inside the project');
-    expect(await rejection(creation)).toMatchObject({ rpc: { data: {
+    expect((await rejection(creation)).reason).toMatchObject({ rpc: { data: {
       field: 'cwd', expected: 'a directory inside the project filesystem root', cwd, projectPath: projectRoot,
     } } });
     expect(await client.call('threads.list', {})).toEqual([]);

@@ -306,7 +306,7 @@ describe('git.diff', () => {
     const path = await fixture();
     const threadId = await threadIn(path, 'repo');
     for (const ref of [null, false, 0, [], { length: 0 }]) {
-      expect(await rejection(client.call('git.diff', { threadId, path: 'a.txt', ref: ref as unknown as string })))
+      expect((await rejection(client.call('git.diff', { threadId, path: 'a.txt', ref: ref as unknown as string }))).reason)
         .toMatchObject({ rpc: { code: RpcErrorCode.Refused, message: 'git.diff ref must be a revision' } });
     }
     const diff = await client.call('git.diff', { threadId, path: 'a.txt', ref: '' });

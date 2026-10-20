@@ -343,7 +343,7 @@ test('real logs queries enforce strict validation, newest-first filters and owne
       const persisted = readFileSync(join(harness.dataDir, 'logs', 'core.0.ndjson'), 'utf8');
       expect(persisted).not.toContain(oauth);
       expect(persisted).not.toContain('synthetic-state');
-      for (const client of [agent, phone]) for (const id of [threadId, 'another-thread']) expect(await rejection(client.call('core.logs', { threadId: id }))).toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
+      for (const client of [agent, phone]) for (const id of [threadId, 'another-thread']) expect((await rejection(client.call('core.logs', { threadId: id }))).reason).toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
       expect(agentLogs).toEqual([]);
       expect(phoneLogs).toEqual([]);
       // Even a long output stays usable and bounded for its owner, while retention stays fixed.
@@ -366,7 +366,7 @@ test('unexpected RPC causes persist with request correlation while clients recei
     const logEvents: string[] = [];
     owner.on('core.log', log => logEvents.push(log.message));
     harness.core.router.register('projects.list', () => { throw new Error(`SQLite failed token=${harness.token}`, { cause: new Error('disk full') }); });
-    expect(await rejection(owner.call('projects.list', {}))).toMatchObject({ rpc: { code: RpcErrorCode.Internal, message: 'Something went wrong. Try again.' } });
+    expect((await rejection(owner.call('projects.list', {}))).reason).toMatchObject({ rpc: { code: RpcErrorCode.Internal, message: 'Something went wrong. Try again.' } });
     const [record] = await owner.call('core.logs', { level: 'error' });
     expect(record).toMatchObject({ source: 'rpc', event: 'rpc.failed' });
     expect(record?.requestId).toBeString();

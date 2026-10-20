@@ -170,7 +170,7 @@ describe('server', () => {
     client.on('thread.updated', event => { if (event.id === threadId) seen.push(event.status); });
     harness.core.journal.db.exec(`CREATE TRIGGER refuse_queue BEFORE INSERT ON threads
       WHEN NEW.status = 'queued' BEGIN SELECT RAISE(ABORT, 'forced queue rollback'); END;`);
-    expect(await rejection(client.call('turns.start', { threadId, prompt: 'must roll back' }))).toBeInstanceOf(Error);
+    expect((await rejection(client.call('turns.start', { threadId, prompt: 'must roll back' }))).reason).toBeInstanceOf(Error);
     // The response to this read follows any premature notification on the same socket.
     const thread = await client.call('threads.get', { threadId });
     expect(thread?.status).toBe('idle');
@@ -194,7 +194,7 @@ describe('server', () => {
     expect(harness.core.delegation.prepareTurn(admission)).toBe(false);
     harness.core.journal.db.exec(`CREATE TRIGGER refuse_child_queue BEFORE INSERT ON threads
       WHEN NEW.status = 'queued' BEGIN SELECT RAISE(ABORT, 'forced child rollback'); END;`);
-    expect(await rejection(client.call('turns.start', { threadId: childId, prompt: 'must keep stop' }))).toBeInstanceOf(Error);
+    expect((await rejection(client.call('turns.start', { threadId: childId, prompt: 'must keep stop' }))).reason).toBeInstanceOf(Error);
     expect(harness.core.journal.listTurns(childId)).toEqual([]);
     expect(harness.core.delegation.get(threadId).turnsUsed).toBe(0);
     expect(harness.core.delegation.prepareTurn(admission)).toBe(false);

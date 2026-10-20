@@ -282,7 +282,7 @@ test('permanently removing a project removes its private file checkpoints', asyn
   const folder = join(h.dataDir, 'checkpoints', threadId);
   expect((await stat(folder)).isDirectory()).toBe(true);
   await client.call('projects.remove', { projectId: h.core.threads.require(threadId).projectId! });
-  expect(await rejection(stat(folder))).toMatchObject({ code: 'ENOENT' });
+  expect((await rejection(stat(folder))).reason).toMatchObject({ code: 'ENOENT' });
 });
 
 test('project removal still reaches connected clients when checkpoint cleanup fails', async () => {
@@ -463,7 +463,7 @@ test('threads on one folder share each blob, and a discarded thread\'s blobs are
   // The unlink moved the blob's ctime, which a filesystem clock can put past a cutoff read in the same millisecond.
   await Bun.sleep(10);
   expect(await h.core.threads.codeCheckpoints.collect(0)).toBe(1);
-  expect(await rejection(stat(sharedBlob(shared, hashOf('first'))))).toMatchObject({ code: 'ENOENT' });
+  expect((await rejection(stat(sharedBlob(shared, hashOf('first'))))).reason).toMatchObject({ code: 'ENOENT' });
   expect((await stat(sharedBlob(shared, hashOf('initial')))).nlink).toBe(2);
   expect((await client.call('threads.rewind', { threadId, messageId })).files).toEqual({ status: 'restored', count: 1 });
   expect(await readFile(join(cwd, 'src', 'deep', 'app.ts'), 'utf8')).toBe('initial');
@@ -574,7 +574,7 @@ test('a copy that does not match its name is left alone, and the rest of the fol
   await h.core.threads.codeCheckpoints.maintain();
   const shared = join(h.dataDir, 'checkpoints', 'objects');
   expect(await readFile(join(objects, hashOf(text)), 'utf8')).toBe('damaged');
-  expect(await rejection(stat(sharedBlob(shared, hashOf(text))))).toMatchObject({ code: 'ENOENT' });
+  expect((await rejection(stat(sharedBlob(shared, hashOf(text))))).reason).toMatchObject({ code: 'ENOENT' });
   expect(await inodeOf(join(objects, hashOf(other)))).toBe(await inodeOf(sharedBlob(shared, hashOf(other))));
 });
 
@@ -628,7 +628,7 @@ test('a stored frame never decodes past the 16 MiB file limit, and a raw frame n
   expect(await decodeBlob(frame, createHash('sha256').update(frame).digest('hex'))).toBe(frame);
   // A manifest frame is bounded the same way.
   const huge = Buffer.from(Bun.zstdCompressSync(Buffer.alloc(65 * 1024 * 1024, 0x20)));
-  expect(await rejection(decodeManifest(huge))).toMatchObject({ code: 'ERR_BUFFER_TOO_LARGE' });
+  expect((await rejection(decodeManifest(huge))).reason).toMatchObject({ code: 'ERR_BUFFER_TOO_LARGE' });
 });
 
 test('the background pass counts manifests against its tick budget and stops when a snapshot starts', async () => {
@@ -685,10 +685,10 @@ test(`checkpoints are kept for the newest ${KEEP_TURNS} turns, and none for a th
   const folder = join(h.dataDir, 'checkpoints', threadId);
   expect((await readdir(folder)).filter(name => name.endsWith('.json'))).toHaveLength(KEEP_TURNS);
   // The first turn's starting content was only in its own checkpoint.
-  expect(await rejection(stat(join(folder, 'objects', hashOf('turn 0'))))).toMatchObject({ code: 'ENOENT' });
+  expect((await rejection(stat(join(folder, 'objects', hashOf('turn 0'))))).reason).toMatchObject({ code: 'ENOENT' });
   await Bun.sleep(10);
   await checkpoints.collect(0);
-  expect(await rejection(stat(sharedBlob(join(h.dataDir, 'checkpoints', 'objects'), hashOf('turn 0'))))).toMatchObject({ code: 'ENOENT' });
+  expect((await rejection(stat(sharedBlob(join(h.dataDir, 'checkpoints', 'objects'), hashOf('turn 0'))))).reason).toMatchObject({ code: 'ENOENT' });
 
   const thread = h.core.threads.require(threadId);
   const oldest = await checkpoints.rewind(thread, turns, messageOf(turns[0]!), files => files);
@@ -708,6 +708,6 @@ test(`checkpoints are kept for the newest ${KEEP_TURNS} turns, and none for a th
   expect((await readdir(folder)).filter(name => name.endsWith('.json'))).toHaveLength(KEEP_TURNS);
   await client.call('threads.archive', { threadId, archived: true });
   await checkpoints.maintain(Date.now() + IDLE_THREAD_MS + 60_000);
-  expect(await rejection(stat(folder))).toMatchObject({ code: 'ENOENT' });
+  expect((await rejection(stat(folder))).reason).toMatchObject({ code: 'ENOENT' });
 // 51 real turns took 5.2 s on a loaded Windows machine, past Bun's default 5 s.
 }, 20000);

@@ -75,7 +75,7 @@ test('leases restore ordered file and native image bytes, keep inline bytes, and
   expect(await Bun.file(path).text()).toBe('first file');
   await uploads.release('connection', [one.id, one.id, two.id]);
   expect(await bodies()).toEqual([]);
-  expect(await rejection(uploads.resolve('connection', [metadata(first)], [one.id]))).toMatchObject(expiry);
+  expect((await rejection(uploads.resolve('connection', [metadata(first)], [one.id]))).reason).toMatchObject(expiry);
   // Permanent copies created only when sending remain independent of pre-send cleanup.
   expect(await Bun.file(path).text()).toBe('first file');
 });
@@ -85,17 +85,17 @@ test('an upload cannot be read or released by another connection or an arbitrary
   const attachment = file();
   const { id } = await uploads.upload('owner', attachment);
   for (const invalidId of [id, '../../outside', '/etc/passwd', 'unknown']) {
-    expect(await rejection(uploads.resolve('other', [metadata(attachment)], [invalidId]))).toMatchObject(expiry);
-    expect(await rejection(uploads.release('other', [invalidId]))).toMatchObject(expiry);
+    expect((await rejection(uploads.resolve('other', [metadata(attachment)], [invalidId]))).reason).toMatchObject(expiry);
+    expect((await rejection(uploads.release('other', [invalidId]))).reason).toMatchObject(expiry);
   }
-  expect(await rejection(uploads.release('owner', [id, 'missing']))).toMatchObject(expiry);
+  expect((await rejection(uploads.release('owner', [id, 'missing']))).reason).toMatchObject(expiry);
   expect(await uploads.resolve('owner', [metadata(attachment)], [id])).toEqual([attachment]);
 });
 
 test('upload validation preserves shared shape, format and per-file size refusals', async () => {
   const uploads = store();
   for (const attachment of [null, { ...file(), kind: 'other' }, { ...file(), name: 3 }, { ...file(), mimeType: 'text/plain\n' }, { ...file(), data: 'invalid base64' }, { ...file(), kind: 'image', mimeType: 'image/svg+xml' }, { ...file(), data: Buffer.alloc(ATTACHMENT_MAX_BYTES + 1).toString('base64') }]) {
-    expect(await rejection(uploads.upload('owner', attachment as Attachment))).toMatchObject({ name: 'RpcFailure' });
+    expect((await rejection(uploads.upload('owner', attachment as Attachment))).reason).toMatchObject({ name: 'RpcFailure' });
   }
   expect(await bodies()).toEqual([]);
   const empty = file('', null);
@@ -147,10 +147,10 @@ test('per-connection count reservations bound empty files even while writes are 
 test('global byte and count budgets cover all connections, including zero-byte files', async () => {
   const uploads = store({ globalMaxBytes: 4, globalMaxCount: 3 });
   const first = await uploads.upload('one', file('abcd'));
-  expect(await rejection(uploads.upload('two', file('x')))).toMatchObject({ data: { bytes: 5, max: 4 } });
+  expect((await rejection(uploads.upload('two', file('x')))).reason).toMatchObject({ data: { bytes: 5, max: 4 } });
   await uploads.release('one', [first.id]);
   await Promise.all(['one', 'two', 'three'].map(connection => uploads.upload(connection, file(''))));
-  expect(await rejection(uploads.upload('four', file('')))).toMatchObject({ data: { count: 4, max: 3 } });
+  expect((await rejection(uploads.upload('four', file('')))).reason).toMatchObject({ data: { count: 4, max: 3 } });
   await uploads.disconnect('two');
   expect(await uploads.upload('four', file('x'))).toHaveProperty('id');
 });
@@ -159,8 +159,8 @@ test('resolved duplicate references and inline bytes cannot exceed turn count or
   const uploads = store();
   const attachment = { ...file(), data: Buffer.alloc(ATTACHMENT_MAX_BYTES, 3).toString('base64') };
   const { id } = await uploads.upload('owner', attachment);
-  expect(await rejection(uploads.resolve('owner', [metadata(attachment), attachment, metadata(attachment)], [id, null, id]))).toMatchObject({ data: { bytes: 3 * ATTACHMENT_MAX_BYTES, max: ATTACHMENTS_TOTAL_MAX_BYTES } });
-  expect(await rejection(uploads.resolve('owner', Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, () => metadata(attachment)), Array(ATTACHMENTS_PER_TURN + 1).fill(id)))).toMatchObject({ data: { count: ATTACHMENTS_PER_TURN + 1, max: ATTACHMENTS_PER_TURN } });
+  expect((await rejection(uploads.resolve('owner', [metadata(attachment), attachment, metadata(attachment)], [id, null, id]))).reason).toMatchObject({ data: { bytes: 3 * ATTACHMENT_MAX_BYTES, max: ATTACHMENTS_TOTAL_MAX_BYTES } });
+  expect((await rejection(uploads.resolve('owner', Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, () => metadata(attachment)), Array(ATTACHMENTS_PER_TURN + 1).fill(id)))).reason).toMatchObject({ data: { count: ATTACHMENTS_PER_TURN + 1, max: ATTACHMENTS_PER_TURN } });
 });
 
 test('disconnect and shutdown cancel uploads both before reservation and during filesystem writes', async () => {
@@ -197,7 +197,7 @@ test('disconnect and shutdown cancel uploads both before reservation and during 
     } finally { resume(); writing.mockRestore(); }
   }
   await uploads.close();
-  expect(await rejection(uploads.upload('owner', file()))).toMatchObject(expiry);
+  expect((await rejection(uploads.upload('owner', file()))).reason).toMatchObject(expiry);
 });
 
 test('closing a manager removes its temporary bytes without touching another manager or permanent copies', async () => {
@@ -215,7 +215,7 @@ test('closing a manager removes its temporary bytes without touching another man
   }
   await first.close();
   expect(await bodies()).toHaveLength(1);
-  expect(await rejection(first.resolve('owner', [metadata(attachment)], [one.id]))).toMatchObject(expiry);
+  expect((await rejection(first.resolve('owner', [metadata(attachment)], [one.id]))).reason).toMatchObject(expiry);
   expect(await second.resolve('owner', [metadata(attachment)], [two.id])).toEqual([attachment]);
 });
 
@@ -229,7 +229,7 @@ test('lazy expiry deletes old leases and reclaims the global budget before a new
     // Filesystem work must finish before the test spends the lease's TTL.
     clock.mockReturnValue(now + 150);
     const replacement = await uploads.upload('other', attachment);
-    expect(await rejection(uploads.resolve('owner', [metadata(attachment)], [id]))).toMatchObject(expiry);
+    expect((await rejection(uploads.resolve('owner', [metadata(attachment)], [id]))).reason).toMatchObject(expiry);
     expect(await bodies()).toHaveLength(1);
     await uploads.release('other', [replacement.id]);
     expect(await bodies()).toEqual([]);
@@ -267,7 +267,7 @@ test('a missing temporary body produces the expiry reason for inline retry', asy
   const attachment = file();
   const { id } = await uploads.upload('owner', attachment);
   await rm((await bodies())[0]!);
-  expect(await rejection(uploads.resolve('owner', [metadata(attachment)], [id]))).toMatchObject(expiry);
+  expect((await rejection(uploads.resolve('owner', [metadata(attachment)], [id]))).reason).toMatchObject(expiry);
   expect(await bodies()).toEqual([]);
 });
 
@@ -277,9 +277,9 @@ test('changed temporary bytes are never restored, including same-length edits', 
   for (const corrupted of ['modified', 'longer changed content']) {
     const { id } = await uploads.upload('owner', attachment);
     await writeFile((await bodies())[0]!, corrupted);
-    expect(await rejection(uploads.resolve('owner', [metadata(attachment)], [id]))).toMatchObject({ message: expect.stringContaining('bytes changed'), ...expiry });
+    expect((await rejection(uploads.resolve('owner', [metadata(attachment)], [id]))).reason).toMatchObject({ message: expect.stringContaining('bytes changed'), ...expiry });
     expect(await bodies()).toEqual([]);
-    expect(await rejection(uploads.resolve('owner', [metadata(attachment)], [id]))).toMatchObject(expiry);
+    expect((await rejection(uploads.resolve('owner', [metadata(attachment)], [id]))).reason).toMatchObject(expiry);
   }
 });
 
@@ -287,7 +287,7 @@ test('release requests are bounded before processing and cannot partially delete
   const uploads = store();
   const attachment = file();
   const { id } = await uploads.upload('owner', attachment);
-  expect(await rejection(uploads.release('owner', Array(ATTACHMENTS_PER_TURN + 1).fill(id)))).toMatchObject({ data: { count: ATTACHMENTS_PER_TURN + 1, max: ATTACHMENTS_PER_TURN } });
+  expect((await rejection(uploads.release('owner', Array(ATTACHMENTS_PER_TURN + 1).fill(id)))).reason).toMatchObject({ data: { count: ATTACHMENTS_PER_TURN + 1, max: ATTACHMENTS_PER_TURN } });
   for (const ids of [null, [null], ['']]) {
     expect(await thrown(uploads.release('owner', ids as unknown as string[]))).toThrow('array of nonempty strings');
   }
@@ -519,7 +519,7 @@ test('accepted upload receipt survives release and expired-reference fallback wi
     const params = { threadId, prompt: 'read once', clientRequestId: 'upload-fallback-receipt', attachments: [metadata(attachment)], attachmentIds: [id] };
     const accepted = await client.call('turns.start', params);
     await client.call('attachments.release', { ids: [id] });
-    expect(await rejection(client.call('turns.start', params))).toMatchObject({ rpc: expiry });
+    expect((await rejection(client.call('turns.start', params))).reason).toMatchObject({ rpc: expiry });
     const fallback = await client.call('turns.start', { ...params, attachments: [attachment], attachmentIds: [null] });
     expect(fallback.id).toBe(accepted.id);
     await waitFor(() => h.core.journal.getTurn(accepted.id)?.status === 'done');

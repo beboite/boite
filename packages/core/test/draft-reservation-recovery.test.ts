@@ -160,8 +160,8 @@ for (const checkedOut of [false, true]) test(`a concurrent branch and its unmerg
     return spawn(id, cmd, args, options);
   });
   try {
-    expect(await rejection(h.core.drafts.prepare('branch_race_connection', { ...choice, projectId: repo.id,
-      worktree: { branch }, preparationId: 'branch_race_owner' }))).toBeInstanceOf(Error);
+    expect((await rejection(h.core.drafts.prepare('branch_race_connection', { ...choice, projectId: repo.id,
+      worktree: { branch }, preparationId: 'branch_race_owner' }))).reason).toBeInstanceOf(Error);
     expect(commit).not.toBe('');
     expect(git(repo.path, 'rev-parse', `refs/heads/${branch}`).trim()).toBe(commit);
     expect(git(repo.path, 'show', `${branch}:unmerged.txt`)).toBe('another actor owns this work\n');
@@ -188,8 +188,8 @@ test('a competing checkout at the reserved path survives rollback of our separat
     return spawn(id, cmd, args, options);
   });
   try {
-    expect(await rejection(h.core.drafts.prepare('checkout_race_connection', { ...choice, projectId: repo.id,
-      worktree: { branch }, preparationId: 'checkout_race_owner' }))).toBeInstanceOf(Error);
+    expect((await rejection(h.core.drafts.prepare('checkout_race_connection', { ...choice, projectId: repo.id,
+      worktree: { branch }, preparationId: 'checkout_race_owner' }))).reason).toBeInstanceOf(Error);
     expect(competingPath).not.toBe('');
     expect(existsSync(join(competingPath, 'unmerged.txt'))).toBe(true);
     expect(git(competingPath, 'symbolic-ref', '--short', 'HEAD').trim()).toBe(otherBranch);
@@ -236,9 +236,9 @@ test('a worktree creation refusal survives cleanup failure and retains ownership
   });
   let ownership: DraftOwnership | undefined;
   try {
-    expect(await rejection(h.core.threads.creation.createInWorktree({ ...choice, projectId: repo.id, worktree: {} }, false, intent => {
+    expect((await rejection(h.core.threads.creation.createInWorktree({ ...choice, projectId: repo.id, worktree: {} }, false, intent => {
       ledger.record(intent); ownership = intent;
-    }))).toBe(original);
+    }))).reason).toBe(original);
     expect(ownership).toBeDefined();
     expect(new DraftReservationLedger(h.core).list()).toEqual([ownership!]);
     expect(existsSync(ownership!.path)).toBe(true);
@@ -262,7 +262,7 @@ test('admission bounds active and detached cleanup per connection without blocki
   });
   try {
     for (let i = 0; i < 4; i++) await h.core.drafts.prepare('held_connection', { ...choice, preparationId: `held_draft_${i}` });
-    expect(await rejection(h.core.drafts.prepare('held_connection', { ...choice, preparationId: 'held_draft_overflow' })))
+    expect((await rejection(h.core.drafts.prepare('held_connection', { ...choice, preparationId: 'held_draft_overflow' }))).reason)
       .toMatchObject({ data: { reason: 'draft-preparation-capacity' } });
     const cold = h.core.threads.creation.create(choice);
     expect(h.core.journal.getThread(cold.id)?.id).toBe(cold.id);
@@ -279,7 +279,7 @@ test('global admission includes failed ownership recovered from disk', async () 
   const held = spyOn(h.core.worktrees, 'remove').mockResolvedValue(false);
   try {
     const recovered = new DraftPreparations(h.core);
-    expect(await rejection(recovered.prepare('new_connection', { ...choice, preparationId: 'global_overflow' })))
+    expect((await rejection(recovered.prepare('new_connection', { ...choice, preparationId: 'global_overflow' }))).reason)
       .toMatchObject({ data: { reason: 'draft-preparation-capacity' } });
     expect(ledger.list()).toHaveLength(32);
     const cold = h.core.threads.creation.create(choice);
@@ -291,7 +291,7 @@ test('global admission includes failed ownership recovered from disk', async () 
 
 test('global admission also bounds active reservations across composing connections', async () => {
   for (let i = 0; i < 32; i++) await h.core.drafts.prepare(`active_connection_${i}`, { ...choice, preparationId: `active_draft_${i}` });
-  expect(await rejection(h.core.drafts.prepare('extra_connection', { ...choice, preparationId: 'active_overflow' })))
+  expect((await rejection(h.core.drafts.prepare('extra_connection', { ...choice, preparationId: 'active_overflow' }))).reason)
     .toMatchObject({ data: { reason: 'draft-preparation-capacity' } });
   await Promise.all(Array.from({ length: 32 }, (_, i) => h.core.drafts.disconnect(`active_connection_${i}`)));
   expect(ledger.list()).toEqual([]);

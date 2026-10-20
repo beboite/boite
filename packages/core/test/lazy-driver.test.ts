@@ -210,7 +210,7 @@ test('loading preserves permission changes and both steering methods, including 
   const attachments = [{ kind: 'image' as const, mimeType: 'image/png' as const, data: 'fixture', name: null }];
   expect(await handle.setPermissionMode!('plan')).toBe(true);
   expect(await handle.setPermissionMode!('default')).toBe(false);
-  expect(await rejection(handle.steer!('coordination', attachments))).toBe(failure);
+  expect((await rejection(handle.steer!('coordination', attachments))).reason).toBe(failure);
   expect(innerHandle.steer).toHaveBeenCalledTimes(1);
   expect(await handle.steerUser!('user input', attachments)).toBe(true);
   expect(innerHandle.steerUser).toHaveBeenCalledWith('user input', attachments);
@@ -286,7 +286,7 @@ for (const beforeLoading of [false, true]) test(`a side question aborted ${befor
   if (beforeLoading) abort.abort();
   const answer = driver.sideQuestion!(side(abort.signal));
   abort.abort();
-  expect(await rejection(answer)).toHaveProperty('name', 'AbortError');
+  expect((await rejection(answer)).reason).toHaveProperty('name', 'AbortError');
   if (beforeLoading) expect(load).not.toHaveBeenCalled();
   gate.resolve(inner);
   await driver.probe!(probe);
@@ -304,7 +304,7 @@ test('probe invalidation during module loading rejects only the matching account
   const other = driver.probe!({ ...probe, accountId: 'other' });
   driver.forgetProbes?.({ providerId: 'unrelated' });
   driver.forgetProbes?.({ providerId: 'fixture', accountId: 'account' });
-  expect(await rejection(stale)).toHaveProperty('name', 'AbortError');
+  expect((await rejection(stale)).reason).toHaveProperty('name', 'AbortError');
   gate.resolve(inner);
   expect(await other).toEqual(reading);
   expect(inner.probe).toHaveBeenCalledTimes(1);

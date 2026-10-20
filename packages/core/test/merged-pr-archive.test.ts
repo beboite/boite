@@ -269,8 +269,8 @@ test('a completed delivered workflow and delegation family archives with histori
     expect(harness.core.threads.require(childId)).toEqual(child);
     expect(harness.core.journal.listTurns(childId)).toEqual(history);
     expect(existsSync(join(f.checkout, '.git'))).toBe(true);
-    expect(await rejection(f.client.call('turns.start', { threadId: childId, prompt: 'Late child work' }))).toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
-    expect(await rejection(f.client.call('threads.btw', { threadId: childId, question: 'Late child question', requestId: 'side_archived_child' }))).toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
+    expect((await rejection(f.client.call('turns.start', { threadId: childId, prompt: 'Late child work' }))).reason).toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
+    expect((await rejection(f.client.call('threads.btw', { threadId: childId, question: 'Late child question', requestId: 'side_archived_child' }))).reason).toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
     expect(await thrown(stale.call('delegation.send', { threadId: childId, toThreadId: f.threadId, text: 'Late result', requestId: 'late-family-result' }))).toThrow();
     harness.core.threads.deferred.wake(childId, 'Late background wake');
     expect(harness.core.journal.listTurns(childId)).toEqual(history);
@@ -474,7 +474,7 @@ test('merged archive retains checkout and reason, and restored exact PR stays di
   await f.client.call('threads.focus', { threadId: null, protectedThreadIds: [] });
   await f.client.call('threads.focus', { threadId: null });
   expect(await service.sweep()).toBe(0);
-  expect(await rejection(secondOwner.call('threads.focus', { threadId: null, protectedThreadIds: Array.from({ length: 257 }, (_, index) => `id-${index}`) }))).toMatchObject({ rpc: { code: RpcErrorCode.InvalidParams, data: { field: 'protectedThreadIds' } } });
+  expect((await rejection(secondOwner.call('threads.focus', { threadId: null, protectedThreadIds: Array.from({ length: 257 }, (_, index) => `id-${index}`) }))).reason).toMatchObject({ rpc: { code: RpcErrorCode.InvalidParams, data: { field: 'protectedThreadIds' } } });
   expect(await service.sweep()).toBe(0);
   await f.client.call('threads.focus', { threadId: null, protectAllThreads: true });
   secondOwner.close();

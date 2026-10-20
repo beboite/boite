@@ -164,16 +164,16 @@ describe('worktrees.list', () => {
 describe('worktrees.remove', () => {
   test('refuses a path git does not list, the main checkout and a worktree a live thread uses', async () => {
     const project = await repoProject();
-    expect(await rejection(client.call('worktrees.remove', { projectId: project.id, path: join(harness.dataDir, 'nowhere') }))).toMatchObject({
+    expect((await rejection(client.call('worktrees.remove', { projectId: project.id, path: join(harness.dataDir, 'nowhere') }))).reason).toMatchObject({
       rpc: { message: expect.stringContaining('is not a worktree git lists'), data: expect.objectContaining({ field: 'path', expected: 'a worktree of this project' }) },
     });
-    expect(await rejection(client.call('worktrees.remove', { projectId: project.id, path: project.path }))).toMatchObject({
+    expect((await rejection(client.call('worktrees.remove', { projectId: project.id, path: project.path }))).reason).toMatchObject({
       rpc: { message: expect.stringContaining("the project's own checkout"), data: expect.objectContaining({ field: 'path' }) },
     });
 
     const accountId = await echoAccount();
     const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Busy here', worktree: {} });
-    expect(await rejection(client.call('worktrees.remove', { projectId: project.id, path: thread.cwd, force: true }))).toMatchObject({
+    expect((await rejection(client.call('worktrees.remove', { projectId: project.id, path: thread.cwd, force: true }))).reason).toMatchObject({
       rpc: { message: expect.stringContaining(`thread "Busy here" (${thread.id})`), data: expect.objectContaining({ field: 'path', expected: 'a worktree no live thread uses', threadId: thread.id, threadTitle: 'Busy here' }) },
     });
     expect(existsSync(thread.cwd)).toBe(true);
@@ -190,10 +190,10 @@ describe('worktrees.remove', () => {
     git(both, 'commit', '-q', '--allow-empty', '-m', 'only in both');
     writeFileSync(join(both, 'notes.txt'), 'new\n');
 
-    expect(await rejection(client.call('worktrees.remove', { projectId: project.id, path: dirty }))).toMatchObject({
+    expect((await rejection(client.call('worktrees.remove', { projectId: project.id, path: dirty }))).reason).toMatchObject({
       rpc: { message: 'This worktree has uncommitted changes.', data: expect.objectContaining({ field: 'force', dirty: true, unmerged: false }) },
     });
-    expect(await rejection(client.call('worktrees.remove', { projectId: project.id, path: unmerged }))).toMatchObject({
+    expect((await rejection(client.call('worktrees.remove', { projectId: project.id, path: unmerged }))).reason).toMatchObject({
       rpc: { message: 'This worktree has commits on no other branch.', data: expect.objectContaining({ field: 'force', dirty: false, unmerged: true }) },
     });
     expect(await thrown(client.call('worktrees.remove', { projectId: project.id, path: both }))).toThrow(
@@ -282,7 +282,7 @@ describe('worktrees.remove', () => {
 
     const restored = await client.call('threads.archive', { threadId: thread.id, archived: false });
     expect(restored.cwd).toBe(thread.cwd);
-    expect(await rejection(client.call('turns.start', { threadId: thread.id, prompt: 'still there?' }))).toMatchObject({
+    expect((await rejection(client.call('turns.start', { threadId: thread.id, prompt: 'still there?' }))).reason).toMatchObject({
       rpc: { message: expect.stringContaining(thread.cwd), data: expect.objectContaining({ threadId: thread.id, field: 'cwd', cwd: thread.cwd }) },
     });
   });

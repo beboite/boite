@@ -70,7 +70,7 @@ describe('scheduler', () => {
     expect(await thrown(client.call('turns.start', { threadId, prompt: 'must not land' }))).toThrow('in-flight');
     // The refusal says the prompt is early, not wrong, and carries the row a
     // client that had not seen this turn yet needs to wait for it.
-    expect(await rejection(client.call('turns.start', { threadId, prompt: 'must not land' }))).toMatchObject({
+    expect((await rejection(client.call('turns.start', { threadId, prompt: 'must not land' }))).reason).toMatchObject({
       rpc: { code: RpcErrorCode.Refused, data: { threadId, reason: 'turn-in-flight', thread: { id: threadId, status: 'running' } } },
     });
     expect(harness.core.threads.get(threadId).turns).toHaveLength(1);

@@ -65,7 +65,7 @@ describe('a thread in its own worktree', () => {
     const base = { projectId: project.id, providerId: 'echo', accountId: await echoAccount() };
     const branch = 'feature/' + 'a'.repeat(41);
     const before = await client.call('threads.list', {});
-    expect(await rejection(client.call('threads.create', { ...base, worktree: { branch } }))).toMatchObject({
+    expect((await rejection(client.call('threads.create', { ...base, worktree: { branch } }))).reason).toMatchObject({
       rpc: { data: { field: 'branch', maxLength: 48, actualLength: 49, expected: 'at most 48 characters' } },
     });
     expect(await client.call('threads.list', {})).toEqual(before);
