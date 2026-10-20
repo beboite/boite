@@ -6,8 +6,8 @@ Boite Nightly are described in [Desktop updates](updates.md).
 Each core checks and updates the agent executables on its own machine. Clients
 show those readings and send Update or Skip to that core.
 
-An agent with an updater but no readable latest-version source, such as the
-Antigravity CLI, shows Checks by itself and Run its updater. A successful run
+An agent with an updater but no readable latest-version source shows Checks by
+itself and Run its updater. A successful run
 records its resulting version as current until the next check. If a newer
 version was known but the installed version stays unchanged, or the command
 fails, the row retains its update action and error. Automatic updates exclude
@@ -107,8 +107,7 @@ directory it cannot write, without running anything.
 `latestNpm` and `latestArgs` exclude each other. With neither, the installed
 version is listed, no update is announced and `Run its updater` stays on the
 row. Claude, Codex, OpenCode, Grok and pi ship with a block that names its
-newest release. The Antigravity CLI ships with its updater alone, having no
-newest release Boite can read. Muse Code has no updater, so it is not listed.
+newest release. Muse Code has no updater, so it is not listed.
 
 Every run of an agent goes through the process registry under the synthetic
 thread `update:<provider id>`, so it is traced and capped like any other agent

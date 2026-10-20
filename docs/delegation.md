@@ -74,8 +74,8 @@ identify an individual child.
 Codex collaboration calls and subagent activity become persisted tool parts.
 Child-thread text and tools stay out of the parent's answer. Claude Agent/Task
 calls and background agent lists, Muse subagent items, and named agent tools
-from ACP and pi feed the same view. Other drivers, including agy's ordinary
-tool stream, retain agent tools if the provider reports their name and brief.
+from ACP and pi feed the same view. Other drivers retain agent tools if the
+provider reports their name and brief.
 A provider that sends only text or shell output exposes no native agent list.
 
 Agent CLIs launched through a shell also appear under "Started from a command"

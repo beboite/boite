@@ -53,7 +53,7 @@
       .finally(() => { if (current) capabilityPending = false; });
     return () => { current = false; };
   });
-  const supported = $derived(protocol !== 'agy' && (protocol !== 'acp' || thread?.commands?.some(command => command.name === 'compact')));
+  const supported = $derived(protocol !== 'acp' || thread?.commands?.some(command => command.name === 'compact'));
   const reason = $derived(submitting || store.busy ? strings.composer.compactBusy : !thread?.sessionId
     ? strings.composer.compactNoSession : capabilityPending ? strings.app.loading
     : store.connection !== 'ready' || capabilityFailed || (capabilities ? !capabilities.compaction.available : !supported) ? strings.composer.compactUnavailable : null);

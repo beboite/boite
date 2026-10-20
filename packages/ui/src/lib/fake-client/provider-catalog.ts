@@ -26,7 +26,7 @@ export function checkSpeed(ctx: FakeContext, providerId: string, accountId: stri
 }
 
 /** The protocols whose models and speed tiers come from the agent, as in the core. */
-export const PROBED_PROTOCOLS = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'];
+export const PROBED_PROTOCOLS = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi'];
 
 /** Match the core's automatic discovery before a new model, effort or speed is checked. */
 export async function discoverSelection(ctx: FakeContext, providerId: string, accountId: string, model: string | null, effort: string | null, speed: string | null): Promise<void> {

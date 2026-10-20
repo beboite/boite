@@ -93,8 +93,6 @@ function announcedCallback(loginUrl: string | null): URL | null {
  * directory: an isolation variable, or a login Boite runs there. A provider
  * with neither would take the directory and then read the user's own login
  * anyway, so the second account would be the first one under another name.
- * The Antigravity CLI is that case: nothing moves `~/.gemini/antigravity-cli`
- * and its token sits in the system keyring.
  */
 function refuseUnisolable(provider: ProviderDescriptor): void {
   const profile = profileFor(provider);

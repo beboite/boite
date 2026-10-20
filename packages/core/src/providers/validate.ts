@@ -7,7 +7,7 @@ import { checkShared, checkSharedKeys, checkHookSources, checkQuirks } from './v
 import { checkModels, checkCapabilities } from './validate-models.ts';
 export { Rejection } from './validate-primitives.ts';
 
-const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'muse', 'pi', 'acp', 'agy', 'echo'];
+const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'muse', 'pi', 'acp', 'echo'];
 
 const DESCRIPTOR_KEYS = [
   'id',

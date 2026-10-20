@@ -110,12 +110,6 @@ const PROFILES: Profile[] = [
     threads: [{ id: 't-descriptors', title: 'Review the descriptor loader' }],
   },
   {
-    providerId: 'antigravity-cli', models: [{ id: 'default', share: 1 }],
-    perDay: 7, since: 19, idle: 0.25,
-    tokens: [4_000, 1_400, 19_000, 0],
-    threads: [{ id: 'u-agy-models', title: 'Discover the CLI models' }],
-  },
-  {
     providerId: 'muse', models: [{ id: 'default', share: 1 }],
     perDay: 6, since: 17, idle: 0.2,
     tokens: [3_500, 1_500, 15_000, 0],

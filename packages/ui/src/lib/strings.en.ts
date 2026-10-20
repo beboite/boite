@@ -50,7 +50,6 @@ import { strings as notify } from './strings/en/notify';
 import { strings as permissionMode } from './strings/en/permissionMode';
 import { strings as permissionModeLong } from './strings/en/permissionModeLong';
 import { strings as permissionModeCodex } from './strings/en/permissionModeCodex';
-import { strings as permissionModeAgy } from './strings/en/permissionModeAgy';
 import { strings as thread } from './strings/en/thread';
 import { strings as chat } from './strings/en/chat';
 import { strings as agentMessages } from './strings/en/agentMessages';
@@ -139,7 +138,6 @@ export const strings = {
   ...permissionMode,
   ...permissionModeLong,
   ...permissionModeCodex,
-  ...permissionModeAgy,
   ...thread,
   ...chat,
   ...agentMessages,

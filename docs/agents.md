@@ -280,10 +280,8 @@ Profiles use existing model probing, account selection, effort and drivers.
 A selected model must appear in the account's current probe; examples and saved
 profiles do not establish availability.
 
-Antigravity CLI uses agy stream-json and its single default login. Print mode
-has no interactive tool-approval channel. Muse Code uses MSP, including
-approvals and session resume. The separate Antigravity ACP integration has its
-own accounts. See [providers](providers.md) and [accounts](accounts.md).
+Muse Code uses MSP, including approvals and session resume. Antigravity runs
+its managed ACP server, with accounts of its own. See [providers](providers.md) and [accounts](accounts.md).
 Collaboration uses the provider-independent [`boite agent` commands](cli.md).
 
 ## Individual brain and compaction

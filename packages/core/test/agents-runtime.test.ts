@@ -2,6 +2,7 @@ import { expect, spyOn, test } from 'bun:test';
 import type { AgentProfile } from '@boite/contracts';
 import { quietAgent as quiet, startTestCore, waitFor } from './harness.ts';
 import { connect } from '../src/client.ts';
+import { Core } from '../src/core.ts';
 import { thrown } from './settle.ts';
 
 test('declared shared write resources serialize agents until the holder stops', async () => {
@@ -98,6 +99,34 @@ test('a persistent agent answers without a project and keeps group contexts sepa
     expect((await client.call('agent.where', { threadId: thread.id })).projectId).toBeNull();
     expect(await thrown(client.call('todos.list', { threadId: thread.id }))).toThrow('no project');
   } finally { await h.stop(); }
+});
+
+test('an agent saved on the retired Antigravity CLI loads and waits for another model', async () => {
+  const h = await startTestCore();
+  let next: Core | null = null;
+  try {
+    const client = await h.connect();
+    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+    const saved = await client.call('agents.profile.save', { value: { name: 'Old', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
+    // As an older Boite left it: on the CLI's provider and its default account.
+    h.core.journal.putAccount({ id: 'acc_agy', providerId: 'antigravity-cli', label: 'Default', isolationDir: null, status: 'ok', identity: null, createdAt: 1 });
+    h.core.workforce.records.update('profile', saved.id, saved.revision, { ...saved, selection: { ...saved.selection, providerId: 'antigravity-cli', accountId: 'acc_agy', model: 'default' } });
+    client.close();
+    await h.server.stop();
+    await h.core.close();
+
+    next = new Core({ dataDir: h.dataDir, token: h.token });
+    const agent = next.workforce.snapshot().profiles.find(profile => profile.id === saved.id)!;
+    expect(agent.selection.providerId).toBe('antigravity-cli');
+    next.workforce.send({ scope: { kind: 'agent', id: agent.id }, recipientIds: [agent.id], text: 'still there?', requestId: 'retired_provider_01' });
+    await waitFor(() => next!.workforce.records.list('work').some(work => work.agentId === agent.id && work.status === 'paused'), 10000);
+    const work = next.workforce.records.list('work').find(entry => entry.agentId === agent.id)!;
+    expect(work.error).toContain('choose another model for this agent');
+    expect(next.workforce.records.list('session').filter(session => session.agentId === agent.id)).toEqual([]);
+    // The owner picks another model: the save checks it as any choice.
+    const moved = next.workforce.saveProfile({ id: agent.id, expectedRevision: agent.revision, value: { ...agent, selection: { ...agent.selection, providerId: 'echo', accountId: account.id, model: null } } });
+    expect(moved.selection.providerId).toBe('echo');
+  } finally { await next?.close(); await h.stop(); }
 });
 
 test('an idle agent runtime reads nothing until a record changes, then starts the new work', async () => {

@@ -21,7 +21,6 @@ import { attachVersions, loadVersions, readVersion, versionsSettled } from './ve
 import { programName } from '../threads/provider-process-log.ts';
 import { invalidParams, notFound, refused } from '../errors.ts';
 import antigravityShipped from './shipped/antigravity.json';
-import antigravityCliShipped from './shipped/antigravity-cli.json';
 import claudeShipped from './shipped/claude.json';
 import codexShipped from './shipped/codex.json';
 import grokShipped from './shipped/grok.json';
@@ -44,7 +43,6 @@ export function echoEnabled(): boolean {
 
 const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = [
   { file: 'shipped/antigravity.json', raw: antigravityShipped },
-  { file: 'shipped/antigravity-cli.json', raw: antigravityCliShipped },
   { file: 'shipped/claude.json', raw: claudeShipped },
   { file: 'shipped/codex.json', raw: codexShipped },
   { file: 'shipped/grok.json', raw: grokShipped },

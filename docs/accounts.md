@@ -31,11 +31,6 @@ environment variables, with `{isolationDir}` substituted at spawn:
   under it, and has no default account at all: its descriptor says
   `isolation.alwaysIsolated`, so `accounts.add` gives every account a directory
   of its own whatever the request asked for.
-- The Antigravity CLI moves with nothing. `agy` keeps its token in the system
-  keyring and its settings under `~/.gemini/antigravity-cli`, and no variable
-  points either elsewhere, so its descriptor declares an empty map and only the
-  default account exists. Its `auth.kind` is `none`: there is no session file to
-  read, and a signed-out agy shows up in the model probe instead.
 
 The same environment goes to every process of that account: a turn, a probe, a
 login. The OS profile owns the map; drivers use the resolved account environment.
@@ -296,7 +291,7 @@ and no terminal.
 - An account of its own, for a provider whose profile has no isolation variable
   and no login block. Such an account would run on the user's own login anyway,
   so `accounts.add` refuses it, names the profile's `isolation` field and says to
-  use the default account. The Antigravity CLI is the shipped example.
+  use the default account. No shipped provider is such a case.
 
 The account controls display each refusal with its field and reason.
 

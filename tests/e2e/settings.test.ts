@@ -141,8 +141,6 @@ test('the Limits page turns the monitoring of each account on and off', async ()
   const opencode = `${id('limits-tracked')} ${id('quota-monitor')}[data-account-id="a-opencode"]`;
   await page.waitFor(`document.querySelector('${opencode}')`);
   expect(await page.evaluate(`document.querySelector('${opencode}').checked`)).toBe(true);
-  // The fake finds agy, so its own reading starts on, and this is the switch that turns it off.
-  expect(await page.evaluate(`document.querySelector('${id('limits-tracked')} ${id('quota-monitor')}[data-account-id="quota:antigravity-cli"]').checked`)).toBe(true);
   await page.click(opencode);
   await page.waitFor(`!document.querySelector('${opencode}').checked && !document.querySelector('${id('usage-limits')} [data-provider="opencode"]')`);
   await capture('limits-tracked.png');
@@ -223,9 +221,9 @@ test('the compact quota page shows limits and reset times', async () => {
   expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderRadius`)).toBe('0px');
   expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderTopWidth`)).toBe('1px');
   await capture('quota-popup.png');
-  // Only signed-in providers the user reads: the fake finds agy, so its CLI source is read; echo and pi report nothing.
+  // Only signed-in providers the user reads: echo and pi report nothing.
   const listed = await page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('quota-provider')}')).map(el => el.dataset.provider)`);
-  expect(listed).toEqual(expect.arrayContaining(['claude', 'codex', 'grok', 'opencode', 'antigravity-cli']));
+  expect(listed).toEqual(expect.arrayContaining(['claude', 'codex', 'grok', 'opencode']));
   for (const absent of ['antigravity', 'echo', 'pi']) expect(listed).not.toContain(absent);
   const resets = await page.evaluate<{ text: string; title: string; icon: boolean }[]>(`[...document.querySelectorAll('${id('quota-popup')} .summary .reset')].map(el => ({ text: el.textContent.trim(), title: el.title, icon: !!el.querySelector('svg[aria-hidden="true"]') }))`);
   expect(resets.length).toBeGreaterThan(0);
