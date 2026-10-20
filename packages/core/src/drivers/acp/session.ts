@@ -164,9 +164,13 @@ export class AcpSession {
     this.controls.seed(options);
   }
 
-  /** Reusable only while the process is up and the turn asks for the very same setup. */
+  /**
+   * Reusable only while the process is up and the turn asks for the very same
+   * setup. A command an earlier turn left running keeps it reusable whatever
+   * the warm window: a new process would end that command.
+   */
   usable(key: string, warmMs: number): boolean {
-    return !this.ended && !this.closing && this.key === key && this.retention.reusable(warmMs, this.warmMs);
+    return !this.ended && !this.closing && this.key === key && (this.retention.reusable(warmMs, this.warmMs) || this.commands.outlived());
   }
 
   setViewed(viewed: boolean): void {
