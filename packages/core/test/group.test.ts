@@ -12,6 +12,7 @@ import { boxPublic, newBoxKey, open, openResponse, pack, seal, SEALED, sealRespo
 import { parseInvite, parseTicket } from '../src/group/ticket.ts';
 import { isAllowedOrigin } from '../src/server.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { rejection, thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 afterEach(async () => {
@@ -42,7 +43,7 @@ async function hangUp(h: TestCore, client: { close(): void }): Promise<void> {
 /** A hello the core refuses, and the socket it was said on gone before the test goes on. */
 async function refusedHello(h: TestCore, token: string, options: Parameters<typeof connect>[2], message: string): Promise<void> {
   const open = h.server.connections();
-  await expect(connect(h.url, token, options)).rejects.toThrow(message);
+  expect(await thrown(connect(h.url, token, options))).toThrow(message);
   await settled(h, open);
 }
 
@@ -144,11 +145,11 @@ test('the owner renames a group on either member, and the name survives synchron
   await waitFor(() => a.core.group.view('owner')?.name === 'Studio');
   const stored = checkRoster(a.core.journal.getSetting('group'));
   expect(stored).toMatchObject({ name: 'Studio', nameRev: 1 });
-  for (const bad of ['', ' '.repeat(3), 'x'.repeat(81)]) await expect(owner.call('group.rename', { name: bad })).rejects.toThrow('name: expected');
+  for (const bad of ['', ' '.repeat(3), 'x'.repeat(81)]) expect(await thrown(owner.call('group.rename', { name: bad }))).toThrow('name: expected');
   expect(() => checkRoster({ ...stored, nameRev: -1 })).toThrow('roster.nameRev');
   const grant = a.core.sessions.grant();
   const phone = await connect(a.url, '', { grant: grant.grant, client: { name: 'pwa', version: '1' } });
-  await expect(phone.call('group.rename', { name: 'Denied' })).rejects.toThrow();
+  expect(await thrown(phone.call('group.rename', { name: 'Denied' }))).toThrow();
   await hangUp(a, phone);
   await hangUp(b, owner);
   await a.core.group.close();
@@ -177,12 +178,12 @@ test('migration preserves granted transcript reads only for the current group ad
   await waitFor(() => b.core.group.view('owner') === null);
   expect(b.core.coordination.trusted()).toEqual([]);
   await join(a, b);
-  await expect(a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).rejects.toThrow('not allowed to read');
+  expect(await thrown(a.core.coordination.read(ta, { coreId: id(b), threadId: tb }))).toThrow('not allowed to read');
   b.core.coordination.trust({ ...a.core.coordination.card(), name: 'A', url: a.url, readThreads: true });
   expect(b.core.coordination.peers()).toEqual([]);
   expect((await a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).contact.threadId).toBe(tb);
   b.core.coordination.untrust(id(a));
-  await expect(a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).rejects.toThrow('not allowed to read');
+  expect(await thrown(a.core.coordination.read(ta, { coreId: id(b), threadId: tb }))).toThrow('not allowed to read');
 });
 
 test('a roster from another machine is read field by field', async () => {
@@ -236,20 +237,20 @@ test('an invitation makes two machines members of one group, and a third joins t
   const group = await a.core.group.create('  Home  ');
   expect(group).toMatchObject({ name: 'Home', self: id(a), devices: [] });
   expect(group.cores).toEqual([expect.objectContaining({ coreId: id(a), addresses: [a.url] })]);
-  await expect(a.core.group.create('Other')).rejects.toThrow('already belongs');
+  expect(await thrown(a.core.group.create('Other'))).toThrow('already belongs');
 
   const { invite, expiresAt } = await a.core.group.invite();
   expect(invite.startsWith(GROUP_INVITE_PREFIX)).toBe(true);
   expect(expiresAt).toBeGreaterThan(Date.now());
   expect(parseInvite(invite)).toMatchObject({ n: 'Home', c: id(a), a: [a.url], x: (a.core.journal.getSetting('group') as Roster).cores[0]!.box });
-  await expect(a.core.group.join(invite)).rejects.toThrow('already belongs');
+  expect(await thrown(a.core.group.join(invite))).toThrow('already belongs');
 
   const joined = await b.core.group.join(invite);
   expect(joined.name).toBe('Home');
   expect(members(a)).toEqual([id(a), id(b)].sort());
   expect(members(b)).toEqual(members(a));
   // The same machine asking again gets the same welcome; another one is refused.
-  await expect(c.core.group.join(invite)).rejects.toThrow('already used');
+  expect(await thrown(c.core.group.join(invite))).toThrow('already used');
   expect(c.core.group.view('owner')).toBeNull();
 
   // A member that did not mint the first invitation invites the third.
@@ -265,17 +266,17 @@ test('an invitation is refused when it is malformed, unknown, or answered by ano
   const b = await machine();
   const stranger = await machine();
   await a.core.group.create('Home');
-  await expect(b.core.group.join('http://host/?grant=abc')).rejects.toThrow(GROUP_INVITE_PREFIX);
+  expect(await thrown(b.core.group.join('http://host/?grant=abc'))).toThrow(GROUP_INVITE_PREFIX);
   const { invite } = await a.core.group.invite();
   const parsed = parseInvite(invite);
   const encode = (value: object) => GROUP_INVITE_PREFIX + Buffer.from(JSON.stringify({ v: 1, ...value })).toString('base64url');
   // A grant nobody minted names no invitation and seals with a key the inviter cannot open.
-  await expect(b.core.group.join(encode({ ...parsed, t: 'f'.repeat(64) }))).rejects.toThrow('no machine accepted');
+  expect(await thrown(b.core.group.join(encode({ ...parsed, t: 'f'.repeat(64) })))).toThrow('no machine accepted');
   // The address of a core that is not the one the invitation names: its answer does not verify.
   await stranger.core.group.create('Elsewhere');
-  await expect(b.core.group.join(encode({ ...parsed, a: [stranger.url] }))).rejects.toThrow('no machine accepted');
+  expect(await thrown(b.core.group.join(encode({ ...parsed, a: [stranger.url] })))).toThrow('no machine accepted');
   // Sealed to another key than the inviter's, the request does not open there.
-  await expect(b.core.group.join(encode({ ...parsed, x: boxPublic(newBoxKey()) }))).rejects.toThrow('no machine accepted');
+  expect(await thrown(b.core.group.join(encode({ ...parsed, x: boxPublic(newBoxKey()) })))).toThrow('no machine accepted');
   expect(b.core.group.view('owner')).toBeNull();
   expect(members(a)).toEqual([id(a)]);
   // The untouched invitation still works after those attempts.
@@ -306,8 +307,8 @@ test('the shell of one member is handed an owner key by another, once per ticket
   expect(again.principal).toBe('owner');
   await hangUp(b, again);
   await refusedHello(b, '', { ticket: ticket.ticket }, 'already used');
-  await expect(shell.call('group.ticket', { coreId: id(a) })).rejects.toThrow('not another machine');
-  await expect(shell.call('group.ticket', { coreId: 'f'.repeat(64) })).rejects.toThrow('not another machine');
+  expect(await thrown(shell.call('group.ticket', { coreId: id(a) }))).toThrow('not another machine');
+  expect(await thrown(shell.call('group.ticket', { coreId: 'f'.repeat(64) }))).toThrow('not another machine');
 });
 
 test('a ticket opens only at the address it names, and the key it becomes dies when the machine stops giving that address', async () => {
@@ -318,7 +319,7 @@ test('a ticket opens only at the address it names, and the key it becomes dies w
   await waitFor(() => members(b).length === 2);
   const shell = await a.connect();
   // Asked for an address b does not have: a vouches for none.
-  await expect(shell.call('group.ticket', { coreId: id(b), url: 'http://10.9.9.9:1' })).rejects.toThrow('expected an address of');
+  expect(await thrown(shell.call('group.ticket', { coreId: id(b), url: 'http://10.9.9.9:1' }))).toThrow('expected an address of');
   const ticket = await shell.call('group.ticket', { coreId: id(b), url: b.url });
   expect(ticket.url).toBe(b.url);
   expect(parseTicket(ticket.ticket).payload.u).toBe(b.url);
@@ -395,7 +396,7 @@ test('a ticket is refused when forged, expired, for another machine or from outs
   const owned = await a.connect();
   const { threadId } = await echoThread(a, owned);
   const agent = await connect(a.url, a.core.agents.tokenFor(threadId));
-  await expect(agent.call('group.ticket', { coreId: id(b) })).rejects.toThrow("agent's methods");
+  expect(await thrown(agent.call('group.ticket', { coreId: id(b) }))).toThrow("agent's methods");
   await hangUp(a, agent);
   // Nothing above left a session behind on b.
   expect(b.core.sessions.list(null)).toEqual([]);
@@ -413,8 +414,8 @@ test('a phone paired with one member reaches the others as a device, and one rev
   expect(group?.cores.map((core) => core.coreId).sort()).toEqual([id(a), id(b)].sort());
   // Who else is paired is not a phone's to read.
   expect(group?.devices).toEqual([]);
-  await expect(phone.call('group.invite', {})).rejects.toThrow('owner only');
-  await expect(phone.call('group.remove', { coreId: id(b) })).rejects.toThrow('owner only');
+  expect(await thrown(phone.call('group.invite', {}))).toThrow('owner only');
+  expect(await thrown(phone.call('group.remove', { coreId: id(b) }))).toThrow('owner only');
 
   const ticket = await phone.call('group.ticket', { coreId: id(b) });
   const deviceId = `${id(a)}:${phone.session!.id}`;
@@ -422,7 +423,7 @@ test('a phone paired with one member reaches the others as a device, and one rev
   expect(a.core.group.view('owner')?.devices).toEqual([{ id: deviceId, name: 'pwa', role: 'device', by: id(a), legacy: true }]);
   const onB = await connect(b.url, '', { ticket: ticket.ticket, client: { name: 'pwa', version: '1' } });
   expect(onB.principal).toBe('session');
-  await expect(onB.call('projects.add', { path: b.dataDir })).rejects.toThrow('owner only');
+  expect(await thrown(onB.call('projects.add', { path: b.dataDir }))).toThrow('owner only');
   // From b it can ask a ticket back to a, under the same device.
   expect(parseTicket((await onB.call('group.ticket', { coreId: id(a) })).ticket).payload.sub).toBe(`device:${deviceId}`);
   await waitFor(() => b.core.group.view('owner')?.devices.length === 1);
@@ -548,7 +549,7 @@ test('a member that stops answering waits longer each time, unless the roster ch
     down = false;
     const rates = (a.core.coordination as unknown as { desk: { rates: Map<string, { since: number; count: number }> } }).desk.rates;
     rates.set(id(b), { since: Date.now(), count: 120 });
-    await expect(b.core.coordination.request(b.core.group.peers().find((peer) => peer.coreId === id(a))!, 'directory', {})).rejects.toThrow();
+    expect(await thrown(b.core.coordination.request(b.core.group.peers().find((peer) => peer.coreId === id(a))!, 'directory', {}))).toThrow();
     rates.set(id(b), { since: Date.now(), count: 0 });
     await settle();
     expect(await round()).toBe(1);
@@ -614,7 +615,7 @@ test('leaving tells the others first, and the last member leaving ends the group
   expect(members(b)).toEqual([id(b)]);
   await b.core.group.leave();
   expect(b.core.group.view('owner')).toBeNull();
-  await expect(b.core.group.leave()).rejects.toThrow('no group');
+  expect(await thrown(b.core.group.leave())).toThrow('no group');
   // Both are free to start again, a under a new group.
   expect((await a.core.group.create('Again')).cores).toHaveLength(1);
 });
@@ -671,7 +672,7 @@ test('the owner\'s app carries what two members cannot send each other directly,
   // The former standing link is gone: group membership now authorizes this existing relay.
   expect(a.core.coordination.peers()).toEqual([]);
   // The existing relay survives replacing standing trust with group membership.
-  await expect(ownerA.call('collaboration.bridge.register', { coreId: 'f'.repeat(64), enabled: true })).rejects.toThrow('trusted for coordination');
+  expect(await thrown(ownerA.call('collaboration.bridge.register', { coreId: 'f'.repeat(64), enabled: true }))).toThrow('trusted for coordination');
   const real = globalThis.fetch;
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     if (String(input).endsWith('/agent-messages')) throw new Error('no route between the two machines');
@@ -698,7 +699,7 @@ test('a member is asked on the address that answered last, and on the others onl
   expect(asked).toEqual(['x']);
   expect(await firstAnswer(['x', 'y', 'z'], send({ x: 'down', y: 'ok', z: 'silent' }), 20)).toBe('y');
   expect(await firstAnswer(['x', 'y'], send({ x: 'silent', y: 'ok' }), 20)).toBe('y');
-  await expect(firstAnswer(['x', 'y'], send({ x: 'down', y: 'down' }), 20)).rejects.toBeInstanceOf(AggregateError);
+  expect((await rejection(firstAnswer(['x', 'y'], send({ x: 'down', y: 'down' }), 20))).reason).toBeInstanceOf(AggregateError);
 
   // Two addresses that lead to the same core, as a tailnet name and its address do: the copy a second
   // one would carry is a replay there, refused and counted against the sender. It is never sent.
@@ -752,7 +753,7 @@ test('a request begun for a member is never sent readable once this machine has 
   }) as typeof fetch;
   try {
     const peer = { coreId: entry.coreId, name: entry.name, url: dead, publicKey: entry.publicKey };
-    await expect(a.core.coordination.request(peer, 'directory', {})).rejects.toThrow('no longer in the group');
+    expect(await thrown(a.core.coordination.request(peer, 'directory', {}))).toThrow('no longer in the group');
   } finally {
     globalThis.fetch = real;
   }
@@ -767,7 +768,7 @@ test('a roster is only taken from a member, never from a machine linked by hand'
   a.core.coordination.trust(linked.core.coordination.identity());
   const roster = a.core.journal.getSetting('group') as Roster;
   const forged = { ...roster, cores: [...roster.cores, { ...linked.core.coordination.card(), name: 'Intruder', addresses: [linked.url], rev: 50 }] };
-  await expect(linked.core.coordination.request({ ...a.core.coordination.identity() }, 'group.sync', forged)).rejects.toThrow('sealed requests only');
+  expect(await thrown(linked.core.coordination.request({ ...a.core.coordination.identity() }, 'group.sync', forged))).toThrow('sealed requests only');
   expect(members(a)).toEqual([id(a)]);
 });
 
@@ -883,7 +884,7 @@ test('a used invitation welcomes its machine again without writing, and never af
   // Refused before anything is opened or counted: a machine that was removed cannot spend the allowance with its old invitation.
   const joins = (): number => (a.core.group as unknown as { joins: { count: number } }).joins.count;
   const counted = joins();
-  await expect(b.core.group.join(invite)).rejects.toThrow('no machine accepted');
+  expect(await thrown(b.core.group.join(invite))).toThrow('no machine accepted');
   expect(joins()).toBe(counted);
   expect(members(a)).toEqual([id(a)]);
   expect(b.core.group.view('owner')).toBeNull();
@@ -896,7 +897,7 @@ test('a used invitation welcomes its machine again without writing, and never af
   // Somebody else who holds that invitation, now used, is refused before anything is counted.
   const other = await machine();
   const spentBefore = joins();
-  await expect(other.core.group.join(second)).rejects.toThrow('already used');
+  expect(await thrown(other.core.group.join(second))).toThrow('already used');
   expect(joins()).toBe(spentBefore);
   // The answer was lost and the machine asks again: same welcome, nothing rewritten.
   const retry = c.core.group as unknown as { roster: Roster | null };
@@ -1035,7 +1036,7 @@ test('only a holder of the invitation spends the join allowance, and a pairing l
   }) as typeof fetch;
   retry.roster = null;
   try {
-    await expect(b.core.group.join(invite)).rejects.toThrow('no machine accepted');
+    expect(await thrown(b.core.group.join(invite))).toThrow('no machine accepted');
   } finally {
     globalThis.fetch = real;
   }
@@ -1176,5 +1177,5 @@ test('a removal needs no admission behind it, and the invitation is never a comm
   const orphan = { ...other, admit: { by: 'e'.repeat(64), sig: 'AAAA' }, rev: 40, removed: true as const };
   expect(checkRoster({ ...roster, cores: [roster.cores.find((core) => core.coreId === id(a))!, orphan] }).cores).toHaveLength(2);
   expect(() => checkRoster({ ...roster, cores: [roster.cores.find((core) => core.coreId === id(a))!, { ...orphan, removed: undefined }] })).toThrow('no valid admission');
-  await expect(groupCommand(['join', 'boite-group:anything', '--data-dir', a.dataDir])).rejects.toThrow('takes no argument');
+  expect(await thrown(groupCommand(['join', 'boite-group:anything', '--data-dir', a.dataDir]))).toThrow('takes no argument');
 });

@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { boundaryViolations, cycles, dependencyGraph, type Sources } from './graph.ts';
+import { nestedTickViolations, readBunTestSources } from './nested-tick.ts';
 import { lineCount, rebaselinedBudget, shrunkBudget, sizeSlack, sizeViolations, type SizeBudget } from './size.ts';
 
 const BUDGET_FILE = 'scripts/architecture/size-budget.json';
@@ -36,11 +37,12 @@ const errors = [
   ...boundaryViolations(graph),
   ...cycles(graph).map(cycle => `runtime cycle: ${cycle}`),
   ...sizeViolations(lines, budget),
+  ...nestedTickViolations(readBunTestSources()),
 ];
 if (errors.length) throw new Error(`Architecture check failed:\n${errors.join('\n')}`);
 for (const note of sizeSlack(lines, budget)) console.log(`note: ${note} (bun run check:architecture --write-size-budget)`);
 console.log(
   `Architecture passed: ${graph.size} modules, no runtime cycles or forbidden imports, ` +
-    `no source above ${budget.ceiling} lines outside the ${Object.keys(budget.allow).length} files allowed to shrink ` +
+    `no promise matcher under bun test, no source above ${budget.ceiling} lines outside the ${Object.keys(budget.allow).length} files allowed to shrink ` +
     `and the ${Object.keys(budget.exempt ?? {}).length} exempt entries`,
 );

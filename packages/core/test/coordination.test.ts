@@ -9,6 +9,7 @@ import { Coordination, coordinationUrl, LETTER_RETENTION_MS, letterPrompt, SWEEP
 import { senderContext } from '../src/coordination-relation.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { rejection, thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
@@ -33,16 +34,16 @@ test('agents communicate by default, respect explicit restrictions and cannot ch
   expect((await h.core.coordination.directory(a)).agents.map(t => t.threadId)).toEqual([b]);
   h.core.coordination.configure(a, { ...brief, mode: 'off' });
   expect(await h.core.coordination.directory(a)).toEqual({ agents: [], unavailable: [] });
-  await expect(send(h, a, dest(h, b))).rejects.toThrow('disabled');
+  expect(await thrown(send(h, a, dest(h, b)))).toThrow('disabled');
   enable(h, a, b);
   const agent = await connect(h.url, h.core.agents.tokenFor(a));
   try {
     const directory = await agent.call('collaboration.directory', { threadId: a });
     expect(directory.agents.map(t => t.threadId)).toEqual([b]);
     expect(JSON.stringify(directory)).not.toContain(h.dataDir);
-    await expect(agent.call('collaboration.get', { threadId: b })).rejects.toThrow('not thread');
-    await expect(agent.call('collaboration.configure', { threadId: a, config: { ...brief, mode: 'team' } })).rejects.toThrow('agent');
-    await expect(agent.call('collaboration.trust', { peer: h.core.coordination.identity() })).rejects.toThrow('agent');
+    expect(await thrown(agent.call('collaboration.get', { threadId: b }))).toThrow('not thread');
+    expect(await thrown(agent.call('collaboration.configure', { threadId: a, config: { ...brief, mode: 'team' } }))).toThrow('agent');
+    expect(await thrown(agent.call('collaboration.trust', { peer: h.core.coordination.identity() }))).toThrow('agent');
     const letter = await agent.call('collaboration.send', { threadId: a, to: dest(h, b), text: 'Wait for my answer', requestId: 'one' });
     expect(letter.from.threadId).toBe(a);
     expect(letter.from.title).toBe('Maintenance');
@@ -57,7 +58,7 @@ test('agents communicate by default, respect explicit restrictions and cannot ch
     const isolated = await owner.call('threads.create', { projectId: other.id, providerId: 'echo', accountId, title: 'Other project' });
     enable(h, isolated.id);
     expect((await h.core.coordination.directory(a)).agents.some(t => t.threadId === isolated.id)).toBe(false);
-    await expect(send(h, a, dest(h, isolated.id))).rejects.toThrow('across projects');
+    expect(await thrown(send(h, a, dest(h, isolated.id)))).toThrow('across projects');
   } finally { agent.close(); }
 });
 
@@ -66,14 +67,14 @@ test('default discovery excludes archived threads and persistent agent sessions'
   h.core.threads.archive(b, true);
   const projectId = h.core.threads.require(b).projectId!;
   h.core.projects.archive(projectId, true);
-  await expect(send(h, a, dest(h, b))).rejects.toThrow('unavailable');
+  expect(await thrown(send(h, a, dest(h, b)))).toThrow('unavailable');
   expect(h.core.journal.getProject(projectId)?.archived).toBe(true);
   const resident = (await echoThread(h, owner, 'Persistent session')).threadId;
   h.core.journal.putThread({ ...h.core.threads.require(resident), projectId: null, agentSessionId: 'resident-test' });
   expect((await h.core.coordination.directory(a)).agents).toEqual([]);
   expect(h.core.coordination.get(resident).config.mode).toBe('off');
-  await expect(send(h, a, dest(h, resident))).rejects.toThrow('across projects');
-  await expect(send(h, resident, dest(h, a))).rejects.toThrow('disabled');
+  expect(await thrown(send(h, a, dest(h, resident)))).toThrow('across projects');
+  expect(await thrown(send(h, resident, dest(h, a)))).toThrow('disabled');
 });
 
 test('contact activity distinguishes completed work from a recent title change and an archived project', async () => {
@@ -162,9 +163,9 @@ test('idempotency, size limits and reply provenance are enforced in the core, wi
   h.core.coordination.pause(b);
   const first = await send(h, a, dest(h, b), 'One', 'same');
   expect((await send(h, a, dest(h, b), 'One', 'same')).id).toBe(first.id);
-  await expect(send(h, a, dest(h, b), 'Changed', 'same')).rejects.toThrow('different content');
-  await expect(send(h, a, dest(h, b), 'x'.repeat(4001))).rejects.toThrow('4000');
-  await expect(h.core.coordination.send({ threadId: a, to: dest(h, b), text: 'Fake reply', replyTo: first.id, requestId: 'bad-reply' })).rejects.toThrow('incoming');
+  expect(await thrown(send(h, a, dest(h, b), 'Changed', 'same'))).toThrow('different content');
+  expect(await thrown(send(h, a, dest(h, b), 'x'.repeat(4001)))).toThrow('4000');
+  expect(await thrown(h.core.coordination.send({ threadId: a, to: dest(h, b), text: 'Fake reply', replyTo: first.id, requestId: 'bad-reply' }))).toThrow('incoming');
   // More than the old Brief budgets allowed (6 sent, 20 received an hour).
   for (let i = 0; i < 24; i++) await send(h, a, dest(h, b), `Message ${i}`);
   expect(h.core.coordination.get(b).messages).toHaveLength(25);
@@ -235,7 +236,7 @@ test('two real cores exchange signed directory, message, reply and receipt witho
   const one = await setup(); const two = await setup();
   const cardA = one.h.core.coordination.identity(), cardB = two.h.core.coordination.identity();
   expect(JSON.stringify(cardA)).not.toContain(one.h.token);
-  await expect(send(one.h, one.a, dest(two.h, two.b))).rejects.toThrow('not trusted');
+  expect(await thrown(send(one.h, one.a, dest(two.h, two.b)))).toThrow('not trusted');
   one.h.core.coordination.trust(cardB); two.h.core.coordination.trust(cardA);
   const archivedProjectId = two.h.core.threads.require(two.b).projectId!;
   two.h.core.projects.archive(archivedProjectId, true);
@@ -263,7 +264,7 @@ test('an unreachable coordination check names the destination without broadcasti
   one.h.core.coordination.trust(peer);
   const log = spyOn(one.h.core, 'log');
   try {
-    await expect(one.owner.call('collaboration.check', { coreId: peer.coreId })).rejects.toMatchObject({
+    expect((await rejection(one.owner.call('collaboration.check', { coreId: peer.coreId }))).reason).toMatchObject({
       rpc: {
         code: RpcErrorCode.Unavailable,
         message: expect.stringContaining('Remote test machine at http://127.0.0.1:1'),
@@ -309,8 +310,8 @@ test('federation rejects forged signatures, replay, sender substitution, clearte
   const grant = await one.owner.call('pairing.grant', {});
   const phone = await connect(one.h.url, '', { grant: grant.grant });
   try {
-    await expect(phone.call('collaboration.configure', { threadId: one.a, config: brief })).rejects.toThrow('owner');
-    await expect(phone.call('collaboration.send', { threadId: one.a, to: dest(one.h, one.b), text: 'fake agent', requestId: 'device' })).rejects.toThrow('owner');
+    expect(await thrown(phone.call('collaboration.configure', { threadId: one.a, config: brief }))).toThrow('owner');
+    expect(await thrown(phone.call('collaboration.send', { threadId: one.a, to: dest(one.h, one.b), text: 'fake agent', requestId: 'device' }))).toThrow('owner');
     expect((await phone.call('collaboration.get', { threadId: one.a })).config.mode).toBe('brief');
   } finally { phone.close(); }
 });
@@ -569,7 +570,7 @@ test('search finds a contact by words of its chat, fields or both, and reading r
   expect(older.more).toBe(false);
   expect(JSON.stringify(read)).not.toContain('secret tool output');
   h.core.coordination.configure(b, { ...brief, mode: 'off' });
-  await expect(h.core.coordination.read(a, dest(h, b))).rejects.toThrow('not a contact');
+  expect(await thrown(h.core.coordination.read(a, dest(h, b)))).toThrow('not a contact');
 });
 
 test('a waiting agent takes its answer directly, and the recipient is not woken for it', async () => {
@@ -602,7 +603,7 @@ test('two linked cores search and read each other\'s agents through signed reque
   expect(read.contact.threadId).toBe(two.b);
   expect(read.entries.map(e => e.text)).toEqual(['the nightly backup to the NAS failed again']);
   two.h.core.coordination.configure(two.b, { ...brief, remote: false });
-  await expect(one.h.core.coordination.read(one.a, { coreId: cardB.coreId, threadId: two.b })).rejects.toThrow('not a thread open to other machines');
+  expect(await thrown(one.h.core.coordination.read(one.a, { coreId: cardB.coreId, threadId: two.b }))).toThrow('not a thread open to other machines');
 }, 25000);
 
 

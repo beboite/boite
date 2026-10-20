@@ -8,6 +8,7 @@ import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoDriver } from '../src/drivers/echo.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let h: TestCore;
 let root: string;
@@ -70,7 +71,7 @@ test('automatic pull settings persist and reject invalid intervals', async () =>
   expect(changes[0]).toMatchObject({ path: root, enabled: true, autoPull });
   expect(new BrainStore(h.core).config().autoPull).toEqual(autoPull);
   for (const intervalMinutes of [-1, 0.5, 1441, NaN]) {
-    await expect(h.core.brain.configure({ path: root, enabled: true, autoPull: { onStartup: true, intervalMinutes } })).rejects.toThrow('intervalMinutes');
+    expect(await thrown(h.core.brain.configure({ path: root, enabled: true, autoPull: { onStartup: true, intervalMinutes } }))).toThrow('intervalMinutes');
   }
   await h.core.brain.configure({ path: root, enabled: false });
   expect(h.core.brain.config().autoPull).toEqual(autoPull);
@@ -196,11 +197,11 @@ test('a brain reached through a directory alias has the same catalog', () => {
 
 test('owner configures, disables and disconnects the brain; invalid paths preserve the previous config', async () => {
   const owner = await h.connect();
-  await expect(owner.call('brain.configure', { path: 'relative', enabled: true })).rejects.toThrow('absolute');
+  expect(await thrown(owner.call('brain.configure', { path: 'relative', enabled: true }))).toThrow('absolute');
   const result = await owner.call('brain.configure', { path: root, enabled: true });
   expect(result.config).toEqual({ path: root, enabled: true });
   expect(result.git).toBeNull();
-  await expect(owner.call('brain.configure', { path: join(root, 'missing'), enabled: true })).rejects.toThrow('existing');
+  expect(await thrown(owner.call('brain.configure', { path: join(root, 'missing'), enabled: true }))).toThrow('existing');
   expect((await owner.call('brain.status', {})).config.path).toBe(root);
   await owner.call('brain.configure', { path: root, enabled: false });
   expect(h.core.brain.instructions()).toBe('');
@@ -208,8 +209,8 @@ test('owner configures, disables and disconnects the brain; invalid paths preser
   const { grant } = await owner.call('pairing.grant', {});
   const device = await connect(h.url, '', { grant, client: { name: 'pwa', version: 'test' } });
   try {
-    for (const method of ['brain.status', 'brain.sync'] as const) await expect(device.call(method, {})).rejects.toThrow('owner');
-    await expect(device.call('brain.configure', { path: root, enabled: true })).rejects.toThrow('owner');
+    for (const method of ['brain.status', 'brain.sync'] as const) expect(await thrown(device.call(method, {}))).toThrow('owner');
+    expect(await thrown(device.call('brain.configure', { path: root, enabled: true }))).toThrow('owner');
   } finally { device.close(); }
 });
 
@@ -319,7 +320,7 @@ test('the Boite guide switch persists, and echo never receives the ask command',
   expect(await run()).not.toContain('boite where');
   // Leaving the field out keeps the switch where it was.
   expect((await owner.call('brain.configure', { path: root, enabled: true })).config.boiteGuide).toBe(false);
-  await expect(owner.call('brain.configure', { path: root, enabled: true, boiteGuide: 'yes' as never })).rejects.toThrow('boiteGuide');
+  expect(await thrown(owner.call('brain.configure', { path: root, enabled: true, boiteGuide: 'yes' as never }))).toThrow('boiteGuide');
 });
 
 test('short answers ride every turn until switched off, and the first lists the built-in skills', async () => {
@@ -452,7 +453,7 @@ test('closing the brain drains active Git and prevents subsequent commands', asy
   const operation = h.core.brain.sync().catch(cause => cause as Error);
   await h.core.brain.close();
   expect((await operation as Error).message).toContain('shutting down');
-  await expect(h.core.brain.sync()).rejects.toThrow('shutting down');
+  expect(await thrown(h.core.brain.sync())).toThrow('shutting down');
 });
 
 test('two checkouts exchange existing commits; dirty and diverged histories remain untouched', async () => {
@@ -476,7 +477,7 @@ test('two checkouts exchange existing commits; dirty and diverged histories rema
   await git(second, ['pull', '--ff-only']);
   expect(readFileSync(join(second, 'AGENTS.md'), 'utf8')).toBe('Local convention');
   file(join(root, 'untracked.txt'), 'Keep this');
-  await expect(h.core.brain.sync()).rejects.toThrow('local file changes');
+  expect(await thrown(h.core.brain.sync())).toThrow('local file changes');
   // Refused before the fetch: the log carries no ahead/behind it never measured.
   expect((await h.core.logs.select(record => record.event === 'brain.sync-failed', 1))[0]?.data).toEqual({ push: true });
   expect(readFileSync(join(root, 'untracked.txt'), 'utf8')).toBe('Keep this');
@@ -485,7 +486,7 @@ test('two checkouts exchange existing commits; dirty and diverged histories rema
   await commit(second, 'Diverged remote');
   await git(second, ['push']);
   const before = await git(root, ['rev-parse', 'HEAD']);
-  await expect(h.core.brain.sync()).rejects.toThrow('diverging');
+  expect(await thrown(h.core.brain.sync())).toThrow('diverging');
   expect(await git(root, ['rev-parse', 'HEAD'])).toBe(before);
   expect((await h.core.brain.status()).git).toMatchObject({ ahead: 1, behind: 1, dirty: false });
   // About thirty git processes: 17 to 24 s on a Windows runner, past 30 s under parallel load
@@ -517,7 +518,7 @@ test.each(['fetch', 'push'] as const)('switching branches during %s cannot publi
     return result;
   });
   try {
-    if (phase === 'fetch') await expect(h.core.brain.sync()).rejects.toThrow('changed during synchronization');
+    if (phase === 'fetch') expect(await thrown(h.core.brain.sync())).toThrow('changed during synchronization');
     else await h.core.brain.sync();
     expect(await git(remote, ['rev-parse', 'main'])).toBe(phase === 'fetch' ? base : mainHead);
     expect(await git(root, ['branch', '--show-current'])).toBe('other');

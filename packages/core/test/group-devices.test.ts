@@ -6,6 +6,7 @@ import { appOrigin, isAllowedOrigin } from '../src/server.ts';
 import { APP_ORIGIN } from '@boite/contracts';
 import { mergeDeviceKeys } from '../src/group/device-keys.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 const clients: CoreClient[] = [];
@@ -22,8 +23,8 @@ async function settled(h: TestCore, open: number): Promise<void> {
 
 async function refused(h: TestCore, hello: Promise<unknown>, message?: string): Promise<void> {
   const open = h.server.connections();
-  if (message === undefined) await expect(hello).rejects.toThrow();
-  else await expect(hello).rejects.toThrow(message);
+  if (message === undefined) expect(await thrown(hello)).toThrow();
+  else expect(await thrown(hello)).toThrow(message);
   await settled(h, open);
 }
 
@@ -237,7 +238,7 @@ test('a key handed over on two members keeps both older pairings, a removed key 
   const grant = new URL(first.url).searchParams.get('grant')!;
   const admitted = await open(b.url, { grant, device: { publicKey: phone.publicKey, sig: phone.sign(deviceAdmitInput(grant, phone.publicKey)) } });
   // A device key asks a ticket for nothing: it signs its own way into the other machine.
-  await expect(admitted.call('group.ticket', { coreId: id(a) })).rejects.toThrow('needs no ticket');
+  expect(await thrown(admitted.call('group.ticket', { coreId: id(a) }))).toThrow('needs no ticket');
   b.core.group.clients.revokeDevice(admitted.device!);
   await settled(b, 0);
   await waitFor(() => (a.core.group.view('owner')?.devices.length ?? 1) === 0);
@@ -293,9 +294,9 @@ test('a machine joining a group tells a device of it to come back, not that it i
   let asked!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
   const asking = new Promise<void>((resolve) => { asked = resolve; });
-  const group = b.core.group as unknown as { askToJoin: (...args: unknown[]) => Promise<unknown> };
-  const ask = group.askToJoin.bind(b.core.group);
-  group.askToJoin = async (...args) => { asked(); await held; return ask(...args); };
+  const group = a.core.group as { http: (request: Request) => Promise<Response> };
+  const answer = group.http.bind(a.core.group);
+  group.http = async (request) => { asked(); await held; return answer(request); };
   const joining = b.core.group.join(invite);
   await asking;
   let refusal: { code?: number; data?: unknown } | undefined;

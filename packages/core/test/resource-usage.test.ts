@@ -5,6 +5,7 @@ import { LinuxLoad } from '../src/platform/linux-load.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import { connect } from '../src/client.ts';
 import { processPlatform } from '../src/platform/index.ts';
+import { thrown } from './settle.ts';
 
 function stat(pid: number, parent = 1, birth = 100): string {
   const fields = Array<string>(20).fill('0');
@@ -133,11 +134,11 @@ test('paired resource usage is sanitized, read-only and unavailable to agent tok
     expect(Object.keys(row ?? {}).sort()).toEqual(['disk', 'load', 'loadAvailable', 'model', 'network', 'parentThreadId', 'projectId', 'providerId', 'status', 'threadId', 'title']);
     expect(JSON.stringify(snapshot)).not.toContain(harness.dataDir);
     expect(JSON.stringify(snapshot)).not.toContain('private-command-marker');
-    await expect(phone.call('resources.list', {})).rejects.toThrow('owner only');
-    await expect(phone.call('resources.killTree', { threadId })).rejects.toThrow('owner only');
-    await expect(phone.call('resources.usage', { watch: 'bad' } as never)).rejects.toThrow('watch: expected a boolean');
+    expect(await thrown(phone.call('resources.list', {}))).toThrow('owner only');
+    expect(await thrown(phone.call('resources.killTree', { threadId }))).toThrow('owner only');
+    expect(await thrown(phone.call('resources.usage', { watch: 'bad' } as never))).toThrow('watch: expected a boolean');
     agent = await connect(harness.url, harness.core.agents.tokenFor(threadId));
-    await expect(agent.call('resources.usage', { watch: true })).rejects.toThrow("not one of the agent's methods");
+    expect(await thrown(agent.call('resources.usage', { watch: true }))).toThrow("not one of the agent's methods");
     if (process.platform === 'linux') {
       // A successful tmpfs write contributes zero physical storage bytes.
       await waitFor(() => {

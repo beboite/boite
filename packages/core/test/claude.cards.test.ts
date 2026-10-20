@@ -11,6 +11,7 @@ import {
   success,
   useClaudeHarness,
 } from './fixtures/claude-query.ts';
+import { thrown } from './settle.ts';
 
 useClaudeHarness();
 
@@ -174,7 +175,7 @@ describe('claude driver', () => {
     expect(answers).toEqual([{ behavior: 'deny', message: expect.any(String) }]);
     expect(await client.call('permissions.list', { threadId })).toEqual([]);
     expect((await client.call('threads.get', { threadId })).status).toBe('running');
-    await expect(client.call('permissions.answer', { requestId: request.id, decision: 'allow' })).rejects.toThrow();
+    expect(await thrown(client.call('permissions.answer', { requestId: request.id, decision: 'allow' }))).toThrow();
 
     resumed();
     expect((await finished).status).toBe('done');

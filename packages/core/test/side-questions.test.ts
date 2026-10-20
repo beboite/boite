@@ -3,6 +3,7 @@ import { sideQuestionSnapshot, type Message, type RpcEvents } from '@boite/contr
 import { echoDriver } from '../src/drivers/echo.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore | undefined;
 let restore: (() => void) | undefined;
@@ -44,7 +45,7 @@ test('a side answer sees streamed context while the main turn waits, and never e
   expect(copied.permissionMode).toBe(before.permissionMode);
   expect((await client.call('threads.get', { threadId })).messages).toEqual(before.messages);
   expect(harness.core.threads.require(threadId).status).toBe('waiting');
-  await expect(client.call('threads.btw.fork', { threadId, requestId: 'side_0001' })).rejects.toThrow('available completed');
+  expect(await thrown(client.call('threads.btw.fork', { threadId, requestId: 'side_0001' }))).toThrow('available completed');
 
 });
 
@@ -90,7 +91,7 @@ test('a fork uses the request snapshot even when the source continues before its
   await client.call('threads.btw', { threadId, question: 'Discard this', requestId: 'side_dismiss' });
   finish('Discarded'); await second;
   await client.call('threads.btw.cancel', { threadId, requestId: 'side_dismiss' });
-  await expect(client.call('threads.btw.fork', { threadId, requestId: 'side_dismiss' })).rejects.toThrow('available completed');
+  expect(await thrown(client.call('threads.btw.fork', { threadId, requestId: 'side_dismiss' }))).toThrow('available completed');
 });
 
 test('duplicate side requests are refused and archive cancels only the side request', async () => {
@@ -106,15 +107,15 @@ test('duplicate side requests are refused and archive cancels only the side requ
   await client.call('threads.subscribe', { threadId });
   await client.call('threads.btw', { threadId, question: 'A question', requestId: 'side_0001' });
   await waitFor(() => signal !== undefined);
-  await expect(client.call('threads.btw', { threadId, question: 'Another question', requestId: 'side_0002' })).rejects.toThrow('already being answered');
+  expect(await thrown(client.call('threads.btw', { threadId, question: 'Another question', requestId: 'side_0002' }))).toThrow('already being answered');
   await client.call('threads.btw.cancel', { threadId, requestId: 'side_wrong' });
   expect(signal!.aborted).toBe(false);
-  await expect(client.call('threads.btw.cancel', { threadId, requestId: '' })).rejects.toThrow('requestId');
+  expect(await thrown(client.call('threads.btw.cancel', { threadId, requestId: '' }))).toThrow('requestId');
   await client.call('threads.archive', { threadId });
   expect(signal!.aborted).toBe(true);
   expect((await pending).error).toBe('side request cancelled');
-  await expect(client.call('threads.btw', { threadId, question: ' ', requestId: 'side_0003' })).rejects.toThrow('question');
-  await expect(client.call('threads.btw', { threadId, question: 'Question', requestId: 'side_0004' })).rejects.toThrow('not archived');
+  expect(await thrown(client.call('threads.btw', { threadId, question: ' ', requestId: 'side_0003' }))).toThrow('question');
+  expect(await thrown(client.call('threads.btw', { threadId, question: 'Question', requestId: 'side_0004' }))).toThrow('not archived');
 });
 
 test('a cancelled side request cannot publish over its replacement when the request id is reused', async () => {
@@ -144,7 +145,7 @@ test('a cancelled side request cannot publish over its replacement when the requ
     requests[0]!.finish('Obsolete answer');
     await new Promise<void>(resolve => setImmediate(resolve));
     expect(events).toHaveLength(1);
-    await expect(client.call('threads.btw', { threadId, question: 'A third request', requestId: 'side_third' })).rejects.toThrow('already being answered');
+    expect(await thrown(client.call('threads.btw', { threadId, question: 'A third request', requestId: 'side_third' }))).toThrow('already being answered');
     requests[1]!.finish('Replacement answer');
     await waitFor(() => events.length === 2);
     expect(events[1]).toEqual({ threadId, requestId: 'side_reused', answer: 'Replacement answer', error: null });
@@ -176,7 +177,7 @@ test('archiving a parent cancels retained descendant side requests and fences th
     await client.call('threads.archive', { threadId });
     expect(requests[0]!.signal.aborted).toBe(true);
     expect(events).toEqual([{ threadId: descendant.id, requestId: 'side_family_old', answer: null, error: 'side request cancelled' }]);
-    await expect(client.call('threads.btw', { threadId: descendant.id, question: 'While archived', requestId: 'side_family_hidden' })).rejects.toThrow('parent');
+    expect(await thrown(client.call('threads.btw', { threadId: descendant.id, question: 'While archived', requestId: 'side_family_hidden' }))).toThrow('parent');
     await client.call('threads.archive', { threadId, archived: false });
     await client.call('threads.btw', { threadId: descendant.id, question: 'After restore', requestId: 'side_family_new' });
     requests[0]!.finish('Late archived answer');

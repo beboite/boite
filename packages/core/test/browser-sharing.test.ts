@@ -5,6 +5,7 @@ import { connect } from '../src/client.ts';
 import { Cdp } from '../src/browser/cdp.ts';
 import { waitForEndpoint } from '../src/browser/chromium.ts';
 import { createBrowserFixture, jpegSize, picture } from './browser/fixture.ts';
+import { thrown } from './settle.ts';
 
 const browserFixture = createBrowserFixture();
 const { real, url, evaluate, fakeHost } = browserFixture;
@@ -38,8 +39,8 @@ real('a viewer watching while the agent changes the page size never puts the old
 real('the desktop app on this machine hosts the agent tabs: the core drives them through it, and they close with it', async () => {
   const { harness, owner, agent, threadId } = browserFixture;
   // Only the owner's desktop app may host: not a script, not another client.
-  await expect(owner.call('browser.hostAttach', {})).rejects.toThrow('only the desktop app on this machine');
-  await expect(agent.call('browser.hostAttach', {})).rejects.toThrow();
+  expect(await thrown(owner.call('browser.hostAttach', {}))).toThrow('only the desktop app on this machine');
+  expect(await thrown(agent.call('browser.hostAttach', {}))).toThrow();
   const host = await fakeHost();
   // A sign-in the core kept while the app was closed.
   const file = join(harness.core.dataDir, 'browser', 'default', 'boite-cookies.json');
@@ -69,7 +70,7 @@ real('the desktop app on this machine hosts the agent tabs: the core drives them
     const frame = await picture(owner.call('browser.remoteFrame', { threadId }));
     expect(jpegSize(frame.base64)).toEqual({ width: frame.width, height: frame.height });
     // A reply from a connection that does not host is refused.
-    await expect(owner.call('browser.hostReply', { profile: 'default', messages: ['{}'] })).rejects.toThrow('does not host');
+    expect(await thrown(owner.call('browser.hostReply', { profile: 'default', messages: ['{}'] }))).toThrow('does not host');
   } finally {
     await Promise.all([host.close(), host.close()]);
   }
@@ -94,7 +95,7 @@ real('a desktop host that cannot connect to the core removes its browser and tem
     return process;
   }) as typeof Bun.spawn);
   try {
-    await expect(fakeHost()).rejects.toThrow();
+    expect(await thrown(fakeHost())).toThrow();
     expect(host).toBeDefined();
     expect(host!.process.exitCode).not.toBeNull();
     expect(existsSync(host!.dir)).toBe(false);
@@ -121,7 +122,7 @@ real('a viewer on another device watches and drives the tab, and hears it come a
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
   try {
-    await expect(phone.call('browser.remoteStatus', { threadId })).rejects.toThrow('subscribe');
+    expect(await thrown(phone.call('browser.remoteStatus', { threadId }))).toThrow('subscribe');
     await phone.call('threads.subscribe', { threadId });
     expect(await phone.call('browser.remoteStatus', { threadId })).toEqual({ live: false, tabs: [], available: true });
     // A cold browser start can take longer than the default wait on a slow runner.
@@ -136,8 +137,8 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     const small = await picture(phone.call('browser.remoteFrame', { threadId, tabId, maxWidth: 400, quality: 40 }));
     expect(jpegSize(small.base64).width).toBe(400);
     expect([small.width, small.height]).toEqual([frame.width, frame.height]);
-    await expect(phone.call('browser.remoteInput', { threadId, frameId: 'unknown', input: { kind: 'key', key: 'Enter' } })).rejects.toThrow('refresh');
-    await expect(phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'tap', x: .5, y: .5, width: small.width + 1, height: small.height } })).rejects.toThrow('viewport');
+    expect(await thrown(phone.call('browser.remoteInput', { threadId, frameId: 'unknown', input: { kind: 'key', key: 'Enter' } }))).toThrow('refresh');
+    expect(await thrown(phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'tap', x: .5, y: .5, width: small.width + 1, height: small.height } }))).toThrow('viewport');
     // The button spans 100..300 × 100..180 CSS pixels.
     await phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'tap', x: 200 / small.width, y: 140 / small.height, width: small.width, height: small.height } });
     expect(await evaluate('document.title')).toBe('clicked');
@@ -176,15 +177,39 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     await act({ kind: 'select-all' });
     expect(await evaluate('document.querySelector("#name").selectionEnd > 0')).toBe(true);
     expect(await selection()).toEqual({ text: '', truncated: false });
-    await expect(act({ kind: 'press', keys: ['Hyper+a'] })).rejects.toThrow('remote press');
-    await expect(phone.call('browser.remoteSelection', { threadId, frameId: 'unknown' })).rejects.toThrow('refresh');
-    await expect(phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'navigate', url: 'javascript:alert(1)' } })).rejects.toThrow('HTTP');
+    expect(await thrown(act({ kind: 'press', keys: ['Hyper+a'] }))).toThrow('remote press');
+    expect(await thrown(phone.call('browser.remoteSelection', { threadId, frameId: 'unknown' }))).toThrow('refresh');
+    expect(await thrown(phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'navigate', url: 'javascript:alert(1)' } }))).toThrow('HTTP');
     // A viewer never gets the agent's own command, which can run scripts.
-    await expect(phone.call('browser.command', { threadId, action: { kind: 'evaluate', expression: '1' } })).rejects.toThrow();
+    expect(await thrown(phone.call('browser.command', { threadId, action: { kind: 'evaluate', expression: '1' } }))).toThrow();
     const gone = phone.next('browser.remoteChanged', event => event.threadId === threadId && !event.live, 30_000);
     await owner.call('threads.archive', { threadId });
     expect((await gone).tabs).toEqual([]);
   } finally { phone.close(); }
+}, 150_000);
+
+real('a tap on a <select> answers its options for the viewer to draw, since Chrome draws its own list outside every frame', async () => {
+  const { owner, agent, threadId } = browserFixture;
+  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+  await owner.call('threads.subscribe', { threadId });
+  const frame = await picture(owner.call('browser.remoteFrame', { threadId, tabId }));
+  await evaluate('window.changes = []; document.querySelector("#day").addEventListener("change", e => changes.push(e.target.value))', tabId);
+  // The list spans 100..220 × 420..452 CSS pixels.
+  const on = { x: 160 / frame.width, y: 436 / frame.height, width: frame.width, height: frame.height };
+  const reply = await owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'tap', ...on } });
+  expect(reply.picker).toMatchObject({ selected: 1, options: [{ label: '1' }, { label: '20' }, { label: '21', disabled: true }, { label: '22', hidden: true }, { label: 'Thirty', group: 'Late' }] });
+  const rect = reply.picker!.rect;
+  expect([rect.x * frame.width, rect.y * frame.height, rect.width * frame.width, rect.height * frame.height].map(Math.round)).toEqual([100, 420, 120, 32]);
+  expect(await evaluate('document.activeElement.id', tabId)).toBe('day');
+  expect(await thrown(owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'choose', ...on, index: 2, label: '21' } }))).toThrow('option');
+  // A list the page rewrote while the viewer showed it: the option at that index reads otherwise.
+  await evaluate('document.querySelector("#day").options[0].text = "Zero"', tabId);
+  expect(await thrown(owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'choose', ...on, index: 0, label: '1' } }))).toThrow('the list changed');
+  await owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'choose', ...on, index: 4, label: 'Thirty' } });
+  expect(await evaluate('[document.querySelector("#day").value, changes.join()]', tabId)).toEqual(['30', '30']);
+  // Anywhere else a tap stays a click.
+  expect(await owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'tap', x: 200 / frame.width, y: 140 / frame.height, width: frame.width, height: frame.height } })).toEqual({ ok: true });
+  expect(await evaluate('document.title', tabId)).toBe('clicked');
 }, 150_000);
 
 real('a viewer of a still page gets no new picture until the page draws, and the frame it holds stays usable', async () => {
@@ -264,7 +289,7 @@ real('a recording is an MP4 made in the browser itself, and one left running whe
   const { owner, agent, threadId } = browserFixture;
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/moving') } });
   await agent.call('browser.command', { threadId, action: { kind: 'recording-start' } });
-  await expect(agent.call('browser.command', { threadId, action: { kind: 'recording-start' } })).rejects.toThrow('already running');
+  expect(await thrown(agent.call('browser.command', { threadId, action: { kind: 'recording-start' } }))).toThrow('already running');
   // A slow encoder drops frames by design: an Intel macOS runner keeps 3 to 5 a second, so 4 s still clears 10.
   await Bun.sleep(4000);
   const { recording, tabId } = await agent.call('browser.command', { threadId, action: { kind: 'recording-stop' } });
@@ -279,5 +304,5 @@ real('a recording is an MP4 made in the browser itself, and one left running whe
   const finished = owner.next('turn.finished', row => row.threadId === threadId, 10_000);
   await owner.call('turns.start', { threadId, prompt: 'hello' });
   await finished; await Bun.sleep(300);
-  await expect(agent.call('browser.command', { threadId, action: { kind: 'recording-stop' } })).rejects.toThrow('discarded');
+  expect(await thrown(agent.call('browser.command', { threadId, action: { kind: 'recording-stop' } }))).toThrow('discarded');
 }, 150_000);

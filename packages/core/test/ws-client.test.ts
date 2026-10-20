@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { createServer, type Socket } from 'node:net';
 import { constants as zlibConstants, deflateRawSync } from 'node:zlib';
 import { encodeFrame, FrameReader, TextSocket, type CloseEvent, type Frame } from '../src/ws-client.ts';
+import { thrown } from './settle.ts';
 
 /** A server frame: unmasked, final unless told otherwise. */
 function serverFrame(opcode: number, payload: Uint8Array | string, fin = true, rsv = 0): Uint8Array {
@@ -252,13 +253,13 @@ test('what a message starts, an awaited answer included, runs before the next me
 test('an upgrade the server refuses or never answers rejects with what happened', async () => {
   const refusing = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('no page', { status: 404 }) });
   try {
-    await expect(TextSocket.connect(`ws://127.0.0.1:${refusing.port}/devtools/page/gone`, 5_000)).rejects.toThrow('refused the WebSocket upgrade: HTTP/1.1 404');
+    expect(await thrown(TextSocket.connect(`ws://127.0.0.1:${refusing.port}/devtools/page/gone`, 5_000))).toThrow('refused the WebSocket upgrade: HTTP/1.1 404');
   } finally { await refusing.stop(true); }
   // A server that never answers the upgrade gets its connection closed: a late 101 would otherwise keep it for the run.
   let hungUp = false;
   const silent = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {}, close() { hungUp = true; } } });
   try {
-    await expect(TextSocket.connect(`ws://127.0.0.1:${silent.port}/`, 300)).rejects.toThrow('no WebSocket upgrade');
+    expect(await thrown(TextSocket.connect(`ws://127.0.0.1:${silent.port}/`, 300))).toThrow('no WebSocket upgrade');
     for (let waited = 0; !hungUp && waited < 2_000; waited += 20) await Bun.sleep(20);
     expect(hungUp).toBe(true);
   } finally { silent.stop(true); }
@@ -356,7 +357,7 @@ test('an upgrade answered with extensions this client cannot read is refused', a
   for (const [extensions, deflate, error] of cases) {
     const server = answering(extensions);
     try {
-      await expect(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000, { deflate })).rejects.toThrow(error);
+      expect(await thrown(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000, { deflate }))).toThrow(error);
     } finally { server.stop(true); }
   }
 });
@@ -375,9 +376,9 @@ test('upgrade headers reach the server, a Host among them replacing the url one,
     const socket = await TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000, { headers: { host: 'boite.example:7000', Origin: 'http://boite.example' } });
     expect(seen).toEqual({ host: 'boite.example:7000', origin: 'http://boite.example' });
     socket.close();
-    await expect(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000, { headers: { 'x-a': 'b\r\nx-injected: 1' } })).rejects.toThrow('on one line');
-    await expect(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000, { headers: { 'Sec-WebSocket-Key': 'x' } })).rejects.toThrow('the client\'s own');
-    await expect(TextSocket.connect(`http://127.0.0.1:${server.port}/`, 5_000)).rejects.toThrow('ws:// or wss://');
+    expect(await thrown(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000, { headers: { 'x-a': 'b\r\nx-injected: 1' } }))).toThrow('on one line');
+    expect(await thrown(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000, { headers: { 'Sec-WebSocket-Key': 'x' } }))).toThrow('the client\'s own');
+    expect(await thrown(TextSocket.connect(`http://127.0.0.1:${server.port}/`, 5_000))).toThrow('ws:// or wss://');
   } finally { await server.stop(true); }
 });
 
@@ -475,7 +476,7 @@ test('an upgrade answer without Upgrade and Connection, or with a subprotocol no
   for (const [head, error] of cases) {
     const server = answering(undefined, head);
     try {
-      await expect(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000)).rejects.toThrow(error);
+      expect(await thrown(TextSocket.connect(`ws://127.0.0.1:${server.port}/`, 5_000))).toThrow(error);
     } finally { server.stop(true); }
   }
 });

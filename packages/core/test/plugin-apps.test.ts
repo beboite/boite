@@ -14,6 +14,7 @@ import { PluginStore } from '../src/plugins.ts';
 import { RELAUNCH_DELAYS_MS, appEnv, desktopProblem, type AppClock } from '../src/plugins/apps.ts';
 import { parseManifest, platformKey } from '../src/plugins/manifest.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore | undefined;
 const restores: (() => void)[] = [];
@@ -232,18 +233,18 @@ describe('a desktop app', () => {
     expect(alive(second)).toBe(false);
     expect(app().pid).not.toBe(second);
     expect(new PluginStore(harness.core).state('bots').app).toMatchObject({ enabled: true, autostart: false });
-    await expect(client.call('plugins.app', { id: 'bots', action: 'pause' as 'stop' })).rejects.toThrow('start, stop or restart');
-    await expect(client.call('plugins.autostart', { id: 'bots', autostart: 'yes' as unknown as boolean })).rejects.toThrow('autostart must be true or false');
+    expect(await thrown(client.call('plugins.app', { id: 'bots', action: 'pause' as 'stop' }))).toThrow('start, stop or restart');
+    expect(await thrown(client.call('plugins.autostart', { id: 'bots', autostart: 'yes' as unknown as boolean }))).toThrow('autostart must be true or false');
     // A recommended plugin that is not installed has no app to start.
     const pools = parseManifest({ ...manifest(), id: 'pool-switcher', name: 'Pool switcher', executable: 'pool', provides: { accountPools: { providers: ['claude'] } } }, 'recommended.json[1]');
     harness.core.plugins.recommended = [...harness.core.plugins.recommended, pools];
-    await expect(client.call('plugins.app', { id: 'pool-switcher', action: 'start' })).rejects.toThrow('Install pool-switcher first');
-    await expect(client.call('plugins.autostart', { id: 'pool-switcher', autostart: true })).rejects.toThrow('Install pool-switcher first');
+    expect(await thrown(client.call('plugins.app', { id: 'pool-switcher', action: 'start' }))).toThrow('Install pool-switcher first');
+    expect(await thrown(client.call('plugins.autostart', { id: 'pool-switcher', autostart: true }))).toThrow('Install pool-switcher first');
 
     const { grant } = await client.call('pairing.grant', {});
     const device = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
     try {
-      await expect(device.call('plugins.autostart', { id: 'bots', autostart: true })).rejects.toThrow('plugins.autostart is for the owner only');
+      expect(await thrown(device.call('plugins.autostart', { id: 'bots', autostart: true }))).toThrow('plugins.autostart is for the owner only');
     } finally { device.close(); }
   });
 
@@ -341,12 +342,12 @@ describe('ui.reveal', () => {
       await Bun.sleep(50);
       expect(heard.sort()).toEqual(['owner:agent', 'owner:thread', 'owner:update', 'second:agent', 'second:thread', 'second:update']);
 
-      await expect(owner.call('ui.reveal', { target: { kind: 'thread', threadId: 'thr_missing' } })).rejects.toThrow('is not a thread of this core');
-      await expect(owner.call('ui.reveal', { target: { kind: 'window' } as never })).rejects.toThrow('ui.reveal target must be');
-      await expect(device.call('ui.reveal', { target: { kind: 'thread', threadId } })).rejects.toThrow('ui.reveal is for the owner only');
-      await expect(agent.call('ui.reveal', { target: { kind: 'thread', threadId } })).rejects.toThrow('not one of the agent\'s methods');
-      await expect(device.call('plugins.app', { id: 'bots', action: 'start' })).rejects.toThrow('plugins.app is for the owner only');
-      await expect(agent.call('plugins.app', { id: 'bots', action: 'start' })).rejects.toThrow('not one of the agent\'s methods');
+      expect(await thrown(owner.call('ui.reveal', { target: { kind: 'thread', threadId: 'thr_missing' } }))).toThrow('is not a thread of this core');
+      expect(await thrown(owner.call('ui.reveal', { target: { kind: 'window' } as never }))).toThrow('ui.reveal target must be');
+      expect(await thrown(device.call('ui.reveal', { target: { kind: 'thread', threadId } }))).toThrow('ui.reveal is for the owner only');
+      expect(await thrown(agent.call('ui.reveal', { target: { kind: 'thread', threadId } }))).toThrow('not one of the agent\'s methods');
+      expect(await thrown(device.call('plugins.app', { id: 'bots', action: 'start' }))).toThrow('plugins.app is for the owner only');
+      expect(await thrown(agent.call('plugins.app', { id: 'bots', action: 'start' }))).toThrow('not one of the agent\'s methods');
     } finally { device.close(); agent.close(); plugin.close(); second.close(); }
   });
 });

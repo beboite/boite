@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { checkSettingsPatch, MODEL_FAVORITES_MAX } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { startTestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const opus = { providerId: 'claude', model: { id: 'claude-opus-5-5', name: 'Opus 5.5' }, account: 'Pro' };
 
@@ -33,13 +34,13 @@ test('the core keeps the later favorites, tells every client and lets a paired d
     expect(stored.modelFavorites).toEqual(later);
     expect(stored.warmProcessMinutes).toBe(4);
     expect(h.core.settings.get().modelFavorites).toEqual(later);
-    await expect(owner.call('settings.set', { modelFavorites: { at: 3_000, items: 'Opus' } as never })).rejects.toThrow('modelFavorites');
+    expect(await thrown(owner.call('settings.set', { modelFavorites: { at: 3_000, items: 'Opus' } as never }))).toThrow('modelFavorites');
 
     const { grant } = await owner.call('pairing.grant', {});
     const phone = await connect(h.url, '', { grant, client: { name: 'pwa', version: 'test' } });
     try {
       expect((await phone.call('settings.get', {})).modelFavorites).toEqual(later);
-      await expect(phone.call('settings.set', { modelFavorites: { at: 9_000, items: [] } })).rejects.toThrow();
+      expect(await thrown(phone.call('settings.set', { modelFavorites: { at: 9_000, items: [] } }))).toThrow();
     } finally { phone.close(); }
     owner.close(); other.close();
   } finally { await h.stop(); }

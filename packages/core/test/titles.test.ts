@@ -10,6 +10,7 @@ import { TITLE_RETRY } from '../src/threads/retitle.ts';
 import { cleanAgentBranch, cleanAgentTitle, parseAgentTitle, titleFromPrompt, titleRequest } from '../src/titles.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const EVENT_TIMEOUT_MS = 5_000;
 
@@ -330,7 +331,7 @@ describe('thread titles', () => {
   test('a thread with no prompt is refused, and a title from the prompt is the fallback', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client, 'untouched');
-    await expect(client.call('threads.retitle', { threadId })).rejects.toThrow(
+    expect(await thrown(client.call('threads.retitle', { threadId }))).toThrow(
       'this thread has no prompt to write a title from',
     );
 
@@ -348,14 +349,14 @@ describe('thread titles', () => {
 
   test('a title model names a provider that writes titles, or none', async () => {
     const client = await harness.connect();
-    await expect(client.call('settings.set', { titleModel: { providerId: 'nobody', model: 'x' } })).rejects.toThrow(
+    expect(await thrown(client.call('settings.set', { titleModel: { providerId: 'nobody', model: 'x' } }))).toThrow(
       'not a loaded provider that writes titles',
     );
     // OpenCode speaks ACP, whose driver writes no title.
-    await expect(client.call('settings.set', { titleModel: { providerId: 'opencode', model: 'x' } })).rejects.toThrow(
+    expect(await thrown(client.call('settings.set', { titleModel: { providerId: 'opencode', model: 'x' } }))).toThrow(
       'not a loaded provider that writes titles',
     );
-    await expect(client.call('settings.set', { titleModel: { providerId: 'echo', model: ' ' } })).rejects.toThrow(
+    expect(await thrown(client.call('settings.set', { titleModel: { providerId: 'echo', model: ' ' } }))).toThrow(
       'titleModel must be null',
     );
     const set = await client.call('settings.set', { titleModel: { providerId: ' echo ', model: ' echo-small ' } });

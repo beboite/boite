@@ -6,6 +6,7 @@ import { setThreadStatus } from '../src/threads/records.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let h: TestCore;
 let restore: (() => void) | undefined;
@@ -67,7 +68,7 @@ test('an async question answer is visible while steering and becomes one user me
   expect(after.pendingAnswers).toEqual([]);
   expect(after.messages.filter(message => message.role === 'user')).toHaveLength(2);
   expect(after.messages.at(-1)).toMatchObject({ role: 'user', turnId: turn.id, parts: [{ type: 'text', text: '> Which file?\n\nParser\nCheck it first.' }] });
-  await expect(owner.call('questions.answer', { threadId, questionId, optionIds: ['1'] })).rejects.toThrow('unknown question');
+  expect(await thrown(owner.call('questions.answer', { threadId, questionId, optionIds: ['1'] }))).toThrow('unknown question');
 });
 
 test('a question asked without stopping marks the row as needing the user until it is answered or skipped', async () => {
@@ -145,7 +146,7 @@ test('uncertain provider submissions are never retried', async () => {
   const completed = owner.next('turn.finished', item => item.id === turn.id);
   await owner.call('turns.stop', { threadId }); await completed;
   await owner.call('threads.rewind', { threadId, messageId: h.core.journal.listMessages(threadId)[0]!.id });
-  await expect(owner.call('turns.steer', params)).rejects.toThrow('unconfirmed');
+  expect(await thrown(owner.call('turns.steer', params))).toThrow('unconfirmed');
   expect(inputs).toHaveLength(1);
 });
 
@@ -186,8 +187,8 @@ test('cutting unbound legacy inputs returns delivery uncertainty instead of ackn
   const completed = owner.next('turn.finished', item => item.id === turn.id);
   finish(); await completed;
   await owner.call('threads.rewind', { threadId, messageId: h.core.journal.listMessages(threadId).at(-1)!.id });
-  await expect(owner.call('turns.start', { threadId, prompt: 'Keep working', clientRequestId: 'legacy_original' })).rejects.toThrow('unconfirmed');
-  await expect(owner.call('turns.steer', removed)).rejects.toThrow('unconfirmed');
+  expect(await thrown(owner.call('turns.start', { threadId, prompt: 'Keep working', clientRequestId: 'legacy_original' }))).toThrow('unconfirmed');
+  expect(await thrown(owner.call('turns.steer', removed))).toThrow('unconfirmed');
   expect(await owner.call('turns.steer', kept)).toEqual({ accepted: true });
   expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
   expect(inputs).toHaveLength(2);
@@ -284,7 +285,7 @@ test('continued output follows published files while existing tools keep their o
   writeFileSync(join(h.dataDir, 'report.txt'), 'Report');
   const first = await owner.call('artifacts.publish', { threadId, path: 'report.txt' });
   const second = await owner.call('artifacts.publish', { threadId, path: 'report.txt' });
-  await expect(owner.call('artifacts.publish', { threadId, path: 'missing.txt' })).rejects.toThrow('does not exist');
+  expect(await thrown(owner.call('artifacts.publish', { threadId, path: 'missing.txt' }))).toThrow('does not exist');
   const started = owner.next('message.started', message => message.threadId === threadId && ![reply, first.id, second.id].includes(message.id));
   emit.delta(reply, 0, 'Checking the next change');
   const history = await owner.call('threads.get', { threadId });

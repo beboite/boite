@@ -40,6 +40,17 @@ without a usable GPU gets none rather than SwiftShader on every core. On the
 M2 container on 2026-10-05, WebGL reported `ANGLE (AMD, AMD Radeon Graphics
 (radeonsi renoir ACO), OpenGL ES 3.2)`.
 
+A Mac in a virtual machine, where the kernel sets `kern.hv_vmm_present` to 1,
+starts the browser with `--disable-gpu` instead: pages draw on the CPU and
+WebGL is off. On the paravirtual GPU of a macos-15 arm64 CI runner, Chrome's
+GPU process lost its Metal device (`[Device] is lost`) and restarted. The
+process that exited stayed a zombie with a thread in the kernel's
+`IOService::newUserClient`, and the browser's UI thread sat in `wait4` until
+it ended, so no DevTools command was answered for 10 to 30 seconds. Over 40
+minutes of the browser tests, 1180 browsers had 48 GPU restarts and 20
+silences past 3 seconds; with `--disable-gpu`, 3177 browsers had none, and
+none took more than 1.6 seconds to answer. A Mac's own hardware keeps the GPU.
+
 ### What sites see
 
 Headless Chrome names itself `HeadlessChrome` in its user agent, sets
@@ -381,6 +392,18 @@ The wheel scrolls under the pointer. A drag with the mouse is a drag in the
 page, so it selects text; a second click selects the word, a third the
 paragraph, and Shift with a click extends the selection. Control or Command
 with A selects all, with Z or Y undoes and redoes.
+
+A `<select>` opens here, not on the agent's machine. Chrome draws a select's
+list in a window of its own, which no frame shows, so a plain tap on one only
+focuses it and answers its options (`picker`: labels, the selected one, the
+disabled, hidden and grouped ones, and the field's box, at most 1,000 options),
+and the viewer draws the list under the field, or over it when there is more
+room there. The arrows, Home, End, Enter, Space and Escape work in it. A pick
+goes back as `choose` at the tap's point with the option's index and label; the
+core finds the select there again and sets the option as a person would, so the
+page hears `input` and `change`, and refuses an option that is disabled, gone,
+or reads another label there: the page changed the list meanwhile. A tap
+elsewhere, the wheel or a resized page closes the list without choosing.
 
 The clipboard is the viewer's own. Paste inserts this computer's text in the
 focused field of the page. Copy and cut ask the core for the page's selection

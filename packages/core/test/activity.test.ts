@@ -5,6 +5,7 @@ import { ActivityStore } from '../src/activity.ts';
 import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let h: TestCore;
 let restore: (() => void) | undefined;
@@ -165,9 +166,9 @@ test('counted loops run consecutive iterations, retain each result and stop at t
   expect(received).toEqual([[image], []]);
   expect(loop.nextRunAt).toBeNull();
   expect(loop.history?.map(run => [run.iteration, run.status, run.summary])).toEqual([[1, 'done', 'pong 1'], [2, 'done', 'pong 2']]);
-  await expect(client.call('threads.activity.control', { threadId, kind: 'loop', action: 'resume' })).rejects.toThrow('finished');
+  expect(await thrown(client.call('threads.activity.control', { threadId, kind: 'loop', action: 'resume' }))).toThrow('finished');
   // Pausing a finished loop used to flip it to `paused`, which nothing could leave.
-  await expect(client.call('threads.activity.control', { threadId, kind: 'loop', action: 'pause' })).rejects.toThrow('complete');
+  expect(await thrown(client.call('threads.activity.control', { threadId, kind: 'loop', action: 'pause' }))).toThrow('complete');
   expect(h.core.activity.get(threadId).loop?.status).toBe('complete');
   await Bun.sleep(400);
   expect(count).toBe(2);
@@ -309,9 +310,9 @@ test('invalid intervals and empty objectives are refused without mutations', asy
   const client = await h.connect();
   const { threadId } = await echoThread(h, client);
   for (const intervalMs of [0, 999, 1000.5, 86400001]) {
-    await expect(client.call('threads.activity.set', { threadId, loop: { prompt: 'check', intervalMs } })).rejects.toThrow('intervalMs');
+    expect(await thrown(client.call('threads.activity.set', { threadId, loop: { prompt: 'check', intervalMs } }))).toThrow('intervalMs');
   }
-  await expect(client.call('threads.activity.set', { threadId, goal: { objective: ' ' } })).rejects.toThrow('objective');
+  expect(await thrown(client.call('threads.activity.set', { threadId, goal: { objective: ' ' } }))).toThrow('objective');
   expect(h.core.activity.get(threadId)).toEqual({ goal: null, loop: null, tasks: [] });
 });
 

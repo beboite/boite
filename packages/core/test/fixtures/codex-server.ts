@@ -56,8 +56,10 @@ function logConfig(method: string, params: Record<string, unknown>): void {
  * rather than dropped: the driver sends one the instant it learns the turn id.
  */
 const interrupted = new Set<string>();
-/** Resolved by the next `account/rateLimits/read`, so a rolling update can follow it. */
+/** Resolved once the next `account/rateLimits/read` is answered, so a rolling update can follow the answer. */
 let rateLimitsRead: (() => void) | null = null;
+/** Runs right after the answer it was set for is written. */
+let afterAnswer: (() => void) | null = null;
 
 const waiting = new Map<string, () => void>();
 
@@ -461,8 +463,8 @@ async function runTurn(turnId: string, text: string): Promise<void> {
           credits: null, planType: null, rateLimitReachedType: null, individualLimit: null, spendControlReached: null, normalModelSlug: null } });
         const read = new Promise<void>((resolve) => { rateLimitsRead = resolve; });
         update(30);
+        // The next update follows the answer at once, as it may share its chunk of stdout.
         await read;
-        await Bun.sleep(50);
         update(35);
         await Bun.sleep(50);
         break;
@@ -572,7 +574,7 @@ function handle(method: string, raw: unknown): unknown {
       };
     case 'account/rateLimits/read':
       log(`account/rateLimits/read ${JSON.stringify(params)}`);
-      rateLimitsRead?.();
+      afterAnswer = rateLimitsRead;
       rateLimitsRead = null;
       return { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300 },
         credits: { hasCredits: true, unlimited: false, balance: '42.5' } },
@@ -764,7 +766,7 @@ process.stdin.on('data', (chunk: string) => {
       void Promise.resolve()
         .then(() => handle(method, params))
         .then(
-          (result) => send({ id, result }),
+          (result) => { send({ id, result }); const after = afterAnswer; afterAnswer = null; after?.(); },
           (error: unknown) => send({ id, error: { code: (error as { code?: number }).code ?? -32601, message: (error as Error).message } }),
         );
       continue;

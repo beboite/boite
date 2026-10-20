@@ -15,6 +15,7 @@ import { abnormalExit, programName, watchProviderProcess } from '../src/threads/
 import { gitSubcommand, logGit } from '../src/git/git-log.ts';
 import { logUpdate } from '../src/providers/install-log.ts';
 import { startTestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 /** A core whose log store only collects what the code under test records. */
 function recordingCore(): { core: Core; records: { level: string; message: string; context: Record<string, unknown> }[] } {
@@ -164,7 +165,7 @@ test('a connection logs who it was, how long it lived and who closed it; a refus
     expect(typeof closed?.durationMs).toBe('number');
     expect((await find('connection.hello'))?.data?.principal).toBe('owner');
 
-    await expect(connect(harness.url, 'not-the-token')).rejects.toThrow('the token is wrong');
+    expect(await thrown(connect(harness.url, 'not-the-token'))).toThrow('the token is wrong');
     const refused = await find('connection.hello-refused');
     expect(refused?.level).toBe('warn');
     expect(refused?.message).toContain('bad token');
@@ -175,22 +176,22 @@ test('a connection logs who it was, how long it lived and who closed it; a refus
 test('a session open that throws before its first await is logged as a failure, and the clock covers synchronous setup', async () => {
   const notes: { level: string; message: string; event: string; durationMs?: number }[] = [];
   const ctx = { sessionId: null, diagnostic: (level: string, message: string, context: { event: string; durationMs?: number }) => { notes.push({ level, message, ...context }); } };
-  await expect(noteReady(ctx, 'pi', () => { throw new Error('no pi executable on this machine'); })).rejects.toThrow('no pi executable');
+  expect(await thrown(noteReady(ctx, 'pi', () => { throw new Error('no pi executable on this machine'); }))).toThrow('no pi executable');
   expect(notes).toMatchObject([{ level: 'warn', event: 'driver.session.open-failed' }]);
   notes.length = 0;
   // A stop that a driver can only report by throwing is an abandoned open, not a failure.
-  await expect(noteReady(ctx, 'acp', () => Promise.reject(Object.assign(new Error('closed before it started'), { abandoned: true })))).rejects.toThrow('closed before');
+  expect(await thrown(noteReady(ctx, 'acp', () => Promise.reject(Object.assign(new Error('closed before it started'), { abandoned: true }))))).toThrow('closed before');
   expect(notes).toMatchObject([{ level: 'debug', event: 'driver.session.open-abandoned' }]);
   notes.length = 0;
   // Codex and Muse close the process to stop an open in flight: the plain rejection that follows is routine too.
-  await expect(noteReady(ctx, 'Codex app-server', () => Promise.reject(new Error('the codex startup was stopped')), undefined, () => true)).rejects.toThrow('startup was stopped');
+  expect(await thrown(noteReady(ctx, 'Codex app-server', () => Promise.reject(new Error('the codex startup was stopped')), undefined, () => true))).toThrow('startup was stopped');
   expect(notes).toMatchObject([{ level: 'debug', event: 'driver.session.open-abandoned' }]);
   notes.length = 0;
-  await expect(noteReady(ctx, 'Codex app-server', () => Promise.reject(new Error('spawn codex ENOENT')), undefined, () => false)).rejects.toThrow('ENOENT');
+  expect(await thrown(noteReady(ctx, 'Codex app-server', () => Promise.reject(new Error('spawn codex ENOENT')), undefined, () => false))).toThrow('ENOENT');
   expect(notes).toMatchObject([{ level: 'warn', event: 'driver.session.open-failed' }]);
   notes.length = 0;
   // A stored thread the agent no longer has is a resume miss the turn recovers from.
-  await expect(noteReady(ctx, 'Codex app-server', () => Promise.reject(Object.assign(new Error('thread not found'), { sessionLost: true })))).rejects.toThrow('thread not found');
+  expect(await thrown(noteReady(ctx, 'Codex app-server', () => Promise.reject(Object.assign(new Error('thread not found'), { sessionLost: true }))))).toThrow('thread not found');
   expect(notes).toMatchObject([{ level: 'info', event: 'driver.session.lost' }]);
   notes.length = 0;
   await noteReady(ctx, 'pi', () => { const until = Date.now() + 30; while (Date.now() < until) { /* synchronous setup */ } return Promise.resolve(); }, () => ({ text: ', on gpt', data: { model: 'gpt' } }));

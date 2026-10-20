@@ -4,6 +4,7 @@ import { connect, type CoreClient } from '../../packages/core/src/client.ts';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startCore, type RunningCore } from './lib/core.ts';
 import { startUi } from './lib/ui.ts';
+import { thrown } from '../../packages/core/test/settle.ts';
 
 async function capture(page: BrowserPage, name: string): Promise<void> {
   await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
@@ -46,13 +47,13 @@ test('the owner app relays signed reads, preserves directional grants on reload,
       globalThis.__boiteTest.workspace.machines[1].store.checkCoordinationPeer(${JSON.stringify(cardPC!.coreId)})
     ]).then(() => true).catch(() => false)`);
     const address = { coreId: cardPC!.coreId, threadId: threads[0]!.id };
-    await expect(server.call('collaboration.read', { threadId: threads[1]!.id, target: address })).rejects.toThrow('not allowed to read');
+    expect(await thrown(server.call('collaboration.read', { threadId: threads[1]!.id, target: address }))).toThrow('not allowed to read');
     // Install an existing directional permission before the app migrates its legacy connections.
     await pc.call('collaboration.trust', { peer: { ...cardServer!, readThreads: true, viaClient: true } });
     // The server cannot dial this address. Only the real browser relay can complete the read.
     await server.call('collaboration.trust', { peer: { ...cardPC!, url: 'http://127.0.0.1:1', viaClient: true } });
     expect((await server.call('collaboration.read', { threadId: threads[1]!.id, target: address })).contact.threadId).toBe(threads[0]!.id);
-    await expect(pc.call('collaboration.read', { threadId: threads[0]!.id, target: { coreId: cardServer!.coreId, threadId: threads[1]!.id } })).rejects.toThrow('not allowed to read');
+    expect(await thrown(pc.call('collaboration.read', { threadId: threads[0]!.id, target: { coreId: cardServer!.coreId, threadId: threads[1]!.id } }))).toThrow('not allowed to read');
     await page.click('[data-testid=nav-settings]'); await page.click('[data-testid=settings-tab-machines]');
     await page.waitFor('globalThis.__boiteTest.workspace.machines.every(machine => machine.store.group?.cores.length === 2)');
     expect(await pc.call('collaboration.peers', {})).toEqual([]);
@@ -74,7 +75,7 @@ test('the owner app relays signed reads, preserves directional grants on reload,
     expect(await pc.call('collaboration.peers', {})).toEqual([]);
     expect((await server.call('collaboration.read', { threadId: threads[1]!.id, target: address })).contact.threadId).toBe(threads[0]!.id);
     await pc.call('collaboration.untrust', { coreId: cardServer!.coreId });
-    await expect(server.call('collaboration.read', { threadId: threads[1]!.id, target: address })).rejects.toThrow('not allowed to read');
+    expect(await thrown(server.call('collaboration.read', { threadId: threads[1]!.id, target: address }))).toThrow('not allowed to read');
     await page.click(`[data-thread-id="${threads[0]!.id}"]`);
     await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(threads[0]!.id)} && globalThis.__boiteTest.workspace.active.loadingThreadId === null`);
     await page.type('[data-testid=composer-input]', 'Prepare the filesystem [think][sleep:60000]');
@@ -94,7 +95,7 @@ test('the owner app relays signed reads, preserves directional grants on reload,
     await page.waitFor('document.querySelector("[data-testid=trace-panel]")');
     await pc.call('turns.stop', { threadId: threads[0]!.id });
     await page.close(); page = undefined;
-    await expect(server.call('collaboration.read', { threadId: threads[1]!.id, target: address })).rejects.toThrow();
+    expect(await thrown(server.call('collaboration.read', { threadId: threads[1]!.id, target: address }))).toThrow();
   } finally {
     await page?.close(); await ui?.close();
     for (const client of clients) client.close();

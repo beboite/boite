@@ -7,6 +7,7 @@ import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts'
 import { checkAttachments } from '../src/threads/inputs.ts';
 import { FileReferences, fileReference, prepareAttachments } from '../src/attachments.ts';
 import { continuationInput } from '../src/continuation.ts';
+import { rejection } from './settle.ts';
 
 let harness: TestCore;
 beforeEach(async () => { harness = await startTestCore(); });
@@ -80,7 +81,7 @@ test('malformed attachment arrays are refused before retry fingerprinting', asyn
   const client = await harness.connect();
   const { threadId } = await echoThread(harness, client);
   for (const attachments of [{}, [null]]) {
-    await expect(client.call('turns.start', { threadId, prompt: 'Read', clientRequestId: 'invalid-files', attachments: attachments as never })).rejects.toMatchObject({ rpc: { code: RpcErrorCode.Refused, message: expect.stringContaining('attachment') } });
+    expect((await rejection(client.call('turns.start', { threadId, prompt: 'Read', clientRequestId: 'invalid-files', attachments: attachments as never }))).reason).toMatchObject({ rpc: { code: RpcErrorCode.Refused, message: expect.stringContaining('attachment') } });
   }
   expect(harness.core.journal.listTurns(threadId)).toEqual([]);
 });

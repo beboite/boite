@@ -4,11 +4,11 @@ import { join } from 'node:path';
 
 const repo = join(import.meta.dir, '../..');
 
-/** The steps of one job of ci.yml, by name, as raw YAML text. */
-function steps(job: string): Map<string, string> {
-  const workflow = readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8');
+/** The steps of one job of a workflow, by name, as raw YAML text. */
+function steps(job: string, file = 'ci.yml'): Map<string, string> {
+  const workflow = readFileSync(join(repo, '.github/workflows', file), 'utf8');
   const start = workflow.indexOf(`\n  ${job}:\n`);
-  if (start < 0) throw new Error(`ci.yml: no job ${job}`);
+  if (start < 0) throw new Error(`${file}: no job ${job}`);
   const end = workflow.slice(start + 1).search(/\n {2}[a-z][\w-]*:\n/);
   const body = end < 0 ? workflow.slice(start) : workflow.slice(start, start + 1 + end);
   const named = new Map<string, string>();
@@ -30,6 +30,16 @@ test('the Windows E2E steps keep Chrome profiles and data directories on the run
     expect(step).toMatch(/^ {8}env:\n(?: {10}\S.*\n)*? {10}TEMP: \$\{\{ runner\.temp \}\}$/m);
     expect(step).toMatch(/^ {8}env:\n(?: {10}\S.*\n)*? {10}TMP: \$\{\{ runner\.temp \}\}$/m);
   }
+});
+
+test('the native shell E2E step keeps test shells and their WebView2 profiles on the runner temp drive', () => {
+  // On C:, the first document request waited for the fresh profile's cookie
+  // database: 1.1 s on average and 10.4 s at worst, against 0.5 s at worst on
+  // D:. The page stayed about:blank past the 15 s wait in five runs.
+  const step = steps('windows', 'desktop.yml').get('Native shell end-to-end tests');
+  if (step === undefined) throw new Error('desktop.yml: the windows job has no step named Native shell end-to-end tests');
+  expect(step).toMatch(/^ {8}env:\n(?: {10}\S.*\n)*? {10}TEMP: \$\{\{ runner\.temp \}\}$/m);
+  expect(step).toMatch(/^ {8}env:\n(?: {10}\S.*\n)*? {10}TMP: \$\{\{ runner\.temp \}\}$/m);
 });
 
 test('every E2E shard stops a hung run before its job limit and uploads the report', () => {

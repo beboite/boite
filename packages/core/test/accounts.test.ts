@@ -8,6 +8,7 @@ import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const ECHO_LOGIN_SCRIPT = fileURLToPath(new URL('../src/providers/shipped/echo-login.ts', import.meta.url));
 // A Claude login may be in the macOS Keychain or Windows Credential Manager, so a missing file proves nothing there.
@@ -165,7 +166,7 @@ describe('accounts', () => {
     const updated = client.next('accounts.updated', entry => entry.id === account.id && entry.label === 'Work');
     expect(await client.call('accounts.rename', { accountId: account.id, label: ' Work ' })).toEqual({ ...account, label: 'Work' });
     expect((await updated).label).toBe('Work');
-    await expect(client.call('accounts.rename', { accountId: account.id, label: ' ' })).rejects.toThrow('label');
+    expect(await thrown(client.call('accounts.rename', { accountId: account.id, label: ' ' }))).toThrow('label');
     expect(harness.core.accounts.require(account.id).label).toBe('Work');
   });
 
@@ -429,8 +430,8 @@ describe('accounts', () => {
     for (const entry of harness.core.accounts.list().filter(entry => entry.providerId === 'echo')) {
       await client.call('accounts.remove', { accountId: entry.id });
     }
-    await expect(client.call('turns.start', { threadId: thread.id, prompt: 'hello' })).rejects.toThrow('was removed');
-    await expect(client.call('threads.update', { threadId: thread.id, model: null })).rejects.toThrow('was removed');
+    expect(await thrown(client.call('turns.start', { threadId: thread.id, prompt: 'hello' }))).toThrow('was removed');
+    expect(await thrown(client.call('threads.update', { threadId: thread.id, model: null }))).toThrow('was removed');
     expect((await client.call('threads.update', { threadId: thread.id, title: 'Kept' })).title).toBe('Kept');
     const fresh = await client.call('accounts.add', { providerId: 'echo', label: 'Fresh' });
     const moved = await client.call('threads.update', { threadId: thread.id, accountId: fresh.id });

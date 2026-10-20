@@ -4,6 +4,7 @@ import * as clients from '../../packages/core/src/client.ts';
 import * as cores from './lib/core.ts';
 import { echoTurns } from '../../bench/boite2.ts';
 import { pidAlive, RssSampler } from '../../bench/lib/proc.ts';
+import { thrown } from '../../packages/core/test/settle.ts';
 
 test('a rejected benchmark turn closes its core, sampler and temporary project', async () => {
   let running: cores.RunningCore | undefined;
@@ -30,7 +31,7 @@ test('a rejected benchmark turn closes its core, sampler and temporary project',
     async stop() { samplerStopped = true; return []; },
   } as unknown as RssSampler);
   try {
-    await expect(echoTurns(2, 3, 5)).rejects.toThrow('benchmark start rejected');
+    expect(await thrown(echoTurns(2, 3, 5))).toThrow('benchmark start rejected');
     expect(samplerStopped).toBe(true);
     expect(running).toBeDefined();
     expect(pidAlive(running!.pid)).toBe(false);

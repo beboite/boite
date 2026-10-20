@@ -3,6 +3,7 @@ import { afterEach, expect, test } from 'bun:test';
 import type { DesktopUpdateStatus, ProviderDescriptor, ProviderId } from '@boite/contracts';
 import { connect, type CoreClient } from '../src/client.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore | null = null;
 const clients: CoreClient[] = [];
@@ -44,23 +45,23 @@ test('only this machine\'s own window reports its updater, and its report lasts 
   expect(await remote.call('core.desktopUpdateStatus', {})).toBeNull();
 
   // A member of the group, a browser tab with the token and the CLI hold no installer here.
-  await expect(remote.call('core.desktopUpdateReport', { status: offered })).rejects.toThrow('own desktop window only');
+  expect(await thrown(remote.call('core.desktopUpdateReport', { status: offered }))).toThrow('own desktop window only');
   const tab = await connect(h.url, h.token, { client: { name: 'pwa', version: '1' } });
   clients.push(tab);
-  await expect(tab.call('core.desktopUpdateReport', { status: offered })).rejects.toThrow('own desktop window only');
+  expect(await thrown(tab.call('core.desktopUpdateReport', { status: offered }))).toThrow('own desktop window only');
   const plugin = await connect(h.url, h.token, { client: { name: 'plugin', version: '1' } });
   clients.push(plugin);
-  await expect(plugin.call('core.desktopUpdateReport', { status: offered })).rejects.toThrow('own desktop window only');
+  expect(await thrown(plugin.call('core.desktopUpdateReport', { status: offered }))).toThrow('own desktop window only');
   // A phone holds no owner method at all.
   const owner = await h.connect();
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(h.url, '', { grant, client: { name: 'pwa', version: '1' } });
   clients.push(phone);
-  await expect(phone.call('core.desktopUpdateStatus', {})).rejects.toThrow('owner only');
+  expect(await thrown(phone.call('core.desktopUpdateStatus', {}))).toThrow('owner only');
 
   const local = await window(h);
-  await expect(local.call('core.desktopUpdateReport', { status: { ...offered, phase: 'gone' } as never })).rejects.toThrow('status.phase must be one of');
-  await expect(local.call('core.desktopUpdateReport', { status: { ...offered, received: -1 } })).rejects.toThrow('status.received');
+  expect(await thrown(local.call('core.desktopUpdateReport', { status: { ...offered, phase: 'gone' } as never }))).toThrow('status.phase must be one of');
+  expect(await thrown(local.call('core.desktopUpdateReport', { status: { ...offered, received: -1 } }))).toThrow('status.received');
   expect(await local.call('core.desktopUpdateReport', { status: offered })).toEqual({ ok: true });
   expect(await remote.call('core.desktopUpdateStatus', {})).toEqual(offered);
   await waitFor(() => changes.length === 1);
@@ -78,7 +79,7 @@ test('no window open names the machine; a release the window does not offer is r
   const none = await remote.call('core.updateEverything', { agents: [], server: null, app: '2.0.0-beta.2' });
   expect(none.app).toBeNull();
   expect(none.appError).toBe(`Boite is not open on ${hostname()}`);
-  await expect(remote.call('core.updateEverything', { agents: [], server: null, app: 7 as never })).rejects.toThrow('core.updateEverything.app');
+  expect(await thrown(remote.call('core.updateEverything', { agents: [], server: null, app: 7 as never }))).toThrow('core.updateEverything.app');
 
   const local = await window(h);
   await local.call('core.desktopUpdateReport', { status: offered });

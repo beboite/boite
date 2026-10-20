@@ -153,6 +153,9 @@ export class WsClient implements ObservableClient {
     if (this.#retryTimer !== null) clearTimeout(this.#retryTimer);
     this.#retryTimer = null;
     this.#teardown('connection resumed; check the conversation before resending', true);
+    // The failures before the page went away say nothing of the network it came back to:
+    // the new socket gets the first deadline and backoff, not the 30 s and 10 s they climbed to.
+    this.#attempt = 0;
     await this.#startOpen();
   }
 

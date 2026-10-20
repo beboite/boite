@@ -9,6 +9,7 @@ import { HISTORY_CHARS, OutputHistory, commandLine, pickShell, threadTerminalId,
 import { HistoryAnnounce, defaultHistoryFile, integrate, parseHistory } from '../src/terminal-integration.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const ECHO_LOGIN_SCRIPT = fileURLToPath(new URL('../src/providers/shipped/echo-login.ts', import.meta.url));
 /** A shell with the user's profile can take a few seconds to draw its first prompt. */
@@ -162,7 +163,7 @@ describe('terminals', () => {
     const id = threadTerminalId(threadId);
     const seen = watch(client, id);
 
-    await expect(client.call('terminals.open', { threadId, cols: 0, rows: 24 })).rejects.toThrow(/cols must be an integer/);
+    expect(await thrown(client.call('terminals.open', { threadId, cols: 0, rows: 24 }))).toThrow(/cols must be an integer/);
     const opened = await client.call('terminals.open', { threadId, cols: 100, rows: 30 });
     expect(opened.id).toBe(id);
     expect(opened.cwd).toBe(harness.core.threads.require(threadId).cwd);
@@ -180,7 +181,7 @@ describe('terminals', () => {
     await client.call('terminals.close', { id });
     await waitFor(() => seen.exited() !== null);
     await waitFor(() => harness.core.procs.liveCount(id) === 0);
-    await expect(client.call('terminals.write', { id, data: 'x' })).rejects.toThrow(/no terminal is running/);
+    expect(await thrown(client.call('terminals.write', { id, data: 'x' }))).toThrow(/no terminal is running/);
   }, 30_000);
 
   test('a burst of output goes out in fewer events than chunks, and a snapshot is exactly what went out', async () => {
@@ -237,7 +238,7 @@ describe('terminals', () => {
     await client.call('threads.archive', { threadId });
     await waitFor(() => seen.exited() !== null, SHELL_MS);
     expect(harness.core.terminals.has(id)).toBe(false);
-    await expect(client.call('terminals.open', { threadId, cols: 80, rows: 24 })).rejects.toThrow(/is archived/);
+    expect(await thrown(client.call('terminals.open', { threadId, cols: 80, rows: 24 }))).toThrow(/is archived/);
   }, 30_000);
 
   test('a closing shell keeps its id until it exits, and removing the project waits for it', async () => {
@@ -264,7 +265,7 @@ describe('terminals', () => {
     const first = threadTerminalId(threadId);
     const second = threadTerminalId(threadId, 'term-2');
     const third = threadTerminalId(threadId, 'term-3');
-    await expect(client.call('terminals.open', { threadId, cols: 80, rows: 24, terminalId: 'Bad id' })).rejects.toThrow(/terminalId must be/);
+    expect(await thrown(client.call('terminals.open', { threadId, cols: 80, rows: 24, terminalId: 'Bad id' }))).toThrow(/terminalId must be/);
     await client.call('terminals.open', { threadId, cols: 80, rows: 24 });
     const opened = await client.call('terminals.open', { threadId, cols: 80, rows: 24, terminalId: 'term-2' });
     expect(opened.id).toBe(second);
@@ -433,7 +434,7 @@ describe('terminals', () => {
     else expect(harness.core.journal.listProcesses(id, 10)[0]?.commandLine).toContain('echo-login.ts');
     // Attaching again is the same shell, not a second login, and no piped one starts beside it.
     expect((await client.call('accounts.loginTerminal', { accountId: account.id, cols: 100, rows: 30 })).id).toBe(id);
-    await expect(client.call('accounts.login', { accountId: account.id })).rejects.toThrow(/already running/);
+    expect(await thrown(client.call('accounts.login', { accountId: account.id }))).toThrow(/already running/);
 
     await client.call('terminals.write', { id, data: 'fake-code\r' });
     await waitFor(() => existsSync(join(account.isolationDir ?? '', '.credentials.json')), SHELL_MS);
@@ -447,7 +448,7 @@ describe('terminals', () => {
     const accounts = await client.call('accounts.list', {});
     const echo = accounts.find((entry) => entry.providerId === 'echo');
     if (echo === undefined) throw new Error('no echo account');
-    await expect(client.call('accounts.loginTerminal', { accountId: echo.id, cols: 80, rows: 24 })).rejects.toThrow(/does not sign in from a terminal/);
+    expect(await thrown(client.call('accounts.loginTerminal', { accountId: echo.id, cols: 80, rows: 24 }))).toThrow(/does not sign in from a terminal/);
     const { loaded } = await client.call('providers.list', {});
     expect(loaded.find((provider) => provider.id === 'opencode')?.login).toEqual({ kind: 'terminal' });
     expect(loaded.find((provider) => provider.id === 'grok')?.login).toEqual({ kind: 'terminal' });

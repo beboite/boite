@@ -14,6 +14,7 @@ import { parseNumstat, parseStatus } from '../src/git.ts';
 import { GIT_READ_SLOTS, git as readGit, SIDE_CEILING_BYTES } from '../src/git/read.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { rejection, thrown } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
@@ -138,7 +139,7 @@ describe('git.status', () => {
     );
     try {
       const started = Date.now();
-      await expect(readGit(harness.core, threadId, path, ['status'], 300)).rejects.toThrow(/git status did not answer within 0.3 s/);
+      expect(await thrown(readGit(harness.core, threadId, path, ['status'], 300))).toThrow(/git status did not answer within 0.3 s/);
       expect(Date.now() - started).toBeLessThan(5_000);
       await waitFor(() => harness.core.procs.liveCount(threadId) === 0);
     } finally {
@@ -251,10 +252,10 @@ describe('git.diff', () => {
     } finally {
       for (const spy of spies) spy.mockRestore();
     }
-    await expect(client.call('git.diff', { threadId, path: 'moved.txt', oldPath: '../keep.txt' }))
-      .rejects.toThrow("git.diff oldPath leaves the thread's working directory: ../keep.txt");
-    await expect(client.call('git.diff', { threadId, path: 'moved.txt', oldPath: 3 as unknown as string }))
-      .rejects.toThrow('git.diff oldPath must be a path, got number');
+    expect(await thrown(client.call('git.diff', { threadId, path: 'moved.txt', oldPath: '../keep.txt' })))
+      .toThrow("git.diff oldPath leaves the thread's working directory: ../keep.txt");
+    expect(await thrown(client.call('git.diff', { threadId, path: 'moved.txt', oldPath: 3 as unknown as string })))
+      .toThrow('git.diff oldPath must be a path, got number');
   });
 
   test('a git without `cat-file --batch -z` reads the side in three steps, and only asks once', async () => {
@@ -285,8 +286,8 @@ describe('git.diff', () => {
     git(path, 'add', 'huge.bin');
     git(path, 'commit', '-q', '-m', 'huge');
     writeFileSync(join(path, 'huge.bin'), 'small now\n');
-    await expect(client.call('git.diff', { threadId, path: 'huge.bin', oldPath: null }))
-      .rejects.toThrow(`git.diff will not read huge.bin: it is over ${SIDE_CEILING_BYTES / (1024 * 1024)} MB on one side`);
+    expect(await thrown(client.call('git.diff', { threadId, path: 'huge.bin', oldPath: null })))
+      .toThrow(`git.diff will not read huge.bin: it is over ${SIDE_CEILING_BYTES / (1024 * 1024)} MB on one side`);
     await waitFor(() => harness.core.procs.liveCount(threadId) === 0);
   });
 
@@ -296,8 +297,8 @@ describe('git.diff', () => {
     writeFileSync(join(path, 'a.txt'), 'a\n');
     const threadId = await threadIn(path, 'plain');
     for (const params of [{}, { oldPath: null }]) {
-      await expect(client.call('git.diff', { threadId, path: 'a.txt', ...params }))
-        .rejects.toThrow(`the working directory of thread ${threadId} is not inside a git repository`);
+      expect(await thrown(client.call('git.diff', { threadId, path: 'a.txt', ...params })))
+        .toThrow(`the working directory of thread ${threadId} is not inside a git repository`);
     }
   });
 
@@ -305,8 +306,8 @@ describe('git.diff', () => {
     const path = await fixture();
     const threadId = await threadIn(path, 'repo');
     for (const ref of [null, false, 0, [], { length: 0 }]) {
-      await expect(client.call('git.diff', { threadId, path: 'a.txt', ref: ref as unknown as string }))
-        .rejects.toMatchObject({ rpc: { code: RpcErrorCode.Refused, message: 'git.diff ref must be a revision' } });
+      expect((await rejection(client.call('git.diff', { threadId, path: 'a.txt', ref: ref as unknown as string }))).reason)
+        .toMatchObject({ rpc: { code: RpcErrorCode.Refused, message: 'git.diff ref must be a revision' } });
     }
     const diff = await client.call('git.diff', { threadId, path: 'a.txt', ref: '' });
     expect(diff.oldText).toBe('one\ntwo\nthree\n');
@@ -359,7 +360,7 @@ test('git.diff refuses a junction leading outside the working directory', async 
   mkdirSync(outside);
   writeFileSync(join(outside, 'private.txt'), 'outside data');
   symlinkSync(outside, join(cwd, 'linked'), 'junction');
-  await expect(client.call('git.diff', { threadId, path: 'linked/private.txt' })).rejects.toThrow("leaves the thread's working directory");
+  expect(await thrown(client.call('git.diff', { threadId, path: 'linked/private.txt' }))).toThrow("leaves the thread's working directory");
 });
 
 describe('the porcelain formats', () => {

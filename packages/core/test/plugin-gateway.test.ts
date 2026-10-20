@@ -9,9 +9,10 @@ import { DOUANE_BINARY_ENV } from '../src/plugins/gateway.ts';
 import { recommendedPlugins } from '../src/plugins.ts';
 import { readSubscriptionProxyModels, subscriptionProxyEnv } from '../src/subscription-proxy.ts';
 import { startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const FAKE = join(import.meta.dir, 'fixtures', 'fake-douane.ts');
-const ENV = [DOUANE_BINARY_ENV, 'FAKE_DOUANE_VERSION', 'FAKE_DOUANE_CRASH_FILE', 'FAKE_DOUANE_IN_FLIGHT_FILE', 'BOITE_TOKEN'] as const;
+const ENV = [DOUANE_BINARY_ENV, 'FAKE_DOUANE_VERSION', 'FAKE_DOUANE_CRASH_FILE', 'FAKE_DOUANE_IN_FLIGHT_FILE', 'FAKE_DOUANE_RUNS_FILE', 'BOITE_TOKEN'] as const;
 const LOCAL: SubscriptionProxy = { enabled: true, kind: 'douane', mode: 'local', baseUrl: 'http://gateway.invalid', dashboardUrl: 'http://gateway.invalid/' };
 const ARTIFACT = 'https://plugins.example.invalid/douane';
 const realFetch = globalThis.fetch;
@@ -40,7 +41,7 @@ function douane(version: string, bytes: Uint8Array) {
   served.set(version, bytes);
   return parseManifest({
     schema: 1, id: 'douane', name: 'Douane', version,
-    description: 'Subscription gateway.', homepage: 'https://github.com/beboite/douane', executable: 'douane',
+    description: 'Subscription gateway.', homepage: 'https://github.com/mtsu-dev/douane', executable: 'douane',
     artifacts: { [platformKey()]: { url: `${ARTIFACT}/${version}`, sha256: sha256(bytes) } },
     provides: { gateway: {} },
   }, 'recommended.json[1]');
@@ -92,7 +93,7 @@ const live = () => harness!.core.procs.liveCount('plugin:douane:gateway');
 test('the recommended list ships Douane as a gateway plugin with an update source', () => {
   const shipped = recommendedPlugins().find((manifest) => manifest.id === 'douane');
   expect(shipped?.provides).toEqual({ gateway: {} });
-  expect(shipped?.homepage).toBe('https://github.com/beboite/douane');
+  expect(shipped?.homepage).toBe('https://github.com/mtsu-dev/douane');
   expect(() => parseManifest({ ...shipped, provides: { gateway: { port: 8787 } } }, 'boite-plugin.json')).toThrow('provides.gateway.port');
 });
 
@@ -123,7 +124,7 @@ test('an installed gateway runs on loopback without the owner token, and the loc
   expect((await owner.call('subscriptionProxy.movePlan', {})).origin).toBe('https://gateway.example.invalid');
   await owner.call('plugins.gateway', { id: 'douane', action: 'stop' });
   expect((await owner.call('subscriptionProxy.movePlan', { target: 'plugin' })).origin).toBeNull();
-  await expect(owner.call('subscriptionProxy.move', { ids: ['x'], target: 'plugin' })).rejects.toThrow('start the Douane plugin first');
+  expect(await thrown(owner.call('subscriptionProxy.move', { ids: ['x'], target: 'plugin' }))).toThrow('start the Douane plugin first');
 }, 30_000);
 
 test('a crash starts it again; a core start runs it only while it starts with Boite; uninstall keeps its data', async () => {
@@ -224,3 +225,40 @@ test.skipIf(process.platform === 'win32')('an update waits for the requests in f
   expect(readFileSync(binary, 'utf8')).toContain('0.4.0');
   expect(live()).toBe(1);
 }, 60_000);
+
+test('an update whose release exits at once says so, even when its relaunch would come before the answer', async () => {
+  const { owner } = await core();
+  const runs = join(harness!.dataDir, 'runs');
+  process.env.FAKE_DOUANE_RUNS_FILE = runs;
+  await owner.call('plugins.install', { id: 'douane' });
+  await gatewayIs(owner, 'running');
+
+  // The new release exits; a relaunch at once would start one that is still silent when the update reads why it failed.
+  harness!.core.plugins.gateways.relaunchDelaysMs = [0, 0, 0];
+  writeFileSync(runs, 'exit\nlate\n');
+  harness!.core.plugins.recommended = [douane('0.5.0', new Uint8Array([5]))];
+  await owner.call('plugins.install', { id: 'douane' });
+  const back = await until(() => state(owner), (plugin) => plugin.status === 'error' && plugin.gateway?.status === 'running', 'the previous release back');
+  expect(back.version).toBe('0.3.0');
+  expect(back.error).toBe('douane exited with code 1. 0.3.0 runs again.');
+  await until(live, (count) => count === 1, 'one gateway process');
+}, 30_000);
+
+test('an updated gateway that crashes later starts again', async () => {
+  const { owner } = await core();
+  await owner.call('plugins.install', { id: 'douane' });
+  await gatewayIs(owner, 'running');
+
+  // The new release answers, then crashes: the update kept it, so the crash relaunches it like any other.
+  const crash = join(harness!.dataDir, 'crash-once');
+  writeFileSync(crash, '');
+  process.env.FAKE_DOUANE_CRASH_FILE = crash;
+  const seen: string[] = [];
+  owner.on('plugins.updated', (plugin) => { if (plugin.gateway?.error) seen.push(plugin.gateway.error); });
+  harness!.core.plugins.recommended = [douane('0.5.0', new Uint8Array([5]))];
+  await owner.call('plugins.install', { id: 'douane' });
+  await until(() => state(owner), (plugin) => plugin.status === 'installed' && plugin.version === '0.5.0', 'the update kept');
+  await until(() => seen, (errors) => errors.some((error) => /exited with code 3.*starting it again/.test(error)), 'the crash and its relaunch');
+  await gatewayIs(owner, 'running', 'running again');
+  await until(live, (count) => count === 1, 'one gateway process');
+}, 30_000);

@@ -17,6 +17,7 @@ import { getDriver, setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider } from './scripted-provider.ts';
+import { thrown } from './settle.ts';
 
 /** The fake ACP agent: a real ACP process over stdio, run by bun. */
 const FAKE_AGENT = fileURLToPath(new URL('./fixtures/acp-agent.ts', import.meta.url));
@@ -536,9 +537,9 @@ describe('acp driver', () => {
     const request = await requested;
     expect(request.options.map((option) => option.id)).toEqual(['yes', 'no']);
     // No free field, so no file either: ACP's answer is an option id.
-    await expect(client.call('questions.answer', {
+    expect(await thrown(client.call('questions.answer', {
       threadId, questionId: request.id, optionIds: ['no'], attachments: [{ kind: 'file', mimeType: 'text/plain', data: 'aGk=', name: 'a.txt' }],
-    })).rejects.toThrow('the question takes no files');
+    }))).toThrow('the question takes no files');
     await client.call('questions.answer', { threadId, questionId: request.id, optionIds: ['no'] });
     expect((await finished).status).toBe('done');
     const thread = await client.call('threads.get', { threadId });
@@ -762,7 +763,7 @@ describe('acp driver', () => {
     const { accountId, projectId } = await acpAccount(client);
     process.env['ACP_FAKE_EXIT_AT_START'] = '1';
 
-    await expect(client.call('providers.probe', { providerId: 'acp-fake', accountId })).rejects.toThrow(
+    expect(await thrown(client.call('providers.probe', { providerId: 'acp-fake', accountId }))).toThrow(
       /exited with code 4: not signed in/,
     );
 
@@ -791,7 +792,7 @@ describe('acp driver', () => {
         spawn(cmd, args, { cwd: opts?.cwd, env: opts?.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }),
       onLine: (line) => lines.push(line),
     });
-    await expect(login.done).rejects.toThrow(/exited with code 4 before it authenticated: not signed in/);
+    expect(await thrown(login.done)).toThrow(/exited with code 4 before it authenticated: not signed in/);
     login.kill();
     await login.exited;
   });
@@ -1190,9 +1191,7 @@ describe('acp driver', () => {
     await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
     expect((await finished).status).toBe('done');
 
-    await expect(
-      client.call('providers.probe', { providerId: 'acp-fake', accountId, model: '' }),
-    ).rejects.toThrow(/model must be a non-empty string/);
+    expect(await thrown(client.call('providers.probe', { providerId: 'acp-fake', accountId, model: '' }))).toThrow(/model must be a non-empty string/);
   });
 
   test('a second probe answers from the cache, an unchanged reload keeps it, and refresh reads again', async () => {
@@ -1230,7 +1229,7 @@ describe('acp driver', () => {
     expect(thread.model).toBe('fake-smart');
     expect(thread.effort).toBeNull();
     expect((await client.call('threads.update', { threadId: thread.id, effort: 'high' })).effort).toBe('high');
-    await expect(client.call('threads.update', { threadId: thread.id, effort: 'unsupported' })).rejects.toThrow(/does not offer this reasoning effort/);
+    expect(await thrown(client.call('threads.update', { threadId: thread.id, effort: 'unsupported' }))).toThrow(/does not offer this reasoning effort/);
   });
 
   test('the thread permission mode becomes a session mode, and the one the agent is on sends nothing', async () => {

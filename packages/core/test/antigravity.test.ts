@@ -15,6 +15,7 @@ import { probeTimeoutMs } from '../src/drivers/acp/probe.ts';
 import { LAUNCH_TEMP_DIR } from '../src/drivers/launch-temp.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 /** The fake Antigravity server: a real ACP process over stdio, run by bun. */
 const FAKE_AGENT = fileURLToPath(new URL('./fixtures/antigravity-agent.ts', import.meta.url));
@@ -184,7 +185,7 @@ describe('antigravity', () => {
     expect(loggedEnv('GEMINI_API_KEY')).toBe('');
 
     // A pasted code is what a CLI login takes; this one takes the redirect URL.
-    await expect(client.call('accounts.loginInput', { accountId: account.id, text: '1234-5678' })).rejects.toThrow(
+    expect(await thrown(client.call('accounts.loginInput', { accountId: account.id, text: '1234-5678' }))).toThrow(
       /redirect URL/,
     );
 
@@ -199,12 +200,8 @@ describe('antigravity', () => {
     // the user's machine, sent from the core.
     const elsewhere = new URL(callback ?? '');
     const otherPort = String(Number(elsewhere.port) + 1);
-    await expect(
-      client.call('accounts.loginInput', { accountId: account.id, text: `http://127.0.0.1:${otherPort}/oauth2callback?code=x` }),
-    ).rejects.toThrow(/this login listens on/);
-    await expect(
-      client.call('accounts.loginInput', { accountId: account.id, text: `http://127.0.0.1:${elsewhere.port}/admin/shutdown` }),
-    ).rejects.toThrow(/this login listens on/);
+    expect(await thrown(client.call('accounts.loginInput', { accountId: account.id, text: `http://127.0.0.1:${otherPort}/oauth2callback?code=x` }))).toThrow(/this login listens on/);
+    expect(await thrown(client.call('accounts.loginInput', { accountId: account.id, text: `http://127.0.0.1:${elsewhere.port}/admin/shutdown` }))).toThrow(/this login listens on/);
 
     await client.call('accounts.loginInput', { accountId: account.id, text: callback ?? '' });
 

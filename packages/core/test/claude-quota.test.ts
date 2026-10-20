@@ -6,6 +6,7 @@ import type { ProbeContext } from '../src/drivers/types.ts';
 import { claudeQuotaWindows } from '../src/quotas.ts';
 import { scriptedClaude, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 beforeEach(async () => { harness = await startTestCore(); scriptedClaude(harness); });
@@ -59,6 +60,6 @@ test('an account the plan limits do not apply to says so instead of an empty quo
     close: () => undefined,
   })) as unknown as QueryFn;
   const killed = { count: 0 };
-  await expect(readClaudeQuota(context(killed), { loadQuery: () => Promise.resolve(queryFn) })).rejects.toThrow('no subscription login');
+  expect(await thrown(readClaudeQuota(context(killed), { loadQuery: () => Promise.resolve(queryFn) }))).toThrow('no subscription login');
   expect(killed.count).toBe(1);
 });

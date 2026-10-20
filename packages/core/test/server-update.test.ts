@@ -12,6 +12,7 @@ import { openDataDir, restoreSnapshot, type FileLock, type RestoreMoves } from '
 import type { ServerUpdatePlan, ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { echoThread, holdAccountTurns, startTestCore, waitFor } from './harness.ts';
 import { lockDataDir } from '../src/main.ts';
+import { thrown } from './settle.ts';
 
 /** A publisher key and a Minisign packet over `bytes`, in the shape Tauri publishes. */
 function publisher() {
@@ -54,7 +55,7 @@ test('an offer is taken from the release under the old or the new owner, never a
     const url = `https://github.com/${owner}/boite/releases/download/v2.0.0/boite-server_2.0.0_x64.zip`;
     expect((await offered(url))?.url).toBe(url);
   }
-  await expect(offered('https://github.com/someone/boite/releases/download/v2.0.0/boite-server_2.0.0_x64.zip')).rejects.toThrow('signed boite-server_2.0.0_x64.zip');
+  expect(await thrown(offered('https://github.com/someone/boite/releases/download/v2.0.0/boite-server_2.0.0_x64.zip'))).toThrow('signed boite-server_2.0.0_x64.zip');
 });
 
 test('a downloaded archive is verified over every byte, refused when altered, and unpacks the files it holds', async () => {
@@ -82,7 +83,7 @@ test('a downloaded archive is verified over every byte, refused when altered, an
       const altered = Buffer.from(archive);
       altered[altered.length - 1]! ^= 1;
       served = altered;
-      await expect(downloadPayload(offer, join(directory, 'altered.zip'), AbortSignal.timeout(10_000), () => {}, publicKey)).rejects.toThrow('verification failed');
+      expect(await thrown(downloadPayload(offer, join(directory, 'altered.zip'), AbortSignal.timeout(10_000), () => {}, publicKey))).toThrow('verification failed');
     }
   } finally {
     await server.stop(true);
@@ -96,19 +97,19 @@ test('signed server archives cannot escape staging or disagree with their offere
     const zip = join(root, 'payload.zip');
     const entries = { 'boite-core': Buffer.from('executable'), 'boite': Buffer.from('shim'), 'ui/index.html': Buffer.from('UI'), 'server-release.json': Buffer.from('{"version":"2.1.0"}') };
     writeFileSync(zip, zipSync(entries));
-    await expect(unpackPayload(zip, join(root, 'stage'), '2.0.0')).rejects.toThrow('version');
+    expect(await thrown(unpackPayload(zip, join(root, 'stage'), '2.0.0'))).toThrow('version');
     writeFileSync(zip, zipSync({ ...entries, 'ui/../../escaped': Buffer.from('unsafe') }));
-    await expect(unpackPayload(zip, join(root, 'stage'), '2.1.0')).rejects.toThrow('Unsafe');
+    expect(await thrown(unpackPayload(zip, join(root, 'stage'), '2.1.0'))).toThrow('Unsafe');
     expect(readdirSync(root)).not.toContain('escaped');
     writeFileSync(zip, zipSync({ ...entries, 'other': Buffer.from('extra') }));
-    await expect(unpackPayload(zip, join(root, 'stage-other'), '2.1.0')).rejects.toThrow('Unexpected');
+    expect(await thrown(unpackPayload(zip, join(root, 'stage-other'), '2.1.0'))).toThrow('Unexpected');
     expect(readdirSync(join(root, 'stage-other'))).not.toContain('other');
     const { 'boite': _, ...missing } = entries;
     writeFileSync(zip, zipSync(missing));
-    await expect(unpackPayload(zip, join(root, 'stage-missing'), '2.1.0')).rejects.toThrow('missing boite');
+    expect(await thrown(unpackPayload(zip, join(root, 'stage-missing'), '2.1.0'))).toThrow('missing boite');
     // A cancelled update stops unpacking.
     writeFileSync(zip, zipSync(entries));
-    await expect(unpackPayload(zip, join(root, 'stage-cancelled'), '2.1.0', AbortSignal.abort(new Error('cancelled')))).rejects.toThrow('cancelled');
+    expect(await thrown(unpackPayload(zip, join(root, 'stage-cancelled'), '2.1.0', AbortSignal.abort(new Error('cancelled'))))).toThrow('cancelled');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -137,7 +138,7 @@ test('a busy server hands running and queued turns to the next core at once; onl
   try {
     const client = await h.connect();
     expect((await client.call('core.updateStatus', { refresh: true })).phase).toBe('available');
-    await expect(client.call('core.updateInstall', { version: '2.0.0-beta.3' })).rejects.toThrow('version');
+    expect(await thrown(client.call('core.updateInstall', { version: '2.0.0-beta.3' }))).toThrow('version');
     const first = await echoThread(h, client, 'first');
     const second = await echoThread(h, client, 'queued');
     release = holdAccountTurns(h, second.accountId);
@@ -337,14 +338,14 @@ for (const mode of ['installs', 'fails', 'full'] as const) test(`update helper $
       spareBytes: mode === 'full' ? Number.MAX_SAFE_INTEGER : fails ? spare : 0, disk: fails ? low.disk : undefined,
       health: async () => fails ? null : { ok: true, version: '2.1.0', pid: 456 } });
     if (mode === 'full') {
-      await expect(run).rejects.toThrow('Not enough disk space');
+      expect(await thrown(run)).toThrow('Not enough disk space');
       // The core admitted the update and exits by itself; it is started again as it was.
       expect(f.controls).toEqual(['stop', 'start']);
       expect(existsSync(f.backup)).toBe(false);
       expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('old executable');
       expect(f.result().error).toContain('Server update was not installed. Not enough disk space');
     } else if (fails) {
-      await expect(run).rejects.toThrow('healthy');
+      expect(await thrown(run)).toThrow('healthy');
       f.expectPrevious();
       expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
       // The snapshot moved back instead of being copied a second time.
@@ -383,12 +384,12 @@ test('with the data on another filesystem, an update reserves room there for the
     try {
       const run = applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk: low.disk, health: async () => null });
       if (!roomy) {
-        await expect(run).rejects.toThrow(`Not enough disk space beside ${f.data} for a rollback`);
+        expect(await thrown(run)).toThrow(`Not enough disk space beside ${f.data} for a rollback`);
         expect(f.controls).toEqual(['stop', 'start']);
         expect(existsSync(f.backup)).toBe(false);
         continue;
       }
-      await expect(run).rejects.toThrow('healthy');
+      expect(await thrown(run)).toThrow('healthy');
       f.expectPrevious();
       expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
       // A rename cannot cross filesystems: one copy each way, each within the room checked.
@@ -410,7 +411,7 @@ test('a rollback whose data restore fails after the new version ran keeps the se
     low.disk.copy!(source, target, filter);
   } };
   try {
-    await expect(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk, health: async () => null })).rejects.toThrow('EIO');
+    expect(await thrown(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk, health: async () => null }))).toThrow('EIO');
     // The previous core would open the data the rejected one migrated: nothing starts it.
     expect(f.controls).toEqual(['stop', 'start', 'stop']);
     expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('old executable');
@@ -439,7 +440,7 @@ test('a rollback whose only failure is deleting the used snapshot starts the pre
     low.disk.rename!(source, target);
   } };
   try {
-    await expect(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk, health: async () => null })).rejects.toThrow('healthy');
+    expect(await thrown(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: spare, disk, health: async () => null }))).toThrow('healthy');
     f.expectPrevious();
     expect(f.controls).toEqual(['stop', 'start', 'stop', 'start']);
     expect(existsSync(join(f.operation, 'finished'))).toBe(true);
@@ -666,7 +667,7 @@ test('a rollback records its restore before the previous version can boot, so a 
     if (target === f.install) throw new Error('power cut');
   } };
   try {
-    await expect(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: 0, disk, health: async () => null })).rejects.toThrow('power cut');
+    expect(await thrown(applyServerUpdate(f.file, f.platform, { pollMs: 5, healthTimeoutMs: 35, spareBytes: 0, disk, health: async () => null }))).toThrow('power cut');
     expect(readFileSync(join(f.install, 'boite-core'), 'utf8')).toBe('old executable');
     // At boot the service starts the previous version.
     open(f)();
@@ -843,7 +844,7 @@ test('the Linux worker is throttled rather than capped and its unit recovers the
     expect(args.slice(-3)).toEqual([executable, 'update-apply', plan]);
     // A refused launch takes its link back.
     rmSync(link);
-    await expect(linuxServerUpdates().launch(async () => { throw new Error('systemd-run: refused'); }, executable, plan)).rejects.toThrow('refused');
+    expect(await thrown(linuxServerUpdates().launch(async () => { throw new Error('systemd-run: refused'); }, executable, plan))).toThrow('refused');
     expect(existsSync(link)).toBe(false);
     expect(unitWord('/srv/my "boite"')).toBe(String.raw`"/srv/my \"boite\""`);
     expect(() => unitWord('/srv/$HOME/boite')).toThrow('must not contain');

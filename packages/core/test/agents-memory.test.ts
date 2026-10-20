@@ -6,6 +6,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { parseMemoryAnswer } from '../src/agents/memory.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
@@ -130,8 +131,8 @@ test('brains move to the folder the owner chooses, named after their agents, and
   const root = realpathSync(join(h.dataDir, '..', `brains-${agent.id}`));
   const taken = join(root, 'open-source-2');
   writeFileSync(join(taken, 'note.md'), 'mine');
-  await expect(client.call('agents.brain.root', { path: 'relative/brains' })).rejects.toThrow('absolute');
-  await expect(client.call('agents.brain.root', { path: join(h.dataDir, 'inside') })).rejects.toThrow("core's own data");
+  expect(await thrown(client.call('agents.brain.root', { path: 'relative/brains' }))).toThrow('absolute');
+  expect(await thrown(client.call('agents.brain.root', { path: join(h.dataDir, 'inside') }))).toThrow("core's own data");
 
   const chosen = await client.call('agents.brain.root', { path: root });
   expect(chosen).toEqual({ path: root, custom: true });
@@ -149,7 +150,7 @@ test('brains move to the folder the owner chooses, named after their agents, and
   mkdirSync(join(root, '..', `busy-${agent.id}`, 'open-source'), { recursive: true });
   const busy = realpathSync(join(root, '..', `busy-${agent.id}`));
   writeFileSync(join(busy, 'open-source', 'MEMORY.md'), 'other');
-  await expect(client.call('agents.brain.root', { path: busy })).resolves.toEqual({ path: busy, custom: true });
+  expect(await client.call('agents.brain.root', { path: busy })).toEqual({ path: busy, custom: true });
   expect(h.core.workforce.resident.brain(agent.id).path).toBe(join(busy, 'open-source-2'));
 
   expect(await client.call('agents.brain.root', { path: null })).toEqual({ path: join(h.dataDir, 'agent-workspaces'), custom: false });

@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { expect, test } from 'bun:test';
 import { BrowserPage } from './lib/cdp.ts';
+import { thrown } from '../../packages/core/test/settle.ts';
 
 test('browser condition waits bound unresolved evaluations and refuse closed pages', async () => {
   const page = await BrowserPage.launch({ url: 'about:blank' });
@@ -10,8 +11,8 @@ test('browser condition waits bound unresolved evaluations and refuse closed pag
     const expression = 'new Promise(() => {})';
     const started = performance.now();
     const waiting = page.waitFor(expression, 100);
-    await expect(waiting).rejects.toThrow(`waitFor timed out on ${expression}`);
-    await expect(waiting).rejects.toThrow('"ready":"complete"');
+    expect(await thrown(waiting)).toThrow(`waitFor timed out on ${expression}`);
+    expect(await thrown(waiting)).toThrow('"ready":"complete"');
     const elapsed = performance.now() - started;
     console.info(`Unresolved condition: ${elapsed.toFixed(1)} ms for a 100 ms budget; captured browser ${pid}`);
     // Allows the bounded diagnostic grace and scheduling delay, not a fresh 20-second CDP deadline.
@@ -20,15 +21,15 @@ test('browser condition waits bound unresolved evaluations and refuse closed pag
 
     // This bounded task occupies the renderer long enough that even diagnostics cannot answer.
     const blocked = performance.now();
-    await expect(page.waitFor('(() => { const end = performance.now() + 1500; while (performance.now() < end) {} return false; })()', 100))
-      .rejects.toThrow('page diagnostic timed out');
+    expect(await thrown(page.waitFor('(() => { const end = performance.now() + 1500; while (performance.now() < end) {} return false; })()', 100)))
+      .toThrow('page diagnostic timed out');
     const blockedElapsed = performance.now() - blocked;
     console.info(`Unresponsive renderer: ${blockedElapsed.toFixed(1)} ms including bounded diagnostics`);
     expect(blockedElapsed).toBeLessThan(1_000);
 
     await page.close();
     const closed = performance.now();
-    await expect(page.waitFor('true', 1_000)).rejects.toThrow('the browser is closed');
+    expect(await thrown(page.waitFor('true', 1_000))).toThrow('the browser is closed');
     expect(performance.now() - closed).toBeLessThan(250);
   } finally {
     await page.close();

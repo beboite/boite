@@ -3,6 +3,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import type { Message, RpcResult } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 
@@ -207,7 +208,7 @@ describe('deferred pictures', () => {
     expect((await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0, display: true })).data).toBe(copy.data);
     expect(reads).toBe(0);
     const other = await echoThread(harness, client, 'other thread');
-    await expect(client.call('messages.attachment', { threadId: other.threadId, messageId: 'msg_screen', partIndex: 0, display: true })).rejects.toThrow('is not a message of thread');
+    expect(await thrown(client.call('messages.attachment', { threadId: other.threadId, messageId: 'msg_screen', partIndex: 0, display: true }))).toThrow('is not a message of thread');
     journal.messagePart = messagePart;
     // The original is still what a plain read gives; a copy heavier than its PNG is not sent; a GIF stays a GIF.
     expect(await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0 })).toEqual({ data: SCREEN });

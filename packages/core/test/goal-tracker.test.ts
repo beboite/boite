@@ -8,6 +8,7 @@ import { echoDriver } from '../src/drivers/echo.ts';
 import { ModelProbes } from '../src/drivers/model-probes.ts';
 import type { TurnContext } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let h: TestCore;
 let restore: (() => void) | undefined;
@@ -157,8 +158,8 @@ test('the user\'s later messages add, drop and change items, and his own turns a
 test('the checklist runs on the model Settings names, and an unknown provider is refused', async () => {
   const client = await h.connect();
   const { threadId } = await echoThread(h, client);
-  await expect(client.call('settings.set', { goalTracker: { providerId: 'nobody', model: 'x', effort: null } })).rejects.toThrow('goalTracker names nobody, which is not a loaded provider');
-  await expect(client.call('settings.set', { goalTracker: { providerId: 'echo', model: '', effort: null } })).rejects.toThrow('goalTracker must be null');
+  expect(await thrown(client.call('settings.set', { goalTracker: { providerId: 'nobody', model: 'x', effort: null } }))).toThrow('goalTracker names nobody, which is not a loaded provider');
+  expect(await thrown(client.call('settings.set', { goalTracker: { providerId: 'echo', model: '', effort: null } }))).toThrow('goalTracker must be null');
   const set = await client.call('settings.set', { goalTracker: { providerId: ' echo ', model: 'echo', effort: 'low' } });
   expect(set.goalTracker).toEqual({ providerId: 'echo', model: 'echo', effort: 'low' });
   restore = roles({ agent: () => ({ text: 'Done.\n[BOITE_GOAL_COMPLETE]' }), tracker: pass => pass === 'write' ? json({ items: [{ text: 'Do it', source: 'it' }] }) : json({ done: [1] }) });

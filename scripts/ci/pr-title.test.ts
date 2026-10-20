@@ -8,6 +8,8 @@ test('conventional titles pass, with or without a scope', () => {
     'chore(deps): bump the actions group across 1 directory with 3 updates',
     'feat(core)!: drop schema 8 migration',
     'perf(shell/core): cut startup round trips',
+    // The squash commit a merge group checks ends with its pull request's number.
+    'fix(plugins): an update keeps its exit reason (#689)',
   ]) expect(titleProblem(title)).toBeUndefined();
 });
 

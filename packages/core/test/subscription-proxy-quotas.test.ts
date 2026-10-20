@@ -3,6 +3,7 @@ import type { AccountQuota, RpcEvents, SubscriptionProxy } from '@boite/contract
 import { connect } from '../src/client.ts';
 import { parseGatewayQuotas } from '../src/subscription-proxy-quotas.ts';
 import { startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore | undefined;
 let gateway: ReturnType<typeof Bun.serve> | undefined;
@@ -75,7 +76,7 @@ test('quotas come from Douane through the core, in both display modes, with the 
   // The machine's own Claude and Codex accounts are the gateway's now.
   expect(rows.filter((row) => !row.gateway && ['claude', 'codex'].includes(row.providerId)).every((row) => row.status === 'unsupported')).toBe(true);
   // A gateway entry is not an account: no switch, no reset.
-  await expect(owner.call('quotas.configure', { accountId: 'proxy:claude:c00l', enabled: false })).rejects.toThrow();
+  expect(await thrown(owner.call('quotas.configure', { accountId: 'proxy:claude:c00l', enabled: false }))).toThrow();
 
   // Refresh asks again, and every client hears the answer.
   const progress: string[] = [];
@@ -92,7 +93,7 @@ test('quotas come from Douane through the core, in both display modes, with the 
   const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
   try {
     expect((await phone.call('subscriptionProxy.quotas', {})).providers.map((provider) => provider.providerId)).toEqual(['claude', 'antigravity']);
-    await expect(phone.call('subscriptionProxy.quotas', { refresh: true })).rejects.toThrow('refresh must be false or absent');
+    expect(await thrown(phone.call('subscriptionProxy.quotas', { refresh: true }))).toThrow('refresh must be false or absent');
   }
   finally { phone.close(); }
 

@@ -9,6 +9,7 @@ import { childEnv } from '../src/drivers/claude/query.ts';
 import { agentEnv } from '../src/providers/resolve.ts';
 import { mergeProxyModels, readSubscriptionProxyModels, subscriptionProxyCodexArgs, subscriptionProxyEnv } from '../src/subscription-proxy.ts';
 import { startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore | undefined;
 let gateway: ReturnType<typeof Bun.serve> | undefined;
@@ -62,7 +63,7 @@ test('configuration and private key roll back together without leaking to events
     expect(envKey()).toBe(newKey);
     await owner.call('subscriptionProxy.configure', { subscriptionProxy: next });
     expect(envKey()).toBe(newKey);
-    await expect(owner.call('subscriptionProxy.configure', { subscriptionProxy: next, key: `${newKey}\n` })).rejects.toThrow('without whitespace');
+    expect(await thrown(owner.call('subscriptionProxy.configure', { subscriptionProxy: next, key: `${newKey}\n` }))).toThrow('without whitespace');
     expect(envKey()).toBe(newKey);
     const publicData = JSON.stringify({ saved, settings: await owner.call('settings.get', {}), broadcasts, errors,
       events: db.query('SELECT payload FROM events').all(), logs: await owner.call('core.logs', {}) });
@@ -122,8 +123,8 @@ test('real RPC discovers gateway models, separates the key and restores native a
   const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
   try {
     expect((await phone.call('settings.get', {})).subscriptionProxy).toEqual(proxy);
-    await expect(phone.call('subscriptionProxy.key', { key: null })).rejects.toThrow('owner');
-    await expect(phone.call('subscriptionProxy.configure', { subscriptionProxy: proxy, key: null })).rejects.toThrow('owner');
+    expect(await thrown(phone.call('subscriptionProxy.key', { key: null }))).toThrow('owner');
+    expect(await thrown(phone.call('subscriptionProxy.configure', { subscriptionProxy: proxy, key: null }))).toThrow('owner');
     expect((await phone.call('providers.probe', { providerId: 'codex', accountId: codex.id })).models).toEqual(b.models);
   } finally { phone.close(); }
   await owner.call('settings.set', { subscriptionProxy: { ...proxy, enabled: false } });
@@ -365,7 +366,7 @@ test('legacy CLIProxy catalogs select native families and malformed gateway erro
     { id: 'antigravity/gpt-oss-120b-medium', name: 'antigravity/gpt-oss-120b-medium', default: false },
     { id: 'codex/o5-mini', name: 'codex/o5-mini', default: false }]);
   fail = true;
-  await expect(owner.call('providers.probe', { providerId: 'codex', accountId: account.id, refresh: true })).rejects.toThrow('HTTP 401');
+  expect(await thrown(owner.call('providers.probe', { providerId: 'codex', accountId: account.id, refresh: true }))).toThrow('HTTP 401');
   expect(JSON.stringify(await owner.call('core.logs', {}))).not.toContain('private-token-in-body');
 });
 

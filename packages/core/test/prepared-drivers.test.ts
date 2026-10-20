@@ -10,6 +10,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { Driver, ProbeContext } from '../src/drivers/types.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 import { countProcesses, readScriptedLog, writeScriptedProvider } from './scripted-provider.ts';
+import { thrown } from './settle.ts';
 
 const cases = [
   { protocol: 'acp' as const, fixture: 'acp-agent.ts', env: 'ACP_FAKE_LOG', prompt: 'session/prompt', create: () => createAcpDriver({ loadSdk: () => import('@agentclientprotocol/sdk') }) },
@@ -142,7 +143,7 @@ setInterval(() => {}, 1000);`);
     };
     const spawnChild = fixture.ctx.spawnChild;
     fixture.ctx.spawnChild = (cmd, _args, opts) => spawnChild(cmd, ['-e', 'process.exit(4)'], opts);
-    await expect(driver!.prepare!(fixture.ctx)).rejects.toThrow();
+    expect(await thrown(driver!.prepare!(fixture.ctx))).toThrow();
     await waitFor(() => fixture.core.procs.liveCount(fixture.ctx.thread.id) === 0);
     expect(fixture.core.journal.listTurns(fixture.ctx.thread.id)).toHaveLength(0);
     await fixture.run('recover');

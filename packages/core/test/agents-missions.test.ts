@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { Core } from '../src/core.ts';
 import { connect } from '../src/client.ts';
 import { quietAgent as quiet, startTestCore, waitFor, removeDir, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 async function fixture(h: TestCore) {
   const client = await h.connect();
@@ -37,13 +38,13 @@ test('mission artifacts retry after completion, review waits for execution and t
     const thread = h.core.threads.require(run.threadId);
     expect(thread.cwd).not.toBe(project.path);
     expect(thread.branch).toStartWith('boite/agent-');
-    await expect(client.call('projects.remove', { projectId: project.id })).rejects.toThrow('persistent agents');
+    expect(await thrown(client.call('projects.remove', { projectId: project.id }))).toThrow('persistent agents');
     const agentClient = await connect(h.url, h.core.agents.tokenFor(thread.id));
     const file = join(thread.cwd, 'prototype.txt'); writeFileSync(file, 'Prototype result');
     const request = { threadId: thread.id, requestId: 'artifact_mission_001', value: { missionId: mission.id, taskId: task.id, title: 'Prototype', summary: 'Ready for review', paths: ['prototype.txt'], commit: null, verification: 'Read the generated file' } };
     const artifact = await agentClient.call('agents.artifact.add', request);
     const submitted = await agentClient.call('agents.task.submit', { threadId: thread.id, taskId: task.id, generation: assigned.generation, result: 'Ready' });
-    await expect(client.call('agents.task.save', { id: task.id, expectedRevision: submitted.revision, value: { ...submitted, status: 'done' } })).rejects.toThrow('execution');
+    expect(await thrown(client.call('agents.task.save', { id: task.id, expectedRevision: submitted.revision, value: { ...submitted, status: 'done' } }))).toThrow('execution');
     const decision = await agentClient.call('agents.decision.request', { threadId: thread.id, prompt: 'Review the artifact', options: [], requestId: 'mission_decision_001' });
     await waitFor(() => h.core.scheduler.state().running.length === 0);
     unlinkSync(file);

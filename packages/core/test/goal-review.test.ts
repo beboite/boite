@@ -5,6 +5,7 @@ import { parseVerdict } from '../src/activity-prompt.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let h: TestCore;
 let restore: (() => void) | undefined;
@@ -171,5 +172,5 @@ test('a restarted core keeps its reviewers and drops the interrupted review', as
 test('a reviewed goal refuses a review flag that is not a boolean', async () => {
   const client = await h.connect();
   const { threadId } = await echoThread(h, client);
-  await expect(client.call('threads.activity.set', { threadId, goal: { objective: 'x', review: 'yes' as unknown as boolean } })).rejects.toThrow('goal.review must be a boolean');
+  expect(await thrown(client.call('threads.activity.set', { threadId, goal: { objective: 'x', review: 'yes' as unknown as boolean } }))).toThrow('goal.review must be a boolean');
 });

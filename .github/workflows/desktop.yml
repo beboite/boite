@@ -155,10 +155,16 @@ jobs:
         env:
           BOITE_CI_INSTALLER_REQUIRED: '1'
         run: bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts scripts/ci/stop-core.test.ts
+      # Test shells keep their data directory, WebView2 profile included, on
+      # the runner's temp drive (D:), as the E2E shards do (docs/ci.md). On C:,
+      # a fresh profile's cookie database held the first document request for
+      # up to 10 s.
       - name: Native shell end-to-end tests
         if: inputs.native-e2e
         env:
           BOITE_E2E_PREBUILT_UI: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: bun test tests/e2e/shell.test.ts
       - uses: ./.github/actions/upload-artifact
         with:

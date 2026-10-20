@@ -32,6 +32,7 @@ import { joinContact, joinRequest } from './join.ts';
 import { evaluatePolicy, TailscaleClient } from './tailscale.ts';
 import { attestedTier, checkTier, modelTier, tierAllowed } from './tier.ts';
 import { fingerprintWords } from './words.ts';
+import { TextSocket } from '../ws-client.ts';
 
 export { CONTACT_JOIN_ROUTE } from './join.ts';
 export const CONTACT_LINK_ROUTE = '/coordination/contact/link';
@@ -51,6 +52,8 @@ export const REPLY_WINDOW_MS = 7 * 24 * 3_600_000;
 const SKEW_MS = 60_000;
 const HELLO_INPUT = 'boite-contact-hello\n';
 const TICK_MS = 1000;
+/** How long the upgrade to a host may take before the link counts as failed. */
+const LINK_DIAL_MS = 8000;
 /** Every this many ticks, what waits to be told to a contact is offered again. */
 const FLUSH_TICKS = 30;
 const TAILSCALE_CACHE_MS = 60_000;
@@ -82,7 +85,7 @@ export class ContactStore {
   /** The origin an invitation gives: this machine's tailnet name. Tests point it at loopback. */
   selfUrl: () => Promise<string> = () => this.tailnetUrl();
   /** Guest side: the link this core keeps to each host. */
-  private readonly dialed = new Map<string, { socket: WebSocket; state: 'connecting' | 'connected' }>();
+  private readonly dialed = new Map<string, { socket: TextSocket | null; state: 'connecting' | 'connected' }>();
   /** Host side: the link each guest keeps to this core, by the guest's id. */
   private readonly hosted = new Map<string, { routeId: string; socket: LinkSocket }>();
   /** Join and hello nonces already used, until they would be stale anyway. */
@@ -784,49 +787,44 @@ export class ContactStore {
       'x-boite-hello': Buffer.from(hello).toString('base64url'),
       'x-boite-signature': this.core.coordination.signature(Buffer.from(`${HELLO_INPUT}${hello}`)).toString('base64'),
     };
-    let socket: WebSocket;
-    try {
-      // Bun's client takes headers; the hello rides in them, before any frame.
-      socket = new WebSocket(`${contact.url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, { headers } as unknown as string[]);
-    } catch {
-      // A link that fails counts whatever was heard before: the mark is now.
-      this.backoff.failed(contact.coreId, 'link', this.backoff.mark());
-      return;
-    }
     const coreId = contact.coreId;
-    const link = { socket, state: 'connecting' as 'connecting' | 'connected' };
+    const link: { socket: TextSocket | null; state: 'connecting' | 'connected' } = { socket: null, state: 'connecting' };
     this.dialed.set(coreId, link);
-    socket.addEventListener('open', () => {
-      if (this.closed || this.dialed.get(coreId) !== link) { socket.close(1000); return; }
-      link.state = 'connected';
-      this.backoff.heard(coreId);
-      if (this.has(coreId)) this.mutate(coreId, entry => { entry.lastSeenAt = Date.now(); });
-      this.flush(coreId);
-    });
-    socket.addEventListener('message', event => { this.background(this.serve(coreId, socket, event.data)); });
-    socket.addEventListener('close', () => {
+    // A link that fails counts whatever was heard before: the mark is now.
+    const lost = () => {
       if (this.dialed.get(coreId) !== link) return;
       this.dialed.delete(coreId);
       this.backoff.failed(coreId, 'link', this.backoff.mark());
       if (!this.closed) this.changed();
-    });
+    };
+    // The hello rides in the upgrade's headers, before any frame.
+    TextSocket.connect(`${contact.url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, LINK_DIAL_MS, { headers }).then(socket => {
+      if (this.closed || this.dialed.get(coreId) !== link) { socket.close(1000); return; }
+      link.socket = socket;
+      link.state = 'connected';
+      this.backoff.heard(coreId);
+      if (this.has(coreId)) this.mutate(coreId, entry => { entry.lastSeenAt = Date.now(); });
+      this.flush(coreId);
+      socket.onMessage(text => { this.background(this.serve(coreId, socket, text)); });
+      socket.onClose(lost);
+    }, lost);
   }
 
   /** A request of the host, carried down the link: answered by the same handler as one posted to this core. */
-  private async serve(hostId: string, socket: WebSocket, data: unknown): Promise<void> {
+  private async serve(hostId: string, socket: TextSocket, data: string): Promise<void> {
     let frame: Partial<Extract<Frame, { t: 'req' }>>;
-    try { frame = JSON.parse(typeof data === 'string' ? data : Buffer.from(data as ArrayBuffer).toString('utf8')) as typeof frame; } catch { return; }
+    try { frame = JSON.parse(data) as typeof frame; } catch { return; }
     if (frame?.t !== 'req' || typeof frame.id !== 'string' || typeof frame.body !== 'string' || typeof frame.signature !== 'string') return;
     let response: CoordinationBridgeResponse;
     try { response = await this.core.coordination.forward({ coreId: hostId, body: frame.body, signature: frame.signature }); }
     catch { response = { status: 400, body: '', signature: '' }; }
-    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ t: 'res', id: frame.id, ...response } satisfies Frame));
+    if (socket.open) socket.send(JSON.stringify({ t: 'res', id: frame.id, ...response } satisfies Frame));
   }
 
   /** Closes this core's side of a contact's link. */
   unlink(coreId: string): void {
     const dialed = this.dialed.get(coreId);
-    if (dialed) { this.dialed.delete(coreId); dialed.socket.close(1000, 'contact removed'); }
+    if (dialed) { this.dialed.delete(coreId); dialed.socket?.close(1000, 'contact removed'); }
     const hosted = this.hosted.get(coreId);
     if (hosted) {
       this.hosted.delete(coreId);
@@ -881,7 +879,7 @@ export class ContactStore {
     this.closed = true;
     if (this.timer !== null) clearInterval(this.timer);
     this.timer = null;
-    for (const { socket } of this.dialed.values()) socket.close(1001, 'core stopping');
+    for (const { socket } of this.dialed.values()) socket?.close(1001, 'core stopping');
     this.dialed.clear();
     for (const { socket } of this.hosted.values()) socket.close(1001, 'core stopping');
     this.hosted.clear();

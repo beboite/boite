@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'bun:test';
 import { removeDir } from '../src/fs-retry.ts';
+import { thrown } from './settle.ts';
 
 const holders: ReturnType<typeof Bun.spawn>[] = [];
 
@@ -34,7 +35,7 @@ test('a directory a leaving process still holds is removed once it lets go', asy
   await hold(dir, 600);
   if (process.platform === 'win32') {
     // What the three readers relied on: Bun's rm tries once, whatever maxRetries says.
-    await expect(rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })).rejects.toThrow(/EBUSY/);
+    expect(await thrown(rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))).toThrow(/EBUSY/);
   }
   const logged: string[] = [];
   expect(await removeDir(dir, (message) => logged.push(message))).toBe(true);

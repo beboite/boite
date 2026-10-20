@@ -6,6 +6,7 @@ import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let h: TestCore;
 let client: CoreClient;
@@ -83,7 +84,7 @@ describe('threads.rewind', () => {
     if (!lastKept) throw new Error('nothing kept');
     const listed = await client.call('messages.list', { threadId, before: lastKept.id });
     expect(listed.messages.map((message) => message.role)).toEqual(['user']);
-    await expect(client.call('messages.list', { threadId, before: target.id })).rejects.toThrow('is not a message of thread');
+    expect(await thrown(client.call('messages.list', { threadId, before: target.id }))).toThrow('is not a message of thread');
 
     // Append-only: the removal is an event of its own, naming what went.
     const events = h.core.journal.db.query<{ payload: string }, [string]>("SELECT payload FROM events WHERE type = 'thread.rewound' AND thread_id = ?").all(threadId);
@@ -250,7 +251,7 @@ describe('threads.fork', () => {
       }
       proceed.resolve();
       if (change === 'boundary') {
-        await expect(forked).rejects.toThrow('source thread changed');
+        expect(await thrown(forked)).toThrow('source thread changed');
         expect(h.core.journal.listThreads()).toHaveLength(1);
         expect(h.core.journal.getTurn(turn.id)?.status).toBe('running');
         return;

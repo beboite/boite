@@ -7,6 +7,7 @@ import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
@@ -75,7 +76,7 @@ test('a discussion asks to entrust projects to an agent; the owner unticks one a
 
   // The agent of a thread cannot apply its own card: Apply is the owner's.
   const agentClient = await connect(h.url, h.core.agents.tokenFor(worker));
-  await expect(agentClient.call('agents.settings.apply', { threadId: worker, questionId: card!.id })).rejects.toThrow("not one of the agent's methods");
+  expect(await thrown(agentClient.call('agents.settings.apply', { threadId: worker, questionId: card!.id }))).toThrow("not one of the agent's methods");
   agentClient.close();
 
   await owner.call('agents.settings.apply', { threadId: worker, questionId: card!.id, value: ['Notes'] });
@@ -137,6 +138,6 @@ test('an agent whose stored model its provider no longer lists still takes a pro
   expect(profile().selection).toMatchObject({ model: 'echo/echo', effort: 'medium' });
 
   // Choosing a model is still checked.
-  await expect(owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), selection: { ...profile().selection, model: 'echo/other' } } }))
-    .rejects.toThrow('the provider does not offer this model');
+  expect(await thrown(owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), selection: { ...profile().selection, model: 'echo/other' } } })))
+    .toThrow('the provider does not offer this model');
 });

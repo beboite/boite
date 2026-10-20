@@ -11,6 +11,32 @@ requests reviews; approval is not required. The `release tags` policy protects
 `type(scope): summary`, with an optional scope and one of `feat`, `fix`, `perf`,
 `refactor`, `docs`, `test`, `ci`, `build`, `chore` or `revert`. Its body is empty.
 
+## Merge queue
+
+`main` takes pull requests through a squash merge queue, so each one is tested
+on the `main` it lands on, with the pull requests queued ahead of it. Without
+it, two pull requests green on their own can break `main` together: the ruleset
+does not require an up-to-date branch, and requiring one would rerun every open
+pull request's CI after each merge.
+
+`ci` and `PR title` also run on `merge_group`. A group runs `ci` in `pr` mode
+against its `main` base: the same path rules, skips and platforms as a pull
+request, with the diff covering every pull request ahead of it. `Bundle size`
+skips there, since it compares a pull request with its base. A group's `PR
+title` checks the squash title of its last commit, the one `main` receives.
+The queue builds up to five groups at once, each on top of the ones ahead of
+it, without waiting to fill a group. Pull requests land in queue order: one
+whose group passed waits for those ahead of it. A failed group removes its pull
+request and rebuilds the groups behind it without that one; so do checks that
+have not reported within 60 minutes. A green `ci` run takes about 12 minutes
+(2026-10-20): that is the shortest time from entering the queue to landing, and
+waits or rebuilds add to it.
+
+An agent merges with `gh pr merge <number> --squash --match-head-commit <sha>`:
+the pull request enters the queue once its own checks pass, and lands when its
+group passes. One the queue removes needs a fix or a rebase, then the same
+command. `--admin` bypasses the queue and its checks.
+
 ## Checks
 
 `scripts/ci/changes.ts` selects jobs from changed paths. Unknown paths run the
@@ -102,7 +128,8 @@ compares with saved `gh api` output instead.
 
 ### Run modes and platforms
 
-PRs against any branch use `pr` mode and compare with their base. Main pushes
+PRs against any branch use `pr` mode and compare with their base; so do merge
+queue groups, against their `main` base. Main pushes
 use `warm`: they run affected core and E2E suites too, add Linux ARM64 and macOS
 Intel desktop legs, and save caches. A push event does not prove that an
 equivalent PR tree passed. A main push compares with the last main commit whose
@@ -428,6 +455,16 @@ milliseconds: 8 such stalls in 5 of 9 shard runs, against none in 9 on D:, and
 706 s of tests against 420 s (PR #513, 2026-10-15). They had failed about one
 shard in five since 2026-10-10, on `main` as on branches, a different test each
 time. `scripts/ci/e2e-harness.test.ts` keeps both variables on both steps.
+
+The desktop job's native shell E2E step does the same for test shells, whose
+data directory holds their WebView2 profile. WebView2 holds a fresh profile's
+first document request until the profile's cookie database has opened: in 249
+of 250 launches on C: the host got the request within 5 ms of that open ending.
+On C: the request came 1.1 s after the navigation started on average and
+10.4 s at worst, 3 of 250 launches past 5 s; on D: 0.18 s and 0.5 s, none of 150
+past 5 s (run 39417347690). The slow tail left the page on `about:blank` past
+the 15 s bridge wait in five runs, on `main` as on branches (2026-10-19 and
+20). `e2e-harness.test.ts` keeps both variables on that step too.
 
 CI Chromium uses CPU compositing with software GL disabled. Browser launch
 failures retain bounded stderr; exited browsers fail promptly. Navigation waits

@@ -13,6 +13,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import { addTodo, AGENT_OPEN_TODOS_MAX } from '../src/todos.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
@@ -162,7 +163,7 @@ describe('the todo list of a project', () => {
     })();
     const agent = await agentClient();
     try {
-      await expect(agent.call('todos.add', { threadId, text: 'one more' })).rejects.toThrow(
+      expect(await thrown(agent.call('todos.add', { threadId, text: 'one more' }))).toThrow(
         `an agent adds a card only while the project holds fewer than ${AGENT_OPEN_TODOS_MAX} open or claimed cards, this one has ${AGENT_OPEN_TODOS_MAX}`,
       );
       expect(await client.call('todos.list', { threadId })).toHaveLength(AGENT_OPEN_TODOS_MAX);
@@ -335,7 +336,7 @@ describe('the project board', () => {
     const first = await echoThread(harness, client, 'first');
     const second = await echoThread(harness, client, 'second');
     await client.call('todos.update', { threadId, todoId: card.id, goalThreadId: first.threadId });
-    await expect(client.call('todos.update', { threadId, todoId: card.id, goalThreadId: second.threadId })).rejects.toThrow(
+    expect(await thrown(client.call('todos.update', { threadId, todoId: card.id, goalThreadId: second.threadId }))).toThrow(
       `todo ${card.id} already works in conversation ${first.threadId}`,
     );
     await client.call('threads.activity.set', { threadId: first.threadId, goal: { objective: card.text, review: true } });
@@ -363,7 +364,7 @@ describe('the project board', () => {
     const account = (await client.call('accounts.list', {})).find((entry) => entry.providerId === 'echo');
     const stranger = await client.call('threads.create', { projectId: other.id, providerId: 'echo', accountId: account?.id ?? '', title: 'elsewhere' });
     const card = await client.call('todos.add', { threadId, text: 'stay home' });
-    await expect(client.call('todos.update', { threadId, todoId: card.id, goalThreadId: stranger.id })).rejects.toThrow(
+    expect(await thrown(client.call('todos.update', { threadId, todoId: card.id, goalThreadId: stranger.id }))).toThrow(
       `goalThreadId ${stranger.id} is not a conversation of this card's project`,
     );
     const sibling = await echoThread(harness, client, 'sibling');
