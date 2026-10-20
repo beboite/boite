@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { connect } from '../../packages/core/src/client.ts';
 import { BrowserPage, freePort } from './lib/cdp.ts';
-import { describeShell } from './lib/shell-diagnosis.ts';
+import { describeShell, TAURI_READY, waitForShellPage, type ShellUnderTest } from './lib/shell-diagnosis.ts';
 import { freshDataDir, killProcessTree, removeDirectory, startCore } from './lib/core.ts';
 
 const TIMEOUT = 120_000;
@@ -296,15 +296,28 @@ async function waitForHealthyCore(ownDataDir: string): Promise<CoreFile> {
   }
 }
 
-/** The webview exposes its page target before the IPC bridge is injected. */
-const TAURI_READY = "typeof window.__TAURI_INTERNALS__?.invoke === 'function'";
+/** The shell behind each page `attachShell` returned, for `shellReady`. */
+const shells = new WeakMap<BrowserPage, ShellUnderTest>();
 
 /**
  * Attaches to a hidden shell's page. A shell whose page never shows up fails
  * with its own log and process tree, so the run says where WebView2 stopped.
  */
-function attachShell(port: number, ownDataDir: string, pid: number, urlIncludes = ''): Promise<BrowserPage> {
-  return BrowserPage.attach(port, urlIncludes, failure => describeShell(ownDataDir, pid, failure));
+async function attachShell(port: number, ownDataDir: string, pid: number, urlIncludes = ''): Promise<BrowserPage> {
+  const attached = await BrowserPage.attach(port, urlIncludes, failure => describeShell(ownDataDir, pid, failure));
+  shells.set(attached, { port, dataDir: ownDataDir, pid });
+  return attached;
+}
+
+/**
+ * Waits for the page's IPC bridge. A page that stays without it (about:blank
+ * on Windows runners, cause unknown) fails with the target list, the frame
+ * and the shell's page-load records (`waitForShellPage`).
+ */
+async function shellReady(shellPage: BrowserPage | undefined): Promise<void> {
+  if (shellPage === undefined) return;
+  const shell = shells.get(shellPage);
+  await (shell === undefined ? shellPage.waitFor(TAURI_READY) : waitForShellPage(shellPage, shell));
 }
 
 shellTest('a resident core finishes agent work after shell exit, is adopted, and stops explicitly', async () => {
@@ -317,7 +330,7 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     client = await connect(`http://127.0.0.1:${found.port}`, found.token);
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
-    ownPage = await attachShell(port, ownDataDir, shellPid); await ownPage.waitFor(TAURI_READY);
+    ownPage = await attachShell(port, ownDataDir, shellPid); await shellReady(ownPage);
     await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid=titlebar] .close')`);
     const started = client.next('turn.started', () => true, 10000);
     const finished = client.next('turn.finished', () => true, 30000);
@@ -350,7 +363,7 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     expect((await client.call('agents.snapshot', {})).work[0]?.status).toBe('done');
     await ownPage.close(); ownPage = undefined;
     const secondPort = await freePort(); shellPid = spawnHiddenShell(ownDataDir, secondPort, true);
-    ownPage = await attachShell(secondPort, ownDataDir, shellPid); await ownPage.waitFor(TAURI_READY);
+    ownPage = await attachShell(secondPort, ownDataDir, shellPid); await shellReady(ownPage);
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('core_endpoint')`);
     expect((await waitForHealthyCore(ownDataDir)).pid).toBe(found.pid);
     expect(await client.call('core.shutdown', {})).toEqual({ ok: true });
@@ -374,7 +387,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     const port = await freePort(); ownPid = spawnHiddenShell(ownDataDir, port);
     ownCore = await waitForHealthyCore(ownDataDir);
     ownPage = await attachShell(port, ownDataDir, ownPid);
-    await ownPage.waitFor(TAURI_READY);
+    await shellReady(ownPage);
     // A first launch opens centred in the work area, not at Windows' cascade spot.
     const main = await ownPage.evaluate<{ dx: number; dy: number }>(`(async () => {
       const invoke = window.__TAURI_INTERNALS__.invoke;
@@ -506,7 +519,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
 
     const thirdPort = await freePort(); ownPid = spawnHiddenShell(ownDataDir, thirdPort);
     ownCore = await waitForHealthyCore(ownDataDir); ownPage = await attachShell(thirdPort, ownDataDir, ownPid);
-    await ownPage.waitFor(TAURI_READY);
+    await shellReady(ownPage);
     expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior')`)).toBe(true);
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior', {enabled:false})`);
     await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid="titlebar"] .close')`);
@@ -535,7 +548,7 @@ async function waitUntil(done: () => boolean, timeoutMs: number): Promise<void> 
  * nothing (`apps/shell/src-tauri/src/lib.rs`).
  */
 async function quitShell(shellPage: BrowserPage): Promise<void> {
-  await shellPage.waitFor(TAURI_READY);
+  await shellReady(shellPage);
   try {
     await shellPage.evaluate<null>(
       `(() => { window.__TAURI_INTERNALS__.invoke('quit_shell'); return null; })()`,
@@ -608,7 +621,7 @@ shellTest(
 );
 
 shellTest('the native updater reports its local version and refuses installation in hidden tests', async () => {
-  await page?.waitFor(TAURI_READY);
+  await shellReady(page);
   const status = await page?.evaluate<{ supported: boolean; currentVersion: string }>(`window.__TAURI_INTERNALS__.invoke('app_update_status')`);
   expect(status?.supported).toBe(false);
   expect(status?.currentVersion).toMatch(/^\d+\.\d+\.\d+/);
@@ -618,7 +631,7 @@ shellTest('the native updater reports its local version and refuses installation
 
 shellTest('the native file opener launches the original executable and rejects paths outside the thread', async () => {
   if (!page) throw new Error('the shell did not expose its page');
-  await page.waitFor(TAURI_READY);
+  await shellReady(page);
   const executable = join(projectDir, 'game fixture.exe');
   const compiler = Bun.spawn(['rustc', '--crate-name', 'file_open', join(import.meta.dir, 'fixtures', 'file-open.rs'), '-o', executable], {
     stdout: 'pipe', stderr: 'pipe', windowsHide: true,
@@ -1013,7 +1026,7 @@ async function waitForTargets(url: string, wanted: number, timeoutMs: number): P
 
 /** `invoke` from the shell's own page, with the promise it returns awaited. */
 async function invokeShell(command: string, args: Record<string, unknown> = {}): Promise<void> {
-  await page?.waitFor(TAURI_READY);
+  await shellReady(page);
   await page?.evaluate<null>(
     `window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}, ${JSON.stringify(args)}).then(() => null)`,
   );
@@ -1197,7 +1210,7 @@ shellTest(
     // The list depends on the Windows build: solid always, mica from 22000,
     // acrylic from 22523. Nothing off Windows. A runner on Windows Server 2022
     // (20348) offers solid alone, and a stored mica then stamps nothing.
-    await page?.waitFor(TAURI_READY);
+    await shellReady(page);
     const supported = await page?.evaluate<string[]>(
       `window.__TAURI_INTERNALS__.invoke('window_material_supported')`,
     );
@@ -1353,7 +1366,7 @@ shellTest(
     try {
       corePid = (await waitForHealthyCore(ownDataDir)).pid;
       shellPage = await attachShell(debugPort, ownDataDir, shell);
-      await shellPage.waitFor(TAURI_READY);
+      await shellReady(shellPage);
       await shellPage.waitFor(`document.querySelector('[data-testid="titlebar"]')`);
 
       // One tap: the hint comes and goes, nothing quits. WebView2 drops a Ctrl
@@ -1410,7 +1423,7 @@ shellTest(
       // Adopted, not replaced: the endpoint the shell hands its own UI is the
       // core this test started, and `core.json` still names that process. The
       // page target is there before the IPC is, so this waits for the bridge.
-      await shellPage.waitFor(TAURI_READY);
+      await shellReady(shellPage);
       const endpoint = await shellPage.evaluate<{ url: string }>(
         `window.__TAURI_INTERNALS__.invoke('core_endpoint')`,
       );

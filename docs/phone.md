@@ -265,6 +265,11 @@ settings. Methods absent from the list remain owner-only, including newly
 added methods. A refusal names the method, such as
 `projects.add is for the owner only`.
 
+A paired device reads and moves the project's todos for the board
+([board.md](board.md)): `todos.list`, `todos.add`, `todos.update` and
+`todos.remove`, with `todos.updated` for every project. It confirms and removes
+cards as the owner does; an agent only claims one.
+
 The Changes and Files panels are read-only on a paired device: `git.status`,
 `git.diff`, `files.list` and `files.read`, never `files.write`, Tasks or the
 trace. The core runs git itself, refuses a device diff against any revision but
@@ -709,7 +714,8 @@ field and type in the input below the preview: Return sends the text and then
 Enter, and Backspace in the empty input erases on the page. Navigation keys
 and scroll buttons remain available without a hardware keyboard. A double tap
 selects a word and **Copy** puts the page's selection on the phone's
-clipboard. A computer has none of these controls: it types, scrolls, selects,
+clipboard. A tap on a page's drop-down list opens its options over the preview
+([the agent's browser](browser.md#watching-it)). A computer has none of these controls: it types, scrolls, selects,
 copies and pastes on the page itself ([the agent's browser](browser.md#watching-it)).
 
 The phone requests JPEG frames while the view is shown and the app visible,

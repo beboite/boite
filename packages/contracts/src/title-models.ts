@@ -55,9 +55,15 @@ export function defaultTitleModel(
   const rule = TITLE_MODEL_DEFAULTS[provider.id] ?? TITLE_MODEL_DEFAULTS[BY_PROTOCOL[provider.protocol] ?? ''];
   if (rule === undefined) return null;
   for (const family of rule.families) {
-    const listed = models.filter((model) => family.test(model.id) && !model.id.includes('['));
-    if (listed.length === 0) continue;
-    return listed.reduce((best, model) => (newer(version(model.id), version(best.id)) > 0 ? model : best)).id;
+    const newest = newestModel(models, family);
+    if (newest !== null) return newest;
   }
   return rule.fallback;
+}
+
+/** The newest listed model of a family, a variant such as `[1m]` left out; null when none is listed. */
+export function newestModel(models: readonly Pick<ModelInfo, 'id'>[], family: RegExp): string | null {
+  const listed = models.filter((model) => family.test(model.id) && !model.id.includes('['));
+  if (listed.length === 0) return null;
+  return listed.reduce((best, model) => (newer(version(model.id), version(best.id)) > 0 ? model : best)).id;
 }

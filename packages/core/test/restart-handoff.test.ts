@@ -6,6 +6,7 @@ import { startServer, type RunningServer } from '../src/server.ts';
 import { HANDOFF } from '../src/threads/handoff.ts';
 import { CRASH_WHILE_QUEUED } from '../src/threads/recovery.ts';
 import { echoThread, holdAccountTurns, removeDir, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const DEFAULTS = { ...HANDOFF };
 afterEach(() => { Object.assign(HANDOFF, DEFAULTS); });
@@ -217,7 +218,7 @@ test('a restart lets the running tool call finish, stops the turn and resumes th
     expect((await ask(h)).status).toBe(202);
     expect((await ask(h)).status).toBe(202);
     expect(h.core.stopping).toBe(true);
-    await expect(client.call('turns.start', { threadId, prompt: 'too late' })).rejects.toThrow('stopping');
+    expect(await thrown(client.call('turns.start', { threadId, prompt: 'too late' }))).toThrow('stopping');
     await waitFor(() => stops === 1);
     // The tool call ended by itself; the sleep after it never got its minute.
     expect(Date.now() - asked).toBeLessThan(5_000);
@@ -378,7 +379,7 @@ test('core.restart is that same restart for the owner, and a paired phone is ref
     const owner = await h.connect();
     const { grant } = await owner.call('pairing.grant', {});
     const phone = await connect(h.url, '', { grant });
-    await expect(phone.call('core.restart', {})).rejects.toThrow('core.restart is for the owner only');
+    expect(await thrown(phone.call('core.restart', {}))).toThrow('core.restart is for the owner only');
     expect(stops).toBe(0);
     expect(await owner.call('core.restart', {})).toEqual({ ok: true });
     expect(h.core.stopping).toBe(true);

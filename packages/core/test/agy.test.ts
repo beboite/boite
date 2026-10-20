@@ -17,6 +17,7 @@ import { modelsFromListing, parseModelLines } from '../src/drivers/agy/models.ts
 import { browserNoopPath } from '../src/paths.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 /** The fake agy: a real stream-json process over stdio, run by bun. */
 const FAKE_AGENT = fileURLToPath(new URL('./fixtures/agy-agent.ts', import.meta.url));
@@ -407,7 +408,7 @@ describe('agy driver', () => {
     const client = await startCore();
     const { accountId } = await agyAccount(client);
     process.env['AGY_FAKE_SIGNED_OUT'] = '1';
-    await expect(client.call('providers.probe', { providerId: 'agy-fake', accountId })).rejects.toThrow(/not signed in/);
+    expect(await thrown(client.call('providers.probe', { providerId: 'agy-fake', accountId }))).toThrow(/not signed in/);
   });
 
   test('a complete model listing settles after native exit and drained output when close is missing', async () => {
@@ -415,6 +416,9 @@ describe('agy driver', () => {
     const { accountId } = await agyAccount(client);
     const core = harness!.core;
     const spawn = core.procs.spawnChild.bind(core.procs);
+    const procs = core.procs as unknown as { onJobExited(...args: unknown[]): void };
+    const jobExited = procs.onJobExited.bind(core.procs);
+    const lateExit = spyOn(procs, 'onJobExited').mockImplementation((...args) => { setTimeout(() => jobExited(...args), 300); });
     const releases: Array<() => void> = [];
     const childSpies: Array<{ mockRestore(): void }> = [];
     const spawnSpy = spyOn(core.procs, 'spawnChild').mockImplementation((...args) => {
@@ -438,12 +442,16 @@ describe('agy driver', () => {
         }),
       ]);
       expect(result.models.map(model => model.id)).toEqual(['default', 'gemini-3.8-flash', 'gemini-3.1-pro', 'claude-opus-4-6-thinking', 'gemini-solo-high']);
+      // The probe answers before its cleanup, and on Windows the pid leaves the registry only once its
+      // job reports the exit: late here, as on a loaded machine.
+      await core.procs.waitForExit(`probe:agy-fake:${accountId}`);
       expect(core.procs.liveCount(`probe:agy-fake:${accountId}`)).toBe(0);
       expect(core.providers.installs.leaseCount('agy-fake')).toBe(0);
     } finally {
       clearTimeout(timer);
       for (const release of releases) release();
       spawnSpy.mockRestore();
+      lateExit.mockRestore();
       for (const spy of childSpies) spy.mockRestore();
       await Promise.allSettled([request]);
     }
@@ -465,19 +473,15 @@ describe('agy driver', () => {
     // check that finds the same status is no change and leaves the probe alone.
     await client.call('accounts.check', { accountId });
     harness!.core.accounts.check(accountId, true);
-    await expect(refused).rejects.toThrow(/changed during discovery/);
+    expect(await thrown(refused)).toThrow(/changed during discovery/);
   });
 
   test('an account of its own is refused: nothing moves the agy login', async () => {
     const client = await startCore();
     await agyAccount(client);
     const before = (await client.call('accounts.list', {})).length;
-    await expect(
-      client.call('accounts.add', { providerId: 'agy-fake', label: 'Second', useDefaultLocation: false }),
-    ).rejects.toThrow(/default account/);
-    await expect(
-      client.call('accounts.add', { providerId: 'antigravity-cli', label: 'Second', useDefaultLocation: false }),
-    ).rejects.toThrow(/no variable that moves its login/);
+    expect(await thrown(client.call('accounts.add', { providerId: 'agy-fake', label: 'Second', useDefaultLocation: false }))).toThrow(/default account/);
+    expect(await thrown(client.call('accounts.add', { providerId: 'antigravity-cli', label: 'Second', useDefaultLocation: false }))).toThrow(/no variable that moves its login/);
     // Nothing was created on the way to the refusal.
     expect((await client.call('accounts.list', {})).length).toBe(before);
   });
@@ -486,7 +490,7 @@ describe('agy driver', () => {
     const client = await startCore();
     const { threadId } = await agyThread(client);
     await runTurn(client, threadId, 'first');
-    await expect(client.call('threads.compact', { threadId })).rejects.toThrow(/no \/compact/);
+    expect(await thrown(client.call('threads.compact', { threadId }))).toThrow(/no \/compact/);
   });
 });
 

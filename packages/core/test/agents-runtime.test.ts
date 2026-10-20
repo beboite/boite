@@ -2,6 +2,7 @@ import { expect, spyOn, test } from 'bun:test';
 import type { AgentProfile } from '@boite/contracts';
 import { quietAgent as quiet, startTestCore, waitFor } from './harness.ts';
 import { connect } from '../src/client.ts';
+import { thrown } from './settle.ts';
 
 test('declared shared write resources serialize agents until the holder stops', async () => {
   const h = await startTestCore();
@@ -93,9 +94,9 @@ test('a persistent agent answers without a project and keeps group contexts sepa
     expect(h.core.workforce.records.get('run', groupRun.id).context.instructions).not.toContain('private greeting');
     const thread = h.core.threads.require(groupRun.threadId);
     expect(thread.projectId).toBeNull();
-    await expect(client.call('turns.start', { threadId: thread.id, prompt: 'bypass scheduling' })).rejects.toThrow('persistent');
+    expect(await thrown(client.call('turns.start', { threadId: thread.id, prompt: 'bypass scheduling' }))).toThrow('persistent');
     expect((await client.call('agent.where', { threadId: thread.id })).projectId).toBeNull();
-    await expect(client.call('todos.list', { threadId: thread.id })).rejects.toThrow('no project');
+    expect(await thrown(client.call('todos.list', { threadId: thread.id }))).toThrow('no project');
   } finally { await h.stop(); }
 });
 

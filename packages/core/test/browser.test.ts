@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { echoThread, startTestCore } from './harness.ts';
 import { createBrowserFixture } from './browser/fixture.ts';
 import { traceBrowserCommands } from './browser/dialog-trace.ts';
+import { thrown } from './settle.ts';
 
 const browserFixture = createBrowserFixture();
 const { real, url, evaluate } = browserFixture;
@@ -36,7 +37,7 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
   expect(await evaluate('document.title')).toBe('clicked');
   await agent.call('browser.command', { threadId, action: { kind: 'type', selector: '#name', text: 'hello' } });
   expect(await evaluate('document.querySelector("#name").value')).toBe('hello');
-  await expect(agent.call('browser.command', { threadId, action: { kind: 'click', selector: 'nothing' } })).rejects.toThrow('matched 0');
+  expect(await thrown(agent.call('browser.command', { threadId, action: { kind: 'click', selector: 'nothing' } }))).toThrow('matched 0');
   await agent.call('browser.command', { threadId, action: { kind: 'preset', preset: 'iphone-15-pro' } });
   expect(await evaluate('innerWidth')).toBe(393);
   await agent.call('browser.command', { threadId, action: { kind: 'appearance', colorScheme: 'dark' } });
@@ -47,11 +48,11 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
   expect(history.map(entry => entry.action)).toEqual(['open', 'click', 'evaluate', 'type', 'evaluate', 'click', 'preset', 'evaluate', 'appearance', 'evaluate', 'screenshot']);
   expect(history[5]!.ok).toBe(false);
   // Its token reaches its own conversation only, and only http(s) pages open.
-  await expect(agent.call('browser.command', { threadId: 'another-thread', action: { kind: 'status' } })).rejects.toThrow('not thread');
-  await expect(agent.call('browser.command', { threadId, action: { kind: 'open', url: 'file:///etc/passwd' } })).rejects.toThrow('HTTP');
+  expect(await thrown(agent.call('browser.command', { threadId: 'another-thread', action: { kind: 'status' } }))).toThrow('not thread');
+  expect(await thrown(agent.call('browser.command', { threadId, action: { kind: 'open', url: 'file:///etc/passwd' } }))).toThrow('HTTP');
   const other = (await echoThread(harness, owner, 'other')).threadId;
   expect(((await owner.call('browser.command', { threadId: other, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
-  await expect(owner.call('browser.command', { threadId: other, tabId: open.tabId, action: { kind: 'snapshot' } })).rejects.toThrow('no browser tab');
+  expect(await thrown(owner.call('browser.command', { threadId: other, tabId: open.tabId, action: { kind: 'snapshot' } }))).toThrow('no browser tab');
   await agent.call('browser.command', { threadId, action: { kind: 'close' } });
   expect(((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
 }, 150_000);
@@ -59,7 +60,7 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
 real('a page nobody drives or watches sleeps, and meets the next command or viewer awake and focused', async () => {
   const { harness, owner, agent, threadId } = browserFixture;
   harness.core.browser.sleepAfterMs = 300;
-  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/animated') } });
+  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/animated?busy=400') } });
   const browser = harness.core.browser;
   // Whether the core keeps the tab awake is its own state; how fast a runner's
   // Chrome then runs the page is not (macOS runners stalled awake pages 2 s).
@@ -75,17 +76,26 @@ real('a page nobody drives or watches sleeps, and meets the next command or view
     }
     return true;
   };
+  // The browser answers a freeze before its renderer applies it, and a loaded
+  // renderer applies it late: a page that still ran 400 ms into a second counted
+  // from the answer showed a timer pause of 701 ms. The second runs from when the
+  // page says it froze, and the page above is still busy for 400 ms each time.
+  const frozenFor = async (ms: number) => {
+    const froze = browserFixture.frozen();
+    expect(await asleepWithin(30_000)).toBe(true);
+    for (const end = Date.now() + 30_000; browserFixture.frozen() === froze && Date.now() < end;) await Bun.sleep(50);
+    expect(browserFixture.frozen()).toBeGreaterThan(froze);
+    await Bun.sleep(ms);
+  };
   await evaluate('gaps()');
-  expect(await asleepWithin(30_000)).toBe(true);
-  await Bun.sleep(1000);
+  await frozenFor(1000);
   // Frozen for a second: no animation frame and no timer ran, and the command found the page as it was.
   const [frameGap, tickGap] = await evaluate('gaps()') as [number, number];
   expect(frameGap).toBeGreaterThan(800);
   expect(tickGap).toBeGreaterThan(800);
   expect(await evaluate('document.visibilityState + " " + document.hasFocus()')).toBe('visible true');
   // Asleep again, a viewer's first frame wakes it and its screencast keeps it awake past the wait.
-  expect(await asleepWithin(30_000)).toBe(true);
-  await Bun.sleep(1000);
+  await frozenFor(1000);
   await owner.call('threads.subscribe', { threadId });
   await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 300, quality: 40 });
   expect(browser.asleep(tabId!)).toBe(false);
@@ -96,8 +106,7 @@ real('a page nobody drives or watches sleeps, and meets the next command or view
   // Once the viewer leaves it sleeps again; a client that shows the tab's own
   // page asks for no frames, and one `browser.remoteWatch` keeps it awake.
   // The screencast stops up to twice its idle time after the last frame; a loaded runner takes longer.
-  expect(await asleepWithin(30_000)).toBe(true);
-  await Bun.sleep(1000);
+  await frozenFor(1000);
   expect(await owner.call('browser.remoteWatch', { threadId, tabId: tabId! })).toEqual({ ok: true });
   expect((await evaluate('gaps()') as [number, number])[0]).toBeGreaterThan(800);
   // Without the lease it would sleep within this wait, as it did above.
@@ -155,17 +164,17 @@ real('an agent drives a page with agent-browser commands: refs, forms, dialogs a
   expect(await command({ kind: 'get', what: 'title' })).toBe('later no');
   // A covered element is reached through the DOM, and the agent hears what covered it.
   expect(await command({ kind: 'click', selector: '@e8' })).toMatchObject({ note: expect.stringContaining('covered by div#cover') });
-  await expect(command({ kind: 'click', selector: '@e70' })).rejects.toThrow('unknown ref @e70');
-  await expect(command({ kind: 'click', selector: 'button' })).rejects.toThrow('matched 4');
+  expect(await thrown(command({ kind: 'click', selector: '@e70' }))).toThrow('unknown ref @e70');
+  expect(await thrown(command({ kind: 'click', selector: 'button' }))).toThrow('matched 4');
   // Enter submits the form natively; the command waits for the next page and says where it went.
   await command({ kind: 'focus', selector: '@e2' });
   expect(await command({ kind: 'press', key: 'Enter' })).toMatchObject({ navigated: true, title: 'Sent', url: url('/sent?name=Ada+L') });
-  await expect(command({ kind: 'click', selector: '@e3' })).rejects.toThrow('belongs to an earlier page');
+  expect(await thrown(command({ kind: 'click', selector: '@e3' }))).toThrow('belongs to an earlier page');
   // open drives the current tab, as agent-browser's does.
   const again = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/shop'), reuse: true } });
   expect(again.tabId).toBe(opened.tabId);
   expect(await command({ kind: 'history', direction: 'back' })).toMatchObject({ navigated: true, title: 'Sent' });
-  await expect(command({ kind: 'wait', selector: '#never', timeoutMs: 300 })).rejects.toThrow('wait timed out after 300 ms');
+  expect(await thrown(command({ kind: 'wait', selector: '#never', timeoutMs: 300 }))).toThrow('wait timed out after 300 ms');
 }), 150_000);
 
 real('a window a page opens joins the conversation as a tab of its own', async () => {

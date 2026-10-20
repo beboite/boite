@@ -3,7 +3,8 @@
   import { tick } from 'svelte';
   import type { DelegationProfile, WorkflowNode, WorkflowRun } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
-  import { edgesOf, fitsPhase, nodeProgress, nodeTiming, phasesOf, routeOf } from '../lib/workflow-view';
+  import { edgesOf, fitsPhase, nodeProgress, nodeTiming, nodeTokens, phasesOf, routeOf } from '../lib/workflow-view';
+  import { formatTokens, levelName } from '../lib/format';
   import Elapsed from './Elapsed.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
@@ -90,7 +91,7 @@
 
 {#snippet card(node: WorkflowNode)}
   {@const progress = nodeProgress(node)}
-  {@const route = routeOf(node, profiles)}
+  {@const route = routeOf(node, profiles, run.plan.steps.find(step => step.id === node.id))}
   {@const timing = nodeTiming(node)}
   {@const note = hint(node)}
   <button
@@ -109,7 +110,7 @@
       {#if node.forEach && progress.total > 0}<span class="count ui-label" data-testid="workflow-node-count">{progress.done}/{progress.total}</span>{/if}
     </span>
     {#if route}
-      <span class="route"><ProviderLogo providerId={route.providerId} size={12} /><span class="ui-label">{route.model || route.profile}</span></span>
+      <span class="route"><ProviderLogo providerId={route.providerId} size={12} /><span class="model ui-label">{route.model || route.profile}</span>{#if route.effort}<span class="effort ui-label" data-testid="workflow-effort">{levelName({ id: route.effort, label: route.effort })}</span>{/if}</span>
     {/if}
     {#if node.forEach && progress.total > 0}
       <span class="bar" aria-hidden="true">
@@ -120,7 +121,7 @@
     {#if node.status === 'skipped'}
       <span class="note ui-label">{strings.workflow.stepStatus.skipped}</span>
     {:else if timing.startedAt !== null}
-      <span class="note"><Elapsed startedAt={timing.startedAt} finishedAt={timing.finishedAt} active={timing.active} /></span>
+      <span class="note metrics"><Elapsed startedAt={timing.startedAt} finishedAt={timing.finishedAt} active={timing.active} />{#if node.instances.some(inst => inst.usage !== undefined)}<span>·</span><span data-testid="workflow-node-tokens" title={strings.workflow.tokensHelp}>{fill(strings.workflow.tokens, { tokens: formatTokens(nodeTokens(node)) })}</span>{/if}</span>
     {/if}
   </button>
 {/snippet}
@@ -185,8 +186,10 @@
   .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); font-weight: 500; }
   .count { flex: none; color: var(--color-muted-foreground); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
   .route { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .route span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .effort { flex: none; padding: 2px 5px; border-radius: var(--radius-sm); background: var(--color-surface-3); font-size: var(--text-xs); }
   .note { color: var(--color-subtle); font-size: var(--text-xs); }
+  .metrics { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
   .bar { display: flex; gap: 2px; height: 4px; }
   .bar i { flex: 1; min-width: 3px; border-radius: 2px; background: var(--color-surface-3); }
   .bar i.running { background: var(--color-live); }

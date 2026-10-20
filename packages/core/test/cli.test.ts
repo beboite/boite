@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_ENV, AGENT_HISTORY_PAGE } from '@boite/contracts';
@@ -8,6 +8,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { TurnResult } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 let threadId: string;
@@ -115,11 +116,16 @@ test('agents reach each other by a short address, find by chat, read and wait fo
   const read = await boite(['agents', 'read', other, '--last', '5']);
   expect(read.out).toContain('user:\n    the staging database keeps timing out');
   const self = harness.core.coordination.get(threadId).self;
-  const answering = new Promise<void>(resolve => setTimeout(() => {
-    void harness.core.coordination.send({ threadId: other, to: self, text: 'Restart it, I am done.', requestId: 'answer' }).then(() => resolve());
-  }, 300));
+  // The answer goes out once the CLI waits for it: one that came first would wake this idle thread
+  // with a turn instead. The CLI reaches its wait late here, as it did on a loaded macOS runner.
+  const coordination = harness.core.coordination;
+  const wait = coordination.wait.bind(coordination);
+  const late = spyOn(coordination, 'wait').mockImplementation(async (...args) => { await Bun.sleep(500); return wait(...args); });
+  const waiting = () => (coordination as unknown as { waiters: Map<string, unknown> }).waiters.has(threadId);
+  const answering = waitFor(waiting, 10_000).then(() => coordination.send({ threadId: other, to: self, text: 'Restart it, I am done.', requestId: 'answer' }));
   const sent = await boite(['agents', 'send', other, 'May I restart staging?', '--wait', '--timeout', '10']);
   await answering;
+  late.mockRestore();
   expect(sent.code).toBe(0);
   expect(sent.out).toContain('Restart it, I am done.');
   expect((await boite(['agents', 'log', other])).out).toContain('-> to');
@@ -424,13 +430,13 @@ test('skipping async questions neither steers running work nor starts a later tu
       }
       const { questionId } = await client.call('questions.ask', { threadId, text: 'Deploy now?', options: ['Yes', 'No'] });
       const other = await echoThread(harness, client, 'Other thread');
-      await expect(client.call('questions.skip', { threadId: other.threadId, questionId })).rejects.toThrow('another thread');
+      expect(await thrown(client.call('questions.skip', { threadId: other.threadId, questionId }))).toThrow('another thread');
       expect(await client.call('questions.list', { threadId })).toHaveLength(1);
       const answered = client.next('question.answered', event => event.questionId === questionId);
       await client.call('questions.skip', { threadId, questionId });
       expect((await answered).answer).toBeNull();
       expect(await client.call('questions.list', { threadId })).toEqual([]);
-      await expect(client.call('questions.skip', { threadId, questionId })).rejects.toThrow('unknown question');
+      expect(await thrown(client.call('questions.skip', { threadId, questionId }))).toThrow('unknown question');
       expect(harness.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
       expect(harness.core.threads.require(threadId).status).toBe(active ? 'running' : 'idle');
       expect(harness.core.journal.listMessages(threadId).filter(message => message.role === 'user')).toHaveLength(1);
@@ -517,9 +523,7 @@ describe('settings', () => {
     expect(card?.setting).toEqual({ kind: 'change', key: 'agentCpuCapPercent', value: 60, previous: 75, page: 'resources', section: 'limits', sensitive: false });
     expect((await boite(['settings', 'request', 'agentCpuCapPercent', '50', '--why', 'again'])).err).toContain('already open');
     // Applied is the core's to say: an answer cannot claim it.
-    // Caught by hand: with `expect(...).rejects`, the next call crashed Bun 1.4.2 on Windows every time.
-    const claimed = await client.call('questions.answer', { threadId, questionId, optionIds: ['applied'] }).then(() => null, (error: unknown) => error);
-    expect(claimed instanceof Error ? claimed.message : String(claimed)).toContain('does not offer');
+    expect(await thrown(client.call('questions.answer', { threadId, questionId, optionIds: ['applied'] }))).toThrow('does not offer');
 
     const next = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
     await client.call('settings.set', { agentCpuCapPercent: 60 });

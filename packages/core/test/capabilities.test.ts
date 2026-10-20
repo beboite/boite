@@ -5,6 +5,7 @@ import { assertAllowed } from '../src/access.ts';
 import type { Connection } from '../src/router.ts';
 import { threadCapabilities } from '../src/threads/capabilities.ts';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let h: TestCore;
 afterEach(async () => { await h?.stop(); });
@@ -57,7 +58,7 @@ test('real capability RPC is read-only, reflects current selection and scopes ag
     const paired = await connect(h.url, '', { grant });
     try {
       expect(await agent.call('threads.capabilities', { threadId })).toEqual(before);
-      await expect(agent.call('threads.capabilities', { threadId: 'other' })).rejects.toThrow('not thread other');
+      expect(await thrown(agent.call('threads.capabilities', { threadId: 'other' }))).toThrow('not thread other');
       expect(await paired.call('threads.capabilities', { threadId })).toEqual(before);
     } finally { agent.close(); paired.close(); }
 

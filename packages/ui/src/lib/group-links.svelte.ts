@@ -229,11 +229,12 @@ export class GroupLinks {
     };
     const stop = $effect.root(() => {
       $effect(() => {
-        // Read so the effect follows them: the list, each connection, each roster.
+        // Read so the effect follows them: the list, each connection, each roster, a machine's word that it has none.
         for (const machine of this.workspace.machines) {
           void machine.store.connection;
           void machine.store.group;
           void machine.store.groupKnown;
+          void machine.store.ungrouped;
         }
         void this.workspace.settled;
         untrack(() => void this.reconcile());
@@ -438,7 +439,8 @@ export class GroupLinks {
       const groupId = machine.store.group?.id;
       const listedBy = (other: Machine): boolean => other.store.group!.cores.some((core) => core.coreId === signs);
       // Its own group, as another machine of it says; or, refused there or out of every group by its own word, none of the device's groups lists it.
-      // Removed, a machine may say it is in no group before the others drop it from their roster, then tell this device's hellos to come back.
+      // Removed, a machine says it is in no group, to `group.get` or by refusing this device's hello, maybe before the others drop it from their roster.
+      // That word is of itself only: a machine that says nothing, offline or not answered yet, is no word of anything.
       const delisted = groupId !== undefined
         ? signed.some((other) => other !== machine && other.store.group!.id === groupId && !listedBy(other))
         : (machine.store.pairingRequired || machine.store.ungrouped) && signed.length > 0 && !signed.some((other) => other !== machine && listedBy(other));

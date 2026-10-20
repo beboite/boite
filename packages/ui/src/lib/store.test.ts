@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
+import { machineKey } from '../test/machine-key';
 import { INITIAL_PAGE_BYTES, PROTOCOL_VERSION, RpcErrorCode, TRACE_LIMIT, type ProcessRecord, type Thread, type ThreadStatus } from '@boite/contracts';
 import { RpcFailure, WsClient, droppedFailure, type SocketLike } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
 import * as endpoints from './endpoint';
+import * as deviceKeys from './device-key';
 import { Store } from './store.svelte';
 import { LOCAL_RECOVERY_MS } from './store/connection.svelte';
 import { resumeAnchor } from './thread-rows';
@@ -2228,6 +2230,73 @@ test('connecting a second account moves the composer to that account, not the fi
   store.accounts = store.accounts.map((a) => (a.id === 'a-claude-side' ? { ...a, status: 'unauthenticated' } : a));
   expect(store.useProvider('claude', 'a-claude-side')).toBe(true);
   expect(store.prefs.accountId).toBe('a-claude-main');
+});
+
+test('a machine that refuses the hello of the device key in no group is taken at its word, until that key opens it again', async () => {
+  // A device that signed a hello holds its signing code already.
+  await deviceKeys.loadSigner();
+  vi.useFakeTimers();
+  const hellos: number[] = [];
+  const b = machineKey();
+  // It has not heard of this device yet, then it was taken out of its group, then a group let it in again.
+  let phase: 'unheard' | 'out' | 'back' = 'unheard';
+  class OutSocket {
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onclose: ((event?: { code?: number }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor() {
+      setTimeout(() => this.onopen?.(), 10);
+    }
+    send(raw: string): void {
+      const frame = JSON.parse(raw) as { id: number; method: string; params: { device?: { nonce: string } } };
+      const answer = (body: Record<string, unknown>) => setTimeout(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, ...body }) }), 10);
+      // Its group read is never answered: what the page holds then is the hello's word alone.
+      if (frame.method === 'group.get') return;
+      if (frame.method !== 'hello') return void answer({ error: { code: RpcErrorCode.NotFound, message: `${frame.method} is not in this fixture` } });
+      hellos.push(frame.id);
+      if (phase === 'back') return void answer({ result: { core: { protocolVersion: PROTOCOL_VERSION, coreId: b.coreId }, principal: 'session' } });
+      answer({ error: phase === 'unheard'
+        ? { code: RpcErrorCode.Unavailable, message: 'this machine has not heard of this device yet' }
+        : b.ungrouped(frame.params.device!.nonce) });
+    }
+    close(): void {
+      this.onclose?.({ code: 1000 });
+    }
+  }
+  vi.stubGlobal('WebSocket', OutSocket);
+  const id = 'd'.repeat(64);
+  const key = vi.spyOn(deviceKeys, 'deviceKey').mockResolvedValue({
+    publicKey: 'key', id,
+    hello: () => ({ id, at: Date.now(), nonce: crypto.randomUUID(), sig: 'sig' }),
+    admit: (_grant, name) => ({ publicKey: 'key', name, sig: 'sig' }),
+    enroll: () => ({ publicKey: 'key', at: Date.now(), sig: 'sig' })
+  });
+  const store = new Store();
+  try {
+    void store.connectEndpoint({ url: 'https://out.example', token: '', paired: true, signs: b.coreId }).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(hellos).toHaveLength(1);
+    expect(store.ungrouped).toBe(false);
+    phase = 'out';
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(hellos).toHaveLength(2);
+    expect(store.ungrouped).toBe(true);
+    expect(store.groupKnown).toBe(false);
+    // Tried again all the same, and opened again: a group of that machine knows the device, whatever it reads later.
+    phase = 'back';
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(hellos).toHaveLength(3);
+    expect(store.connection).toBe('ready');
+    expect(store.groupKnown).toBe(false);
+    expect(store.ungrouped).toBe(false);
+  } finally {
+    store.client?.close();
+    store.detach();
+    key.mockRestore();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
 });
 
 test('a machine on a slow link keeps its connection when the lists take longer than the handshake deadline', async () => {

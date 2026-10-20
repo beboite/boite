@@ -3,10 +3,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test, expect } from 'bun:test';
 import { BrowserPage, freePort } from './lib/cdp.ts';
-import { describeShell } from './lib/shell-diagnosis.ts';
+import { describeShell, waitForShellPage } from './lib/shell-diagnosis.ts';
 import { killProcessTreeAsync, removeDirectory } from './lib/cleanup.ts';
 import { connect } from '../../packages/core/src/client.ts';
 import type { BrowserAction } from '../../packages/contracts/src/index.ts';
+import { thrown } from '../../packages/core/test/settle.ts';
 
 const executable = process.env.BOITE_E2E_SHELL_EXE;
 const pro = { id: 'p-e2e0profile', name: 'Pro' };
@@ -47,7 +48,7 @@ test.skip('browser profiles keep their own cookies across a restart until one is
     }
     if (!client) throw new Error('core did not start');
     page = await BrowserPage.attach(port, '', failure => describeShell(dataDir, shell!.pid, failure));
-    await page.waitFor("typeof window.__TAURI_INTERNALS__?.invoke === 'function'");
+    await waitForShellPage(page, { port, dataDir, pid: shell!.pid });
   };
   const openThread = async (threadId: string) => {
     await page!.waitFor("document.querySelector('[data-testid=thread-row]')");
@@ -98,7 +99,7 @@ test.skip('browser profiles keep their own cookies across a restart until one is
     expect(await cookie(hidden.tabId)).toBe('who=private');
     await command(mine.tabId, { kind: 'navigate', url: site.url.href });
     expect(await cookie(mine.tabId)).toBe('who=perso');
-    await expect(open('/', 'Perso')).rejects.toThrow('no browser profile is named Perso');
+    expect(await thrown(open('/', 'Perso'))).toThrow('no browser profile is named Perso');
     // The panel reopens its tabs after the restart: none of them may set a cookie again.
     for (const tab of [work, hidden]) await command(tab.tabId, { kind: 'navigate', url: site.url.href });
     console.log('Three profiles hold three cookies');
@@ -182,7 +183,7 @@ test.skip('browser profiles keep their own cookies across a restart until one is
     expect(await page!.evaluate("document.querySelector('[data-testid=browser-profile-error]')?.textContent ?? ''")).toBe('');
     const left = (await client!.call('browser.command', { threadId: thread.id, action: { kind: 'status' } })).value as { tabs: { profile: string }[] };
     expect(left.tabs.map(tab => tab.profile).sort()).toEqual(['default', 'default', 'private', 'private']);
-    await expect(open('/', 'Pro')).rejects.toThrow('no browser profile is named Pro');
+    expect(await thrown(open('/', 'Pro'))).toThrow('no browser profile is named Pro');
     console.log('Deleting the profile closed its tabs and forgot it');
 
     // WebView2 removes a deleted profile's folder when its browser process exits.

@@ -5,6 +5,7 @@ import { DEFAULT_DELEGATION_CONFIG, checkSteps } from '@boite/contracts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
@@ -103,8 +104,8 @@ test('worktree is refused outside a git repository, and a plan step checks its w
   const client = await h.connect();
   const { threadId } = await echoThread(h, client);
   await client.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true } });
-  await expect(client.call('delegation.spawn', { threadId, task: 'Edit things', worktree: true, requestId: 'no-repo' })).rejects.toThrow('is not a git repository');
-  await expect(client.call('delegation.spawn', { threadId, task: 'Edit things', worktree: 'yes' as unknown as boolean, requestId: 'bad-flag' })).rejects.toThrow('worktree: expected true, false or absent');
+  expect(await thrown(client.call('delegation.spawn', { threadId, task: 'Edit things', worktree: true, requestId: 'no-repo' }))).toThrow('is not a git repository');
+  expect(await thrown(client.call('delegation.spawn', { threadId, task: 'Edit things', worktree: 'yes' as unknown as boolean, requestId: 'bad-flag' }))).toThrow('worktree: expected true, false or absent');
   expect(h.core.delegation.get(threadId).agents).toEqual([]);
   expect(() => checkSteps([{ id: 'fix', task: 'Fix', worktree: 'yes' }], { profiles: [] })).toThrow('steps[0].worktree: expected true or false');
   expect(checkSteps([{ id: 'fix', task: 'Fix', worktree: true }], { profiles: [] })[0]!.worktree).toBe(true);

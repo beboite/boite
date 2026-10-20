@@ -10,6 +10,7 @@ import { claudeProjectFolder } from '../src/imports/claude.ts';
 import { claudeSessionFixture, FIXTURE_SESSION_ID } from './fixtures/claude-session.ts';
 import { echoThread, startTestCore, testProject } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
@@ -133,7 +134,7 @@ test('a session re-imported while its deleted thread waits keeps its transcript 
   harness.core.journal.db.query('UPDATE thread_deletions SET deleted_at = ? WHERE root_id = ?').run(Date.now() - 2 * 86_400_000, again.id);
   harness.core.threads.purgeDeleted();
   const refusal = harness.core.imports.run({ projectId: project.id, accountId: account.id, sessionId: FIXTURE_SESSION_ID });
-  await expect(refusal).rejects.toThrow(/being removed/);
+  expect(await thrown(refusal)).toThrow(/being removed/);
   await harness.core.threads.transcriptPurge;
   expect(existsSync(current.file)).toBe(false);
 });

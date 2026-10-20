@@ -5,31 +5,31 @@
     "name": "B.O.T.S",
     "version": "0.1.16",
     "description": "Little robots on your desktop that follow your Boite agents, answer your questions and keep you company while you work.",
-    "homepage": "https://github.com/beboite/bots",
+    "homepage": "https://github.com/Skollheim/bots",
     "executable": "bots",
     "artifacts": {
       "win32-x64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-x86_64-pc-windows-msvc.exe",
+        "url": "https://github.com/Skollheim/bots/releases/download/v0.1.16/bots-x86_64-pc-windows-msvc.exe",
         "sha256": "2d04730442c180197d289e839ce537000b5b50d03ea73f82340e21d11aecab35"
       },
       "win32-arm64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-aarch64-pc-windows-msvc.exe",
+        "url": "https://github.com/Skollheim/bots/releases/download/v0.1.16/bots-aarch64-pc-windows-msvc.exe",
         "sha256": "ae2572423be48ba61e1650616cbe8096af28855e983fc0d8ff1ff3b0bd9eecf6"
       },
       "darwin-x64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-x86_64-apple-darwin",
+        "url": "https://github.com/Skollheim/bots/releases/download/v0.1.16/bots-x86_64-apple-darwin",
         "sha256": "9453ed0dfbe6525725afb1bb0a706d7f8064d129d357407c654acd59f13e5912"
       },
       "darwin-arm64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-aarch64-apple-darwin",
+        "url": "https://github.com/Skollheim/bots/releases/download/v0.1.16/bots-aarch64-apple-darwin",
         "sha256": "603d4574950696ce427c8560918e7c83bd6bdde4ee17f6a092b10bd3927d217a"
       },
       "linux-x64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-x86_64-unknown-linux-gnu",
+        "url": "https://github.com/Skollheim/bots/releases/download/v0.1.16/bots-x86_64-unknown-linux-gnu",
         "sha256": "7c6bf86aae15f002ca0ce3c97147228ff1c837aaee41c129c261fd4695f98b38"
       },
       "linux-arm64": {
-        "url": "https://github.com/beboite/bots/releases/download/v0.1.16/bots-aarch64-unknown-linux-gnu",
+        "url": "https://github.com/Skollheim/bots/releases/download/v0.1.16/bots-aarch64-unknown-linux-gnu",
         "sha256": "66b3ed9dd2434eded78aff427d4c85936ef497ca54f0084b5aed766c443d17e9"
       }
     },
@@ -37,7 +37,7 @@
       "desktopApp": {}
     },
     "updates": {
-      "repository": "https://github.com/beboite/bots",
+      "repository": "https://github.com/Skollheim/bots",
       "ref": "main"
     }
   },
@@ -47,27 +47,27 @@
     "name": "Douane",
     "version": "0.3.0",
     "description": "Local gateway for AI coding subscriptions: pools Claude, Codex, Grok, Copilot and API key accounts behind one OpenAI and Anthropic compatible endpoint, with quota tracking and a dashboard.",
-    "homepage": "https://github.com/beboite/douane",
+    "homepage": "https://github.com/mtsu-dev/douane",
     "executable": "douane",
     "artifacts": {
       "win32-x64": {
-        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-windows-x64.exe",
+        "url": "https://github.com/mtsu-dev/douane/releases/download/v0.3.0/douane-windows-x64.exe",
         "sha256": "9dfbdacb3845438b147a33daa9fb000941c756a3afb598bd1b12813627429a81"
       },
       "darwin-arm64": {
-        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-macos-arm64",
+        "url": "https://github.com/mtsu-dev/douane/releases/download/v0.3.0/douane-macos-arm64",
         "sha256": "c1f97fb350a7a56c160e062bdf1d09a93b59946a21eaccb6a2912d836ec65ae8"
       },
       "darwin-x64": {
-        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-macos-x64",
+        "url": "https://github.com/mtsu-dev/douane/releases/download/v0.3.0/douane-macos-x64",
         "sha256": "129e1d3e3604f935476cdb5e9cef97fbeabce8e519ce6677a2822a7803235d1b"
       },
       "linux-x64": {
-        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-linux-x64",
+        "url": "https://github.com/mtsu-dev/douane/releases/download/v0.3.0/douane-linux-x64",
         "sha256": "5964cc8f84d0ddfed15954e09d3ceccfe5b5ecb53997b00ab4e15d6e16388210"
       },
       "linux-arm64": {
-        "url": "https://github.com/beboite/douane/releases/download/v0.3.0/douane-linux-arm64",
+        "url": "https://github.com/mtsu-dev/douane/releases/download/v0.3.0/douane-linux-arm64",
         "sha256": "cf2bf1869d29616a1b18859f66ba5103d3873b1767ddd049bebb9fd7d19bfa9a"
       }
     },
@@ -75,7 +75,7 @@
       "gateway": {}
     },
     "updates": {
-      "repository": "https://github.com/beboite/douane",
+      "repository": "https://github.com/mtsu-dev/douane",
       "ref": "main"
     }
   }

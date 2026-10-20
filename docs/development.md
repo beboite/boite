@@ -536,6 +536,22 @@ or a one-second fallback after the child exits (`procs.ts`). Cleanup assertions
 must wait for both the expected PID set and install leases before checking them;
 the child exit callback alone does not establish that the trace row was removed.
 
+### Promise matchers under bun test
+
+Files run by `bun test` never use `expect(promise).rejects` or `.resolves`;
+`bun run check:architecture` refuses them. In Bun 1.4.3 those matchers run a
+nested event loop tick on a pending promise. On macOS the nested `kevent64`
+reuses the loop's `ready_polls`, and the outer tick drops the events it had not
+processed yet: a socket's one-shot write event is lost and the core closes the
+socket with 1013 after 10 seconds. On macos-15, `todos.test.ts` failed 23
+times in 7,308 runs with `.rejects` and 0 in 14,214 with an awaited
+`.catch()`. Await first, then match, with the helpers of
+`packages/core/test/settle.ts`: `expect(await thrown(promise)).toThrow(message)`,
+`expect((await rejection(promise)).reason).toMatchObject(shape)` for other
+matchers (boxed, so a thenable reason is not adopted),
+and `expect(await promise)` in place of `.resolves`. UI Vitest awaits its
+matchers and keeps them.
+
 ### Contract scenarios
 
 `tests/contract/scenarios.ts` drives RPC results and events through the same
@@ -624,10 +640,26 @@ and when, a last TCP and `/json/list` probe, the end of the shell's own
 Any other failure of a shell attach (the page socket, `Page.enable`) carries
 the same shell details. The whole text lands in
 `tests/e2e/.artifacts/shell-<pid>-diagnosis.txt`, which the
-`desktop-failure-captures` artifact keeps. The diagnosis gets 20 s at most and
-the process tree 10 s, so a stuck WMI query costs the tree, not the error. A
+`desktop-failure-captures` artifact keeps. The diagnosis gets 20 s at most. The
+process tree is read in the test process (`tests/e2e/lib/process-tree.ts`, a
+Toolhelp snapshot and each command line), in milliseconds: the PowerShell and
+WMI listing it replaced gave nothing within 10 s on a loaded runner. A
 missing `main-window` startup phase means the main webview was never built; a
 phase with no `shell.webview.page-load` means the page never started loading.
+The shell logs each main-page navigation as `shell.webview.navigation`: the URL
+the page was on when the watch began, each navigation's start and URL, when its
+document request reached the host (`requested`) and when the asset protocol
+answered it (`answered`), whether its content is an error page, and how it
+ended (WebView2's `WebErrorStatus` and the HTTP status). A test shell also
+writes WebView2's Chromium net log to `logs/webview-net.json`; a failed attach
+or bridge wait copies it to `tests/e2e/.artifacts/shell-<pid>-webview-net.json`.
+Between `starting` and `requested`, look for `COOKIE_PERSISTENT_STORE_LOAD`
+(the profile's cookie database, which holds the first request until it has
+opened) and `PAC_FILE_DECIDER` (proxy auto-detection).
+A page that is exposed but never gets its IPC bridge fails in
+`waitForShellPage` with its frame tree, its navigation history and each
+main-frame navigation event and document request devtools saw since the
+attach, with how the request ended, in `shell-<pid>-not-ready.txt`.
 
 ## Staging the sidecar
 

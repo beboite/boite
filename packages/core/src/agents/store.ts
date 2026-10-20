@@ -85,11 +85,15 @@ export class AgentStore {
     const provider = this.core.providers.require(text(v.selection.providerId, 'selection.providerId', 100));
     const account = this.core.accounts.require(text(v.selection.accountId, 'selection.accountId', 160));
     if (account.providerId !== provider.id) throw refused('selection.accountId: account belongs to another provider');
-    const model = checkModel(provider, account.id, v.selection.model ?? provider.models.find(m => m.default)?.id ?? provider.models[0]?.id ?? null);
-    if (!model) throw refused('selection.model: choose a default model');
     const previous = params.id ? this.records.get('profile', params.id) : null;
+    // A model and level the agent already runs were checked when chosen. A list read later
+    // may drop that id (a gateway renamed it), which must not block an unrelated change.
+    const kept = previous !== null && previous.selection.providerId === provider.id && previous.selection.accountId === account.id
+      && v.selection.model != null && previous.selection.model === v.selection.model;
+    const model = kept ? v.selection.model! : checkModel(provider, account.id, v.selection.model ?? provider.models.find(m => m.default)?.id ?? provider.models[0]?.id ?? null);
+    if (!model) throw refused('selection.model: choose a default model');
     if (previous && this.core.journal.getSetting(`agents:runtime:${previous.id}`) && JSON.stringify(previous.selection) !== JSON.stringify({ ...v.selection, model }) && !this.resident.allowed(previous.id, { ...v.selection, model })) throw refused('selection.model: default model must be allowed by this agent policy');
-    const effort = checkEffort(provider, account.id, model, v.selection.effort);
+    const effort = kept && previous.selection.effort === v.selection.effort ? v.selection.effort : checkEffort(provider, account.id, model, v.selection.effort);
     const tools = ids(v.tools, 'tools', TOOLS.length);
     for (const tool of tools) oneOf(tool, 'tools', TOOLS);
     const projectIds = ids(v.projectIds ?? [], 'projectIds', 50);

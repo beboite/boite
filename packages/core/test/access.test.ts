@@ -15,6 +15,7 @@ import { AGENT_METHODS, DEVICE_METHODS, assertAllowed } from '../src/access.ts';
 import type { Connection } from '../src/router.ts';
 import { echoThread, startTestCore, testProject } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { rejection, thrown } from './settle.ts';
 
 let harness: TestCore;
 
@@ -57,9 +58,9 @@ describe('the access gate', () => {
       const expected = await owner.call('providers.probe', params);
       expect((await phone.call('providers.probe', params)).models).toEqual(expected.models);
       expect((await phone.call('providers.probe', { ...params, refresh: true })).models).toEqual(expected.models);
-      await expect(phone.call('providers.probe', { ...params, accountId: 'missing' })).rejects.toThrow('account');
-      await expect(phone.call('providers.reload', {})).rejects.toThrow('owner only');
-      await expect(phone.call('accounts.add', { providerId: 'echo', label: 'Phone' })).rejects.toThrow('owner only');
+      expect(await thrown(phone.call('providers.probe', { ...params, accountId: 'missing' }))).toThrow('account');
+      expect(await thrown(phone.call('providers.reload', {}))).toThrow('owner only');
+      expect(await thrown(phone.call('accounts.add', { providerId: 'echo', label: 'Phone' }))).toThrow('owner only');
     } finally { phone.close(); }
   });
 
@@ -70,11 +71,11 @@ describe('the access gate', () => {
       expect(await phone.call('quotas.list', {})).toEqual(await owner.call('quotas.list', {}));
       expect(await phone.call('quotas.list', { refresh: false })).toBeArray();
       expect((await phone.call('subscriptionProxy.quotas', {})).status).toBe('off');
-      await expect(phone.call('quotas.list', { refresh: true })).rejects.toThrow('quotas.list: paired devices read the last reading; refresh must be false or absent');
-      await expect(phone.call('subscriptionProxy.quotas', { refresh: true })).rejects.toThrow('refresh must be false or absent');
+      expect(await thrown(phone.call('quotas.list', { refresh: true }))).toThrow('quotas.list: paired devices read the last reading; refresh must be false or absent');
+      expect(await thrown(phone.call('subscriptionProxy.quotas', { refresh: true }))).toThrow('refresh must be false or absent');
       const account = (await owner.call('accounts.list', {}))[0]!;
-      await expect(phone.call('quotas.configure', { accountId: account.id, enabled: false })).rejects.toThrow('owner only');
-      await expect(phone.call('quotas.reset', { accountId: account.id, confirmed: true })).rejects.toThrow('owner only');
+      expect(await thrown(phone.call('quotas.configure', { accountId: account.id, enabled: false }))).toThrow('owner only');
+      expect(await thrown(phone.call('quotas.reset', { accountId: account.id, confirmed: true }))).toThrow('owner only');
     } finally { phone.close(); }
   });
 
@@ -356,13 +357,13 @@ describe('a paired device reads a thread\'s changes and files', () => {
       expect(await phone.call('files.read', { threadId, path: 'a.txt' })).toMatchObject({ kind: 'text', text: 'two\n' });
 
       // No writing, no history beyond HEAD, nothing outside the working tree.
-      await expect(phone.call('files.write', { threadId, path: 'a.txt', text: 'from the phone' })).rejects.toThrow('files.write is for the owner only');
-      await expect(phone.call('git.diff', { threadId, path: 'a.txt', ref: 'HEAD~1' })).rejects.toThrow('HEAD only');
-      await expect(phone.call('git.diff', { threadId, path: 'a.txt', ref: '--output=x' })).rejects.toThrow('HEAD only');
-      await expect(phone.call('files.read', { threadId, path: '../outside.txt' })).rejects.toThrow('leaves the thread\'s working directory');
-      await expect(phone.call('files.read', { threadId, path: join(harness.dataDir, 'outside.txt') })).rejects.toThrow('leaves the thread\'s working directory');
-      await expect(phone.call('files.list', { threadId, path: '..' })).rejects.toThrow('leaves the thread\'s working directory');
-      await expect(phone.call('git.diff', { threadId, path: '../outside.txt' })).rejects.toThrow('leaves the thread\'s working directory');
+      expect(await thrown(phone.call('files.write', { threadId, path: 'a.txt', text: 'from the phone' }))).toThrow('files.write is for the owner only');
+      expect(await thrown(phone.call('git.diff', { threadId, path: 'a.txt', ref: 'HEAD~1' }))).toThrow('HEAD only');
+      expect(await thrown(phone.call('git.diff', { threadId, path: 'a.txt', ref: '--output=x' }))).toThrow('HEAD only');
+      expect(await thrown(phone.call('files.read', { threadId, path: '../outside.txt' }))).toThrow('leaves the thread\'s working directory');
+      expect(await thrown(phone.call('files.read', { threadId, path: join(harness.dataDir, 'outside.txt') }))).toThrow('leaves the thread\'s working directory');
+      expect(await thrown(phone.call('files.list', { threadId, path: '..' }))).toThrow('leaves the thread\'s working directory');
+      expect(await thrown(phone.call('git.diff', { threadId, path: '../outside.txt' }))).toThrow('leaves the thread\'s working directory');
       expect(readFileSync(join(root, 'a.txt'), 'utf8')).toBe('two\n');
       // The owner still diffs against any revision.
       expect(await owner.call('git.diff', { threadId, path: 'a.txt', ref: 'HEAD' })).toMatchObject({ oldText: 'one\n' });
@@ -380,10 +381,10 @@ describe('a paired device reads a thread\'s changes and files', () => {
     const phone = await pairedDevice();
     try {
       for (const path of [...secrets, '.ssh/config', '.git/config']) {
-        await expect(phone.call('files.read', { threadId, path })).rejects.toThrow('credential files');
+        expect(await thrown(phone.call('files.read', { threadId, path }))).toThrow('credential files');
       }
-      await expect(phone.call('files.list', { threadId, path: '.git' })).rejects.toThrow('credential files');
-      await expect(phone.call('git.diff', { threadId, path: '.env' })).rejects.toThrow('credential files');
+      expect(await thrown(phone.call('files.list', { threadId, path: '.git' }))).toThrow('credential files');
+      expect(await thrown(phone.call('git.diff', { threadId, path: '.env' }))).toThrow('credential files');
       expect(await phone.call('files.read', { threadId, path: '.env.example' })).toMatchObject({ kind: 'text' });
       expect(await phone.call('files.read', { threadId, path: 'terraform.tfvars.example' })).toMatchObject({ kind: 'text' });
       expect(await owner.call('files.read', { threadId, path: '.env' })).toMatchObject({ kind: 'text', text: 'token\n' });
@@ -398,8 +399,8 @@ describe('a paired device reads a thread\'s changes and files', () => {
     writeFileSync(join(harness.dataDir, 'notes.txt'), 'hello\n');
     const phone = await pairedDevice();
     try {
-      await expect(phone.call('files.read', { threadId, path: 'journal.db' })).rejects.toThrow('data folder');
-      await expect(phone.call('files.list', { threadId })).rejects.toThrow('data folder');
+      expect(await thrown(phone.call('files.read', { threadId, path: 'journal.db' }))).toThrow('data folder');
+      expect(await thrown(phone.call('files.list', { threadId }))).toThrow('data folder');
       expect(await owner.call('files.read', { threadId, path: 'notes.txt' })).toMatchObject({ kind: 'text', text: 'hello\n' });
     } finally {
       phone.close();
@@ -427,7 +428,7 @@ describe('a paired device reads a thread\'s changes and files', () => {
         () => phone.call('git.status', { threadId }),
         () => phone.call('git.diff', { threadId, path: 'secret.txt' }),
       ]) {
-        await expect(attempt()).rejects.toThrow('a paired device reads only inside the thread\'s project or its worktrees');
+        expect(await thrown(attempt())).toThrow('a paired device reads only inside the thread\'s project or its worktrees');
       }
       // The owner's own read is not changed by this guard.
       expect((await owner.call('files.list', { threadId })).map((entry) => entry.name)).toEqual(['secret.txt']);
@@ -498,9 +499,9 @@ describe('a working directory outside the project', () => {
       const created = await client.call('threads.create', { projectId: linkedProject.id, providerId: 'echo', accountId: account?.id ?? '', cwd });
       expect(created.cwd).toBe(cwd);
     }
-    await expect(client.call('threads.create', {
+    expect(await thrown(client.call('threads.create', {
       projectId: linkedProject.id, providerId: 'echo', accountId: account?.id ?? '', cwd: join(nested, 'child'),
-    })).rejects.toThrow('the working directory must be inside the project');
+    }))).toThrow('the working directory must be inside the project');
   });
 
   test('threads.create refuses a cwd whose directory link escapes the project, and writes no thread', async () => {
@@ -513,8 +514,8 @@ describe('a working directory outside the project', () => {
     const project = await client.call('projects.add', { path: projectRoot, name: 'contained project' });
     const account = (await client.call('accounts.list', {})).find(entry => entry.providerId === 'echo');
     const creation = client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', cwd });
-    await expect(creation).rejects.toThrow('the working directory must resolve inside the project');
-    await expect(creation).rejects.toMatchObject({ rpc: { data: {
+    expect(await thrown(creation)).toThrow('the working directory must resolve inside the project');
+    expect((await rejection(creation)).reason).toMatchObject({ rpc: { data: {
       field: 'cwd', expected: 'a directory inside the project filesystem root', cwd, projectPath: projectRoot,
     } } });
     expect(await client.call('threads.list', {})).toEqual([]);

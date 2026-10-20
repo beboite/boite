@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { PROTOCOL_VERSION, type Group, type GroupCore } from '@boite/contracts';
+import { PROTOCOL_VERSION, RpcErrorCode, type Group, type GroupCore } from '@boite/contracts';
 import type { SocketLike } from './client';
+import { deviceKey } from './device-key';
+import { WsClient } from './ws-client';
+import { machineKey } from '../test/machine-key';
 import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, rememberSession, removeBrought, type Endpoint } from './endpoint';
 import { GroupLinks, usableAddresses } from './group-links.svelte';
 import type { Machine, Workspace } from './workspace.svelte';
@@ -720,5 +723,139 @@ describe('a machine the device key opens', () => {
     await links.reconcile();
     expect(removed).toEqual(['http://b.test']);
     localStorage.clear();
+  });
+});
+
+/**
+ * The rows of the rule in docs/groups.md, and of PR #672: what a removed machine
+ * the device key opens says of itself decides, and only for itself.
+ */
+describe('a removed machine the device key opens', () => {
+  const ids = { a: 'a'.repeat(64), b: 'b'.repeat(64), c: 'c'.repeat(64), d: 'd'.repeat(64) };
+  type Name = keyof typeof ids;
+  const url = (name: Name) => `http://${name}.test`;
+  /** What `self` answers to `group.get`: group `id`, listing `names` (at `epochs`, 1 by default). */
+  const says = (self: Name, names: Name[], id = 'grp', epochs: Partial<Record<Name, number>> = {}): Partial<FakeStore> =>
+    ({ group: group(ids[self], names.map((name) => core(ids[name], [url(name)], epochs[name] ?? 1)), id) });
+  /** Not heard since the page opened: offline, or its `group.get` not answered yet. */
+  const silent: Partial<FakeStore> = { connection: 'connecting', groupKnown: false };
+  /** It refused this device's hello saying it is in no group: removed, and told so. */
+  const out: Partial<FakeStore> = { connection: 'connecting', groupKnown: false, ungrouped: true };
+
+  /** Reconciles twice with these machines, the device key opening each but those in `unsigned`, and gives what left. */
+  async function left(machines: Partial<Record<Name, Partial<FakeStore>>>, extra: { unsigned?: Name[]; brought?: Machine[] } = {}): Promise<string[]> {
+    const names = Object.keys(machines) as Name[];
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify(names.map((name) => (extra.unsigned?.includes(name)
+      ? { url: url(name), label: name, token: `key-${name}`, paired: true }
+      : { url: url(name), label: name, token: '', paired: true, signs: ids[name] }))));
+    const { workspace: ws, removed } = workspace([...names.map((name) => machine(url(name), machines[name]!)), ...(extra.brought ?? [])]);
+    const links = new GroupLinks(ws, { reach: vi.fn(async () => null), secure: () => false });
+    await links.reconcile();
+    await links.reconcile();
+    return removed.filter((id) => !extra.brought?.some((entry) => entry.id === id)).sort();
+  }
+
+  it('1. #672: reloaded, it refuses the hello in no group and its group no longer lists it: it leaves', async () => {
+    expect(await left({ a: says('a', ['a']), b: out })).toEqual([url('b')]);
+  });
+
+  it('2. it refuses the hello in no group while a roster still lists it (Sol delta): it stays until that one hears', async () => {
+    expect(await left({ a: says('a', ['a', 'c']), b: out, c: says('c', ['a', 'b', 'c']) })).toEqual([]);
+  });
+
+  it('3. it refuses the device key (Sol r1) and no roster lists it: it leaves', async () => {
+    expect(await left({ a: says('a', ['a', 'c'], 'other'), b: { connection: 'closed', groupKnown: false, pairingRequired: true } as Partial<FakeStore>, c: says('c', ['a', 'c'], 'other') })).toEqual([url('b')]);
+  });
+
+  it.each([
+    ['4. moved to another group that lists it (Sol r1)', { a: says('a', ['a']), b: silent, c: says('c', ['b', 'c'], 'other') }],
+    ['5. one roster never heard of its admission, another lists it (Sol r3)', { a: says('a', ['a', 'c']), b: silent, c: says('c', ['a', 'b', 'c']) }],
+    ['5b. the same with a readmission at 2 (Sol r3)', { a: says('a', ['a', 'c']), b: silent, c: says('c', ['a', 'b', 'c'], 'grp', { b: 2 }) }],
+    ['6. removed while it was off, and not heard since (Sol r1)', { a: says('a', ['a']), b: silent }]
+  ] as const)('%s: silent, it stays', async (_name, machines) => {
+    expect(await left(machines)).toEqual([]);
+  });
+
+  it('7. only a machine paired by hand with a token omits it (Sol r1): it stays', async () => {
+    expect(await left({ a: says('a', ['a']), b: says('b', ['a', 'b']) }, { unsigned: ['a'] })).toEqual([]);
+  });
+
+  it('8. removed at 1, it answers its group with an admission 2 of its own (Sol r4): its group omits it, it leaves', async () => {
+    expect(await left({ a: says('a', ['a']), b: says('b', ['a', 'b'], 'grp', { b: 2 }) })).toEqual([url('b')]);
+  });
+
+  it('9. a machine the group brought lists it at 2 (Sol r4): it vouches for nothing, it leaves', async () => {
+    const brought = machine(url('d'), says('d', ['a', 'b', 'd'], 'grp', { b: 2 }), { coreId: ids.d });
+    expect(await left({ a: says('a', ['a']), b: says('b', ['a', 'b']) }, { brought: [brought] })).toEqual([url('b')]);
+  });
+
+  it.each([
+    ['10. two removed machines list each other (Sol r5)', {}],
+    ['11. a chain of readmissions they made up, 2 and 3 (Sol r5)', { b: 3, c: 2 }]
+  ] as const)('%s: both leave', async (_name, epochs) => {
+    expect(await left({ a: says('a', ['a']), b: says('b', ['a', 'b', 'c'], 'grp', epochs), c: says('c', ['a', 'b', 'c'], 'grp', epochs) })).toEqual([url('b'), url('c')]);
+  });
+
+  it('12. removed, it answers a roster without the machine that removed it (Sol r5): it leaves', async () => {
+    expect(await left({ a: says('a', ['a']), b: says('b', ['b']) })).toContain(url('b'));
+  });
+});
+
+describe('a machine at the address of one the device key opens says it is in no group', () => {
+  /**
+   * The page's real client says hello to b's address, signed for b, and hears `refusal` for that hello's nonce; then
+   * the links reconcile with a, whose group no longer lists b. What left.
+   */
+  async function left(refusal: (nonce: string, b: ReturnType<typeof machineKey>) => object): Promise<string[]> {
+    const b = machineKey();
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([
+      { url: 'http://a.test', label: 'a', token: '', paired: true, signs: 'a'.repeat(64) },
+      { url: 'http://b.test', label: 'b', token: '', paired: true, signs: b.coreId }
+    ]));
+    const machines = [machine('http://a.test', { group: group('a'.repeat(64), [core('a'.repeat(64), ['http://a.test'])]) }), machine('http://b.test', { connection: 'connecting', groupKnown: false })];
+    const { workspace: ws, removed } = workspace(machines);
+    const nonces: string[] = [];
+    class Refusing implements SocketLike {
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onclose: SocketLike['onclose'] = null;
+      onerror: (() => void) | null = null;
+      constructor() { setTimeout(() => this.onopen?.(), 0); }
+      send(raw: string) {
+        const frame = JSON.parse(raw) as { id: number; params: { device: { nonce: string } } };
+        nonces.push(frame.params.device.nonce);
+        setTimeout(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, error: refusal(frame.params.device.nonce, b) }) }), 0);
+      }
+      close() { this.onclose?.({ code: 1000 }); }
+    }
+    const client = new WsClient({
+      url: 'http://b.test', token: '', paired: true, reconnect: false, signer: { key: deviceKey, coreId: b.coreId },
+      socketFactory: () => new Refusing(), onUngrouped: () => { storeOf(machines[1]!).ungrouped = true; }
+    });
+    try {
+      await client.connect().catch(() => undefined);
+      await vi.waitFor(() => expect(nonces).toHaveLength(1));
+      await settle();
+      await settle();
+      expect(client.state).not.toBe('ready');
+      const links = new GroupLinks(ws, { reach: vi.fn(async () => null), secure: () => false });
+      await links.reconcile();
+      await links.reconcile();
+      return removed;
+    } finally {
+      client.close();
+    }
+  }
+
+  it('1. b itself, signed with its key over this hello: it leaves', async () => {
+    expect(await left((nonce, b) => b.ungrouped(nonce))).toEqual(['http://b.test']);
+  });
+
+  it.each([
+    ['14. unsigned, as any server can say it (Sol r6)', () => ({ code: RpcErrorCode.Unavailable, message: 'this machine belongs to no group', data: { reason: 'ungrouped' } })],
+    ['14b. signed by another machine now at that address, for b', (nonce: string, b: ReturnType<typeof machineKey>) => machineKey().ungrouped(nonce, b.coreId)],
+    ['14c. signed by b over an older hello', (_nonce: string, b: ReturnType<typeof machineKey>) => b.ungrouped(crypto.randomUUID())]
+  ] as const)('%s: b stays', async (_name, refusal) => {
+    expect(await left(refusal)).toEqual([]);
   });
 });

@@ -53,7 +53,8 @@ export const commandTable: readonly CommandDefinition[] = [
     const projectId = store.openThread?.projectId ?? store.draft?.projectId ?? store.projects[0]?.id;
     if (projectId !== undefined) void store.openImports(projectId);
   } },
-  { id: 'terminal', label: () => strings.palette.terminal, ownerOnly: true, run: (store) => { const open = store.openThread; if (open) { store.showChat(); store.toggleTerminal(); } } },
+  // The drawer's: the terminal, or the project board a paired device opens too.
+  { id: 'terminal', label: () => strings.palette.terminal, run: (store) => { const open = store.openThread; if (open && (store.owner || store.boardAvailable())) { store.showChat(); store.toggleDrawer(); } } },
   { id: 'terminal-new', label: () => strings.keyboard.commands.terminalNew, ownerOnly: true },
   { id: 'terminal-split', label: () => strings.keyboard.commands.terminalSplit, ownerOnly: true },
   { id: 'terminal-split-vertical', label: () => strings.keyboard.commands.terminalSplitVertical, ownerOnly: true },

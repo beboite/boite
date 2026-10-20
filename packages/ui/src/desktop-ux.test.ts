@@ -10,6 +10,9 @@ import { archiveThread } from './lib/archive';
 import { runCommand } from './lib/commands.svelte';
 import { undo } from './lib/undo.svelte';
 import { confirm } from './lib/confirm.svelte';
+import { strings } from './lib/strings';
+import { clampPanel, rightPanel } from './lib/right-panel.svelte';
+import { contactsRail } from './lib/contacts-rail.svelte';
 
 /**
  * The desktop behaviours the UX audit found broken, on the whole app over the
@@ -35,6 +38,81 @@ afterEach(() => {
   work.load();
   workspace.view = 'projects';
   undo.dismiss();
+});
+
+test('a maximized panel stays with its thread: the Contacts page beside the list is not squeezed to nothing', async () => {
+  writeExperiments(['contacts']);
+  await mountOnFake();
+  try {
+    if (!store.panelOpen) store.togglePanel();
+    rightPanel.maximized = true;
+    await waitFor(() => query('.body').classList.contains('panel-maximized'));
+    store.showHome();
+    await waitFor(() => document.querySelector('[data-testid=home-page]') !== null);
+    expect(query('.body').classList.contains('panel-maximized')).toBe(false);
+    // Back on the chat, the thread finds its panel as it left it.
+    store.showChat();
+    await waitFor(() => query('.body').classList.contains('panel-maximized'));
+  } finally {
+    rightPanel.maximized = false;
+  }
+});
+
+test('contacts stand in their own column on the right: the thread list keeps the projects, a row opens the page between them, the bar folds the column', async () => {
+  writeExperiments(['contacts']);
+  await mountOnFake();
+  try {
+    await waitFor(() => document.querySelector('[data-testid=rail-contact]') !== null);
+    const rail = query('[data-testid=contacts-rail]');
+    expect(query('main').compareDocumentPosition(rail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.querySelector('[data-testid=sidebar] [data-testid=sidebar-contacts]')).toBeNull();
+
+    query<HTMLButtonElement>('[data-testid=rail-contact]').click();
+    await waitFor(() => document.querySelector('[data-testid=home-page]') !== null);
+    expect([store.page, store.contact]).toEqual(['home', 'core-chris']);
+    expect(document.querySelector('[data-testid=sidebar]')).not.toBeNull();
+    flushSync();
+    expect(query('[data-testid=rail-contact]').getAttribute('aria-current')).toBe('page');
+
+    // Folded, the bar's button alone says Chris asks something, and the next start finds it folded.
+    query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
+    flushSync();
+    expect(rail.classList.contains('collapsed')).toBe(true);
+    expect(query('[data-testid=contacts-toggle]').getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('[data-testid=contacts-toggle-waiting]')).not.toBeNull();
+    expect(window.localStorage.getItem('boite.contacts-rail-folded')).toBe('1');
+    query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
+    flushSync();
+    expect(rail.classList.contains('collapsed')).toBe(false);
+  } finally {
+    if (contactsRail.folded) contactsRail.toggle();
+  }
+});
+
+test('a panel widened while the contacts column was folded gives the chat its room back when the column unfolds', async () => {
+  writeExperiments(['contacts']);
+  contactsRail.toggle();
+  const stored = rightPanel.width;
+  rightPanel.width = 700;
+  await mountOnFake();
+  try {
+    if (!store.panelOpen) store.togglePanel();
+    await waitFor(() => document.querySelector('[data-testid=right-panel]') !== null);
+    const width = () => query('[data-testid=right-panel]').style.getPropertyValue('--panel-width');
+    const list = store.sidebarCollapsed ? 0 : store.sidebarWidth;
+    const folded = clampPanel(700, window.innerWidth, list);
+    expect(width()).toBe(`${folded}px`);
+    query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
+    flushSync();
+    const unfolded = clampPanel(700, window.innerWidth, list + 240);
+    expect(unfolded).toBeLessThan(folded);
+    expect(width()).toBe(`${unfolded}px`);
+    // The width asked for stays, for the day the room comes back.
+    expect(rightPanel.width).toBe(700);
+  } finally {
+    if (contactsRail.folded) contactsRail.toggle();
+    rightPanel.width = stored;
+  }
 });
 
 test('typed confirmation supports Enter and cancellation restores focus', async () => {
@@ -213,28 +291,37 @@ test('Ctrl+Shift+T brings back the thread archived last on the machine, from thi
   expect(store.threads.find((t) => t.id === 't-trace')).toBeUndefined();
 });
 
-test('the scheduler never says Saved after a refused save, and refuses an out-of-range value itself', async () => {
+test('the scheduler saves a valid value by itself, never sends an out-of-range one and never says Saved after a refusal', async () => {
   await mountOnFake();
   store.showSettings('advanced');
-  await waitFor(() => document.querySelector('[data-testid=scheduler-save]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=setting-warmProcessMinutes]') !== null);
+  const status = () => document.querySelector<HTMLElement>('[data-testid=scheduler-settings] [data-testid=save-status]');
   const field = query<HTMLInputElement>('[data-testid=setting-warmProcessMinutes]');
+  const call = store.client!.call.bind(store.client!);
+  const spy = vi.spyOn(store.client!, 'call');
   field.value = '-1';
   field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new Event('change', { bubbles: true }));
   await waitFor(() => document.querySelector('[data-testid=setting-error-warmProcessMinutes]') !== null);
-  expect(query<HTMLButtonElement>('[data-testid=scheduler-save]').disabled).toBe(true);
+  await waitFor(() => status()?.dataset.state === 'invalid');
+  expect(spy.mock.calls.some(([method]) => method === 'settings.set')).toBe(false);
 
   field.value = '7';
   field.dispatchEvent(new Event('input', { bubbles: true }));
-  await waitFor(() => !query<HTMLButtonElement>('[data-testid=scheduler-save]').disabled);
-  const call = store.client!.call.bind(store.client!);
-  vi.spyOn(store.client!, 'call').mockImplementation((async (method: string, params: never) => {
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  await waitFor(() => status()?.dataset.state === 'saved');
+  expect(store.settings?.warmProcessMinutes).toBe(7);
+
+  spy.mockImplementation((async (method: string, params: never) => {
     if (method === 'settings.set') throw new Error('settings.set refused');
     return call(method as never, params);
   }) as never);
-  query<HTMLButtonElement>('[data-testid=scheduler-save]').click();
-  await waitFor(() => store.error !== null);
-  flushSync();
-  expect(document.querySelector('[data-testid=scheduler-saved]')).toBeNull();
+  field.value = '9';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  await waitFor(() => status()?.dataset.state === 'error');
+  expect(status()!.textContent).not.toContain(strings.settings.autosave.saved);
+  expect(store.settings?.warmProcessMinutes).toBe(7);
 });
 
 test('the LAN switch saves when it flips, like every other switch in Settings', async () => {

@@ -311,9 +311,11 @@ The reads (`git.*`, `files.list`, `files.read`, `todos.list`, the tasks) are
 the owner's and the thread's own agent's. A paired phone also reads `git.status`,
 `git.diff` against `HEAD` only, `files.list` and `files.read`, on a thread whose
 real working directory is inside its project or the core's worktree folder
-([phone.md](phone.md#what-a-paired-device-may-call)). `files.write`,
-`todos.remove` and a todo's `done` are the owner's alone, and `todos.updated`
-goes to the owner and to the agents of that project. A paired phone has the
+([phone.md](phone.md#what-a-paired-device-may-call)). `files.write` is the
+owner's alone. A paired phone reads and moves the project's todos for the board
+([board.md](board.md)); `todos.remove` and a todo's `done` are the user's, never
+an agent's, and `todos.updated` goes to the owner, to paired devices and to the
+agents of that project. A paired phone has the
 Panel button too, and its menu offers Changes, Files (read-only, no Save),
 Subagents and Discussions; Tasks and the trace stay the owner's. The
 Discussions tab uses the same coordination and delegation reads as the chat and

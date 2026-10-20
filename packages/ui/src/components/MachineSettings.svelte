@@ -30,14 +30,14 @@
 </div>
 
 <style>
-  .machine-settings { padding: 36px clamp(20px, 4vw, 64px); }
+  .machine-settings { height: 100%; overflow: auto; padding: 36px clamp(20px, 4vw, 64px); }
   .machine-settings > * { max-width: var(--settings-width); }
   header { margin-bottom: 20px; }
   .back { margin-bottom: 16px; }
   h1 { margin: 0 0 8px; font-size: var(--text-lg); overflow-wrap: anywhere; }
   header p { margin: 8px 0 0; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
   .synced { color: var(--color-subtle); }
-  .machine-settings > fieldset.page { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .machine-settings > fieldset.page { height: auto; overflow: visible; border: 0; padding: 0; margin: 0; min-width: 0; }
   .machine-settings > fieldset.page :global(.page) { padding: 0; }
   fieldset :global(.card) { margin-bottom: 16px; }
   fieldset :global([data-testid='worktree-storage']) { padding-bottom: 0; margin-bottom: 0; border-bottom: 0; }

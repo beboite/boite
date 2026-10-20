@@ -53,6 +53,34 @@ the switch off closes the page if it is open. It hides the page only: agents
 already made keep their routines and missions on the core, which knows nothing
 of a client's experiments.
 
+## Contacts
+
+The contacts column and the Contacts page ([contacts](contacts.md)). On a
+desktop window the contacts stand in a column on the right edge, the thread
+list keeping the left one: one row per contact with its link and what it asks,
+and Add beside the title. A row opens that contact's page in the chat's card,
+between the two lists. The Contacts button at the right end of the title bar
+folds the column, remembered on the device, and shows a dot while a folded
+column hides a request. The right panel leaves the column its width. A phone
+has no right edge: its list shows the contacts as a section under the
+projects, and the menu entry opens the page with no contact picked.
+
+A contact's page shows what it asks, the projects each side shares with the
+other with their read switch, then trust, the eight check words and Remove. With
+no contact picked, the page lists the requests waiting for an answer, with
+Accept on a picked project and Refuse with a reason; decided ones fold under a
+count that says who decided. Invite makes a one-use link, copies it and says
+whether Tailscale shared the machine or why it could not; Join takes a pasted
+link and shows the eight words to compare. The Tailscale row says the policy
+state; Configure unfolds the API key (stored or cleared, never shown back), the
+policy lines to paste when it is open, and the weakest model tier a contact's
+request may run on.
+
+In a thread, a letter the core labelled with a contact shows that contact's
+name in a dashed "remote" chip beside the sender. The chip is drawn whatever
+the switch says: the label comes from the core. Turning the switch off closes
+the Contacts page if it is open; contacts, grants and requests stay on the core.
+
 ## Preview comments
 
 Open a Browser tab in the integrated panel and choose Reference an element.
@@ -118,6 +146,14 @@ Reviewing during a review, and draws one dot per verdict plus a pulsing dot for
 the running review. A dot opens its reviewer conversation. The details list
 each verdict with its findings.
 
+Before a reviewer or a tracker conversation starts on a model its agent has
+not listed since the last account change, the core reads that agent's models
+on the account the child will use, as `boite delegate spawn` does, once per
+review; the start then goes through the scheduler, so a goal replaced or paused
+meanwhile is not reviewed on the old read. An account update forgets Claude's list, and a
+review that started without reading it again paused the goal with "the agent
+has not listed this model".
+
 Reviewers are not subagents. Like workflow steps, they need no enabled team, a
 paused team holds them, and their answer goes to the goal, never to the parent
 as mail. They are not listed in the Subagents tab. Pausing, removing or
@@ -125,9 +161,69 @@ completing the goal by hand stops the running reviewer, and resuming a goal
 paused during its review starts a new review. A core restart keeps the
 verdicts and drops the interrupted review; the resume starts a fresh one.
 
+### The checklist
+
+A reviewed goal also keeps the checklist of what the user asked for, so the
+agent works on the user's requests rather than on its own plan
+(`goal-tracker.ts`, `goal-tracker-prompt.ts`). A tracker, one more child
+conversation of the thread with none of its history, runs short passes, one at
+a time, in the order they were asked for:
+
+1. When the goal starts, it writes the list from the objective: one item per
+   distinct request, in the user's language, at most 12 words, a verb and a
+   visible result, with the user's own words it came from. Corrections ("or
+   rather", "but", `mot*`) keep their final meaning.
+2. Each later message of the user, a new prompt or a steer, adds, drops or
+   changes items. The tracker answers with additions, cancellations and
+   changes; the core applies them, so ids never move and a dropped item stays,
+   struck through.
+3. After each finished turn of the conversation, the agent's or the user's, it
+   reads a digest of that turn (one line per tool call, the failed ones marked,
+   and the agent's last answer) and marks the open items the turn did. An
+   item the turn never touched stays open, whatever the answer claims. The
+   goal's next turn or review waits for that check.
+
+The next goal turn hears what is still open, as JSON data, in place of the
+usual line about the agent's own task list. A completion claim with an open
+item goes back to the agent before any review runs, and says so; each item
+holds a claim back twice at most, then the review decides alone with the whole
+list, statuses included, in its prompt.
+
+The tracker runs on `Settings.goalTracker`, picked under the switch in
+Settings, Experiments: a provider, a model and its reasoning level, stored by
+the core of that machine. Automatic (`null`) takes the newest Opus at medium on
+Claude or the newest Sol at high on Codex (`GOAL_TRACKER_DEFAULTS`), the
+conversation's own agent first, else the conversation's own model. A small
+model is never chosen by itself: on nine real prompts of 900 to 4000
+characters (2026-10-18), Haiku 5.5 at xhigh dropped or inverted about two
+requests per long prompt, the same ones on every run, where Opus 5.5 at medium
+dropped none. On Claude the tracker starts without the user's guides, servers
+and hooks and keeps only `Read`; on every agent its rules tell it to answer
+from the text alone.
+
+`ThreadActivity.goal.checklist` holds the tracker conversation, its model, the
+phase (`writing`, `checking` or `idle`), the items with their status (`open`,
+`done`, `cancelled`), whether a later message `added` or `changed` them, how
+often each `bounced` a claim, and the last pass's `error`. The goal bar keeps
+one line: the first open item and `done/total`, dropped items left out. On the
+owner's app that line opens the side panel's Tasks tab. There the checklist
+sits under the goal it breaks down, in the same section: a progress bar with
+`done/total`, then the items in the order asked, done ones ticked and struck,
+the next open one marked. Dropped items wait folded under a "1 dropped" line,
+and an icon beside it opens the tracker conversation. The Reviews section lists
+each review, newest first, with what it found. A paired device, which has no
+Tasks tab, unfolds the same list in the bar instead. A press on an item shows
+its source. An item that bounced twice says the final review decides it. The
+screen leaves out the `added` and `changed` flags. A pass
+that fails, answers without its JSON block or runs past five minutes leaves the
+list as it was with the reason, and the goal goes on; a first list is tried
+three times at most. A core restart keeps the list and the tracker; work no
+pass had read yet is lost.
+
 This version does not run checks itself before the review: the reviewer runs
 them and spends tokens doing so. It has no token budget and no detection of
-the same finding repeated: the five-review stop bounds a goal instead.
+the same finding repeated: the five-review stop bounds a goal instead. The
+tracker adds one pass per user message and per finished turn.
 
 ## Edge scrollbars
 
@@ -204,9 +300,16 @@ No live provider login is required.
 
 `goal-review.test.ts` drives reviewed goals through the real core with the
 echo driver: a failed review then a pass, the five-review stop and the reply
-that allows one more, pause and resume during a review, and a restart. UI unit
-tests cover the `/goal2` switch, the goal bar's verdicts and the fake core's
-reviewer.
+that allows one more, pause and resume during a review, and a restart.
+`goal-tracker.test.ts` drives the checklist the same way: the first list, the
+checks and what the next turn hears, a claim sent back twice then reviewed,
+the user's additions and cancellations, the model Settings names, a tracker
+answer without JSON, a tracker stuck on a pass, a goal finished by hand during
+a pass, models read again after an account change, and a restart. The opt-in
+`goal-tracker.live.test.ts` (`BOITE_E2E_CLAUDE=1`) runs one real goal on Haiku
+with the checklist on Automatic. UI unit tests cover the `/goal2` switch,
+the checklist model row, the goal bar's verdicts and checklist, and the fake
+core's reviewer and tracker.
 
 `whip.test.ts` covers the toggle, persistence, desktop and phone layout, drop and rethrow, whole
 interface movement, rope drawing and release, cancellation and reduced motion. `shell.test.ts` verifies
@@ -230,3 +333,11 @@ press with one subscribe, that a turn streamed during the press is on screen,
 that a released press unsubscribes, and that the agents panel's subscription
 survives. `press-preload.test.ts` (end to end) measures the gain and covers a
 press dragged away.
+
+`fake-client.contacts.test.ts` covers the in-memory core's contacts: the seed,
+the `contacts.updated` event after each change, the refusals with their field,
+the invitation's share with and without a key, and `collaboration.ask`.
+`HomePage.test.ts` renames, trusts and opens a project for reading on the seeded
+contact, accepts a request through the menu, refuses one only with a reason,
+removes the contact behind the confirm, creates and joins an invitation, clears
+the key and moves the tier. `AgentDiscussion.svelte.test.ts` checks the remote chip.

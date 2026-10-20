@@ -1,7 +1,8 @@
 # CI and publication
 
 Changes land through squash-merged pull requests. The repository's merge policy
-requires `CI required` and `PR title`, forbids direct pushes, force pushes and
+requires every check a pull request reports ([check names](#check-names)),
+`PR title` included, forbids direct pushes, force pushes and
 deletion of `main`, and permits admin bypass only when merging a PR. CODEOWNERS
 requests reviews; approval is not required. The `release tags` policy protects
 `v*` tags from movement and deletion while allowing their creation.
@@ -13,10 +14,10 @@ requests reviews; approval is not required. The `release tags` policy protects
 ## Checks
 
 `scripts/ci/changes.ts` selects jobs from changed paths. Unknown paths run the
-complete suite; renames affect both the old and new path. Every run has a
-`CI required` gate, or `CI draft` on a draft, including documentation-only changes. It requires success
-for selected jobs and an intentional skip for the others. Failure, cancellation
-or an unexpected skip blocks it, including jobs whose dependency never started.
+complete suite; renames affect both the old and new path. A job left out
+skips and still reports its check, which passes; a failed or cancelled job
+blocks the merge, and so does a job its failed dependency skipped, since that
+dependency is required too.
 
 | Change | Selected checks |
 | --- | --- |
@@ -61,10 +62,10 @@ and [portability](portability.md) for what these fixtures cannot prove.
 
 ### Check names
 
-Every job a pull request can run has a fixed name, whether it runs or skips, so
-a ruleset can require the jobs themselves instead of waiting for the `CI
-required` gate, which starts only after the last job ends and then queues for a
-runner. A skipped matrix job reports its unexpanded template
+Every job a pull request can run has a fixed name, whether it runs or skips, and
+the ruleset requires each one. It replaced a `CI required` gate job that
+started after the last job ended, then waited a median 8.5 minutes for a
+runner (38 runs, 2026-10-19). A skipped matrix job reports its unexpanded template
 (`Core tests (${{ matrix.name }})`) and a skipped caller of a reusable workflow
 reports its own name (`Desktop`), never the inner ones. So:
 
@@ -78,15 +79,26 @@ reports its own name (`Desktop`), never the inner ones. So:
   `Desktop / Linux x64` as it would running. The portable jobs are one per
   platform of `PORTABLE_ALL`, each skipped unless `platforms` lists its id.
 - A job skipped because its dependency failed counts as passed in a ruleset, so
-  a ruleset without the gate must require every job of each needs chain
-  (`Plan and repository checks`, `Build UI`).
+  the ruleset requires every job of each needs chain (`Plan and repository
+  checks`, `Build UI`).
 
-`bun scripts/ci/required-checks.ts` prints the names a pull request reports;
-with `--ruleset <file>` it compares them with
-`gh api repos/beboite/boite/rulesets/<id>` output and fails on a name to add or
-one no run reports. Its tests refuse a matrix or an expression in a name, and
-check each written-out job against `CORE_ALL` and `PORTABLE_ALL`. The ruleset
-still requires `CI required` and `PR title`.
+`bun scripts/ci/required-checks.ts` prints the names a ready pull request
+reports. Its tests pin all of them, refuse a matrix or an expression in a name
+(the draft expression aside, see [draft pull requests](#draft-pull-requests)), and check each written-out job against
+`CORE_ALL` and `PORTABLE_ALL`. On main and in a release, the `Ruleset check
+names` job runs it with `--live`, which reads the rules for `main`
+(`repos/beboite/boite/rules/branches/main`, public) and fails on a check the
+ruleset lacks or one no pull request reports. No job needs it: the tests still
+run, and once the ruleset matches, a rerun of that job alone turns the run
+green. Pull requests skip it, so it is not required. `--ruleset <file>`
+compares with saved `gh api` output instead.
+
+- Adding a job: merge the pull request, then add its name to the ruleset in
+  the same sitting; until then main's run fails and the new job is unguarded.
+- Renaming or removing a job: a required name no pull request reports blocks
+  every pull request. Keep the old job and add the new one, merge, add the new
+  name to the ruleset, then remove the old job and its name once no open pull
+  request still needs it.
 
 ### Run modes and platforms
 
@@ -115,10 +127,9 @@ The tests compile `apps/shell/src-tauri` and the two page scripts `browser.rs`
 embeds, and start inline fake cores, so `shellRust` follows those paths and the
 ones that select every check. 7 of the 100 PRs before 2026-10-19 touched them,
 yet all ran the tests: 3.6 runner minutes on Windows, 3.5 on Apple Silicon and
-0.9 on Linux per green PR run. Only `CI required`
-and `PR title` are required checks today; see [check names](#check-names)
-before renaming a job. The `release.yml` job names that
-`server-provenance.ts` checks stay fixed too.
+0.9 on Linux per green PR run. Every check name is required; see
+[check names](#check-names) before renaming a job. The `release.yml` job names
+that `server-provenance.ts` checks stay fixed too.
 
 Intel macOS packages are cross-built on the Apple Silicon runner with
 `BOITE_TARGET=x86_64-apple-darwin`. The core compiles for `bun-darwin-x64`, and
@@ -163,15 +174,73 @@ fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
 attempt left attached and removes its partial DMGs. Any other failure ends
 the step.
 
+### Hung test runs
+
+A job cut by its `timeout-minutes` keeps no artifact, and its log can be lost
+too: E2E 2/3 of run 39321123064 (2026-10-19) left only the annotation
+`exceeded the maximum execution time of 35m0s`. So each E2E shard ends its own
+run first. Its first step notes when the job started; `scripts/ci/flaky.ts
+--job-started --job-minutes 35` runs `bun test` with the Bun inspector and
+stops it 4 minutes before the job's limit (`scripts/ci/hang-watch.ts`). From
+2026-10-12 to 2026-10-19, 2831 passing shards ran their tests in 7.6 min at the
+median and 19.2 min at most, the whole job in 24.5 min at most, so no healthy
+run gets less time. `--job-minutes` must equal the job's `timeout-minutes`
+(`e2e-harness.test.ts`).
+
+A stopped run fails with an annotation naming the test that was running and
+leaves `tests/e2e/.artifacts/hang/` in the shard's failure captures:
+
+| File | What it holds |
+| --- | --- |
+| `summary.txt` | The tests running and for how long, the last that ended, whether the test process answered, free memory each minute |
+| `tests.txt` | Every test that ended, with its status and duration: bun holds its own result lines while its output is a pipe |
+| `test-process.txt` | What the test process reports of itself: its file, memory, and each open browser page or shell (`tests/e2e/lib/hang-report.ts`), with the page's in-flight requests, errors and main-thread state, and the shell's log tail and process tree (`shell-diagnosis.ts`) |
+| `process-tree.txt` | The `bun test` process and every descendant, with memory, CPU time and command line |
+| `browsers.txt` | `/json/version` and `/json/list` of each browser in the tree |
+| `machine.txt` | Free memory and disk, and the 15 largest processes |
+| `output-tail.txt` | The end of the run's output |
+
+A test process that does not answer within 10 s on an open inspector is
+blocked in synchronous code; the summary says so and the files written from
+outside remain. An inspector that refuses the watch before any test ran leaves
+a warning, and the tests run once without it under the same deadline: a hang
+then reports no test names. An inspector that disconnects later is named in
+the summary with its time, and the tests listed are those seen before. Bun
+gives no list of open handles and no stack of a test that awaits: its
+inspector answers only when the JavaScript thread is free.
+
 ### Draft pull requests
 
 A draft pull request runs `draft` mode: the changes job, the Linux x64 core
 suite, type checks and UI tests, and the focused telemetry and E2E type checks,
 each only when its paths changed. Windows, macOS, desktop packages, E2E,
-stress, Docker and the APK wait. Its gate is named `CI draft`, so branch
-protection never reads a draft's green gate as `CI required` on a head that
-later turns ready. `ready_for_review` starts the `pr` run, and
-`converted_to_draft` cancels a full run in progress. CodeRabbit reviews drafts
+stress, Docker and the APK wait: their checks skip.
+
+A skip passes in a ruleset, so a draft must not satisfy it:
+
+- The planning job reports `Plan and repository checks (draft)` and the
+  reusable workflows `Desktop (draft) / Linux x64` and so on. Only a job that
+  runs or a caller evaluates its name: a skipped job reports the expression
+  itself, so the other jobs keep their fixed names.
+- After `ready_for_review`, the required planning name stays expected until
+  the `pr` run creates it, then pending until it ends.
+- A rerun keeps its event, so an old draft run rerun once the pull request is
+  ready, or a fork's draft run approved after it, would put skips back under
+  the required names. The planning job's first step reads the pull request's
+  draft flag. Still a draft: the other jobs skip as usual, even when the
+  repository checks fail. No longer a draft, no answer from GitHub, or
+  planning failed before that step: every other job runs only to fail with
+  "rerun the latest ready run instead". A cancelled run reports its pending
+  jobs `cancelled`, not skipped, which blocks as well.
+- `converted_to_draft` cancels a full run in progress and fails `Plan and
+  repository checks` at once, so that run's earlier planning success cannot
+  merge next to skips; the next push runs the draft checks.
+- A pull request reopened as a draft over a partial full run is the one case
+  left: its draft run puts skips back next to that run's planning success. A
+  draft cannot merge, and marking it ready runs a full run whose planning
+  replaces that success before anything else.
+
+`PR title` reports the same name in both modes. CodeRabbit reviews drafts
 (`.coderabbit.yaml`).
 
 Of the 5,632 runner minutes spent by the 86 pull request runs started on
@@ -185,7 +254,7 @@ An agent's pull request flow:
 
 1. `gh pr create --draft`.
 2. Fix the draft's CI failures and review findings, batching pushes.
-3. `gh pr ready <number>` once the draft gate is green and the threads are answered.
+3. `gh pr ready <number>` once the draft's checks pass and the threads are answered.
 4. After that, push only for a full-run failure or a new finding.
 
 ## Build cost
@@ -231,7 +300,7 @@ the follow period starts when content is ready, and user input still cancels it.
 The Windows job shares release-profile Rust dependencies, builds the installer
 once, and stages its existing core beside the shell for native E2E. The shell's
 Rust tests run beside it in their own job, which restores the same
-`desktop-release-v1` cache and never saves it: the test build turns on
+`desktop-release-v2` cache and never saves it: the test build turns on
 `tauri/test` and drops `custom-protocol`, so it needs neither the UI nor the
 staged core, and in line it added 97 to 102 s after the 221 s build. Installer
 regressions set `BOITE_CI_INSTALLER_REQUIRED=1`, so missing NSIS or generated
@@ -247,9 +316,19 @@ on 2026-10-17, recompiling only the shell crate took 8 min 57 s with fat LTO and
 `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1` only on the steps that build a shipped
 shell (the Windows installer, the Debian package, the macOS bundle) and only
 when `sign-updates` is on: the nightly and a release. Other steps and runs set
-`false` and `16`, Cargo's defaults, so `test:shell --release` keeps them even in
-a release run. Both desktop jobs get 60 minutes instead of 35 when publishing.
-The cache is saved from `main`, so a publishing run also
+neither, so `test:shell --release` keeps Cargo's defaults even in a release run.
+Setting the defaults explicitly is not the same: `CODEGEN_UNITS=16` passes
+`-C codegen-units=16` to rustc, which changes every crate's fingerprint. On
+2026-10-19, `cargo build --release -p libc -v` in `apps/shell/src-tauri` stayed
+`Fresh` with `CARGO_PROFILE_RELEASE_LTO=false` and printed `Compiling` with
+`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`. In CI, the `Compiling` lines of the
+build step (Windows installer, macOS bundle, Debian package) fell from 203, 207
+and 260 in pull request run 39165484727 to 1, 33 and 1 in run 39251281108 once
+neither was set. The desktop Rust caches moved
+to `-v2` keys at the same time: rust-cache never rewrites a key it restored in
+full, and the v1 caches of macOS x64 and Linux arm64 held only those crates.
+Both desktop jobs get 60 minutes instead of 35 when publishing. The cache is
+saved from `main`, so a publishing run also
 compiles its dependencies with LTO, an estimated 7 to 8 minutes more per
 platform. On Windows `stage:core` no longer compiles `dist/boite-core.exe`:
 2026-10-17, four alternating local runs of the old and new command, median
@@ -269,7 +348,11 @@ holds a limit, so a pull request never edits a shared one to grow.
 A pull request is checked twice:
 
 - Against its base: the sizes `bundle-size.yml` kept for the base commit, or
-  the base built in the same job when that run is missing or still going. A measure
+  the base built in the same job when that run is missing or still going. The
+  base is the first parent of the merge ref the job checks out, the main commit
+  the pull request is merged onto. `pull_request.base.sha` stays at the branch
+  point until the branch moves: on 2026-10-19 it charged #665, which touched no
+  UI file, with 156e44cf's UI growth over 184e63a7 (run 39319378723). A measure
   growing more than 0.1 % fails until the pull request body explains it under
   a `## Bundle size` heading. The body is read when the job runs: after
   editing it, rerun the failed jobs (`gh run rerun <run-id> --failed`).
@@ -346,6 +429,16 @@ milliseconds: 8 such stalls in 5 of 9 shard runs, against none in 9 on D:, and
 shard in five since 2026-10-10, on `main` as on branches, a different test each
 time. `scripts/ci/e2e-harness.test.ts` keeps both variables on both steps.
 
+The desktop job's native shell E2E step does the same for test shells, whose
+data directory holds their WebView2 profile. WebView2 holds a fresh profile's
+first document request until the profile's cookie database has opened: in 249
+of 250 launches on C: the host got the request within 5 ms of that open ending.
+On C: the request came 1.1 s after the navigation started on average and
+10.4 s at worst, 3 of 250 launches past 5 s; on D: 0.18 s and 0.5 s, none of 150
+past 5 s (run 39417347690). The slow tail left the page on `about:blank` past
+the 15 s bridge wait in five runs, on `main` as on branches (2026-10-19 and
+20). `e2e-harness.test.ts` keeps both variables on that step too.
+
 CI Chromium uses CPU compositing with software GL disabled. Browser launch
 failures retain bounded stderr; exited browsers fail promptly. Navigation waits
 for committed state and asynchronous conditions, reporting page state, JS errors
@@ -380,15 +473,30 @@ failed build is eligible next time.
 The nightly does not run CI again. Its `CI passed` job (`scripts/ci/commit-ci.ts`)
 waits for the `ci` run that pushing this commit to main started. It reruns that
 run's failed jobs once and fails unless the run ends green; a commit with no
-such run after ten minutes fails. Beside it, `desktop.yml` builds and signs
-each desktop package once and tests what ships: installer regressions and
-native shell E2E on Windows, the installed Debian package, the extracted
-AppImage and the macOS bundle. The Rust tests are skipped because the commit's
-CI already ran them.
+such run after ten minutes fails. A main run is only cancelled while pending,
+when a newer push replaces it, so a cancelled run has no verdict: the job then
+follows the newest main run that was not cancelled, normally the one that
+replaced it, and waits for that commit instead. With no newer run it takes the
+newest older main commit whose run passed; anything else fails. On 2026-10-19
+the 08:59 UTC nightly started on 30287eef while its run was pending; that run
+and the next two were each replaced while pending, 9c974e65's passed at 09:33,
+and the night was lost on `ended cancelled` (run 39226757576). The job writes the commit it passed as
+its `sha` output, and every later job checks out, tags and publishes that
+commit, never `github.sha`; the version step runs that commit's `nightly.ts`
+with `GITHUB_SHA` set to it. `desktop.yml`, `android.yml`, `server.yml` and
+`server-verify.yml` take it as their `ref` input. `app.yml` deploys its own
+checkout, so it does not follow and a cancelled run still fails it. The whole
+wait is bounded at two hours: 35 minutes behind the main run ahead, 35 for the
+followed run and 35 for its rerun.
+
+`desktop.yml` builds and signs each desktop package once and tests what ships:
+installer regressions and native shell E2E on Windows, the installed Debian
+package, the extracted AppImage and the macOS bundle. The Rust tests are
+skipped because the commit's CI already ran them.
 
 A dispatch with `dry-run` builds any branch with throwaway signing keys, even a
-commit that already has a nightly. It accepts that
-branch's pull request CI run without rerunning it, skips reservation and every
+commit that already has a nightly. It accepts that branch's pull request CI run
+without rerunning or following it, skips reservation and every
 publication, and has its own concurrency group.
 
 Versions use `2.0.0-nightly.YYYYMMDD.N`, taking the base from the manifest and
@@ -396,8 +504,11 @@ resetting the counter each UTC day. For example, September 15's first build is
 `2.0.0-nightly.20260915.1`, then `.2` for a new commit. Build inputs stamp the
 version; source manifests retain theirs.
 
-The CI check, desktop builds and native image builds run alongside one
-another. Only after all pass does reservation bind the tag to the exact commit. A publishing
+The CI check runs first, since it decides which commit gets built; the
+version, desktop builds, APK and native image builds follow on that commit,
+alongside one another. A scheduled run usually finds its CI long finished, so
+the wait costs nothing there; a dispatch right after a merge waits for that
+run before building. Only after all pass does reservation bind the tag to the exact commit. A publishing
 failure keeps that tag for retry, including on a later day. A reserved tag alone
 is not a successful release. `server-manifest.yml` promotes the tested digests
 to `nightly`, the version and commit tags after reservation. It never moves
@@ -423,9 +534,10 @@ domain's DNS names `beboite.github.io`.
 
 ## Pull request reviews
 
-`.coderabbit.yaml` enables advisory reviews and chat replies, excluding drafts
-and generated artifacts. CodeRabbit is not a required check. Its installed App,
-plan eligibility and quotas are external prerequisites.
+`.coderabbit.yaml` enables advisory reviews and chat replies, drafts included
+(`auto_review.drafts`), and skips generated artifacts. CodeRabbit is not a
+required check. Its installed App, plan eligibility and quotas are external
+prerequisites.
 
 Follow the [PR rules](../AGENTS.md#follow-through-on-pull-requests): inspect CI
 and review findings together, verify and group fixes before pushing, and report

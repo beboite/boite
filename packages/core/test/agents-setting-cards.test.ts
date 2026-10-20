@@ -7,6 +7,7 @@ import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
@@ -75,7 +76,7 @@ test('a discussion asks to entrust projects to an agent; the owner unticks one a
 
   // The agent of a thread cannot apply its own card: Apply is the owner's.
   const agentClient = await connect(h.url, h.core.agents.tokenFor(worker));
-  await expect(agentClient.call('agents.settings.apply', { threadId: worker, questionId: card!.id })).rejects.toThrow("not one of the agent's methods");
+  expect(await thrown(agentClient.call('agents.settings.apply', { threadId: worker, questionId: card!.id }))).toThrow("not one of the agent's methods");
   agentClient.close();
 
   await owner.call('agents.settings.apply', { threadId: worker, questionId: card!.id, value: ['Notes'] });
@@ -119,4 +120,24 @@ test("an agent asks about its own settings from its conversation; a change from 
   await owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), status: 'archived' } });
   await waitFor(() => cards(self).length === 0);
   expect(drawn(self, helpers!.id)!.answer).toBeNull();
+});
+
+test('an agent whose stored model its provider no longer lists still takes a projects card; a new unlisted model is refused', async () => {
+  const { h, owner, worker, notes, agent, run, profile, cards } = await setup();
+  // A gateway once listed `echo/echo`; the provider lists only `echo` now.
+  const { id: _id, revision, createdAt: _c, updatedAt: _u, ...draft } = profile();
+  h.core.workforce.records.update('profile', agent.id, revision, { ...draft, selection: { ...draft.selection, model: 'echo/echo', effort: 'medium' } });
+
+  await owner.call('turns.start', { threadId: worker, prompt: 'Prepare the release' });
+  await waitFor(() => h.core.journal.listTurns(worker).some(t => t.status === 'done'));
+  const asked = await run(['settings', 'agent', 'request', 'projects', '+Notes', '--agent', 'Ada', '--why', 'Watch the notes.'], worker);
+  expect(asked.err).toBe('');
+  const [card] = cards(worker);
+  await owner.call('agents.settings.apply', { threadId: worker, questionId: card!.id });
+  expect(profile().projectIds).toEqual([notes.id]);
+  expect(profile().selection).toMatchObject({ model: 'echo/echo', effort: 'medium' });
+
+  // Choosing a model is still checked.
+  expect(await thrown(owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), selection: { ...profile().selection, model: 'echo/other' } } })))
+    .toThrow('the provider does not offer this model');
 });

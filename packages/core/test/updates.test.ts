@@ -14,6 +14,7 @@ import { compareVersions, inside, readVersion } from '../src/providers/updates.t
 import type { ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { holdAccountTurns, echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const FAKE = fileURLToPath(new URL('./fixtures/update-agent.ts', import.meta.url));
 
@@ -210,7 +211,7 @@ describe('harness updates', () => {
     expect(readFileSync(state, 'utf8')).toBe('1.2.0');
 
     // Nothing newer is left, and the refusal says so.
-    await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/already on its newest known version/);
+    expect(await thrown(client.call('providers.update', { providerId: 'update-fake' }))).toThrow(/already on its newest known version/);
 
     // Every run of the agent went through the process registry.
     const trace = await client.call('trace.get', { threadId: 'update:update-fake' });
@@ -601,15 +602,21 @@ describe('harness updates', () => {
     const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
     const parent = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'parent' });
     await client.call('delegation.configure', { threadId: parent.id, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: 'update-fake', accountId: account.id, model: 'default', effort: null }] } });
+    // The child starts its CI loop in its first turn, which ends on that checkpoint: it stays open while the loop runs.
+    const off = core.bus.onAny((name, payload) => {
+      const turn = payload as { threadId: string };
+      if (name !== 'turn.started' || core.threads.require(turn.threadId).parentThreadId !== parent.id) return;
+      off();
+      core.threads.agentState.noteBackground(turn.threadId, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: Date.now() }]);
+    });
     const child = (await client.call('delegation.spawn', { threadId: parent.id, profileId: 'worker', task: 'watch CI', requestId: 'ci' })).thread.id;
     const server = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'dev server' });
     const turn = await client.call('turns.start', { threadId: server.id, prompt: 'start the dev server' });
     await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done' && core.journal.listTurns(child).at(-1)?.status === 'done', 20000);
     // The child's result wakes its parent: let that turn end too.
     await waitFor(() => core.journal.unfinishedTurns().length === 0, 20000);
-    // Each turn started its work before it ended on a checkpoint.
+    // The server's turn started its work before it ended on a checkpoint.
     const during = (threadId: string) => core.journal.listTurns(threadId).at(-1)!.finishedAt! - 1;
-    core.threads.agentState.noteBackground(child, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: during(child) }]);
     core.threads.agentState.noteBackground(server.id, [{ id: 'bg-dev', kind: 'shell', description: 'dev server', toolId: null, startedAt: during(server.id) }]);
     const started = Date.now();
 
@@ -666,13 +673,19 @@ describe('harness updates', () => {
     const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
     const parent = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'parent' });
     await client.call('delegation.configure', { threadId: parent.id, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: 'update-fake', accountId: account.id, model: 'default', effort: null }] } });
+    // The child starts its CI loop in its first turn, which ends on that checkpoint: it stays open while the loop runs.
+    const off = core.bus.onAny((name, payload) => {
+      const turn = payload as { threadId: string };
+      if (name !== 'turn.started' || core.threads.require(turn.threadId).parentThreadId !== parent.id) return;
+      off();
+      core.threads.agentState.noteBackground(turn.threadId, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: Date.now() }]);
+    });
     const child = (await client.call('delegation.spawn', { threadId: parent.id, profileId: 'worker', task: 'watch CI', requestId: 'ci' })).thread.id;
     const server = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'dev server' });
     const turn = await client.call('turns.start', { threadId: server.id, prompt: 'start the dev server' });
     await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done' && core.journal.listTurns(child).at(-1)?.status === 'done', 20000);
     await waitFor(() => core.journal.unfinishedTurns().length === 0, 20000);
     const during = (threadId: string) => core.journal.listTurns(threadId).at(-1)!.finishedAt! - 1;
-    core.threads.agentState.noteBackground(child, [{ id: 'bg-ci', kind: 'shell', description: 'CI loop', toolId: null, startedAt: during(child) }]);
     core.threads.agentState.noteBackground(server.id, [{ id: 'bg-dev', kind: 'shell', description: 'dev server', toolId: null, startedAt: during(server.id) }]);
     const childTurns = core.journal.listTurns(child).length;
 
@@ -792,7 +805,7 @@ describe('harness updates', () => {
     expect(harness!.core.updates.updating('update-fake')).toBe(true);
     const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
     await checked;
-    await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/already updating/);
+    expect(await thrown(client.call('providers.update', { providerId: 'update-fake' }))).toThrow(/already updating/);
     writeFileSync(`${state}.go`, '');
     const updated = only(await changed);
     await waitFor(() => harness?.core.journal.getTurn(turn.id)?.status === 'done', 20000);
@@ -838,8 +851,8 @@ describe('harness updates', () => {
       expect((await client.call('core.updateStatus', { refresh: true })).phase).toBe('available');
 
       // Bad requests are refused by field before anything starts.
-      await expect(client.call('core.updateEverything', { agents: 'update-fake' as never, server: null })).rejects.toThrow(/agents/);
-      await expect(client.call('core.updateEverything', { agents: [], server: 7 as never })).rejects.toThrow(/server/);
+      expect(await thrown(client.call('core.updateEverything', { agents: 'update-fake' as never, server: null }))).toThrow(/agents/);
+      expect(await thrown(client.call('core.updateEverything', { agents: [], server: 7 as never }))).toThrow(/server/);
 
       // The registry read after the updater is the moment no process of the update runs:
       // held here, it is the gap an idle restart would slip into.
@@ -891,7 +904,7 @@ describe('harness updates', () => {
     updates.close();
     release();
     await checked;
-    await expect(update).rejects.toThrow('stopping');
+    expect(await thrown(update)).toThrow('stopping');
     expect(readFileSync(state, 'utf8')).toBe('1.0.0');
   });
 

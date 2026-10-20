@@ -6,10 +6,12 @@
  * pairs carrying one JSON message per NUL, so no port is open for another
  * process to use.
  * On Windows, where Bun cannot open those descriptors, it is a WebSocket to a
- * random loopback port instead.
+ * random loopback port instead, read by `ws-client.ts` rather than Bun's own
+ * client, which loses frames of a sound stream and closes it with 1002.
  */
 
 import { fstatSync } from 'node:fs';
+import { TextSocket, UpgradeError } from '../ws-client.ts';
 
 type Listener = (params: Record<string, unknown>, sessionId: string | undefined) => void;
 interface Waiting { resolve(value: Record<string, unknown>): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout>; method: string }
@@ -92,19 +94,16 @@ export class Cdp {
   }
 
   /** The Windows transport: the browser's WebSocket endpoint on 127.0.0.1. */
-  static connect(url: string, timeoutMs = 10_000): Promise<Cdp> {
-    return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url);
-      const timer = setTimeout(() => { socket.close(); reject(new CdpError(`the browser did not accept a DevTools connection within ${timeoutMs / 1000} seconds`)); }, timeoutMs);
-      socket.addEventListener('error', () => { clearTimeout(timer); reject(new CdpError(`could not connect to the browser's DevTools at ${url}`)); }, { once: true });
-      socket.addEventListener('open', () => {
-        clearTimeout(timer);
-        const cdp = new Cdp(text => socket.send(text), () => { try { socket.close(); } catch { /* already gone */ } });
-        socket.addEventListener('message', event => cdp.#receive(String(event.data)));
-        socket.addEventListener('close', () => cdp.#ended());
-        resolve(cdp);
-      }, { once: true });
+  static async connect(url: string, timeoutMs = 10_000): Promise<Cdp> {
+    const socket = await TextSocket.connect(url, timeoutMs).catch((error: unknown) => {
+      throw new CdpError(error instanceof UpgradeError && error.timedOut
+        ? `the browser did not accept a DevTools connection within ${timeoutMs / 1000} seconds`
+        : `could not connect to the browser's DevTools at ${url}: ${error instanceof Error ? error.message : String(error)}`);
     });
+    const cdp = new Cdp(text => socket.send(text), () => socket.close());
+    socket.onMessage(text => cdp.#receive(text));
+    socket.onClose(() => cdp.#ended());
+    return cdp;
   }
 
   /**

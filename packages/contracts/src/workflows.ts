@@ -88,6 +88,8 @@ export interface WorkflowInstance {
   model: string | null;
   /** The reasoning level it runs at; null or missing on older runs: the model's default. */
   effort?: string | null;
+  /** All reported turns of this execution, retries and cache included. Null when none reported; missing on older cores. */
+  usage?: Usage | null;
   status: WorkflowStepStatus;
   attempts: number;
   /** A durable output correction awaiting admission, including while paused. */

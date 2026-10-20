@@ -27,20 +27,21 @@ import type { KeyObject } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join as joinPath } from 'node:path';
-import { DEVICE_LINK_JOIN, GRANT_TTL_MS, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
+import { GRANT_TTL_MS, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
 import { deviceAdmitInput, deviceHelloInput, type CoordinationPeer, type DeviceHello, type DeviceInvite, type Group, type GroupDevice, type GroupInvite, type GroupTicket, type PairingRole, type Principal } from '@boite/contracts';
-import { boundedBody, MAX_BODY, PeerGone } from './coordination-wire.ts';
+import { boundedBody, PeerGone } from './coordination-wire.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unauthorized, unavailable } from './errors.ts';
 import { advertisedAddresses, probeTailnet, tailnetAddress, ticketAddresses, type Tailnet } from './group/addresses.ts';
-import { admissionInput, checkAddress, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDeviceKeys, liveDevices, memberOrigins, mergeRosters, groupName, peerOf, reachOf } from './group/roster.ts';
+import { admissionInput, checkAddress, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, homeOf, liveCores, liveDeviceKeys, liveDevices, memberOrigins, mergeRosters, groupName, peerOf, reachOf } from './group/roster.ts';
 import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, SERVED_ORIGINS_MAX, type DeviceKeyEntry } from './group/device-keys.ts';
 import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
-import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
+import { boxPublic, boxSigningInput, newBoxKey, open, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
 import type { Sealing } from './group/seal.ts';
-import { encodeInvite, encodeTicket, parseInvite, parseTicket, ticketSigningInput, inviteId, invitePsk } from './group/ticket.ts';
+import { encodeInvite, encodeTicket, inviteOf, parseInvite, parseTicket, ticketSigningInput, inviteId, invitePsk } from './group/ticket.ts';
 import type { Invite } from './group/ticket.ts';
 import { DEVICES_MAX, GroupClients } from './group/clients.ts';
+import { askToJoin, JOIN_SIGNING_PREFIX, type JoinReply } from './group/join.ts';
 import { SyncBackoff } from './group/backoff.ts';
 import { newId, newToken } from './ids.ts';
 import { currentOs } from './paths.ts';
@@ -54,11 +55,7 @@ const SPENT_SETTING = 'group:spent';
 const JOINS_PER_MINUTE = 30;
 /** Requests one invitation is asked with before it is taken away: a machine joins once, and asks again a few times at most. */
 const JOIN_REQUESTS_MAX = 64;
-export const JOIN_ROUTE = '/group/join';
-/** What a join request and its answer are signed with, so neither passes for a coordination message. */
-const JOIN_SIGNING_PREFIX = 'boite-group-join\n';
 const JOIN_BODY_MAX = 16_384;
-const JOIN_TIMEOUT_MS = 8000;
 /** A member that missed a change is offered it again this often. */
 const TICK_MS = 15_000;
 /** Every member is asked for its roster this many ticks apart, whatever it acknowledged: five minutes. */
@@ -68,16 +65,7 @@ const NAME_REFRESH_MS = 5 * 60_000;
 const FAREWELL_MS = 6000;
 
 export type { NetworkSink } from './group/addresses.ts';
-
-/** The invitation in what was pasted: itself, or the one a device link carries after `#join=`. */
-export function inviteOf(text: string): string {
-  const marker = `#${DEVICE_LINK_JOIN}=`;
-  const at = text.indexOf(marker);
-  if (at < 0) return text.trim();
-  try { return decodeURIComponent(text.slice(at + marker.length).trim()); } catch { return text.trim(); }
-}
-
-interface JoinReply { nonce: string; publicKey: string; roster?: unknown; error?: string }
+export { JOIN_ROUTE } from './group/join.ts';
 
 export class GroupStore {
   roster: Roster | null = null;
@@ -85,6 +73,8 @@ export class GroupStore {
   sessions: Record<string, string> = {};
   /** The address each of those sessions was issued for: it lives while this machine still gives it. */
   vias: Record<string, string> = {};
+  /** Joins in flight: meanwhile a device of the group it joins is told to come back, not that this machine is in none. */
+  joining = 0;
   /** Keyed by `inviteId`: the grant itself is kept nowhere once the invitation is handed out. */
   private readonly invites = new Map<string, { expiresAt: number; joined: string | null; psk: Buffer; seen: Set<string> }>();
   private boxKey: KeyObject | null = null;
@@ -281,6 +271,9 @@ export class GroupStore {
     return { key: this.boxKey, box: boxPublic(this.boxKey) };
   }
 
+  /** This machine's sealing key, public half: what a contact seals its requests to. */
+  boxPublic(): string { return this.box().box; }
+
   /** A signed message sealed to a machine of the roster, or null for a machine outside it. */
   sealFor(coreId: string, plaintext: string): ({ body: string } & Sealing) | null {
     const entry = this.roster?.cores.find((core) => core.coreId === coreId);
@@ -302,10 +295,14 @@ export class GroupStore {
     this.tailnet = await probeTailnet(this.tailnet, stale);
   }
 
-  /** A member answers on its tailnet address; a core in no group opens nothing. */
+  /** A member answers on its tailnet address, and so does a core a contact dials; any other core opens nothing. */
   private listen(member: boolean): void {
-    this.onTailnet = this.core.network.also(member && this.tailnet !== null ? this.tailnet.ip : null);
+    const wanted = member || this.core.contacts?.wantsTailnet() === true;
+    this.onTailnet = this.core.network.also(wanted && this.tailnet !== null ? this.tailnet.ip : null);
   }
+
+  /** Contacts changed: the tailnet listener follows. */
+  relisten(): void { if (!this.closed && this.live) this.listen(this.roster !== null); }
 
   private card(): CoreCard {
     const { coreId, publicKey } = this.core.coordination.card();
@@ -681,6 +678,11 @@ export class GroupStore {
 
   /** This core calls the member the invitation names, proves it holds its own key, and takes the roster back. */
   async join(text: unknown): Promise<Group> {
+    this.joining++;
+    try { return await this.enter(text); } finally { this.joining--; }
+  }
+
+  private async enter(text: unknown): Promise<Group> {
     const refusal = () => refused(`this machine already belongs to the group ${this.roster?.name}; leave it before joining another`);
     // A group of this machine alone, the one its devices brought, gives way: its devices come along.
     const alone = (): boolean => this.roster === null || liveCores(this.roster).every((core) => core.coreId === this.selfId());
@@ -701,7 +703,7 @@ export class GroupStore {
       const sealed = { ...seal(pack(body, signature), invite.x, context, invitePsk(invite.t)), context };
       let reply: JoinReply;
       try {
-        reply = await Promise.any(invite.a.map((url) => this.askToJoin(url, invite, sealed, nonce)));
+        reply = await Promise.any(invite.a.map((url) => askToJoin(url, invite, sealed, nonce)));
       } catch {
         throw refused(`no machine accepted the invitation at ${invite.a.join(', ')}: it is off or unreachable from here, or the invitation expired, was already used or was made by another machine`, { field: 'invite' });
       }
@@ -732,27 +734,6 @@ export class GroupStore {
     this.publishSelf();
     this.kick();
     return this.view('owner')!;
-  }
-
-  private async askToJoin(url: string, invite: Invite, sealed: { body: string } & Sealing, nonce: string): Promise<JoinReply> {
-    const response = await fetch(`${url}${JOIN_ROUTE}`, {
-      method: 'POST',
-      redirect: 'error',
-      signal: AbortSignal.timeout(JOIN_TIMEOUT_MS),
-      headers: { 'content-type': 'application/json', 'x-boite-peer': sealed.context.from, 'x-boite-invite': inviteId(invite.t), 'x-boite-signature': SEALED },
-      body: sealed.body,
-    });
-    const raw = await boundedBody(response.body, MAX_BODY);
-    // Only the machine that minted the invitation can answer under this key.
-    if (response.headers.get('x-boite-signature') !== SEALED) throw new Error('the answer is not sealed');
-    const { body, signature } = unpack(openResponse(raw, sealed.responseKey, sealed.context));
-    const reply = JSON.parse(body) as JoinReply;
-    // The invitation names who must answer: a machine with another key is not it.
-    const key = fingerprint(reply.publicKey);
-    if (key.coreId !== invite.c) throw new Error('another machine answered');
-    if (!verify(null, Buffer.from(JOIN_SIGNING_PREFIX + body), key.publicKey, Buffer.from(signature, 'base64'))) throw new Error('invalid signature');
-    if (reply.nonce !== nonce) throw new Error('nonce mismatch');
-    return reply;
   }
 
   /**

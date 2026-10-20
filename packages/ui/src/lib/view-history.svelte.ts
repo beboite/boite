@@ -13,12 +13,14 @@
 import type { ProjectId, ThreadId } from '@boite/contracts';
 import type { SettingsTab, Store } from './store.svelte';
 import { workspace } from './workspace.svelte';
+import { contactsShown } from './contacts-rail.svelte';
 
 export type View =
   | { store: Store; page: 'thread'; threadId: ThreadId }
   | { store: Store; page: 'draft'; projectId: ProjectId | null }
   | { store: Store; page: 'settings'; tab: SettingsTab }
-  | { store: Store; page: 'agents' };
+  | { store: Store; page: 'agents' }
+  | { store: Store; page: 'home'; contact: string | null };
 
 /** How far back the buttons reach. */
 export const TRAIL_LIMIT = 100;
@@ -31,7 +33,8 @@ function where(view: View): string {
   if (view.page === 'thread') return `thread:${view.threadId}`;
   if (view.page === 'draft') return `draft:${view.projectId ?? ''}`;
   if (view.page === 'settings') return `settings:${view.tab}`;
-  return 'agents';
+  if (view.page === 'home') return `home:${view.contact ?? ''}`;
+  return view.page;
 }
 
 export function sameView(a: View, b: View): boolean {
@@ -85,17 +88,20 @@ export function currentView(): View | null {
   const store = workspace.active;
   if (store.page === 'settings') return { store, page: 'settings', tab: store.settingsTab };
   if (store.page === 'agents') return { store, page: 'agents' };
+  if (store.page === 'home') return { store, page: 'home', contact: store.contact };
   if (store.openThread) return { store, page: 'thread', threadId: store.openThread.id };
   if (store.draft) return { store, page: 'draft', projectId: store.draft.projectId };
   return null;
 }
 
 /** A machine that left, or a thread or project that was deleted, is not a place to return to. */
-function exists(view: View): boolean {
+export function exists(view: View): boolean {
   const { store } = view;
   if (store !== workspace.active && !workspace.machines.some((machine) => machine.store === store)) return false;
   if (view.page === 'thread') return store.threads.some((thread) => thread.id === view.threadId);
   if (view.page === 'draft') return view.projectId === null || store.projects.some((project) => project.id === view.projectId);
+  // Contacts turned off, or a client that is no longer the owner, has no Contacts page to show.
+  if (view.page === 'home') return contactsShown(store);
   return true;
 }
 
@@ -106,6 +112,7 @@ async function show(view: View): Promise<void> {
   if (workspace.active !== store) await workspace.select(store);
   if (view.page === 'draft') store.startDraft(null);
   else if (view.page === 'settings') store.showSettings(view.tab);
+  else if (view.page === 'home') store.showHome(view.contact);
   else store.showAgents();
 }
 

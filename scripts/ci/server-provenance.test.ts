@@ -56,7 +56,7 @@ function fixture() {
     status: 'completed', conclusion: 'success',
   };
   const jobs = [
-    'version', 'verify / CI required', 'image / test and stage server (amd64)',
+    'version', 'verify / Plan and repository checks', 'image / test and stage server (amd64)',
     'image / test and stage server (arm64)', 'draft',
   ].map((name) => ({ name, run_id: 123, run_attempt: 2, head_sha: expected.sha, status: 'completed', conclusion: 'success' }));
   return { provenance, run, jobs, release: { tag_name: expected.tag, draft: false, prerelease: false }, tag: { sha: expected.sha } };
@@ -123,7 +123,7 @@ test.each([
   expect(() => verify(input)).toThrow(message);
 });
 
-test.each(['version', 'verify / CI required', 'image / test and stage server (amd64)', 'image / test and stage server (arm64)', 'draft'])('a successful run cannot hide skipped required job %s', (name) => {
+test.each(['version', 'verify / Plan and repository checks', 'image / test and stage server (amd64)', 'image / test and stage server (arm64)', 'draft'])('a successful run cannot hide skipped required job %s', (name) => {
   const input = fixture();
   input.jobs.find((job) => job.name === name)!.conclusion = 'skipped';
   expect(() => verify(input)).toThrow(`${name}.conclusion: expected success`);

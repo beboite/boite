@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { PullRequestReviews } from '../src/pull-request-review.ts';
 import { connect } from '../src/client.ts';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 let harness: TestCore | undefined;
 afterEach(async () => { await harness?.stop(); harness = undefined; });
 const url = 'https://github.com/example/repo/pull/1';
@@ -33,8 +34,8 @@ test('paired phones cannot turn review reads into arbitrary GitHub queries', asy
   const owner = await harness.connect(), { threadId } = await echoThread(harness, owner);
   const { grant } = await owner.call('pairing.grant', {}), phone = await connect(harness.url, '', { grant });
   try {
-    await expect(phone.call('threads.pullRequestReview', { threadId, url })).rejects.toThrow('link this');
-    await expect(phone.call('threads.pullRequestFiles', { threadId, url, page: 1 })).rejects.toThrow('link this');
-    await expect(phone.call('threads.linkPullRequest', { threadId, url })).rejects.toThrow('owner');
+    expect(await thrown(phone.call('threads.pullRequestReview', { threadId, url }))).toThrow('link this');
+    expect(await thrown(phone.call('threads.pullRequestFiles', { threadId, url, page: 1 }))).toThrow('link this');
+    expect(await thrown(phone.call('threads.linkPullRequest', { threadId, url }))).toThrow('owner');
   } finally { phone.close(); owner.close(); }
 });

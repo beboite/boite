@@ -1,9 +1,10 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { ProjectStore, hasGitMarker } from '../src/projects.ts';
+import { ProjectStore, hasGitMarker, probeFolder, probeGit } from '../src/projects.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 
@@ -111,10 +112,10 @@ test('a deleted project folder is named by every refusal, and a folder put back 
 
   const sentence = `the folder ${path} does not exist any more`;
   // Reading the changes used to answer "git did not start: needs git on PATH".
-  await expect(client.call('git.status', { threadId: thread.id })).rejects.toThrow(sentence);
+  expect(await thrown(client.call('git.status', { threadId: thread.id }))).toThrow(sentence);
   // These two used to answer "is not a git repository".
-  await expect(client.call('worktrees.list', { projectId: project.id })).rejects.toThrow(sentence);
-  await expect(client.call('projects.setWorktreeDefault', { projectId: project.id, enabled: true })).rejects.toThrow(sentence);
+  expect(await thrown(client.call('worktrees.list', { projectId: project.id }))).toThrow(sentence);
+  expect(await thrown(client.call('projects.setWorktreeDefault', { projectId: project.id, enabled: true }))).toThrow(sentence);
   expect((await client.call('projects.list', {})).find((entry) => entry.id === project.id)?.missing).toBe(true);
 
   const updated: (boolean | undefined)[] = [];
@@ -126,6 +127,32 @@ test('a deleted project folder is named by every refusal, and a folder put back 
   await waitFor(() => updated.length > 0);
   expect(updated.at(-1)).toBeUndefined();
   await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', title: 'back' });
+});
+
+test('a list asked after a folder came back is not answered by a check that read the disk before', async () => {
+  const client = await harness.connect();
+  const path = join(harness.dataDir, 'returning');
+  mkdirSync(path, { recursive: true });
+  const project = await client.call('projects.add', { path });
+  rmSync(path, { recursive: true, force: true });
+  expect((await client.call('projects.list', {})).find((entry) => entry.id === project.id)?.missing).toBe(true);
+  // Any request naming the project starts a check in the background. Its folder
+  // read saw the folder gone, and on a loaded runner its answer is not in yet
+  // when the folder comes back.
+  const stale = Promise.withResolvers<boolean | null>();
+  const store = harness.core.projects;
+  let reads = 0;
+  // Every other folder answers at once.
+  store.gitProbe = async (folder) => (folder === path ? probeGit(folder) : null);
+  store.folderProbe = (folder) => (folder === path && ++reads === 1 ? stale.promise : probeFolder(folder));
+  store.require(project.id);
+  await waitFor(() => reads === 1);
+  mkdirSync(path, { recursive: true });
+  // The stale answer lands once the list has started.
+  const listFresh = store.listFresh.bind(store);
+  store.listFresh = () => { const answer = listFresh(); setTimeout(() => stale.resolve(false), 0); return answer; };
+  const back = (await client.call('projects.list', {})).find((entry) => entry.id === project.id);
+  expect(back?.missing).toBeUndefined();
 });
 
 test('a disk that gives no clear answer does not mark a project missing', async () => {

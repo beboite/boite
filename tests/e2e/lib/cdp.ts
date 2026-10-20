@@ -5,6 +5,9 @@ import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import type { Subprocess } from 'bun';
 import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
+import { reportOnHang } from './hang-report.ts';
+import { uiServerSide } from './ui-requests.ts';
+import { TextSocket } from '../../../packages/core/src/ws-client.ts';
 
 /**
  * Marks the tour seen before any script of the page runs, and only where no
@@ -25,6 +28,21 @@ const PROBE_TIMEOUT_MS = 5_000;
 /** How long a failed attach waits for its launcher's diagnosis. */
 const DIAGNOSIS_TIMEOUT_MS = 20_000;
 const WAIT_DIAGNOSTIC_TIMEOUT_MS = 250;
+/** Main-frame navigation events a page keeps for its failure reports. */
+const NAVIGATION_EVENTS = 30;
+/**
+ * Each `history.back()` and `popstate` of a main-frame document, sent to the navigation log through a binding:
+ * a back that lands late takes over the navigation that follows it, and the document that called it is gone
+ * by the time that navigation fails.
+ */
+const HISTORY_BINDING = '__boiteE2eHistory';
+const HISTORY_WATCH = `if (window === top && typeof ${HISTORY_BINDING} === 'function') {
+  const report = ${HISTORY_BINDING};
+  const state = () => { try { return String(JSON.stringify(history.state)).slice(0, 160); } catch { return '?'; } };
+  const back = History.prototype.back;
+  History.prototype.back = function () { report('history.back() with state ' + state()); return back.call(this); };
+  addEventListener('popstate', () => report('popstate to state ' + state()));
+}`;
 /** What a page that left an evaluate hanging is doing: frames drawn in a second, fonts and animations still pending. */
 const HUNG_PAGE = `new Promise((resolve) => {
   let frames = 0;
@@ -89,7 +107,8 @@ export function freePort(): Promise<number> {
   });
 }
 
-interface TargetInfo {
+export interface TargetInfo {
+  id?: string;
   type: string;
   url: string;
   webSocketDebuggerUrl?: string;
@@ -100,6 +119,31 @@ interface Pending {
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
+
+interface InFlight {
+  url: string;
+  /** When its devtools event reached us, which can be after the server answered it. */
+  at: number;
+  /** When Chrome sent it (`wallTime`), on the same clock as `Date.now()`. */
+  wall?: number;
+  answered: boolean;
+  frameId?: string;
+  loaderId?: string;
+  sent?: number;
+  headers?: number;
+  cache?: boolean;
+}
+
+/** One process of `SystemInfo.getProcessInfo`, CPU time in seconds since it started. */
+interface ProcessInfo { type: string; id: number; cpuTime: number }
+
+/**
+ * `BOITE_E2E_HANG_STACK=1` turns the debugger on in every page, so a page whose
+ * main thread runs JavaScript past an evaluate's deadline reports where. Off by
+ * default: `Debugger.enable` waits for that thread like any other call, so it
+ * cannot be sent once the page hangs, and on it reports every script parsed.
+ */
+const HANG_STACK = process.env.BOITE_E2E_HANG_STACK === '1';
 
 export interface BrowserOptions {
   url: string;
@@ -134,6 +178,12 @@ export async function closeAllBrowsers(): Promise<void> {
   await Promise.all([...open].map((page) => page.close()));
 }
 
+// A run stopped at its deadline (scripts/ci/hang-watch.ts) reports every page still open.
+reportOnHang('browser pages', async () => {
+  const reports = await Promise.all([...open].map((page) => page.hangReport()));
+  return reports.join('\n\n') || '(no page open)';
+});
+
 /**
  * Lets a closing browser exit, then kills a stalled browser's process tree
  * before its profile is removed: a profile deleted under a live browser was
@@ -156,36 +206,65 @@ async function stopBrowser(proc: Subprocess, userDataDir: string | null, watch: 
 }
 
 export class BrowserPage {
-  #socket: WebSocket;
+  #socket: TextSocket;
   #proc: Subprocess | null;
   #watch: ParentDeathWatch | null;
   #userDataDir: string | null;
+  #target: TargetInfo;
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #closed = false;
+  /**
+   * Set once devtools sent a message that is not JSON. Chrome never does: the
+   * socket lost its frame alignment, so replies may be gone and every later
+   * call fails with this instead of waiting out its timeout.
+   */
+  #fault: string | null = null;
   #pageErrors: string[] = [];
-  /** Requests the page sent and has not finished loading, reported when a wait times out. */
-  #requests = new Map<string, { url: string; at: number; answered: boolean }>();
+  /**
+   * Requests the page's current documents sent and have not finished loading,
+   * reported when a wait times out. `sent` and `headers` are the network
+   * service's own events, which reach devtools from the browser process even
+   * while the renderer's main thread is blocked and Blink reports nothing.
+   */
+  #requests = new Map<string, InFlight>();
+  /** Network-service events that came before the request they belong to. */
+  #early = new Map<string, { sent?: number; headers?: number }>();
+  /** The debugging port of the browser this page runs in, for the processes' CPU. */
+  #debugPort: number | null = null;
+  #paused: ((frames: string) => void) | null = null;
   /** Completed failures would otherwise disappear from the timeout's in-flight list. */
   #networkFailures: string[] = [];
+  /**
+   * What devtools said of the main frame's navigations, oldest first, timed
+   * from when this page opened its socket: a page left on about:blank shows
+   * whether a navigation reached it, where to, and how its document request
+   * ended. Main frame only, the last `NAVIGATION_EVENTS`.
+   */
+  #navigations: string[] = [];
+  #opened = Date.now();
+  /** Main-frame document requests still loading, by request id. */
+  #documents = new Set<string>();
   errors(): string[] { return [...this.#pageErrors]; }
+  navigationLog(): string[] { return [...this.#navigations]; }
   /** The profile `launch` made for this page and removes on close; null when the caller owns it. */
   get profileDir(): string | null { return this.#userDataDir; }
   /** The browser's pid, null for a page `attach` drives. */
   get pid(): number | null { return this.#proc?.pid ?? null; }
+  /** The `/json/list` entry this page was opened on, as it read then. */
+  get target(): TargetInfo { return { ...this.#target }; }
 
-  private constructor(socket: WebSocket, proc: Subprocess | null, userDataDir: string | null, watch: ParentDeathWatch | null = null) {
+  private constructor(socket: TextSocket, target: TargetInfo, proc: Subprocess | null, userDataDir: string | null, watch: ParentDeathWatch | null = null) {
     this.#socket = socket;
+    this.#target = target;
     this.#proc = proc;
     this.#watch = watch;
     this.#userDataDir = userDataDir;
-    socket.addEventListener('message', (event: MessageEvent) => {
-      this.#receive(typeof event.data === 'string' ? event.data : '');
-    });
-    socket.addEventListener('close', () => {
+    socket.onMessage((text) => this.#receive(text));
+    socket.onClose(({ code, reason }) => {
       for (const pending of this.#pending.values()) {
         clearTimeout(pending.timer);
-        pending.reject(new Error('the devtools socket closed, the browser exited or was killed (bun test kills every process a file started when one of its tests or hooks times out)'));
+        pending.reject(new Error(`the devtools socket closed (${code} ${reason}), the browser exited or was killed (bun test kills every process a file started when one of its tests or hooks times out)`));
       }
       this.#pending.clear();
     });
@@ -273,11 +352,14 @@ export class BrowserPage {
     try {
       const target = await waitForPageTarget(port, '', proc, true);
       const socket = await openSocket(target);
-      page = new BrowserPage(socket, proc, ownsUserDataDir ? userDataDir : null, watch);
+      page = new BrowserPage(socket, target, proc, ownsUserDataDir ? userDataDir : null, watch);
+      page.#debugPort = port;
       open.add(page);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
       await page.send('Network.enable', {});
+      await page.#enableHangProbes();
+      await page.#watchHistory();
       if (options.showTour !== true) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
       if (options.terminalGpu !== true) {
         // Only on a fresh profile: a test that turns the GPU on and reloads keeps its choice.
@@ -315,7 +397,9 @@ export class BrowserPage {
   static async attach(port: number, urlIncludes = '', diagnose?: (failure: string) => string | Promise<string>): Promise<BrowserPage> {
     let page: BrowserPage | undefined;
     try {
-      page = new BrowserPage(await openSocket(await waitForPageTarget(port, urlIncludes)), null, null);
+      const target = await waitForPageTarget(port, urlIncludes);
+      page = new BrowserPage(await openSocket(target), target, null, null);
+      page.#debugPort = port;
       return await page.#prepareAttached();
     } catch (error) {
       await page?.close().catch(() => undefined);
@@ -329,6 +413,10 @@ export class BrowserPage {
   async #prepareAttached(): Promise<BrowserPage> {
     await this.send('Page.enable', {});
     await this.send('Runtime.enable', {});
+    // A page launched here reports its requests; one attached to, its own document request too (`navigationLog`).
+    await this.send('Network.enable', {});
+    await this.#enableHangProbes();
+    await this.#watchHistory();
     // The page booted before we got here, on a profile as new as the data
     // directory it sits in: it read "never seen" already. Record the tour and
     // boot it again, once, so every later reload finds the record too.
@@ -350,11 +438,12 @@ export class BrowserPage {
   /** The one place raw devtools JSON is handled. */
   send(method: string, params: Record<string, unknown>, timeoutMs = CALL_TIMEOUT_MS): Promise<unknown> {
     if (this.#closed) return Promise.reject(new Error('the browser is closed'));
+    if (this.#fault !== null) return Promise.reject(new Error(this.#fault));
     // A send on a closed socket is dropped without an error, and each call then
     // waited out its whole timeout: after `bun test` killed the browser of a
     // file whose test timed out, every later test of that file spent 20 s on a
     // "Runtime.evaluate timed out" that looked like a hung renderer.
-    if (this.#socket.readyState !== WebSocket.OPEN) {
+    if (!this.#socket.open) {
       return Promise.reject(new Error(`the devtools socket closed before ${method}: the browser exited or was killed. bun test kills every process a file started when one of its tests or hooks times out, so look for the file's first failure`));
     }
     const id = this.#nextId++;
@@ -384,9 +473,9 @@ export class BrowserPage {
       if (timeoutMs !== undefined || !(error instanceof Error) || !error.message.includes('timed out')) throw error;
       const state = await this.send('Runtime.evaluate', { expression: HUNG_PAGE, returnByValue: true, awaitPromise: true }, 3_000)
         .then((result) => JSON.stringify((result as { result?: { value?: unknown } }).result?.value))
-        .catch(() => 'the page did not answer either: its main thread is busy');
+        .catch(() => null);
       throw new Error(`${error.message}
-Page: ${state}
+Page: ${state === null ? `the page did not answer either: its main thread is busy\n${await this.#busyReport()}` : state}
 In flight: ${JSON.stringify(this.#inFlight())}`);
     })) as {
       result?: { value?: unknown };
@@ -415,19 +504,19 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     const deadline = Date.now() + timeoutMs;
     let last = '';
     while (Date.now() < deadline) {
-      if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw new Error('the browser is closed');
+      if (this.#closed || !this.#socket.open) throw new Error('the browser is closed');
       try {
         const remaining = Math.max(1, deadline - Date.now());
         const ok = await this.evaluate<boolean>(`(async () => !!(await (${expression})))()`, Math.min(CALL_TIMEOUT_MS, remaining));
         if (ok) return;
         last = 'it stayed false';
       } catch (error) {
-        if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw error;
+        if (this.#closed || !this.#socket.open) throw error;
         last = error instanceof Error ? error.message : String(error);
       }
       await Bun.sleep(Math.min(POLL_MS, Math.max(0, deadline - Date.now())));
     }
-    if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw new Error('the browser is closed');
+    if (this.#closed || !this.#socket.open) throw new Error('the browser is closed');
     // A separate, bounded grace preserves useful diagnostics after the condition consumes its budget.
     const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`, WAIT_DIAGNOSTIC_TIMEOUT_MS).catch(() => 'page diagnostic timed out');
     throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
@@ -442,14 +531,27 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     if (result.loaderId) {
       const deadline = Date.now() + CONNECT_TIMEOUT_MS;
       for (;;) {
-        const tree = await this.send('Page.getFrameTree', {}) as { frameTree: { frame: { loaderId: string } } };
+        const tree = await this.send('Page.getFrameTree', {}) as { frameTree: { frame: { loaderId: string; url: string } } };
         if (tree.frameTree.frame.loaderId === result.loaderId) break;
-        if (Date.now() > deadline) throw new Error('the requested navigation never committed');
+        if (Date.now() > deadline) throw new Error(`the requested navigation never committed in ${CONNECT_TIMEOUT_MS / 1000} s: loader ${result.loaderId}, the frame is on ${tree.frameTree.frame.url.split(/[?#]/, 1)[0]} loader ${tree.frameTree.frame.loaderId}
+${await this.#historyReport()}`);
         await Bun.sleep(POLL_MS);
       }
     }
     // A cold Vite dependency build on the Windows runner can outlast the normal DOM wait.
     await this.waitFor("document.readyState === 'complete'", 60_000);
+  }
+
+  /** The tab's last history entries, `*` on the current one, and the main frame's navigation log. */
+  async #historyReport(): Promise<string> {
+    const history = await this.send('Page.getNavigationHistory', {}, WAIT_DIAGNOSTIC_TIMEOUT_MS * 4)
+      .then((answer) => {
+        const { currentIndex, entries } = answer as { currentIndex: number; entries: { url: string; transitionType: string }[] };
+        // Without their query strings, as in the navigation log.
+        return entries.map((entry, index) => `${index === currentIndex ? '* ' : ''}${entry.url.split(/[?#]/, 1)[0]} (${entry.transitionType})`).slice(-8).join(', ');
+      })
+      .catch((error: unknown) => `unread (${error instanceof Error ? error.message : String(error)})`);
+    return `History: ${history}\nNavigations:\n  ${this.#navigations.join('\n  ')}`;
   }
 
   /** Boots the same page again and returns once the new document has loaded. */
@@ -566,32 +668,219 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     else if (this.#userDataDir !== null) await removeDirectory(this.#userDataDir);
   }
 
+  async #watchHistory(): Promise<void> {
+    await this.send('Runtime.addBinding', { name: HISTORY_BINDING });
+    await this.send('Page.addScriptToEvaluateOnNewDocument', { source: HISTORY_WATCH });
+  }
+
+  /** What a run stopped at its deadline reports of this page: its target, what it waits on and whether its main thread answers. */
+  async hangReport(): Promise<string> {
+    return [
+      `Page ${JSON.stringify(this.#target.url)} of browser ${this.pid ?? 'attached'} on port ${this.#debugPort ?? '?'}${this.#fault === null ? '' : `, socket fault: ${this.#fault}`}`,
+      `Calls waiting: ${this.#pending.size}`,
+      `Errors: ${JSON.stringify(this.#pageErrors)}`,
+      `In flight: ${JSON.stringify(this.#inFlight())}`,
+      `Failed requests: ${JSON.stringify(this.#networkFailures)}`,
+      await this.#busyReport(),
+    ].join('\n');
+  }
+
+  async #enableHangProbes(): Promise<void> {
+    if (HANG_STACK) await this.send('Debugger.enable', {});
+  }
+
+  /**
+   * What holds a page whose main thread left a call unanswered, asked of what
+   * still answers. `Performance.getMetrics` is dispatched as a V8 interrupt, so
+   * it answers while JavaScript runs and waits like any call while the thread
+   * is in a layout, a synchronous IPC or a native wait (Edge 155, a busy loop
+   * against a synchronous XHR). The browser endpoint gives each process's CPU.
+   * The probes run side by side: about a second, up to 5 s when the browser
+   * endpoint answers slowly (its fetch, upgrade and two calls have 1 s each).
+   */
+  async #busyReport(): Promise<string> {
+    const asked = Date.now();
+    const [again, inScript, cpu] = await Promise.all([
+      this.send('Runtime.evaluate', { expression: '1' }, 1_000).then(() => Date.now() - asked, () => null),
+      this.send('Performance.getMetrics', {}, 1_000).then(() => Date.now() - asked, () => null),
+      this.#processCpu(),
+    ]);
+    const lines = [
+      again !== null
+        ? `Main thread: answered again ${again} ms later`
+        : inScript === null
+          ? 'Main thread: not in JavaScript: Performance.getMetrics, a V8 interrupt, got no answer in 1 s either (a layout, a synchronous IPC or a native wait)'
+          : `Main thread: running JavaScript: Performance.getMetrics, a V8 interrupt, answered in ${inScript} ms`,
+      `CPU over 1 s: ${cpu}`,
+    ];
+    if (HANG_STACK && again === null) lines.push(`Stack: ${await this.#pausedStack()}`);
+    return lines.join('\n');
+  }
+
+  /** Where the running script is, through the debugger `HANG_STACK` turned on at launch. */
+  async #pausedStack(): Promise<string> {
+    const paused = new Promise<string>((resolve) => { this.#paused = resolve; });
+    try {
+      await this.send('Debugger.pause', {}, 1_000);
+      return await Promise.race([paused, Bun.sleep(1_000).then(() => 'no pause within 1 s')]);
+    } catch (error) {
+      return `Debugger.pause failed: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.#paused = null;
+      await this.send('Debugger.resume', {}, 1_000).catch(() => undefined);
+    }
+  }
+
+  /** CPU seconds per second of each process of the browser, over one second. */
+  async #processCpu(): Promise<string> {
+    if (this.#debugPort === null) return 'no browser endpoint';
+    let socket: TextSocket | undefined;
+    try {
+      const version = await (await fetch(`http://127.0.0.1:${this.#debugPort}/json/version`, { signal: AbortSignal.timeout(1_000) })).json() as { webSocketDebuggerUrl?: string };
+      if (version.webSocketDebuggerUrl === undefined) return 'the browser endpoint has no socket';
+      const browser = socket = await TextSocket.connect(version.webSocketDebuggerUrl, 1_000);
+      const replies = new Map<number, (processes: ProcessInfo[]) => void>();
+      browser.onMessage((text) => {
+        const message = JSON.parse(text) as { id?: number; result?: { processInfo?: ProcessInfo[] } };
+        if (message.id !== undefined) replies.get(message.id)?.(message.result?.processInfo ?? []);
+      });
+      const processes = (id: number) => new Promise<ProcessInfo[]>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('SystemInfo.getProcessInfo timed out')), 1_000);
+        replies.set(id, (found) => { clearTimeout(timer); resolve(found); });
+        browser.send(JSON.stringify({ id, method: 'SystemInfo.getProcessInfo', params: {} }));
+      });
+      const before = await processes(1);
+      const started = performance.now();
+      await Bun.sleep(1_000);
+      const after = await processes(2);
+      const seconds = (performance.now() - started) / 1_000;
+      const used = after.map((process) => ({ process, rate: (process.cpuTime - (before.find((candidate) => candidate.id === process.id)?.cpuTime ?? 0)) / seconds }));
+      const busy = used.filter(({ rate }) => rate >= 0.05).map(({ process, rate }) => `${process.type} ${process.id} ${rate.toFixed(2)}`);
+      return `${busy.join(', ') || 'no process'} at 0.05 s/s or more, ${used.length - busy.length} below`;
+    } catch (error) {
+      return `could not read it: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      socket?.close();
+    }
+  }
+
   /** What a stalled page is still waiting on: whether the server never answered or the body never arrived. */
   #inFlight(): string[] {
     const now = Date.now();
-    return [...this.#requests.values()].filter((request) => now - request.at > 1_000).slice(0, 10)
-      .map((request) => `${request.url} ${request.answered ? 'answered, body pending' : 'no response'} for ${now - request.at} ms`);
+    return [...this.#requests.values()].filter((request) => now - (request.wall ?? request.at) > 1_000).slice(0, 10).map((request) => {
+      const sentAt = request.wall ?? request.at;
+      const wire = request.cache ? 'served from the cache'
+        : request.headers !== undefined ? `the network service had its headers by ${request.headers - sentAt} ms after it was sent`
+          : request.sent !== undefined ? 'the network service sent it and has no headers'
+            : 'nothing from the network service (not sent, or a service worker holds it)';
+      const server = uiServerSide(request.url, request.wall ?? null, request.at);
+      return `${request.url} ${request.answered ? 'answered, body pending' : 'no response'} for ${now - sentAt} ms: ${wire}${server === null ? '' : `; ${server}`}`;
+    });
+  }
+
+  /** Fails what waits and what comes next with the message devtools sent, then hangs up. */
+  #protocolFault(raw: string): void {
+    if (this.#fault !== null) return;
+    this.#fault = `devtools sent a message that is not JSON (${raw.length} chars: ${JSON.stringify(raw.slice(0, 120))}): the socket lost its frames, so replies and network events may be missing`;
+    for (const pending of this.#pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(this.#fault));
+    }
+    this.#pending.clear();
+    this.#socket.close(1002);
   }
 
   #receive(raw: string): void {
     if (raw === '') return;
-    let frame: { id?: unknown; method?: string; params?: { exceptionDetails?: { text?: string; exception?: { description?: string } }; requestId?: string; request?: { url?: string }; response?: { status?: number }; errorText?: string }; result?: unknown; error?: { message?: string } };
+    let frame: {
+      id?: unknown;
+      method?: string;
+      params?: {
+        exceptionDetails?: { text?: string; exception?: { description?: string } };
+        requestId?: string; frameId?: string; loaderId?: string; wallTime?: number; request?: { url?: string }; response?: { status?: number }; errorText?: string;
+        frame?: { id: string; loaderId: string; url?: string; parentId?: string };
+        url?: string; reason?: string; type?: string; canceled?: boolean; blockedReason?: string; name?: string; payload?: string;
+        callFrames?: { functionName: string; url: string; location: { lineNumber: number; columnNumber: number } }[];
+      };
+      result?: unknown;
+      error?: { message?: string };
+    };
     try {
       frame = JSON.parse(raw) as typeof frame;
     } catch {
+      // Bun's WebSocket client did this on the E2E runner: misaligned, it handed
+      // over pieces of frames, and dropping them silently lost the replies and
+      // network events inside. Each call then timed out, its probe too, and the
+      // page read as "main thread busy" with its lazy chunks "no response".
+      this.#protocolFault(raw);
       return;
     }
     if (typeof frame.id !== 'number') {
+      if (frame.method === 'Runtime.bindingCalled' && frame.params?.name === HISTORY_BINDING) {
+        this.#navigated(String(frame.params.payload));
+        return;
+      }
       if (frame.method === 'Runtime.exceptionThrown') {
         const detail = frame.params?.exceptionDetails;
         this.#pageErrors.push(detail?.exception?.description ?? detail?.text ?? 'unknown page exception');
         if (this.#pageErrors.length > 10) this.#pageErrors.shift();
       }
+      if (frame.method === 'Debugger.paused') {
+        const frames = (frame.params?.callFrames ?? []).slice(0, 8)
+          .map((call) => `${call.functionName || '(anonymous)'} ${call.url}:${call.location.lineNumber + 1}:${call.location.columnNumber + 1}`).join(' < ');
+        // A pause nobody asked for, a `debugger` statement, must not freeze the page.
+        if (this.#paused !== null) this.#paused(frames || 'paused outside any script');
+        else void this.send('Debugger.resume', {}).catch(() => undefined);
+        return;
+      }
+      if (frame.method?.startsWith('Page.frame') && (frame.params?.frameId ?? frame.params?.frame?.id) === this.#target.id) {
+        const params = frame.params!;
+        const detail = frame.method === 'Page.frameNavigated' ? ` ${params.frame!.url} loader ${params.frame!.loaderId}`
+          : frame.method === 'Page.frameRequestedNavigation' ? ` ${params.url} (${params.reason})`
+            : frame.method === 'Page.frameStartedNavigating' ? ` ${params.url} loader ${params.loaderId}` : '';
+        this.#navigated(`${frame.method}${detail}`);
+      }
+      if (frame.method === 'Page.frameNavigated') {
+        // Chrome sends nothing more about the requests of a document a
+        // navigation replaced: they would read as unanswered forever.
+        const navigated = frame.params?.frame;
+        if (navigated !== undefined) {
+          for (const [key, request] of this.#requests) if (request.frameId === navigated.id && request.loaderId !== navigated.loaderId) this.#requests.delete(key);
+        }
+        return;
+      }
       const id = frame.params?.requestId;
       if (id !== undefined) {
         const url = frame.params?.request?.url ?? '';
-        if (frame.method === 'Network.requestWillBeSent' && !url.startsWith('data:')) this.#requests.set(id, { url, at: Date.now(), answered: false });
-        else if (frame.method === 'Network.responseReceived') {
+        if (frame.method === 'Network.requestWillBeSent' && frame.params?.type === 'Document' && frame.params.frameId === this.#target.id) {
+          this.#documents.add(id);
+          this.#navigated(`document request ${url.split(/[?#]/, 1)[0]} loader ${frame.params.loaderId}`);
+        } else if (this.#documents.has(id) && frame.method === 'Network.responseReceived') {
+          this.#navigated(`document response HTTP ${frame.params?.response?.status}`);
+        } else if (this.#documents.has(id) && (frame.method === 'Network.loadingFinished' || frame.method === 'Network.loadingFailed')) {
+          this.#documents.delete(id);
+          const params = frame.params!;
+          this.#navigated(frame.method === 'Network.loadingFinished' ? 'document loaded'
+            : `document failed: ${params.errorText ?? 'no error text'}${params.canceled ? ', canceled' : ''}${params.blockedReason ? `, blocked (${params.blockedReason})` : ''}`);
+        }
+        if (frame.method === 'Network.requestWillBeSent' && !url.startsWith('data:')) {
+          const early = this.#early.get(id);
+          this.#early.delete(id);
+          const wallTime = frame.params?.wallTime;
+          this.#requests.set(id, { url, at: Date.now(), wall: typeof wallTime === 'number' ? wallTime * 1_000 : undefined, answered: false, frameId: frame.params?.frameId, loaderId: frame.params?.loaderId, ...early });
+        } else if (frame.method === 'Network.requestWillBeSentExtraInfo' || frame.method === 'Network.responseReceivedExtraInfo') {
+          // The browser process sends these, and not always after Blink's own event.
+          const step = frame.method === 'Network.requestWillBeSentExtraInfo' ? 'sent' : 'headers';
+          const request = this.#requests.get(id);
+          if (request !== undefined) request[step] ??= Date.now();
+          else {
+            if (this.#early.size > 500) this.#early.clear();
+            this.#early.set(id, { ...this.#early.get(id), [step]: Date.now() });
+          }
+        } else if (frame.method === 'Network.requestServedFromCache') {
+          const request = this.#requests.get(id);
+          if (request !== undefined) request.cache = true;
+        } else if (frame.method === 'Network.responseReceived') {
           const request = this.#requests.get(id);
           if (request) request.answered = true;
           if ((frame.params?.response?.status ?? 0) >= 400) this.#recordNetworkFailure(id, `HTTP ${frame.params?.response?.status}`);
@@ -608,6 +897,12 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     clearTimeout(pending.timer);
     if (frame.error !== undefined) pending.reject(new Error(frame.error.message ?? 'devtools error'));
     else pending.resolve(frame.result);
+  }
+
+  #navigated(line: string): void {
+    // Pairing and ticket query strings belong to the test, never to its failure log.
+    this.#navigations.push(`+${Date.now() - this.#opened} ms ${line.replace(/(https?:\/\/[^\s?#]*)[?#]\S*/g, '$1')}`);
+    if (this.#navigations.length > NAVIGATION_EVENTS) this.#navigations.shift();
   }
 
   #recordNetworkFailure(id: string, reason: string): void {
@@ -706,23 +1001,13 @@ export async function probeDebuggingPort(port: number): Promise<string> {
   }
 }
 
-function openSocket(target: TargetInfo): Promise<WebSocket> {
+/** Bun's own WebSocket client closes sound devtools streams with 1002: see `packages/core/src/ws-client.ts`. */
+async function openSocket(target: TargetInfo): Promise<TextSocket> {
   const url = target.webSocketDebuggerUrl;
   if (url === undefined) throw new Error('the page target has no debugger url');
-  return new Promise<WebSocket>((resolve, reject) => {
-    const socket = new WebSocket(url);
-    // A socket that never opened is closed with its refusal: nothing else
-    // holds it, and a late open would keep its connection for the whole run.
-    const fail = (message: string) => {
-      clearTimeout(timer);
-      socket.close();
-      reject(new Error(message));
-    };
-    const timer = setTimeout(() => fail('the devtools socket did not open'), CONNECT_TIMEOUT_MS);
-    socket.addEventListener('open', () => {
-      clearTimeout(timer);
-      resolve(socket);
-    }, { once: true });
-    socket.addEventListener('error', () => fail('the devtools socket failed to open'), { once: true });
-  });
+  try {
+    return await TextSocket.connect(url, CONNECT_TIMEOUT_MS);
+  } catch (error) {
+    throw new Error(`the devtools socket did not open: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
 }

@@ -67,6 +67,7 @@ import { fr as composer } from './strings/fr/composer';
 import { fr as rightPanel } from './strings/fr/rightPanel';
 import { fr as changes } from './strings/fr/changes';
 import { fr as tasks } from './strings/fr/tasks';
+import { fr as board } from './strings/fr/board';
 import { fr as files } from './strings/fr/files';
 import { fr as browserTools } from './strings/fr/browserTools';
 import { fr as browser } from './strings/fr/browser';
@@ -95,6 +96,7 @@ import { fr as effortLevels } from './strings/fr/effortLevels';
 import { fr as parts } from './strings/fr/parts';
 import { fr as common } from './strings/fr/common';
 import { fr as onboarding } from './strings/fr/onboarding';
+import { fr as contacts } from './strings/fr/contacts';
 
 export const fr: Translation = {
   ...subscriptionProxy,
@@ -154,6 +156,7 @@ export const fr: Translation = {
   ...rightPanel,
   ...changes,
   ...tasks,
+  ...board,
   ...files,
   ...browserTools,
   ...browser,
@@ -182,4 +185,5 @@ export const fr: Translation = {
   ...parts,
   ...common,
   ...onboarding,
+  ...contacts,
 };

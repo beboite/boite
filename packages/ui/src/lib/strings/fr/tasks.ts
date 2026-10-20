@@ -8,7 +8,6 @@ export const fr: Translation = {
     nextRun: 'Prochain passage {time}',
     iterations: '{count} itérations',
     agentSection: "Tâches de l'agent",
-    noTasks: "L'agent n'a signalé aucune liste de tâches",
     todoSection: 'Todos du projet',
     noTodos: 'Aucun todo sur ce projet',
     addPlaceholder: 'Ajouter un todo',

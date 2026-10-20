@@ -11,6 +11,7 @@ import { MergedPrArchive } from '../src/merged-pr-archive.ts';
 import { archiveState } from '../src/merged-pr-archive-state.ts';
 import { githubRepository, parseMergedPrProof } from '../src/pull-requests.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { rejection, thrown } from './settle.ts';
 
 let harness: TestCore;
 let service: MergedPrArchive;
@@ -85,6 +86,8 @@ async function completedFamily() {
   });
   const children = harness.core.journal.listThreads().filter(thread => thread.parentThreadId === f.threadId);
   expect(children).toHaveLength(2);
+  // Both finished and told their parent: they are put away as done.
+  expect(children.map(child => [child.archived, child.doneAt != null])).toEqual([[true, true], [true, true]]);
   for (const thread of [harness.core.threads.require(f.threadId), ...children]) await f.client.call('threads.markRead', { threadId: thread.id });
   return { ...f, children, runId: run.id };
 }
@@ -266,9 +269,9 @@ test('a completed delivered workflow and delegation family archives with histori
     expect(harness.core.threads.require(childId)).toEqual(child);
     expect(harness.core.journal.listTurns(childId)).toEqual(history);
     expect(existsSync(join(f.checkout, '.git'))).toBe(true);
-    await expect(f.client.call('turns.start', { threadId: childId, prompt: 'Late child work' })).rejects.toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
-    await expect(f.client.call('threads.btw', { threadId: childId, question: 'Late child question', requestId: 'side_archived_child' })).rejects.toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
-    await expect(stale.call('delegation.send', { threadId: childId, toThreadId: f.threadId, text: 'Late result', requestId: 'late-family-result' })).rejects.toThrow();
+    expect((await rejection(f.client.call('turns.start', { threadId: childId, prompt: 'Late child work' }))).reason).toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
+    expect((await rejection(f.client.call('threads.btw', { threadId: childId, question: 'Late child question', requestId: 'side_archived_child' }))).reason).toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
+    expect(await thrown(stale.call('delegation.send', { threadId: childId, toThreadId: f.threadId, text: 'Late result', requestId: 'late-family-result' }))).toThrow();
     harness.core.threads.deferred.wake(childId, 'Late background wake');
     expect(harness.core.journal.listTurns(childId)).toEqual(history);
     await f.client.call('threads.archive', { threadId: f.threadId, archived: false });
@@ -311,6 +314,8 @@ test('retained child activity, unread results, protected input and undelivered f
 test('pending and retained side answers on a root or retained descendant keep the merged family visible', async () => {
   const f = await completedFamily();
   const child = f.children[0]!;
+  // Its finished step was put away as done; the user reopened it.
+  await f.client.call('threads.archive', { threadId: child.id, archived: false });
   const descendant = { ...harness.core.threads.require(child.id), id: 'thr_archive_descendant', parentThreadId: child.id };
   harness.core.journal.putThread(descendant);
   harness.core.journal.putTurn({ ...harness.core.journal.listTurns(child.id).at(-1)!, id: 'trn_archive_descendant', threadId: descendant.id });
@@ -338,6 +343,8 @@ test('pending and retained side answers on a root or retained descendant keep th
 test('a child turn admitted during final Git validation keeps its merged parent visible', async () => {
   const f = await completedFamily();
   const childId = f.children[0]!.id;
+  // Its finished step was put away as done; the user reopened it.
+  await f.client.call('threads.archive', { threadId: childId, archived: false });
   restoreDriver?.();
   restoreDriver = setDriver('echo', { protocol: 'echo', startTurn() {
     let finish!: () => void;
@@ -467,7 +474,7 @@ test('merged archive retains checkout and reason, and restored exact PR stays di
   await f.client.call('threads.focus', { threadId: null, protectedThreadIds: [] });
   await f.client.call('threads.focus', { threadId: null });
   expect(await service.sweep()).toBe(0);
-  await expect(secondOwner.call('threads.focus', { threadId: null, protectedThreadIds: Array.from({ length: 257 }, (_, index) => `id-${index}`) })).rejects.toMatchObject({ rpc: { code: RpcErrorCode.InvalidParams, data: { field: 'protectedThreadIds' } } });
+  expect((await rejection(secondOwner.call('threads.focus', { threadId: null, protectedThreadIds: Array.from({ length: 257 }, (_, index) => `id-${index}`) }))).reason).toMatchObject({ rpc: { code: RpcErrorCode.InvalidParams, data: { field: 'protectedThreadIds' } } });
   expect(await service.sweep()).toBe(0);
   await f.client.call('threads.focus', { threadId: null, protectAllThreads: true });
   secondOwner.close();
@@ -631,6 +638,6 @@ test('project opt-out survives other policy writers and default access denies de
   await f.client.call('projects.archive', { projectId: f.project.id, archived: false });
   expect(harness.core.projects.require(f.project.id).autoArchiveMergedPr).toBe(false);
   for (const principal of ['session', 'agent'] as const) expect(() => assertAllowed('projects.setAutoArchiveMergedPr', { identity: { principal, threadId: f.threadId, sessionId: 'fixture' } } as never, { projectId: f.project.id, enabled: true })).toThrow();
-  await expect(f.client.call('projects.setAutoArchiveMergedPr', { projectId: f.project.id, enabled: 'yes' as never })).rejects.toThrow('boolean');
+  expect(await thrown(f.client.call('projects.setAutoArchiveMergedPr', { projectId: f.project.id, enabled: 'yes' as never }))).toThrow('boolean');
   expect(await service.sweep()).toBe(0);
 });

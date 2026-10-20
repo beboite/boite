@@ -164,9 +164,14 @@ describe('orphan sweep', () => {
     expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([120, 121]);
   });
 
-  test('a start reported late for a process the core spawned is not a second process', () => {
+  test('a start reported late for a process the core spawned is not a second process', async () => {
     const threadId = 'late-start';
+    // On Windows the child's own kill waits for taskkill, tens to hundreds of
+    // ms: held here, so the child still runs, in this test's directory, when
+    // the test ends. The directory cannot be removed before it exits (EBUSY).
+    const treeKill = spyOn(job.platform, 'terminateUnassigned').mockImplementation(() => Bun.sleep(300));
     const child = procs.spawnChild(threadId, process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { cwd: directory });
+    const exited = new Promise(resolve => child.once('exit', resolve));
     const pid = child.pid as number;
     const born = procs.liveOf(threadId)[0]?.startedAt as number;
     expect(born).toBe(SPAWN_BORN);
@@ -183,6 +188,8 @@ describe('orphan sweep', () => {
     job.sink().started(threadId, pid, { exe: 'C:\\tools\\git.exe', commandLine: null, parentPid: 100, startedAt: born + 50 });
     expect(started).toEqual([pid]);
     stop();
+    treeKill.mockRestore();
+    await exited;
   });
 
   test('everything under an orphan goes with it, however deep, and a sibling tree stays', () => {

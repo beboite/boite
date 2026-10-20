@@ -30,6 +30,7 @@
   import { activeLocale } from './lib/i18n.svelte';
   import { retryOrReload } from './lib/retry-load';
   import { experimentOn } from './lib/experiments.svelte';
+  import { contactsShown, contactsViews } from './lib/contacts-views.svelte';
   import { installWhipEscape } from './lib/whip.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
@@ -120,12 +121,16 @@
     // The drawer, then xterm.js and its stylesheet: only once a terminal is asked for.
     TerminalDrawer: () => import('./components/TerminalDrawer.svelte'),
     TerminalView: () => import('./components/TerminalView.svelte'),
+    // The project board, in the same drawer: only once it is asked for.
+    BoardDrawer: () => import('./components/BoardDrawer.svelte'),
     PluginUpdateNotice: () => import('./components/PluginUpdateNotice.svelte')
   };
   type Deferred = { [K in keyof typeof deferredLoaders]?: Awaited<ReturnType<(typeof deferredLoaders)[K]>>['default'] };
   let deferred = $state.raw<Deferred>({});
   const requested = new Set<keyof Deferred>();
-  let terminalShown = $derived(store.openThread !== null && store.owner && store.terminalShown(store.openThread.id));
+  let boardShown = $derived(store.openThread !== null && store.boardShown && store.boardAvailable());
+  // One drawer at a time: the board, when it holds the drawer, wins over a terminal left open.
+  let terminalShown = $derived(store.openThread !== null && store.owner && store.terminalShown(store.openThread.id) && !boardShown);
   function need(name: keyof Deferred): void {
     if (requested.has(name)) return;
     requested.add(name);
@@ -180,6 +185,7 @@
     if (experimentOn('resident-agents')) return;
     for (const machine of workspace.machines) if (machine.store.page === 'agents') machine.store.showChat();
   });
+  const contacts = contactsViews(() => store, () => workspace.machines, () => narrow.current);
   let settingsLoadError = $state('');
   $effect(() => {
     if (store.page !== 'settings' || SettingsShell) return;
@@ -197,6 +203,10 @@
       need('TerminalDrawer');
       need('TerminalView');
     }
+  });
+
+  $effect(() => {
+    if (boardShown) need('BoardDrawer');
   });
 
   // A drawer left open before a reload or a reconnect opens again, with its tabs and splits.
@@ -283,6 +293,7 @@
   const scrim = new Closing();
   const panelSlot = new Closing();
   const terminalSlot = new Closing();
+  const boardSlot = new Closing();
   /** The error is cleared the moment Dismiss is pressed, so the exit plays on a copy. */
   let toastText = $state('');
   let toastThreadId = $state<string | null>(null);
@@ -367,6 +378,13 @@
       // the keyboard goes back to the composer first.
       if (document.activeElement?.closest('[data-testid=terminal-drawer]')) focusComposer();
       terminalSlot.hide();
+    }
+  });
+  $effect(() => {
+    if (boardShown && deferred.BoardDrawer) boardSlot.show();
+    else {
+      if (document.activeElement?.closest('[data-testid=board-drawer]')) focusComposer();
+      boardSlot.hide();
     }
   });
 
@@ -546,7 +564,7 @@
   {/if}
   <TitleBar {store} />
 
-  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
+  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={store.page === 'chat' && rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
     {#if !booted}
       <p class="empty boot" class:long={compacting}>{compacting ? strings.app.compacting : strings.app.loading}</p>
     {:else if wideRecovery}
@@ -583,6 +601,12 @@
           onclick={() => (store.sidebarOpen = false)}
         ></button>
       {/if}
+      {#if store.page === 'home' && contactsShown(store)}
+        <!-- Contacts take the chat's card; the thread list stays beside them. -->
+        <main><div class="thread-chat framed">
+          {#if contacts.HomePage}{#key store}<contacts.HomePage {store} />{/key}{:else}<p class="empty">{contacts.homeError || strings.app.loading}</p>{/if}
+        </div></main>
+      {:else}
       <main>
         <div class="thread-chat framed">
           {#key store}
@@ -599,6 +623,14 @@
             {/key}
           {/key}
         {/if}
+        {#if boardSlot.shown && store.openThread && deferred.BoardDrawer}
+          {@const BoardDrawer = deferred.BoardDrawer}
+          <!-- Not keyed on the thread: the board is the project's, the same in each of its threads. -->
+          {#key store}
+            <BoardDrawer {store} threadId={store.openThread.id}
+              closing={boardSlot.closing} attach={boardSlot.attach} onexit={boardSlot.end} />
+          {/key}
+        {/if}
       </main>
       {#if panelSlot.shown && store.openThread && deferred.RightPanel}
         {@const RightPanel = deferred.RightPanel}
@@ -612,6 +644,8 @@
           />
         {/key}
       {/if}
+      {/if}
+      {#if contacts.ContactsRail && contactsShown(store) && !narrow.current}{#key store}<contacts.ContactsRail {store} />{/key}{/if}
     {/if}
   </div>
 

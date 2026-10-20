@@ -3,6 +3,7 @@ import type { ImageAttachment, MessagePart, QuestionAnswer, RpcEvents, ToolDocum
 import { echoThread, scriptedClaude, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { connect } from '../src/client.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 
@@ -300,23 +301,13 @@ describe('echo driver', () => {
     const image = (over: Partial<{ mimeType: string; data: string; name: string | null }>): ImageAttachment =>
       ({ kind: 'image', mimeType: 'image/png', data: png, name: 'pixel.png', ...over }) as ImageAttachment;
 
-    await expect(
-      client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ mimeType: 'image/bmp' })] }),
-    ).rejects.toThrow('pixel.png: image/bmp is not an image format an agent reads');
-    await expect(
-      client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ data: 'data:image/png;base64,abcd' })] }),
-    ).rejects.toThrow('pixel.png: the attachment data is not base64');
-    await expect(
-      client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ data: 'A'.repeat(7 * 1048576), name: null })] }),
-    ).rejects.toThrow('attachment 1: 5.3 MB is over the 5 MB a file may weigh');
-    await expect(
-      client.call('turns.start', { threadId, prompt: 'x', attachments: Array.from({ length: 21 }, () => image({})) }),
-    ).rejects.toThrow('a turn carries at most 20 attachments, this one has 21');
+    expect(await thrown(client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ mimeType: 'image/bmp' })] }))).toThrow('pixel.png: image/bmp is not an image format an agent reads');
+    expect(await thrown(client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ data: 'data:image/png;base64,abcd' })] }))).toThrow('pixel.png: the attachment data is not base64');
+    expect(await thrown(client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ data: 'A'.repeat(7 * 1048576), name: null })] }))).toThrow('attachment 1: 5.3 MB is over the 5 MB a file may weigh');
+    expect(await thrown(client.call('turns.start', { threadId, prompt: 'x', attachments: Array.from({ length: 21 }, () => image({})) }))).toThrow('a turn carries at most 20 attachments, this one has 21');
     // Three phone photos under the per-file cap still make a frame the socket would not carry.
     const photo = 'A'.repeat(4_893_356);
-    await expect(
-      client.call('turns.start', { threadId, prompt: 'x', attachments: [1, 2, 3].map((at) => image({ data: photo, name: `photo-${at}.jpg` })) }),
-    ).rejects.toThrow('the attachments weigh 10.5 MB together, over the 10 MB one turn may carry');
+    expect(await thrown(client.call('turns.start', { threadId, prompt: 'x', attachments: [1, 2, 3].map((at) => image({ data: photo, name: `photo-${at}.jpg` })) }))).toThrow('the attachments weigh 10.5 MB together, over the 10 MB one turn may carry');
 
     // Nothing above started a turn, so the thread is still idle and empty.
     const thread = await client.call('threads.get', { threadId });
@@ -439,12 +430,12 @@ describe('echo driver', () => {
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
     const shot = { kind: 'image' as const, mimeType: 'image/png' as const, data: png, name: 'screen.png' };
 
-    await expect(client.call('questions.answer', {
+    expect(await thrown(client.call('questions.answer', {
       threadId, questionId: question.id, optionIds: [], attachments: [{ ...shot, data: 'data:image/png;base64,abcd' }],
-    })).rejects.toThrow('screen.png: the attachment data is not base64');
-    await expect(client.call('questions.answer', {
+    }))).toThrow('screen.png: the attachment data is not base64');
+    expect(await thrown(client.call('questions.answer', {
       threadId, questionId: question.id, optionIds: [], attachments: Array.from({ length: 21 }, () => shot),
-    })).rejects.toThrow('at most 20 attachments');
+    }))).toThrow('at most 20 attachments');
 
     const answered = client.next('question.answered', (event) => event.questionId === question.id, 10000);
     // A file alone answers: the screenshot is the answer.
@@ -486,21 +477,15 @@ describe('echo driver', () => {
     const { threadId } = await echoThread(harness, client);
     await client.call('threads.subscribe', { threadId });
 
-    await expect(
-      client.call('questions.answer', { threadId, questionId: 'qst_nobody', optionIds: ['short'] }),
-    ).rejects.toThrow(/qst_nobody/);
+    expect(await thrown(client.call('questions.answer', { threadId, questionId: 'qst_nobody', optionIds: ['short'] }))).toThrow(/qst_nobody/);
 
     const asked = client.next('question.asked', (request) => request.threadId === threadId, 10000);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
     await client.call('turns.start', { threadId, prompt: 'question' });
     const question = await asked;
 
-    await expect(
-      client.call('questions.answer', { threadId, questionId: question.id, optionIds: ['purple'] }),
-    ).rejects.toThrow(/options/);
-    await expect(
-      client.call('questions.answer', { threadId, questionId: question.id, optionIds: [] }),
-    ).rejects.toThrow(/option or some text/);
+    expect(await thrown(client.call('questions.answer', { threadId, questionId: question.id, optionIds: ['purple'] }))).toThrow(/options/);
+    expect(await thrown(client.call('questions.answer', { threadId, questionId: question.id, optionIds: [] }))).toThrow(/option or some text/);
     // Refused and still pending: the card is answerable after a bad try.
     expect(await client.call('questions.list', { threadId })).toHaveLength(1);
 

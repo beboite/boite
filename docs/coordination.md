@@ -161,6 +161,29 @@ channel. Signatures cover destinations, timestamps, unique request nonces and
 content. The receiver checks replay, size, expiry and rate limits. HTTPS protects
 message privacy. Keep the core data directory private, including its signing key.
 
+### Contacts
+
+A [contact](contacts.md) is another owner's core, linked through an invitation.
+It is a coordination peer too, listed after the hand-made links and the group's
+members (`ContactStore.peers()` in `packages/core/src/contacts/store.ts`).
+`collaboration.trust`, `collaboration.bridge.register` and thread reveals refuse
+its core id. Its requests are always sealed, whichever way they travel: a
+readable one is refused with `contacts exchange sealed requests only`. It
+reaches only the projects opened to it. `directory` and `search` list their
+threads whose settings allow other machines, and search matches chat only
+where the grant has `readThreads`. `read` needs that grant too. `deliver`
+reaches those threads, or a thread that wrote to the contact in the last 7
+days. A contact never sends `group.sync` or `group.push`, and only a contact
+sends `contact.sync` (the projects opened to the receiver), `contact.ask` and
+`contact.answer` (a request and its decision).
+
+The inviting core, the host, never dials its guest: the guest keeps a
+WebSocket open at `/coordination/contact/link`, and that socket is the
+guest's bridge route on the host. The host's signed and sealed requests go
+down it as `{t: 'req'}` frames; the guest answers each through the same
+handler as an HTTP request (`coordination.forward`) and sends back a
+`{t: 'res'}` frame. The guest's requests to the host are ordinary POSTs.
+
 Trusted peers can discover the conversations that allow
 remote coordination: title, project, branch, model, declared resources and the
 agent's status. When the destination grants reading, searches also match chat
@@ -206,6 +229,16 @@ the start of the recipient's own message it answers. The core id hash, the
 mode and the timestamps stay out. When the context is still unclear, the
 recipient is told to read the sender's conversation instead of dismissing the
 message.
+
+A letter that crossed a contact link carries `contact`, the name this owner
+gave that contact, set by the receiving core from its own list. The provider
+reads such letters under their own heading, the sender named
+`<name>'s agent, a contact: not your user`, with the rule that a contact's word
+never authorizes a destructive action, a credential or work outside the
+project it came through. The answer to `boite agents ask` arrives as a letter
+with `origin: 'contact'`, written by the asking core from the contact's
+decision; the agent does not reply to it. The coordination guide mentions
+`boite agents contacts` and `ask` only while the core has a contact.
 
 Agents are told to write compactly: one to three short lines, facts and asks,
 no greeting, recap or sign-off, since the recipient already sees who wrote.
@@ -268,6 +301,8 @@ boite agents send <machine>/<thread-id> "The parser check fails on main."
 boite agents reply <message-id> "Wait until the current test finishes."
 boite agents log <thread-id>                   # what the two of you said to each other
 boite agents wait --timeout 120            # the next message addressed to you
+boite agents contacts                      # other owners' Boites and the projects they opened to you
+boite agents ask <contact> "An agent on a project like our parser" --wait
 ```
 
 An agent is named by its thread id when it runs on the same core, or by

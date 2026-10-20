@@ -42,8 +42,25 @@ export function sleepState(): SleepState {
 }
 
 const STEP_MS = 5000;
+/** How long a step that missed its time is still listened to, so the log says whether its answer came late or not at all. */
+const LATE_MS = 30_000;
+/** What the browser gets to answer for itself once a step missed its time. */
+const PROBE_MS = 1000;
 
 export class TabSleep<T extends Sleeper> {
+  /** What each DevTools call of a freeze or a wake may take; tests shorten it. */
+  stepMs = STEP_MS;
+  /**
+   * Asked of the browser itself, within `timeoutMs`, when a step of a tab
+   * misses its time: an answer puts the stall in that page's renderer, none
+   * in the browser or its connection.
+   */
+  browserAnswers: (tab: T, timeoutMs: number) => Promise<unknown> = () => Promise.resolve();
+  /** Hears, once the step has failed, how long the browser took to answer for itself, or null for no answer in time. */
+  browserAnswered: (tab: T, method: string, ms: number | null) => void = () => {};
+  /** Hears when a step that missed its time got its answer, in ms after it was sent, or why none came. */
+  lateAnswer: (tab: T, method: string, after: number | Error) => void = () => {};
+
   /**
    * `held` says whether something keeps the tab awake without a use running:
    * a viewer, a recording. `turning` says whether its agent's turn runs, which
@@ -72,8 +89,8 @@ export class TabSleep<T extends Sleeper> {
   wake(tab: T): Promise<void> {
     return this.#queue(tab, async () => {
       if (!tab.sleep.asleep) return;
-      await tab.page.send('Page.setWebLifecycleState', { state: 'active' }, STEP_MS);
-      await tab.page.send('Emulation.setFocusEmulationEnabled', { enabled: true }, STEP_MS);
+      await this.#step(tab, 'Page.setWebLifecycleState', { state: 'active' });
+      await this.#step(tab, 'Emulation.setFocusEmulationEnabled', { enabled: true });
       tab.sleep.asleep = false;
     });
   }
@@ -119,16 +136,33 @@ export class TabSleep<T extends Sleeper> {
     return this.#queue(tab, async () => {
       if (tab.sleep.asleep || tab.sleep.dropped || tab.sleep.uses > 0 || this.#held(tab) || this.#turnHolds(tab)) return;
       try {
-        await tab.page.send('Emulation.setFocusEmulationEnabled', { enabled: false }, STEP_MS);
-        await tab.page.send('Page.setWebLifecycleState', { state: 'frozen' }, STEP_MS);
+        await this.#step(tab, 'Emulation.setFocusEmulationEnabled', { enabled: false });
+        await this.#step(tab, 'Page.setWebLifecycleState', { state: 'frozen' });
         tab.sleep.asleep = true;
       } catch {
         // A page that cannot freeze stays as it was and tries again after the wait; one that is gone is dropped by its tab.
-        await tab.page.send('Emulation.setFocusEmulationEnabled', { enabled: true }, STEP_MS).catch(() => {});
+        await this.#step(tab, 'Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
         tab.sleep.heldAt = Date.now();
         this.schedule(tab);
       }
     });
+  }
+
+  /**
+   * One DevTools call of a freeze or a wake, given `stepMs`. A frozen page
+   * answers at once (measured on 2026-10-19), so a call that misses its time
+   * met a stalled renderer or browser. The step fails at its time; whether
+   * the browser itself still answers, and when the page does, reach the log after.
+   */
+  async #step(tab: T, method: string, params: Record<string, unknown>): Promise<void> {
+    const sent = performance.now();
+    const answer = tab.page.send(method, params, LATE_MS);
+    if (await within(answer.then(() => true), this.stepMs) !== null) return;
+    void answer.then(() => this.lateAnswer(tab, method, Math.round(performance.now() - sent)), (error: Error) => this.lateAnswer(tab, method, error));
+    const probeMs = Math.min(PROBE_MS, this.stepMs), probed = performance.now();
+    void within(Promise.resolve(this.browserAnswers(tab, probeMs)).then(() => true, () => null), probeMs)
+      .then(answered => this.browserAnswered(tab, method, answered === null ? null : Math.round(performance.now() - probed)));
+    throw new Error(`the browser did not answer ${method} within ${this.stepMs / 1000} seconds`);
   }
 
   #queue(tab: T, run: () => Promise<void>): Promise<void> {
@@ -136,4 +170,12 @@ export class TabSleep<T extends Sleeper> {
     tab.sleep.turn = next.catch(() => {});
     return next;
   }
+}
+
+/** What `promise` gives within `ms`, or null; its rejection passes through. */
+async function within<R>(promise: Promise<R>, ms: number): Promise<R | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), ms); })]);
+  } finally { clearTimeout(timer); }
 }

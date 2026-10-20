@@ -5,6 +5,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { PermissionTicket, QuestionAsk, TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { PERMISSION_WAKE_MS } from '../src/delegation.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
+import { thrown } from './settle.ts';
 
 /** A child whose agent asks through its own question tool, and a parent that only answers what it is told. */
 async function setup() {
@@ -49,7 +50,7 @@ test('a child question wakes the parent, ends its wait, and the parent answers i
     expect(wake).toContain(`boite delegate send ${s.childId}`);
     expect(s.letters()).toHaveLength(1);
     // A text that is no option of a question without free text is refused with the options.
-    await expect(s.client.call('delegation.send', { threadId: s.threadId, toThreadId: s.childId, text: 'Postgres', requestId: 'wrong' })).rejects.toThrow('"JSON", "SQLite"');
+    expect(await thrown(s.client.call('delegation.send', { threadId: s.threadId, toThreadId: s.childId, text: 'Postgres', requestId: 'wrong' }))).toThrow('"JSON", "SQLite"');
     expect(s.h.core.threads.listQuestions(s.childId)).toHaveLength(1);
     const letter = await s.client.call('delegation.send', { threadId: s.threadId, toThreadId: s.childId, text: 'sqlite', requestId: 'answer' });
     expect(letter).toMatchObject({ answered: ticket.questionId, status: 'delivered' });

@@ -12,6 +12,7 @@ import { CFunction, FFIType, ptr } from 'bun:ffi';
 import { coInitialize, coUninitialize, openSessions, vtables } from '../src/platform/windows/audio-sessions.ts';
 import type { AudioSession, AudioSessions } from '../src/platform/windows/audio-sessions.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
+import { hostMutes } from './host-mutes.ts';
 import type { TestCore } from './harness.ts';
 
 const onWindows = process.platform === 'win32';
@@ -24,8 +25,8 @@ if (onWindows) {
   coUninitialize();
   if (!hasAudioEndpoint) console.info('Audio integration tests skipped: no default render endpoint on this host');
 }
-const describeWindows = hasAudioEndpoint ? describe : describe.skip;
 const FIXTURE = join(import.meta.dir, 'fixtures', 'silent-tone.ts');
+
 /**
  * How long the core has to mute a session that exists. Starting a Bun process
  * and opening a wave device is a second or so on its own and has nothing to do
@@ -38,6 +39,50 @@ const MUTE_WINDOW_MS = 3000;
  */
 const INHERITED_WINDOW_MS = 2000;
 const SESSION_WINDOW_MS = 15000;
+
+/** Whether the Boite running these tests mutes the fixture's session itself (`host-mutes.ts`). */
+async function hostMutesAgents(): Promise<boolean> {
+  coInitialize();
+  let probe: AudioSessions | null = null;
+  let child: ReturnType<typeof Bun.spawn> | null = null;
+  /** Every session of the fixture, each released once seen. */
+  const each = (see: (session: AudioSession) => void): boolean => {
+    let found = false;
+    for (const session of probe?.list() ?? []) {
+      if (session.pid === child?.pid) {
+        found = true;
+        see(session);
+      }
+      session.release();
+    }
+    return found;
+  };
+  // Inside the try, so a probe or a fixture that fails to start still leaves COM and the child cleaned up.
+  try {
+    probe = openSessions();
+    child = Bun.spawn(['bun', FIXTURE], { stdout: 'ignore', stderr: 'ignore' });
+    return await hostMutes({
+      read: () => {
+        let muted: boolean | null = null;
+        return each((session) => { if (muted !== true) muted = session.getMute(); }) ? muted : null;
+      },
+      unmute: () => {
+        let took = true;
+        each((session) => { took = session.mute(false) && took; });
+        return took;
+      }
+    }, { appearMs: 10_000, muteMs: MUTE_WINDOW_MS, remuteMs: 1500 });
+  } finally {
+    child?.kill();
+    await child?.exited;
+    probe?.release();
+    coUninitialize();
+  }
+}
+
+const hostMutesFixture = hasAudioEndpoint && await hostMutesAgents();
+if (hostMutesFixture) console.info('Thread audio tests skipped: the Boite running these tests mutes what its agents start (muteAgents), so the test core never gets to mute the fixture');
+const describeWindows = hasAudioEndpoint ? describe : describe.skip;
 
 /** `waitFor` that answers whether the condition came true instead of throwing. */
 async function settles(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
@@ -204,7 +249,7 @@ describeWindows('the audio sessions of the default endpoint', () => {
     }
   }, 30000);
 
-  describe('a process a thread launched', () => {
+  (hostMutesFixture ? describe.skip : describe)('a process a thread launched', () => {
     let harness: TestCore;
 
     beforeEach(async () => {

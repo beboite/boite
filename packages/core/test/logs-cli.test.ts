@@ -6,6 +6,7 @@ import type { CoreClient } from '../src/client.ts';
 import { parse } from '../src/cli-args.ts';
 import { runCli } from '../src/cli.ts';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { rejection } from './settle.ts';
 
 // Its own file, so its own process, and one step per test so a CI log names the step a
 // crash interrupts: on Windows, Bun 1.4.2 crashed in its socket code during these commands.
@@ -76,7 +77,7 @@ describe('the CLI prints records oldest first, filters by time and level, and ex
       expect(await runCli(['logs', 'export', '--out', 'out'], { env: agentEnv, cwd: harness.dataDir, out: () => undefined, err: () => undefined })).not.toBe(0);
       expect(statSync(join(harness.dataDir, 'out')).mode & 0o777).toBe(before);
     }
-    await expect(owner.call('diagnostics.summary', { thread: 'x' } as never)).rejects.toMatchObject({ rpc: { code: RpcErrorCode.InvalidParams } });
+    expect((await rejection(owner.call('diagnostics.summary', { thread: 'x' } as never))).reason).toMatchObject({ rpc: { code: RpcErrorCode.InvalidParams } });
   });
 
   test('the export lands in the named file, and help names the command', async () => {

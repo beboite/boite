@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AgentBrowser } from '../src/browser.ts';
-import { chromiumArgs, findChromium, trimProfile } from '../src/browser/chromium.ts';
+import { chromiumArgs, drawsWithGpu, findChromium, trimProfile } from '../src/browser/chromium.ts';
 import { createBrowserFixture } from './browser/fixture.ts';
+import { thrown } from './settle.ts';
 
 const browserFixture = createBrowserFixture();
 const { real, url } = browserFixture;
@@ -18,7 +19,7 @@ test('without a Chromium-based browser the status says why and nothing opens', a
     const status = await owner.call('browser.remoteStatus', { threadId });
     expect(status).toMatchObject({ live: false, available: false });
     expect(status.reason).toContain('/nonexistent/chrome');
-    await expect(agent.call('browser.command', { threadId, action: { kind: 'open', url: 'http://127.0.0.1:1/' } })).rejects.toThrow('cannot start');
+    expect(await thrown(agent.call('browser.command', { threadId, action: { kind: 'open', url: 'http://127.0.0.1:1/' } }))).toThrow('cannot start');
   } finally {
     if (previous === undefined) delete process.env.BOITE_BROWSER; else process.env.BOITE_BROWSER = previous;
   }
@@ -52,6 +53,25 @@ test('the browser is found where each OS installs it, and BOITE_BROWSER alone wh
       expect(chromiumArgs('/profile', platform)).toEqual(expect.arrayContaining(['--disable-component-update', '--disk-cache-size=67108864']));
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a browser in a macOS virtual machine draws without the GPU, and SwiftShader stays off everywhere', async () => {
+  for (const platform of ['linux', 'darwin', 'win32'] as const) {
+    expect(chromiumArgs('/profile', platform)).toEqual(expect.arrayContaining(['--enable-gpu', '--disable-software-rasterizer']));
+    expect(chromiumArgs('/profile', platform)).not.toContain('--disable-gpu');
+  }
+  const virtual = chromiumArgs('/profile', 'darwin', undefined, false);
+  expect(virtual).toEqual(expect.arrayContaining(['--disable-gpu', '--disable-software-rasterizer']));
+  expect(virtual).not.toContain('--enable-gpu');
+  expect(await drawsWithGpu('linux')).toBe(true);
+  expect(await drawsWithGpu('win32')).toBe(true);
+});
+
+// The GPU process of a CI runner lost its Metal device and the browser answered nothing for 10 to 30 seconds.
+test.skipIf(process.platform !== 'darwin')('a Mac draws with the GPU only on its own hardware, as sysctl reads it', async () => {
+  const hypervisor = Bun.spawnSync({ cmd: ['sysctl', '-n', 'kern.hv_vmm_present'], stdout: 'pipe', stderr: 'pipe' }).stdout.toString().trim();
+  expect(['0', '1']).toContain(hypervisor);
+  expect(await drawsWithGpu()).toBe(hypervisor === '0');
 });
 
 test('a profile loses its downloaded components and caches once, never its cookies, logins or Local State', () => {
@@ -130,9 +150,9 @@ real('the owner copies a desktop profile into the agent browser: the profile is 
     { name: 'kept', value: 'a-month', domain: '127.0.0.1', path: '/', expires: Math.floor(Date.now() / 1000) + 30 * 86400, sameSite: 'Lax' as const },
   ];
   // Sign-ins are the owner's to hand over: never an agent's, never into a private tab, never malformed.
-  await expect(agent.call('browser.importCookies', { profile: { id: 'p-work', name: 'Work' }, cookies })).rejects.toThrow("agent's methods");
-  await expect(owner.call('browser.importCookies', { profile: { id: 'private' }, cookies })).rejects.toThrow('private');
-  await expect(owner.call('browser.importCookies', { profile: { id: 'p-work' }, cookies: [{ ...cookies[0]!, path: 'nope' }] })).rejects.toThrow('path');
+  expect(await thrown(agent.call('browser.importCookies', { profile: { id: 'p-work', name: 'Work' }, cookies }))).toThrow("agent's methods");
+  expect(await thrown(owner.call('browser.importCookies', { profile: { id: 'private' }, cookies }))).toThrow('private');
+  expect(await thrown(owner.call('browser.importCookies', { profile: { id: 'p-work' }, cookies: [{ ...cookies[0]!, path: 'nope' }] }))).toThrow('path');
   expect(await owner.call('browser.importCookies', { profile: { id: 'p-work', name: 'Work' }, cookies })).toEqual({ imported: 2, profile: 'p-work' });
   expect((await owner.call('settings.get', {})).browserProfiles).toEqual([{ id: 'p-work', name: 'Work' }]);
   const read = async (browser: AgentBrowser, profile: string) => {

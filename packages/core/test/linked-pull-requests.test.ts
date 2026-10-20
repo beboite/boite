@@ -3,6 +3,7 @@ import { orderPullRequests, pullRequestAddress, type LinkedPullRequest } from '@
 import { LinkedPullRequests } from '../src/linked-pull-requests.ts';
 import { connect } from '../src/client.ts';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 beforeEach(async () => { harness = await startTestCore(); });
@@ -72,8 +73,8 @@ test('agent links are thread scoped, saved only after verification, and events r
     const result = await agent.call('threads.linkPullRequest', { threadId, url: pr(1).url });
     expect(result[0]).toMatchObject({ number: 1, headRepository: 'example/repo' });
     expect((await event).pullRequests).toEqual(result);
-    await expect(agent.call('threads.linkPullRequest', { threadId: 'other', url: pr(1).url })).rejects.toThrow('not thread');
-    await expect(agent.call('threads.linkPullRequest', { threadId, url: 'https://attacker.example/a/b/pull/1' })).rejects.toThrow('host');
+    expect(await thrown(agent.call('threads.linkPullRequest', { threadId: 'other', url: pr(1).url }))).toThrow('not thread');
+    expect(await thrown(agent.call('threads.linkPullRequest', { threadId, url: 'https://attacker.example/a/b/pull/1' }))).toThrow('host');
     expect(run).toHaveBeenCalledTimes(1);
     expect(await agent.call('threads.unlinkPullRequest', { threadId, url: pr(1).url })).toEqual([]);
   } finally { agent.close(); run.mockRestore(); }

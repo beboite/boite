@@ -3,11 +3,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test, expect } from 'bun:test';
 import { BrowserPage, freePort } from './lib/cdp.ts';
-import { describeShell } from './lib/shell-diagnosis.ts';
+import { describeShell, waitForShellPage } from './lib/shell-diagnosis.ts';
 import { killProcessTreeAsync, removeDirectory } from './lib/cleanup.ts';
 import { connect } from '../../packages/core/src/client.ts';
 import { runCli } from '../../packages/core/src/cli.ts';
 import type { BrowserAction } from '../../packages/contracts/src/index.ts';
+import { thrown } from '../../packages/core/test/settle.ts';
 const executable = process.env.BOITE_E2E_SHELL_EXE;
 // Not run since the agent's browser moved to the core: this test drove the shell's own WebView2 tabs
 // through `browser.command`, which now reaches the core's headless browser instead. It has to be
@@ -32,7 +33,7 @@ test.skip('native browser fills its panel and floats inside the app without losi
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Browser validation' });
     page = await BrowserPage.attach(port, '', failure => describeShell(dataDir, shell.pid, failure));
-    await page.waitFor("typeof window.__TAURI_INTERNALS__?.invoke === 'function'");
+    await waitForShellPage(page, { port, dataDir, pid: shell.pid });
     await page.evaluate(`localStorage.setItem('boite.onboarding', JSON.stringify({version:6, at:Date.now()})); location.reload();`);
     await page.waitFor("document.querySelector('[data-testid=thread-row]')");
     await page.click('[data-testid=thread-row]');
@@ -66,7 +67,7 @@ test.skip('native browser fills its panel and floats inside the app without losi
     await fillsSlot();
     const snap = await command({ kind: 'snapshot' });
     if (!JSON.stringify(snap).includes('#hello')) throw new Error('snapshot lacks button');
-    await expect(command({ kind: 'click', selector: '.does-not-exist' })).rejects.toThrow('exactly one element');
+    expect(await thrown(command({ kind: 'click', selector: '.does-not-exist' }))).toThrow('exactly one element');
     await command({ kind: 'type', selector: '#name', text: 'Chris' });
     await command({ kind: 'click', selector: '#hello' });
     if ((await command({ kind: 'evaluate', expression: 'document.querySelector("#result").textContent' })).value !== 'Bonjour Chris') throw new Error('native input failed');

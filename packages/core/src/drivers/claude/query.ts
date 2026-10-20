@@ -160,10 +160,23 @@ export const THINKING_DISPLAY_FLAG = 'thinking-display';
 export const TOOL_SUMMARIES_ENV = 'CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES';
 
 /**
+ * What turns off the CLI's "the user hasn't heard from you in a while" note,
+ * which it slips into a long silent turn to ask for a progress line. `0` is
+ * read as off (CLI 2.1.303). Boite's short answers ask for the opposite, so
+ * the two would pull against each other on every long turn.
+ */
+export const SILENT_TURN_REMINDER_ENV = 'CLAUDE_CODE_SILENT_TURN_REMINDER';
+
+/**
  * The environment of a conversation's CLI: `childEnv`, plus the tool summaries
  * the timeline labels its calls with when the owner turned them on
- * (`Settings.toolSummaries`). Without them a run reads as its counted calls.
+ * (`Settings.toolSummaries`), without them a run reads as its counted calls,
+ * and the CLI's progress reminder off while short answers are on.
  */
-export function agentEnv(accountEnv: Record<string, string>, toolSummaries = false): Record<string, string | undefined> {
-  return toolSummaries ? { ...childEnv(accountEnv), [TOOL_SUMMARIES_ENV]: '1' } : childEnv(accountEnv);
+export function agentEnv(accountEnv: Record<string, string>, toolSummaries = false, shortAnswers = false): Record<string, string | undefined> {
+  return {
+    ...childEnv(accountEnv),
+    ...(toolSummaries ? { [TOOL_SUMMARIES_ENV]: '1' } : {}),
+    ...(shortAnswers ? { [SILENT_TURN_REMINDER_ENV]: '0' } : {}),
+  };
 }

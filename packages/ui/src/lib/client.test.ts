@@ -83,7 +83,7 @@ describe('reconnect timing', () => {
     expect(defaultBackoff(9, () => 1)).toBe(12_000);
   });
 
-  test('an attempt gets 10 s, then 20 s, then 30 s to answer', async () => {
+  test('an attempt gets 10 s, then 20 s, then 30 s to answer, and a return to the page starts again at 10 s', async () => {
     expect([0, 1, 2, 5].map(openDeadline)).toEqual([10_000, 20_000, 30_000, 30_000]);
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
@@ -100,6 +100,17 @@ describe('reconnect timing', () => {
       expect(take(sockets, 1).closed).toBe(false);
       await vi.advanceTimersByTimeAsync(1_000);
       expect(take(sockets, 1).closed).toBe(true);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sockets).toHaveLength(3);
+
+      // Back in the app while the third attempt waits out its 30 s: a fresh socket with 10 s.
+      void client.resume().catch(() => undefined);
+      expect(take(sockets, 2).closed).toBe(true);
+      expect(sockets).toHaveLength(4);
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(take(sockets, 3).closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(take(sockets, 3).closed).toBe(true);
     } finally { client.close(); vi.useRealTimers(); }
   });
 

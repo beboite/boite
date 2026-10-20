@@ -3,6 +3,14 @@ import type { Translation } from '../../i18n.svelte';
 export const fr: Translation = {
 
   settings: {
+    autosave: {
+      saving: 'Enregistrement',
+      saved: 'Enregistré',
+      failed: 'Non enregistré',
+      invalid: 'Rien n\'est enregistré tant qu\'un champ est invalide',
+      conflict: 'Modifié ailleurs aussi. Rouvrez cette page pour voir les deux changements.',
+      retry: 'Réessayer'
+    },
     heading: 'Réglages',
     modelDefaults: 'Modèles par défaut',
     modelDefaultsHint: 'Pour les nouvelles conversations. Enregistré sur cet appareil.',
@@ -169,7 +177,7 @@ export const fr: Translation = {
     asyncQuestions: 'Laisser les agents poser des questions sans s’arrêter',
     asyncQuestionsHint: 'Apprend la commande boite ask aux agents au début d\'une session. Codex pose déjà ses questions ainsi.',
     shortAnswers: 'Réponses courtes',
-    shortAnswersHint: 'Demande à chaque agent, à chaque message, le résultat d\'abord en quelques phrases simples, sans préambule, récapitulatif ni commentaire en cours de route. Les faits, les chiffres et les commandes restent.',
+    shortAnswersHint: 'Demande à chaque agent, à chaque message, de travailler en silence et d\'écrire seulement à la fin ou quand il a besoin de vous : le résultat d\'abord en quelques phrases simples, sans préambule ni récapitulatif. Les faits, les chiffres et les commandes restent. Coupe aussi le rappel de progression de Claude au démarrage d\'un processus Claude.',
     toolSummaries: 'Résumés des outils (Claude)',
     toolSummariesHint: 'Claude décrit chaque série d\'appels d\'outils en une ligne au lieu de les compter. Chaque ligne est une requête à son petit modèle, Haiku, facturée au compte de la conversation. S\'applique au démarrage d\'un processus Claude.',
     titleModel: 'Modèle des titres',

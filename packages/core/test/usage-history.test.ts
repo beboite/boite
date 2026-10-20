@@ -4,6 +4,7 @@ import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { MAX_USAGE_EDGES } from '../src/usage.ts';
 import { priceOf } from '../src/pricing/index.ts';
+import { thrown } from './settle.ts';
 
 const DAY = 86_400_000;
 const D0 = Date.UTC(2026, 8, 1);
@@ -203,7 +204,7 @@ test('usage.history rejects edges that are not ascending timestamps', async () =
     expect(failure).toBe(`edges: expected 2 to ${MAX_USAGE_EDGES} strictly ascending timestamps in milliseconds`);
   }
   for (const providerId of ['', ' ', null, 42]) {
-    await expect(client.call('usage.history', { edges: EDGES, providerId } as { edges: number[]; providerId: string })).rejects.toThrow('providerId: expected a non-empty provider id');
+    expect(await thrown(client.call('usage.history', { edges: EDGES, providerId } as { edges: number[]; providerId: string }))).toThrow('providerId: expected a non-empty provider id');
   }
   expect((await client.call('usage.history', { edges: EDGES, providerId: 'removed-provider' })).rows).toEqual([]);
 });

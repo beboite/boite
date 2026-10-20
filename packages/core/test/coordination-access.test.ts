@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentContact, CoordinationPeer } from '@boite/contracts';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 afterEach(async () => { for (const core of cores.splice(0)) await core.stop(); });
@@ -135,7 +136,7 @@ test('the destination owner grants conversation reads per machine without exposi
   expect((await server.core.coordination.directory(a)).agents.some(t => t.threadId === b)).toBe(true);
   expect((await server.core.coordination.search(a, 'private backup')).matches).toEqual([]);
   expect((await server.core.coordination.search(a, 'client migration')).matches[0]?.excerpts).toEqual([]);
-  await expect(server.core.coordination.read(a, address)).rejects.toThrow('not allowed to read');
+  expect(await thrown(server.core.coordination.read(a, address))).toThrow('not allowed to read');
   pc.core.coordination.trust({ ...cardA, readThreads: true });
   expect((await server.core.coordination.search(a, 'private backup')).matches[0]?.matched).toContain('chat');
   expect((await server.core.coordination.read(a, address)).entries[0]?.text).toBe('private backup details');
@@ -143,10 +144,10 @@ test('the destination owner grants conversation reads per machine without exposi
   pc.core.coordination.trust(cardA);
   expect(pc.core.coordination.peers()[0]?.readThreads).toBe(true);
   // Permission is directional: the client cannot read the server's conversations.
-  await expect(pc.core.coordination.read(b, { coreId: cardA.coreId, threadId: a })).rejects.toThrow('not allowed to read');
+  expect(await thrown(pc.core.coordination.read(b, { coreId: cardA.coreId, threadId: a }))).toThrow('not allowed to read');
   pc.core.coordination.trust({ ...cardA, readThreads: false });
   expect((await server.core.coordination.search(a, 'private backup')).matches).toEqual([]);
-  await expect(server.core.coordination.read(a, address)).rejects.toThrow('not allowed to read');
+  expect(await thrown(server.core.coordination.read(a, address))).toThrow('not allowed to read');
   pc.core.coordination.untrust(cardA.coreId);
   pc.core.coordination.trust(cardA);
   expect(pc.core.coordination.peers()[0]?.readThreads).toBe(false);

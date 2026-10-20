@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import ExperimentsPage from './ExperimentsPage.svelte';
 import { EXPERIMENTS_STORAGE_KEY } from '../lib/experiments';
+import type { Store } from '../lib/store.svelte';
 
 let running: Record<string, unknown> | null = null;
 
@@ -83,4 +84,37 @@ test('a click on a row name flips its switch, the "i" beside it only opens the t
   await tick();
   expect(grain.checked).toBe(true);
   expect(window.localStorage.getItem(EXPERIMENTS_STORAGE_KEY)).toBe('["theme-grain"]');
+});
+
+test('a paired device sees the reviewed goals switch but no checklist model', async () => {
+  // Only the owner may save the machine's settings: a paired device's pick would be refused.
+  window.localStorage.setItem(EXPERIMENTS_STORAGE_KEY, '["goal2"]');
+  const store = { owner: false, settings: { goalTracker: null }, providers: [], accountsOf: () => [], modelsOf: () => [], saveSettings: async () => true } as unknown as Store;
+  running = mount(ExperimentsPage, { target: document.body, props: { store } });
+  flushSync();
+  await tick();
+  expect(query<HTMLInputElement>('[data-testid=experiment-goal2]').checked).toBe(true);
+  expect(document.querySelector('[data-testid=goal2-tracker]')).toBeNull();
+});
+
+test('the reviewed goals switch shows its checklist model only while it is on', async () => {
+  const store = { owner: true, settings: { goalTracker: null }, providers: [], accountsOf: () => [], modelsOf: () => [], saveSettings: async () => true } as unknown as Store;
+  running = mount(ExperimentsPage, { target: document.body, props: { store } });
+  flushSync();
+  await tick();
+  expect(document.querySelector('[data-testid=goal2-tracker]')).toBeNull();
+
+  query<HTMLInputElement>('[data-testid=experiment-goal2]').click();
+  flushSync();
+  await tick();
+  // Right under its switch, the way a setting of that switch reads.
+  const tracker = query('[data-testid=goal2-tracker]');
+  expect(tracker.previousElementSibling?.querySelector('[data-testid=experiment-goal2]')).not.toBeNull();
+  expect(tracker.textContent).toContain('Checklist model');
+  expect(query('[data-testid=goal2-tracker-model]').textContent).toContain('Automatic');
+
+  query<HTMLInputElement>('[data-testid=experiment-goal2]').click();
+  flushSync();
+  await tick();
+  expect(document.querySelector('[data-testid=goal2-tracker]')).toBeNull();
 });

@@ -1,8 +1,11 @@
 /** A 9×20 JPEG still, for jsdom, which has no canvas. */
 const FALLBACK = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABQODxIPDRQSEBIXFRQYHjIhHhwcHj0sLiQySUBMS0dARkVQWnNiUFVtVkVGZIhlbXd7gYKBTmCNl4x9lnN+gXz/2wBDARUXFx4aHjshITt8U0ZTfHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHz/wAARCAAUAAkDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDNWCI9UT6ktx09vrR9ni/6Z/r/AIVMsm3+FsdxvIz0/wAKN6/3D/32a60rGDZdWUCPPkxEjjlag3j/AJ5p+VFFHUfQ/9k=';
 
-/** What the fake agent page shows: enough for a viewer to see its taps and text land. */
-export interface FakePage { url: string; title: string; width: number; height: number; taps: number; text: string; scrollY: number }
+/** What the fake agent page shows: enough for a viewer to see its taps and text land. `choice`: what its list shows. */
+export interface FakePage { url: string; title: string; width: number; height: number; taps: number; text: string; scrollY: number; choice?: string }
+
+/** The fake page's `<select>`, in CSS pixels of the page scrolled to its top, and its options. */
+export const FAKE_SELECT = { x: 40, y: 396, width: 240, height: 64, options: [{ label: 'Small' }, { label: 'Medium' }, { label: 'Large' }, { label: 'Huge', disabled: true as const }] };
 
 const drawn = new Map<string, string>();
 
@@ -44,8 +47,10 @@ export function fakeBrowserScreen(page: FakePage): string {
     paint.strokeRect(20, top + 128, width - 40, 36);
     paint.fillStyle = 'hsl(163 46% 16%)';
     paint.fillText(page.text.slice(-60) || ' ', 30, top + 152);
+    paint.strokeRect(FAKE_SELECT.x * scale, top + 174, FAKE_SELECT.width * scale, FAKE_SELECT.height * scale);
+    paint.fillText(`${page.choice ?? FAKE_SELECT.options[0]!.label} ▾`, FAKE_SELECT.x * scale + 10, top + 200);
     paint.fillStyle = 'hsl(40 20% 84%)';
-    for (let line = 0; line < 12; line++) paint.fillRect(20, top + 186 + line * 22, (width - 40) * (0.55 + ((line * 37) % 40) / 100), 10);
+    for (let line = 0; line < 12; line++) paint.fillRect(20, top + 226 + line * 22, (width - 40) * (0.55 + ((line * 37) % 40) / 100), 10);
     frame = canvas.toDataURL('image/jpeg', 0.7).replace(/^data:image\/jpeg;base64,/, '');
   } catch {
     /* the still stays */

@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
@@ -83,3 +83,69 @@ test('the thread header shows the watches with their status and stops one from i
   }
 });
 
+
+test('the checklist shows under its goal while the tracker writes the first list, where the goal bar\'s button leads', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  await store.open('t-trace');
+  store.openThread!.activity = { tasks: [], loop: null, goal: { objective: 'Ship it', status: 'active', iterations: 0, error: null,
+    checklist: { threadId: 'tracker-1', phase: 'writing', model: null, effort: null, error: null, items: [] } } };
+  const component = mount(TasksSurface, { target: document.body, props: { store } });
+  try {
+    await settle();
+    await vi.waitFor(() => expect(document.querySelector('[data-testid=tasks-checklist]')!.textContent).toContain('Writing the checklist'));
+    // One block: the goal, then its checklist, in the same section; no header of its own.
+    expect(document.querySelector('[data-testid=tasks-goal]')!.closest('section')!.contains(document.querySelector('[data-testid=tasks-checklist]'))).toBe(true);
+    expect(document.querySelector('[data-testid=tasks-checklist] [data-testid=goal-checklist-open]')).not.toBeNull();
+  } finally {
+    unmount(component);
+    document.body.innerHTML = '';
+  }
+});
+
+test('a reviewed goal\'s checklist lists what is left under the goal, folds dropped items, and reviews have their own section', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  await store.open('t-trace');
+  store.openThread!.activity = { tasks: [], loop: null, goal: { objective: 'Ship it', status: 'active', iterations: 2, error: null,
+    review: { phase: 'working', maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 1, verdicts: [
+      { round: 1, verdict: 'fail', summary: '- The CSV export drops the totals', threadId: 'reviewer-1', finishedAt: 1 },
+      { round: 2, verdict: 'pass', summary: 'Both exports work.', threadId: 'reviewer-2', finishedAt: 2 },
+    ] },
+    checklist: { threadId: null, phase: 'idle', model: null, effort: null, error: null, items: [
+      { id: 1, text: 'Add a dark theme', source: 'dark theme', status: 'done' },
+      { id: 2, text: 'Export invoices as CSV', source: 'CSV', status: 'open' },
+      { id: 3, text: 'Mail the invoices', source: 'mail', status: 'cancelled' },
+    ] } } };
+  const component = mount(TasksSurface, { target: document.body, props: { store } });
+  try {
+    await settle();
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=tasks-checklist] [data-testid=goal-checklist-item]')).toHaveLength(2));
+    const items = () => [...document.querySelectorAll<HTMLElement>('[data-testid=tasks-checklist] [data-testid=goal-checklist-item]')].map(item => [item.dataset.state, item.querySelector('.text')!.textContent]);
+    expect(items()).toEqual([['done', 'Add a dark theme'], ['next', 'Export invoices as CSV']]);
+    expect(document.querySelector('[data-testid=tasks-checklist-progress]')!.textContent).toContain('1/2 done');
+    expect(document.querySelector('[data-testid=tasks-checklist] [data-testid=goal-checklist]')!.classList.contains('dense')).toBe(true);
+    // A dropped item waits folded under the list, opened on demand.
+    const dropped = document.querySelector<HTMLButtonElement>('[data-testid=goal-checklist-dropped-toggle]')!;
+    expect(dropped.textContent).toContain('1 dropped');
+    dropped.click();
+    flushSync();
+    expect(items()).toEqual([['done', 'Add a dark theme'], ['next', 'Export invoices as CSV'], ['cancelled', 'Mail the invoices']]);
+    // The agent reported no task list: no empty section says so.
+    expect(document.querySelector('[data-testid=tasks-section-agent]')).toBeNull();
+    // The bar keeps only the verdict dots: the panel lists each review, newest first, with what it found.
+    const reviews = [...document.querySelectorAll<HTMLElement>('[data-testid=tasks-review]')];
+    expect(reviews.map(review => review.dataset.verdict)).toEqual(['pass', 'fail']);
+    expect(reviews[1]!.textContent).toContain('- The CSV export drops the totals');
+    const open = vi.spyOn(store, 'open').mockResolvedValue(undefined as never);
+    reviews[1]!.querySelector<HTMLButtonElement>('button')!.click();
+    expect(open).toHaveBeenCalledWith('reviewer-1');
+  } finally {
+    unmount(component);
+    document.body.innerHTML = '';
+  }
+});

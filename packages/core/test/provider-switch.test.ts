@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { RpcEvents } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 beforeEach(async () => { harness = await startTestCore(); });
@@ -38,15 +39,15 @@ test('a provider turned off starts nothing, says why, and runs again once it is 
   await client.call('providers.setEnabled', { providerId: 'echo', enabled: false });
   expect(updates.length).toBe(1);
 
-  await expect(client.call('turns.start', { threadId, prompt: 'hello' })).rejects.toThrow(/Echo is turned off on this machine/);
-  await expect(client.call('providers.probe', { providerId: 'echo', accountId })).rejects.toThrow(/turned off/);
+  expect(await thrown(client.call('turns.start', { threadId, prompt: 'hello' }))).toThrow(/Echo is turned off on this machine/);
+  expect(await thrown(client.call('providers.probe', { providerId: 'echo', accountId }))).toThrow(/turned off/);
   const capabilities = await client.call('threads.capabilities', { threadId });
   expect(capabilities.images.reason).toBe('provider-disabled');
   // The account and the thread are kept: off is not removed.
   expect((await client.call('accounts.list', {})).some((account) => account.id === accountId)).toBe(true);
   // Its sign-in starts the provider's program too, in a pipe or in a terminal: both are refused.
-  await expect(client.call('accounts.login', { accountId: seat.id })).rejects.toThrow(/Echo is turned off on this machine/);
-  await expect(client.call('accounts.loginTerminal', { accountId: seat.id, cols: 80, rows: 24 })).rejects.toThrow(/Echo is turned off on this machine/);
+  expect(await thrown(client.call('accounts.login', { accountId: seat.id }))).toThrow(/Echo is turned off on this machine/);
+  expect(await thrown(client.call('accounts.loginTerminal', { accountId: seat.id, cols: 80, rows: 24 }))).toThrow(/Echo is turned off on this machine/);
 
   const on = await client.call('providers.setEnabled', { providerId: 'echo', enabled: true });
   expect(on.loaded.find((provider) => provider.id === 'echo')?.enabled).toBe(true);
@@ -76,8 +77,8 @@ test('an experimental provider is off until someone turns it on, and the choice 
 
 test('the switch refuses an unknown provider and a value that is not a boolean', async () => {
   const client = await harness.connect();
-  await expect(client.call('providers.setEnabled', { providerId: 'nobody', enabled: false })).rejects.toThrow(/unknown provider nobody/);
-  await expect(client.call('providers.setEnabled', { providerId: 'echo', enabled: 'no' as unknown as boolean })).rejects.toThrow(/enabled must be true or false/);
+  expect(await thrown(client.call('providers.setEnabled', { providerId: 'nobody', enabled: false }))).toThrow(/unknown provider nobody/);
+  expect(await thrown(client.call('providers.setEnabled', { providerId: 'echo', enabled: 'no' as unknown as boolean }))).toThrow(/enabled must be true or false/);
 });
 
 test('an account whose agent keeps its login in a database reads signed in once a row is there', async () => {

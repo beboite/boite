@@ -5,6 +5,7 @@ import { NEMOTRON_FILES } from '../src/speech-artifacts.ts';
 import { DEFAULT_SPEECH, decodeSpeechAudio } from '../src/speech.ts';
 import { transcribeWhistle } from '../src/speech-whistle.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 let harness: TestCore;
 let restore: (() => void) | undefined;
 beforeEach(async () => { harness = await startTestCore(); });
@@ -57,7 +58,7 @@ test('Whistle splits long audio, keeps the final samples, joins overlapping word
   expect(windows.map(window => window.bytes)).toEqual([44 + 25 * 32000, 44 + 7 * 32000]);
   expect(windows[1].final).toBe(71);
   expect(harness.core.procs.liveThreads().some(id => id.startsWith('speech:'))).toBe(false);
-  await expect(transcribeWhistle(harness.core, local, canonical, 'ja', new AbortController().signal)).rejects.toThrow('Whistle supports');
+  expect(await thrown(transcribeWhistle(harness.core, local, canonical, 'ja', new AbortController().signal))).toThrow('Whistle supports');
 });
 
 test('new configuration defaults to streaming while explicitly selected Whisper stays selected', () => {

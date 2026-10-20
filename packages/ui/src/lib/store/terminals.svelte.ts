@@ -1,4 +1,4 @@
-import { RpcErrorCode, isThreadTerminal, threadTerminalId, type KeybindingCommand, type RpcEvents, type TerminalState, type ThreadId, type ThreadTerminal } from '@boite/contracts';
+import { RpcErrorCode, isThreadTerminal, threadTerminalId, type KeybindingCommand, type ProjectId, type RpcEvents, type TerminalState, type ThreadId, type ThreadSummary, type ThreadTerminal } from '@boite/contracts';
 import { RpcFailure } from '../client';
 // A type only: xterm's screen class rides in the terminal view's chunk, which hands it over.
 import type { TerminalSession, TerminalStart } from '../terminal-session.svelte';
@@ -6,10 +6,19 @@ import {
   MAX_PANES, activeTab, addTab, firstLayout, nextPane, panesOf, parseLayout, reconcile, removePane, resizePanes, splitPane, terminalIdOf,
   type SplitDirection, type TerminalLayout
 } from '../terminal-layout';
+import { experimentOn } from '../experiments.svelte';
 import type { StoreContext } from './context';
 
 /** Per core and thread: the tabs and splits, and whether the drawer was open. */
 const LAYOUT_KEY = 'boite:terminal-layout';
+/** Per device: the drawer's tab Ctrl+J opens, the project board or the terminal. */
+const DRAWER_TAB_KEY = 'boite:drawer-tab';
+
+type DrawerTab = 'board' | 'terminal';
+
+function readDrawerTab(): DrawerTab {
+  try { return localStorage.getItem(DRAWER_TAB_KEY) === 'terminal' ? 'terminal' : 'board'; } catch { return 'board'; }
+}
 
 interface StoredLayout { layout: TerminalLayout; open: boolean }
 
@@ -30,6 +39,10 @@ export class Terminals {
   layouts = $state<Partial<Record<ThreadId, TerminalLayout>>>({});
   /** Accounts whose sign-in terminal is open on the Providers page. */
   loginTerminals = $state<string[]>([]);
+  /** The project board fills the drawer under the chat, in place of the terminal, in every thread until hidden. */
+  boardShown = $state(false);
+  /** The tab Ctrl+J opens the drawer on: the one picked last on this device. */
+  drawerTab = $state<DrawerTab>(readDrawerTab());
 
   /** The screens of the shells this client opened, by terminal id. One lives until its shell ends. */
   private readonly sessions = new Map<string, TerminalSession>();
@@ -109,7 +122,7 @@ export class Terminals {
     return client !== null && !this.single.has(client);
   }
 
-  /** Ctrl+J: the open thread's drawer, shown or hidden. A shell is the owner's to run. */
+  /** The open thread's terminal, shown or hidden. A shell is the owner's to run. */
   toggleTerminal(): void {
     const s = this.ctx.store;
     const open = s.openThread;
@@ -118,15 +131,99 @@ export class Terminals {
     else this.showTerminal(open.id);
   }
 
-  /** The drawer of a thread whose drawer was open when the page last showed it. */
+  /** The board lives behind the `/goal2` experiment, on a core that links cards to goals, in a thread of a project. */
+  boardAvailable(): boolean {
+    const s = this.ctx.store;
+    return experimentOn('goal2') && s.core?.features?.projectBoard === true && Boolean(s.openThread?.projectId);
+  }
+
+  /**
+   * Ctrl+J: the drawer under the chat on the tab picked last, or hidden. A
+   * paired device has no shell, so its drawer is the board. Without the board
+   * the drawer is the terminal's, as before.
+   */
+  toggleDrawer(): void {
+    const s = this.ctx.store;
+    const open = s.openThread;
+    if (!open) return;
+    if (!this.boardAvailable()) { this.toggleTerminal(); return; }
+    if (this.boardShown) { this.boardShown = false; return; }
+    if (s.owner && this.terminalShown(open.id)) { this.hideTerminal(open.id); return; }
+    if (this.drawerTab === 'terminal' && s.owner) this.showTerminal(open.id);
+    else this.showBoard();
+  }
+
+  /** The header's board button. */
+  toggleBoard(): void {
+    if (this.boardShown) this.boardShown = false;
+    else this.showBoard();
+  }
+
+  /**
+   * The board in the drawer; the terminals it replaces keep their shells
+   * running. Every thread's drawer is put away, not only this one's, since the
+   * board follows the user into the next thread.
+   */
+  showBoard(): void {
+    const open = this.ctx.store.openThread;
+    if (!open || !this.boardAvailable()) return;
+    for (const threadId of this.terminalThreads) this.hideTerminal(threadId);
+    this.boardShown = true;
+    this.pickTab('board');
+  }
+
+  hideBoard(): void {
+    this.boardShown = false;
+  }
+
+  /**
+   * The conversation a project's board opens in from outside the project, a
+   * contact's page: its last changed one, not archived. Null when the core
+   * serves no board or the project has no conversation to hold it.
+   */
+  projectBoardThread(projectId: ProjectId): ThreadSummary | null {
+    const s = this.ctx.store;
+    if (!experimentOn('goal2') || s.core?.features?.projectBoard !== true) return null;
+    let last: ThreadSummary | null = null;
+    for (const thread of s.threadsOf(projectId)) {
+      if (!thread.archived && !thread.incognito && (!last || thread.updatedAt > last.updatedAt)) last = thread;
+    }
+    return last;
+  }
+
+  /**
+   * That project's board, in the drawer of that conversation. A Back, a page
+   * or another conversation picked while it opens is a newer navigation: the
+   * board then stays hidden.
+   */
+  async openProjectBoard(projectId: ProjectId): Promise<void> {
+    const s = this.ctx.store;
+    const thread = this.projectBoardThread(projectId);
+    if (!thread) return;
+    const opening = s.open(thread.id);
+    const generation = s.navigationGeneration;
+    await opening;
+    if (s.navigationGeneration === generation && s.page === 'chat' && s.openThread?.id === thread.id) this.showBoard();
+  }
+
+  private pickTab(tab: DrawerTab): void {
+    this.drawerTab = tab;
+    try { localStorage.setItem(DRAWER_TAB_KEY, tab); } catch { /* private mode keeps it for this session */ }
+  }
+
+  /** The drawer of a thread whose drawer was open when the page last showed it, unless the board holds the drawer. */
   restoreTerminal(threadId: ThreadId): void {
-    if (!this.ctx.store.owner || this.terminalShown(threadId) || this.readStored(threadId)?.open !== true) return;
+    if (!this.ctx.store.owner || this.boardShown || this.terminalShown(threadId) || this.readStored(threadId)?.open !== true) return;
     this.showTerminal(threadId);
   }
 
   private showTerminal(threadId: ThreadId): void {
     const client = this.ctx.client;
     if (!client) return;
+    if (this.boardShown) {
+      this.boardShown = false;
+      this.pickTab('terminal');
+    } else if (this.boardAvailable()) this.pickTab('terminal');
     const closed = this.closed.get(client);
     for (const id of [...(closed ?? [])]) if (isThreadTerminal(threadId, id)) closed?.delete(id);
     this.terminalThreads = [...this.terminalThreads, threadId];

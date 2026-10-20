@@ -9,6 +9,7 @@ import { readKeybindings } from '../src/keybindings.ts';
 import { removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
@@ -127,13 +128,13 @@ describe('the keybindings file', () => {
   });
 
   test('a chord it cannot read and a file that is not JSON are refused, the file untouched', async () => {
-    await expect(client.call('keybindings.set', { command: 'pin', chord: 'p' })).rejects.toThrow(
+    expect(await thrown(client.call('keybindings.set', { command: 'pin', chord: 'p' }))).toThrow(
       'chord: "p" has no modifier: a chord needs mod, ctrl, alt or meta before its key',
     );
-    await expect(client.call('keybindings.set', { command: 'nope' as 'pin', chord: 'mod+p' })).rejects.toThrow('command: "nope" is not a command Boite has');
+    expect(await thrown(client.call('keybindings.set', { command: 'nope' as 'pin', chord: 'mod+p' }))).toThrow('command: "nope" is not a command Boite has');
     const path = join(harness.dataDir, 'keybindings.json');
     writeFileSync(path, '{"pin": ');
-    await expect(client.call('keybindings.set', { command: 'pin', chord: 'mod+p' })).rejects.toThrow('keybindings.json: not valid JSON');
+    expect(await thrown(client.call('keybindings.set', { command: 'pin', chord: 'mod+p' }))).toThrow('keybindings.json: not valid JSON');
     expect(readFileSync(path, 'utf8')).toBe('{"pin": ');
   });
 

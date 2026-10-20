@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { BrowserPage, freePort } from './cdp.ts';
-import { describeShell } from './shell-diagnosis.ts';
+import { describeShell, waitForShellPage } from './shell-diagnosis.ts';
 import { killProcessTreeAsync, removeDirectory } from './cleanup.ts';
 import { connect } from '../../../packages/core/src/client.ts';
 import type { BrowserAction } from '../../../packages/contracts/src/index.ts';
@@ -37,7 +37,7 @@ export async function startBrowserSession(executable: string, title = 'Boite · 
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title });
     page = await BrowserPage.attach(port, '', failure => describeShell(dataDir, shell.pid, failure));
-    await page.waitFor("typeof window.__TAURI_INTERNALS__?.invoke === 'function'");
+    await waitForShellPage(page, { port, dataDir, pid: shell.pid });
     await page.evaluate(`localStorage.setItem('boite.onboarding', JSON.stringify({version:6,at:Date.now()})); localStorage.setItem('boite.locale', 'fr'); localStorage.setItem('boite.experiments', ${JSON.stringify(JSON.stringify(experiments))}); location.reload();`);
     await page.waitFor("document.querySelector('[data-testid=thread-row]')");
     await page.click('[data-testid=thread-row]');

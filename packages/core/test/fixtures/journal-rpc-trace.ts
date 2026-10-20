@@ -2,6 +2,7 @@ import { spyOn } from 'bun:test';
 import { FrameQueue } from '../../src/server/frame-queue.ts';
 import { ServerConnection } from '../../src/server/connection.ts';
 import { Router } from '../../src/router.ts';
+import { TextSocket } from '../../src/ws-client.ts';
 
 /** Test-only bounded metadata: never retain a request, response body or credential. */
 export function rpcTrace({ label = 'journal.inspect', methods = ['hello', 'pairing.grant', 'journal.inspect'] }: { label?: string; methods?: readonly string[] } = {}) {
@@ -39,6 +40,20 @@ export function rpcTrace({ label = 'journal.inspect', methods = ['hello', 'pairi
   const close = ServerConnection.prototype.close;
   const send = WebSocket.prototype.send;
   const addListener = WebSocket.prototype.addEventListener;
+  const textSend = TextSocket.prototype.send;
+  const onMessage = TextSocket.prototype.onMessage;
+  const onClose = TextSocket.prototype.onClose;
+  /** A message a client read: its frame, and the role a hello answer gives the connection. */
+  const received = (socket: object, raw: unknown): void => {
+    try {
+      const principal = JSON.parse(String(raw)).result?.principal;
+      if (['owner', 'session', 'agent'].includes(principal)) roles.set(socket, principal === 'session' ? 'phone' : principal);
+    } catch { /* Metadata only; invalid frames remain classified by frame(). */ }
+    record('client.receive', socket, frame(raw));
+  };
+  const closed = (socket: object, code: number, reason: string): void => {
+    record('client.close', socket, { code, classification: reason === 'Protocol error - unexpected opcode' ? 'unexpected-opcode' : undefined });
+  };
   const spies: { mockRestore(): void }[] = [
     spyOn(FrameQueue.prototype, 'enqueue').mockImplementation(function (this: FrameQueue, connection, raw) {
       serverConnections.set(connection.id, connection);
@@ -67,18 +82,24 @@ export function rpcTrace({ label = 'journal.inspect', methods = ['hello', 'pairi
     spyOn(WebSocket.prototype, 'addEventListener').mockImplementation(function (this: WebSocket, type: string, listener: EventListener | { handleEvent(event: Event): void }, options?: boolean | AddEventListenerOptions) {
       if (type !== 'message' && type !== 'close') return addListener.call(this, type, listener, options);
       const observed: EventListener = event => {
-        if (type === 'message') {
-          try {
-            const principal = JSON.parse((event as MessageEvent).data).result?.principal;
-            if (['owner', 'session', 'agent'].includes(principal)) roles.set(this, principal === 'session' ? 'phone' : principal);
-          } catch { /* Metadata only; invalid frames remain classified by frame(). */ }
-        }
-        record(type === 'message' ? 'client.receive' : 'client.close', this,
-          type === 'message' ? frame((event as MessageEvent).data) : { code: (event as CloseEvent).code, classification: (event as CloseEvent).reason === 'Protocol error - unexpected opcode' ? 'unexpected-opcode' : undefined });
+        if (type === 'message') received(this, (event as MessageEvent).data);
+        else closed(this, (event as CloseEvent).code, (event as CloseEvent).reason);
         if (typeof listener === 'function') listener.call(this, event);
         else listener?.handleEvent(event);
       };
       return addListener.call(this, type, observed, options);
+    }),
+    // The core client reads its socket through `ws-client.ts`.
+    spyOn(TextSocket.prototype, 'send').mockImplementation(function (this: TextSocket, text) {
+      record('client.send', this, frame(text));
+      textSend.call(this, text);
+      record('client.send.returned', this);
+    }),
+    spyOn(TextSocket.prototype, 'onMessage').mockImplementation(function (this: TextSocket, listener) {
+      onMessage.call(this, text => { received(this, text); listener(text); });
+    }),
+    spyOn(TextSocket.prototype, 'onClose').mockImplementation(function (this: TextSocket, listener) {
+      onClose.call(this, event => { closed(this, event.code, event.reason); listener(event); });
     }),
   ];
   let restored = false;

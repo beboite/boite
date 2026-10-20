@@ -1,3 +1,4 @@
+import { noteUserMessage } from './checklist';
 import { attachmentError, previewPrompt, previewReferencesError, protocolSupportsSteering, type MessagePart, type Message, type RpcParams } from '@boite/contracts';
 import type { FakeContext } from './context';
 import { refusal } from './shared';
@@ -43,5 +44,7 @@ export async function steerUser(ctx: FakeContext, params: RpcParams<'turns.steer
   ctx.emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
   thread.lastUserMessageAt = message.createdAt;
   ctx.touch(thread);
+  // A `/goal2`'s checklist reads what the user adds while the agent works.
+  noteUserMessage(ctx, thread, params.prompt);
   return { accepted: true };
 }

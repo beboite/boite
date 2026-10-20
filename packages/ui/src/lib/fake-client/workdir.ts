@@ -221,6 +221,14 @@ export function workdirMethods(ctx: FakeContext, all: () => Pick<FakeMethods, 'b
       else ctx.emitToThread(thread.id, 'panel.requested', { threadId: thread.id, surface, at: ctx.now() });
       return { shown };
     },
+    'questions.openPage': async ({ threadId, questionId }) => {
+      const thread = ctx.thread(threadId);
+      const question = ctx.pendingQuestions.get(questionId)?.request;
+      if (question?.threadId !== thread.id || !question.open) throw refusal(`questions.openPage: ${questionId} is not a pending question with a page`);
+      const surface = checkSurface(ctx, thread.cwd, { kind: 'browser', url: question.open.url });
+      if (surface.kind === 'browser') await all()['browser.command']({ threadId: thread.id, action: { kind: 'open', url: surface.url } });
+      return { ok: true as const };
+    },
     'git.status': async (params) => {
       const thread = ctx.thread(params.threadId);
       const branch = thread.branch ?? 'main';

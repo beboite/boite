@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bodyReason, ceiling, entryChunk, judge, mainRun, measure, publishedCommits, type Sizes } from './budgets.ts';
+import { bodyReason, ceiling, comparisonBase, entryChunk, judge, mainRun, measure, publishedCommits, type Sizes } from './budgets.ts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -89,4 +89,14 @@ test('the ceiling follows the newest published release, drafts and branch target
     release('v3', null, 'c'.repeat(40), true),
     release('v4', '2026-10-19T00:00:00Z', 'main'),
   ])).toEqual([{ tag: 'v2', sha: '2'.repeat(40) }, { tag: 'v1', sha: '1'.repeat(40) }]);
+});
+
+test('a pull request is compared with the main commit its merge ref was built on, not its stale base', () => {
+  // #665 branched at 184e63a7; its merge ref sat on 156e44cf, whose UI growth was blamed on it (run 39319378723).
+  const branchPoint = '184e63a7babb243849a6c3bff5ecdf2404af2f4f';
+  const main = '156e44cf'.padEnd(40, '0');
+  const commit = (...parents: string[]) => [`tree ${'1'.repeat(40)}`, ...parents.map((sha) => `parent ${sha}`), 'author A <a@b> 1 +0000', '', 'parent of nothing', ''].join('\n');
+  expect(comparisonBase(commit(main, '8e2f74eb'.padEnd(40, '0')), branchPoint)).toBe(main);
+  // A checkout that is not a merge ref keeps the pull request's base; the message is not read.
+  expect(comparisonBase(commit(main), branchPoint)).toBe(branchPoint);
 });

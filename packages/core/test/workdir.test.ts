@@ -14,6 +14,7 @@ import { connect, type CoreClient } from '../src/client.ts';
 import { createExclusiveFile, languageOf, mediaOf, openHeldDirectory, writeLandsInside } from '../src/workdir.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
@@ -264,7 +265,7 @@ describe('files.locate', () => {
     mkdirSync(join(harness.dataDir, 'notes', '.local'), { recursive: true });
     writeFileSync(join(harness.dataDir, 'notes', '.local', 'core-rules.md'), '# rules');
     expect(await client.call('files.locate', { threadId, path: 'core-rules.md' })).toEqual(['notes/.local/core-rules.md']);
-    await expect(client.call('files.locate', { threadId, path: '' })).rejects.toThrow('files.locate path: expected a file path');
+    expect(await thrown(client.call('files.locate', { threadId, path: '' }))).toThrow('files.locate path: expected a file path');
   });
 });
 
@@ -347,7 +348,7 @@ describe('files.write', () => {
     const moved = join(root, 'sub-real');
     const outside = mkdtempSync(join(tmpdir(), 'boite-held-out-'));
     mkdirSync(parent);
-    const stats = statSync(parent);
+    const stats = statSync(parent, { bigint: true });
     const dir = await openHeldDirectory(parent, stats.dev, stats.ino, 'files.write path directory', 'sub');
     try {
       renameSync(parent, moved);

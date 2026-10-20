@@ -3,7 +3,8 @@
  * its edges, each step's route and progress. Pure, so the layout rules are
  * tested without a DOM.
  */
-import { workflowLevels, type DelegationProfile, type WorkflowNode, type WorkflowRun, type WorkflowStepStatus } from '@boite/contracts';
+import { workflowLevels, type DelegationProfile, type WorkflowNode, type WorkflowRun, type WorkflowStepPlan, type WorkflowStepStatus } from '@boite/contracts';
+import { totalTokens } from './usage';
 
 /** Under this width per step a phase no longer fits in a row, and the graph reads as a plain list. */
 export const STEP_MIN = 150;
@@ -64,11 +65,16 @@ export function nodeProgress(node: WorkflowNode): { done: number; total: number;
 }
 
 /** The route a step runs on: its first execution's once started, its profile's before. Null before a step without profile starts: it takes the conversation's model. */
-export function routeOf(node: WorkflowNode, profiles: DelegationProfile[]): { providerId: string; model: string; profile: string } | null {
+export function routeOf(node: WorkflowNode, profiles: DelegationProfile[], step?: WorkflowStepPlan): { providerId: string; model: string; profile: string; effort: string | null } | null {
   const started = node.instances.find(inst => inst.providerId !== null);
   const profile = profiles.find(entry => entry.id === node.profileId);
-  if (started?.providerId) return { providerId: started.providerId, model: started.model ?? profile?.model ?? '', profile: profile?.name ?? node.profileId ?? '' };
-  return profile ? { providerId: profile.providerId, model: profile.model, profile: profile.name } : null;
+  if (started?.providerId) return { providerId: started.providerId, model: started.model ?? profile?.model ?? '', profile: profile?.name ?? node.profileId ?? '', effort: started.effort === undefined ? step?.effort ?? profile?.effort ?? null : started.effort };
+  return profile ? { providerId: profile.providerId, model: profile.model, profile: profile.name, effort: step?.effort ?? profile.effort } : null;
+}
+
+/** All reported turns of every execution of a step, cache and retries included. */
+export function nodeTokens(node: WorkflowNode): number {
+  return node.instances.reduce((sum, inst) => sum + (inst.usage ? totalTokens(inst.usage) : 0), 0);
 }
 
 /** When the step started and ended, across its executions. */

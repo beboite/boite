@@ -24,6 +24,7 @@ import { registerPushMethods } from './push.ts';
 import { registerSpeechMethods } from './speech.ts';
 import { registerTelemetry } from './telemetry.ts';
 import { registerCoordination } from './coordination.ts';
+import { registerContactMethods } from './contacts/rpc.ts';
 import { registerResidentMethods } from './agents/projects.ts';
 import { registerGroupMethods } from './group/rpc.ts';
 import { registerTerminalMethods } from './terminals.ts';
@@ -59,6 +60,7 @@ export function registerModules(core: Core): void {
   registerHookMethods(core);
   registerTelemetry(core);
   registerCoordination(core);
+  registerContactMethods(core);
   registerResidentMethods(core);
   registerGroupMethods(core);
   registerSpeechMethods(core);
@@ -86,6 +88,7 @@ export function registerModules(core: Core): void {
   registerProjectMethods(core);
   registerProviderMethods(core);
   const probe = registerProbeMethods(core);
+  core.activity.useProbe(probe);
   core.router.register('delegation.result', params => core.delegation.resultPage(params));
   core.router.register('delegation.wait', (params, ctx) => core.delegation.wait(params, ctx.connection));
   core.router.register('delegation.get', params => core.delegation.get(params.threadId));

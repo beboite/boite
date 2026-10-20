@@ -7,6 +7,7 @@ import type { Core } from '../src/core.ts';
 import { linuxVersion, macosVersion, RELAY, relayFor, Telemetry, telemetryEvent, windowsVersion } from '../src/telemetry.ts';
 import relay, { buildBatch, type Env } from '../../../telemetry/src/index.ts';
 import { enhancedDetails, publicModel } from '../../contracts/src/telemetry.ts';
+import { thrown } from './settle.ts';
 
 const cleanups: (() => Promise<void>)[] = [];
 test('the core test runner disables the production relay', () => {
@@ -23,7 +24,8 @@ test('only a release build defaults to the relay, and the runtime override wins'
 test('every core build inlines the release flag present at build time and only then', async () => {
   const root = join(import.meta.dir, '..');
   const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts as Record<string, string>;
-  for (const command of [scripts.build, scripts['build:linux'], readFileSync(join(root, 'bin', 'compile.ts'), 'utf8')]) {
+  expect(scripts['build:linux']).toContain('bun run bin/compile.ts ');
+  for (const command of [scripts.build, readFileSync(join(root, 'bin', 'compile.ts'), 'utf8')]) {
     expect(command).toContain('--env=BOITE_RELEASE_*');
   }
   // The CLI, as the build scripts run it: Bun.build reads the environment its process started with.
@@ -219,12 +221,12 @@ test('consent changes discard events arriving while an aborted upload settles', 
 test('export needs enhanced mode and an inert build never contacts a relay', async () => {
   const f = fixture();
   await f.telemetry.configure('off');
-  await expect(f.telemetry.export()).rejects.toThrow('enhanced');
+  expect(await thrown(f.telemetry.export())).toThrow('enhanced');
   const inert = new Telemetry(f.host, '', f.send);
   await inert.configure('enhanced');
   await inert.flush();
   expect(inert.state().configured).toBe(false);
-  await expect(inert.export()).rejects.toThrow('no relay');
+  expect(await thrown(inert.export())).toThrow('no relay');
   await inert.close();
   expect(f.requests).toEqual([]);
 });

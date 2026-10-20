@@ -56,6 +56,17 @@ test('typed subjects are grouped, untyped ones fall under other changes', () => 
   expect(notes.slice(other)).toContain('Point the cargo note');
 });
 
+test('each commit credits its author and co-authors, GitHub accounts by login', () => {
+  const notes = releaseNotes([
+    { sha: 'a'.repeat(40), subject: 'fix: one', authors: ['meetsu <96637888+klNuno@users.noreply.github.com>', 'Chris <76012699+ChrisPlayer@users.noreply.github.com>'] },
+    { sha: 'b'.repeat(40), subject: 'fix: two', authors: ['Jane_Doe <jane@example.com>', 'old <old-login@users.noreply.github.com>', 'meetsu <96637888+klNuno@users.noreply.github.com>'] },
+    { sha: 'c'.repeat(40), subject: 'fix: three' },
+  ], 'example/boite', 'v1.1.0');
+  expect(notes).toContain(`/commit/${'a'.repeat(40)})) by @klNuno, @ChrisPlayer\n`);
+  expect(notes).toContain(`/commit/${'b'.repeat(40)})) by Jane\\_Doe, @old-login, @klNuno\n`);
+  expect(notes).toContain(`/commit/${'c'.repeat(40)}))\n`);
+});
+
 test('the first release has no invented previous version', () => {
   expect(previousRelease([], 'v1.0.0', () => true)).toBeUndefined();
   expect(releaseNotes([{ sha: 'a'.repeat(40), subject: 'Initial implementation' }], 'example/boite', 'v1.0.0')).not.toContain('/compare/');

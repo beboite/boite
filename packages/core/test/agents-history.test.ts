@@ -10,6 +10,7 @@ import { SCHEMA_VERSION } from '../src/journal/schema.ts';
 import { PRUNE_RECORD_EVENTS } from '../src/agents/repository.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const HISTORY = AGENT_HISTORY_PAGE * 3 + 7;
 
@@ -87,8 +88,8 @@ test('the snapshot stays bounded as history grows and pages reach every record o
     expect(page.work).toHaveLength(AGENT_HISTORY_PAGE);
     expect(page.runs.map(r => r.workId).sort()).toEqual(page.work.map(w => w.id).sort());
     expect(page.runs.every(r => !('instructions' in r.context))).toBe(true);
-    await expect(c.call('agents.history', { kind: 'message', agentId: agent.id })).rejects.toThrow('agentId');
-    await expect(c.call('agents.history', { kind: 'work', limit: 1000 })).rejects.toThrow('limit');
+    expect(await thrown(c.call('agents.history', { kind: 'message', agentId: agent.id }))).toThrow('agentId');
+    expect(await thrown(c.call('agents.history', { kind: 'work', limit: 1000 }))).toThrow('limit');
   } finally { await h.stop(); }
 }, 30000);
 
@@ -135,9 +136,9 @@ test('an agent session pages only its own context and provenance', async () => {
       expect(memories).toHaveLength(AGENT_HISTORY_PAGE + 10);
       const messages = await walk(scoped, 'message', snapshot.messages, { threadId: thread.id });
       expect(messages).toHaveLength(AGENT_HISTORY_PAGE + 10);
-      await expect(scoped.call('agents.history', { threadId: thread.id, kind: 'message', scopes: [shared] })).rejects.toThrow('own context');
-      await expect(scoped.call('agents.history', { threadId: thread.id, kind: 'work', agentId: 'someone-else' })).rejects.toThrow('own context');
-      await expect(scoped.call('agents.history', { kind: 'message' })).rejects.toThrow('for thread');
+      expect(await thrown(scoped.call('agents.history', { threadId: thread.id, kind: 'message', scopes: [shared] }))).toThrow('own context');
+      expect(await thrown(scoped.call('agents.history', { threadId: thread.id, kind: 'work', agentId: 'someone-else' }))).toThrow('own context');
+      expect(await thrown(scoped.call('agents.history', { kind: 'message' }))).toThrow('for thread');
       // Asking for the group's memory from the direct context yields nothing, on every page.
       const group = await scoped.call('agents.history', { threadId: thread.id, kind: 'memory', scopes: [shared] });
       expect(group.memories).toEqual([]);

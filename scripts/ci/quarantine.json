@@ -36,19 +36,9 @@
       "reason": "failed 4 first attempts that passed on rerun (Windows), 2026-10-16 to 10-18"
     },
     {
-      "file": "tests/e2e/coordination-bridge-live.test.ts",
-      "test": "the owner app relays signed reads, preserves directional grants on reload, and displays actual turn activity",
-      "reason": "failed 8 first attempts that passed on rerun, its lazy UI chunks getting no response for 15 s, 2026-10-16 to 10-18"
-    },
-    {
       "file": "tests/e2e/drafts-overlays.test.ts",
       "test": "drafts survive reload and composer menus stay above the chrome",
       "reason": "failed 5 first attempts that passed on rerun, 2026-10-16 to 10-18"
-    },
-    {
-      "file": "tests/e2e/machines.test.ts",
-      "test": "one invitation groups two real cores: the page connects the second by itself, and a paired phone reaches both",
-      "reason": "failed 4 first attempts that passed on rerun, 2026-10-16 to 10-18"
     }
   ]
 }

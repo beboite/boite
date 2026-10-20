@@ -29,11 +29,13 @@ import { hookMethods, recordHookRun } from './fake-client/hooks';
 import { logMethods, seedDiagnostics } from './fake-client/logs';
 import { coordinationMethods, registerCore, trusts, unregisterCore } from './fake-client/coordination';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
+import { seedBoardDemo } from './fake-client/board-demo';
 import { seedSubagentsDemo } from './fake-client/subagents-demo';
 import { seedAgentsDemo } from './fake-client/agents-demo';
 import { agentSettingMethods } from './fake-client/agent-settings';
 import type { AgentSettingMethod } from './fake-agents';
 import { groupMethods } from './fake-client/group';
+import { contactMethods } from './fake-client/contacts';
 import { pairingMethods } from './fake-client/pairing';
 import { projectMethods } from './fake-client/projects';
 import { pathKey } from './fake-client/checks';
@@ -110,6 +112,7 @@ export class FakeClient implements ObservableClient {
     if (options.delegationDemo) seedDelegationDemo(ctx);
     if (options.agentsDemo) seedAgentsDemo(ctx);
     if (options.subagentsDemo) seedSubagentsDemo(ctx);
+    if (options.boardDemo) seedBoardDemo(ctx);
     seedRetry(ctx);
     this.#stopWorking = seedWorking(ctx, options.working ?? 0);
     if (options.watchDemo) {
@@ -475,6 +478,7 @@ export class FakeClient implements ObservableClient {
       ...delegationMethods(ctx),
       ...coordinationMethods(ctx),
       ...groupMethods(ctx),
+      ...contactMethods(ctx),
       ...todoMethods(ctx),
       ...workdirMethods(ctx, () => methods),
       ...browserMethods(ctx),

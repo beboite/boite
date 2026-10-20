@@ -3,9 +3,20 @@
  * `/health`, `/v1/models` and `/admin/api/summary`. Environment:
  * FAKE_DOUANE_VERSION names its version; FAKE_DOUANE_CRASH_FILE, when that
  * file exists, makes it delete the file and exit with code 3 a moment after
- * it answers; FAKE_DOUANE_IN_FLIGHT_FILE holds the number `in_flight` reports.
+ * it answers; FAKE_DOUANE_IN_FLIGHT_FILE holds the number `in_flight` reports;
+ * FAKE_DOUANE_RUNS_FILE, when it exists, holds one word per start to come:
+ * `exit` exits with code 1 at once, `late` listens a second late, and each
+ * start takes its word off the top.
  */
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+
+const runs = process.env.FAKE_DOUANE_RUNS_FILE;
+if (runs && existsSync(runs)) {
+  const [word, ...rest] = readFileSync(runs, 'utf8').split('\n').filter(Boolean);
+  writeFileSync(runs, rest.map((line) => `${line}\n`).join(''));
+  if (word === 'exit') process.exit(1);
+  if (word === 'late') await Bun.sleep(1_000);
+}
 
 const at = process.argv.indexOf('--config');
 const config = at > 0 ? process.argv[at + 1] : undefined;

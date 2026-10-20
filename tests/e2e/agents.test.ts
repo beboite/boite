@@ -183,11 +183,43 @@ test('create, converse, configure the resident engine and follow background work
   await capture('agents-routines-desktop.png');
   await openPane('settings');
   await page.waitFor(`document.querySelector('[data-testid="agent-runtime"]')`);
+  // A permission picked in the runtime card saves by itself, with no Save button, and reads back after leaving the tab.
+  const runtimeButton = (label: string) => `Array.from(document.querySelectorAll('[data-testid="agent-runtime"] button')).find(b => b.textContent.trim() === ${JSON.stringify(label)})`;
+  expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-runtime-save"]')`)).toBe(false);
+  await page.evaluate(`${runtimeButton('Ask before actions')}.click()`);
+  await page.waitFor(`Array.from(document.querySelectorAll('[role="menuitem"]')).some(i => i.textContent.trim() === 'Allow edits')`);
+  await page.evaluate(`Array.from(document.querySelectorAll('[role="menuitem"]')).find(i => i.textContent.trim() === 'Allow edits').click()`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-runtime"] [data-testid="save-status"]')?.dataset.state === 'saved'`);
+  await page.evaluate(`document.querySelector('[data-testid="agent-runtime"]').scrollIntoView()`);
   await capture('agents-runtime-desktop.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.evaluate(`document.querySelector('[data-testid="agent-runtime"]').scrollIntoView()`);
   await capture('agents-runtime-phone.png');
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await openPane('memory');
+  await openPane('settings');
+  await page.waitFor(`!!${runtimeButton('Allow edits')}`);
+  // A refused save says so beside the card and the agent keeps its saved permission.
+  await page.evaluate(`(() => {
+    const c = window.__boiteTest.workspace.active.client, call = c.call.bind(c);
+    c.call = (method, params) => method === 'agents.runtime.configure' ? Promise.reject(new Error('The core refused this change.')) : call(method, params);
+    window.__restoreRuntime = () => { c.call = call; };
+  })()`);
+  await page.evaluate(`${runtimeButton('Allow edits')}.click()`);
+  await page.waitFor(`Array.from(document.querySelectorAll('[role="menuitem"]')).some(i => i.textContent.trim() === 'Plan only')`);
+  await page.evaluate(`Array.from(document.querySelectorAll('[role="menuitem"]')).find(i => i.textContent.trim() === 'Plan only').click()`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-runtime"] [data-testid="save-status"]')?.dataset.state === 'error'`);
+  expect(await page.evaluate(`(async () => (await window.__boiteTest.workspace.active.client.call('agents.snapshot', {})).profiles.find(p => p.name === 'Mira').selection.permissionMode)()`)).toBe('acceptEdits');
+  await page.evaluate(`document.querySelector('[data-testid="agent-runtime"]').scrollIntoView()`);
+  await capture('agents-runtime-error-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.evaluate(`document.querySelector('[data-testid="agent-runtime"]').scrollIntoView()`);
+  await capture('agents-runtime-error-phone.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.evaluate(`window.__restoreRuntime()`);
+  await page.evaluate(`document.querySelector('[data-testid="agent-runtime"] [data-testid="save-status"] button').click()`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-runtime"] [data-testid="save-status"]')?.dataset.state === 'saved'`);
 
   await page.evaluate(`(async () => {
     const { workspace } = window.__boiteTest;
@@ -296,9 +328,10 @@ test('archiving an experimental agent requires its exact name on desktop and pho
   await openPane('settings');
   await page.waitFor(`document.querySelector('[data-testid="agent-editor"]')`);
   await capture('agent-archive-before-desktop.png');
+  // Settings save by themselves, but archiving still asks before anything is saved.
+  expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-save"]')`)).toBe(false);
   await page.click('[data-testid="agent-editor"] button[aria-label="Status"]');
   await page.click('[data-value="archived"]');
-  await page.click('[data-testid="agent-save"]');
   await page.waitFor(`document.activeElement?.matches('[data-testid="confirm-name"]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid="confirm-ok"]').disabled`)).toBe(true);
   await page.type('[data-testid="confirm-name"]', 'pixel');
@@ -310,7 +343,8 @@ test('archiving an experimental agent requires its exact name on desktop and pho
   await page.waitFor(`!document.querySelector('[data-testid="confirm-name"]')`);
   expect(await page.evaluate(status)).toBe('active');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.click('[data-testid="agent-save"]');
+  await page.click('[data-testid="agent-editor"] button[aria-label="Status"]');
+  await page.click('[data-value="archived"]');
   await page.waitFor(`document.querySelector('[data-testid="confirm-name"]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid="confirm-name"]').value`)).toBe('');
   await capture('agent-archive-phone.png');

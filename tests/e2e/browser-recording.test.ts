@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 import { startBrowserSession } from './lib/browser-session.ts';
 import { runCli } from '../../packages/core/src/cli.ts';
 import type { BrowserPreset } from '../../packages/contracts/src/index.ts';
+import { thrown } from '../../packages/core/test/settle.ts';
 
 /**
  * Records an animated page through the agent CLI and measures the file the
@@ -119,7 +120,7 @@ test.skipIf(process.platform !== 'win32' || !executable)('a browser recording ke
       // A codec this desktop cannot encode is refused, and nothing records in another one.
       console.log(`Refused: ${started.err.trim()}`);
       expect(started.err).toContain('not available on this desktop');
-      await expect(session.command({ kind: 'recording-stop' }, id)).rejects.toThrow('no browser recording has started');
+      expect(await thrown(session.command({ kind: 'recording-stop' }, id))).toThrow('no browser recording has started');
       return;
     }
     console.log(`Recording started in ${Math.round(performance.now() - startedAt)} ms`);

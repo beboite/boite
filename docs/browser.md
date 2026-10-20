@@ -40,6 +40,17 @@ without a usable GPU gets none rather than SwiftShader on every core. On the
 M2 container on 2026-10-05, WebGL reported `ANGLE (AMD, AMD Radeon Graphics
 (radeonsi renoir ACO), OpenGL ES 3.2)`.
 
+A Mac in a virtual machine, where the kernel sets `kern.hv_vmm_present` to 1,
+starts the browser with `--disable-gpu` instead: pages draw on the CPU and
+WebGL is off. On the paravirtual GPU of a macos-15 arm64 CI runner, Chrome's
+GPU process lost its Metal device (`[Device] is lost`) and restarted. The
+process that exited stayed a zombie with a thread in the kernel's
+`IOService::newUserClient`, and the browser's UI thread sat in `wait4` until
+it ended, so no DevTools command was answered for 10 to 30 seconds. Over 40
+minutes of the browser tests, 1180 browsers had 48 GPU restarts and 20
+silences past 3 seconds; with `--disable-gpu`, 3177 browsers had none, and
+none took more than 1.6 seconds to answer. A Mac's own hardware keeps the GPU.
+
 ### What sites see
 
 Headless Chrome names itself `HeadlessChrome` in its user agent, sets
@@ -123,6 +134,17 @@ is left out, since the copy cannot carry that scope. The cookies cross the conne
 action is the owner's alone and never automatic. Signing in directly works
 too: show the agent's browser and sign in there.
 
+An agent that meets a login page asks with `boite ask --open <url> "<site and
+why>" "Signed in" Skip`. The question card gets an Open button: it opens the
+page as `boite browse` does, in a new tab of the conversation's browser and
+its default profile, and shows the panel on the Browser tab, going to the
+thread first from the Agents page or another conversation. It calls
+`questions.openPage`, which names the question rather than an address, so a
+paired phone subscribed to the conversation opens the page too, and the core
+reads and checks the address again. The address must
+be http or https and carry no user name or password. Such a question never
+goes to a delegated agent's parent: only the user can sign in.
+
 A conversation has at most 8 tabs and a machine 24. A page that opens a
 window, a sign-in popup for instance, adds a tab to the same conversation; past
 the limit the window is closed. A tab still attaching counts toward both
@@ -167,6 +189,21 @@ while the page is being frozen waits for the freeze, wakes the page and only
 then runs, and the page is visible and focused again when it does. A tab
 closed while asleep is woken first, and a freeze that fails is tried again after the wait. A page asleep keeps its state; its timers
 resume where they stopped, and a page that reads the clock sees the time pass.
+The browser answers the freeze once it has passed it to the renderer, not once
+the renderer has applied it: a busy renderer runs the page until it gets to it
+(a few hundred milliseconds on a loaded macOS runner on 2026-10-19), so a tab
+counted asleep may still run that long. Its page's `freeze` event says when
+the freeze landed.
+
+Each call of a freeze or a wake has 5 seconds. A frozen page still answers
+DevTools at once (measured on Windows on 2026-10-19), so a call that misses
+them met a stalled renderer or browser, not a frozen page: a wake that fails
+fails the command that asked for it, the tab stays asleep and the next use
+wakes it again. The command fails at those 5 seconds; after it, a
+`browser.sleep-stalled` warning says whether the browser itself still
+answered (`Target.getTargetInfo` for the tab, within 1 second), and a
+`browser.sleep-late` warning says when the page answered, or that it never did
+within 30 seconds.
 
 A tab the desktop app hosts gets the same calls through the relay: `Page` and
 `Emulation` are among the domains an agent webview takes. The desktop's own
@@ -356,6 +393,18 @@ page, so it selects text; a second click selects the word, a third the
 paragraph, and Shift with a click extends the selection. Control or Command
 with A selects all, with Z or Y undoes and redoes.
 
+A `<select>` opens here, not on the agent's machine. Chrome draws a select's
+list in a window of its own, which no frame shows, so a plain tap on one only
+focuses it and answers its options (`picker`: labels, the selected one, the
+disabled, hidden and grouped ones, and the field's box, at most 1,000 options),
+and the viewer draws the list under the field, or over it when there is more
+room there. The arrows, Home, End, Enter, Space and Escape work in it. A pick
+goes back as `choose` at the tap's point with the option's index and label; the
+core finds the select there again and sets the option as a person would, so the
+page hears `input` and `change`, and refuses an option that is disabled, gone,
+or reads another label there: the page changed the list meanwhile. A tap
+elsewhere, the wheel or a resized page closes the list without choosing.
+
 The clipboard is the viewer's own. Paste inserts this computer's text in the
 focused field of the page. Copy and cut ask the core for the page's selection
 (`browser.remoteSelection`) and write it to this computer's clipboard; cut then
@@ -399,9 +448,13 @@ any browser profile.
 
 On Windows Bun cannot open those descriptors (`EBADF`, CI on 2026-10-05), so
 the browser listens on a random port of 127.0.0.1 and the core connects to it.
-That port has no authentication: a process of the same PC that finds it can
-drive the browser, signed-in profiles included. Do not copy sign-ins into the
-agent browser of a Windows machine other people have an account on.
+The core reads that socket with its own WebSocket client on `Bun.connect`
+(`packages/core/src/ws-client.ts`), as it does every socket it opens to
+another core: Bun's client (1.4.2 and 1.4.3) lost frames of sound streams and
+closed them with 1002 or 1011. That port has no authentication: a process of
+the same PC that finds it can drive the browser, signed-in profiles included.
+Do not copy sign-ins into the agent browser of a Windows machine other people
+have an account on.
 
 ## Verification
 
@@ -414,11 +467,12 @@ page, a worker, a request and a popup send without `Headless`, with
 `navigator.webdriver` false and full client hints, cookies kept per
 profile across a restart, a profile copied in by the owner, an MP4 recording
 read back, a recording discarded at the end of a turn, a page that sleeps
-once nobody uses it and meets the next command and viewer awake and focused,
+once nobody uses it and meets the next command and viewer awake and focused
+(its page busy 400 ms each time it is hidden, so each freeze lands late),
 one kept awake by `browser.remoteWatch`, and a machine without a browser. `browser-sleep.test.ts` checks, with the page
 stubbed, that a command arriving during a freeze runs after the wake, and that
-a held or closed tab never sleeps, and that a running turn holds an unused
-tab only 5 minutes. `AgentBrowserSurface.test.ts` checks that the desktop app
+a held or closed tab never sleeps, that a running turn holds an unused
+tab only 5 minutes, and that a wake call that misses its time fails at once and then names who stalled. `AgentBrowserSurface.test.ts` checks that the desktop app
 reports a hosted tab it shows, only while its window is visible. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
 `tests/e2e/agent-browser-core.test.ts` runs the whole path on a real core: the
 owner's desktop at 1280 × 900 and a paired phone at 390 × 844 see the cover,

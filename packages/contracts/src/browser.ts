@@ -1,5 +1,5 @@
 import { RPC_MAX_FRAME_BYTES } from './attachment-limits';
-import type { RemoteBrowserFrame, RemoteBrowserInput, RemoteBrowserSelection, RemoteBrowserUnchanged, RemoteFrameOptions } from './browser-remote';
+import type { RemoteBrowserFrame, RemoteBrowserInput, RemoteBrowserPicker, RemoteBrowserSelection, RemoteBrowserUnchanged, RemoteFrameOptions } from './browser-remote';
 /**
  * The agent's browser runs on the machine that runs its conversation: the core
  * starts a headless Chromium there and drives it over the DevTools protocol.
@@ -201,8 +201,8 @@ export interface BrowserRpcMethods {
    * `REMOTE_WATCH_MS` as if a viewer watched it.
    */
   'browser.remoteWatch': { params: { threadId: string; tabId: string }; result: { ok: true } };
-  /** Input on the tab a frame showed, from a viewer: never a script. */
-  'browser.remoteInput': { params: { threadId: string; frameId: string; input: RemoteBrowserInput }; result: { ok: true } };
+  /** Input on the tab a frame showed, from a viewer: never a script. A tap on a `<select>` answers its `picker`. */
+  'browser.remoteInput': { params: { threadId: string; frameId: string; input: RemoteBrowserInput }; result: { ok: true; picker?: RemoteBrowserPicker } };
   /**
    * The text selected in the tab a frame showed, for a viewer's copy: what a
    * person at that page would copy, so never a password field's.

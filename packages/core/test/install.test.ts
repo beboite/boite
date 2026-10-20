@@ -8,6 +8,7 @@ import { newToken } from '../src/ids.ts';
 import { resolveLatestInstall } from '../src/providers/install-latest.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 /** A fake agent binary and one file beside it: enough to prove the sizes are checked. */
 const EXE = new Uint8Array(4096).fill(0x42);
@@ -289,7 +290,7 @@ describe('managed installs', () => {
     const client = await harness.connect();
     const provider = (await client.call('providers.list', {})).loaded.find(value => value.id === 'managed');
     expect(provider?.install).toEqual({ state: 'failed', version: '1.0.0', message: `managed requires ${arch}; this machine is ${process.arch}` });
-    await expect(client.call('providers.install', { providerId: 'managed' })).rejects.toThrow(`requires ${arch}`);
+    expect(await thrown(client.call('providers.install', { providerId: 'managed' }))).toThrow(`requires ${arch}`);
     expect(existsSync(agentDir('downloads'))).toBe(false);
   });
 

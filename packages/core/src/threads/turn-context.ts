@@ -94,6 +94,7 @@ export class TurnContexts {
       systemGuide: this.systemGuide(thread, provider),
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
+      shortAnswers: this.core.settings.get().shortAnswers !== false,
       log: (level, message, context) => {
         if (context?.kind === 'provider-output') noteStderr(threadId, message);
         this.core.log(level, message, { ...context, source: provider.id, threadId });
@@ -365,6 +366,7 @@ export class TurnContexts {
       accountEnv: env,
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
+      shortAnswers: this.core.settings.get().shortAnswers !== false,
       emit,
       reportProgress: progress,
       reportProviderEvent: () => this.threads.progress.contact(threadId, turn.id),
@@ -504,7 +506,7 @@ export class TurnContexts {
       const note = moved?.type === 'text' ? moved.moved?.note ?? '' : '';
       const sent = message.role === 'user' ? message.parts.find((part) => part.type === 'text' && part.sentFrom !== undefined) : undefined;
       return {
-        prompt: note + message.parts.map((part) => part.type === 'text' ? part.activity ? activityPrompt(part.activity.kind, part.text, part.activity.iteration, part.activity.review) : part.text : '').join(''),
+        prompt: note + message.parts.map((part) => part.type === 'text' ? part.activity ? activityPrompt(part.activity.kind, part.text, part.activity.iteration, part.activity.review, part.activity.checklist) : part.text : '').join(''),
         attachments,
         ...(note ? { moved: true as const } : {}),
         ...(sent?.type === 'text' && sent.sentFrom ? { sentFrom: { from: sent.sentFrom, messageId: message.id } } : {}),

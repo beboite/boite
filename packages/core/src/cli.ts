@@ -84,7 +84,9 @@ ${CONTROL_HELP}
                                  report a Boite bug on GitHub with that export;
                                  show the user the draft before submit
   ask <question> [option ...]    ask the user without stopping; the answer
-                                 arrives later as a message (--multiple)
+                                 arrives later as a message (--multiple);
+                                 --open <url> adds an Open button for a page
+                                 the user must sign in to, in your browser
   settings [key]                 Boite settings you may ask about: value, page,
                                  the name the user's app shows; first, the
                                  language the app speaks; experiments last
@@ -122,6 +124,10 @@ ${CONTROL_HELP}
   agents wait [agent]            the next message (--timeout <s>, default 90)
   agents inbox                   every exchange and its delivery state
                                  <agent>: <thread-id>, <machine>/<thread-id>
+  agents contacts                other owners' Boites linked as contacts and
+                                 the projects each opened to you
+  agents ask <contact> <text>    ask a contact for an agent on a project like
+                                 yours; the answer comes back as a message
   agent context|inbox|missions   this persistent agent's authorized context
   agent send <ids|-> <text>      post to its group or direct conversation
   agent reply <message-id> <text>
@@ -618,7 +624,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       if (rest.length === 1 && rest[0] === 'help') { print([USAGE], { help: USAGE }); return; }
       const text = want(0, 'a question');
       const options = rest.slice(1);
-      const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}) });
+      const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}), ...(parsed.open === undefined ? {} : { open: parsed.open }) });
       print([`asked: ${asked.questionId}`, 'Keep working. The answer arrives as a message quoting the question; without one, go on with a sensible default.'], asked);
     },
     status: async () => {
