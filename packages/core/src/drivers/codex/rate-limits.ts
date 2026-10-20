@@ -9,9 +9,15 @@ const BASE_MS = 60_000;
 type Snapshot = Record<string, unknown>;
 const isObject = (value: unknown): value is Snapshot => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** `update`'s fields over `target`'s; a null field is "not in this update". */
-function merged(target: Snapshot, update: Snapshot): Snapshot {
-  for (const [key, value] of Object.entries(update)) if (value !== null && value !== undefined) target[key] = value;
+/**
+ * `update`'s fields over `target`'s; a null field is "not in this update".
+ * `under` keeps the fields `target` already carries.
+ */
+function merged(target: Snapshot, update: Snapshot, under = false): Snapshot {
+  for (const [key, value] of Object.entries(update)) {
+    if (value === null || value === undefined || (under && target[key] !== null && target[key] !== undefined)) continue;
+    target[key] = value;
+  }
   return target;
 }
 
@@ -21,10 +27,11 @@ function merged(target: Snapshot, update: Snapshot): Snapshot {
  * Codex session runs. The update is sparse: a null field means "not in this
  * update", and it carries no reset credits. So it is merged into the latest
  * full read of this same process, which is fetched again once it is older
- * than a minute. An update the app-server sent before its answer to that
- * read is older than the read and is dropped; one sent after it can share the
- * answer's chunk of stdout and be handled before the awaited answer lands, so
- * it waits for the answer and is merged into it. A read that fails stops the
+ * than a minute. The updates around that read wait for its answer, each kind
+ * folded into one set of fields. Those the app-server sent before the answer
+ * are older than the read: they fill only the fields it does not carry. Those
+ * sent after it can share the answer's chunk of stdout and be handled before
+ * the awaited answer lands: they go over it. A read that fails stops the
  * forwarding for this process, and the quota probe answers as before.
  */
 export class CodexRateLimits {
@@ -33,8 +40,9 @@ export class CodexRateLimits {
   private reading: Promise<void> | null = null;
   /** Whether the app-server answered the read: the updates after it are newer. */
   private answered = false;
-  /** Their fields, the latest of each, merged into the read once it lands. */
-  private waiting: Snapshot | null = null;
+  /** The latest field of each update before the answer, and after it. */
+  private before: Snapshot | null = null;
+  private after: Snapshot | null = null;
   private refused = false;
 
   constructor(
@@ -52,11 +60,12 @@ export class CodexRateLimits {
     const update = params['rateLimits'];
     if (!isObject(update) || (update['limitId'] != null && update['limitId'] !== 'codex')) return;
     if (this.reading !== null) {
-      if (this.answered) this.waiting = merged(this.waiting ?? {}, update);
+      if (this.answered) this.after = merged(this.after ?? {}, update);
+      else this.before = merged(this.before ?? {}, update);
       return;
     }
     if (this.base === null || Date.now() - this.readAt > BASE_MS) {
-      // The fresh read already holds this update.
+      this.before = merged({}, update);
       this.reading = this.read().finally(() => { this.reading = null; });
       return;
     }
@@ -79,12 +88,16 @@ export class CodexRateLimits {
       if (!isObject(raw)) throw new Error('the answer is not an object');
       this.base = raw;
       this.readAt = Date.now();
-      const waiting = this.waiting;
-      this.waiting = null;
-      if (waiting !== null) this.merge(waiting);
-      else this.forward();
+      const { before, after } = this;
+      this.before = this.after = null;
+      const target = this.target(raw);
+      if (target !== null) {
+        if (before !== null) merged(target, before, true);
+        if (after !== null) merged(target, after);
+      }
+      this.forward();
     } catch (error) {
-      this.waiting = null;
+      this.before = this.after = null;
       this.refused = true;
       this.host()?.log('info', `codex: account/rateLimits/read failed in a live session, limits are probed instead: ${messageOf(error)}`);
     }

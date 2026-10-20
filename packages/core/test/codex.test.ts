@@ -698,25 +698,40 @@ describe('codex driver', () => {
     });
   });
 
-  test('a rolling update sent after the answer to the full read is merged into it; one sent before is older and dropped', async () => {
+  test('a rolling update sent after the answer to the full read goes over it; one sent before fills only what the read lacks', async () => {
     // The answer and the updates around it can come in one chunk of stdout: each is handled
     // before the awaited answer lands, and only the answer's place among them tells which is newer.
-    let answer: (raw: unknown) => void = () => undefined;
-    const rpc = { request: (_method: string, _params: unknown, options?: { onAccepted?(): void }) => new Promise(resolve => {
-      answer = raw => { options?.onAccepted?.(); resolve(raw); };
-    }) } as unknown as CodexRpc;
-    const readings: QuotaReading[] = [];
-    const limits = new CodexRateLimits(() => rpc, () => ({ quota: reading => { readings.push(reading); }, log: () => undefined }));
-    const update = (primary: number | null, secondary: number) => ({ rateLimits: { limitId: 'codex', primary: primary === null ? null : { usedPercent: primary, windowDurationMins: 300 },
-      secondary: { usedPercent: secondary, windowDurationMins: 10080, resetsAt: 1_900_000_000 }, credits: null } });
-    limits.updated(update(10, 10));
-    limits.updated(update(20, 20));
-    answer({ rateLimits: { limitId: 'codex', primary: { usedPercent: 30, windowDurationMins: 300 }, secondary: { usedPercent: 30, windowDurationMins: 10080 } } });
-    limits.updated(update(null, 35));
-    limits.updated(update(null, 40));
+    const live = () => {
+      let answer: (raw: unknown) => void = () => undefined;
+      const rpc = { request: (_method: string, _params: unknown, options?: { onAccepted?(): void }) => new Promise(resolve => {
+        answer = raw => { options?.onAccepted?.(); resolve(raw); };
+      }) } as unknown as CodexRpc;
+      const readings: QuotaReading[] = [];
+      const limits = new CodexRateLimits(() => rpc, () => ({ quota: reading => { readings.push(reading); }, log: () => undefined }));
+      return { limits, readings, answer: (raw: unknown) => answer(raw) };
+    };
+    const window = (usedPercent: number, minutes: number) => ({ usedPercent, windowDurationMins: minutes, resetsAt: 1_900_000_000 });
+    const update = (primary: number | null, secondary: number | null) => ({ rateLimits: { limitId: 'codex',
+      primary: primary === null ? null : window(primary, 300), secondary: secondary === null ? null : window(secondary, 10080), credits: null } });
+    const percents = (reading: QuotaReading) => reading.windows.map(w => [w.id, w.usedPercent]);
+
+    // Before the answer: older than the read on what it carries. After it: newer.
+    const both = live();
+    both.limits.updated(update(10, 10));
+    both.limits.updated(update(20, 20));
+    both.answer({ rateLimits: { limitId: 'codex', primary: window(30, 300), secondary: window(30, 10080) } });
+    both.limits.updated(update(null, 35));
+    both.limits.updated(update(null, 40));
     await Bun.sleep(0);
-    expect(readings).toHaveLength(1);
-    expect(readings[0]!.windows.map(w => [w.id, w.usedPercent])).toEqual([['primary', 30], ['secondary', 40]]);
+    expect(both.readings.map(percents)).toEqual([[['primary', 30], ['secondary', 40]]]);
+
+    // A read without the weekly window keeps the one an earlier update gave.
+    const sparse = live();
+    sparse.limits.updated(update(10, null));
+    sparse.limits.updated(update(20, 77));
+    sparse.answer({ rateLimits: { limitId: 'codex', primary: window(30, 300) } });
+    await Bun.sleep(0);
+    expect(sparse.readings.map(percents)).toEqual([[['primary', 30], ['secondary', 77]]]);
   });
 
   test('a retry reports live progress without failing the turn or accepting an older native turn', async () => {
