@@ -21,6 +21,9 @@ test('a shell page that never gets its IPC bridge reports its target, the target
     // The records a busy shell writes after it push the page-load out of the last 60.
     ...Array.from({ length: 80 }, (_, i) => record(10 + i, 'shell.core.health', 'the core answered')),
   ].join('\n') + '\n');
+  // A net log the browser is still writing: no closing bracket yet.
+  const netLog = '{"constants":{},\n"events": [\n{"phase":0,"source":{"id":1,"type":1},"time":"1","type":2},\n';
+  writeFileSync(join(dataDir, 'logs', 'webview-net.json'), netLog);
   const port = await freePort();
   let page: BrowserPage | undefined;
   try {
@@ -38,6 +41,9 @@ test('a shell page that never gets its IPC bridge reports its target, the target
     expect(report).toContain(`Shell ${shell.pid} process tree:`);
     const artifact = readFileSync(join(import.meta.dir, '.artifacts', `shell-${shell.pid}-not-ready.txt`), 'utf8');
     expect(artifact).toBe(report);
+    // The data directory goes with the test; the net log stays beside the report.
+    expect(report).toContain(`Net log: shell-${shell.pid}-webview-net.json, ${netLog.length} bytes`);
+    expect(readFileSync(join(import.meta.dir, '.artifacts', `shell-${shell.pid}-webview-net.json`), 'utf8')).toBe(netLog);
   } finally {
     await page?.close();
     await removeDirectory(dataDir);

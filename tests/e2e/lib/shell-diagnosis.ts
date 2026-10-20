@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, existsSync, fstatSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserPage } from './cdp.ts';
 import { reportOnHang } from './hang-report.ts';
@@ -17,6 +17,8 @@ const WEBVIEW_RECORDS = 40;
 /** How long each devtools question of that report may take: the page may be what hangs. */
 const PROBE_TIMEOUT_MS = 3_000;
 const TARGETS_CHARS = 4_000;
+/** The Chromium net log a test shell's WebView2 writes under `<dataDir>/logs`. */
+const NET_LOG = 'webview-net.json';
 
 /** A hidden shell a test drives: its debugging port, data directory and pid. */
 export interface ShellUnderTest { port: number; dataDir: string; pid: number }
@@ -35,7 +37,7 @@ export interface DiagnosisProbes { processTree?: (shellPid: number) => Promise<s
  * uploads.
  */
 export async function describeShell(dataDir: string, shellPid: number, failure = ''): Promise<string> {
-  const text = await shellReport(dataDir, shellPid);
+  const text = `${await shellReport(dataDir, shellPid)}\n${keepNetLog(dataDir, shellPid)}`;
   writeArtifact(`shell-${shellPid}-diagnosis.txt`, failure === '' ? text : `${failure}\n${text}`);
   return text;
 }
@@ -69,7 +71,7 @@ export async function waitForShellPage(page: BrowserPage, shell: ShellUnderTest,
     const failure = errorText(error);
     const report = await notReadyReport(page, shell, probes.processTree ?? processTree)
       .catch((diagnosisError: unknown) => `The diagnosis failed: ${errorText(diagnosisError)}`);
-    const text = `${failure}\n${report}`;
+    const text = `${failure}\n${report}\n${keepNetLog(shell.dataDir, shell.pid)}`;
     const name = `shell-${shell.pid}-not-ready.txt`;
     let unsaved = '';
     try {
@@ -141,6 +143,26 @@ function writeArtifact(name: string, text: string): void {
   const artifacts = join(import.meta.dir, '..', '.artifacts');
   mkdirSync(artifacts, { recursive: true });
   writeFileSync(join(artifacts, name), text);
+}
+
+/**
+ * Copies the shell's WebView2 net log (`--log-net-log` in `test_browser_args`,
+ * `apps/shell/src-tauri/src/window.rs`) beside the report, since the data
+ * directory goes with the test. The browser is still writing it: the copy
+ * ends without its closing bracket, which `chrome://net-export` viewers accept.
+ */
+function keepNetLog(dataDir: string, shellPid: number): string {
+  const from = join(dataDir, 'logs', NET_LOG);
+  if (!existsSync(from)) return `Net log: none at ${from}`;
+  const name = `shell-${shellPid}-${NET_LOG}`;
+  try {
+    const artifacts = join(import.meta.dir, '..', '.artifacts');
+    mkdirSync(artifacts, { recursive: true });
+    copyFileSync(from, join(artifacts, name));
+    return `Net log: ${name}, ${statSync(from).size} bytes`;
+  } catch (error) {
+    return `Net log: could not keep ${from}: ${errorText(error)}`;
+  }
 }
 
 /** The records of the log's tail, each with its event and printed line; a string says why there are none. */

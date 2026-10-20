@@ -34,8 +34,17 @@ pub(crate) fn test_browser_args() -> Option<String> {
     let value = std::env::var("BOITE_SHELL_DEBUG_PORT").ok()?;
     let port: u16 = value.parse().expect("BOITE_SHELL_DEBUG_PORT must be a port number");
     assert!(port > 0, "BOITE_SHELL_DEBUG_PORT must be greater than zero");
-    Some(format!("--remote-debugging-port={port} --remote-allow-origins=* --mute-audio --use-angle=d3d11"))
+    let mut args = format!("--remote-debugging-port={port} --remote-allow-origins=* --mute-audio --use-angle=d3d11");
+    // What the browser did with a navigation that never committed: the test
+    // that waited for it keeps this file (`tests/e2e/lib/shell-diagnosis.ts`).
+    if let Some(logs) = crate::shell_log::directory() {
+        args.push_str(&format!(" --log-net-log=\"{}\"", logs.join(TEST_NET_LOG).display()));
+    }
+    Some(args)
 }
+
+/// The Chromium net log of a test shell's WebView2, in `<dataDir>/logs`.
+const TEST_NET_LOG: &str = "webview-net.json";
 
 /// The WebView2 profile the main window and every browser surface share. `None`
 /// leaves it to Tauri, which puts it under the app's own local data directory.
@@ -187,6 +196,18 @@ pub(crate) fn build_main_window<R: Runtime>(
             .focused(!hidden())
             .skip_taskbar(hidden())
             .initialization_script(crate::platform::region::script())
+            // The asset protocol answers from its own thread; wry then hands
+            // the answer to WebView2 on the main thread. Logged for the main
+            // document only, after `requested` (`platform/windows_watch.rs`).
+            .on_web_resource_request(|request, response| {
+                let html = response.headers().get(tauri::http::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok()).is_some_and(|value| value.starts_with("text/html"));
+                if html {
+                    let (path, status) = (request.uri().path().to_string(), response.status().as_u16());
+                    crate::shell_log::info("webview", "shell.webview.navigation", format!("the document for {path} is answered, HTTP {status}"),
+                        serde_json::json!({ "phase": "answered", "path": path, "status": status, "bytes": response.body().len() }));
+                }
+            })
             // The browser surfaces belong to the page that asked for them: a
             // reload of the UI takes every child webview with it.
             .on_page_load(|window, payload| {
