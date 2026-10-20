@@ -28,6 +28,7 @@ import {
   type RemoteBrowserUnchanged,
   type RemoteBrowserSelection,
   type RpcParams,
+  type RpcResult,
   type Settings,
   type ThreadId,
   type Turn,
@@ -625,7 +626,7 @@ export class AgentBrowser {
     return this.#remote.remoteWatch(params, connection);
   }
 
-  remoteInput(params: RpcParams<'browser.remoteInput'>, connection: Connection): Promise<{ ok: true }> {
+  remoteInput(params: RpcParams<'browser.remoteInput'>, connection: Connection): Promise<RpcResult<'browser.remoteInput'>> {
     return this.#remote.remoteInput(params, connection);
   }
 

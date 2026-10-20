@@ -187,6 +187,30 @@ real('a viewer on another device watches and drives the tab, and hears it come a
   } finally { phone.close(); }
 }, 150_000);
 
+real('a tap on a <select> answers its options for the viewer to draw, since Chrome draws its own list outside every frame', async () => {
+  const { owner, agent, threadId } = browserFixture;
+  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+  await owner.call('threads.subscribe', { threadId });
+  const frame = await picture(owner.call('browser.remoteFrame', { threadId, tabId }));
+  await evaluate('window.changes = []; document.querySelector("#day").addEventListener("change", e => changes.push(e.target.value))', tabId);
+  // The list spans 100..220 × 420..452 CSS pixels.
+  const on = { x: 160 / frame.width, y: 436 / frame.height, width: frame.width, height: frame.height };
+  const reply = await owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'tap', ...on } });
+  expect(reply.picker).toMatchObject({ selected: 1, options: [{ label: '1' }, { label: '20' }, { label: '21', disabled: true }, { label: '22', hidden: true }, { label: 'Thirty', group: 'Late' }] });
+  const rect = reply.picker!.rect;
+  expect([rect.x * frame.width, rect.y * frame.height, rect.width * frame.width, rect.height * frame.height].map(Math.round)).toEqual([100, 420, 120, 32]);
+  expect(await evaluate('document.activeElement.id', tabId)).toBe('day');
+  await expect(owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'choose', ...on, index: 2, label: '21' } })).rejects.toThrow('option');
+  // A list the page rewrote while the viewer showed it: the option at that index reads otherwise.
+  await evaluate('document.querySelector("#day").options[0].text = "Zero"', tabId);
+  await expect(owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'choose', ...on, index: 0, label: '1' } })).rejects.toThrow('the list changed');
+  await owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'choose', ...on, index: 4, label: 'Thirty' } });
+  expect(await evaluate('[document.querySelector("#day").value, changes.join()]', tabId)).toEqual(['30', '30']);
+  // Anywhere else a tap stays a click.
+  expect(await owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'tap', x: 200 / frame.width, y: 140 / frame.height, width: frame.width, height: frame.height } })).toEqual({ ok: true });
+  expect(await evaluate('document.title', tabId)).toBe('clicked');
+}, 150_000);
+
 real('a viewer of a still page gets no new picture until the page draws, and the frame it holds stays usable', async () => {
   const { owner, agent, threadId } = browserFixture;
   const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
