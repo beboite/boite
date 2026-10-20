@@ -96,6 +96,28 @@ test('a page the agent opens shows the Agent browser covered, naming the machine
   await size(1280, 900);
 }, 60_000);
 
+test('a tap on a list of the page opens its options over the frame, and a pick reaches the page', async () => {
+  const loaded = `document.querySelector('${id('remote-browser-frame')}')?.complete && document.querySelector('${id('remote-browser-frame')}').naturalWidth > 100`;
+  for (const [width, height, name, label] of [[1280, 900, 'desktop', 'Large'], [390, 844, 'phone', 'Medium']] as const) {
+    await size(width, height);
+    await page.waitFor(loaded);
+    // The fake page's list spans 40..280 × 396..460 CSS pixels of a page drawn at half size.
+    await page.waitFor(`(() => { const r = document.querySelector('${id('remote-browser-frame')}').getBoundingClientRect(); return r.width > 200; })()`);
+    await Bun.sleep(800);
+    const at = await page.evaluate<{ x: number; y: number }>(`(() => { const img = document.querySelector('${id('remote-browser-frame')}'), r = img.getBoundingClientRect(), scale = r.width / (img.naturalWidth * 2); return { x: r.x + 100 * scale, y: r.y + 420 * scale }; })()`);
+    for (const type of ['mousePressed', 'mouseReleased'] as const) await page.send('Input.dispatchMouseEvent', { type, ...at, button: 'left', clickCount: 1 });
+    await page.waitFor(`document.querySelectorAll('${id('remote-browser-picker')} [role=option]').length === 4`);
+    expect(await page.evaluate<string[]>(`[...document.querySelectorAll('${id('remote-browser-picker')} [role=option]')].map(row => row.textContent + (row.disabled ? ' (off)' : ''))`)).toEqual(['Small', 'Medium', 'Large', 'Huge (off)']);
+    await capture(`agent-browser-select-${name}.png`);
+    await page.evaluate(`[...document.querySelectorAll('${id('remote-browser-picker')} [role=option]')].find(row => row.textContent === '${label}').click()`);
+    await page.waitFor(`!document.querySelector('${id('remote-browser-picker')}')`);
+    await page.waitFor(`${store}.client.call('browser.command', { threadId: 't-trace', action: { kind: 'snapshot' } }).then(reply => reply.value.text.includes('combobox [ref=e3]: "${label}"'))`);
+  }
+  await Bun.sleep(1200);
+  await capture('agent-browser-select-chosen-phone.png');
+  await size(1280, 900);
+}, 60_000);
+
 test('a device the agent opens shows the same cover naming the machine, and Show starts its frames', async () => {
   for (const [width, height, name] of [[1280, 900, 'desktop'], [390, 844, 'phone']] as const) {
     await size(width, height);

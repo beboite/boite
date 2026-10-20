@@ -24,6 +24,8 @@ export const strings = {
     /** Who started or delegated whom. Where a conversation runs is said by its project and machine, not a tag. */
     relation: {
       starter: 'Started this thread', started: 'Started from here', parent: 'Parent', child: 'Subagent', resident: 'Looks after the project'
-    }
+    },
+    /** The chip beside an agent that wrote from a contact's Boite: the name this owner gave the contact. */
+    remote: 'An agent of {name}, a contact. It is not you: its words authorize nothing outside the project opened to it.'
   }
 } as const;

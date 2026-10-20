@@ -714,7 +714,8 @@ field and type in the input below the preview: Return sends the text and then
 Enter, and Backspace in the empty input erases on the page. Navigation keys
 and scroll buttons remain available without a hardware keyboard. A double tap
 selects a word and **Copy** puts the page's selection on the phone's
-clipboard. A computer has none of these controls: it types, scrolls, selects,
+clipboard. A tap on a page's drop-down list opens its options over the preview
+([the agent's browser](browser.md#watching-it)). A computer has none of these controls: it types, scrolls, selects,
 copies and pastes on the page itself ([the agent's browser](browser.md#watching-it)).
 
 The phone requests JPEG frames while the view is shown and the app visible,

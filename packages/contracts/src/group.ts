@@ -247,4 +247,6 @@ export interface GroupRpcMethods {
 export interface GroupRpcEvents {
   /** The roster changed, or this core joined or left a group: re-read `group.get`. */
   'group.updated': Record<string, never>;
+  /** A contact, a request, a link state or the contact settings changed: re-read `contacts.get`. */
+  'contacts.updated': Record<string, never>;
 }

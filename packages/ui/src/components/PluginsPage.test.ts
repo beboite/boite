@@ -48,7 +48,7 @@ test('each section holds its plugins, every state drawn with what the owner can 
   // Every recommended plugin is installed: the section has nothing to say and is not drawn.
   expect(q('[data-testid="plugins-recommended"]')).toBeNull();
   // A recommended plugin links its source from its name; a URL one shows the repository and commit instead.
-  expect(row('bots')?.querySelector('[data-testid="plugin-home"]')?.getAttribute('href')).toBe('https://github.com/beboite/bots');
+  expect(row('bots')?.querySelector('[data-testid="plugin-home"]')?.getAttribute('href')).toBe('https://github.com/Skollheim/bots');
   expect(row('seat-pool')?.querySelector('[data-testid="plugin-home"]')).toBeNull();
   expect(row('grok-seats')?.querySelector('[data-testid="plugin-progress"]')?.getAttribute('aria-valuenow')).toBe('45');
   expect(row('grok-seats')?.querySelector('[data-testid="plugin-cancel"]')).not.toBeNull();
@@ -228,7 +228,7 @@ test('a recommended plugin with an update source says what it last found, and a 
 
   (bots().querySelector('[data-testid="plugin-check-updates"]') as HTMLElement).click();
   await vi.waitFor(() => expect(bots().querySelector('[data-testid="plugin-update"]')?.textContent).toBe('Update to v0.1.10'));
-  expect(line()).toBe('Found at github.com/beboite/bots, main at 6b2e4d8 · checked now');
+  expect(line()).toBe('Found at github.com/Skollheim/bots, main at 6b2e4d8 · checked now');
   expect(bots().textContent).toContain('Installed · v0.1.10 available');
 
   (bots().querySelector('[data-testid="plugin-update"]') as HTMLElement).click();

@@ -1,0 +1,137 @@
+<script lang="ts">
+  import { onDestroy, tick, untrack } from 'svelte';
+  import { Check, Copy, ExternalLink, Link2, TriangleAlert } from '@lucide/svelte';
+  import { inviteShare } from '../../lib/contact-link';
+  import { copyText, type ContactsView } from '../../lib/contacts.svelte';
+  import { clockTime } from '../../lib/format';
+  import { fill, strings } from '../../lib/strings';
+  import InfoTip from '../InfoTip.svelte';
+  import FingerprintWords from './FingerprintWords.svelte';
+
+  /**
+   * The two ways a contact starts, as two Settings rows. Invite makes a
+   * one-time link and copies it at once; its expiry and how the Tailscale
+   * share went show under the row. Join takes the link another owner sent and
+   * then shows the eight words to compare with them. A link that shares the
+   * inviter through Tailscale, pasted where no API key can accept it, first
+   * offers the share to accept by hand.
+   */
+  let { view }: { view: ContactsView } = $props();
+  const labels = $derived(strings.contacts);
+  const ADMIN = 'https://login.tailscale.com/admin/machines';
+
+  let linkField = $state<HTMLInputElement>();
+  let copied = $state(false);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  onDestroy(() => clearTimeout(timer));
+  async function copy() {
+    if (!view.invite || !(await copyText(view.invite.link, linkField))) return;
+    copied = true;
+    clearTimeout(timer);
+    timer = setTimeout(() => { copied = false; }, 1500);
+  }
+  async function invite() {
+    await view.createInvite();
+    await tick();
+    await copy();
+  }
+  // A new invitation is not the one just copied.
+  $effect(() => { void view.invite; untrack(() => { copied = false; }); });
+
+  let pasted = $state('');
+  const shareStep = $derived(view.state?.tailscale.apiKey === true ? null : inviteShare(pasted));
+  async function join() {
+    const link = pasted.trim();
+    if (!link) return;
+    if (await view.join(link)) pasted = '';
+  }
+</script>
+
+<div class="switch-row">
+  <span class="text">
+    <span class="ui-label-box"><span class="ui-label">{labels.invite.title}</span><InfoTip topic={labels.invite.title} text={labels.invite.tip} /></span>
+  </span>
+  <button type="button" class:primary={!view.invite} disabled={view.isBusy('invite')} onclick={() => void invite()} data-testid="contact-invite-create">
+    <Link2 size={14} /><span class="ui-label">{view.invite ? labels.invite.again : labels.invite.create}</span>
+  </button>
+</div>
+{#if view.invite}
+  {@const made = view.invite}
+  <div class="under" data-testid="contact-invite">
+    <div class="line">
+      <input class="mono link" bind:this={linkField} readonly spellcheck="false" autocomplete="off" aria-label={labels.invite.link} value={made.link}
+        onfocus={event => event.currentTarget.select()} data-testid="contact-invite-link" />
+      <button type="button" onclick={() => void copy()} data-testid="contact-invite-copy">
+        {#if copied}<Check size={14} /><span class="ui-label">{labels.invite.copied}</span>{:else}<Copy size={14} /><span class="ui-label">{labels.invite.copy}</span>{/if}
+      </button>
+    </div>
+    <p class="hint">
+      {fill(labels.invite.expires, { time: clockTime(made.expiresAt) })}
+      {#if made.share.status === 'created'}
+        · <a class="share ok" href={made.share.url} target="_blank" rel="noreferrer" data-testid="contact-invite-share" data-status="created"><Check size={12} strokeWidth={2.25} />{labels.invite.shared}</a>
+      {/if}
+    </p>
+    {#if made.share.status !== 'created'}
+      <p class="manual" data-testid="contact-invite-share" data-status="manual">
+        <TriangleAlert size={14} strokeWidth={2} /><span><strong>{labels.invite.manual}</strong> {made.share.reason}
+        <a href={ADMIN} target="_blank" rel="noreferrer">{labels.invite.openConsole}<ExternalLink size={12} /></a></span>
+      </p>
+    {/if}
+  </div>
+{/if}
+
+<div class="switch-row join-row">
+  <span class="text">
+    <span class="ui-label">{labels.join.title}</span>
+    <span class="hint">{labels.join.tip}</span>
+  </span>
+  {#if !view.joined}
+    <form class="join" onsubmit={event => { event.preventDefault(); void join(); }}>
+      <input class="mono" bind:value={pasted} placeholder={labels.join.placeholder} aria-label={labels.join.label} spellcheck="false" autocomplete="off" data-testid="contact-join-link" />
+      <button type="submit" class="primary" disabled={!pasted.trim() || view.isBusy('join')} data-testid="contact-join">
+        <span class="ui-label">{view.isBusy('join') ? labels.join.joining : labels.join.submit}</span>
+      </button>
+    </form>
+  {/if}
+</div>
+{#if view.joined}
+  {@const joined = view.joined}
+  <div class="under" data-testid="contact-joined">
+    <p class="compare ui-label-box"><span class="ui-label">{fill(labels.join.compare, { name: joined.name })}</span><InfoTip topic={labels.words} text={labels.join.compareTip} /></p>
+    <FingerprintWords fingerprint={joined.fingerprint} testid="contact-joined-words" />
+    <button type="button" class="small done" onclick={() => { view.joined = null; }} data-testid="contact-joined-done">{labels.join.done}</button>
+  </div>
+{:else if shareStep}
+  <!-- Stays while the link does, so it is still there after a join that could not reach the inviter. -->
+  <p class="under step ui-label-box">
+    <a class="manual-step" href={shareStep} target="_blank" rel="noreferrer" data-testid="contact-join-share">{labels.join.acceptShare}</a>
+    <InfoTip topic={labels.join.acceptShare} text={labels.join.acceptShareTip} />
+  </p>
+{/if}
+
+<style>
+  /* What a row made sits under it, before the next row's rule. */
+  .under { display: grid; gap: 8px; padding-bottom: 16px; min-width: 0; animation: rise var(--dur-3) var(--ease-out-quint); }
+  .join-row { border-top: 1px solid var(--color-border); }
+  .line { display: flex; gap: 8px; min-width: 0; }
+  .link { flex: 1; min-width: 0; font-size: var(--text-xs); }
+  .hint { margin: 0; }
+  .share { display: inline-flex; align-items: center; gap: 4px; color: var(--color-success); text-decoration: none; }
+  .manual { display: flex; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid color-mix(in oklch, var(--color-live) 35%, transparent); border-radius: var(--radius-md); background: color-mix(in oklch, var(--color-live) 10%, transparent); color: var(--color-muted-foreground); font-size: var(--text-sm); overflow-wrap: anywhere; }
+  .manual :global(svg) { flex: none; margin-top: 2px; color: var(--color-live); }
+  .manual strong { color: var(--color-foreground); font-weight: 600; }
+  .manual a { display: inline-flex; align-items: center; gap: 4px; color: var(--color-foreground); }
+  .join { display: flex; flex: 0 1 360px; gap: 8px; min-width: 0; }
+  .join input { flex: 1; min-width: 0; font-size: var(--text-sm); }
+  .step { display: flex; align-items: center; gap: 4px; margin: 0; }
+  .manual-step { color: var(--color-live); font-size: var(--text-sm); font-weight: 500; }
+  .compare { display: flex; align-items: center; gap: 4px; margin: 0; font-weight: 600; }
+  .done { justify-self: start; }
+  @media (prefers-reduced-motion: reduce) { .under { animation: none; } }
+  :global(html[data-motion='reduced']) .under { animation: none; }
+  @media (max-width: 720px) {
+    :global(.settings .page) .switch-row { flex-direction: column; align-items: stretch; gap: 12px; }
+    .join { flex: none; flex-direction: column; }
+    .switch-row > button, .join button, .join input, .line button { min-height: var(--touch-target); }
+  }
+</style>

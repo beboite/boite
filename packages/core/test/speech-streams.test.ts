@@ -87,7 +87,9 @@ test('cancelling model load rejects the start and never delivers a late stream',
   const client = await harness.connect();
   const revision = harness.core.speech.status().revision;
   const started = client.call('speech.streamStart', { revision, requestId: 'slow' }).catch(error => error);
-  await waitFor(() => existsSync(join(harness.core.speech.local.root, 'native-requests.jsonl')));
+  // The fixture's append creates the file before it writes the line: wait for the line.
+  const log = join(harness.core.speech.local.root, 'native-requests.jsonl');
+  await waitFor(() => existsSync(log) && readFileSync(log, 'utf8').includes('\n'));
   await client.call('speech.cancel', { requestId: 'slow' });
   expect((await started).message).toContain('cancelled');
   expect(requests().map(request => request.operation)).toEqual(['init']);

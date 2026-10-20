@@ -324,18 +324,18 @@ describe('the update field of a recommended entry', () => {
   };
 
   test('reads a repository and a ref, and an entry without one has no source', () => {
-    expect(parseRecommendedEntry(entry({ repository: 'https://github.com/beboite/bots', ref: 'main' }), 'recommended.json[0]').updates).toEqual({ url: 'https://github.com/beboite/bots', ref: 'main' });
+    expect(parseRecommendedEntry(entry({ repository: 'https://github.com/Skollheim/bots', ref: 'main' }), 'recommended.json[0]').updates).toEqual({ url: 'https://github.com/Skollheim/bots', ref: 'main' });
     expect(parseRecommendedEntry(release('1.0.0'), 'recommended.json[0]').updates).toBeNull();
   });
 
   test('refuses another field, an http or credentialed repository and a ref that is not one', () => {
-    expect(refusal({ repository: 'https://github.com/beboite/bots', ref: 'main', manifest: 'x' }).rejected.field).toBe('updates.manifest');
-    expect(refusal({ repository: 'http://github.com/beboite/bots', ref: 'main' }).rejected.field).toBe('updates.repository');
-    expect(refusal({ repository: 'https://user:pass@github.com/beboite/bots', ref: 'main' }).rejected.field).toBe('updates.repository');
-    expect(refusal({ repository: 'https://github.com/beboite/bots', ref: '--upload-pack=x' }).rejected.field).toBe('updates.ref');
-    expect(refusal({ repository: 'https://github.com/beboite/bots' }).rejected.field).toBe('updates.ref');
-    expect(refusal('https://github.com/beboite/bots').rejected.field).toBe('updates');
+    expect(refusal({ repository: 'https://github.com/Skollheim/bots', ref: 'main', manifest: 'x' }).rejected.field).toBe('updates.manifest');
+    expect(refusal({ repository: 'http://github.com/Skollheim/bots', ref: 'main' }).rejected.field).toBe('updates.repository');
+    expect(refusal({ repository: 'https://user:pass@github.com/Skollheim/bots', ref: 'main' }).rejected.field).toBe('updates.repository');
+    expect(refusal({ repository: 'https://github.com/Skollheim/bots', ref: '--upload-pack=x' }).rejected.field).toBe('updates.ref');
+    expect(refusal({ repository: 'https://github.com/Skollheim/bots' }).rejected.field).toBe('updates.ref');
+    expect(refusal('https://github.com/Skollheim/bots').rejected.field).toBe('updates');
     // A plugin's own manifest may never carry it: the field belongs to Boite's list.
-    expect(() => parseManifest(entry({ repository: 'https://github.com/beboite/bots', ref: 'main' }), PLUGIN_MANIFEST_FILE)).toThrow('updates must be one of');
+    expect(() => parseManifest(entry({ repository: 'https://github.com/Skollheim/bots', ref: 'main' }), PLUGIN_MANIFEST_FILE)).toThrow('updates must be one of');
   });
 });

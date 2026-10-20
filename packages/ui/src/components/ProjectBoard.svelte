@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { MessagesSquare, Play, Plus } from '@lucide/svelte';
   import type { ThreadId, Todo } from '@boite/contracts';
+  import { BOARD_COLUMNS, cardColumn, type BoardColumn } from '../lib/board';
   import { separator, type MenuItem } from '../lib/menu';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -21,8 +22,8 @@
    */
   let { store, threadId, narrow }: { store: Store; threadId: ThreadId; narrow: boolean } = $props();
 
-  type Column = 'todo' | 'doing' | 'review' | 'done';
-  const COLUMNS: Column[] = ['todo', 'doing', 'review', 'done'];
+  type Column = BoardColumn;
+  const COLUMNS = BOARD_COLUMNS;
 
   let projectId = $derived(store.openThread?.projectId ?? null);
   let todos = $derived(projectId ? store.todos[projectId] ?? [] : []);
@@ -41,10 +42,7 @@
   });
 
   function columnOf(todo: Todo): Column {
-    if (starting.includes(todo.id)) return 'doing';
-    if (todo.status === 'done') return 'done';
-    if (todo.status === 'claimed' || todo.goal?.reviewing) return 'review';
-    return todo.goalThreadId ? 'doing' : 'todo';
+    return starting.includes(todo.id) ? 'doing' : cardColumn(todo);
   }
 
   /** In progress with no goal on its conversation: a start cut short, or the goal removed there. */
@@ -237,9 +235,10 @@
 
   .board.pager::-webkit-scrollbar { display: none; }
 
+  /* Four columns fit beside the contacts column on a 1280 px window; narrower, the board scrolls. */
   .column {
     flex: 1 1 0;
-    min-width: 200px;
+    min-width: 168px;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -321,8 +320,10 @@
   }
 
   /* The text that unfolds the checklist reads as the card's text, not as a button. */
+  /* A button keeps its text on one line; a card's wraps like the others. */
   button.text {
     display: block;
+    white-space: normal;
     justify-content: flex-start;
     padding: 0;
     height: auto;

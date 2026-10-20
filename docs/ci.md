@@ -429,6 +429,16 @@ milliseconds: 8 such stalls in 5 of 9 shard runs, against none in 9 on D:, and
 shard in five since 2026-10-10, on `main` as on branches, a different test each
 time. `scripts/ci/e2e-harness.test.ts` keeps both variables on both steps.
 
+The desktop job's native shell E2E step does the same for test shells, whose
+data directory holds their WebView2 profile. WebView2 holds a fresh profile's
+first document request until the profile's cookie database has opened: in 249
+of 250 launches on C: the host got the request within 5 ms of that open ending.
+On C: the request came 1.1 s after the navigation started on average and
+10.4 s at worst, 3 of 250 launches past 5 s; on D: 0.18 s and 0.5 s, none of 150
+past 5 s (run 39417347690). The slow tail left the page on `about:blank` past
+the 15 s bridge wait in five runs, on `main` as on branches (2026-10-19 and
+20). `e2e-harness.test.ts` keeps both variables on that step too.
+
 CI Chromium uses CPU compositing with software GL disabled. Browser launch
 failures retain bounded stderr; exited browsers fail promptly. Navigation waits
 for committed state and asynchronous conditions, reporting page state, JS errors

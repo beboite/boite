@@ -53,6 +53,34 @@ the switch off closes the page if it is open. It hides the page only: agents
 already made keep their routines and missions on the core, which knows nothing
 of a client's experiments.
 
+## Contacts
+
+The contacts column and the Contacts page ([contacts](contacts.md)). On a
+desktop window the contacts stand in a column on the right edge, the thread
+list keeping the left one: one row per contact with its link and what it asks,
+and Add beside the title. A row opens that contact's page in the chat's card,
+between the two lists. The Contacts button at the right end of the title bar
+folds the column, remembered on the device, and shows a dot while a folded
+column hides a request. The right panel leaves the column its width. A phone
+has no right edge: its list shows the contacts as a section under the
+projects, and the menu entry opens the page with no contact picked.
+
+A contact's page shows what it asks, the projects each side shares with the
+other with their read switch, then trust, the eight check words and Remove. With
+no contact picked, the page lists the requests waiting for an answer, with
+Accept on a picked project and Refuse with a reason; decided ones fold under a
+count that says who decided. Invite makes a one-use link, copies it and says
+whether Tailscale shared the machine or why it could not; Join takes a pasted
+link and shows the eight words to compare. The Tailscale row says the policy
+state; Configure unfolds the API key (stored or cleared, never shown back), the
+policy lines to paste when it is open, and the weakest model tier a contact's
+request may run on.
+
+In a thread, a letter the core labelled with a contact shows that contact's
+name in a dashed "remote" chip beside the sender. The chip is drawn whatever
+the switch says: the label comes from the core. Turning the switch off closes
+the Contacts page if it is open; contacts, grants and requests stay on the core.
+
 ## Preview comments
 
 Open a Browser tab in the integrated panel and choose Reference an element.
@@ -305,3 +333,11 @@ press with one subscribe, that a turn streamed during the press is on screen,
 that a released press unsubscribes, and that the agents panel's subscription
 survives. `press-preload.test.ts` (end to end) measures the gain and covers a
 press dragged away.
+
+`fake-client.contacts.test.ts` covers the in-memory core's contacts: the seed,
+the `contacts.updated` event after each change, the refusals with their field,
+the invitation's share with and without a key, and `collaboration.ask`.
+`HomePage.test.ts` renames, trusts and opens a project for reading on the seeded
+contact, accepts a request through the menu, refuses one only with a reason,
+removes the contact behind the confirm, creates and joins an invitation, clears
+the key and moves the tier. `AgentDiscussion.svelte.test.ts` checks the remote chip.

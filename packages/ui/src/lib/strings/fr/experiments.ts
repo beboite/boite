@@ -45,6 +45,10 @@ export const fr: Translation = {
     pressPreload: {
       title: 'Chargement à l’appui',
       hint: 'Une conversation ou une page commence à charger dès que vous appuyez dessus, avant de relâcher le clic ou de lever le doigt'
+    },
+    contacts: {
+      title: 'Contacts',
+      hint: 'Une page Accueil à côté des conversations, où vous reliez votre Boite à celle d\'un autre propriétaire via Tailscale, pour que vos agents et les siens travaillent ensemble sur les projets que chacun ouvre. Pas encore prêt pour un usage quotidien'
     }
   }
 };

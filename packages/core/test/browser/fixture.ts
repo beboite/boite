@@ -14,6 +14,7 @@ const PAGE = `<!doctype html><title>Fixture</title>
 <input id="name" style="position:absolute;left:100px;top:220px">
 <a id="pop" href="#" style="position:absolute;left:100px;top:300px" onclick="window.open('/popup','x','width=400,height=300');return false">Popup</a>
 <p id="words" style="position:absolute;left:100px;top:360px;margin:0;width:400px">Select these words</p>
+<select id="day" style="position:absolute;left:100px;top:420px;width:120px;height:32px"><option>1</option><option selected>20</option><option disabled>21</option><option hidden>22</option><optgroup label="Late"><option value="30">Thirty</option></optgroup></select>
 <script>console.error('boom'); fetch('/missing?token=secret');</script>`;
 
 // agent-browser's commands: refs, a form that navigates, dialogs, a covered element.

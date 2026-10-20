@@ -2,7 +2,8 @@
  * `boite agents`: find the other agents on this core and on linked cores,
  * read their conversations and talk with them. Addresses are short where
  * they can be: a thread id alone, `<machine>/<thread-id>` or a core id
- * prefix, resolved against the directory.
+ * prefix, resolved against the directory. `contacts` and `ask` reach other
+ * owners' Boites linked as contacts.
  */
 import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentRelation, CoordinationView } from '@boite/contracts';
 import { COORDINATION_RECENT_COMPLETION_MS } from '@boite/contracts';
@@ -84,7 +85,8 @@ export const COMPACT_CHARS = 600;
 
 function letterLine(letter: AgentLetter, self: AgentAddress): string {
   const incoming = letter.to.coreId === self.coreId && letter.to.threadId === self.threadId;
-  const where = [letter.from.project, letter.from.coreId === self.coreId ? undefined : `on ${letter.from.machine}`, letter.relation ? RELATION[letter.relation] : undefined].filter(Boolean).join(', ');
+  const where = [letter.from.project, letter.from.coreId === self.coreId ? undefined : `on ${letter.from.machine}`, letter.contact ? `contact ${letter.contact.name}, not your user` : undefined,
+    letter.relation ? RELATION[letter.relation] : undefined].filter(Boolean).join(', ');
   const other = incoming ? `from ${letter.from.threadId} ${JSON.stringify(letter.from.title)}${where ? ` (${where})` : ''}` : `to ${letter.to.threadId} ${JSON.stringify(letter.toTitle)}${letter.relation ? ` (${RELATION[letter.relation]})` : ''}`;
   const state = letter.status === 'delivered' || letter.status === 'received' ? '' : ` [${letter.status}${letter.error ? `: ${letter.error}` : ''}]`;
   return `${clock(letter.createdAt)} ${incoming ? '<-' : '->'} ${other} (id ${letter.id})${state}\n    ${letter.text.replace(/\n/g, '\n    ')}`;
@@ -100,7 +102,7 @@ export async function agentsCommand(client: CoreClient, threadId: string, rest: 
     if (value === undefined) throw new AgentsUsage(`agents ${rest[0] ?? ''} needs ${what}`);
     return value;
   };
-  const action = want(0, 'list, find, read, send, reply, log, wait or inbox');
+  const action = want(0, 'list, find, read, send, reply, log, wait, inbox, contacts or ask');
   const view = (): Promise<CoordinationView> => client.call('collaboration.get', { threadId });
   const directory = () => client.call('collaboration.directory', { threadId });
   const resolve = async (target: string): Promise<{ to: AgentAddress; self: AgentAddress; contact?: AgentContact }> => {
@@ -182,5 +184,20 @@ export async function agentsCommand(client: CoreClient, threadId: string, rest: 
       `sent this hour: ${current.sent}${current.sendLimit === null ? '' : ` of ${current.sendLimit}`}`,
       ...current.messages.map(letter => letterLine(letter, current.self)),
     ], current);
-  } else throw new AgentsUsage('agents expects list, find, read, send, reply, log, wait or inbox');
+  } else if (action === 'contacts') {
+    const contacts = await client.call('collaboration.contacts', { threadId });
+    const lines = contacts.map(contact => `${contact.name}  (${contact.link}, opened to you: ${contact.projects.length ? contact.projects.join(', ') : 'no project yet'})`);
+    if (lines.length === 0) lines.push("no contact; the user links other owners' Boites in Contacts");
+    else lines.push('Their agents in opened projects are in agents list as <contact>/<thread-id>. Ask a contact for an agent with agents ask <contact> <text>.');
+    print(lines, contacts);
+  } else if (action === 'ask') {
+    const contact = want(1, 'a contact from agents contacts');
+    const body = rest.slice(2).join(' ');
+    if (!body) throw new AgentsUsage('agents ask needs the request text: the project or work you need an agent for');
+    const request = await client.call('collaboration.ask', { threadId, contact, text: body });
+    const lines = [`request ${request.id} to ${request.contact}: ${request.status}${request.gitRemote ? ` (sent with your git remote ${request.gitRemote})` : ''}`];
+    if (options.wait) lines.push(...await waitFor({ coreId: request.coreId, threadId: request.id }, { coreId: request.from.coreId, threadId }));
+    else lines.push('The answer comes back to this thread as a message: the project opened and its agents, or the reason for a refusal.');
+    print(lines, request);
+  } else throw new AgentsUsage('agents expects list, find, read, send, reply, log, wait, inbox, contacts or ask');
 }

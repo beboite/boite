@@ -18,6 +18,7 @@ export function experimentCopy(): Record<ExperimentId, { title: string; hint: st
     goal2: strings.experiments.goal2,
     whip: strings.experiments.whip,
     'edge-scrollbars': strings.experiments.edgeScrollbars,
-    'press-preload': strings.experiments.pressPreload
+    'press-preload': strings.experiments.pressPreload,
+    contacts: strings.experiments.contacts
   };
 }

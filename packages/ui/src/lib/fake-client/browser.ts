@@ -1,6 +1,6 @@
 import { browserActionError, browserCookiesError, browserProfileIdError, browserProfilesOf, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
 import { refusal } from './shared';
-import { fakeBrowserScreen, type FakePage } from './browser-screen';
+import { FAKE_SELECT, fakeBrowserScreen, type FakePage } from './browser-screen';
 import type { FakeContext, FakeMethods } from './context';
 
 type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteSelection' | 'browser.remoteStatus' | 'browser.remoteWatch' | 'browser.hostAttach' | 'browser.hostDetach' | 'browser.hostReply';
@@ -108,7 +108,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       }
       case 'navigate': go(browser, tab, action.url); browser.active = tab.tabId; changed(threadId); return { tabId: tab.tabId, url: tab.url, title: tab.title };
       // The core's snapshot format, agent-browser's: one line per node, refs on what can be acted on.
-      case 'snapshot': return { tabId: tab.tabId, url: tab.url, title: tab.title, value: { url: tab.url, title: tab.title, refs: 2, text: [`- heading ${JSON.stringify(tab.title)} [ref=e1] [level=1]`, `- text: Taps: ${tab.taps}`, `- textbox [ref=e2]: ${JSON.stringify(tab.text)}`].join('\n') } };
+      case 'snapshot': return { tabId: tab.tabId, url: tab.url, title: tab.title, value: { url: tab.url, title: tab.title, refs: 3, text: [`- heading ${JSON.stringify(tab.title)} [ref=e1] [level=1]`, `- text: Taps: ${tab.taps}`, `- textbox [ref=e2]: ${JSON.stringify(tab.text)}`, `- combobox [ref=e3]: ${JSON.stringify(tab.choice ?? FAKE_SELECT.options[0]!.label)}`].join('\n') } };
       case 'activate': browser.active = tab.tabId; changed(threadId); return { tabId: tab.tabId, url: tab.url, title: tab.title, value: { ok: true } };
       case 'screenshot': return { tabId: tab.tabId, screenshot: { mime: 'image/png', base64: PIXEL_PNG } };
       case 'click': tab.taps++; return reply();
@@ -171,7 +171,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       if (Date.now() - browser.requestedAt < 220) throw refusal('wait before requesting another browser frame');
       browser.requestedAt = Date.now();
       // What the page shows, as `fakeBrowserScreen` draws it.
-      const drawn = JSON.stringify([tab.url, tab.title, tab.width, tab.height, tab.taps, tab.text, tab.scrollY]);
+      const drawn = JSON.stringify([tab.url, tab.title, tab.width, tab.height, tab.taps, tab.text, tab.scrollY, tab.choice ?? null]);
       // The page drew nothing new since the frame the viewer shows: it keeps it, still valid for input. The core waits a second first.
       const held = after === undefined ? undefined : browser.frames.find(one => one.id === after && one.tabId === tab.tabId && Date.now() - one.taken < 5000);
       if (held && held.drawn === drawn) { held.taken = Date.now(); return { unchanged: true, id: held.id, tabId: tab.tabId, at: Date.now(), waitedMs: 0 }; }
@@ -187,7 +187,22 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       const frame = browser?.frames.find(one => one.id === frameId && Date.now() - one.taken < 5000);
       const tab = frame && browser?.tabs.find(one => one.tabId === frame.tabId);
       if (!browser || !frame || !tab) throw refusal('the page changed; refresh the live browser before interacting');
-      if ((input.kind === 'tap' || input.kind === 'drag') && (input.width !== frame.width || input.height !== frame.height)) throw refusal('the browser viewport changed; refresh before tapping');
+      if ((input.kind === 'tap' || input.kind === 'drag' || input.kind === 'choose') && (input.width !== frame.width || input.height !== frame.height)) throw refusal('the browser viewport changed; refresh before tapping');
+      // As the core: a plain tap on the page's list answers its options instead of clicking.
+      const onSelect = (x: number, y: number) => {
+        const px = x * tab.width, py = y * tab.height + tab.scrollY;
+        return px >= FAKE_SELECT.x && px <= FAKE_SELECT.x + FAKE_SELECT.width && py >= FAKE_SELECT.y && py <= FAKE_SELECT.y + FAKE_SELECT.height;
+      };
+      if (input.kind === 'tap' && (input.count ?? 1) === 1 && !input.shift && onSelect(input.x, input.y)) {
+        const rect = { x: FAKE_SELECT.x / tab.width, y: (FAKE_SELECT.y - tab.scrollY) / tab.height, width: FAKE_SELECT.width / tab.width, height: FAKE_SELECT.height / tab.height };
+        return { ok: true, picker: { selected: Math.max(0, FAKE_SELECT.options.findIndex(option => option.label === tab.choice)), options: FAKE_SELECT.options, rect } };
+      }
+      if (input.kind === 'choose') {
+        const option = FAKE_SELECT.options[input.index];
+        if (!onSelect(input.x, input.y) || !option || 'disabled' in option || option.label !== input.label) throw refusal('that option cannot be chosen: the list changed or the option is disabled');
+        tab.choice = option.label;
+        return { ok: true };
+      }
       const type = (text: string) => { tab.text = (tab.selected ? '' : tab.text) + text; tab.selected = false; };
       switch (input.kind) {
         case 'tap': tab.taps++; tab.selected = (input.count ?? 1) > 1 || input.shift === true; break;

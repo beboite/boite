@@ -7,6 +7,7 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
+  import RemoteChip from './RemoteChip.svelte';
 
   /**
    * One discussion, back and forth, the way this thread's chat reads: its own
@@ -142,6 +143,7 @@
     <div class="who">
       <strong data-testid="agent-discussion-heading" tabindex="-1">{discussion.title}</strong>
       <span class="facts">
+        {#if discussion.contact}<RemoteChip name={discussion.contact} />{/if}
         {#if tag}<span class="tag" class:resident={discussion.resident} data-relation={tag}>{strings.agentMessages.relation[tag]}</span>{/if}
         {#if where}<span class="where" data-testid="agent-discussion-where">{where}</span>{/if}
         {#if discussion.model}<span class="model">{discussion.model}</span>{/if}

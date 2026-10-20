@@ -1,5 +1,6 @@
-import type { AgentContact, AgentMatch, AgentTranscriptEntry, Message, MessagePart } from '@boite/contracts';
+import type { AgentContact, AgentMatch, AgentTranscriptEntry, CoordinationPeer, Message, MessagePart } from '@boite/contracts';
 import type { Database } from 'bun:sqlite';
+import { address, text } from './coordination-letter.ts';
 import { invalidParams } from './errors.ts';
 
 /** At most this many words in a search; each costs one scan of the candidates' chat. */
@@ -130,4 +131,21 @@ export function checkMatchExtras(value: { matched?: unknown; excerpts?: unknown 
   if (!Array.isArray(value.matched) || value.matched.some(field => !allowed.includes(field as Field))) throw invalidParams('match.matched: expected field names');
   if (!Array.isArray(value.excerpts) || value.excerpts.length > 3 || value.excerpts.some(text => typeof text !== 'string' || text.length > 400)) throw invalidParams('match.excerpts: expected up to three short excerpts');
   return { matched: [...new Set(value.matched as Field[])], excerpts: value.excerpts as string[] };
+}
+
+/** An agent another core listed, kept to the fields and sizes this core shows, named after the machine it came from. */
+export function checkRemoteContact(contact: AgentContact, peer: CoordinationPeer): AgentContact {
+  if (!contact || contact.coreId !== peer.coreId || !['brief', 'team'].includes(contact.mode) || !['idle', 'queued', 'running', 'waiting', 'error'].includes(contact.status)) throw invalidParams('agent: invalid remote contact');
+  const optional = (value: unknown) => typeof value === 'string' && value.length <= 200 ? value : undefined;
+  const project = optional(contact.project);
+  const agent = optional(contact.agent);
+  const branch = optional(contact.branch);
+  return {
+    ...address(contact, 'agent'), title: text(contact.title, 'agent.title', 200), machine: peer.name, resources: typeof contact.resources === 'string' && contact.resources.length <= 500 ? contact.resources : '', status: contact.status, mode: contact.mode,
+    ...(project === undefined ? {} : { project }), ...(agent === undefined ? {} : { agent }),
+    ...(branch === undefined ? {} : { branch }), ...(Number.isSafeInteger(contact.activeAt) ? { activeAt: contact.activeAt } : {}),
+    ...(contact.lastCompletedAt === null || Number.isSafeInteger(contact.lastCompletedAt) && contact.lastCompletedAt! >= 0 ? { lastCompletedAt: contact.lastCompletedAt } : {}),
+    ...(typeof contact.projectArchived === 'boolean' ? { projectArchived: contact.projectArchived } : {}),
+    ...(typeof contact.paused === 'boolean' ? { paused: contact.paused } : {}),
+  };
 }

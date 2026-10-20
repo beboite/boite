@@ -33,6 +33,55 @@ export const PAGE_INFO_SCRIPT = '({width:innerWidth,height:innerHeight,title:doc
 
 export const KEY_CODES = { Enter: 13, Tab: 9, Escape: 27, Backspace: 8, ArrowDown: 40, ArrowUp: 38 } as const;
 
+/** The enabled single-choice `<select>` at a point of the viewport, through open shadow roots, or null. */
+const SELECT_AT = `(x, y) => {
+  let e = document.elementFromPoint(x, y);
+  for (let i = 0; i < 20 && e?.shadowRoot; i++) { const inner = e.shadowRoot.elementFromPoint(x, y); if (!inner || inner === e) break; e = inner; }
+  e = e?.closest?.('select') ?? null;
+  return e && !e.multiple && e.size <= 1 && !e.matches(':disabled') ? e : null;
+}`;
+
+/** An option's label as a viewer reads it: spaces folded, at most `REMOTE_PICKER_LABEL_MAX` characters. */
+const LABEL_OF = `o => String(o.label || o.text || '').replace(/\\s+/g, ' ').trim().slice(0, 200)`;
+
+/**
+ * The `<select>` at a point, focused as a click would, with its options for a
+ * viewer to draw: Chrome draws the list in a window of its own that no frame shows.
+ * Null where there is none, and the tap stays a click.
+ */
+export const pickerScript = (x: number, y: number, max: number) => `(() => {
+  const e = (${SELECT_AT})(${x}, ${y});
+  if (!e) return null;
+  e.focus();
+  const clip = s => String(s ?? '').replace(/\\s+/g, ' ').trim().slice(0, 200), unit = n => Math.max(0, Math.min(1, n));
+  const options = Array.from(e.options).slice(0, ${max}).map(o => {
+    const item = { label: (${LABEL_OF})(o) }, group = o.parentElement?.tagName === 'OPTGROUP' ? o.parentElement : null;
+    if (o.disabled || group?.disabled) item.disabled = true;
+    if (o.hidden) item.hidden = true;
+    if (group) item.group = clip(group.label);
+    return item;
+  });
+  const r = e.getBoundingClientRect();
+  return { selected: e.selectedIndex, options, rect: { x: unit(r.left / innerWidth), y: unit(r.top / innerHeight), width: unit(r.width / innerWidth), height: unit(r.height / innerHeight) } };
+})()`;
+
+/**
+ * Chooses option `index` of the `<select>` at a point as a person would: the page
+ * hears input and change. False when there is no such option to choose, or when
+ * it no longer reads `label`: the list changed since the viewer drew it.
+ */
+export const chooseScript = (x: number, y: number, index: number, label: string) => `(() => {
+  const e = (${SELECT_AT})(${x}, ${y}), o = e?.options[${index}];
+  if (!o || o.disabled || o.hidden || o.parentElement?.disabled || (${LABEL_OF})(o) !== ${JSON.stringify(label)}) return false;
+  e.focus();
+  if (e.selectedIndex !== ${index}) {
+    e.selectedIndex = ${index};
+    e.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    e.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  return true;
+})()`;
+
 /** Resolves once the page's viewport has held one size for two frames, and returns it: a resize is not instant. */
 export const SETTLED_VIEWPORT_SCRIPT = `(async () => {
   let seen = '';

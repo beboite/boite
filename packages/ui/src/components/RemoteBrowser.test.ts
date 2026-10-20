@@ -225,6 +225,41 @@ test('a drag scrolls continuously from where the finger started; a short touch t
   expect(inputs).toEqual([{ kind: 'tap', x: 197 / 390, y: 151 / 300, width: 780, height: 600 }]);
 });
 
+test('a tap on a <select> draws its list here, since Chrome draws its own on the agent’s machine, and a pick goes back as choose', async () => {
+  client = new FakeClient({ delayMs: 0, principal: 'session' }); store = new Store(); store.attach(client); await store.connect();
+  const original = client.call.bind(client), inputs: any[] = [];
+  const picker = { selected: 1, rect: { x: 0.1, y: 0.2, width: 0.3, height: 0.05 }, options: [{ label: '1' }, { label: '20' }, { label: '21', disabled: true }, { label: '22', hidden: true }, { label: 'Thirty', group: 'Late' }] };
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: any) => {
+    if (method === 'browser.remoteFrame') return Promise.resolve(frameAt('f'));
+    if (method === 'browser.remoteInput') { inputs.push(params.input); return Promise.resolve(params.input.kind === 'tap' ? { ok: true, picker } : { ok: true }); }
+    return original(method as never, params as never);
+  }) as typeof client.call);
+  Object.defineProperty(Element.prototype, 'setPointerCapture', { configurable: true, value: () => {} });
+  vi.spyOn(HTMLImageElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 390, height: 300, right: 390, bottom: 300, x: 0, y: 0, toJSON() {} } as DOMRect);
+  vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 390, height: 300, right: 390, bottom: 300, x: 0, y: 0, toJSON() {} } as DOMRect);
+  vi.useFakeTimers();
+  app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
+  await vi.advanceTimersByTimeAsync(1); await settle();
+  const screen = document.querySelector<HTMLButtonElement>('.screen')!;
+  const tap = (x: number, y: number) => { for (const type of ['pointerdown', 'pointerup']) screen.dispatchEvent(new MouseEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true })); };
+  tap(80, 67); await settle();
+  const list = document.querySelector<HTMLElement>('[data-testid=remote-browser-picker]')!;
+  // Under its field: 0.25 of 300 px, plus the gap.
+  expect([list.style.left, list.style.top, list.style.width]).toEqual(['39px', '77px', '160px']);
+  const rows = [...list.querySelectorAll<HTMLButtonElement>('[role=option]')];
+  expect(rows.map(row => [row.textContent, row.getAttribute('aria-selected'), row.disabled])).toEqual([['1', 'false', false], ['20', 'true', false], ['21', 'false', true], ['Thirty', 'false', false]]);
+  expect(list.querySelector('.group')!.textContent).toBe('Late');
+  rows[3]!.click(); await settle();
+  expect(inputs).toEqual([{ kind: 'tap', x: 80 / 390, y: 67 / 300, width: 780, height: 600 }, { kind: 'choose', x: 80 / 390, y: 67 / 300, width: 780, height: 600, index: 4, label: 'Thirty' }]);
+  expect(document.querySelector('[data-testid=remote-browser-picker]')).toBeNull();
+  // A tap elsewhere on the page closes an open list without choosing.
+  tap(80, 67); await settle();
+  expect(document.querySelector('[data-testid=remote-browser-picker]')).not.toBeNull();
+  screen.dispatchEvent(new MouseEvent('pointerdown', { clientX: 300, clientY: 250, button: 0, bubbles: true })); await settle();
+  expect(document.querySelector('[data-testid=remote-browser-picker]')).toBeNull();
+  expect(inputs.filter(input => input.kind === 'choose')).toHaveLength(1);
+});
+
 test('a still page is polled slowly, and a phone back from the background resumes at once', async () => {
   client = new FakeClient({ delayMs: 0, principal: 'session' }); store = new Store(); store.attach(client); await store.connect();
   const original = client.call.bind(client), requests: number[] = [];

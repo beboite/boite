@@ -631,9 +631,15 @@ WMI listing it replaced gave nothing within 10 s on a loaded runner. A
 missing `main-window` startup phase means the main webview was never built; a
 phase with no `shell.webview.page-load` means the page never started loading.
 The shell logs each main-page navigation as `shell.webview.navigation`: the URL
-the page was on when the watch began, each navigation's start and URL, whether
-its content is an error page, and how it ended (WebView2's `WebErrorStatus`
-and the HTTP status).
+the page was on when the watch began, each navigation's start and URL, when its
+document request reached the host (`requested`) and when the asset protocol
+answered it (`answered`), whether its content is an error page, and how it
+ended (WebView2's `WebErrorStatus` and the HTTP status). A test shell also
+writes WebView2's Chromium net log to `logs/webview-net.json`; a failed attach
+or bridge wait copies it to `tests/e2e/.artifacts/shell-<pid>-webview-net.json`.
+Between `starting` and `requested`, look for `COOKIE_PERSISTENT_STORE_LOAD`
+(the profile's cookie database, which holds the first request until it has
+opened) and `PAC_FILE_DECIDER` (proxy auto-detection).
 A page that is exposed but never gets its IPC bridge fails in
 `waitForShellPage` with its frame tree, its navigation history and each
 main-frame navigation event and document request devtools saw since the

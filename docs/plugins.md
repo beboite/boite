@@ -15,8 +15,8 @@ only when they hold a plugin:
   from, its pools and its errors.
 - Recommended: the plugins Boite ships a manifest for and that are not
   installed yet, in the order Boite lists them. Today that is
-  [Bots](https://github.com/beboite/bots), the desktop companion, and
-  [Douane](https://github.com/beboite/douane), the subscription gateway. A row there
+  [Bots](https://github.com/Skollheim/bots), the desktop companion, and
+  [Douane](https://github.com/mtsu-dev/douane), the subscription gateway. A row there
   carries the name, version, a link to the source, the description and
   Install, with no state line.
 - Add from a git URL: any repository with a `boite-plugin.json` at its root.
@@ -151,7 +151,7 @@ command exits. One login change runs at a time across all plugins.
 ## Desktop apps
 
 A plugin that provides `desktopApp` is a program with a window of its own,
-such as [Bots](https://github.com/beboite/bots). Boite starts it and keeps it
+such as [Bots](https://github.com/Skollheim/bots). Boite starts it and keeps it
 running; the app then talks to the core like any client.
 
 ```json
@@ -161,10 +161,10 @@ running; the app then talks to the core like any client.
   "name": "Bots",
   "version": "0.1.0",
   "description": "Little robots on your desktop, one for each agent at work.",
-  "homepage": "https://github.com/beboite/bots",
+  "homepage": "https://github.com/Skollheim/bots",
   "executable": "bots",
   "artifacts": {
-    "win32-x64": { "url": "https://github.com/beboite/bots/releases/download/v0.1.0/bots.exe", "sha256": "…" }
+    "win32-x64": { "url": "https://github.com/Skollheim/bots/releases/download/v0.1.0/bots.exe", "sha256": "…" }
   },
   "provides": { "desktopApp": {} }
 }
@@ -277,7 +277,7 @@ calls it is refused, and neither receives it.
 ## Gateways
 
 A plugin that provides `gateway` is a subscription gateway speaking Douane's
-runtime contract, such as [Douane](https://github.com/beboite/douane). Boite
+runtime contract, such as [Douane](https://github.com/mtsu-dev/douane). Boite
 runs it in the background; the subscription proxy's local mode points at it
 ([providers](providers.md#douane-on-this-machine)).
 
@@ -430,7 +430,7 @@ A recommended entry may name an update source, so a plugin release reaches
 installed copies without a Boite release:
 
 ```json
-"updates": { "repository": "https://github.com/beboite/bots", "ref": "main" }
+"updates": { "repository": "https://github.com/Skollheim/bots", "ref": "main" }
 ```
 
 The field sits in Boite's reviewed list only. A plugin's own

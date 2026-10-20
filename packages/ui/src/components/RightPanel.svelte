@@ -10,7 +10,8 @@
   import type { ControlId } from '../lib/work-prefs.svelte';
   import { separator } from '../lib/menu';
   import { closeTabs } from '../lib/panel-close';
-  import { rightPanel } from '../lib/right-panel.svelte';
+  import { innerWidth } from 'svelte/reactivity/window';
+  import { clampPanel, panelSibling, rightPanel } from '../lib/right-panel.svelte';
   import type { BoundPanel, Surface, SurfaceKind } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -46,6 +47,12 @@
   } = $props();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  /**
+   * The docked width: the one asked for, within the room the chat keeps once
+   * the thread list and the contacts column take theirs. The asked width stays
+   * stored for when the room comes back.
+   */
+  const docked = $derived(clampPanel(rightPanel.width, innerWidth.current ?? window.innerWidth, panelSibling(store, innerWidth.current ?? window.innerWidth)));
   /** The new-surface menu's last row, which no surface kind can be called. */
   const CUSTOMIZE = 'customize';
 
@@ -269,7 +276,7 @@
   class:dragging
   class:closing
   class:entered
-  style="--panel-width: {rightPanel.width}px"
+  style="--panel-width: {docked}px"
   data-testid="right-panel"
   bind:this={root}
   use:attach
