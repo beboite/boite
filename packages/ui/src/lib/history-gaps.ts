@@ -1,5 +1,5 @@
 import type { Message, MessageId } from '@boite/contracts';
-import { ESTIMATE } from './message-window';
+import { ESTIMATE, atOrBefore } from './message-window';
 import type { TimelineRow } from './timeline-rows';
 import type { MissingStretch } from './store/message-positions.svelte';
 
@@ -191,6 +191,20 @@ export function wantedRange(total: number[], gaps: readonly GapAt[], top: number
  * page lands before its gap reaches the screen.
  */
 export const READ_AHEAD = 3;
+
+/**
+ * How many of the newest `messages` draw a row within `reach` of the bottom of
+ * `rows`, whose tops `total` holds: what the live end keeps (`releaseOlder`),
+ * so the history it lets go of is never on screen or about to be read.
+ */
+export function heldNear(total: number[], rows: readonly TimelineRow[], messages: readonly Message[], reach: number): number {
+  const at = new Map(messages.map((message, index) => [message.id, index]));
+  let oldest = messages.length;
+  for (let row = atOrBefore(total, rows.length, (total[rows.length] ?? 0) - reach); row < rows.length; row += 1) {
+    oldest = Math.min(oldest, at.get(rows[row]!.message.id) ?? oldest);
+  }
+  return messages.length - oldest;
+}
 
 /**
  * Asks for a range a frame after the view moved, with what the view is by
