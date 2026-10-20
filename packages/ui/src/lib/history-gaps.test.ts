@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { Message } from '@boite/contracts';
-import { RangeAsk, gapHeight, loadKeepingReader, rowOnScreen, wantedRange, withGaps } from './history-gaps';
+import { RangeAsk, gapHeight, heldNear, loadKeepingReader, rowOnScreen, wantedRange, withGaps } from './history-gaps';
 import { TimelineRows } from './timeline-rows';
 import { ESTIMATE } from './message-window';
 
@@ -104,6 +104,20 @@ describe('history gaps', () => {
     const rows = new TimelineRows().build([held[0]!, held[2]!]);
     const gaps = new Map([['m-20', { from: 11, count: 9 }], ['m-30', { from: 21, count: 9 }]]);
     expect(withGaps(rows, held, gaps).rows.map((row) => row.id)).toEqual(['m-10', 'gap:11:9', 'gap:21:9', 'm-30']);
+  });
+
+  test('the live end keeps what is drawn near the bottom, the files moved after an answer and the views it draws', () => {
+    const turn = (item: Message) => ({ ...item, turnId: 'turn' });
+    // A view published early in a long turn, the song, then the answer that draws the view in its text.
+    const view = turn(message('m-view', 1, 'assistant'));
+    const song = turn(message('m-song', 30, 'assistant'));
+    const answer = turn(message('m-answer', 31, 'assistant'));
+    const messages = [view, ...Array.from({ length: 28 }, (_, at) => turn(message(`m-${at + 2}`, at + 2, 'assistant'))), song, answer];
+    // The timeline draws the song after the answer, and the view inside it: neither has its row where it was published.
+    const rows = new TimelineRows().build([...messages.slice(1, -2), answer, song]);
+    const total = rows.map((_, at) => at * ESTIMATE).concat(rows.length * ESTIMATE);
+    expect(heldNear(total, rows, messages, 2 * ESTIMATE, new Map())).toBe(2);
+    expect(heldNear(total, rows, messages, 2 * ESTIMATE, new Map([['turn', [view]]]))).toBe(messages.length);
   });
 
   test('a page landing above the reader moves the view by what the row drifted on screen, and only then', async () => {

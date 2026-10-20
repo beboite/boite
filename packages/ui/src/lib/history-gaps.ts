@@ -194,15 +194,21 @@ export const READ_AHEAD = 3;
 
 /**
  * How many of the newest `messages` draw a row within `reach` of the bottom of
- * `rows`, whose tops `total` holds: what the live end keeps (`releaseOlder`),
- * so the history it lets go of is never on screen or about to be read.
+ * `rows`, whose tops `total` holds, or a view one of those rows' turns placed
+ * (`views` by turn: an answer draws it inline, with no row of its own): what
+ * the live end keeps (`releaseOlder`), so the history it lets go of is never
+ * on screen or about to be read.
  */
-export function heldNear(total: number[], rows: readonly TimelineRow[], messages: readonly Message[], reach: number): number {
+export function heldNear(total: number[], rows: readonly TimelineRow[], messages: readonly Message[], reach: number, views: ReadonlyMap<string, readonly Message[]>): number {
   const at = new Map(messages.map((message, index) => [message.id, index]));
+  const turns = new Set<string>();
   let oldest = messages.length;
   for (let row = atOrBefore(total, rows.length, (total[rows.length] ?? 0) - reach); row < rows.length; row += 1) {
-    oldest = Math.min(oldest, at.get(rows[row]!.message.id) ?? oldest);
+    const message = rows[row]!.message;
+    oldest = Math.min(oldest, at.get(message.id) ?? oldest);
+    turns.add(message.turnId);
   }
+  for (const turn of turns) for (const view of views.get(turn) ?? []) oldest = Math.min(oldest, at.get(view.id) ?? oldest);
   return messages.length - oldest;
 }
 
