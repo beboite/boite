@@ -382,7 +382,18 @@ test('one invitation groups two real cores: the page connects the second by itse
     await page.evaluate(`document.querySelector('${id('main-machine')}').scrollIntoView({ block: 'center' })`);
     await capture('main-machine-phone.png');
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    // The removal below can reach the second machine before the reloaded page read its group (run 39299531333):
+    // it closes the phone's socket, and the hello it refuses next is all the page hears of it, saying it is in no
+    // group. That read is held a second and a half here, so the removal lands before it each run.
+    const { identifier: held } = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `{
+      const send = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        if (new URL(this.url).host !== ${JSON.stringify(new URL(second.url).host)} || typeof data !== 'string' || !data.includes('"method":"group.get"')) return send.call(this, data);
+        setTimeout(() => { if (this.readyState === WebSocket.OPEN) send.call(this, data); }, 1500);
+      };
+    }` }) as { identifier: string };
     await page.reload();
+    await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: held });
     await page.waitFor(`${machines(2)} && globalThis.__boiteTest.workspace.active.endpointUrl === ${JSON.stringify(awake.url)}`, 20_000);
 
     // Removed from the group: the second machine leaves, drops the phone's key, and the page lets it go.
@@ -390,7 +401,7 @@ test('one invitation groups two real cores: the page connects the second by itse
       const [workspace, firstGroup, secondGroup, sessions] = await Promise.all([
         page.evaluate(`globalThis.__boiteTest.workspace.machines.map(machine => ({ id: machine.id, coreId: machine.coreId,
           groupId: machine.groupId, connection: machine.store.connection, booted: machine.store.booted,
-          groupKnown: machine.store.groupKnown, group: machine.store.group?.id,
+          groupKnown: machine.store.groupKnown, ungrouped: machine.store.ungrouped, group: machine.store.group?.id,
           members: machine.store.group?.cores.map(core => core.coreId) }))`),
         a.call('group.get', {}), b.call('group.get', {}), b.call('sessions.list', {})
       ]);
@@ -405,6 +416,7 @@ test('one invitation groups two real cores: the page connects the second by itse
       console.error('Group removal state:', JSON.stringify(await removalState().catch(() => 'group diagnostics unavailable')));
       throw error;
     }
+    // The page lets it go on its own word, which it says once it heard of its removal: it is out of the group by then.
     expect(await b.call('group.get', {})).toBeNull();
     expect((await b.call('sessions.list', {})).filter((session) => session.group)).toEqual([]);
     await page.send('Emulation.clearDeviceMetricsOverride', {});

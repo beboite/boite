@@ -106,6 +106,32 @@ export interface DeviceHello {
 }
 
 /**
+ * What a machine in no group signs to tell a device so: the machine and the
+ * nonce of the device's hello. Said once, for that hello only.
+ */
+export function ungroupedInput(coreId: string, nonce: string): string {
+  return `boite-group-ungrouped
+${coreId}
+${nonce}`;
+}
+
+/**
+ * The `data` of the Unavailable error a machine in no group answers a device's
+ * signed hello with: removed or gone, its key opens nothing there, which is the
+ * machine's own word that it is in no group, as a `group.get` answering null.
+ * Signed with its key, so another machine at its address cannot say it in its
+ * place. It says nothing of any other machine. A core older than it says only
+ * "come back"; so does one joining a group, which may know the device.
+ */
+export interface UngroupedData {
+  reason: 'ungrouped';
+  /** The machine's key, SPKI PEM: its `coreId` is the SHA-256 of this text. */
+  publicKey: string;
+  /** Ed25519 over `ungroupedInput(coreId, nonce)`, base64. */
+  sig: string;
+}
+
+/**
  * What a machine pastes to join. It names the group, the member that minted
  * it, that member's addresses and key fingerprint, and a one-time grant good
  * until `expiresAt`. It is a credential: whoever holds it joins.

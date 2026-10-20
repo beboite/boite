@@ -39,11 +39,6 @@
       "file": "tests/e2e/drafts-overlays.test.ts",
       "test": "drafts survive reload and composer menus stay above the chrome",
       "reason": "failed 5 first attempts that passed on rerun, 2026-10-16 to 10-18"
-    },
-    {
-      "file": "tests/e2e/machines.test.ts",
-      "test": "one invitation groups two real cores: the page connects the second by itself, and a paired phone reaches both",
-      "reason": "failed 4 first attempts that passed on rerun, 2026-10-16 to 10-18"
     }
   ]
 }

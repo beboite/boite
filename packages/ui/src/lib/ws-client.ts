@@ -1,10 +1,10 @@
 // Owns the WebSocket client lifecycle, authentication and reconnect state.
 import { secureId } from './secure-id';
 import { RELEASE_VERSION } from './release';
-import type { DeviceKey } from './device-key';
+import { signedUngrouped, type DeviceKey } from './device-key';
 import {
   PROTOCOL_VERSION, RPC_MAX_FRAME_BYTES, RpcCloseCode, RpcErrorCode,
-  type ClientName, type CoreInfo, type DeviceHello, type Principal,
+  type ClientName, type CoreInfo, type DeviceHello, type Principal, type UngroupedData,
   type RpcEventName, type RpcMethodName, type RpcParams, type RpcResult, type ThreadId
 } from '@boite/contracts';
 import type { CallOptions, ClientState, EventHandler, ObservableClient, Session, SocketLike, WsClientOptions } from './client';
@@ -16,7 +16,7 @@ import {
 } from './ws-client-utils';
 
 export class WsClient implements ObservableClient {
-  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'device' | 'grant' | 'ticket' | 'paired' | 'relay' | 'signer' | 'onDevice' | 'onSession' | 'onRevoked' | 'onUnauthorized'>> & {
+  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'device' | 'grant' | 'ticket' | 'paired' | 'relay' | 'signer' | 'onDevice' | 'onSession' | 'onRevoked' | 'onUnauthorized' | 'onUngrouped'>> & {
     clientName: ClientName;
     version: string;
     device: () => string | null;
@@ -39,6 +39,7 @@ export class WsClient implements ObservableClient {
   #onSession: ((session: Session) => unknown) | null;
   #onRevoked: (() => void) | null;
   #onUnauthorized: ((error: RpcFailure) => void) | null;
+  #onUngrouped: (() => void) | null;
   #principal: Principal | null = null;
   #socket: SocketLike | null = null;
   #state: ClientState = 'idle';
@@ -87,6 +88,7 @@ export class WsClient implements ObservableClient {
     this.#onSession = options.onSession ?? null;
     this.#onRevoked = options.onRevoked ?? null;
     this.#onUnauthorized = options.onUnauthorized ?? null;
+    this.#onUngrouped = options.onUngrouped ?? null;
     this.#remote = !isLoopbackUrl(options.url);
   }
 
@@ -316,7 +318,10 @@ export class WsClient implements ObservableClient {
           socket.close();
           return;
         }
-        this.#send(socket, 'hello', { ...this.#helloParams(), ...(relay === null ? {} : { relay }) }).then(
+        const hello = this.#helloParams();
+        // The machine this hello is signed for, and its nonce: what a refusal saying it is in no group must be signed over.
+        const meant = hello.device !== undefined && 'nonce' in hello.device ? { coreId: signer?.coreId ?? null, nonce: hello.device.nonce } : null;
+        this.#send(socket, 'hello', { ...hello, ...(relay === null ? {} : { relay }) }).then(
           (result) => {
             if (result.core.protocolVersion !== PROTOCOL_VERSION) {
               this.#manuallyClosed = true;
@@ -391,6 +396,11 @@ export class WsClient implements ObservableClient {
               (error instanceof RpcFailure &&
                 (error.code === RpcErrorCode.InvalidParams || (grant !== null && error.code === RpcErrorCode.Unauthorized)));
             if (error instanceof RpcFailure && error.code === RpcErrorCode.Unauthorized) this.#onUnauthorized?.(error);
+            // Out of every group, the machine says so under its key: tried again all the same, as a group that lets it in
+            // again tells it of this device. Unsigned, or signed by another machine, it is heard as "come back".
+            if (error instanceof RpcFailure && error.code === RpcErrorCode.Unavailable && (error.data as Partial<UngroupedData> | undefined)?.reason === 'ungrouped' && meant?.coreId) {
+              void signedUngrouped(meant.coreId, meant.nonce, error.data).then((said) => { if (said && this.#state !== 'ready') this.#onUngrouped?.(); });
+            }
             if (permanent) this.close();
             else socket.close();
             if (revoked) this.#onRevoked?.();
