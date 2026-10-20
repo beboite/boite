@@ -538,7 +538,7 @@ export class PluginStore {
       await rm(kept, { force: true });
       return;
     }
-    if (await this.gateways.launch(id)) {
+    if (await this.gateways.launch(id, false)) {
       await rm(kept, { force: true });
       return;
     }
