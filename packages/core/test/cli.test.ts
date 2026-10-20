@@ -8,6 +8,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { TurnResult } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 let threadId: string;
@@ -429,13 +430,13 @@ test('skipping async questions neither steers running work nor starts a later tu
       }
       const { questionId } = await client.call('questions.ask', { threadId, text: 'Deploy now?', options: ['Yes', 'No'] });
       const other = await echoThread(harness, client, 'Other thread');
-      await expect(client.call('questions.skip', { threadId: other.threadId, questionId })).rejects.toThrow('another thread');
+      expect(await thrown(client.call('questions.skip', { threadId: other.threadId, questionId }))).toThrow('another thread');
       expect(await client.call('questions.list', { threadId })).toHaveLength(1);
       const answered = client.next('question.answered', event => event.questionId === questionId);
       await client.call('questions.skip', { threadId, questionId });
       expect((await answered).answer).toBeNull();
       expect(await client.call('questions.list', { threadId })).toEqual([]);
-      await expect(client.call('questions.skip', { threadId, questionId })).rejects.toThrow('unknown question');
+      expect(await thrown(client.call('questions.skip', { threadId, questionId }))).toThrow('unknown question');
       expect(harness.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
       expect(harness.core.threads.require(threadId).status).toBe(active ? 'running' : 'idle');
       expect(harness.core.journal.listMessages(threadId).filter(message => message.role === 'user')).toHaveLength(1);
@@ -522,9 +523,7 @@ describe('settings', () => {
     expect(card?.setting).toEqual({ kind: 'change', key: 'agentCpuCapPercent', value: 60, previous: 75, page: 'resources', section: 'limits', sensitive: false });
     expect((await boite(['settings', 'request', 'agentCpuCapPercent', '50', '--why', 'again'])).err).toContain('already open');
     // Applied is the core's to say: an answer cannot claim it.
-    // Caught by hand: with `expect(...).rejects`, the next call crashed Bun 1.4.2 on Windows every time.
-    const claimed = await client.call('questions.answer', { threadId, questionId, optionIds: ['applied'] }).then(() => null, (error: unknown) => error);
-    expect(claimed instanceof Error ? claimed.message : String(claimed)).toContain('does not offer');
+    expect(await thrown(client.call('questions.answer', { threadId, questionId, optionIds: ['applied'] }))).toThrow('does not offer');
 
     const next = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
     await client.call('settings.set', { agentCpuCapPercent: 60 });

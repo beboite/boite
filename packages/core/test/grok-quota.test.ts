@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { Account } from '@boite/contracts';
 import type { Core } from '../src/core.ts';
 import { readExtraQuota } from '../src/quota-readers.ts';
+import { thrown } from './settle.ts';
 
 const scope = 'https://auth.x.ai::fixture-client';
 const billing = 'https://cli-chat-proxy.grok.com/v1/billing?format=credits';
@@ -110,12 +111,12 @@ test('Grok stops after one rejected retry and does not refresh subscription acce
     ? Response.json({ access_token: 'fixture-renewed-access', expires_in: 3600 })
     : new Response(null, { status }));
   await save({ [scope]: fresh });
-  await expect(readExtraQuota(core, account)).rejects.toThrow('login expired or has no subscription access');
+  expect(await thrown(readExtraQuota(core, account))).toThrow('login expired or has no subscription access');
   expect(fetcher).toHaveBeenCalledTimes(3);
   fetcher.mockClear();
   status = 403;
   await save({ [scope]: fresh });
-  await expect(readExtraQuota(core, account)).rejects.toThrow('login expired or has no subscription access');
+  expect(await thrown(readExtraQuota(core, account))).toThrow('login expired or has no subscription access');
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
@@ -127,7 +128,7 @@ test('Grok refuses missing, malformed and foreign refresh credentials without se
     { ...expired, expires_at: 'invalid' },
   ]) {
     await save({ [scope]: login });
-    await expect(readExtraQuota(core, account)).rejects.toThrow('Grok login');
+    expect(await thrown(readExtraQuota(core, account))).toThrow('Grok login');
   }
   expect(fetcher).not.toHaveBeenCalled();
 });

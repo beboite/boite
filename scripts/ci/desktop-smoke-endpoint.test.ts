@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startupSeconds, waitForCoreEndpoint } from './desktop-smoke-endpoint.ts';
+import { thrown } from '../../packages/core/test/settle.ts';
 
 describe('desktop smoke endpoint', () => {
   const directories: string[] = [];
@@ -18,19 +19,19 @@ describe('desktop smoke endpoint', () => {
     setTimeout(() => writeFileSync(file, '{"pid":0,"port":70000,"token":""}'), 50);
     setTimeout(() => writeFileSync(file, '{"pid":123,"port":456,"token":"secret"}'), 150);
 
-    await expect(waitForCoreEndpoint(file, {
+    expect(await waitForCoreEndpoint(file, {
       deadline: Date.now() + 1_000,
       seconds: 1,
       exitCode: () => null,
-    })).resolves.toEqual({ pid: 123, port: 456, token: 'secret' });
+    })).toEqual({ pid: 123, port: 456, token: 'secret' });
   });
 
   test('fails as soon as the shell exits', async () => {
-    await expect(waitForCoreEndpoint('missing-core.json', {
+    expect(await thrown(waitForCoreEndpoint('missing-core.json', {
       deadline: Date.now() + 30_000,
       seconds: 30,
       exitCode: () => 17,
-    })).rejects.toThrow('Shell exited with 17');
+    }))).toThrow('Shell exited with 17');
   });
 
   test('keeps the startup deadline while the endpoint is incomplete', async () => {
@@ -39,11 +40,11 @@ describe('desktop smoke endpoint', () => {
     const file = join(directory, 'core.json');
     writeFileSync(file, '{"pid":123,');
 
-    await expect(waitForCoreEndpoint(file, {
+    expect(await thrown(waitForCoreEndpoint(file, {
       deadline: Date.now() - 1,
       seconds: 90,
       exitCode: () => null,
-    })).rejects.toThrow('within 90 seconds');
+    }))).toThrow('within 90 seconds');
   });
 
   test('the startup budget is 30 s unless the environment names a positive number', () => {

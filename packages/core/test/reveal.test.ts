@@ -2,6 +2,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 import { afterEach, expect, test } from 'bun:test';
 import type { UiRevealTarget } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 afterEach(async () => {
@@ -63,18 +64,18 @@ test('a machine the core does not know, or a malformed coreId, is refused by its
   const { threadId } = await echoThread(a, owner);
   const stranger = linkedPeer().coreId;
 
-  await expect(owner.call('ui.reveal', { target: { kind: 'thread', threadId, coreId: stranger } })).rejects.toThrow(`target.coreId ${stranger} is not this core's id, a machine of its group or a machine trusted for coordination`);
-  await expect(owner.call('ui.reveal', { target: { kind: 'agent', agentId: 'agent-1', coreId: stranger } })).rejects.toThrow('is not this core\'s id');
-  await expect(owner.call('ui.reveal', { target: { kind: 'agent', agentId: 'agent-1', coreId: 'laptop' } })).rejects.toThrow('target.coreId must be');
-  await expect(owner.call('ui.reveal', { target: { kind: 'thread', threadId, coreId: null } as never })).rejects.toThrow('target.coreId must be');
+  expect(await thrown(owner.call('ui.reveal', { target: { kind: 'thread', threadId, coreId: stranger } }))).toThrow(`target.coreId ${stranger} is not this core's id, a machine of its group or a machine trusted for coordination`);
+  expect(await thrown(owner.call('ui.reveal', { target: { kind: 'agent', agentId: 'agent-1', coreId: stranger } }))).toThrow('is not this core\'s id');
+  expect(await thrown(owner.call('ui.reveal', { target: { kind: 'agent', agentId: 'agent-1', coreId: 'laptop' } }))).toThrow('target.coreId must be');
+  expect(await thrown(owner.call('ui.reveal', { target: { kind: 'thread', threadId, coreId: null } as never }))).toThrow('target.coreId must be');
   // Without a coreId, the thread must still be this core's.
-  await expect(owner.call('ui.reveal', { target: { kind: 'thread', threadId: 'thr_on_b' } })).rejects.toThrow('is not a thread of this core');
+  expect(await thrown(owner.call('ui.reveal', { target: { kind: 'thread', threadId: 'thr_on_b' } }))).toThrow('is not a thread of this core');
 
   // A link the owner removes no longer counts.
   const linked = linkedPeer();
   a.core.coordination.trust(linked);
   expect(await owner.call('ui.reveal', { target: { kind: 'thread', threadId: 'thr_x', coreId: linked.coreId } })).toEqual({ delivered: 1 });
-  await expect(owner.call('ui.reveal', { target: { kind: 'thread', threadId: '', coreId: linked.coreId } })).rejects.toThrow('target.threadId must be 1 to 200 characters');
+  expect(await thrown(owner.call('ui.reveal', { target: { kind: 'thread', threadId: '', coreId: linked.coreId } }))).toThrow('target.threadId must be 1 to 200 characters');
   a.core.coordination.untrust(linked.coreId);
-  await expect(owner.call('ui.reveal', { target: { kind: 'thread', threadId: 'thr_x', coreId: linked.coreId } })).rejects.toThrow('is not this core\'s id');
+  expect(await thrown(owner.call('ui.reveal', { target: { kind: 'thread', threadId: 'thr_x', coreId: linked.coreId } }))).toThrow('is not this core\'s id');
 }, 30_000);

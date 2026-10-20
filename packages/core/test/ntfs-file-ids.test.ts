@@ -13,6 +13,7 @@ import { openDataDir } from '../src/server-update/restore.ts';
 import { buildView } from '../src/views.ts';
 import { existingInside, openChecked } from '../src/workdir.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
+import { thrown } from './settle.ts';
 
 /*
  * Two files whose NTFS ids are one apart, past 2^53, as a Windows runner
@@ -134,8 +135,8 @@ test('a work file swapped for another between its check and its opening is refus
   stats('statSync', path => path === join(cwd, 'a.txt') ? A : undefined);
   handlesRead(B);
   const found = existingInside(cwd, 'a.txt', 'file', 'files.read path');
-  await expect(openChecked(found.real, fs.constants.O_RDONLY, found.stats.dev, found.stats.ino, 'files.read path', 'a.txt'))
-    .rejects.toThrow('files.read path changed while it was opened');
+  expect(await thrown(openChecked(found.real, fs.constants.O_RDONLY, found.stats.dev, found.stats.ino, 'files.read path', 'a.txt')))
+    .toThrow('files.read path changed while it was opened');
 });
 
 test('a file a view embeds, swapped for another as it is opened, is not embedded', () => {
@@ -160,6 +161,6 @@ test('a file swapped for another as it is published is refused', async () => {
     fs.writeFileSync(path, '%PDF-1.4\nreport');
     stats('statSync', named => named === path ? A : undefined);
     handlesRead(B);
-    await expect(publishArtifact(harness.core, { threadId, path: 'report.pdf' })).rejects.toThrow('artifacts.publish path changed while opening');
+    expect(await thrown(publishArtifact(harness.core, { threadId, path: 'report.pdf' }))).toThrow('artifacts.publish path changed while opening');
   } finally { await harness.stop(); }
 });

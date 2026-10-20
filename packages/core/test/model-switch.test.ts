@@ -8,6 +8,7 @@ import { continuationInput } from '../src/continuation.ts';
 import { Journal } from '../src/journal.ts';
 import { join } from 'node:path';
 import { holdAccountTurns, echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let h: TestCore;
 let restore: (() => void) | undefined;
@@ -150,7 +151,7 @@ test('on-demand model discovery cannot overwrite another client selection while 
     await waitFor(() => reads === 1);
     const chosen = await other.call('threads.update', { threadId, permissionMode: 'acceptEdits', expectedSelectionVersion: 0 });
     expect(chosen.selectionVersion).toBe(1);
-    await expect(other.call('threads.update', { threadId, model: 'another', expectedSelectionVersion: 0 })).rejects.toThrow('selection changed');
+    expect(await thrown(other.call('threads.update', { threadId, model: 'another', expectedSelectionVersion: 0 }))).toThrow('selection changed');
     expect(reads).toBe(1);
     gate.resolve([{ id: 'discovered', name: 'Discovered', effort: { levels: [{ id: 'high', label: 'High' }], default: 'high' } }]);
     expect(String(await observed)).toContain('selection changed');

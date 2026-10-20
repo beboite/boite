@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test';
 import { BrowserPage } from './lib/cdp.ts';
+import { thrown } from '../../packages/core/test/settle.ts';
 
 test('a browser that exits before opening CDP reports its exit and stderr promptly', async () => {
   const started = performance.now();
   // Bun rejects Chromium's switches and exits without opening the debugging port.
-  await expect(BrowserPage.launch({ executable: process.execPath, url: 'about:blank' }))
-    .rejects.toThrow(/browser exited.*code 1[\s\S]*stderr:/);
+  expect(await thrown(BrowserPage.launch({ executable: process.execPath, url: 'about:blank' })))
+    .toThrow(/browser exited.*code 1[\s\S]*stderr:/);
   expect(performance.now() - started).toBeLessThan(5_000);
 }, 45_000);
 
@@ -34,7 +35,7 @@ test('browser waits for asynchronous conditions and the requested navigation', a
         return { pixel: Array.from(context.getImageData(0, 0, 1, 1).data), webgl: document.createElement('canvas').getContext('webgl') !== null };
       })()`)).toEqual({ pixel: [19, 43, 71, 255], webgl: false });
     }
-    await expect(page.waitFor('Promise.resolve(false)', 100)).rejects.toThrow('waitFor timed out');
+    expect(await thrown(page.waitFor('Promise.resolve(false)', 100))).toThrow('waitFor timed out');
     await page.waitFor('Promise.resolve(true)', 100);
     await page.navigate(`${server.url}next`);
     expect(await page.evaluate('document.title')).toBe('/next');

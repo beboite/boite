@@ -12,6 +12,7 @@ import { attestedTier, modelTier } from '../src/contacts/tier.ts';
 import { fingerprintWords, WORDS } from '../src/contacts/words.ts';
 import { newToken } from '../src/ids.ts';
 import { removeDir } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const dirs: string[] = [];
 afterEach(async () => { for (const dir of dirs.splice(0)) await removeDir(dir); });
@@ -139,7 +140,7 @@ test('the Tailscale client: the key stays in its 600 file, calls reach api.tails
   let answer: (url: string) => Response = () => new Response('{}');
   const client = new TailscaleClient(dir, async (url, init) => { calls.push({ url, init }); return answer(url); });
   expect(client.hasKey()).toBe(false);
-  await expect(client.policy()).rejects.toThrow('no Tailscale API key stored');
+  expect(await thrown(client.policy())).toThrow('no Tailscale API key stored');
   expect(() => client.setKey('not-a-key')).toThrow('key: expected a Tailscale API key starting with tskey-');
   const key = 'tskey-api-k123456789-ABCDEFGHIJ';
   client.setKey(key);
@@ -151,11 +152,11 @@ test('the Tailscale client: the key stays in its 600 file, calls reach api.tails
     { nodeId: 'nStudio', name: 'Studio.tail1234.ts.net.', addresses: ['100.101.102.103'], tags: ['tag:boite'] },
   ] });
   expect(await client.device('100.101.102.103')).toEqual({ id: 'nStudio', name: 'studio.tail1234.ts.net', addresses: ['100.101.102.103'], tags: ['tag:boite'] });
-  await expect(client.device('100.64.0.1')).rejects.toThrow('not among the tailnet');
+  expect(await thrown(client.device('100.64.0.1'))).toThrow('not among the tailnet');
   answer = () => Response.json([{ inviteUrl: 'https://login.tailscale.com/admin/invite/xyz' }]);
   expect(await client.createShare('nStudio')).toBe('https://login.tailscale.com/admin/invite/xyz');
   answer = () => Response.json([{ inviteUrl: 'https://evil.example/' }]);
-  await expect(client.createShare('nStudio')).rejects.toThrow('no share link');
+  expect(await thrown(client.createShare('nStudio'))).toThrow('no share link');
   answer = () => new Response('', { status: 200 });
   await client.acceptShare('https://login.tailscale.com/admin/invite/abc');
   answer = () => new Response('denied', { status: 403 });

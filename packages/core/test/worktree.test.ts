@@ -7,6 +7,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
+import { rejection, thrown } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
@@ -64,7 +65,7 @@ describe('a thread in its own worktree', () => {
     const base = { projectId: project.id, providerId: 'echo', accountId: await echoAccount() };
     const branch = 'feature/' + 'a'.repeat(41);
     const before = await client.call('threads.list', {});
-    await expect(client.call('threads.create', { ...base, worktree: { branch } })).rejects.toMatchObject({
+    expect((await rejection(client.call('threads.create', { ...base, worktree: { branch } }))).reason).toMatchObject({
       rpc: { data: { field: 'branch', maxLength: 48, actualLength: 49, expected: 'at most 48 characters' } },
     });
     expect(await client.call('threads.list', {})).toEqual(before);
@@ -326,13 +327,13 @@ describe('a thread in its own worktree', () => {
     expect(named.branchNamingPending).toBe(false);
     expect(named.cwd).toBe(join(worktreeRoot(project.path), 'feature-retry'));
 
-    await expect(client.call('threads.create', { ...base, worktree: { branch: 'feature/retry' } })).rejects.toThrow(
+    expect(await thrown(client.call('threads.create', { ...base, worktree: { branch: 'feature/retry' } }))).toThrow(
       'branch feature/retry already exists',
     );
-    await expect(client.call('threads.create', { ...base, worktree: { branch: 'two words' } })).rejects.toThrow(
+    expect(await thrown(client.call('threads.create', { ...base, worktree: { branch: 'two words' } }))).toThrow(
       'not a branch name',
     );
-    await expect(client.call('threads.create', { ...base, cwd: project.path, worktree: {} })).rejects.toThrow(
+    expect(await thrown(client.call('threads.create', { ...base, cwd: project.path, worktree: {} }))).toThrow(
       'cwd and worktree exclude each other',
     );
   });
@@ -342,9 +343,7 @@ describe('a thread in its own worktree', () => {
     mkdirSync(path, { recursive: true });
     const project = await client.call('projects.add', { path, name: 'plain' });
     const accountId = await echoAccount();
-    await expect(
-      client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'x', worktree: {} }),
-    ).rejects.toThrow(`${path} is not a git repository`);
+    expect(await thrown(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'x', worktree: {} }))).toThrow(`${path} is not a git repository`);
     expect(await client.call('threads.list', {})).toHaveLength(0);
     expect(existsSync(worktreeRoot(path))).toBe(false);
   });
@@ -369,16 +368,14 @@ describe('a thread in its own worktree', () => {
     const accountId = await echoAccount();
     // The check used to run after `git worktree add`, so a typo in the model
     // left a branch and a directory behind with no thread pointing at them.
-    await expect(
-      client.call('threads.create', {
+    expect(await thrown(client.call('threads.create', {
         projectId: project.id,
         providerId: 'echo',
         accountId,
         title: 'Fix the login',
         model: 'no-such-model',
         worktree: {},
-      }),
-    ).rejects.toThrow('the provider does not offer this model');
+      }))).toThrow('the provider does not offer this model');
     expect(existsSync(worktreeRoot(project.path))).toBe(false);
     expect(git(project.path, 'branch', '--list', 'boite/fix-the-login').trim()).toBe('');
     expect(await client.call('threads.list', {})).toHaveLength(0);

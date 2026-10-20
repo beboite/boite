@@ -14,6 +14,7 @@ import { compareVersions, inside, readVersion } from '../src/providers/updates.t
 import type { ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { holdAccountTurns, echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const FAKE = fileURLToPath(new URL('./fixtures/update-agent.ts', import.meta.url));
 
@@ -210,7 +211,7 @@ describe('harness updates', () => {
     expect(readFileSync(state, 'utf8')).toBe('1.2.0');
 
     // Nothing newer is left, and the refusal says so.
-    await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/already on its newest known version/);
+    expect(await thrown(client.call('providers.update', { providerId: 'update-fake' }))).toThrow(/already on its newest known version/);
 
     // Every run of the agent went through the process registry.
     const trace = await client.call('trace.get', { threadId: 'update:update-fake' });
@@ -804,7 +805,7 @@ describe('harness updates', () => {
     expect(harness!.core.updates.updating('update-fake')).toBe(true);
     const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
     await checked;
-    await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/already updating/);
+    expect(await thrown(client.call('providers.update', { providerId: 'update-fake' }))).toThrow(/already updating/);
     writeFileSync(`${state}.go`, '');
     const updated = only(await changed);
     await waitFor(() => harness?.core.journal.getTurn(turn.id)?.status === 'done', 20000);
@@ -850,8 +851,8 @@ describe('harness updates', () => {
       expect((await client.call('core.updateStatus', { refresh: true })).phase).toBe('available');
 
       // Bad requests are refused by field before anything starts.
-      await expect(client.call('core.updateEverything', { agents: 'update-fake' as never, server: null })).rejects.toThrow(/agents/);
-      await expect(client.call('core.updateEverything', { agents: [], server: 7 as never })).rejects.toThrow(/server/);
+      expect(await thrown(client.call('core.updateEverything', { agents: 'update-fake' as never, server: null }))).toThrow(/agents/);
+      expect(await thrown(client.call('core.updateEverything', { agents: [], server: 7 as never }))).toThrow(/server/);
 
       // The registry read after the updater is the moment no process of the update runs:
       // held here, it is the gap an idle restart would slip into.
@@ -903,7 +904,7 @@ describe('harness updates', () => {
     updates.close();
     release();
     await checked;
-    await expect(update).rejects.toThrow('stopping');
+    expect(await thrown(update)).toThrow('stopping');
     expect(readFileSync(state, 'utf8')).toBe('1.0.0');
   });
 

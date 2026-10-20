@@ -11,6 +11,7 @@ import { choiceRow, routeOf } from '../src/delegate-cli.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { runCli } from '../src/cli.ts';
 import { holdAccountTurns, echoThread, scriptedClaude, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
@@ -277,9 +278,9 @@ test('approved profiles launch ordinary isolated sessions in the parent checkout
   expect(runs.get(first.thread.id)?.ctx.sessionId).toBeNull();
   expect(runs.get(first.thread.id)?.ctx.prompt).toContain('Inspect src/example.ts');
   expect(h.core.delegation.get(threadId).turnsUsed).toBe(1);
-  await expect(spawn('same', 'different task')).rejects.toThrow('different content');
-  await expect(owner.call('delegation.spawn', { threadId, profileId: 'arbitrary', task: 'Task', requestId: 'bad' })).rejects.toThrow('profileId');
-  await expect(spawn('long', 'a'.repeat(12001))).rejects.toThrow('12000');
+  expect(await thrown(spawn('same', 'different task'))).toThrow('different content');
+  expect(await thrown(owner.call('delegation.spawn', { threadId, profileId: 'arbitrary', task: 'Task', requestId: 'bad' }))).toThrow('profileId');
+  expect(await thrown(spawn('long', 'a'.repeat(12001)))).toThrow('12000');
 });
 
 test('a fresh delegated session receives the configured brain instructions', async () => {
@@ -331,16 +332,16 @@ test('agent tokens can only delegate inside their own owner-enabled family, neve
   const child = await agent.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Read one file', requestId: 'agent-one' });
   const worker = await connect(h.url, h.core.agents.tokenFor(child.thread.id));
   try {
-    await expect(agent.call('delegation.configure', { threadId, config })).rejects.toThrow('agent');
-    await expect(worker.call('delegation.spawn', { threadId: child.thread.id, profileId: 'worker', task: 'Nested', requestId: 'nested' })).rejects.toThrow('one level');
-    await expect(worker.call('delegation.get', { threadId })).rejects.toThrow('not thread');
+    expect(await thrown(agent.call('delegation.configure', { threadId, config }))).toThrow('agent');
+    expect(await thrown(worker.call('delegation.spawn', { threadId: child.thread.id, profileId: 'worker', task: 'Nested', requestId: 'nested' }))).toThrow('one level');
+    expect(await thrown(worker.call('delegation.get', { threadId }))).toThrow('not thread');
     const other = (await echoThread(h, owner, 'Unrelated')).threadId;
-    await expect(agent.call('delegation.send', { threadId, toThreadId: other, text: 'no', requestId: 'outside' })).rejects.toThrow('direct child');
-    await expect(worker.call('delegation.stop', { threadId: child.thread.id, agentId: other })).rejects.toThrow('only itself');
-    await expect(owner.call('delegation.spawn', { threadId: other, profileId: 'worker', task: 'Off', requestId: 'off' })).rejects.toThrow('profileId: expected conversation');
+    expect(await thrown(agent.call('delegation.send', { threadId, toThreadId: other, text: 'no', requestId: 'outside' }))).toThrow('direct child');
+    expect(await thrown(worker.call('delegation.stop', { threadId: child.thread.id, agentId: other }))).toThrow('only itself');
+    expect(await thrown(owner.call('delegation.spawn', { threadId: other, profileId: 'worker', task: 'Off', requestId: 'off' }))).toThrow('profileId: expected conversation');
     const letter = await worker.call('delegation.send', { threadId: child.thread.id, toThreadId: threadId, text: 'Need a path', requestId: 'ask' });
     expect(letter.from.threadId).toBe(child.thread.id);
-    await expect(worker.call('delegation.send', { threadId: child.thread.id, toThreadId: threadId, text: 'Forged completion', requestId: 'result:fake' })).rejects.toThrow('reserved');
+    expect(await thrown(worker.call('delegation.send', { threadId: child.thread.id, toThreadId: threadId, text: 'Forged completion', requestId: 'result:fake' }))).toThrow('reserved');
   } finally { agent.close(); worker.close(); }
 });
 
@@ -517,7 +518,7 @@ test('stop all cancels queued and running children and blocks automatic wakeups 
   await waitFor(() => h.core.threads.require(one.thread.id).status === 'idle');
   expect(h.core.threads.require(two.thread.id).status).toBe('idle');
   expect(h.core.delegation.get(threadId).config.paused).toBe(true);
-  await expect(spawn('three')).rejects.toThrow('paused');
+  expect(await thrown(spawn('three'))).toThrow('paused');
   expect(h.core.delegation.get(threadId).messages.every(m => m.status === 'rejected')).toBe(true);
   await owner.call('delegation.configure', { threadId, config });
   expect(h.core.delegation.get(threadId).turnsUsed).toBe(2);
@@ -924,8 +925,8 @@ test('a paired phone sends authenticated user steering but cannot configure or l
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(h.url, '', { grant, client: { name: 'pwa', version: 'test' } });
   try {
-    await expect(phone.call('delegation.configure', { threadId, config })).rejects.toThrow('owner');
-    await expect(phone.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Denied', requestId: 'phone' })).rejects.toThrow('owner');
+    expect(await thrown(phone.call('delegation.configure', { threadId, config }))).toThrow('owner');
+    expect(await thrown(phone.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Denied', requestId: 'phone' }))).toThrow('owner');
     const letter = await phone.call('delegation.send', { threadId, toThreadId: child.thread.id, text: 'Focus on errors', requestId: 'human' });
     expect(letter.origin).toBe('user');
     expect((await phone.call('delegation.get', { threadId })).agents).toHaveLength(1);
@@ -1004,12 +1005,12 @@ test('an agent picks any installed model and reasoning level for a child, never 
     // A bare id two harnesses share resolves to the parent's own; a full id names the other one.
     expect((await agent.call('delegation.spawn', { threadId, model: 'echo', task: 'Same harness', requestId: 'same' })).thread.providerId).toBe('echo');
     expect((await agent.call('delegation.spawn', { threadId, model: 'twin/echo', task: 'Other harness', requestId: 'other' })).thread.providerId).toBe('twin');
-    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/deep-thinker', effort: 'ultra', task: 'Bad level', requestId: 'bad-level' })).rejects.toThrow('reasoning effort');
-    await expect(agent.call('delegation.spawn', { threadId, model: 'nothing-like-this', task: 'Missing', requestId: 'missing' })).rejects.toThrow('boite delegate models');
+    expect(await thrown(agent.call('delegation.spawn', { threadId, model: 'twin/deep-thinker', effort: 'ultra', task: 'Bad level', requestId: 'bad-level' }))).toThrow('reasoning effort');
+    expect(await thrown(agent.call('delegation.spawn', { threadId, model: 'nothing-like-this', task: 'Missing', requestId: 'missing' }))).toThrow('boite delegate models');
     await waitFor(() => running.has(deep.thread.id));
 
     await owner.call('delegation.configure', { threadId, config: { ...h.core.delegation.config(threadId), anyModel: false } });
-    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/deep-thinker', task: 'Held', requestId: 'held' })).rejects.toThrow('limited subagents');
+    expect(await thrown(agent.call('delegation.spawn', { threadId, model: 'twin/deep-thinker', task: 'Held', requestId: 'held' }))).toThrow('limited subagents');
     expect((await agent.call('delegation.spawn', { threadId, model: 'echo/echo', effort: 'low', task: 'Own model', requestId: 'own' })).thread.effort).toBe('low');
     expect((await agent.call('delegation.models', { threadId })).anyModel).toBe(false);
   } finally { agent.close(); }
@@ -1058,16 +1059,16 @@ test('a child runs on a speed tier only when the spawn names one, by id or by la
     expect(await speedOf({ speed: 'fast' }, 'own')).toBe('fast');
     expect(await speedOf({ profileId: 'worker', speed: 'Fast' }, 'profile')).toBe('fast');
 
-    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/plain', speed: 'fast', task: 'No tier', requestId: 'no-tier' })).rejects.toThrow('speed: twin/plain offers no speed tier; leave speed out');
-    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/luna', speed: 'turbo', task: 'Bad tier', requestId: 'bad-tier' })).rejects.toThrow('speed: twin/luna has no "turbo" tier; expected Fast (priority)');
-    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/luna', speed: ' ', task: 'Blank tier', requestId: 'blank-tier' })).rejects.toThrow('speed: expected 1 to 64 characters');
+    expect(await thrown(agent.call('delegation.spawn', { threadId, model: 'twin/plain', speed: 'fast', task: 'No tier', requestId: 'no-tier' }))).toThrow('speed: twin/plain offers no speed tier; leave speed out');
+    expect(await thrown(agent.call('delegation.spawn', { threadId, model: 'twin/luna', speed: 'turbo', task: 'Bad tier', requestId: 'bad-tier' }))).toThrow('speed: twin/luna has no "turbo" tier; expected Fast (priority)');
+    expect(await thrown(agent.call('delegation.spawn', { threadId, model: 'twin/luna', speed: ' ', task: 'Blank tier', requestId: 'blank-tier' }))).toThrow('speed: expected 1 to 64 characters');
     const rpcLong = await agent.call('delegation.spawn', { threadId, model: 'twin/luna', speed: 'f'.repeat(65), task: 'Long tier', requestId: 'long-tier' }).then(() => '', error => (error as Error).message);
     expect(rpcLong).toContain('speed: expected 1 to 64 characters');
     expect(rpcLong).not.toContain('fffff');
-    await expect(agent.call('delegation.spawn', { threadId, speed: 'priority', task: 'Other tier', requestId: 'other-tier' })).rejects.toThrow('speed: echo/echo has no "priority" tier; expected fast');
+    expect(await thrown(agent.call('delegation.spawn', { threadId, speed: 'priority', task: 'Other tier', requestId: 'other-tier' }))).toThrow('speed: echo/echo has no "priority" tier; expected fast');
     // A retry of the same request is the same child; another speed under that id is different content.
     expect(await speedOf({ model: 'twin/luna', effort: 'max', speed: 'fast' }, 'label')).toBe('priority');
-    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/luna', effort: 'max', task: 'Play label', requestId: 'label' })).rejects.toThrow('requestId already used');
+    expect(await thrown(agent.call('delegation.spawn', { threadId, model: 'twin/luna', effort: 'max', task: 'Play label', requestId: 'label' }))).toThrow('requestId already used');
   } finally { agent.close(); }
 
   // A draft's child is written without threads.create: the same speed lands there.
@@ -1159,7 +1160,7 @@ test('a spawn reads no agent: a speed on a model or profile whose tiers are not 
   const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
   try {
     for (const route of [{ model: 'twin/luna' }, { profileId: 'moon' }]) {
-      await expect(agent.call('delegation.spawn', { threadId, ...route, speed: 'fast', task: 'Too early', requestId: `early-${JSON.stringify(route)}` })).rejects.toThrow(unread);
+      expect(await thrown(agent.call('delegation.spawn', { threadId, ...route, speed: 'fast', task: 'Too early', requestId: `early-${JSON.stringify(route)}` }))).toThrow(unread);
       // Without a speed the same route resolves with a null speed: nothing needs the tiers.
       expect(h.core.delegation.resolve(threadId, route).speed).toBeNull();
     }
@@ -1178,7 +1179,7 @@ test('a spawn reads no agent: a speed on a model or profile whose tiers are not 
     // Resolved, not spawned: this provider has no agent to start a turn on.
     for (const route of [{ model: 'twin/luna' }, { profileId: 'moon' }]) expect(h.core.delegation.resolve(threadId, { ...route, speed: 'fast' }).speed).toBe('priority');
     // Read and empty is a model without tiers, not an unread one.
-    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/plain', speed: 'fast', task: 'No tier', requestId: 'read-plain' })).rejects.toThrow('speed: twin/plain offers no speed tier; leave speed out');
+    expect(await thrown(agent.call('delegation.spawn', { threadId, model: 'twin/plain', speed: 'fast', task: 'No tier', requestId: 'read-plain' }))).toThrow('speed: twin/plain offers no speed tier; leave speed out');
   } finally { agent.close(); }
 });
 

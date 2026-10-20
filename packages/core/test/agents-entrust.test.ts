@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { AgentProfile } from '@boite/contracts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let h: TestCore;
 let client: Awaited<ReturnType<TestCore['connect']>>;
@@ -51,7 +52,7 @@ test('refuses threads and agents that cannot be entrusted', async () => {
     [{ threadId, agentId: paused.id }, 'agentId: expected an active agent'],
     [{ threadId, agentId: agent.id, objective: 'x'.repeat(4001) }, 'objective'],
     [{ threadId, agentId: agent.id, objective: 7 as unknown as string }, 'objective'],
-  ] as const) await expect(client.call('agents.entrust', params)).rejects.toThrow(error);
+  ] as const) expect(await thrown(client.call('agents.entrust', params))).toThrow(error);
   expect(h.core.workforce.entrusted.list()).toEqual([]);
   expect(threadMessages()).toEqual([]);
 });

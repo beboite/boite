@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { connect } from '../src/client.ts';
 import { DEFAULT_SPEECH as CURRENT_DEFAULT_SPEECH, decodeSpeechAudio, SpeechStore } from '../src/speech.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 // These existing scenarios exercise the legacy Whisper runtime and its downloads.
 const DEFAULT_SPEECH = { ...CURRENT_DEFAULT_SPEECH, model: 'small-q5_1' };
@@ -42,7 +43,7 @@ test('configuration never returns keys or journals them, preserves and removes k
   expect(harness.core.journal.getSetting('speech')).toBeUndefined();
   expect((await client.call('speech.configure', { ...config, groqKey: '' })).ready).toBe(false);
   expect(readFileSync(join(harness.dataDir, 'speech.json'), 'utf8')).not.toContain('fixture-secret');
-  await expect(client.call('speech.configure', { ...config, executable: 'relative.exe' })).rejects.toThrow('absolute path');
+  expect(await thrown(client.call('speech.configure', { ...config, executable: 'relative.exe' }))).toThrow('absolute path');
 });
 
 test('paired phone transcribes on the core but cannot read config, change keys or install a runtime', async () => {
@@ -59,10 +60,10 @@ test('paired phone transcribes on the core but cannot read config, change keys o
   });
   try {
     expect((await phone.call('speech.status', {})).ready).toBe(true);
-    await expect(phone.call('speech.config', {})).rejects.toThrow('owner only');
-    await expect(phone.call('speech.configure', DEFAULT_SPEECH)).rejects.toThrow('owner only');
-    await expect(phone.call('speech.install', {})).rejects.toThrow('owner only');
-    await expect(phone.call('speech.uninstall', {})).rejects.toThrow('owner only');
+    expect(await thrown(phone.call('speech.config', {}))).toThrow('owner only');
+    expect(await thrown(phone.call('speech.configure', DEFAULT_SPEECH))).toThrow('owner only');
+    expect(await thrown(phone.call('speech.install', {}))).toThrow('owner only');
+    expect(await thrown(phone.call('speech.uninstall', {}))).toThrow('owner only');
     expect(await phone.call('speech.warm', {})).toEqual({ ok: true });
     expect(await phone.call('speech.transcribe', { revision: harness.core.speech.status().revision, requestId: 'phone', audio: testWav() })).toEqual({ text: 'Bonjour depuis le téléphone.' });
     expect(existsSync(join(harness.dataDir, 'speech'))).toBe(false);
@@ -83,7 +84,7 @@ test('API fallback uses the other key and OpenRouter JSON format, without leakin
   expect((await harness.core.speech.transcribe('one', { revision: harness.core.speech.status().revision, requestId: 'a', audio: testWav() })).text).toBe('Repli réussi.');
   expect(calls).toBe(2);
   harness.core.speech.configure({ ...DEFAULT_SPEECH, engine: 'api' });
-  await expect(harness.core.speech.transcribe('one', { revision: harness.core.speech.status().revision, requestId: 'b', audio: testWav() })).rejects.toThrow('HTTP 429');
+  expect(await thrown(harness.core.speech.transcribe('one', { revision: harness.core.speech.status().revision, requestId: 'b', audio: testWav() }))).toThrow('HTTP 429');
   expect(calls).toBe(3);
 });
 
@@ -98,7 +99,7 @@ test('cancel is scoped to the connection and request; disconnect aborts in-fligh
   const checked = result.catch(error => error);
   harness.core.speech.cancel('other', 'a'); harness.core.speech.cancel('one', 'old');
   expect(aborted).toBe(false);
-  await expect(harness.core.speech.transcribe('one', { revision: harness.core.speech.status().revision, requestId: 'b', audio: testWav() })).rejects.toThrow('another transcription');
+  expect(await thrown(harness.core.speech.transcribe('one', { revision: harness.core.speech.status().revision, requestId: 'b', audio: testWav() }))).toThrow('another transcription');
   harness.core.speech.cancel('one', 'a'); expect((await checked).message).toContain('cancelled');
   started = false; aborted = false;
   const client = await harness.connect();
@@ -109,7 +110,7 @@ test('cancel is scoped to the connection and request; disconnect aborts in-fligh
 test('local mode never falls back to an API when unconfigured', async () => {
   harness.core.speech.configure({ ...DEFAULT_SPEECH, fallback: true, groqKey: 'fixture', openrouterKey: 'fixture' });
   fetchSpy = spyOn(globalThis, 'fetch');
-  await expect(harness.core.speech.transcribe('one', { revision: harness.core.speech.status().revision, requestId: 'a', audio: testWav() })).rejects.toThrow('configure');
+  expect(await thrown(harness.core.speech.transcribe('one', { revision: harness.core.speech.status().revision, requestId: 'a', audio: testWav() }))).toThrow('configure');
   expect(fetchSpy).not.toHaveBeenCalled();
 });
 
@@ -117,7 +118,7 @@ test('changing engines invalidates recordings made under the previous privacy ch
   const revision = harness.core.speech.status().revision;
   harness.core.speech.configure({ ...DEFAULT_SPEECH, engine: 'api', groqKey: 'fixture' });
   fetchSpy = spyOn(globalThis, 'fetch');
-  await expect(harness.core.speech.transcribe('one', { revision, requestId: 'old-recording', audio: testWav() })).rejects.toThrow('settings changed');
+  expect(await thrown(harness.core.speech.transcribe('one', { revision, requestId: 'old-recording', audio: testWav() }))).toThrow('settings changed');
   expect(fetchSpy).not.toHaveBeenCalled();
 });
 
@@ -127,7 +128,7 @@ test('a failed download rename removes the partial file and preserves the destin
   const bytes = Buffer.from('verified model fixture');
   fetchSpy = stubFetch(async () => new Response(bytes));
   const spec = { url: 'https://fixture.invalid/model', bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
-  await expect(harness.core.speech.local['download'](spec, target, new AbortController().signal)).rejects.toThrow();
+  expect(await thrown(harness.core.speech.local['download'](spec, target, new AbortController().signal))).toThrow();
   expect(existsSync(target)).toBe(true);
   expect(existsSync(`${target}.part`)).toBe(false);
 });
@@ -316,8 +317,8 @@ describe('the model choice', () => {
 
   test('a link downloads a checked Whisper file, becomes the model in use, and removing it goes back to the default', async () => {
     const speech = harness.core.speech;
-    await expect(Promise.resolve().then(() => speech.install({ url: 'http://models.example/ggml-tiny-fixture.bin' }))).rejects.toThrow('https://');
-    await expect(Promise.resolve().then(() => speech.install({ url: 'https://user:pass@models.example/ggml-tiny-fixture.bin' }))).rejects.toThrow('without a user name');
+    expect(await thrown(Promise.resolve().then(() => speech.install({ url: 'http://models.example/ggml-tiny-fixture.bin' })))).toThrow('https://');
+    expect(await thrown(Promise.resolve().then(() => speech.install({ url: 'https://user:pass@models.example/ggml-tiny-fixture.bin' })))).toThrow('without a user name');
     expect(urls).toHaveLength(0);
     const url = 'https://models.example/ggml-tiny-fixture.bin';
     const started = speech.install({ url });
@@ -417,7 +418,7 @@ describe('the resident whisper-server', () => {
     expect(final).toMatchObject({ language: 'french', audio_ctx: null });
     expect(final!.pid).toBe(preview!.pid);
     expect(Number(preview!.threads)).toBeGreaterThanOrEqual(1);
-    await expect(request('bad', { language: 'fr-FR' })).rejects.toThrow('speech.language');
+    expect(await thrown(request('bad', { language: 'fr-FR' }))).toThrow('speech.language');
   });
 
   test('a configured language wins over what a preview heard', async () => {
@@ -445,7 +446,7 @@ describe('the resident whisper-server', () => {
     const broken = join(harness.dataDir, 'broken-model.bin');
     writeFileSync(broken, 'broken fixture');
     speech.configure({ ...DEFAULT_SPEECH, executable: process.execPath, modelPath: broken });
-    await expect(request('three')).rejects.toThrow('could not load broken-model.bin');
+    expect(await thrown(request('three'))).toThrow('could not load broken-model.bin');
     expect(server.running).toBe(false);
   });
 });

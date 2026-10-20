@@ -8,6 +8,7 @@ import { LISTING_TAIL_BYTES, claudeProjectFolder, listTranscript } from '../src/
 import { claudeSessionFixture, FIXTURE_SESSION_ID } from './fixtures/claude-session.ts';
 import { startTestCore, testProject } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 
@@ -90,7 +91,7 @@ test('a transcript is listed from its head, imported whole, and never twice', as
 
   const again = await client.call('imports.list', { projectId });
   expect(again[0]!.threadId).toBe(summary.id);
-  await expect(client.call('imports.run', { projectId, accountId: account.id, sessionId: FIXTURE_SESSION_ID })).rejects.toThrow(
+  expect(await thrown(client.call('imports.run', { projectId, accountId: account.id, sessionId: FIXTURE_SESSION_ID }))).toThrow(
     'already a thread',
   );
 });
@@ -131,13 +132,13 @@ test('refused by name: another provider, a bad id, a missing file, a transcript 
   const echo = accounts.find((entry) => entry.providerId === 'echo');
   if (echo === undefined) throw new Error('no echo account');
 
-  await expect(client.call('imports.run', { projectId, accountId: echo.id, sessionId: FIXTURE_SESSION_ID })).rejects.toThrow(
+  expect(await thrown(client.call('imports.run', { projectId, accountId: echo.id, sessionId: FIXTURE_SESSION_ID }))).toThrow(
     'only a Claude account',
   );
-  await expect(client.call('imports.run', { projectId, accountId: account.id, sessionId: '../escape' })).rejects.toThrow(
+  expect(await thrown(client.call('imports.run', { projectId, accountId: account.id, sessionId: '../escape' }))).toThrow(
     'letters, digits, dashes and underscores',
   );
-  await expect(client.call('imports.run', { projectId, accountId: account.id, sessionId: 'nope' })).rejects.toThrow(
+  expect(await thrown(client.call('imports.run', { projectId, accountId: account.id, sessionId: 'nope' }))).toThrow(
     'no transcript at',
   );
 

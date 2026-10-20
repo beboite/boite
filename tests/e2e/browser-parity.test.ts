@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { startBrowserSession } from './lib/browser-session.ts';
 import { runCli } from '../../packages/core/src/cli.ts';
 import type { BrowserDiagnostics } from '../../packages/contracts/src/index.ts';
+import { thrown } from '../../packages/core/test/settle.ts';
 
 const executable = process.env.BOITE_E2E_SHELL_EXE;
 test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, the agent browser presets, appearance, diagnostics, recording and chat publication work together', async () => {
@@ -75,7 +76,7 @@ test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, th
     expect((await command({ kind: 'diagnostics' }, id)).value).toEqual({ entries: [], dropped: 0, history: [] });
     console.log('Console, exception, network, history and clear passed');
     await command({ kind: 'recording-start' }, id);
-    await expect(command({ kind: 'recording-start' }, id)).rejects.toThrow('already running');
+    expect(await thrown(command({ kind: 'recording-start' }, id))).toThrow('already running');
     await command({ kind: 'click', selector: '#forest' }, id);
     await Bun.sleep(650);
     await command({ kind: 'type', selector: '#message', text: 'La vidéo fonctionne dans Boite !' }, id);

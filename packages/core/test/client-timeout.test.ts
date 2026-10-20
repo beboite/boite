@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { PROTOCOL_VERSION } from '@boite/contracts';
 import { connect } from '../src/client.ts';
+import { thrown } from './settle.ts';
 
 test.each(['hello', 'call'] as const)('client bounds an unanswered %s and closes a failed handshake', async (phase) => {
   let closed = false;
@@ -84,7 +85,7 @@ test('a call whose params do not serialize rejects and leaves no timer behind', 
   try {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    await expect(client.call('settings.get', cyclic as never)).rejects.toThrow();
+    expect(await thrown(client.call('settings.get', cyclic as never))).toThrow();
     expect(live.size).toBe(0);
   } finally {
     globalThis.setTimeout = set;

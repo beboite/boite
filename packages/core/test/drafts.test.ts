@@ -8,6 +8,7 @@ import { draftFolderName } from '../src/threads/inputs.ts';
 import { Journal } from '../src/journal.ts';
 import { startTestCore, testProject, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
@@ -75,9 +76,7 @@ describe('the drafts project', () => {
     mkdirSync(named);
     const thread = await client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, cwd: named });
     expect(thread.cwd).toBe(named);
-    await expect(
-      client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, worktree: {} }),
-    ).rejects.toThrow(/a draft has no worktree/);
+    expect(await thrown(client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, worktree: {} }))).toThrow(/a draft has no worktree/);
   });
 
   test('a paired phone can start a draft', async () => {

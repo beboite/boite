@@ -7,6 +7,7 @@ import { connect as tcp, type Socket } from 'node:net';
 import { connect } from '../src/client.ts';
 import { parseRelayPath } from '../src/group/relay.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 afterEach(async () => {
@@ -164,7 +165,7 @@ test('a phone paired with one member reaches another through it, and keeps the k
   expect(onB.principal).toBe('session');
   // It is b that answers, under b's own rules for a device.
   expect((await onB.call('group.get', {}))?.self).toBe(id(b));
-  await expect(onB.call('projects.add', { path: b.dataDir, name: 'relay' })).rejects.toThrow('owner only');
+  expect(await thrown(onB.call('projects.add', { path: b.dataDir, name: 'relay' }))).toThrow('owner only');
   const key = onB.session!.token;
   onB.close();
   await waitFor(() => a.core.relays.size === 0);
@@ -267,7 +268,7 @@ test('a socket carried to a machine that leaves the group is closed', async () =
   a.core.group.remove(id(b));
   a.core.relays.sweep();
   await waitFor(() => a.core.relays.size === 0);
-  await expect(onB.call('group.get', {})).rejects.toThrow();
+  expect(await thrown(onB.call('group.get', {}))).toThrow();
   onB.close();
   phone.close();
 });
@@ -298,7 +299,7 @@ test('a notification of another member reaches a phone through the machine it in
   const { ticket } = await phone.call('group.ticket', { coreId: id(b) });
   const onBSocket = await connect(groupRelayUrl(a.url, id(b)), '', { ticket, relay: phone.session!.token, client: { name: 'pwa', version: '1' } });
   // A subscription of its own on b would send b's news without the machine its thread is on.
-  await expect(onBSocket.call('push.subscribe', subscription())).rejects.toThrow('come through');
+  expect(await thrown(onBSocket.call('push.subscribe', subscription()))).toThrow('come through');
   onBSocket.close();
   await waitFor(() => a.core.relays.size === 0);
   b.core.bus.emit('question.asked', { id: 'after', threadId, text: 'Which branch?' } as RpcEvents['question.asked']);
@@ -321,10 +322,10 @@ test('a notification of another member reaches a phone through the machine it in
   expect(onA).toHaveLength(3);
 
   // A member cannot use a's push for anything but a device of a's.
-  await expect(b.core.coordination.request(b.core.group.peers()[0]!, 'group.push', { id: 'x', device: `${id(b)}:ses_x`, push: { title: 't', body: 'b', threadId: null, tag: 'x' } }))
-    .rejects.toThrow('not a device of this machine');
-  await expect(b.core.coordination.request(b.core.group.peers()[0]!, 'group.push', { id: 'y', device: `${id(a)}:${phone.session!.id}`, push: { title: 't', body: 1, threadId: null, tag: 'x' } }))
-    .rejects.toThrow('push.body');
+  expect(await thrown(b.core.coordination.request(b.core.group.peers()[0]!, 'group.push', { id: 'x', device: `${id(b)}:ses_x`, push: { title: 't', body: 'b', threadId: null, tag: 'x' } })))
+    .toThrow('not a device of this machine');
+  expect(await thrown(b.core.coordination.request(b.core.group.peers()[0]!, 'group.push', { id: 'y', device: `${id(a)}:${phone.session!.id}`, push: { title: 't', body: 1, threadId: null, tag: 'x' } })))
+    .toThrow('push.body');
 
   // The phone kept only approvals on a: b still sends every kind with its kind, and a filters at home.
   await phone.call('push.kinds', { kinds: ['approvals'] });
@@ -385,7 +386,7 @@ test('a relayed socket is held to the bounds of one waiting for its hello, and g
   expect(a.core.relays.size).toBe(1);
   a.core.sessions.revoke(phone.session!.id);
   await waitFor(() => a.core.relays.size === 0);
-  await expect(onB.call('group.get', {})).rejects.toThrow();
+  expect(await thrown(onB.call('group.get', {}))).toThrow();
   onB.close();
   phone.close();
 });

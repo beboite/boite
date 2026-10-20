@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { removeDir } from '../src/fs-retry.ts';
 import { bunRuntime, runtimeAsset } from '../bin/bun-runtime.ts';
+import { thrown } from './settle.ts';
 
 let cacheRoot: string;
 beforeEach(() => { cacheRoot = mkdtempSync(join(tmpdir(), 'boite-bun-runtime-')); });
@@ -102,7 +103,7 @@ test('an archive whose checksum differs is refused and nothing is cached', async
   const zip = zipOf(`${asset}/${exe}`, new TextEncoder().encode('tampered'));
   const server = release({ 'SHASUMS256.txt': `${'a'.repeat(64)}  ${asset}.zip\n`, [`${asset}.zip`]: zip });
   try {
-    await expect(bunRuntime(target, { version: '9.9.9', cacheRoot, releases: server.url })).rejects.toThrow(`SHASUMS256.txt says ${'a'.repeat(64)}`);
+    expect(await thrown(bunRuntime(target, { version: '9.9.9', cacheRoot, releases: server.url }))).toThrow(`SHASUMS256.txt says ${'a'.repeat(64)}`);
     expect(existsSync(join(cacheRoot, `${target}-v9.9.9`))).toBe(false);
   } finally {
     server.stop();

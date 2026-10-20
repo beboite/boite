@@ -5,6 +5,7 @@ import { connect } from '../src/client.ts';
 import { validateSubscription } from '../src/push.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { PushStore } from '../src/push.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 beforeEach(async () => { harness = await startTestCore(); });
@@ -22,7 +23,7 @@ function session() {
 
 test('only a real pairing can manage its own push subscription over RPC', async () => {
   const owner = await harness.connect();
-  await expect(owner.call('push.status', {})).rejects.toThrow('paired device');
+  expect(await thrown(owner.call('push.status', {}))).toThrow('paired device');
   const paired = session();
   const phone = await connect(harness.url, paired.token);
   try {
@@ -60,7 +61,7 @@ test('test delivery uses the device subscription and drops an expired destinatio
   await harness.core.push.test(paired.id);
   expect(sent).toEqual(['Notifications are connected']);
   harness.core.push.send = async () => { throw Object.assign(new Error('private endpoint material'), { statusCode: 410 }); };
-  await expect(harness.core.push.test(paired.id)).rejects.toThrow('Web Push delivery failed (410)');
+  expect(await thrown(harness.core.push.test(paired.id))).toThrow('Web Push delivery failed (410)');
   expect((await harness.core.push.status(paired.id)).subscribed).toBe(false);
 });
 
@@ -69,7 +70,7 @@ test('revocation deletes the subscription and cannot deliver another test', asyn
   harness.core.push.subscribe(paired.id, subscription());
   harness.core.sessions.revoke(paired.id);
   expect(harness.core.journal.getSetting('web-push.subscriptions')).toEqual({});
-  await expect(harness.core.push.test(paired.id)).rejects.toThrow('paired device');
+  expect(await thrown(harness.core.push.test(paired.id))).toThrow('paired device');
 });
 
 test('a recreated push store retains its keys and delivers completed turns to the paired phone', async () => {
@@ -219,8 +220,8 @@ test('no push about a thread someone is looking at and uses, on the PC or the ph
     await delivered(3);
     desktop.close();
     await delivered(4);
-    await expect(phone.call('threads.focus', { threadId, attentive: 'yes' as never })).rejects.toThrow('attentive');
-    await expect(phone.call('threads.focus', { threadId, idleMs: -1 })).rejects.toThrow('idleMs');
+    expect(await thrown(phone.call('threads.focus', { threadId, attentive: 'yes' as never }))).toThrow('attentive');
+    expect(await thrown(phone.call('threads.focus', { threadId, idleMs: -1 }))).toThrow('idleMs');
   } finally { setSystemTime(); phone.close(); }
 });
 test('questions and permissions push immediately even when their thread is attended', async () => {
@@ -276,7 +277,7 @@ test('a notification carries the icon badge: the threads waiting on the user, th
 test('public HTTPS origin is validated, used for QR links and accepted by the socket', async () => {
   const owner = await harness.connect();
   for (const publicUrl of ['http://phone.test', 'https://phone.test/path', 'https://user:pass@phone.test', 'https://phone.test?token=x']) {
-    await expect(owner.call('settings.set', { publicUrl })).rejects.toThrow('publicUrl');
+    expect(await thrown(owner.call('settings.set', { publicUrl }))).toThrow('publicUrl');
   }
   // A copy from the address bar ends in a slash: the same origin, stored bare.
   expect((await owner.call('settings.set', { publicUrl: 'https://phone.test/' })).publicUrl).toBe('https://phone.test');
@@ -372,9 +373,9 @@ test('a device that kept only approvals gets the permission push and not the fin
     expect(deliveries).toHaveLength(4);
     await phone.call('push.test', {});
     expect(deliveries).toHaveLength(5);
-    await expect(phone.call('push.kinds', { kinds: ['everything'] as never })).rejects.toThrow('kinds must be a list');
+    expect(await thrown(phone.call('push.kinds', { kinds: ['everything'] as never }))).toThrow('kinds must be a list');
     await phone.call('push.unsubscribe', {});
-    await expect(phone.call('push.kinds', { kinds: ['approvals'] })).rejects.toThrow('Enable notifications');
+    expect(await thrown(phone.call('push.kinds', { kinds: ['approvals'] }))).toThrow('Enable notifications');
     owner.close();
   } finally { phone.close(); }
 });

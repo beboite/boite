@@ -8,6 +8,7 @@ import { Journal } from '../src/journal.ts';
 import { inspectJournal } from '../src/journal/integrity.ts';
 import { connect, type CoreClient } from '../src/client.ts';
 import { startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 describe('historical journal inspection', () => {
   let dir: string, journal: Journal;
   beforeEach(() => {
@@ -89,9 +90,9 @@ test('inspection RPC is owner only for paired devices and scoped agents', async 
     phase = 'inspect as owner';
     expect((await owner.call('journal.inspect', { limit: 1 })).checked).toBeLessThanOrEqual(1);
     phase = 'refuse paired device inspection';
-    await expect(phone.call('journal.inspect', {})).rejects.toThrow('owner');
+    expect(await thrown(phone.call('journal.inspect', {}))).toThrow('owner');
     phase = 'refuse scoped agent inspection';
-    await expect(agent.call('journal.inspect', {})).rejects.toThrow('agent');
+    expect(await thrown(agent.call('journal.inspect', {}))).toThrow('agent');
   } catch (cause) {
     failures.push(new Error(`journal.inspect authorization test failed during ${phase}`, { cause }));
   } finally {

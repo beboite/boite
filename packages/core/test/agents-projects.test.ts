@@ -8,6 +8,7 @@ import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { connect } from '../src/client.ts';
 import { NOTICE_HEADER, QUESTION_GRACE_MS } from '../src/agents/projects.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
@@ -94,8 +95,8 @@ test('an agent reads and drives only the threads of the projects entrusted to it
 
   // Drafts and unknown folders cannot be entrusted; taking the projects back closes every door.
   const drafts = h.core.journal.listProjects().find(project => project.kind === 'drafts');
-  if (drafts) await expect(owner.call('agents.profile.save', { id: agent().id, expectedRevision: agent().revision, value: { ...agent(), projectIds: [drafts.id] } })).rejects.toThrow('drafts');
-  await expect(owner.call('agents.profile.save', { id: agent().id, expectedRevision: agent().revision, value: { ...agent(), projectIds: ['prj_missing'] } })).rejects.toThrow();
+  if (drafts) expect(await thrown(owner.call('agents.profile.save', { id: agent().id, expectedRevision: agent().revision, value: { ...agent(), projectIds: [drafts.id] } }))).toThrow('drafts');
+  expect(await thrown(owner.call('agents.profile.save', { id: agent().id, expectedRevision: agent().revision, value: { ...agent(), projectIds: ['prj_missing'] } }))).toThrow();
   await entrust([]);
   expect((await cli(['threads'])).err).toContain('no project is entrusted to this conversation');
   // An ordinary thread's agent has no projects to look after.

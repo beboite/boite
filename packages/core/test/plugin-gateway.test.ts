@@ -9,6 +9,7 @@ import { DOUANE_BINARY_ENV } from '../src/plugins/gateway.ts';
 import { recommendedPlugins } from '../src/plugins.ts';
 import { readSubscriptionProxyModels, subscriptionProxyEnv } from '../src/subscription-proxy.ts';
 import { startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const FAKE = join(import.meta.dir, 'fixtures', 'fake-douane.ts');
 const ENV = [DOUANE_BINARY_ENV, 'FAKE_DOUANE_VERSION', 'FAKE_DOUANE_CRASH_FILE', 'FAKE_DOUANE_IN_FLIGHT_FILE', 'BOITE_TOKEN'] as const;
@@ -123,7 +124,7 @@ test('an installed gateway runs on loopback without the owner token, and the loc
   expect((await owner.call('subscriptionProxy.movePlan', {})).origin).toBe('https://gateway.example.invalid');
   await owner.call('plugins.gateway', { id: 'douane', action: 'stop' });
   expect((await owner.call('subscriptionProxy.movePlan', { target: 'plugin' })).origin).toBeNull();
-  await expect(owner.call('subscriptionProxy.move', { ids: ['x'], target: 'plugin' })).rejects.toThrow('start the Douane plugin first');
+  expect(await thrown(owner.call('subscriptionProxy.move', { ids: ['x'], target: 'plugin' }))).toThrow('start the Douane plugin first');
 }, 30_000);
 
 test('a crash starts it again; a core start runs it only while it starts with Boite; uninstall keeps its data', async () => {

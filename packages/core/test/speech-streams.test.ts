@@ -5,6 +5,7 @@ import { connect } from '../src/client.ts';
 import { DEFAULT_SPEECH } from '../src/speech.ts';
 import { NEMOTRON_FILES } from '../src/speech-artifacts.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 function wav(seconds = 0.4): string {
@@ -35,17 +36,17 @@ test('phone streams ordered audio, sees text before finish and reuses the loaded
     const revision = (await phone.call('speech.status', {})).revision;
     expect(existsSync(join(harness.core.speech.local.root, 'native-requests.jsonl'))).toBe(false);
     expect(await phone.call('speech.streamStart', { revision, requestId: 'phone' })).toEqual({ ok: true });
-    await expect(owner.call('speech.streamChunk', { revision, requestId: 'phone', sequence: 0, audio: wav() })).rejects.toThrow('on this connection');
-    await expect(owner.call('speech.streamStart', { revision, requestId: 'other' })).rejects.toThrow('another transcription');
+    expect(await thrown(owner.call('speech.streamChunk', { revision, requestId: 'phone', sequence: 0, audio: wav() }))).toThrow('on this connection');
+    expect(await thrown(owner.call('speech.streamStart', { revision, requestId: 'other' }))).toThrow('another transcription');
     await owner.call('speech.cancel', { requestId: 'phone' });
     expect(await phone.call('speech.streamChunk', { revision, requestId: 'phone', sequence: 0, audio: wav() })).toEqual({ text: 'Bonjour' });
-    await expect(phone.call('speech.streamChunk', { revision, requestId: 'phone', sequence: 0, audio: wav() })).rejects.toThrow('sequence must be 1');
+    expect(await thrown(phone.call('speech.streamChunk', { revision, requestId: 'phone', sequence: 0, audio: wav() }))).toThrow('sequence must be 1');
     expect(await phone.call('speech.streamFinish', { revision, requestId: 'phone', sequence: 1, audio: wav(0.02) })).toEqual({ text: 'Bonjour le monde.' });
     await phone.call('speech.streamStart', { revision, requestId: 'second' });
     await phone.call('speech.streamFinish', { revision, requestId: 'second', sequence: 0, audio: wav() });
     expect(requests().filter(request => request.operation === 'init')).toHaveLength(1);
     expect(requests().filter(request => request.operation === 'transcribe')).toHaveLength(0);
-    await expect(phone.call('speech.configure', DEFAULT_SPEECH)).rejects.toThrow('owner only');
+    expect(await thrown(phone.call('speech.configure', DEFAULT_SPEECH))).toThrow('owner only');
   } finally { phone.close(); }
 });
 
@@ -53,11 +54,11 @@ test('stream rejects malformed, oversized and accumulated audio without consumin
   const client = await harness.connect();
   const params = { requestId: 'bounds', revision: harness.core.speech.status().revision };
   await client.call('speech.streamStart', params);
-  await expect(client.call('speech.streamChunk', { ...params, sequence: 0, audio: 'AAAA' })).rejects.toThrow('PCM WAV');
-  await expect(client.call('speech.streamChunk', { ...params, sequence: 0, audio: wav(2.1) })).rejects.toThrow('two seconds');
-  await expect(client.call('speech.streamChunk', { ...params, sequence: -1, audio: wav() })).rejects.toThrow('sequence must be 0');
+  expect(await thrown(client.call('speech.streamChunk', { ...params, sequence: 0, audio: 'AAAA' }))).toThrow('PCM WAV');
+  expect(await thrown(client.call('speech.streamChunk', { ...params, sequence: 0, audio: wav(2.1) }))).toThrow('two seconds');
+  expect(await thrown(client.call('speech.streamChunk', { ...params, sequence: -1, audio: wav() }))).toThrow('sequence must be 0');
   await client.call('speech.streamChunk', { ...params, sequence: 0, audio: wav(1) });
-  await expect(client.call('speech.streamFinish', { ...params, sequence: 1, audio: wav(120) })).rejects.toThrow('120 seconds in total');
+  expect(await thrown(client.call('speech.streamFinish', { ...params, sequence: 1, audio: wav(120) }))).toThrow('120 seconds in total');
   await client.call('speech.streamFinish', { ...params, sequence: 1 });
 });
 
@@ -70,13 +71,13 @@ test('disconnect, configuration changes and session expiry release the decoder r
   await waitFor(() => !harness.core.procs.liveThreads().some(id => id.startsWith('speech:')));
   await next.call('speech.streamStart', { revision, requestId: 'config' });
   harness.core.speech.configure({ ...harness.core.speech.get(), language: 'en' });
-  await expect(next.call('speech.streamChunk', { revision, requestId: 'config', sequence: 0, audio: wav() })).rejects.toThrow('settings changed');
+  expect(await thrown(next.call('speech.streamChunk', { revision, requestId: 'config', sequence: 0, audio: wav() }))).toThrow('settings changed');
   revision = harness.core.speech.status().revision;
   await harness.core.speech.local.native.ensure(harness.core.speech.local.nativeRuntime, join(harness.core.speech.local.root, 'nemotron'));
   harness.core.speech.streams.expiresMs = 50;
   await next.call('speech.streamStart', { revision, requestId: 'expiry' });
   await Bun.sleep(100);
-  await expect(next.call('speech.streamFinish', { revision, requestId: 'expiry', sequence: 0 })).rejects.toThrow('no active stream');
+  expect(await thrown(next.call('speech.streamFinish', { revision, requestId: 'expiry', sequence: 0 }))).toThrow('no active stream');
   harness.core.speech.streams.expiresMs = 180_000;
   await next.call('speech.streamStart', { revision, requestId: 'again' });
   await next.call('speech.streamFinish', { revision, requestId: 'again', sequence: 0 });

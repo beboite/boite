@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { DEFAULT_DELEGATION_CONFIG, LIGHT_TOOLS } from '@boite/contracts';
 import { waitFor } from './harness.ts';
 import { answerEach, calls, claudeThread, harness, runTurn, scripted, useClaudeHarness } from './fixtures/claude-query.ts';
+import { thrown } from './settle.ts';
 
 useClaudeHarness();
 
@@ -90,6 +91,6 @@ test('a conversation started in a context mode keeps it after a core restart', a
   });
   expect(thread.contextMode).toEqual({ label: 'custom', instructions: true, guides: false, mcp: true, hooks: true, tools: null, rules: 'Answer in one word.' });
   expect(harness.core.journal.getThread(thread.id)?.contextMode).toEqual(thread.contextMode);
-  await expect(client.call('threads.create', { projectId: parent.projectId!, providerId: 'claude', accountId: parent.accountId, context: { preset: 'tiny' as never } }))
-    .rejects.toThrow('context.preset: expected full, light, neutral');
+  expect(await thrown(client.call('threads.create', { projectId: parent.projectId!, providerId: 'claude', accountId: parent.accountId, context: { preset: 'tiny' as never } })))
+    .toThrow('context.preset: expected full, light, neutral');
 });

@@ -9,6 +9,7 @@ import { pruneArtifactSnapshots } from '../src/artifact-retention.ts';
 import { connect, type CoreClient } from '../src/client.ts';
 import { runCli } from '../src/cli.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
@@ -44,13 +45,13 @@ test('agent CLI publishes immutable PDF bytes and subscribed clients receive the
 
 test('refuses unrelated threads, outside paths, missing files, directories and oversized data', async () => {
   const other = await echoThread(harness, client, 'another thread');
-  await expect(agent.call('artifacts.publish', { threadId: other.threadId, path: 'report.pdf' })).rejects.toThrow('is for thread');
+  expect(await thrown(agent.call('artifacts.publish', { threadId: other.threadId, path: 'report.pdf' }))).toThrow('is for thread');
   for (const [path, reason] of [['../outside.pdf', 'leaves'], ['missing.pdf', 'does not exist'], ['.', 'not a file']]) {
-    await expect(agent.call('artifacts.publish', { threadId, path: path! })).rejects.toThrow(reason!);
+    expect(await thrown(agent.call('artifacts.publish', { threadId, path: path! }))).toThrow(reason!);
   }
   const fd = openSync(join(harness.dataDir, 'huge.bin'), 'w');
   try { ftruncateSync(fd, ARTIFACT_MAX_BYTES + 1); } finally { closeSync(fd); }
-  await expect(agent.call('artifacts.publish', { threadId, path: 'huge.bin' })).rejects.toThrow('512 MB');
+  expect(await thrown(agent.call('artifacts.publish', { threadId, path: 'huge.bin' }))).toThrow('512 MB');
 });
 
 test('publishes an empty file and refuses a thread without a turn or an archived thread', async () => {
@@ -58,9 +59,9 @@ test('publishes an empty file and refuses a thread without a turn or an archived
   const sent = await agent.call('artifacts.publish', { threadId, path: 'empty.txt' });
   expect(sent.parts[0]).toMatchObject({ type: 'file', data: '' });
   const fresh = await echoThread(harness, client, 'fresh');
-  await expect(client.call('artifacts.publish', { threadId: fresh.threadId, path: 'empty.txt' })).rejects.toThrow('with a turn');
+  expect(await thrown(client.call('artifacts.publish', { threadId: fresh.threadId, path: 'empty.txt' }))).toThrow('with a turn');
   await client.call('threads.archive', { threadId, archived: true });
-  await expect(client.call('artifacts.publish', { threadId, path: 'empty.txt' })).rejects.toThrow('active thread');
+  expect(await thrown(client.call('artifacts.publish', { threadId, path: 'empty.txt' }))).toThrow('active thread');
 });
 
 test('PDF links are binary tickets even when the document contains no NUL bytes', async () => {
@@ -96,15 +97,15 @@ test('large snapshots stay out of JSON, seek over HTTP, renew, survive restart a
   expect(harness.core.fileTickets.resolve(content.url.split('/').at(-1)!, Date.now() + FILE_TICKET_TTL_MS + 1)).toBeNull();
   expect((await fetch(url)).status).toBe(404);
   const other = await echoThread(harness, client, 'other');
-  await expect(agent.call('artifacts.read', { ...params, threadId: other.threadId })).rejects.toThrow('is for thread');
-  await expect(client.call('artifacts.read', { ...params, threadId: other.threadId })).rejects.toThrow('from this message and thread');
-  await expect(client.call('artifacts.read', { ...params, artifactId: '../journal.db' })).rejects.toThrow('from this message and thread');
+  expect(await thrown(agent.call('artifacts.read', { ...params, threadId: other.threadId }))).toThrow('is for thread');
+  expect(await thrown(client.call('artifacts.read', { ...params, threadId: other.threadId }))).toThrow('from this message and thread');
+  expect(await thrown(client.call('artifacts.read', { ...params, artifactId: '../journal.db' }))).toThrow('from this message and thread');
   const { grant } = await client.call('pairing.grant', {});
   const phone = await connect(harness.url, '', { grant, client: { name: 'phone', version: 'test' } });
   try {
     const downloaded = await phone.call('artifacts.read', params);
     expect(Buffer.from(await (await fetch(new URL(downloaded.url, url))).arrayBuffer())).toEqual(bytes);
-    await expect(phone.call('files.read', { threadId, path: 'journal.db' })).rejects.toThrow('data folder');
+    expect(await thrown(phone.call('files.read', { threadId, path: 'journal.db' }))).toThrow('data folder');
   } finally { phone.close(); }
   // Reopen the persisted journal with a fresh ticket store, as a new core does.
   const reopened = new Journal(join(harness.dataDir, 'journal.db'));

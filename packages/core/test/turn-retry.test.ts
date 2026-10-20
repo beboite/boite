@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
+import { thrown } from './settle.ts';
 
 test('resending an accepted request returns its turn even after completion and refuses changed content', async () => {
   const h = await startTestCore();
@@ -13,6 +14,6 @@ test('resending an accepted request returns its turn even after completion and r
     const retry = await client.call('turns.start', params);
     expect(retry.id).toBe(first.id);
     expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
-    await expect(client.call('turns.start', { ...params, prompt: 'changed' })).rejects.toThrow('clientRequestId');
+    expect(await thrown(client.call('turns.start', { ...params, prompt: 'changed' }))).toThrow('clientRequestId');
   } finally { await h.stop(); }
 });

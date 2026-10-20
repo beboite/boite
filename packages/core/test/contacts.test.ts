@@ -13,6 +13,7 @@ import { Refusals, REFUSALS_PER_MINUTE } from '../src/server/refusals.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { Driver } from '../src/drivers/types.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 let restore: (() => void) | undefined;
@@ -124,10 +125,10 @@ test('a granted project is all a contact sees: letters cross both ways, an ungra
   expect(letters(guest, guestThread).find(letter => letter.id === refused.id)?.error).toContain('not a thread of a project opened to you');
   expect(letters(host, hostClosed)).toHaveLength(0);
 
-  await expect(guest.core.coordination.read(guestThread, { coreId: hostId, threadId: hostOpen })).rejects.toThrow('readThreads');
+  expect(await thrown(guest.core.coordination.read(guestThread, { coreId: hostId, threadId: hostOpen }))).toThrow('readThreads');
   await hostClient.call('contacts.grant', { coreId: guestId, projectId: open.id, readThreads: true });
   expect((await guest.core.coordination.read(guestThread, { coreId: hostId, threadId: hostOpen })).contact.threadId).toBe(hostOpen);
-  await expect(guest.core.coordination.read(guestThread, { coreId: hostId, threadId: hostClosed })).rejects.toThrow('not a thread of a project opened to you');
+  expect(await thrown(guest.core.coordination.read(guestThread, { coreId: hostId, threadId: hostClosed }))).toThrow('not a thread of a project opened to you');
 }, 30000);
 
 test('model tiers: a sender below its own owner\'s tier cannot write, and a letter whose attested model is below the recipient\'s tier is refused', async () => {
@@ -137,14 +138,14 @@ test('model tiers: a sender below its own owner\'s tier cannot write, and a lett
   const guestThread = await thread(guestClient, (await project(guest, guestClient, 'mine')).id, 'Guest work');
   await hostClient.call('contacts.grant', { coreId: guestId, projectId: open.id });
   await guestClient.call('contacts.settings', { settings: { minTier: 1 } });
-  await expect(guest.core.coordination.send({ threadId: guestThread, to: { coreId: hostId, threadId: hostThread }, text: 'Hello', requestId: crypto.randomUUID() })).rejects.toThrow('tier 2');
-  await expect(guestClient.call('collaboration.ask', { threadId: guestThread, contact: hostId, text: 'an agent on alpha' })).rejects.toThrow('tier 2');
+  expect(await thrown(guest.core.coordination.send({ threadId: guestThread, to: { coreId: hostId, threadId: hostThread }, text: 'Hello', requestId: crypto.randomUUID() }))).toThrow('tier 2');
+  expect(await thrown(guestClient.call('collaboration.ask', { threadId: guestThread, contact: hostId, text: 'an agent on alpha' }))).toThrow('tier 2');
   await guestClient.call('contacts.settings', { settings: { minTier: 2 } });
   await hostClient.call('contacts.settings', { settings: { minTier: 1 } });
   const letter = await guest.core.coordination.send({ threadId: guestThread, to: { coreId: hostId, threadId: hostThread }, text: 'Hello', requestId: crypto.randomUUID() });
   await waitFor(() => letters(guest, guestThread).find(entry => entry.id === letter.id)?.status === 'rejected', 10000);
   expect(letters(guest, guestThread).find(entry => entry.id === letter.id)?.error).toContain('takes tier 1 or better');
-  await expect(hostClient.call('contacts.settings', { settings: { minTier: 4 as 1 } })).rejects.toThrow('settings.minTier: expected 1, 2 or 3');
+  expect(await thrown(hostClient.call('contacts.settings', { settings: { minTier: 4 as 1 } }))).toThrow('settings.minTier: expected 1, 2 or 3');
 }, 30000);
 
 test('an ask waits for the owner, who opens a project; the asking thread hears the answer as a message from the contact', async () => {
@@ -160,8 +161,8 @@ test('an ask waits for the owner, who opens a project; the asking thread hears t
   // The host names the request with its own id; the guest's stays on the wire.
   expect(incoming[0]).toMatchObject({ direction: 'in', status: 'pending', text: 'an agent on a project like alpha' });
   expect(incoming[0]!.id).not.toBe(asked.id);
-  await expect(hostClient.call('contacts.decide', { id: asked.id, accept: true, projectId: open.id })).rejects.toThrow('pending request');
-  await expect(hostClient.call('contacts.decide', { id: incoming[0]!.id, accept: true })).rejects.toThrow('projectId');
+  expect(await thrown(hostClient.call('contacts.decide', { id: asked.id, accept: true, projectId: open.id }))).toThrow('pending request');
+  expect(await thrown(hostClient.call('contacts.decide', { id: incoming[0]!.id, accept: true }))).toThrow('projectId');
   const decided = await hostClient.call('contacts.decide', { id: incoming[0]!.id, accept: true, projectId: open.id });
   expect(decided).toMatchObject({ status: 'accepted', decidedBy: 'owner', project: { id: open.id, name: 'alpha' } });
   expect(host.core.contacts.find(guestId)?.grants).toEqual([expect.objectContaining({ projectId: open.id, readThreads: false })]);
@@ -301,8 +302,8 @@ test('revoke rejects letters waiting for the closed project, queued wakes includ
   expect(host.core.coordination.trusted().some(peer => peer.coreId === guestId)).toBe(false);
   // The host closed the socket; the guest's redial is refused, its link stays down.
   await eventually(async () => (await guestClient.call('contacts.get', {})).contacts[0]?.link !== 'connected');
-  await expect(host.core.coordination.check(guestId)).rejects.toThrow('not trusted');
-  await expect(guest.core.coordination.check(hostId)).rejects.toThrow();
+  expect(await thrown(host.core.coordination.check(guestId))).toThrow('not trusted');
+  expect(await thrown(guest.core.coordination.check(hostId))).toThrow();
 }, 30000);
 
 test('the link refuses a replayed or stale hello, a contact\'s readable request, and a second join with a spent invitation', async () => {
@@ -339,7 +340,7 @@ test('the link refuses a replayed or stale hello, a contact\'s readable request,
 
   // The guest forgets the host and tries the same link again: the host spent its token at the first join.
   await guestClient.call('contacts.remove', { coreId: hostId });
-  await expect(guestClient.call('contacts.join', { link: invite.link })).rejects.toThrow('already used or expired');
+  expect(await thrown(guestClient.call('contacts.join', { link: invite.link }))).toThrow('already used or expired');
   expect(host.core.contacts.list()).toHaveLength(1);
 }, 30000);
 
@@ -447,7 +448,7 @@ test('joins in flight hold their contact slots: two joins at the last slot keep 
 
   guest.core.contacts.remove(a.core.coordination.card().coreId);
   const release = guest.core.contacts.reserve(b.core.coordination.card().coreId);
-  await expect(c.core.contacts.join((await guest.core.contacts.invite()).link)).rejects.toThrow('this core has 1 contacts already');
+  expect(await thrown(c.core.contacts.join((await guest.core.contacts.invite()).link))).toThrow('this core has 1 contacts already');
   release();
   await c.core.contacts.join((await guest.core.contacts.invite()).link);
   expect(guest.core.contacts.list()).toEqual([expect.objectContaining({ coreId: c.core.coordination.card().coreId, role: 'host' })]);
