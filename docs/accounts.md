@@ -30,7 +30,11 @@ environment variables, with `{isolationDir}` substituted at spawn:
 - Antigravity moves with `GEMINI_HOME`, files `antigravity-acp/acp_token.json`
   under it, and has no default account at all: its descriptor says
   `isolation.alwaysIsolated`, so `accounts.add` gives every account a directory
-  of its own whatever the request asked for.
+  of its own whatever the request asked for. The agent reads its user skills
+  under `GEMINI_HOME`, so the descriptor shares `config/skills` and
+  `antigravity-cli/skills` from the user's own `~/.gemini`; its MCP servers and
+  settings stay out. Project skills (`.gemini/skills`, `.agents/skills`, then
+  the legacy `.agent/skills`) the agent reads itself in the thread's folder.
 
 The same environment goes to every process of that account: a turn, a probe, a
 login. The OS profile owns the map; drivers use the resolved account environment.

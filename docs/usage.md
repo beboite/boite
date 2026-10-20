@@ -124,7 +124,7 @@ quota views update the label immediately while retaining their cached windows.
 | Muse Code | Last `usage/changed` observation from an existing host supporting that event; no host or prompt starts to refresh limits |
 | Grok | Credit percentage or legacy credit amounts from the selected CLI login's billing endpoint |
 | OpenCode Go | Rolling, weekly and monthly limits from its Go usage API, using its own saved API login or the default account's `OPENCODE_API_KEY`. OpenCode 2 accounts read the key from their own database |
-| Antigravity | The managed server's sign-in under `GEMINI_HOME` (`antigravity-acp/acp_token.json`): its refresh token is traded for an access token, held in memory until a minute before it expires, then the Cloud Code `retrieveUserQuotaSummary` buckets (5 hours, weekly, per model group), or per-model `fetchAvailableModels` quotas for an account with no summary. Nothing is spawned |
+| Antigravity | The managed server's sign-in under `GEMINI_HOME` (`antigravity-acp/acp_token.json`): its refresh token is traded for an access token, held in memory until a minute before it expires, then the Cloud Code `retrieveUserQuotaSummary` buckets (5 hours, weekly, per model group), or per-model `fetchAvailableModels` quotas for an account with no summary. Both endpoints are asked and their buckets merged, a bucket both report keeping the higher use: the daily one has answered with the Claude and GPT group and no Gemini one. Nothing is spawned |
 
 Quota readers live in `packages/core/src/quotas.ts`, `quota-readers.ts` and
 `antigravity-quota.ts`, with Claude's fallback under `drivers/claude/quota.ts`. Successful snapshots cache for

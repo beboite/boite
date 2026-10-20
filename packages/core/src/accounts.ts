@@ -6,6 +6,7 @@ import { newId } from './ids.ts';
 import { stripAnsi } from './ansi.ts';
 import { invalidParams, messageOf, notFound, refused, unavailable } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
+import { antigravityCertificates } from './drivers/antigravity.ts';
 import { loginFolders, publishLoginCatalog } from './account-login.ts';
 import { probeThreadId } from './providers/probe.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
@@ -334,6 +335,7 @@ export class AccountStore {
     for (const [key, value] of Object.entries(env)) {
       env[key] = isolationDir === null ? value : value.split('{isolationDir}').join(isolationDir);
     }
+    if (provider.quirks?.includes('antigravity') === true) Object.assign(env, antigravityCertificates(currentOs(), process.env, existsSync));
     return { ...env, ...subscriptionProxyEnv(this.core, provider) };
   }
 

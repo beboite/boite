@@ -143,6 +143,7 @@
   "login": { "acp": { "methodId": "oauth-personal" } },
   "isolation": { "alwaysIsolated": true },
   "seedFiles": { "antigravity-acp/settings.json": "{\"auth\":{\"type\":\"oauth-personal\"}}" },
+  "shared": [{ "variable": "GEMINI_HOME", "paths": ["config/skills", "antigravity-cli/skills"] }],
   "quirks": ["antigravity"],
   "models": [{ "id": "default", "name": "Antigravity default", "default": true }],
   "capabilities": {

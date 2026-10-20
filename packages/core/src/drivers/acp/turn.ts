@@ -21,7 +21,7 @@ import type {
 } from '@boite/contracts';
 import { ANTHROPIC_DEFAULT, openAiCacheLife } from '../../prompt-cache.ts';
 import { isOpenCode } from '../../providers/opencode.ts';
-import { normalizeAntigravityTool } from '../antigravity.ts';
+import { antigravitySubagentBatch, normalizeAntigravityTool } from '../antigravity.ts';
 import { imageDocument } from '../documents.ts';
 import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
 
@@ -58,6 +58,8 @@ interface ToolEntry {
   output: string | null;
   status: ToolStatus;
   documents: ToolDocument[];
+  /** Antigravity's `start_subagent`, or an MCP tool of that title, once an update said which. */
+  subagent: 'subagent' | 'mcp' | null;
 }
 
 /**
@@ -296,6 +298,8 @@ export class AcpTurn {
    * `tool_call` opens the part, `tool_call_update` replaces the same one by id.
    * `content` replaces the documents when the agent sends one, the protocol's
    * own word for that field; null or absent leaves the ones already there.
+   * `subagent` is what this update says the call is, kept from the first
+   * update that says it: the later ones carry no title.
    */
   upsertTool(
     toolCallId: string,
@@ -304,6 +308,7 @@ export class AcpTurn {
     output: unknown,
     status: ToolCallStatus | null | undefined,
     content: ToolCallContent[] | null | undefined,
+    subagent: 'subagent' | 'mcp' | null = null,
   ): void {
     const entry = this.tools.get(toolCallId) ?? {
       index: this.takeIndex(),
@@ -312,7 +317,9 @@ export class AcpTurn {
       output: null,
       status: 'running' as ToolStatus,
       documents: [] as ToolDocument[],
+      subagent: null,
     };
+    entry.subagent ??= subagent;
     if (name !== null && name.length > 0) entry.name = name;
     // Antigravity carries a shell call's command, its cwd and its combined
     // output under half a dozen spellings, and pads `_meta` with base64
@@ -338,6 +345,7 @@ export class AcpTurn {
       output: entry.output,
       status: entry.status,
       ...(entry.documents.length > 0 ? { documents: entry.documents } : {}),
+      ...(entry.subagent === 'subagent' ? { nativeAgents: [antigravitySubagentBatch(toolCallId, entry.status, entry.output)] } : {}),
     });
   }
 }

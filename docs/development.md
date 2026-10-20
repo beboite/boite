@@ -989,7 +989,8 @@ The total cannot grow without a separate upload channel: the journal keeps a
 message's attachments inline, and `threads.get` cannot page a message heavier
 than its 12 MB page. PNG, JPEG, GIF and WebP use native image input. Other
 files, including PDFs and archives, use `kind: 'file'` and host paths in the
-prompt. Provider tools decide which formats they can read. Boite neither
+prompt, and so does an image the provider's agent takes no block of: a GIF for
+Antigravity, whose server reads PNG, JPEG and WebP only. Provider tools decide which formats they can read. Boite neither
 extracts archives nor executes uploads.
 
 Before those caps, the client brings an image to 2000 px on its long edge
