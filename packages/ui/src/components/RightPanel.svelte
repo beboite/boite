@@ -117,6 +117,17 @@
     const gap = parseFloat(getComputedStyle(node.parentElement ?? node).columnGap) || 0;
     const room = [...(node.parentElement?.querySelectorAll<HTMLElement>(':scope > .chev') ?? [])].reduce((sum, chevron) => sum + chevron.offsetWidth + gap, 0);
     overflowing = stripOverflows(node.scrollWidth, node.clientWidth, room, untrack(() => overflowing));
+    readEdges();
+  }
+
+  /** Which ends of the strip hide a tab: that end fades instead of cutting a label in half, and its chevron rests. */
+  let hiddenStart = $state(false);
+  let hiddenEnd = $state(false);
+  function readEdges(): void {
+    const node = tabs;
+    if (!node) return;
+    hiddenStart = node.scrollLeft > 1;
+    hiddenEnd = node.scrollLeft < node.scrollWidth - node.clientWidth - 1;
   }
 
   $effect(() => {
@@ -304,6 +315,7 @@
         class="ghost small icon chev"
         title={strings.rightPanel.scrollLeft}
         aria-label={strings.rightPanel.scrollLeft}
+        disabled={!hiddenStart}
         onclick={() => scrollBy(-1)}
       >
         <ChevronLeft size={14} strokeWidth={1.75} />
@@ -312,10 +324,13 @@
 
     <div
       class="tabs"
+      class:hidden-start={overflowing && hiddenStart}
+      class:hidden-end={overflowing && hiddenEnd}
       role="tablist"
       tabindex="-1"
       bind:this={tabs}
       {onwheel}
+      onscroll={readEdges}
       onkeydown={onTabsKey}
       data-testid="panel-tabs"
     >
@@ -363,6 +378,7 @@
         class="ghost small icon chev"
         title={strings.rightPanel.scrollRight}
         aria-label={strings.rightPanel.scrollRight}
+        disabled={!hiddenEnd}
         onclick={() => scrollBy(1)}
       >
         <ChevronRight size={14} strokeWidth={1.75} />
@@ -547,6 +563,10 @@
     display: none;
   }
 
+  .tabs.hidden-start { mask-image: linear-gradient(to right, transparent, black 24px); }
+  .tabs.hidden-end { mask-image: linear-gradient(to left, transparent, black 24px); }
+  .tabs.hidden-start.hidden-end { mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent); }
+
   .tab {
     display: flex;
     align-items: center;
@@ -618,6 +638,11 @@
 
   .cross {
     display: none;
+  }
+
+  /* Flex, not inline: an inline span set the icon on the text's baseline, 2.5 px above the label's centre. */
+  .glyph {
+    display: inline-flex;
   }
 
   .glyph,

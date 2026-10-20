@@ -180,7 +180,7 @@ fn build_popup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>
     #[cfg(windows)]
     if !native_frame { builder = builder.shadow(false); }
     if let Some(profile) = crate::window::webview_profile() { builder = builder.data_directory(profile); }
-    if let Some(args) = crate::window::test_browser_args() { builder = builder.additional_browser_args(&args); }
+    builder = builder.additional_browser_args(&crate::window::browser_args());
     let window = builder.build()?;
     let handle = app.clone();
     window.on_window_event(move |event| {

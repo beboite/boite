@@ -265,11 +265,12 @@
     text-align: center;
   }
 
+  /* One sentence cut in phrases that wrap whole: the gap between two is a word space, not 6 px. */
   .draft-details {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 4px 6px;
+    gap: 4px 0.28em;
     color: var(--color-muted-foreground);
     font-size: var(--text-base);
     line-height: 1.6;

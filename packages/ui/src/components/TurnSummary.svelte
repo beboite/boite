@@ -70,8 +70,7 @@
 </script>
 
 {#snippet metric(id: string, text: string | null, title?: string, quiet = false)}
-  <span class="dot ui-label" aria-hidden="true">·</span>
-  <span class="ui-label" class:quiet data-testid={id} {title}>{text}</span>
+  <span class="metric"><span class="dot ui-label" aria-hidden="true">·</span><span class="ui-label" class:quiet data-testid={id} {title}>{text}</span></span>
 {/snippet}
 {#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed && !compacting)}
   <div class="summary" class:compacting class:settled class:pointed class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
@@ -109,23 +108,32 @@
       {@render metric('turn-tokens', `${formatTokens(total)} ${strings.units.tokens}`, breakdown)}
     {/if}
     {#if still}
-      <span class="dot ui-label" aria-hidden="true">·</span>
-      <span class="background" data-testid="turn-background" title={background.map((task) => task.description).join('\n')}>
-        <span class="pulse" aria-hidden="true"></span><span class="ui-label">{still}</span>
+      <span class="metric">
+        <span class="dot ui-label" aria-hidden="true">·</span>
+        <span class="background" data-testid="turn-background" title={background.map((task) => task.description).join('\n')}>
+          <span class="pulse" aria-hidden="true"></span><span class="ui-label">{still}</span>
+        </span>
+        {#if stop && !running}
+          <button type="button" class="stop-background" data-testid="turn-background-stop" title={strings.chat.backgroundStop} aria-label={strings.chat.backgroundStop} onclick={stop}>
+            <Square size={10} />
+          </button>
+        {/if}
       </span>
-      {#if stop && !running}
-        <button type="button" class="stop-background" data-testid="turn-background-stop" title={strings.chat.backgroundStop} aria-label={strings.chat.backgroundStop} onclick={stop}>
-          <Square size={10} />
-        </button>
-      {/if}
     {/if}
-    {#if actions && !running}{@render actions()}{/if}
+    {#if actions && !running}<span class="tail">{@render actions()}</span>{/if}
     {/if}
   </div>
 {/if}
 
 <style>
-  .summary { display: flex; flex-wrap: wrap; align-self: stretch; align-items: center; gap: 4px 6px; margin: 12px 0 0 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
+  .summary { --lead: 10px; display: flex; flex-wrap: wrap; align-self: stretch; align-items: center; gap: 4px 6px; margin: 12px 0 0 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
+  /* A metric carries its dot, so a dot never ends a line. A line that starts
+     with one starts --lead to the left, where the clip hides that dot; whatever
+     starts a line without a dot steps back in by --lead. */
+  .summary:not(.compacting) { margin-left: calc(4px - var(--lead)); clip-path: inset(-8px -8px -8px var(--lead)); }
+  .summary:not(.compacting) > :global(*:first-child:not(.metric)), .tail { margin-left: var(--lead); }
+  .metric { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+  .tail { display: inline-flex; }
   .summary[data-status='running'] { color: var(--color-muted-foreground); }
   /* Read on demand: the message under the pointer or the keyboard shows it, a finger always does. */
   .summary.settled { opacity: 0; transition: opacity var(--dur-2); }
@@ -139,7 +147,7 @@
   .compaction-title { display: block; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 500; }
   .compaction-elapsed { display: block; margin-top: 8px; color: var(--color-muted-foreground); }
   .summary :global(.compaction-icon) { flex: none; margin-top: 1px; }
-  .dot { opacity: .6; }
+  .dot { display: inline-block; width: calc(var(--lead) - 6px); text-align: center; opacity: .6; }
   [data-testid='turn-progress'] { min-width: 0; overflow-wrap: anywhere; }
   .quiet { color: var(--color-muted-foreground); }
   .background { display: inline-flex; align-items: center; gap: 6px; color: var(--color-accent); }

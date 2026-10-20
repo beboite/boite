@@ -356,9 +356,11 @@
     color: var(--color-foreground);
   }
 
+  /* Every child is one control high, so the end is the centre on one row; on a
+     composer too narrow for one, the tools sit on the chips' last row. */
   .bar {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 8px;
     padding: var(--composer-bar-padding, 4px 8px 8px 10px);
   }
@@ -432,6 +434,19 @@
 
   .stop {
     color: var(--color-foreground);
+  }
+
+  /* A composer the side panel narrowed keeps its tools on one row: the account
+     goes first, then the effort, worktree and mode chips keep only their icons and
+     tooltips. */
+  @container composer (max-width: 600px) {
+    .chips :global(.picker) { min-width: 0; }
+    .chips :global(.picker > .trigger .account-name) { display: none; }
+  }
+  @container composer (max-width: 480px) {
+    .bar { gap: 6px; }
+    .desktop-options :global(.trigger > .ui-label), .desktop-options .worktree > .ui-label { display: none; }
+    .desktop-options :global(.trigger), .desktop-options .worktree { padding: 0 9px; }
   }
 
   @media (max-width: 720px) {
