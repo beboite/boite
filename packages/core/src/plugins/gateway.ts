@@ -109,7 +109,7 @@ interface Running {
   threadId: string;
   pid: number;
   exited: Promise<number>;
-  /** Whether an exit schedules a relaunch; an update's start does not, its caller puts the previous release back. */
+  /** Whether an exit schedules a relaunch; not while an update starts it, its caller puts the previous release back. */
   relaunch: boolean;
 }
 
@@ -327,6 +327,8 @@ export class PluginGateways {
         const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2_000), redirect: 'error' });
         const body = await response.json() as { status?: unknown; version?: unknown };
         if (response.ok && body.status === 'ok' && entry.running === running) {
+          // Started: from here an exit is a crash like any other, relaunched.
+          Object.assign(running, { relaunch: true });
           Object.assign(entry, { status: 'running', error: null, version: typeof body.version === 'string' && body.version ? body.version.slice(0, 80) : null });
           this.host.log('info', `${id} ${entry.version ?? ''} listens on 127.0.0.1:${port}`, 'gateway.started');
           this.host.changed(id);
