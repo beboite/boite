@@ -223,21 +223,36 @@ function agentKit() {
       else if (typeof el.select === 'function') el.select();
     }
     // Then the point moves out through each iframe around it to this window's viewport.
-    let left = x, top = y, inside = true;
-    for (let inner = view; inner !== window && inner.frameElement; inner = inner.parent) {
-      const origin = contentOrigin(inner.frameElement);
-      left += origin.left; top += origin.top;
-      inside = inside && left >= 0 && top >= 0 && left < inner.parent.innerWidth && top < inner.parent.innerHeight;
-    }
+    const out = outward(view, x, y);
     // A covered element is driven through the DOM rather than clicking what covers it.
-    if (!inside && !typing) return { x: left, y: top, covered: 'the edge of the frame it is in' };
-    return reached || typing ? { x: left, y: top } : { x: left, y: top, covered: hit ? clip(hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') + ' ' + (hit.innerText ?? ''), 60) : 'nothing at its center' };
+    if (typing) return { x: out.x, y: out.y };
+    const covered = !reached ? (hit ? named(hit) : 'nothing at its center') : out.covered;
+    return covered ? { x: out.x, y: out.y, covered } : { x: out.x, y: out.y };
   };
 
-  // Where an iframe's document starts in the viewport of the document that holds it.
-  const contentOrigin = frame => {
-    const r = frame.getBoundingClientRect(), style = (frame.ownerDocument.defaultView ?? window).getComputedStyle(frame);
-    return { left: r.left + frame.clientLeft + parseFloat(style.paddingLeft), top: r.top + frame.clientTop + parseFloat(style.paddingTop) };
+  const named = el => clip(el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + ' ' + (el.innerText ?? ''), 60);
+  /**
+   * A point in the document `frame` shows, in the viewport of the document
+   * that holds the iframe, and what native input there would meet instead of
+   * the frame: something drawn over it, or nothing when the point is out of
+   * view. A scale or translation of the iframe moves and scales the point.
+   */
+  const through = (frame, x, y) => {
+    const r = frame.getBoundingClientRect(), view = frame.ownerDocument.defaultView ?? window, style = view.getComputedStyle(frame);
+    const sx = frame.offsetWidth ? r.width / frame.offsetWidth : 1, sy = frame.offsetHeight ? r.height / frame.offsetHeight : 1;
+    const point = { x: r.left + (frame.clientLeft + parseFloat(style.paddingLeft) + x) * sx, y: r.top + (frame.clientTop + parseFloat(style.paddingTop) + y) * sy };
+    if (point.x < 0 || point.y < 0 || point.x >= view.innerWidth || point.y >= view.innerHeight) return { ...point, covered: 'the edge of the frame it is in' };
+    const root = frame.getRootNode(), hit = (typeof root.elementFromPoint === 'function' ? root : frame.ownerDocument).elementFromPoint(point.x, point.y);
+    return hit === frame ? point : { ...point, covered: hit ? named(hit) : 'nothing over its frame' };
+  };
+  // From `view`'s viewport out to this window's, through each frame of this origin between them.
+  const outward = (view, x, y) => {
+    let point = { x, y }, covered;
+    for (let inner = view; inner !== window && inner.frameElement; inner = inner.parent) {
+      point = through(inner.frameElement, point.x, point.y);
+      covered ??= point.covered;
+    }
+    return { x: point.x, y: point.y, ...(covered ? { covered } : {}) };
   };
   const fire = (el, type, init = {}) => el.dispatchEvent(new (type.startsWith('pointer') ? (window.PointerEvent ?? MouseEvent) : type.startsWith('key') ? KeyboardEvent : type === 'input' ? (window.InputEvent ?? Event) : type === 'change' ? Event : MouseEvent)(type, { bubbles: true, cancelable: true, composed: true, ...init }));
   const setValue = (el, value) => {
@@ -336,10 +351,11 @@ function agentKit() {
   K.scroll = (x, y, target) => { const el = target ? K.find(target) : null; if (el) el.scrollBy(x, y); else scrollBy(x, y); return { x: scrollX, y: scrollY }; };
   K.scrollIntoView = target => { K.find(target).scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); return true; };
   K.focus = target => { K.find(target).focus(); return true; };
-  // An iframe's content box in this document's viewport, and the viewport: a point in its frame lands at x + left, y + top.
-  K.frameBox = target => {
-    const el = K.find(target), view = el.ownerDocument.defaultView ?? window;
-    return { ...contentOrigin(el), width: view.innerWidth, height: view.innerHeight };
+  // A point of the document iframe `target` shows, in this window's viewport, and what covers the way there.
+  K.through = (target, x, y) => {
+    const frame = K.find(target), point = through(frame, x, y), out = outward(frame.ownerDocument.defaultView ?? window, point.x, point.y);
+    const covered = point.covered ?? out.covered;
+    return covered ? { x: out.x, y: out.y, covered } : { x: out.x, y: out.y };
   };
   K.reveal = target => { K.find(target).scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' }); return true; };
   const glob = pattern => new RegExp('^' + pattern.replace(/[.+^$(){}|[\]\\?]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*') + '$');

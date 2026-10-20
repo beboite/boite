@@ -246,10 +246,11 @@ The kit keeps its refs in each frame's own window, and the core keeps, for each
 ref the last snapshot read in a frame, the iframe refs that lead to it. A
 command on such a ref runs in that frame's document. Native input is sent to
 the tab in the top document's coordinates: each iframe around the element is
-scrolled into its parent's view, and its content box's position is added to
-the point. A point outside a parent's view is clicked through the DOM, with a
-note. A navigation of the top document forgets the frame refs, so an old one
-is refused by name.
+scrolled into its parent's view, and the point moves out through its content
+box, scaled with it. A point outside a parent's view, or where something is
+drawn over an iframe, is clicked through the DOM, with a note naming what
+covered it. A navigation of the top document forgets the frame refs, so an old
+one is refused by name.
 
 A snapshot reads at most 30 frames of other origins, within its 40,000
 characters; one past either is a note under its iframe. With `-i`, a frame with
@@ -513,7 +514,9 @@ reports a hosted tab it shows, only while its window is visible. `browser-cli.te
 page's origin, one of another site, one of another origin of the same site
 below the fold, and a frame of another site nested in the second: native clicks land in each (`isTrusted`),
 fill and get reach them, and a frame ref is refused after the page moves on.
-The desktop app's relay of frames is not covered.
+It also clicks into a frame nested in an offset frame and into a scaled one,
+and through the DOM when a button is drawn over the frame. The desktop app's
+relay of frames is not covered.
 `tests/e2e/agent-browser-core.test.ts` runs the whole path on a real core: the
 owner's desktop at 1280 × 900 and a paired phone at 390 × 844 see the cover,
 show the page and tap it, and the tap reaches the page. `browser-remote.test.ts`

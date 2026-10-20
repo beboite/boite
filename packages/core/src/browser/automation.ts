@@ -262,20 +262,19 @@ type Point = { x: number; y: number; covered?: string } | null;
 
 /**
  * Where native input reaches the element, in the top document's viewport: a
- * point in a frame lands offset by each iframe around it, once each is
- * scrolled into its parent's view.
+ * point in a frame moves out through each iframe around it, once each is
+ * scrolled into its parent's view. Something drawn over an iframe covers the
+ * element too.
  */
 async function pointOf(scope: Scope, selector: string, mode: string): Promise<Point> {
   for (const { parent, owner } of scope.path) await run(parent, `return K.reveal(${js(owner)})`);
-  const point = await run<Point>(scope.channel, `return K.point(${js(selector)}, ${js(mode)})`);
-  if (!point || !scope.path.length) return point;
-  let { x, y } = point;
+  let point = await run<Point>(scope.channel, `return K.point(${js(selector)}, ${js(mode)})`);
   for (const { parent, owner } of [...scope.path].reverse()) {
-    const box = await run<{ left: number; top: number; width: number; height: number }>(parent, `return K.frameBox(${js(owner)})`);
-    x += box.left; y += box.top;
-    if (x < 0 || y < 0 || x >= box.width || y >= box.height) return { x, y, covered: 'the edge of the frame it is in' };
+    if (!point) return point;
+    const out: NonNullable<Point> = await run(parent, `return K.through(${js(owner)}, ${point.x}, ${point.y})`);
+    point = { x: out.x, y: out.y, ...(point.covered ?? out.covered ? { covered: point.covered ?? out.covered } : {}) };
   }
-  return { ...point, x, y };
+  return point;
 }
 
 /** Clicks through native input where the element is reachable, through the DOM when something covers it. */

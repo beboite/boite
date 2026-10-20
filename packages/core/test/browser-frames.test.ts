@@ -19,6 +19,16 @@ beforeAll(() => {
   sameSite = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => new Response(CARD(new URL(request.url).searchParams.get('who') ?? 'billing'), { headers: { 'content-type': 'text/html' } }) });
   checkout = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => {
     const { pathname, port, searchParams } = new URL(request.url);
+    const html = (body: string) => new Response(`<!doctype html><title>Placed</title><style>body{margin:0}</style>${body}<script>addEventListener('message', event => { window.result = event.data })</script>`, { headers: { 'content-type': 'text/html' } });
+    // A button whose message says whether the click was native, in frames placed every way a page places them.
+    const foreign = (style: string) => `<iframe title="Foreign" src="http://localhost:${port}/placed/button" style="border:0;position:absolute;left:260px;top:180px;width:400px;height:120px;${style}"></iframe>`;
+    if (pathname === '/placed/button') return html(`<button style="position:absolute;left:160px;top:30px;width:60px;height:30px" onclick="top.postMessage('clicked ' + event.isTrusted, '*')">Pay</button>`);
+    if (pathname === '/placed/inner') return html(foreign('left:40px;top:0'));
+    if (pathname === '/placed/nested') return html(`<iframe title="Local" src="/placed/inner" style="border:0;position:absolute;left:260px;top:180px;width:500px;height:180px"></iframe>`);
+    if (pathname === '/placed/scaled') return html(foreign('transform:scale(.5);transform-origin:0 0'));
+    const overlay = `<button style="position:absolute;left:260px;top:180px;width:400px;height:120px" onclick="top.postMessage('overlay ' + event.isTrusted, '*')">Overlay</button>`;
+    if (pathname === '/placed/covered') return html(`<iframe title="Local" src="/placed/button" style="border:0;position:absolute;left:260px;top:180px;width:400px;height:120px"></iframe>${overlay}`);
+    if (pathname === '/placed/covered-foreign') return html(`${foreign('')}${overlay}`);
     // The card form embeds a check of a third origin, so a frame inside a frame of another process.
     if (pathname === '/card' && searchParams.get('who') === 'local') return new Response(CARD('local'), { headers: { 'content-type': 'text/html' } });
     if (pathname === '/card') return new Response(CARD('card', `<iframe title="Verify" src="http://127.0.0.1:${sameSite.port}/?who=verify" style="display:block;margin-left:40px;width:300px;height:60px;border:2px solid #000"></iframe>`), { headers: { 'content-type': 'text/html' } });
@@ -97,4 +107,30 @@ return page.get('text', '#status')`;
     out: text => out += text, err: text => error += text });
   expect({ code, error }).toEqual({ code: 0, error: '' });
   expect(out).toEndWith('card 1111 true\n');
+}, 120_000);
+
+real('a click in a frame lands where the frame is drawn, and goes through the DOM when something covers the frame', async () => {
+  const { agent, threadId } = browserFixture;
+  const command = async (action: Record<string, unknown>) => (await agent.call('browser.command', { threadId, action: action as never })).value as Record<string, unknown>;
+  const clickPay = async (path: string) => {
+    await command({ kind: 'open', url: `http://127.0.0.1:${checkout.port}${path}` });
+    await command({ kind: 'wait', load: 'load' });
+    const tree = String((await command({ kind: 'snapshot', interactive: true })).text);
+    const pay = /button "Pay" \[ref=(e\d+)\]/.exec(tree);
+    expect(pay, `Pay in\n${tree}`).not.toBeNull();
+    const clicked = await command({ kind: 'click', selector: `@${pay![1]}` });
+    let result: unknown;
+    for (const end = Date.now() + 3000; Date.now() < end && !(result = await command({ kind: 'evaluate', expression: 'window.result ?? null' }) as unknown);) await Bun.sleep(50);
+    return { note: clicked.note, result };
+  };
+  // A frame of another site inside an offset frame of the page's own origin.
+  expect(await clickPay('/placed/nested')).toEqual({ note: undefined, result: 'clicked true' });
+  // An iframe scaled to half its size takes its points scaled too.
+  expect(await clickPay('/placed/scaled')).toEqual({ note: undefined, result: 'clicked true' });
+  // A button drawn over the frame would take a native click: the frame's button is clicked through the DOM instead.
+  for (const path of ['/placed/covered', '/placed/covered-foreign']) {
+    const covered = await clickPay(path);
+    expect(covered.result).toBe('clicked false');
+    expect(String(covered.note)).toContain('covered by button Overlay');
+  }
 }, 120_000);
