@@ -109,6 +109,8 @@ interface Running {
   threadId: string;
   pid: number;
   exited: Promise<number>;
+  /** Whether an exit schedules a relaunch; an update's start does not, its caller puts the previous release back. */
+  relaunch: boolean;
 }
 
 interface Entry {
@@ -278,9 +280,11 @@ export class PluginGateways {
   /**
    * Starts the gateway unless it runs already or the core is closing, and
    * resolves once it answers `/health` (true) or failed to (false, with the
-   * reason on its state and a relaunch scheduled like a crash).
+   * reason on its state and a relaunch scheduled like a crash). With
+   * `relaunch` false a failure only leaves it `crashed`: a relaunch would
+   * start it again while the caller reads why, and clear that reason.
    */
-  async launch(id: string): Promise<boolean> {
+  async launch(id: string, relaunch = true): Promise<boolean> {
     if (this.closing) return false;
     const entry = this.entry(id);
     if (entry.running !== null) return entry.status === 'running';
@@ -311,7 +315,7 @@ export class PluginGateways {
     const last = { line: '' };
     void this.drain(id, spawned.proc.stdout, last);
     void this.drain(id, spawned.proc.stderr, last);
-    const running: Running = { threadId, pid: spawned.record.pid, exited: spawned.exited };
+    const running: Running = { threadId, pid: spawned.record.pid, exited: spawned.exited, relaunch };
     Object.assign(entry, { status: 'starting', pid: running.pid, error: null, version: null, startedAt: this.clock.now(), running });
     try { writeFileSync(join(this.dataDir(id), 'gateway.pid'), `${JSON.stringify({ pid: running.pid, config })}\n`); } catch { /* only the orphan check reads it */ }
     let exitCode: number | null = null;
@@ -352,10 +356,16 @@ export class PluginGateways {
       this.host.changed(id);
       return;
     }
+    const why = silent ? entry.error! : `${id} exited with code ${code}${lastError ? ` (${lastError})` : ''}`;
+    if (!running.relaunch) {
+      Object.assign(entry, { status: 'crashed', error: why });
+      this.host.log('warn', why, 'gateway.start-failed');
+      this.host.changed(id);
+      return;
+    }
     const now = this.clock.now();
     entry.crashes = [...entry.crashes.filter((at) => now - at < CRASH_WINDOW_MS), now];
     const delay = this.relaunchDelaysMs[entry.crashes.length - 1];
-    const why = silent ? entry.error! : `${id} exited with code ${code}${lastError ? ` (${lastError})` : ''}`;
     if (delay === undefined) {
       entry.status = 'crashed';
       entry.error = `${why}; it failed ${entry.crashes.length} times in ${CRASH_WINDOW_MS / 60_000} minutes. Start it again from Settings > Plugins.`;
