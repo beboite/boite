@@ -3,6 +3,7 @@ import { RpcErrorCode, type SchedulerState } from '@boite/contracts';
 import { holdAccountTurns, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
+import { rejection, thrown } from './settle.ts';
 
 let harness: TestCore;
 
@@ -48,7 +49,7 @@ describe('scheduler', () => {
     const client = await harness.connect();
     const [threadId = ''] = await threeThreads(client);
     await harness.core.drain();
-    await expect(client.call('turns.start', { threadId, prompt: 'late prompt' })).rejects.toThrow('stopping');
+    expect(await thrown(client.call('turns.start', { threadId, prompt: 'late prompt' }))).toThrow('stopping');
     expect(harness.core.journal.listTurns(threadId)).toEqual([]);
     expect(harness.core.journal.listMessages(threadId)).toEqual([]);
   });
@@ -66,10 +67,10 @@ describe('scheduler', () => {
     const client = await harness.connect();
     const [threadId = ''] = await threeThreads(client);
     await client.call('turns.start', { threadId, prompt: '[sleep:60000] first' });
-    await expect(client.call('turns.start', { threadId, prompt: 'must not land' })).rejects.toThrow('in-flight');
+    expect(await thrown(client.call('turns.start', { threadId, prompt: 'must not land' }))).toThrow('in-flight');
     // The refusal says the prompt is early, not wrong, and carries the row a
     // client that had not seen this turn yet needs to wait for it.
-    await expect(client.call('turns.start', { threadId, prompt: 'must not land' })).rejects.toMatchObject({
+    expect(await rejection(client.call('turns.start', { threadId, prompt: 'must not land' }))).toMatchObject({
       rpc: { code: RpcErrorCode.Refused, data: { threadId, reason: 'turn-in-flight', thread: { id: threadId, status: 'running' } } },
     });
     expect(harness.core.threads.get(threadId).turns).toHaveLength(1);

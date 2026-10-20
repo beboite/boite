@@ -19,6 +19,7 @@ import { CONFIG_READ } from '../src/drivers/codex/config.ts';
 import { CAPACITY_RETRY } from '../src/threads/turn-attempts.ts';
 import type { TestCore } from './harness.ts';
 import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider } from './scripted-provider.ts';
+import { thrown } from './settle.ts';
 
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
@@ -271,11 +272,11 @@ describe('codex driver', () => {
     const provider = core.providers.require('codex-fake');
     const threadId = `quota-reset:${accountId}`;
     let selected = false;
-    await expect(consumeCodexReset({ provider, accountId, cwd: dataDir,
+    expect(await thrown(consumeCodexReset({ provider, accountId, cwd: dataDir,
       accountEnv: core.accounts.accountEnv(core.accounts.require(accountId), provider),
       spawnChild: (cmd, args, opts) => core.procs.spawnChild(threadId, cmd, args, opts),
-      killTree: () => core.procs.killTree(threadId), log: () => undefined }, 'fixture-retry-key', { remember: () => { selected = true; } }))
-      .rejects.toThrow('reset details');
+      killTree: () => core.procs.killTree(threadId), log: () => undefined }, 'fixture-retry-key', { remember: () => { selected = true; } })))
+      .toThrow('reset details');
     await core.procs.stopAndWait(threadId);
     expect(selected).toBe(false);
     expect(fakeLog().trim().split('\n')).toEqual(['initialize', 'initialized', 'account/rateLimits/read {}']);
@@ -291,7 +292,7 @@ describe('codex driver', () => {
       spawnChild: (cmd, args, opts) => core.procs.spawnChild(threadId, cmd, args, opts),
       killTree: () => core.procs.killTree(threadId), log: () => undefined }, 'fixture-retry-key', { creditId: 'soon', remember: () => { throw new Error('must reuse the pinned credit'); } });
     process.env['CODEX_FAKE_RESET_ERROR'] = 'private-credit-id and fixture-token in a provider error';
-    await expect(consume()).rejects.toThrow('Codex could not confirm the reset');
+    expect(await thrown(consume())).toThrow('Codex could not confirm the reset');
     await core.procs.stopAndWait(threadId);
     delete process.env['CODEX_FAKE_RESET_ERROR'];
     const outcome = await consume();
@@ -2001,7 +2002,7 @@ describe('native Codex fork', () => {
     const before = harness!.core.threads.require(threadId);
     const count = harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get();
     process.env['CODEX_FAKE_FORK_ERROR'] = '1';
-    try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow('native fork refused'); }
+    try { expect(await thrown(harness!.core.threads.fork(threadId, reply.id, false))).toThrow('native fork refused'); }
     finally { delete process.env['CODEX_FAKE_FORK_ERROR']; }
     expect(harness!.core.threads.require(threadId)).toEqual(before);
     expect(harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get()).toEqual(count);
@@ -2030,7 +2031,7 @@ describe('native Codex fork', () => {
       harness!.core.journal.putThread({ ...before, selectionVersion: (before.selectionVersion ?? 0) + 1 });
       return native;
     });
-    try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow('source thread changed'); }
+    try { expect(await thrown(harness!.core.threads.fork(threadId, reply.id, false))).toThrow('source thread changed'); }
     finally { fork.mockRestore(); }
     expect(fakeLog()).toContain(`thread/archive ${forkId}`);
     expect(fakeLog()).not.toContain(`thread/archive ${before.sessionId}`);
@@ -2045,7 +2046,7 @@ describe('native Codex fork', () => {
     const source = harness!.core.threads.require(threadId);
     const count = harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get();
     process.env[flag] = '1';
-    try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow(); }
+    try { expect(await thrown(harness!.core.threads.fork(threadId, reply.id, false))).toThrow(); }
     finally { delete process.env[flag]; }
     expect(harness!.core.threads.require(threadId)).toEqual(source);
     expect(harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get()).toEqual(count);
@@ -2065,7 +2066,7 @@ describe('native Codex fork', () => {
       expect(fork.forkOrigin?.mode).toBe('seeded');
       expect(harness!.core.threads.get(fork.id).messages).toHaveLength(2);
       process.env['CODEX_FAKE_FORK_ARCHIVE_ERROR'] = '1';
-      try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow(); }
+      try { expect(await thrown(harness!.core.threads.fork(threadId, reply.id, false))).toThrow(); }
       finally { delete process.env['CODEX_FAKE_FORK_ARCHIVE_ERROR']; }
       expect({ ...harness!.core.threads.get(threadId), load: null }).toEqual({ ...source, load: null });
       const nextPrompt = source.messages.filter(message => message.role === 'user')[1]!;
@@ -2098,7 +2099,7 @@ describe('native Codex fork', () => {
     await sourceIdle(threadId);
     const source = harness!.core.threads.require(threadId);
     process.env['CODEX_FAKE_FORK_SAME'] = '1';
-    try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow('distinct from the source'); }
+    try { expect(await thrown(harness!.core.threads.fork(threadId, reply.id, false))).toThrow('distinct from the source'); }
     finally { delete process.env['CODEX_FAKE_FORK_SAME']; }
     expect(fakeLog()).not.toContain(`thread/archive ${source.sessionId}`);
     expect(harness!.core.threads.require(threadId)).toEqual(source);
@@ -2160,7 +2161,7 @@ describe('native Codex rewind', () => {
     const before = harness!.core.threads.get(threadId);
     const secondPrompt = before.messages.filter(message => message.role === 'user')[1]!;
     const restore = spyOn(harness!.core.threads.codeCheckpoints, 'rewind').mockRejectedValue(new Error('files changed externally'));
-    try { await expect(harness!.core.threads.rewind(threadId, secondPrompt.id)).rejects.toThrow('files changed externally'); }
+    try { expect(await thrown(harness!.core.threads.rewind(threadId, secondPrompt.id))).toThrow('files changed externally'); }
     finally { restore.mockRestore(); }
     expect({ ...harness!.core.threads.get(threadId), load: null }).toEqual({ ...before, load: null });
     expect(fakeLog()).toContain('thread/archive codex-fork-');
@@ -2201,7 +2202,7 @@ describe('native Codex rewind', () => {
     const secondPrompt = before.messages.filter(message => message.role === 'user')[1]!;
     const restore = spyOn(harness!.core.threads.codeCheckpoints, 'rewind');
     process.env['CODEX_FAKE_FORK_ERROR'] = '1';
-    try { await expect(harness!.core.threads.rewind(threadId, secondPrompt.id)).rejects.toThrow('native fork refused'); }
+    try { expect(await thrown(harness!.core.threads.rewind(threadId, secondPrompt.id))).toThrow('native fork refused'); }
     finally { delete process.env['CODEX_FAKE_FORK_ERROR']; }
     expect(restore).not.toHaveBeenCalled(); restore.mockRestore();
     expect({ ...harness!.core.threads.get(threadId), load: null }).toEqual({ ...before, load: null });
@@ -2217,7 +2218,7 @@ describe('native Codex rewind', () => {
       harness!.core.journal.putThread({ ...before, selectionVersion: (before.selectionVersion ?? 0) + 1 });
       return cut({ status: 'unchanged', count: 0 });
     });
-    try { await expect(harness!.core.threads.rewind(threadId, secondPrompt.id)).rejects.toThrow('changed while restoring files'); }
+    try { expect(await thrown(harness!.core.threads.rewind(threadId, secondPrompt.id))).toThrow('changed while restoring files'); }
     finally { restore.mockRestore(); }
     expect(harness!.core.threads.get(threadId).messages).toEqual(messages);
     expect(harness!.core.threads.require(threadId).sessionId).toBe(before.sessionId);

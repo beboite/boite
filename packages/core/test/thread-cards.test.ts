@@ -3,6 +3,7 @@ import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
 import { hasGitHubRemote, LIST_LIMIT, parsePullRequestList, parsePullRequests, PullRequests, repositoryOf } from '../src/pull-requests.ts';
+import { thrown } from './settle.ts';
 let harness: TestCore;
 beforeEach(async () => {
   harness = await startTestCore();
@@ -56,8 +57,8 @@ test('browser origins are explicit, validated, stored bare and removable', async
     browserOrigins: ['http://192.168.1.20:8777/app', 'http://192.168.1.20:8777/', ' https://example.com/ ']
   });
   expect(pasted.browserOrigins).toEqual(['http://192.168.1.20:8777', 'https://example.com']);
-  await expect(client.call('settings.set', { browserOrigins: ['ftp://example.com'] })).rejects.toThrow('browserOrigins');
-  await expect(client.call('settings.set', { browserOrigins: ['*'] })).rejects.toThrow('browserOrigins');
+  expect(await thrown(client.call('settings.set', { browserOrigins: ['ftp://example.com'] }))).toThrow('browserOrigins');
+  expect(await thrown(client.call('settings.set', { browserOrigins: ['*'] }))).toThrow('browserOrigins');
   const next = await client.call('settings.set', { browserOrigins: ['https://example.com'] });
   expect(next.browserOrigins).toEqual(['https://example.com']);
   expect((await client.call('settings.set', { browserOrigins: [] })).browserOrigins).toEqual([]);
@@ -195,7 +196,7 @@ test('threads of one repository share one git remote and one gh call, and a miss
     expect(await missing.read(ids[1]!, false)).toBeNull();
     expect(commands).toEqual(['git', 'gh']);
     // A user's refresh tries gh again and says why it cannot answer.
-    await expect(missing.read(ids[1]!, true)).rejects.toThrow('Executable not found in $PATH: "gh"');
+    expect(await thrown(missing.read(ids[1]!, true))).toThrow('Executable not found in $PATH: "gh"');
     expect(commands).toEqual(['git', 'gh', 'git', 'gh']);
     // Automatic lookups stay quiet after that refusal.
     expect(await missing.read(ids[2]!)).toBeNull();
@@ -314,7 +315,7 @@ test('a failed git remote read is asked again after fifteen seconds, not five mi
   });
   try {
     const reader = new PullRequests(harness.core);
-    await expect(reader.read(threadId)).rejects.toThrow('unable to read config');
+    expect(await thrown(reader.read(threadId))).toThrow('unable to read config');
     const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 16_000);
     try { expect((await reader.read(threadId))?.number).toBe(7); }
     finally { clock.mockRestore(); }

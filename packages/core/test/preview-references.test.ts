@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { previewReferencesError, type PreviewReference } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import { continuationInput } from '../src/continuation.ts';
+import { thrown } from './settle.ts';
 
 const reference: PreviewReference = { id: 'element-1', url: 'https://example.test/shop', selector: 'button:nth-of-type(2)', shadowPath: ['#checkout'], text: 'Buy now', bounds: { x: 10, y: 20, width: 120, height: 40 }, surfaceId: 'browser:checkout' };
 
@@ -22,7 +23,7 @@ test('preview URLs with credentials are refused before they reach the journal or
     const client = await h.connect();
     const { threadId } = await echoThread(h, client);
     for (const url of ['https://user@example.test', 'https://:password@example.test', 'https://user:%70assword@example.test']) {
-      await expect(client.call('turns.start', { threadId, prompt: 'Check this', previewReferences: [{ ...reference, url }] })).rejects.toThrow('without credentials');
+      expect(await thrown(client.call('turns.start', { threadId, prompt: 'Check this', previewReferences: [{ ...reference, url }] }))).toThrow('without credentials');
     }
     expect(h.core.journal.listTurns(threadId)).toHaveLength(0);
     expect(h.core.journal.listMessages(threadId)).toHaveLength(0);
@@ -54,7 +55,7 @@ test('preview references reach drivers and continuation as untrusted context whi
     expect(continued.prompt).toContain(reference.selector);
     const retry = await client.call('turns.start', { threadId, prompt, previewReferences: [inline], clientRequestId: 'preview-retry-1' });
     expect(retry.id).toBe(turn.id);
-    await expect(client.call('turns.start', { threadId, prompt, previewReferences: [{ ...inline, selector: '#different' }], clientRequestId: 'preview-retry-1' })).rejects.toThrow('different content');
+    expect(await thrown(client.call('turns.start', { threadId, prompt, previewReferences: [{ ...inline, selector: '#different' }], clientRequestId: 'preview-retry-1' }))).toThrow('different content');
   } finally { await h.stop(); }
 });
 
@@ -64,7 +65,7 @@ test('preview reference validation refuses malformed, oversized and unknown fiel
     const client = await h.connect();
     const { threadId } = await echoThread(h, client);
     for (const patch of [{ url: 'file:///secret' }, { bounds: { ...reference.bounds, width: -1 } }, { text: 'x'.repeat(1001) }, { shadowPath: Array(9).fill('#host') }, { extra: 'unexpected' }]) {
-      await expect(client.call('turns.start', { threadId, prompt: 'Test', previewReferences: [{ ...reference, ...patch }] })).rejects.toThrow('previewReferences');
+      expect(await thrown(client.call('turns.start', { threadId, prompt: 'Test', previewReferences: [{ ...reference, ...patch }] }))).toThrow('previewReferences');
     }
     expect(h.core.journal.listTurns(threadId)).toHaveLength(0);
     expect(previewReferencesError([reference, reference])).toContain('unique');

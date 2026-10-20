@@ -5,6 +5,7 @@ import type { Core } from '../src/core.ts';
 import { QuotaStore } from '../src/quotas.ts';
 import { QuotaResetError } from '../src/quota-resets.ts';
 import { startTestCore, type TestCore } from './harness.ts';
+import { rejection, thrown } from './settle.ts';
 
 let harness: TestCore | undefined;
 afterEach(async () => { await harness?.stop(); harness = undefined; });
@@ -51,7 +52,7 @@ test('Claude requires confirmation, claims the earliest usable private grant, th
   let broadcast: unknown;
   const off = core.bus.onAny((name, value) => { if (name === 'quotas.updated') broadcast = value; });
   try {
-    await expect(core.quotas.resets.reset(account.id, false)).rejects.toMatchObject({ data: { field: 'confirmed', expected: true } });
+    expect(await rejection(core.quotas.resets.reset(account.id, false))).toMatchObject({ data: { field: 'confirmed', expected: true } });
     expect(fetcher).toHaveBeenCalledTimes(0);
     const client = await harness!.connect();
     const result = await client.call('quotas.reset', { accountId: account.id, confirmed: true });
@@ -86,7 +87,7 @@ test('an unanswered Claude claim retries the same grant and request after recons
       ] } });
   }, { preconnect: fetch.preconnect }));
   try {
-    await expect(core.quotas.resets.reset(account.id, true)).rejects.toMatchObject({ settled: false });
+    expect(await rejection(core.quotas.resets.reset(account.id, true))).toMatchObject({ settled: false });
     const reopened = new QuotaStore(core);
     expect((await reopened.resets.reset(account.id, true)).outcome).toBe('alreadyRedeemed');
     expect(claims).toHaveLength(2);
@@ -108,9 +109,9 @@ test('Claude maps definitive outcomes and refuses cooldown or unconfirmed replie
       expect((await core.quotas.resets.reset(account.id, true)).outcome).toBe(outcome!);
     }
     answer = 'cooldown';
-    await expect(core.quotas.resets.reset(account.id, true)).rejects.toMatchObject({ settled: true });
+    expect(await rejection(core.quotas.resets.reset(account.id, true))).toMatchObject({ settled: true });
     answer = 'unavailable';
-    await expect(core.quotas.resets.reset(account.id, true)).rejects.toMatchObject({ settled: false });
+    expect(await rejection(core.quotas.resets.reset(account.id, true))).toMatchObject({ settled: false });
   } finally { fetcher.mockRestore(); version.mockRestore(); }
 });
 
@@ -143,7 +144,7 @@ test('an unanswered attempt keeps its key and credit across store reconstruction
   const first = new QuotaStore(core, async () => reading(), async (_account, key, selection) => {
     keys.push(key); selection.remember('private-codex-credit'); throw new QuotaResetError('fixture timeout');
   });
-  await expect(first.resets.reset(account.id, true)).rejects.toThrow('fixture timeout');
+  expect(await thrown(first.resets.reset(account.id, true))).toThrow('fixture timeout');
   const selections: (string | undefined)[] = [];
   const reopened = new QuotaStore(core, async () => reading(), async (_account, key, selection) => {
     keys.push(key); selections.push(selection.creditId); return 'reset';
@@ -175,8 +176,8 @@ test('unsupported and disabled accounts never run a reset consumer', async () =>
   const account = signedIn(core, 'codex', 'Disabled');
   let calls = 0;
   const store = new QuotaStore(core, async () => reading(), async () => { calls++; return 'reset'; });
-  await expect(store.resets.reset(echo.id, true)).rejects.toThrow('not supported');
+  expect(await thrown(store.resets.reset(echo.id, true))).toThrow('not supported');
   await store.configure(account.id, false);
-  await expect(store.resets.reset(account.id, true)).rejects.toThrow('Enable quota monitoring');
+  expect(await thrown(store.resets.reset(account.id, true))).toThrow('Enable quota monitoring');
   expect(calls).toBe(0);
 });

@@ -2,6 +2,7 @@ import { expect, spyOn, test } from 'bun:test';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import { echoThread, holdAccountTurns, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 function ask(h: TestCore): Promise<Response> {
   return fetch(`${h.url}/shutdown-if-idle?pid=${process.pid}`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } });
@@ -133,7 +134,7 @@ test('an in-flight RPC completes before the update barrier, which refuses later 
     await inFlight;
     expect((await ask(h)).status).toBe(202);
     expect(h.core.stopping).toBe(true);
-    await expect(client.call('turns.start', { threadId, prompt: 'too late' })).rejects.toThrow('stopping');
+    expect(await thrown(client.call('turns.start', { threadId, prompt: 'too late' }))).toThrow('stopping');
     expect(() => h.core.procs.spawn(threadId, process.execPath, ['-e', '0'])).toThrow('stopping');
     expect(h.core.journal.listTurns(threadId)).toHaveLength(0);
   } finally { finish?.(); await h.stop(); }

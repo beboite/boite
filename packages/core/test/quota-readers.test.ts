@@ -7,6 +7,7 @@ import type { Core } from '../src/core.ts';
 import type { Account } from '@boite/contracts';
 import { antigravityQuotaWindows, grokQuotaWindows, openCodeQuotaWindows, readExtraQuota, supportsAntigravityUsage } from '../src/quota-readers.ts';
 import { forgetAntigravityTokens } from '../src/antigravity-quota.ts';
+import { thrown } from './settle.ts';
 let directory = '';
 let restore: (() => void) | undefined;
 afterEach(async () => { restore?.(); restore = undefined; if (directory) await rm(directory, { recursive: true, force: true }); directory = ''; delete process.env.BOITE_DATA_DIR; });
@@ -62,7 +63,7 @@ test('OpenCode 2 reads the Go key from its database, never from auth.json', asyn
   const fetcher = spyOn(globalThis, 'fetch').mockImplementation(fakeFetch);
   restore = () => fetcher.mockRestore();
   const account = { providerId: 'opencode-v2', isolationDir: directory } as Account;
-  await expect(readExtraQuota(core, account)).rejects.toThrow('Connect OpenCode Go');
+  expect(await thrown(readExtraQuota(core, account))).toThrow('Connect OpenCode Go');
   const db = new Database(join(directory, 'opencode', 'opencode.db'));
   db.run('CREATE TABLE credential (id TEXT PRIMARY KEY, integration_id TEXT, label TEXT, value TEXT, connector_id TEXT, method_id TEXT, active INTEGER, time_created INTEGER, time_updated INTEGER)');
   db.run("INSERT INTO credential VALUES ('cred_go', 'opencode-go', 'OpenCode Go', ?, NULL, NULL, 1, 1, 1)", [JSON.stringify({ type: 'key', key: 'fixture-v2-key' })]);
@@ -88,7 +89,7 @@ test('OpenCode reads the isolated Go key and sends it only to its fixed usage en
   const account = { providerId: 'opencode', isolationDir: directory } as Account;
   expect((await readExtraQuota(core, account))[0]?.usedPercent).toBe(25);
   await writeFile(join(directory, 'opencode', 'auth.json'), '{}');
-  await expect(readExtraQuota(core, account)).rejects.toThrow('Connect OpenCode Go');
+  expect(await thrown(readExtraQuota(core, account))).toThrow('Connect OpenCode Go');
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
@@ -97,7 +98,7 @@ test('an Antigravity account reads its limits from the server sign-in, renewing 
   forgetAntigravityTokens();
   const core = { accounts: { accountEnv: () => ({ GEMINI_HOME: directory }) }, providers: { require: () => ({ quirks: ['antigravity'] }) } } as unknown as Core;
   const account = { id: 'acc_agy', providerId: 'antigravity', isolationDir: directory } as Account;
-  await expect(readExtraQuota(core, account)).rejects.toThrow('Sign in to Antigravity in Providers');
+  expect(await thrown(readExtraQuota(core, account))).toThrow('Sign in to Antigravity in Providers');
 
   await mkdir(join(directory, 'antigravity-acp'));
   await writeFile(join(directory, 'antigravity-acp', 'acp_token.json'), JSON.stringify({ client_id: 'fixture-client', client_secret: 'fixture-secret', refresh_token: 'fixture-refresh', project_id: 'fixture-project' }));
@@ -154,6 +155,6 @@ test('an Antigravity account reads its limits from the server sign-in, renewing 
   expect(issued).toBe(2);
   // A fresh token refused too: the sign-in is gone, and the page says so.
   refused.add('*');
-  await expect(readExtraQuota(core, account)).rejects.toThrow('The Antigravity sign-in expired');
+  expect(await thrown(readExtraQuota(core, account))).toThrow('The Antigravity sign-in expired');
   expect(issued).toBe(3);
 });

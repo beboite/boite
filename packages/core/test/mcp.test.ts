@@ -5,6 +5,7 @@ import { AGENT_METHODS } from '../src/access.ts';
 import { boundedMcpResult, dispatchMcpTool, MCP_MAX_RESULT_BYTES, MCP_TOOLS, requestWithCancellation } from '../src/mcp/tools.ts';
 import type { CoreClient } from '../src/client.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let h: TestCore;
 afterEach(async () => { await h?.stop(); });
@@ -19,14 +20,14 @@ test('bounded structured MCP output announces truncation and cancellation leaves
   const pending = Promise.withResolvers<number>();
   const waiting = requestWithCancellation(pending.promise, abort.signal);
   abort.abort();
-  await expect(waiting).rejects.toThrow('submitted work may continue');
+  expect(await thrown(waiting)).toThrow('submitted work may continue');
   pending.resolve(42);
   expect(await pending.promise).toBe(42);
   const client = { principal: 'agent', threadId: 'own', call: () => { throw new Error('must not dispatch'); } } as unknown as CoreClient;
-  await expect(dispatchMcpTool(client, 'other', 'boite_where', {})).rejects.toThrow('thread-bound');
-  await expect(dispatchMcpTool(client, 'own', 'arbitrary.rpc', {})).rejects.toThrow('unknown');
-  await expect(dispatchMcpTool(client, 'own', 'boite_where', { threadId: 'other' })).rejects.toThrow();
-  await expect(dispatchMcpTool(client, 'own', 'boite_delegate_spawn', { profileId: 'p', task: 'x', requestId: 'bad' })).rejects.toThrow();
+  expect(await thrown(dispatchMcpTool(client, 'other', 'boite_where', {}))).toThrow('thread-bound');
+  expect(await thrown(dispatchMcpTool(client, 'own', 'arbitrary.rpc', {}))).toThrow('unknown');
+  expect(await thrown(dispatchMcpTool(client, 'own', 'boite_where', { threadId: 'other' }))).toThrow();
+  expect(await thrown(dispatchMcpTool(client, 'own', 'boite_delegate_spawn', { profileId: 'p', task: 'x', requestId: 'bad' }))).toThrow();
 });
 
 test('MCP wait cancellation closes only its dedicated RPC connection and preserves result paging offsets', async () => {
@@ -45,7 +46,7 @@ test('MCP wait cancellation closes only its dedicated RPC connection and preserv
   const waiting = dispatchMcpTool(primary, 'own', 'boite_delegate_wait', { agentId: 'child' }, abort.signal, async () => dedicated);
   await Bun.sleep(0);
   abort.abort();
-  await expect(waiting).rejects.toThrow('cancelled');
+  expect(await thrown(waiting)).toThrow('cancelled');
   expect(closed).toBe(1);
   expect(primaryCalls).toBe(1);
   const acquisition = Promise.withResolvers<CoreClient>();
@@ -53,7 +54,7 @@ test('MCP wait cancellation closes only its dedicated RPC connection and preserv
   let lateClosed = 0;
   const late = dispatchMcpTool(primary, 'own', 'boite_delegate_wait', {}, lateAbort.signal, () => acquisition.promise);
   lateAbort.abort();
-  await expect(late).rejects.toThrow('cancelled');
+  expect(await thrown(late)).toThrow('cancelled');
   acquisition.resolve({ principal: 'owner', threadId: 'other', close: () => { lateClosed++; }, call: () => { throw new Error('late request dispatched'); } } as unknown as CoreClient);
   await Bun.sleep(0);
   expect(lateClosed).toBe(1);

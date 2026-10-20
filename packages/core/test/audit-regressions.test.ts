@@ -9,6 +9,7 @@ import { InstallManager } from '../src/providers/install.ts';
 import { extractRelease } from '../src/providers/install-unpack.ts';
 import { snapshot } from '../src/threads/checkpoint-files.ts';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore | undefined;
 const leftovers: string[] = [];
@@ -125,7 +126,7 @@ test('a releases directory planted as a symlink is not unpacked into', async () 
   const part = join(data, 'payload.bin');
   writeFileSync(part, 'leak');
   const release = join(provider, 'releases', '1.0.0');
-  await expect(extractRelease(binaryInstall('secret.txt'), new AbortController().signal, part, release, data)).rejects.toThrow(/symlink/);
+  expect(await thrown(extractRelease(binaryInstall('secret.txt'), new AbortController().signal, part, release, data))).toThrow(/symlink/);
   expect(existsSync(join(target, '1.0.0', 'secret.txt'))).toBe(false);
   expect(readFileSync(join(target, 'secret.txt'), 'utf8')).toBe('keep');
 });
@@ -140,7 +141,7 @@ test('a release directory planted as a symlink is not unpacked into', async () =
   symlinkSync(target, release, 'junction');
   const part = join(data, 'payload.bin');
   writeFileSync(part, 'leak');
-  await expect(extractRelease(binaryInstall('secret.txt'), new AbortController().signal, part, release, data)).rejects.toThrow(/symlink/);
+  expect(await thrown(extractRelease(binaryInstall('secret.txt'), new AbortController().signal, part, release, data))).toThrow(/symlink/);
   expect(readFileSync(join(target, 'secret.txt'), 'utf8')).toBe('keep');
 });
 

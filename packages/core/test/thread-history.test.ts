@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES, READING_PAGE_BYTES, MESSAGE_PAGE_MAX_BYTES, MESSAGE_SENT_MAX_BYTES, RPC_MAX_FRAME_BYTES, type Message } from '@boite/contracts';
 import { echoThread, startTestCore } from './harness';
+import { thrown } from './settle.ts';
 
 test('a saved reading position shares one byte budget across both halves and keeps every history cursor', async () => {
   const harness = await startTestCore();
@@ -98,8 +99,8 @@ test('a compact first page keeps complete history and retrieves tool output on d
     expect(complete.messages.at(-1)!.parts[0]).toMatchObject({ output });
     expect(harness.core.journal.getMessage('history-149')!.parts[0]).not.toHaveProperty('outputDeferred');
     const other = await echoThread(harness, client);
-    await expect(client.call('messages.toolOutput', { threadId: other.threadId, messageId: 'history-149', toolId: 'big' })).rejects.toThrow('not a message of thread');
-    await expect(client.call('messages.toolOutput', { threadId, messageId: 'history-149', toolId: 'missing' })).rejects.toThrow('not a tool of message');
+    expect(await thrown(client.call('messages.toolOutput', { threadId: other.threadId, messageId: 'history-149', toolId: 'big' }))).toThrow('not a message of thread');
+    expect(await thrown(client.call('messages.toolOutput', { threadId, messageId: 'history-149', toolId: 'missing' }))).toThrow('not a tool of message');
   } finally { await harness.stop(); }
 });
 
@@ -146,8 +147,8 @@ test('a first page holds about a screen: successful outputs stay on the core, th
     const tail = await client.call('threads.get', { threadId, after: 'turn-20', maxBytes: 1, ...light });
     expect(tail.messagesFrom).toBe('turn-20');
     expect(tail.messages).toHaveLength(20);
-    await expect(client.call('threads.get', { threadId, maxBytes: 0 })).rejects.toThrow('threads.get.maxBytes');
-    await expect(client.call('messages.list', { threadId, before: 'turn-39', maxBytes: 1.5 })).rejects.toThrow('messages.list.maxBytes');
+    expect(await thrown(client.call('threads.get', { threadId, maxBytes: 0 }))).toThrow('threads.get.maxBytes');
+    expect(await thrown(client.call('messages.list', { threadId, before: 'turn-39', maxBytes: 1.5 }))).toThrow('messages.list.maxBytes');
     // Opening the card brings the whole call back.
     expect((await client.call('messages.toolPart', { threadId, messageId: 'turn-39', toolId: 'cmd-39-0' })).part).toMatchObject({ output });
 
@@ -184,7 +185,7 @@ test('a message whose stored tool outputs exceed one frame opens compacted and r
     expect(resumed.messagesFrom).toBe('images');
     expect(resumed.messages.map(message => message.id)).toEqual(['images', 'after-images']);
     expect(await client.call('messages.toolOutput', { threadId, messageId: 'images', toolId: 'read-29' })).toEqual({ output: image });
-    await expect(client.call('messages.list', { threadId, before: 'after-images' })).rejects.toThrow('message images is');
+    expect(await thrown(client.call('messages.list', { threadId, before: 'after-images' }))).toThrow('message images is');
   } finally { await harness.stop(); }
 });
 
@@ -210,7 +211,7 @@ test('no message keeps a thread from opening: heavy inputs, documents and texts 
     });
     expect(Buffer.byteLength(JSON.stringify(harness.core.journal.getMessage('writes')))).toBeGreaterThan(2 * RPC_MAX_FRAME_BYTES);
     // Before `compactToolParts`, the whole thread failed on the first heavy message.
-    await expect(client.call('threads.get', { threadId, compactTools: true })).rejects.toThrow('message ');
+    expect(await thrown(client.call('threads.get', { threadId, compactTools: true }))).toThrow('message ');
 
     const light = { compactTools: true, compactToolParts: true } as const;
     const opened = await client.call('threads.get', { threadId, limit: 1, ...light, open: {} });
@@ -236,7 +237,7 @@ test('no message keeps a thread from opening: heavy inputs, documents and texts 
     const full = await client.call('messages.toolPart', { threadId, messageId: 'writes', toolId: 'write-3' });
     expect(full.part).toMatchObject({ input: { content: file }, documents: [{ newText: file }], output: 'written' });
     expect(full.part).not.toHaveProperty('inputDeferred');
-    await expect(client.call('messages.toolPart', { threadId, messageId: 'writes', toolId: 'missing' })).rejects.toThrow('not a tool of message');
+    expect(await thrown(client.call('messages.toolPart', { threadId, messageId: 'writes', toolId: 'missing' }))).toThrow('not a tool of message');
 
     // A call that finishes while the thread is open reaches this socket the same way.
     const live = client.next('message.part', event => event.messageId === 'last');

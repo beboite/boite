@@ -7,6 +7,7 @@ import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG } from '@boite/contr
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
+import { thrown } from './settle.ts';
 
 async function setup() {
   const h = await startTestCore();
@@ -39,7 +40,7 @@ test('a child whose initial turn could not start settles individual and team wai
   const { threadId } = await echoThread(h, client);
   const start = spyOn(h.core.threads, 'startTurn').mockImplementation(() => { throw refused('fixture startup refused'); });
   try {
-    await expect(client.call('delegation.spawn', { threadId, profileId: CONVERSATION_PROFILE_ID, task: 'Inspect source', requestId: 'failed-start' })).rejects.toThrow('fixture startup refused');
+    expect(await thrown(client.call('delegation.spawn', { threadId, profileId: CONVERSATION_PROFILE_ID, task: 'Inspect source', requestId: 'failed-start' }))).toThrow('fixture startup refused');
     const view = await client.call('delegation.get', { threadId });
     expect(view.settlement).toBe('settled');
     expect(view.agents).toHaveLength(1);
@@ -107,14 +108,14 @@ test('result ownership and bounds are enforced; child stop settles wait without 
   const s = await setup();
   try {
     const other = await echoThread(s.h, s.client, 'Unrelated');
-    await expect(s.client.call('delegation.wait', { threadId: other.threadId, agentId: s.child.thread.id, timeoutMs: 0 })).rejects.toThrow('direct delegated child');
-    await expect(s.client.call('delegation.result', { threadId: s.threadId, agentId: s.child.thread.id, turnId: s.child.lastTurn!.id })).rejects.toThrow('terminal turn');
+    expect(await thrown(s.client.call('delegation.wait', { threadId: other.threadId, agentId: s.child.thread.id, timeoutMs: 0 }))).toThrow('direct delegated child');
+    expect(await thrown(s.client.call('delegation.result', { threadId: s.threadId, agentId: s.child.thread.id, turnId: s.child.lastTurn!.id }))).toThrow('terminal turn');
     const waiting = s.client.call('delegation.wait', { threadId: s.threadId, agentId: s.child.thread.id, timeoutMs: 5000 });
     await s.client.call('delegation.stop', { threadId: s.threadId, agentId: s.child.thread.id });
     const ended = await waiting;
     expect(ended.agents[0]!.lastTurn?.status).toBe('stopped');
-    await expect(s.client.call('delegation.result', { threadId: s.threadId, agentId: s.child.thread.id, turnId: ended.agents[0]!.lastTurn!.id, limit: 16_001 })).rejects.toThrow('limit');
-    await expect(s.client.call('delegation.result', { threadId: other.threadId, agentId: s.child.thread.id, turnId: ended.agents[0]!.lastTurn!.id })).rejects.toThrow('direct delegated child');
+    expect(await thrown(s.client.call('delegation.result', { threadId: s.threadId, agentId: s.child.thread.id, turnId: ended.agents[0]!.lastTurn!.id, limit: 16_001 }))).toThrow('limit');
+    expect(await thrown(s.client.call('delegation.result', { threadId: other.threadId, agentId: s.child.thread.id, turnId: ended.agents[0]!.lastTurn!.id }))).toThrow('direct delegated child');
   } finally { await s.stop(); }
 });
 
@@ -149,7 +150,7 @@ test('team wait includes unfinished children and paired result reads retain exac
     phone = await connect(s.h.url, '', { grant, client: { name: 'phone', version: 'test' } });
     const ref = results.agents[0]!.resultRef!;
     expect((await phone.call('delegation.result', { threadId: s.threadId, ...ref })).text).toBe('First result');
-    await expect(phone.call('delegation.result', { threadId: s.threadId, agentId: s.child.thread.id, turnId: results.agents[1]!.resultRef!.turnId })).rejects.toThrow('terminal turn');
+    expect(await thrown(phone.call('delegation.result', { threadId: s.threadId, agentId: s.child.thread.id, turnId: results.agents[1]!.resultRef!.turnId }))).toThrow('terminal turn');
     expect((await phone.call('delegation.wait', { threadId: s.threadId, timeoutMs: 0 })).state).toBe('settled');
   } finally { phone?.close(); await s.stop(); }
 });

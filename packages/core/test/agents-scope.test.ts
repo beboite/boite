@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { connect } from '../src/client.ts';
 import { startTestCore } from './harness.ts';
 import type { AgentProfile, AgentScope } from '@boite/contracts';
+import { thrown } from './settle.ts';
 
 test('a shared member cannot import another group context and loses access when removed', async () => {
   const h = await startTestCore();
@@ -26,11 +27,11 @@ test('a shared member cannot import another group context and loses access when 
       const snapshot = await scoped.call('agents.snapshot', { threadId: thread.id });
       expect(snapshot.groups.map(g => g.id)).toEqual([b.id]);
       expect(snapshot.memories).toEqual([]); expect(snapshot.messages).toEqual([]);
-      await expect(scoped.call('agents.snapshot', { threadId: other.id })).rejects.toThrow('for thread');
-      await expect(scoped.call('agents.message.send', { threadId: thread.id, scope: aScope, text: 'inject', recipientIds: [], requestId: 'cross_scope_001' })).rejects.toThrow('scope');
-      await expect(scoped.call('agents.memory.save', { threadId: thread.id, value: { scope: bScope, sourceScopes: [aScope], title: 'Copy', text: 'copied', sourceRunId: null, expiresAt: null } })).rejects.toThrow('sourceScopes');
+      expect(await thrown(scoped.call('agents.snapshot', { threadId: other.id }))).toThrow('for thread');
+      expect(await thrown(scoped.call('agents.message.send', { threadId: thread.id, scope: aScope, text: 'inject', recipientIds: [], requestId: 'cross_scope_001' }))).toThrow('scope');
+      expect(await thrown(scoped.call('agents.memory.save', { threadId: thread.id, value: { scope: bScope, sourceScopes: [aScope], title: 'Copy', text: 'copied', sourceRunId: null, expiresAt: null } }))).toThrow('sourceScopes');
       await c.call('agents.group.save', { id: b.id, expectedRevision: b.revision, value: { ...b, memberIds: [] } });
-      await expect(scoped.call('agents.snapshot', { threadId: thread.id })).rejects.toThrow('no longer belongs');
+      expect(await thrown(scoped.call('agents.snapshot', { threadId: thread.id }))).toThrow('no longer belongs');
     } finally { scoped.close(); }
   } finally { await h.stop(); }
 });

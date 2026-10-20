@@ -6,6 +6,7 @@ import { refused } from '../src/errors.ts';
 import { DraftPreparations } from '../src/threads/draft-preparations.ts';
 import { DraftReservationLedger, type DraftOwnership } from '../src/threads/draft-reservation-ledger.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { rejection, thrown } from './settle.ts';
 
 let h: TestCore;
 let choice: RpcParams<'threads.create'>;
@@ -159,8 +160,8 @@ for (const checkedOut of [false, true]) test(`a concurrent branch and its unmerg
     return spawn(id, cmd, args, options);
   });
   try {
-    await expect(h.core.drafts.prepare('branch_race_connection', { ...choice, projectId: repo.id,
-      worktree: { branch }, preparationId: 'branch_race_owner' })).rejects.toBeInstanceOf(Error);
+    expect(await rejection(h.core.drafts.prepare('branch_race_connection', { ...choice, projectId: repo.id,
+      worktree: { branch }, preparationId: 'branch_race_owner' }))).toBeInstanceOf(Error);
     expect(commit).not.toBe('');
     expect(git(repo.path, 'rev-parse', `refs/heads/${branch}`).trim()).toBe(commit);
     expect(git(repo.path, 'show', `${branch}:unmerged.txt`)).toBe('another actor owns this work\n');
@@ -187,8 +188,8 @@ test('a competing checkout at the reserved path survives rollback of our separat
     return spawn(id, cmd, args, options);
   });
   try {
-    await expect(h.core.drafts.prepare('checkout_race_connection', { ...choice, projectId: repo.id,
-      worktree: { branch }, preparationId: 'checkout_race_owner' })).rejects.toBeInstanceOf(Error);
+    expect(await rejection(h.core.drafts.prepare('checkout_race_connection', { ...choice, projectId: repo.id,
+      worktree: { branch }, preparationId: 'checkout_race_owner' }))).toBeInstanceOf(Error);
     expect(competingPath).not.toBe('');
     expect(existsSync(join(competingPath, 'unmerged.txt'))).toBe(true);
     expect(git(competingPath, 'symbolic-ref', '--short', 'HEAD').trim()).toBe(otherBranch);
@@ -235,9 +236,9 @@ test('a worktree creation refusal survives cleanup failure and retains ownership
   });
   let ownership: DraftOwnership | undefined;
   try {
-    await expect(h.core.threads.creation.createInWorktree({ ...choice, projectId: repo.id, worktree: {} }, false, intent => {
+    expect(await rejection(h.core.threads.creation.createInWorktree({ ...choice, projectId: repo.id, worktree: {} }, false, intent => {
       ledger.record(intent); ownership = intent;
-    })).rejects.toBe(original);
+    }))).toBe(original);
     expect(ownership).toBeDefined();
     expect(new DraftReservationLedger(h.core).list()).toEqual([ownership!]);
     expect(existsSync(ownership!.path)).toBe(true);
@@ -261,8 +262,8 @@ test('admission bounds active and detached cleanup per connection without blocki
   });
   try {
     for (let i = 0; i < 4; i++) await h.core.drafts.prepare('held_connection', { ...choice, preparationId: `held_draft_${i}` });
-    await expect(h.core.drafts.prepare('held_connection', { ...choice, preparationId: 'held_draft_overflow' }))
-      .rejects.toMatchObject({ data: { reason: 'draft-preparation-capacity' } });
+    expect(await rejection(h.core.drafts.prepare('held_connection', { ...choice, preparationId: 'held_draft_overflow' })))
+      .toMatchObject({ data: { reason: 'draft-preparation-capacity' } });
     const cold = h.core.threads.creation.create(choice);
     expect(h.core.journal.getThread(cold.id)?.id).toBe(cold.id);
   } finally {
@@ -278,8 +279,8 @@ test('global admission includes failed ownership recovered from disk', async () 
   const held = spyOn(h.core.worktrees, 'remove').mockResolvedValue(false);
   try {
     const recovered = new DraftPreparations(h.core);
-    await expect(recovered.prepare('new_connection', { ...choice, preparationId: 'global_overflow' }))
-      .rejects.toMatchObject({ data: { reason: 'draft-preparation-capacity' } });
+    expect(await rejection(recovered.prepare('new_connection', { ...choice, preparationId: 'global_overflow' })))
+      .toMatchObject({ data: { reason: 'draft-preparation-capacity' } });
     expect(ledger.list()).toHaveLength(32);
     const cold = h.core.threads.creation.create(choice);
     expect(existsSync(cold.cwd)).toBe(true);
@@ -290,8 +291,8 @@ test('global admission includes failed ownership recovered from disk', async () 
 
 test('global admission also bounds active reservations across composing connections', async () => {
   for (let i = 0; i < 32; i++) await h.core.drafts.prepare(`active_connection_${i}`, { ...choice, preparationId: `active_draft_${i}` });
-  await expect(h.core.drafts.prepare('extra_connection', { ...choice, preparationId: 'active_overflow' }))
-    .rejects.toMatchObject({ data: { reason: 'draft-preparation-capacity' } });
+  expect(await rejection(h.core.drafts.prepare('extra_connection', { ...choice, preparationId: 'active_overflow' })))
+    .toMatchObject({ data: { reason: 'draft-preparation-capacity' } });
   await Promise.all(Array.from({ length: 32 }, (_, i) => h.core.drafts.disconnect(`active_connection_${i}`)));
   expect(ledger.list()).toEqual([]);
 });
@@ -337,11 +338,11 @@ test('disconnect clears tombstones and receipts even if release cleanup throws',
   await h.core.drafts.claim('disconnect_test', { ...choice, preparationId: 'disconnect_adopt' });
   await h.core.drafts.prepare('disconnect_test', { ...choice, preparationId: 'disconnect_held' });
   const held = spyOn(DraftReservationLedger.prototype, 'cleanup').mockRejectedValue(new Error('injected cleanup failure'));
-  try { await expect(h.core.drafts.disconnect('disconnect_test')).rejects.toThrow('injected cleanup failure'); }
+  try { expect(await thrown(h.core.drafts.disconnect('disconnect_test'))).toThrow('injected cleanup failure'); }
   finally { held.mockRestore(); }
   expect(await h.core.drafts.claim('disconnect_test', { ...choice, preparationId: 'disconnect_adopt' })).toBeNull();
   expect(h.core.journal.getThread(first.threadId)).not.toBeNull();
-  await expect(h.core.drafts.prepare('disconnect_test', { ...choice, preparationId: 'disconnect_held' })).resolves.toHaveProperty('threadId');
+  expect(await h.core.drafts.prepare('disconnect_test', { ...choice, preparationId: 'disconnect_held' })).toHaveProperty('threadId');
   await h.core.drafts.disconnect('disconnect_test');
   await new DraftPreparations(h.core).recover();
 });
@@ -353,7 +354,7 @@ test('disconnect during startup recovery cannot create a late reserved workspace
   const pending = drafts.prepare('startup_connection', { ...choice, preparationId: 'startup_cancelled' });
   await drafts.disconnect('startup_connection');
   gate.resolve();
-  try { await expect(pending).rejects.toThrow('connection was closed'); }
+  try { expect(await thrown(pending)).toThrow('connection was closed'); }
   finally { held.mockRestore(); }
   expect(ledger.list()).toEqual([]);
 });
@@ -376,8 +377,8 @@ test('cleanup deadline stops the registered git tree before returning and preser
     return captured;
   });
   try {
-    await expect(h.core.worktrees.remove('cleanup_timeout', project, { path: join(project.path, 'unused'), branch: 'boite/unused' }, 1500))
-      .rejects.toThrow(/^git reflog show .* did not finish within/);
+    expect(await thrown(h.core.worktrees.remove('cleanup_timeout', project, { path: join(project.path, 'unused'), branch: 'boite/unused' }, 1500)))
+      .toThrow(/^git reflog show .* did not finish within/);
     expect(existsSync(marker)).toBe(true);
     const pid = Number(readFileSync(marker, 'utf8'));
     await waitFor(() => {

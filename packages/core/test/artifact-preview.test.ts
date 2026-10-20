@@ -5,6 +5,7 @@ import { AGENT_ENV } from '@boite/contracts';
 import { connect, type CoreClient } from '../src/client.ts';
 import { runCli } from '../src/cli.ts';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore, owner: CoreClient, agent: CoreClient, threadId: string;
 beforeEach(async () => {
@@ -44,17 +45,17 @@ test('the CLI opens HTML and relative assets on a separate origin, reuses it, re
   expect((await agent.call('artifacts.preview', { threadId, path: 'preview/index.html' })).url).toBe(opened.url);
   rmSync(join(harness.dataDir, 'preview', 'index.html'));
   await agent.call('artifacts.previewClose', { threadId, path: join(harness.dataDir, 'preview', 'index.html') });
-  await expect(fetch(opened.url)).rejects.toThrow();
+  expect(await thrown(fetch(opened.url))).toThrow();
 });
 
 test('preview requests cannot reach other threads, dotfiles, adjacent directories, junctions or the core origin', async () => {
   const other = await echoThread(harness, owner, 'other');
-  await expect(agent.call('artifacts.preview', { threadId: other.threadId, path: 'preview/index.html' })).rejects.toThrow('is for thread');
-  await expect(agent.call('artifacts.preview', { threadId, path: '../outside.html' })).rejects.toThrow('leaves');
-  await expect(agent.call('artifacts.preview', { threadId, path: 'preview/style.css' })).rejects.toThrow('HTML file');
+  expect(await thrown(agent.call('artifacts.preview', { threadId: other.threadId, path: 'preview/index.html' }))).toThrow('is for thread');
+  expect(await thrown(agent.call('artifacts.preview', { threadId, path: '../outside.html' }))).toThrow('leaves');
+  expect(await thrown(agent.call('artifacts.preview', { threadId, path: 'preview/style.css' }))).toThrow('HTML file');
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(harness.url, '', { grant, client: { name: 'phone', version: 'test' } });
-  try { await expect(phone.call('artifacts.preview', { threadId, path: 'preview/index.html' })).rejects.toThrow('owner only'); }
+  try { expect(await thrown(phone.call('artifacts.preview', { threadId, path: 'preview/index.html' }))).toThrow('owner only'); }
   finally { phone.close(); }
   const { url } = await agent.call('artifacts.preview', { threadId, path: 'preview/index.html' });
   writeFileSync(join(harness.dataDir, 'preview', '.private.json'), '{"secret":"test-only"}');
@@ -75,8 +76,8 @@ test('preview requests cannot reach other threads, dotfiles, adjacent directorie
   const second = await agent.call('artifacts.preview', { threadId, path: 'preview/second.html' });
   expect(new URL(second.url).origin).not.toBe(new URL(url).origin);
   await owner.call('threads.archive', { threadId, archived: true });
-  await expect(fetch(url)).rejects.toThrow();
-  await expect(owner.call('artifacts.preview', { threadId, path: 'preview/index.html' })).rejects.toThrow('active thread');
+  expect(await thrown(fetch(url))).toThrow();
+  expect(await thrown(owner.call('artifacts.preview', { threadId, path: 'preview/index.html' }))).toThrow('active thread');
 });
 
 test('previews work in a symlinked project folder and stop serving it when the link is replaced', async () => {

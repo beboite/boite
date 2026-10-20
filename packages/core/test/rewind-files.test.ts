@@ -9,6 +9,7 @@ import { overlap, restoreFiles, sharedBlob, snapshot } from '../src/threads/chec
 import { BLOB_BYTE_LIMIT, decodeBlob, decodeManifest } from '../src/threads/checkpoint-store.ts';
 import { git } from '../src/git/read.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { rejection, thrown } from './settle.ts';
 
 let h: TestCore;
 let client: CoreClient;
@@ -125,7 +126,7 @@ test('a change made between the removed turns is preserved and refuses the rewin
   const messageId = await run('first');
   await writeFile(join(cwd, 'app.ts'), 'outside');
   await run('second');
-  await expect(client.call('threads.rewind', { threadId, messageId })).rejects.toThrow('app.ts changed between');
+  expect(await thrown(client.call('threads.rewind', { threadId, messageId }))).toThrow('app.ts changed between');
   expect(h.core.threads.get(threadId).messages.filter(message => message.role === 'user')).toHaveLength(2);
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('agent');
 });
@@ -181,8 +182,8 @@ test('an oversized file blocks the restore only when the removed turns changed i
   }
   expect(await readFile(large, 'utf8')).toBe('small');
   // restoreFiles refuses an unbacked entry itself, before touching any file.
-  await expect(restoreFiles(cwd, join(h.dataDir, 'objects'), [{ name: 'large.bin', before: { hash: 'h', mode: 0o644, unbacked: true } }]))
-    .rejects.toThrow('large.bin had a version over the 16 MiB checkpoint limit');
+  expect(await thrown(restoreFiles(cwd, join(h.dataDir, 'objects'), [{ name: 'large.bin', before: { hash: 'h', mode: 0o644, unbacked: true } }])))
+    .toThrow('large.bin had a version over the 16 MiB checkpoint limit');
   expect(await readFile(large, 'utf8')).toBe('small');
 });
 
@@ -204,7 +205,7 @@ test('a failure while cutting messages rolls the restored files back', async () 
   const messageId = await run('change');
   const thread = h.core.threads.require(threadId);
   const turnId = h.core.threads.get(threadId).turns[0]!.id;
-  await expect(h.core.threads.codeCheckpoints.rewind(thread, [turnId], messageId, () => { throw new Error('cut refused'); })).rejects.toThrow('cut refused');
+  expect(await thrown(h.core.threads.codeCheckpoints.rewind(thread, [turnId], messageId, () => { throw new Error('cut refused'); }))).toThrow('cut refused');
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('agent');
   expect(h.core.threads.get(threadId).messages.filter(message => message.role === 'user')).toHaveLength(1);
 });
@@ -281,7 +282,7 @@ test('permanently removing a project removes its private file checkpoints', asyn
   const folder = join(h.dataDir, 'checkpoints', threadId);
   expect((await stat(folder)).isDirectory()).toBe(true);
   await client.call('projects.remove', { projectId: h.core.threads.require(threadId).projectId! });
-  await expect(stat(folder)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await rejection(stat(folder))).toMatchObject({ code: 'ENOENT' });
 });
 
 test('project removal still reaches connected clients when checkpoint cleanup fails', async () => {
@@ -427,7 +428,7 @@ test('an external edit to an affected file refuses the rewind without truncating
   const messageId = await run('change');
   await writeFile(join(cwd, 'app.ts'), 'external');
   const before = h.core.threads.get(threadId).messages;
-  await expect(client.call('threads.rewind', { threadId, messageId })).rejects.toThrow('app.ts');
+  expect(await thrown(client.call('threads.rewind', { threadId, messageId }))).toThrow('app.ts');
   expect(h.core.threads.get(threadId).messages).toEqual(before);
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('external');
   expect(await readFile(join(cwd, 'other.ts'), 'utf8')).toBe('agent');
@@ -462,7 +463,7 @@ test('threads on one folder share each blob, and a discarded thread\'s blobs are
   // The unlink moved the blob's ctime, which a filesystem clock can put past a cutoff read in the same millisecond.
   await Bun.sleep(10);
   expect(await h.core.threads.codeCheckpoints.collect(0)).toBe(1);
-  await expect(stat(sharedBlob(shared, hashOf('first')))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await rejection(stat(sharedBlob(shared, hashOf('first'))))).toMatchObject({ code: 'ENOENT' });
   expect((await stat(sharedBlob(shared, hashOf('initial')))).nlink).toBe(2);
   expect((await client.call('threads.rewind', { threadId, messageId })).files).toEqual({ status: 'restored', count: 1 });
   expect(await readFile(join(cwd, 'src', 'deep', 'app.ts'), 'utf8')).toBe('initial');
@@ -573,7 +574,7 @@ test('a copy that does not match its name is left alone, and the rest of the fol
   await h.core.threads.codeCheckpoints.maintain();
   const shared = join(h.dataDir, 'checkpoints', 'objects');
   expect(await readFile(join(objects, hashOf(text)), 'utf8')).toBe('damaged');
-  await expect(stat(sharedBlob(shared, hashOf(text)))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await rejection(stat(sharedBlob(shared, hashOf(text))))).toMatchObject({ code: 'ENOENT' });
   expect(await inodeOf(join(objects, hashOf(other)))).toBe(await inodeOf(sharedBlob(shared, hashOf(other))));
 });
 
@@ -627,7 +628,7 @@ test('a stored frame never decodes past the 16 MiB file limit, and a raw frame n
   expect(await decodeBlob(frame, createHash('sha256').update(frame).digest('hex'))).toBe(frame);
   // A manifest frame is bounded the same way.
   const huge = Buffer.from(Bun.zstdCompressSync(Buffer.alloc(65 * 1024 * 1024, 0x20)));
-  await expect(decodeManifest(huge)).rejects.toMatchObject({ code: 'ERR_BUFFER_TOO_LARGE' });
+  expect(await rejection(decodeManifest(huge))).toMatchObject({ code: 'ERR_BUFFER_TOO_LARGE' });
 });
 
 test('the background pass counts manifests against its tick budget and stops when a snapshot starts', async () => {
@@ -667,7 +668,7 @@ test('a damaged shared frame of the right size is linked without reading it, and
   expect(await inodeOf(join(objects, hash))).toBe(await inodeOf(path));
   await writeFile(join(cwd, 'app.ts'), 'agent');
   const after = await snapshot(h.core, threadId, cwd, objects, undefined, shared);
-  await expect(restoreFiles(cwd, objects, [{ name: 'app.ts', before: before['app.ts'], after: after['app.ts'] }])).rejects.toThrow('app.ts is missing or corrupt');
+  expect(await thrown(restoreFiles(cwd, objects, [{ name: 'app.ts', before: before['app.ts'], after: after['app.ts'] }]))).toThrow('app.ts is missing or corrupt');
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('agent');
 });
 
@@ -684,10 +685,10 @@ test(`checkpoints are kept for the newest ${KEEP_TURNS} turns, and none for a th
   const folder = join(h.dataDir, 'checkpoints', threadId);
   expect((await readdir(folder)).filter(name => name.endsWith('.json'))).toHaveLength(KEEP_TURNS);
   // The first turn's starting content was only in its own checkpoint.
-  await expect(stat(join(folder, 'objects', hashOf('turn 0')))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await rejection(stat(join(folder, 'objects', hashOf('turn 0'))))).toMatchObject({ code: 'ENOENT' });
   await Bun.sleep(10);
   await checkpoints.collect(0);
-  await expect(stat(sharedBlob(join(h.dataDir, 'checkpoints', 'objects'), hashOf('turn 0')))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await rejection(stat(sharedBlob(join(h.dataDir, 'checkpoints', 'objects'), hashOf('turn 0'))))).toMatchObject({ code: 'ENOENT' });
 
   const thread = h.core.threads.require(threadId);
   const oldest = await checkpoints.rewind(thread, turns, messageOf(turns[0]!), files => files);
@@ -707,6 +708,6 @@ test(`checkpoints are kept for the newest ${KEEP_TURNS} turns, and none for a th
   expect((await readdir(folder)).filter(name => name.endsWith('.json'))).toHaveLength(KEEP_TURNS);
   await client.call('threads.archive', { threadId, archived: true });
   await checkpoints.maintain(Date.now() + IDLE_THREAD_MS + 60_000);
-  await expect(stat(folder)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await rejection(stat(folder))).toMatchObject({ code: 'ENOENT' });
 // 51 real turns took 5.2 s on a loaded Windows machine, past Bun's default 5 s.
 }, 20000);

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { echoThread, startTestCore } from './harness.ts';
 import { createBrowserFixture } from './browser/fixture.ts';
 import { traceBrowserCommands } from './browser/dialog-trace.ts';
+import { thrown } from './settle.ts';
 
 const browserFixture = createBrowserFixture();
 const { real, url, evaluate } = browserFixture;
@@ -36,7 +37,7 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
   expect(await evaluate('document.title')).toBe('clicked');
   await agent.call('browser.command', { threadId, action: { kind: 'type', selector: '#name', text: 'hello' } });
   expect(await evaluate('document.querySelector("#name").value')).toBe('hello');
-  await expect(agent.call('browser.command', { threadId, action: { kind: 'click', selector: 'nothing' } })).rejects.toThrow('matched 0');
+  expect(await thrown(agent.call('browser.command', { threadId, action: { kind: 'click', selector: 'nothing' } }))).toThrow('matched 0');
   await agent.call('browser.command', { threadId, action: { kind: 'preset', preset: 'iphone-15-pro' } });
   expect(await evaluate('innerWidth')).toBe(393);
   await agent.call('browser.command', { threadId, action: { kind: 'appearance', colorScheme: 'dark' } });
@@ -47,11 +48,11 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
   expect(history.map(entry => entry.action)).toEqual(['open', 'click', 'evaluate', 'type', 'evaluate', 'click', 'preset', 'evaluate', 'appearance', 'evaluate', 'screenshot']);
   expect(history[5]!.ok).toBe(false);
   // Its token reaches its own conversation only, and only http(s) pages open.
-  await expect(agent.call('browser.command', { threadId: 'another-thread', action: { kind: 'status' } })).rejects.toThrow('not thread');
-  await expect(agent.call('browser.command', { threadId, action: { kind: 'open', url: 'file:///etc/passwd' } })).rejects.toThrow('HTTP');
+  expect(await thrown(agent.call('browser.command', { threadId: 'another-thread', action: { kind: 'status' } }))).toThrow('not thread');
+  expect(await thrown(agent.call('browser.command', { threadId, action: { kind: 'open', url: 'file:///etc/passwd' } }))).toThrow('HTTP');
   const other = (await echoThread(harness, owner, 'other')).threadId;
   expect(((await owner.call('browser.command', { threadId: other, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
-  await expect(owner.call('browser.command', { threadId: other, tabId: open.tabId, action: { kind: 'snapshot' } })).rejects.toThrow('no browser tab');
+  expect(await thrown(owner.call('browser.command', { threadId: other, tabId: open.tabId, action: { kind: 'snapshot' } }))).toThrow('no browser tab');
   await agent.call('browser.command', { threadId, action: { kind: 'close' } });
   expect(((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
 }, 150_000);
@@ -163,17 +164,17 @@ real('an agent drives a page with agent-browser commands: refs, forms, dialogs a
   expect(await command({ kind: 'get', what: 'title' })).toBe('later no');
   // A covered element is reached through the DOM, and the agent hears what covered it.
   expect(await command({ kind: 'click', selector: '@e8' })).toMatchObject({ note: expect.stringContaining('covered by div#cover') });
-  await expect(command({ kind: 'click', selector: '@e70' })).rejects.toThrow('unknown ref @e70');
-  await expect(command({ kind: 'click', selector: 'button' })).rejects.toThrow('matched 4');
+  expect(await thrown(command({ kind: 'click', selector: '@e70' }))).toThrow('unknown ref @e70');
+  expect(await thrown(command({ kind: 'click', selector: 'button' }))).toThrow('matched 4');
   // Enter submits the form natively; the command waits for the next page and says where it went.
   await command({ kind: 'focus', selector: '@e2' });
   expect(await command({ kind: 'press', key: 'Enter' })).toMatchObject({ navigated: true, title: 'Sent', url: url('/sent?name=Ada+L') });
-  await expect(command({ kind: 'click', selector: '@e3' })).rejects.toThrow('belongs to an earlier page');
+  expect(await thrown(command({ kind: 'click', selector: '@e3' }))).toThrow('belongs to an earlier page');
   // open drives the current tab, as agent-browser's does.
   const again = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/shop'), reuse: true } });
   expect(again.tabId).toBe(opened.tabId);
   expect(await command({ kind: 'history', direction: 'back' })).toMatchObject({ navigated: true, title: 'Sent' });
-  await expect(command({ kind: 'wait', selector: '#never', timeoutMs: 300 })).rejects.toThrow('wait timed out after 300 ms');
+  expect(await thrown(command({ kind: 'wait', selector: '#never', timeoutMs: 300 }))).toThrow('wait timed out after 300 ms');
 }), 150_000);
 
 real('a window a page opens joins the conversation as a tab of its own', async () => {

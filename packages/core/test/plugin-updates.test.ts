@@ -14,6 +14,7 @@ import { connect } from '../src/client.ts';
 import { ManifestRefused, parseManifest, platformKey } from '../src/plugins/manifest.ts';
 import { CHECK_INTERVAL_MS, FIRST_CHECK_MS, PluginUpdateChecks, RETRY_FIRST_MS, parseRecommendedEntry, type UpdateHost } from '../src/plugins/updates.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore | undefined;
 let fetchSpy: { mockRestore(): void } | undefined;
@@ -241,7 +242,7 @@ describe('an update source', () => {
 
   test('only a recommended plugin naming a source is checked, and a paired device reaches none of it', async () => {
     const t = await setup();
-    await expect(t.client.call('plugins.checkUpdates', { id: 'pool-switcher' })).rejects.toThrow('plugin pool-switcher has no update source');
+    expect(await thrown(t.client.call('plugins.checkUpdates', { id: 'pool-switcher' }))).toThrow('plugin pool-switcher has no update source');
     expect(t.store.state('seat-pool').updates?.source).toEqual(SOURCE);
     t.store.updateSources = {};
     expect(t.store.state('seat-pool').updates).toBeNull();
@@ -251,7 +252,7 @@ describe('an update source', () => {
     const { grant } = await t.client.call('pairing.grant', {});
     const device = await connect(harness!.url, '', { grant, client: { name: 'pwa', version: 'test' } });
     try {
-      await expect(device.call('plugins.checkUpdates', {})).rejects.toThrow('plugins.checkUpdates is for the owner only');
+      expect(await thrown(device.call('plugins.checkUpdates', {}))).toThrow('plugins.checkUpdates is for the owner only');
       expect(DEVICE_EVENTS.has('plugins.updated')).toBe(false);
     } finally { device.close(); }
   });

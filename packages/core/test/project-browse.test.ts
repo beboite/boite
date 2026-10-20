@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { startTestCore, type TestCore } from './harness.ts';
 import { DEVICE_METHODS } from '../src/access.ts';
+import { thrown } from './settle.ts';
 let harness: TestCore;
 beforeEach(async () => { harness = await startTestCore(); });
 afterEach(async () => { await harness.stop(); });
@@ -17,8 +18,8 @@ test('folder browsing names only directories, navigates parents and refuses inva
     { name: 'alpha', path: join(root, 'alpha') }, { name: 'with spaces', path: join(root, 'with spaces') }
   ] });
   expect((await client.call('projects.browse', { path: join(root, 'alpha') })).directories).toEqual([]);
-  await expect(client.call('projects.browse', { path: 'relative' })).rejects.toThrow('absolute directory path');
-  await expect(client.call('projects.browse', { path: join(root, 'file.txt') })).rejects.toThrow('projects.browse.path');
-  await expect(client.call('projects.browse', { path: join(root, 'missing') })).rejects.toThrow('missing');
+  expect(await thrown(client.call('projects.browse', { path: 'relative' }))).toThrow('absolute directory path');
+  expect(await thrown(client.call('projects.browse', { path: join(root, 'file.txt') }))).toThrow('projects.browse.path');
+  expect(await thrown(client.call('projects.browse', { path: join(root, 'missing') }))).toThrow('missing');
   expect(DEVICE_METHODS.has('projects.browse')).toBe(false);
 });

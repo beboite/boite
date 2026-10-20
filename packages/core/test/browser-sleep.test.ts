@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { sleepState, TabSleep, type Sleeper } from '../src/browser/sleep.ts';
+import { thrown } from './settle.ts';
 
 /** A page whose DevTools calls are logged, and held while `hold` names their method. */
 function fakeTab() {
@@ -102,7 +103,7 @@ test('a wake that fails leaves the tab asleep, and the next use wakes it', async
     if (method === 'Emulation.setFocusEmulationEnabled' && failures > 0) { failures--; throw new Error('timed out'); }
     return send(method, params, timeoutMs);
   };
-  await expect(sleep.use(tab, async () => { calls.push('first'); })).rejects.toThrow('timed out');
+  expect(await thrown(sleep.use(tab, async () => { calls.push('first'); }))).toThrow('timed out');
   expect(tab.sleep.asleep).toBe(true);
   await sleep.use(tab, async () => { calls.push('second'); });
   expect(tab.sleep.asleep).toBe(false);
@@ -134,7 +135,7 @@ test('a wake step that misses its time fails at once, then logs whether the brow
   sleep.schedule(tab);
   await until(() => tab.sleep.asleep);
   holdNext('Emulation.setFocusEmulationEnabled');
-  await expect(sleep.use(tab, async () => { calls.push('first'); })).rejects.toThrow(/^the browser did not answer Emulation\.setFocusEmulationEnabled within 0\.05 seconds$/);
+  expect(await thrown(sleep.use(tab, async () => { calls.push('first'); }))).toThrow(/^the browser did not answer Emulation\.setFocusEmulationEnabled within 0\.05 seconds$/);
   // The probe is still out: the command did not wait for it.
   expect(stalls).toEqual([]);
   expect(probes).toEqual([50]);
@@ -151,7 +152,7 @@ test('a wake step that misses its time fails at once, then logs whether the brow
   // A browser that does not answer its own targets either is named so once its time is out.
   sleep.browserAnswers = () => new Promise(() => {});
   holdNext('Page.setWebLifecycleState');
-  await expect(sleep.use(tab, async () => {})).rejects.toThrow('within 0.05 seconds');
+  expect(await thrown(sleep.use(tab, async () => {}))).toThrow('within 0.05 seconds');
   await until(() => stalls.length === 2);
   expect(stalls[1]).toEqual(['Page.setWebLifecycleState', null]);
   release('Page.setWebLifecycleState');

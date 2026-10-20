@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { connect, type CoreClient } from '../../packages/core/src/client.ts';
 import { startCore, type RunningCore } from './lib/core.ts';
+import { thrown } from '../../packages/core/test/settle.ts';
 
 let core: RunningCore;
 let owner: CoreClient;
@@ -41,7 +42,7 @@ test('a phone sees a completed turn but receives none of its process trace', asy
     await owner.call('threads.get', { threadId });
     expect(ownerTrace.length).toBeGreaterThan(0);
     expect(phoneTrace).toEqual([]);
-    await expect(phone.call('trace.get', { threadId })).rejects.toThrow('owner only');
+    expect(await thrown(phone.call('trace.get', { threadId }))).toThrow('owner only');
   } finally { offOwner(); offPhone(); }
 }, 20_000);
 

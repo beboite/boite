@@ -6,6 +6,7 @@ import { connect, type CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { startServer, type RunningServer } from '../src/server.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const fixtures: TestCore[] = [];
 const reopened: { core: Core; server: RunningServer; owner: CoreClient }[] = [];
@@ -60,7 +61,7 @@ test('mutual trust and directional read grants survive a test restart, with list
 
   // An owner can persist a directional revocation without changing the reverse grant.
   await two.owner.call('collaboration.trust', { peer: { ...cardA, readThreads: false } });
-  await expect(one.owner.call('collaboration.read', { threadId: a, target: { coreId: cardB.coreId, threadId: b } })).rejects.toThrow('not allowed to read');
+  expect(await thrown(one.owner.call('collaboration.read', { threadId: a, target: { coreId: cardB.coreId, threadId: b } }))).toThrow('not allowed to read');
   expect((await two.owner.call('collaboration.read', { threadId: b, target: { coreId: cardA.coreId, threadId: a } })).entries.some(entry => entry.text === 'server history')).toBe(true);
 }, 20000);
 
@@ -68,8 +69,8 @@ test('an unknown core cannot check, register a relay or submit an authenticated 
   const server = await startTestCore(), unknown = await startTestCore(); fixtures.push(server, unknown);
   const owner = await server.connect();
   const sender = unknown.core.coordination.identity(), destination = server.core.coordination.identity();
-  await expect(owner.call('collaboration.check', { coreId: sender.coreId })).rejects.toThrow('not trusted');
-  await expect(owner.call('collaboration.bridge.register', { coreId: sender.coreId, enabled: true })).rejects.toThrow('trusted');
+  expect(await thrown(owner.call('collaboration.check', { coreId: sender.coreId }))).toThrow('not trusted');
+  expect(await thrown(owner.call('collaboration.bridge.register', { coreId: sender.coreId, enabled: true }))).toThrow('trusted');
   const body = JSON.stringify({ from: sender.coreId, to: destination.coreId, at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
   const signature = sign(null, Buffer.from(body), readFileSync(join(unknown.dataDir, 'coordination-key.pem'))).toString('base64');
   const response = await fetch(`${server.url}/agent-messages`, { method: 'POST', body, headers: { 'x-boite-peer': sender.coreId, 'x-boite-signature': signature } });

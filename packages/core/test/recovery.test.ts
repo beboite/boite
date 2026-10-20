@@ -6,6 +6,7 @@ import type { TestCore } from './harness.ts';
 import { Core } from '../src/core.ts';
 import { startServer } from '../src/server.ts';
 import { connect } from '../src/client.ts';
+import { thrown } from './settle.ts';
 
 /**
  * A killed core has no chance to finish its turns: it stops writing mid-turn.
@@ -55,11 +56,11 @@ describe('crash recovery', () => {
       expect(next.journal.getTurn(turn.id)).toEqual(held);
       expect(next.scheduler.state().queued.map(entry => entry.turnId)).toEqual([turn.id, discarded.id]);
       expect(next.scheduler.state().running).toEqual([]);
-      await expect(reader.call('threads.archive', { threadId: first.threadId, onlyIfIdle: true })).rejects.toThrow('expected an idle conversation family');
+      expect(await thrown(reader.call('threads.archive', { threadId: first.threadId, onlyIfIdle: true }))).toThrow('expected an idle conversation family');
       expect(next.journal.getTurn(turn.id)).toEqual(held);
       expect((await reader.call('turns.start', input)).id).toBe(turn.id);
       expect(next.threads.get(first.threadId).messages).toHaveLength(1);
-      await expect(reader.call('turns.recover', { threadId: first.threadId, turnId: discarded.id, action: 'discard' })).rejects.toThrow('turnId');
+      expect(await thrown(reader.call('turns.recover', { threadId: first.threadId, turnId: discarded.id, action: 'discard' }))).toThrow('turnId');
       const selection = next.threads.require(first.threadId);
       next.journal.putThread({ ...selection, model: 'future-picker-choice', selectionVersion: 1 });
       let starts = 0;

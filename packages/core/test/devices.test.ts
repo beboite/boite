@@ -22,6 +22,7 @@ import {
 } from '../src/devices/sdk.ts';
 import { fakeSdk, png, SCREEN } from './fixtures/fake-sdk.ts';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const empty = () => mkdtempSync(join(tmpdir(), 'boite-no-sdk-'));
 const linux = (env: Record<string, string | undefined> = {}): SdkEnvironment => ({ os: 'linux', env: { PATH: '', ...env }, home: empty() });
@@ -137,8 +138,8 @@ describe('the Device panel over RPC', () => {
       { platform: 'android', available: false, reason: NO_ANDROID_SDK },
       { platform: 'ios', available: false, reason: IOS_NEEDS_MAC },
     ]);
-    await expect(agent.call('devices.open', { threadId, platform: 'android' })).rejects.toThrow(NO_ANDROID_SDK);
-    await expect(agent.call('devices.open', { threadId, hostId: 'mac-mini' })).rejects.toThrow('unknown device host');
+    expect(await thrown(agent.call('devices.open', { threadId, platform: 'android' }))).toThrow(NO_ANDROID_SDK);
+    expect(await thrown(agent.call('devices.open', { threadId, hostId: 'mac-mini' }))).toThrow('unknown device host');
   });
 
   test('an agent boots an emulator, the owner watches it, and close or shutdown ends it', async () => {
@@ -153,8 +154,8 @@ describe('the Device panel over RPC', () => {
       ['Small_Phone', 'emulator', 'stopped'],
     ]);
     // A connected phone is the only running device, so it is what a bare open takes.
-    await expect(agent.call('devices.open', { threadId, platform: 'ios' })).rejects.toThrow(IOS_NEEDS_MAC);
-    await expect(agent.call('devices.open', { threadId, deviceId: 'Pixel_9' })).rejects.toThrow('no device Pixel_9');
+    expect(await thrown(agent.call('devices.open', { threadId, platform: 'ios' }))).toThrow(IOS_NEEDS_MAC);
+    expect(await thrown(agent.call('devices.open', { threadId, deviceId: 'Pixel_9' }))).toThrow('no device Pixel_9');
 
     const changed = owner.next('devices.changed', (event) => event.sessions.some((s) => s.state === 'ready'));
     const opened = await agent.call('devices.open', { threadId, deviceId: 'Pixel_8' });
@@ -172,8 +173,8 @@ describe('the Device panel over RPC', () => {
     await owner.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'tap', x: 10, y: 20 } });
     await agent.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'key', key: 'back' } });
     await agent.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'swipe', from: { x: 50, y: 200 }, to: { x: 50, y: 40 } } });
-    await expect(agent.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'text', text: 'héllo' } })).rejects.toThrow('printable ASCII');
-    await expect(agent.call('devices.input', { threadId, deviceId: 'Small_Phone', input: { kind: 'tap', x: 1, y: 1 } })).rejects.toThrow('not open');
+    expect(await thrown(agent.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'text', text: 'héllo' } }))).toThrow('printable ASCII');
+    expect(await thrown(agent.call('devices.input', { threadId, deviceId: 'Small_Phone', input: { kind: 'tap', x: 1, y: 1 } }))).toThrow('not open');
     expect(sdk.calls()).toEqual(expect.arrayContaining([
       'adb -s emulator-5554 shell input tap 10 20',
       'adb -s emulator-5554 shell input keyevent 4',
@@ -192,7 +193,7 @@ describe('the Device panel over RPC', () => {
     expect((await ready('Pixel_8')).state).toBe('ready');
     expect(sdk.calls().filter((call) => call.startsWith('emulator -avd'))).toHaveLength(1);
 
-    await expect(agent.call('devices.close', { threadId, deviceId: 'R58M12345', shutdown: true })).rejects.toThrow('not open');
+    expect(await thrown(agent.call('devices.close', { threadId, deviceId: 'R58M12345', shutdown: true }))).toThrow('not open');
     await agent.call('devices.close', { threadId, deviceId: 'Pixel_8', shutdown: true });
     expect(sdk.calls()).toContain('adb -s emulator-5554 emu kill');
     expect(sdk.state().running).toEqual({});
@@ -215,7 +216,7 @@ describe('the Device panel over RPC', () => {
     // Another size is another frame, and an unknown `previous` gets the picture.
     expect((await ask(first.id, 200)).unchanged).toBeUndefined();
     expect((await ask('not-a-frame')).unchanged).toBeUndefined();
-    await expect(ask('x'.repeat(101))).rejects.toThrow('previous must be the id of a frame');
+    expect(await thrown(ask('x'.repeat(101)))).toThrow('previous must be the id of a frame');
     sdk.paint([200, 40, 40]);
     await owner.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'tap', x: 1, y: 1 } });
     const moved = await ask(first.id);
@@ -246,7 +247,7 @@ describe('the Device panel over RPC', () => {
     const session = await ready('Pixel_8');
     expect(session.state).toBe('failed');
     expect(session.error).toContain('PANIC: Missing emulator engine');
-    await expect(owner.call('devices.frame', { threadId, deviceId: 'Pixel_8' })).rejects.toThrow('PANIC');
+    expect(await thrown(owner.call('devices.frame', { threadId, deviceId: 'Pixel_8' }))).toThrow('PANIC');
   });
 
   test('an iOS Simulator boots, streams view-only and shuts down on a Mac', async () => {
@@ -260,7 +261,7 @@ describe('the Device panel over RPC', () => {
     expect((await ready('A1B2-C3D4')).state).toBe('ready');
     const frame = await owner.call('devices.frame', { threadId, deviceId: 'A1B2-C3D4' });
     expect(frame.width).toBe(SCREEN.width);
-    await expect(agent.call('devices.input', { threadId, deviceId: 'A1B2-C3D4', input: { kind: 'tap', x: 1, y: 1 } })).rejects.toThrow('view-only');
+    expect(await thrown(agent.call('devices.input', { threadId, deviceId: 'A1B2-C3D4', input: { kind: 'tap', x: 1, y: 1 } }))).toThrow('view-only');
     await agent.call('devices.close', { threadId, shutdown: true });
     expect(sdk.calls()).toEqual(expect.arrayContaining(['xcrun simctl boot A1B2-C3D4', 'xcrun simctl bootstatus A1B2-C3D4', 'xcrun simctl shutdown A1B2-C3D4']));
   });
@@ -271,7 +272,7 @@ describe('the Device panel over RPC', () => {
     const { grant } = await owner.call('pairing.grant', {});
     const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
     try {
-      await expect(phone.call('devices.list', { threadId })).rejects.toThrow('subscribe');
+      expect(await thrown(phone.call('devices.list', { threadId }))).toThrow('subscribe');
       await phone.call('threads.subscribe', { threadId });
       const seen = phone.next('devices.changed', (event) => event.threadId === threadId);
       await phone.call('devices.open', { threadId });
@@ -282,7 +283,7 @@ describe('the Device panel over RPC', () => {
       const released = phone.next('devices.changed', (event) => event.threadId === threadId && event.sessions.length === 0);
       await owner.call('threads.archive', { threadId });
       await released;
-      await expect(phone.call('devices.frame', { threadId, deviceId: 'Pixel_8' })).rejects.toThrow('active conversation');
+      expect(await thrown(phone.call('devices.frame', { threadId, deviceId: 'Pixel_8' }))).toThrow('active conversation');
       // Archiving leaves the emulator itself running, like closing without shutdown.
       expect(Object.values(sdk.state().running).map((e) => e.avd)).toEqual(['Pixel_8']);
     } finally {

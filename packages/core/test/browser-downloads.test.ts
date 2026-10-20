@@ -5,6 +5,7 @@ import { AGENT_ENV, browserDownloadName, type BrowserDownload } from '@boite/con
 import { runCli } from '../src/cli.ts';
 import { classifyDownload } from '../src/browser/downloads.ts';
 import { createBrowserFixture, DOWNLOAD_PROGRAM, DOWNLOAD_SCRIPT } from './browser/fixture.ts';
+import { thrown } from './settle.ts';
 
 const browserFixture = createBrowserFixture();
 const { real, url } = browserFixture;
@@ -74,7 +75,7 @@ real('a page downloads into the quarantine, the agent hears of it and copies it 
   const { echoThread } = await import('./harness.ts');
   const other = (await echoThread(harness, owner, 'other')).threadId;
   expect(((await owner.call('browser.command', { threadId: other, action: { kind: 'downloads' } })).value as { downloads: unknown[] }).downloads).toEqual([]);
-  await expect(owner.call('browser.command', { threadId: other, action: { kind: 'download-read', downloadId: script.id, offset: 0 } })).rejects.toThrow('no download');
+  expect(await thrown(owner.call('browser.command', { threadId: other, action: { kind: 'download-read', downloadId: script.id, offset: 0 } }))).toThrow('no download');
 
   const cwd = join(harness.dataDir, 'work'); mkdirSync(cwd);
   const run = async (args: string[]) => {

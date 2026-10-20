@@ -10,6 +10,7 @@ import { fetchManifest } from '../src/plugins/source.ts';
 import type { SpawnedProcess } from '../src/procs.ts';
 import { parseManifest, platformKey } from '../src/plugins/manifest.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore | undefined;
 let fetchSpy: { mockRestore(): void } | undefined;
@@ -126,9 +127,9 @@ test('pool JSON maps live and unknown quotas without inventing reset times', () 
 });
 test('plugin RPC refuses unknown IDs and unavailable installs, uninstall keeps account pools', async () => {
   harness = await startPoolCore(); const client = await harness.connect();
-  await expect(client.call('plugins.install', { id: '../escape' })).rejects.toThrow('unknown plugin');
-  await expect(client.call('plugins.install', { id: 'never-added' })).rejects.toThrow('unknown plugin');
-  await expect(client.call('plugins.accounts', { id: 'pool-switcher' })).rejects.toThrow('Install pool-switcher first');
+  expect(await thrown(client.call('plugins.install', { id: '../escape' }))).toThrow('unknown plugin');
+  expect(await thrown(client.call('plugins.install', { id: 'never-added' }))).toThrow('unknown plugin');
+  expect(await thrown(client.call('plugins.accounts', { id: 'pool-switcher' }))).toThrow('Install pool-switcher first');
   const pool = join(harness.dataDir, 'saved-logins'); mkdirSync(pool); writeFileSync(join(pool, 'keep'), 'fixture');
   const state = await client.call('plugins.uninstall', { id: 'pool-switcher' });
   expect(state.status).toBe('not-installed'); expect(existsSync(join(pool, 'keep'))).toBe(true);
@@ -324,7 +325,7 @@ describe('plugins from a git URL', () => {
     expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots', 'douane', 'seat-pool']);
 
     // A preview is used once.
-    await expect(client.call('plugins.add', { previewId: preview.previewId! })).rejects.toThrow('unknown or expired');
+    expect(await thrown(client.call('plugins.add', { previewId: preview.previewId! }))).toThrow('unknown or expired');
 
     // The same URL again is an update, and the preview says what it replaces.
     const bytes2 = new Uint8Array([8, 8]);
@@ -343,7 +344,7 @@ describe('plugins from a git URL', () => {
     expect(removed.status).toBe('not-installed');
     expect(existsSync(dir)).toBe(false);
     expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['bots', 'douane']);
-    await expect(client.call('plugins.install', { id: 'seat-pool' })).rejects.toThrow('unknown plugin');
+    expect(await thrown(client.call('plugins.install', { id: 'seat-pool' }))).toThrow('unknown plugin');
   }, GIT_URL_TEST_MS);
 
   test('a refused manifest comes back as a preview with the file, the field and what was expected, never installable', async () => {
@@ -371,13 +372,13 @@ describe('plugins from a git URL', () => {
     const foreign = platformKey() === 'darwin-arm64' ? null : await client.call('plugins.inspect', { url: elsewhere.path });
     if (foreign !== null) expect(foreign.rejected).toMatchObject({ field: 'artifacts', expected: `an artifact for ${platformKey()}, this machine` });
 
-    await expect(client.call('plugins.inspect', { url: extra.path, ref: '--upload-pack=touch' })).rejects.toThrow('plugin ref must be');
-    await expect(client.call('plugins.inspect', { url: extra.path, ref: 'no-such-branch' })).rejects.toThrow('could not fetch');
-    await expect(client.call('plugins.add', { previewId: 'f'.repeat(64) })).rejects.toThrow('unknown or expired');
+    expect(await thrown(client.call('plugins.inspect', { url: extra.path, ref: '--upload-pack=touch' }))).toThrow('plugin ref must be');
+    expect(await thrown(client.call('plugins.inspect', { url: extra.path, ref: 'no-such-branch' }))).toThrow('could not fetch');
+    expect(await thrown(client.call('plugins.add', { previewId: 'f'.repeat(64) }))).toThrow('unknown or expired');
 
     // With the test door shut, a path is refused before git runs.
     harness.core.plugins.allowLocalSources = false;
-    await expect(client.call('plugins.inspect', { url: extra.path })).rejects.toThrow('plugin url must be an https URL');
+    expect(await thrown(client.call('plugins.inspect', { url: extra.path }))).toThrow('plugin url must be an https URL');
     expect(readdirSync(join(harness.dataDir, 'plugins'))).toEqual([]);
   }, GIT_URL_TEST_MS);
 
@@ -444,8 +445,8 @@ describe('plugins from a git URL', () => {
     expect(listed?.status).toBe('rejected');
     expect(listed?.rejected).toMatchObject({ field: 'manifest.schema', expected: '1' });
     expect(listed?.rejected?.file).toEndWith('installed.json');
-    await expect(client.call('plugins.accounts', { id: 'pool-legacy' })).rejects.toThrow('pool-legacy was refused');
-    await expect(client.call('plugins.install', { id: 'pool-legacy' })).rejects.toThrow('Remove it, then add it again');
+    expect(await thrown(client.call('plugins.accounts', { id: 'pool-legacy' }))).toThrow('pool-legacy was refused');
+    expect(await thrown(client.call('plugins.install', { id: 'pool-legacy' }))).toThrow('Remove it, then add it again');
     await client.call('plugins.uninstall', { id: 'pool-legacy' });
     expect(existsSync(dir)).toBe(false);
   });
@@ -455,10 +456,10 @@ describe('plugins from a git URL', () => {
     const { grant } = await owner.call('pairing.grant', {});
     const device = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
     try {
-      await expect(device.call('plugins.inspect', { url: 'https://github.com/owner/repo' })).rejects.toThrow('plugins.inspect is for the owner only');
-      await expect(device.call('plugins.add', { previewId: 'f'.repeat(64) })).rejects.toThrow('plugins.add is for the owner only');
-      await expect(device.call('plugins.install', { id: 'bots' })).rejects.toThrow('plugins.install is for the owner only');
-      await expect(device.call('plugins.list', {})).rejects.toThrow('plugins.list is for the owner only');
+      expect(await thrown(device.call('plugins.inspect', { url: 'https://github.com/owner/repo' }))).toThrow('plugins.inspect is for the owner only');
+      expect(await thrown(device.call('plugins.add', { previewId: 'f'.repeat(64) }))).toThrow('plugins.add is for the owner only');
+      expect(await thrown(device.call('plugins.install', { id: 'bots' }))).toThrow('plugins.install is for the owner only');
+      expect(await thrown(device.call('plugins.list', {}))).toThrow('plugins.list is for the owner only');
     } finally { device.close(); }
   });
 });
@@ -503,10 +504,10 @@ describe('plugin git ignores the caller gitconfig', () => {
         expect(call.env.GIT_CONFIG_SYSTEM).toBe(emptyConfig);
       }
     };
-    await expect(fetchManifest(harness.core, 'https://example.invalid/plugin.git', 'HEAD')).rejects.toThrow(/could not fetch/);
+    expect(await thrown(fetchManifest(harness.core, 'https://example.invalid/plugin.git', 'HEAD'))).toThrow(/could not fetch/);
     assertPinned(false);
     seen.length = 0;
-    await expect(fetchManifest(harness.core, harness.dataDir, 'HEAD', { allowLocal: true })).rejects.toThrow(/could not fetch/);
+    expect(await thrown(fetchManifest(harness.core, harness.dataDir, 'HEAD', { allowLocal: true }))).toThrow(/could not fetch/);
     assertPinned(true);
   });
 });

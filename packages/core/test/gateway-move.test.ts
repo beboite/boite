@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { SubscriptionProxy } from '@boite/contracts';
 import { endpointRoute } from '../src/gateway-move.ts';
 import { startTestCore, type TestCore } from './harness.ts';
+import { rejection } from './settle.ts';
 
 let harness: TestCore | undefined;
 let gateway: ReturnType<typeof Bun.serve> | undefined;
@@ -169,7 +170,7 @@ test('a remote Douane that wants a management token says so, and the saved token
   const client = await harness.connect();
   const ids = await seed(client);
   const id = `${ids.claude}:login`;
-  await expect(client.call('subscriptionProxy.move', { ids: [id] })).rejects.toMatchObject({ rpc: { message: expect.stringContaining('HTTP 401'), data: { field: 'managementToken' } } });
+  expect(await rejection(client.call('subscriptionProxy.move', { ids: [id] }))).toMatchObject({ rpc: { message: expect.stringContaining('HTTP 401'), data: { field: 'managementToken' } } });
   expect(fake.received.filter(entry => entry.path.endsWith('/import'))).toEqual([]);
   const { outcomes } = await client.call('subscriptionProxy.move', { ids: [id], managementToken: SECRETS.management });
   expect(outcomes).toEqual([{ id, outcome: 'moved', reason: null, message: null }]);
@@ -179,7 +180,7 @@ test('a remote Douane that wants a management token says so, and the saved token
   const visible = JSON.stringify({ plan, settings: await client.call('settings.get', {}), logs: await client.call('core.logs', {}), events: harness.core.journal.db.query('SELECT payload FROM events').all() });
   expect(visible).not.toContain(SECRETS.management);
   // Removing the token takes effect at once: this move goes without one and is refused.
-  await expect(client.call('subscriptionProxy.move', { ids: [id], managementToken: null })).rejects.toMatchObject({ rpc: { data: { field: 'managementToken' } } });
+  expect(await rejection(client.call('subscriptionProxy.move', { ids: [id], managementToken: null }))).toMatchObject({ rpc: { data: { field: 'managementToken' } } });
   expect((await client.call('subscriptionProxy.movePlan', {})).managementToken).toBe(false);
 });
 
@@ -188,9 +189,9 @@ test('a gateway behind a login page, or no Douane at all, is refused in plain wo
   harness = await startTestCore({ settings: { subscriptionProxy: douane(fake.url) } });
   const client = await harness.connect();
   const ids = await seed(client);
-  await expect(client.call('subscriptionProxy.move', { ids: [`${ids.claude}:login`] })).rejects.toMatchObject({ rpc: { message: expect.stringContaining('sign-in page'), data: { field: 'managementToken' } } });
+  expect(await rejection(client.call('subscriptionProxy.move', { ids: [`${ids.claude}:login`] }))).toMatchObject({ rpc: { message: expect.stringContaining('sign-in page'), data: { field: 'managementToken' } } });
   await client.call('subscriptionProxy.configure', { subscriptionProxy: { ...douane(fake.url), kind: 'cliproxyapi' } });
   expect((await client.call('subscriptionProxy.movePlan', {})).origin).toBeNull();
-  await expect(client.call('subscriptionProxy.move', { ids: [`${ids.claude}:login`] })).rejects.toMatchObject({ rpc: { data: { field: 'subscriptionProxy.kind' } } });
-  await expect(client.call('subscriptionProxy.move', { ids: [] })).rejects.toMatchObject({ rpc: { data: { field: 'ids' } } });
+  expect(await rejection(client.call('subscriptionProxy.move', { ids: [`${ids.claude}:login`] }))).toMatchObject({ rpc: { data: { field: 'subscriptionProxy.kind' } } });
+  expect(await rejection(client.call('subscriptionProxy.move', { ids: [] }))).toMatchObject({ rpc: { data: { field: 'ids' } } });
 });

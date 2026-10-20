@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { PullRequests } from '../src/pull-requests.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 let restore: (() => void) | undefined;
@@ -67,7 +68,7 @@ test('oversized lookup output fails instead of accepting truncated evidence', as
   const intercepted = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, _command, _args, options) => spawn(scope, process.execPath, ['-e', `console.log('x'.repeat(4096))`], options));
   restore = () => intercepted.mockRestore();
   const lookups = new PullRequests(harness.core, { timeoutMs: 1000, maxOutputBytes: 1024 });
-  await expect(lookups.cleanCheckout({ ...harness.core.threads.require(threadId), branch: 'topic' })).rejects.toThrow('stdout exceeded');
+  expect(await thrown(lookups.cleanCheckout({ ...harness.core.threads.require(threadId), branch: 'topic' }))).toThrow('stdout exceeded');
 });
 
 test('canceling a queued lookup never spawns it or stops another owning scope', async () => {

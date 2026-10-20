@@ -8,6 +8,7 @@ import { echoDriver } from '../src/drivers/echo.ts';
 import type { SessionContext } from '../src/drivers/types.ts';
 import type { CoreClient } from '../src/client.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { rejection } from './settle.ts';
 
 let h: TestCore;
 let client: CoreClient;
@@ -81,8 +82,8 @@ test('a prepared folder removed before adoption allows release and an ordinary S
   const reservation = await prepare();
   await waitFor(() => prepared.length === 1);
   await rm(prepared[0]!.thread.cwd, { recursive: true });
-  await expect(client.call('threads.create', { ...choice, preparationId: reservation.preparationId }))
-    .rejects.toMatchObject({ rpc: { data: { reason: 'draft-preparation-expired' } } });
+  expect(await rejection(client.call('threads.create', { ...choice, preparationId: reservation.preparationId })))
+    .toMatchObject({ rpc: { data: { reason: 'draft-preparation-expired' } } });
   await client.call('drafts.release', { preparationId: reservation.preparationId });
   const created = await client.call('threads.create', choice);
   expect(created.id).not.toBe(reservation.threadId);
@@ -130,7 +131,7 @@ test('a cancelled pending preparation cannot launch a session or leave a folder'
 
 test('release arriving before prepare invalidates the exact ID', async () => {
   await client.call('drafts.release', { preparationId: 'draft_cancelled_01' });
-  await expect(prepare('draft_cancelled_01')).rejects.toMatchObject({ rpc: { data: { reason: 'draft-preparation-expired' } } });
+  expect(await rejection(prepare('draft_cancelled_01'))).toMatchObject({ rpc: { data: { reason: 'draft-preparation-expired' } } });
   expect(prepared).toHaveLength(0);
 });
 
@@ -140,8 +141,8 @@ test('connection ownership, selection mismatch and replacement preserve the righ
   const other = await h.connect();
   await other.call('drafts.release', { preparationId: reservation.preparationId });
   expect(await exists(prepared[0]!.thread.cwd)).toBe(true);
-  await expect(client.call('threads.create', { ...choice, permissionMode: 'yolo', preparationId: reservation.preparationId }))
-    .rejects.toMatchObject({ rpc: { data: { reason: 'draft-preparation-mismatch' } } });
+  expect(await rejection(client.call('threads.create', { ...choice, permissionMode: 'yolo', preparationId: reservation.preparationId })))
+    .toMatchObject({ rpc: { data: { reason: 'draft-preparation-mismatch' } } });
   await prepare('draft_replacement_01');
   await waitFor(() => released.includes(reservation.threadId));
   await waitFor(() => !existsSync(prepared[0]!.thread.cwd));

@@ -7,6 +7,7 @@ import { WorktreeCleanup } from '../src/worktree-cleanup.ts';
 import { worktreeRoot } from '../src/worktree.ts';
 import { startTestCore, type TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
+import { rejection } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
@@ -113,7 +114,7 @@ describe('settled worktree cleanup', () => {
 
     const restored = await client.call('threads.archive', { threadId: thread.id, archived: false });
     expect(restored.worktreeRemoved).toMatchObject({ path: thread.cwd, reason: 'clean' });
-    await expect(client.call('turns.start', { threadId: thread.id, prompt: 'still there?' })).rejects.toMatchObject({
+    expect(await rejection(client.call('turns.start', { threadId: thread.id, prompt: 'still there?' }))).toMatchObject({
       rpc: { message: expect.stringContaining(thread.cwd) },
     });
   });
@@ -229,7 +230,7 @@ describe('settled worktree cleanup', () => {
   test('the project policy is on by default, owner only, and refuses anything but a boolean', async () => {
     const project = await repoProject();
     expect((await client.call('projects.list', {})).find((entry) => entry.id === project.id)?.autoRemoveWorktrees).toBe(true);
-    await expect(client.call('projects.setAutoRemoveWorktrees', { projectId: project.id, enabled: 'no' as unknown as boolean })).rejects.toMatchObject({
+    expect(await rejection(client.call('projects.setAutoRemoveWorktrees', { projectId: project.id, enabled: 'no' as unknown as boolean }))).toMatchObject({
       rpc: { data: expect.objectContaining({ field: 'enabled' }) },
     });
     expect((await client.call('projects.setAutoRemoveWorktrees', { projectId: project.id, enabled: true })).autoRemoveWorktrees).toBe(true);

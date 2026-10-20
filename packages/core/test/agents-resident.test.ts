@@ -8,6 +8,7 @@ import { checkSchedule, nextOccurrence } from '../src/agents/routines.ts';
 import { Database } from 'bun:sqlite';
 import { join } from 'node:path';
 import { connect } from '../src/client.ts';
+import { thrown } from './settle.ts';
 let h: TestCore;
 let agent: AgentProfile;
 let client: Awaited<ReturnType<TestCore['connect']>>;
@@ -25,12 +26,12 @@ test('each identity owns a durable brain, with revision-checked edits',async()=>
  expect(existsSync(brain.path)).toBe(true);
  const saved = await client.call('agents.brain.save',{agentId:agent.id,expectedRevision:brain.revision,instructions:'Always verify sources.',memory:'Keep the prototype private.'});
  expect(saved.memory).toBe('Keep the prototype private.');
- await expect(client.call('agents.brain.save',{agentId:agent.id,expectedRevision:brain.revision,instructions:'stale',memory:''})).rejects.toThrow('revision');
+ expect(await thrown(client.call('agents.brain.save',{agentId:agent.id,expectedRevision:brain.revision,instructions:'stale',memory:''}))).toThrow('revision');
 });
 test('default route must be allowed; account grants restrict identity and child routes',async()=>{
- await expect(client.call('agents.runtime.configure',{agentId:agent.id,expectedRevision:agent.revision,config:{...policy(),allowedRoutes:[]}})).rejects.toThrow('default');
+ expect(await thrown(client.call('agents.runtime.configure',{agentId:agent.id,expectedRevision:agent.revision,config:{...policy(),allowedRoutes:[]}}))).toThrow('default');
  await client.call('agents.accounts.set',{grants:[{accountId:agent.selection.accountId,agentIds:[]}]});
- await expect(client.call('agents.runtime.configure',{agentId:agent.id,expectedRevision:agent.revision,config:policy()})).rejects.toThrow('account');
+ expect(await thrown(client.call('agents.runtime.configure',{agentId:agent.id,expectedRevision:agent.revision,config:policy()}))).toThrow('account');
 });
 
 test('removing an account drops its grant, so later grant edits still apply',async()=>{
@@ -52,8 +53,8 @@ test('paired clients receive resident updates and cannot impersonate agents or c
   expect(sent.senderId).toBeNull();
   expect((await remote.call('agents.snapshot',{})).work).toHaveLength(1);
   expect((await remote.call('agents.runtime.get',{agentId:agent.id})).defaultRoute.model).toBe('echo');
-  await expect(remote.call('agents.message.send',{threadId:'not-my-session',scope:{kind:'agent',id:agent.id},recipientIds:[],text:'Impersonation',requestId:'remote-message-002'})).rejects.toThrow('threadId');
-  await expect(remote.call('agents.runtime.configure',{agentId:agent.id,expectedRevision:agent.revision,config:policy()})).rejects.toThrow('owner');
+  expect(await thrown(remote.call('agents.message.send',{threadId:'not-my-session',scope:{kind:'agent',id:agent.id},recipientIds:[],text:'Impersonation',requestId:'remote-message-002'}))).toThrow('threadId');
+  expect(await thrown(remote.call('agents.runtime.configure',{agentId:agent.id,expectedRevision:agent.revision,config:policy()}))).toThrow('owner');
  } finally { remote.close(); }
 });
 
@@ -80,7 +81,7 @@ test('missed routine creates one durable work item, never overlaps or catches up
  const p={routineId:routine.id,requestId:'routine-once-001'};
  const first=await client.call('agents.routine.run',p);
  expect((await client.call('agents.routine.run',p)).id).toBe(first.id);
- await expect(client.call('agents.routine.run',{...p,requestId:'routine-once-002'})).rejects.toThrow('unfinished');
+ expect(await thrown(client.call('agents.routine.run',{...p,requestId:'routine-once-002'}))).toThrow('unfinished');
  expect((await client.call('agents.snapshot',{})).work).toHaveLength(1);
 });
 

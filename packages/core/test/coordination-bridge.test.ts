@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import type { CoordinationBridgeResponse } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 afterEach(async () => { for (const core of cores.splice(0)) await core.stop(); });
@@ -17,7 +18,7 @@ test('an owner app carries signed list read and send in both directions without 
   server.core.journal.putMessage({ id: 'server-message', threadId: a, turnId: 'history', role: 'assistant', state: 'complete', createdAt: Date.now(), parts: [{ type: 'text', text: 'Checking the destination' }] });
   pc.core.journal.putMessage({ id: 'client-message', threadId: b, turnId: 'history', role: 'assistant', state: 'complete', createdAt: Date.now(), parts: [{ type: 'text', text: 'Copying the guest filesystem' }] });
   const address = { coreId: cardB.coreId, threadId: b };
-  await expect(server.core.coordination.read(a, address)).rejects.toThrow('did not answer');
+  expect(await thrown(server.core.coordination.read(a, address))).toThrow('did not answer');
   const forwarding: Promise<unknown>[] = [];
   ownerA.on('collaboration.bridge.request', request => {
     forwarding.push(ownerB.call('collaboration.bridge.forward', { coreId: request.fromCoreId, body: request.body, signature: request.signature })
@@ -41,13 +42,13 @@ test('an owner app carries signed list read and send in both directions without 
   await Promise.all(forwarding);
   const agent = await connect(server.url, server.core.agents.tokenFor(a));
   try {
-    await expect(agent.call('collaboration.bridge.register', { coreId: cardB.coreId, enabled: true })).rejects.toThrow('agent');
-    await expect(agent.call('collaboration.bridge.forward', { coreId: cardA.coreId, body: '{}', signature: '' })).rejects.toThrow('agent');
+    expect(await thrown(agent.call('collaboration.bridge.register', { coreId: cardB.coreId, enabled: true }))).toThrow('agent');
+    expect(await thrown(agent.call('collaboration.bridge.forward', { coreId: cardA.coreId, body: '{}', signature: '' }))).toThrow('agent');
   } finally { agent.close(); }
   ownerA.close();
   // The websocket close is delivered before the next turn of the event loop.
   await new Promise(resolve => setTimeout(resolve, 30));
-  await expect(server.core.coordination.read(a, address)).rejects.toThrow('did not answer');
+  expect(await thrown(server.core.coordination.read(a, address))).toThrow('did not answer');
 }, 15000);
 
 test('another owner connection cannot supply a bridge response, and a forged signature is rejected', async () => {
@@ -66,7 +67,7 @@ test('another owner connection cannot supply a bridge response, and a forged sig
     })());
   });
   await owner.call('collaboration.bridge.register', { coreId: cardB.coreId, enabled: true });
-  await expect(server.core.coordination.check(cardB.coreId)).rejects.toThrow('could not verify');
+  expect(await thrown(server.core.coordination.check(cardB.coreId))).toThrow('could not verify');
   await Promise.all(answering);
   expect(refused).toBe(true);
 });

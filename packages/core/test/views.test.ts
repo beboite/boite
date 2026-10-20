@@ -9,6 +9,7 @@ import { runCli } from '../src/cli.ts';
 import { buildView, viewAdvice } from '../src/views.ts';
 import { VIEW_EXAMPLE } from '../src/view-example.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 /** The checks that load a page need a Chromium-based browser; the rest runs with none, as a machine without one would. */
 const browser = findChromium().path;
@@ -234,7 +235,7 @@ test('boite view publishes a page as an artifact that opens only on the view rou
   writeFileSync(join(harness.dataDir, 'report.txt'), 'x'.repeat(6 * 1024 * 1024));
   const file = await agent.call('artifacts.publish', { threadId, path: 'report.txt' });
   const plain = viewOf(file.parts)!;
-  await expect(client.call('artifacts.read', { threadId, messageId: file.id, artifactId: plain.id, view: true })).rejects.toThrow('published with boite view');
+  expect(await thrown(client.call('artifacts.read', { threadId, messageId: file.id, artifactId: plain.id, view: true }))).toThrow('published with boite view');
 });
 
 test('a page that is not ready is refused with what to fix, and nothing is stored or shown', async () => {
@@ -250,13 +251,13 @@ test('a page that is not ready is refused with what to fix, and nothing is store
 
   write('notes.md', '# no');
   write('empty.html', '  \n');
-  await expect(agent.call('artifacts.view', { threadId, path: 'notes.md' })).rejects.toThrow('must be an HTML file');
-  await expect(agent.call('artifacts.view', { threadId, path: 'empty.html' })).rejects.toThrow('page is empty');
-  await expect(agent.call('artifacts.view', { threadId, path: '../outside.html' })).rejects.toThrow('leaves');
+  expect(await thrown(agent.call('artifacts.view', { threadId, path: 'notes.md' }))).toThrow('must be an HTML file');
+  expect(await thrown(agent.call('artifacts.view', { threadId, path: 'empty.html' }))).toThrow('page is empty');
+  expect(await thrown(agent.call('artifacts.view', { threadId, path: '../outside.html' }))).toThrow('leaves');
   const other = await echoThread(harness, client, 'another thread');
-  await expect(agent.call('artifacts.view', { threadId: other.threadId, path: 'broken.html' })).rejects.toThrow('is for thread');
+  expect(await thrown(agent.call('artifacts.view', { threadId: other.threadId, path: 'broken.html' }))).toThrow('is for thread');
   await client.call('threads.archive', { threadId });
-  await expect(client.call('artifacts.view', { threadId, path: 'empty.html' })).rejects.toThrow('active thread');
+  expect(await thrown(client.call('artifacts.view', { threadId, path: 'empty.html' }))).toThrow('active thread');
 });
 
 real('a page is loaded in a headless browser before it is shown: its height is measured, its errors refuse it', async () => {
@@ -300,11 +301,11 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   expect((await agent.call('artifacts.view', { threadId, path: 'views/edge.html' })).checked).toBe(true);
 
   write('views/throws.html', page('<p>before</p>\n<script>\n  const stage = document.querySelector("#stage");\n  stage.getContext("2d");\n</script>'));
-  const thrown = await agent.call('artifacts.view', { threadId, path: 'views/throws.html' }).then(() => null, (error: Error) => error.message);
-  expect(thrown).toContain('not ready to show');
-  expect(thrown).toMatch(/TypeError: Cannot read properties of null/);
+  const failure = await agent.call('artifacts.view', { threadId, path: 'views/throws.html' }).then(() => null, (error: Error) => error.message);
+  expect(failure).toContain('not ready to show');
+  expect(failure).toMatch(/TypeError: Cannot read properties of null/);
   // The line is the one of the agent's own file, not of the stored copy.
-  expect(thrown).toMatch(/:8:\d+|line 8/);
+  expect(failure).toMatch(/:8:\d+|line 8/);
 
   write('views/calls.html', page('<script>fetch("https://example.com/data.json").catch(() => {});</script>'));
   const called = await agent.call('artifacts.view', { threadId, path: 'views/calls.html' }).then(() => null, (error: Error) => error.message);

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { ModelInfo } from '@boite/contracts';
 import { ModelProbes } from '../src/drivers/model-probes.ts';
 import type { ProbeContext } from '../src/drivers/types.ts';
+import { thrown } from './settle.ts';
 
 const context = (providerId = 'provider', accountId = 'account') => ({ provider: { id: providerId }, accountId } as ProbeContext);
 const models: ModelInfo[] = [{ id: 'model', name: 'Model', default: true }];
@@ -45,7 +46,7 @@ test('a failed probe is retried and composite keys cannot collide', async () => 
     if (++reads === 1) throw new Error('offline');
     return models;
   });
-  await expect(cache.probe(context())).rejects.toThrow('offline');
+  expect(await thrown(cache.probe(context()))).toThrow('offline');
   await cache.probe(context());
   await cache.probe(context('a::b', 'c'));
   await cache.probe(context('a', 'b::c'));

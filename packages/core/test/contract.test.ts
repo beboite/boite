@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { CoreClient } from '../src/client.ts';
 import { KNOWN_DIVERGENCES, SCENARIOS, type ContractEnv } from '../../../tests/contract/scenarios.ts';
 import { startTestCore, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 /*
  * The shared contract scenarios against the real core over WebSocket, with the
@@ -43,6 +44,6 @@ for (const [name, scenario] of Object.entries(SCENARIOS)) {
       return;
     }
     // A listed drift that no longer fails has been fixed: take it off the list.
-    await expect(scenario(env())).rejects.toThrow();
+    expect(await thrown(scenario(env()))).toThrow();
   });
 }

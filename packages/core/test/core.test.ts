@@ -28,7 +28,7 @@ test('shutdown still stops owned children and closes the journal when both start
   const uploads = spyOn(core.attachmentUploads, 'close').mockRejectedValue(new Error('upload cleanup fixture'));
   const log = spyOn(core, 'log');
   try {
-    await expect(harness.stop()).resolves.toBeUndefined();
+    expect(await harness.stop()).toBeUndefined();
     expect(drafts).toHaveBeenCalledTimes(1);
     expect(uploads).toHaveBeenCalledTimes(1);
     expect(core.journal.isClosed()).toBe(true);

@@ -3,6 +3,7 @@ import { getDriver, setDriver, writesTitles } from '../src/drivers/index.ts';
 import { lazyDriver } from '../src/drivers/lazy.ts';
 import type { Driver, ProbeContext, SideQuestionContext, TitleContext, TurnContext, TurnHandle, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
+import { rejection } from './settle.ts';
 
 const result: TurnResult = { status: 'done', sessionId: 'native-session', usage: null };
 const context: TurnContext = {
@@ -209,7 +210,7 @@ test('loading preserves permission changes and both steering methods, including 
   const attachments = [{ kind: 'image' as const, mimeType: 'image/png' as const, data: 'fixture', name: null }];
   expect(await handle.setPermissionMode!('plan')).toBe(true);
   expect(await handle.setPermissionMode!('default')).toBe(false);
-  await expect(handle.steer!('coordination', attachments)).rejects.toBe(failure);
+  expect(await rejection(handle.steer!('coordination', attachments))).toBe(failure);
   expect(innerHandle.steer).toHaveBeenCalledTimes(1);
   expect(await handle.steerUser!('user input', attachments)).toBe(true);
   expect(innerHandle.steerUser).toHaveBeenCalledWith('user input', attachments);
@@ -285,7 +286,7 @@ for (const beforeLoading of [false, true]) test(`a side question aborted ${befor
   if (beforeLoading) abort.abort();
   const answer = driver.sideQuestion!(side(abort.signal));
   abort.abort();
-  await expect(answer).rejects.toHaveProperty('name', 'AbortError');
+  expect(await rejection(answer)).toHaveProperty('name', 'AbortError');
   if (beforeLoading) expect(load).not.toHaveBeenCalled();
   gate.resolve(inner);
   await driver.probe!(probe);
@@ -303,7 +304,7 @@ test('probe invalidation during module loading rejects only the matching account
   const other = driver.probe!({ ...probe, accountId: 'other' });
   driver.forgetProbes?.({ providerId: 'unrelated' });
   driver.forgetProbes?.({ providerId: 'fixture', accountId: 'account' });
-  await expect(stale).rejects.toHaveProperty('name', 'AbortError');
+  expect(await rejection(stale)).toHaveProperty('name', 'AbortError');
   gate.resolve(inner);
   expect(await other).toEqual(reading);
   expect(inner.probe).toHaveBeenCalledTimes(1);

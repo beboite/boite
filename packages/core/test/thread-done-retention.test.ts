@@ -7,6 +7,7 @@ import { Core } from '../src/core.ts';
 import type { CoreClient } from '../src/client.ts';
 import { deleteExpiredDoneThreads } from '../src/threads/done-retention.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const DAY = 86_400_000;
 let harness: TestCore, client: CoreClient;
@@ -112,7 +113,7 @@ test('failed cleanup retains the done deadline so startup retries removal', asyn
   harness.core.journal.db.query('UPDATE threads SET done_at = ? WHERE id = ?').run(doneAt, threadId);
   const stop = spyOn(harness.core.procs, 'stopAndWait').mockRejectedValueOnce(new Error('cleanup interrupted'));
   try {
-    await expect(deleteExpiredDoneThreads(harness.core)).rejects.toThrow('cleanup interrupted');
+    expect(await thrown(deleteExpiredDoneThreads(harness.core))).toThrow('cleanup interrupted');
     expect(harness.core.journal.getThread(threadId)?.doneAt).toBe(doneAt);
     expect(harness.core.journal.listDeletedThreads()).toEqual([]);
   } finally { stop.mockRestore(); }

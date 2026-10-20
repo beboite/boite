@@ -3,6 +3,7 @@ import { realpathSync } from 'node:fs';
 import type { AgentProfile, AgentSave, AgentMissionTask } from '@boite/contracts';
 import { startTestCore, type TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
+import { thrown } from './settle.ts';
 
 describe('persistent agents over RPC', () => {
   let h: TestCore;
@@ -27,7 +28,7 @@ describe('persistent agents over RPC', () => {
     expect(await client.call('projects.list', {})).toEqual([]);
     await client.call('agents.profile.save', { id: agent.id, expectedRevision: agent.revision, value: { ...profile.value, domain: 'Design' } });
     expect((await client.call('agents.snapshot', {})).profiles[0]?.id).toBe(agent.id);
-    await expect(client.call('agents.profile.save', { id: agent.id, expectedRevision: agent.revision, value: profile.value })).rejects.toThrow('revision');
+    expect(await thrown(client.call('agents.profile.save', { id: agent.id, expectedRevision: agent.revision, value: profile.value }))).toThrow('revision');
   });
 
   test('message retries do not duplicate recipients or work, and a reply chain has one allowance', async () => {
@@ -43,7 +44,7 @@ describe('persistent agents over RPC', () => {
     expect(snapshot.deliveries).toHaveLength(3);
     expect(snapshot.work).toHaveLength(2);
     expect(third.episodeId).toBe(first.episodeId);
-    await expect(client.call('agents.message.send', { ...params, text: 'Changed input' })).rejects.toThrow('different');
+    expect(await thrown(client.call('agents.message.send', { ...params, text: 'Changed input' }))).toThrow('different');
   });
 
   test('mentions require a recipient, and group membership does not permit unrelated recipients', async () => {
@@ -53,7 +54,7 @@ describe('persistent agents over RPC', () => {
     const params = { scope: { kind: 'group' as const, id: group.id }, recipientIds: [], text: 'For the record', requestId: 'message_001' };
     await client.call('agents.message.send', params);
     expect((await client.call('agents.snapshot', {})).work).toHaveLength(0);
-    await expect(client.call('agents.message.send', { ...params, recipientIds: [other.id], requestId: 'message_002' })).rejects.toThrow('recipient');
+    expect(await thrown(client.call('agents.message.send', { ...params, recipientIds: [other.id], requestId: 'message_002' }))).toThrow('recipient');
   });
 
   test('task acquisition is exclusive, waits for dependencies and rejects stale submissions', async () => {
@@ -63,13 +64,13 @@ describe('persistent agents over RPC', () => {
     const draft: AgentSave<AgentMissionTask> = { value: { missionId: mission.id, title: 'Build', instructions: '', dependsOn: [], assigneeId: null, status: 'open', generation: 0, leaseUntil: null, workspace: null, result: null } };
     const first = await client.call('agents.task.save', draft);
     const second = await client.call('agents.task.save', { value: { ...draft.value, title: 'Review', dependsOn: [first.id] } });
-    await expect(client.call('agents.task.acquire', { taskId: second.id, agentId: other.id, expectedRevision: second.revision })).rejects.toThrow('dependencies');
+    expect(await thrown(client.call('agents.task.acquire', { taskId: second.id, agentId: other.id, expectedRevision: second.revision }))).toThrow('dependencies');
     const acquired = await client.call('agents.task.acquire', { taskId: first.id, agentId: agent.id, expectedRevision: first.revision });
-    await expect(client.call('agents.task.acquire', { taskId: first.id, agentId: other.id, expectedRevision: first.revision })).rejects.toThrow('already assigned');
-    await expect(client.call('agents.task.submit', { taskId: first.id, generation: 0, result: 'stale result' })).rejects.toThrow('stale');
+    expect(await thrown(client.call('agents.task.acquire', { taskId: first.id, agentId: other.id, expectedRevision: first.revision }))).toThrow('already assigned');
+    expect(await thrown(client.call('agents.task.submit', { taskId: first.id, generation: 0, result: 'stale result' }))).toThrow('stale');
     const submitted = await client.call('agents.task.submit', { taskId: first.id, generation: acquired.generation, result: 'Built and checked' });
     expect(submitted.status).toBe('review');
-    await expect(client.call('agents.task.acquire', { taskId: second.id, agentId: other.id, expectedRevision: second.revision })).rejects.toThrow('dependencies');
+    expect(await thrown(client.call('agents.task.acquire', { taskId: second.id, agentId: other.id, expectedRevision: second.revision }))).toThrow('dependencies');
     await client.call('agents.task.save', { id: submitted.id, expectedRevision: submitted.revision, value: { ...submitted, status: 'done' } });
     expect((await client.call('agents.task.acquire', { taskId: second.id, agentId: other.id, expectedRevision: second.revision })).assigneeId).toBe(other.id);
   });
@@ -86,13 +87,13 @@ describe('persistent agents over RPC', () => {
 
   test('an unused provider account still belongs to its persistent profile', async () => {
     await client.call('agents.profile.save', profile);
-    await expect(client.call('accounts.remove', { accountId: profile.value.selection.accountId })).rejects.toThrow('persistent agent');
+    expect(await thrown(client.call('accounts.remove', { accountId: profile.value.selection.accountId }))).toThrow('persistent agent');
   });
 
   test('directory resources must exist and have an absolute path', async () => {
     const agent = await client.call('agents.profile.save', profile);
     const value = { scope: { kind: 'agent' as const, id: agent.id }, name: 'Files', kind: 'directory' as const, value: 'missing-relative-directory', access: 'write' as const };
-    await expect(client.call('agents.resource.save', { value })).rejects.toThrow('absolute');
+    expect(await thrown(client.call('agents.resource.save', { value }))).toThrow('absolute');
     const resource = await client.call('agents.resource.save', { value: { ...value, value: h.dataDir } });
     expect(resource.value).toBe(realpathSync(h.dataDir));
   });

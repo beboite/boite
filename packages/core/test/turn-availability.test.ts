@@ -114,10 +114,10 @@ test('Stop ends a capacity wait at once and Cancel fails the turn with the refus
 
     const cancelled = await client.call('turns.start', { threadId, prompt: '[capacity:9]cancel me' });
     await waitFor(() => retryOf(h, threadId)?.turnId === cancelled.id);
-    await expect(client.call('turns.cancelRetry', { threadId })).resolves.toEqual({ cancelled: true });
+    expect(await client.call('turns.cancelRetry', { threadId })).toEqual({ cancelled: true });
     await waitFor(() => h.core.journal.getTurn(cancelled.id)?.status === 'error');
     expect(h.core.journal.getTurn(cancelled.id)?.error).toContain('at capacity');
-    await expect(client.call('turns.cancelRetry', { threadId })).resolves.toEqual({ cancelled: false });
+    expect(await client.call('turns.cancelRetry', { threadId })).toEqual({ cancelled: false });
   } finally { await h.stop(); }
 });
 
@@ -181,11 +181,11 @@ test('a planned resume is cancelled by a new message, by Stop and by Cancel', as
     expect(retryOf(h, threadId)).toBeNull();
 
     await plan('[usage-limit:700000]');
-    await expect(client.call('turns.stop', { threadId })).resolves.toEqual({ stopped: true });
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
     expect(retryOf(h, threadId)).toBeNull();
 
     await plan('[usage-limit:800000]');
-    await expect(client.call('turns.cancelRetry', { threadId })).resolves.toEqual({ cancelled: true });
+    expect(await client.call('turns.cancelRetry', { threadId })).toEqual({ cancelled: true });
     expect(retryOf(h, threadId)).toBeNull();
     expect(h.core.journal.listTurns(threadId)).toHaveLength(4);
   } finally { await h.stop(); }

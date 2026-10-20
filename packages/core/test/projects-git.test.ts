@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { ProjectStore, hasGitMarker, probeFolder, probeGit } from '../src/projects.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 let harness: TestCore;
 
@@ -111,10 +112,10 @@ test('a deleted project folder is named by every refusal, and a folder put back 
 
   const sentence = `the folder ${path} does not exist any more`;
   // Reading the changes used to answer "git did not start: needs git on PATH".
-  await expect(client.call('git.status', { threadId: thread.id })).rejects.toThrow(sentence);
+  expect(await thrown(client.call('git.status', { threadId: thread.id }))).toThrow(sentence);
   // These two used to answer "is not a git repository".
-  await expect(client.call('worktrees.list', { projectId: project.id })).rejects.toThrow(sentence);
-  await expect(client.call('projects.setWorktreeDefault', { projectId: project.id, enabled: true })).rejects.toThrow(sentence);
+  expect(await thrown(client.call('worktrees.list', { projectId: project.id }))).toThrow(sentence);
+  expect(await thrown(client.call('projects.setWorktreeDefault', { projectId: project.id, enabled: true }))).toThrow(sentence);
   expect((await client.call('projects.list', {})).find((entry) => entry.id === project.id)?.missing).toBe(true);
 
   const updated: (boolean | undefined)[] = [];

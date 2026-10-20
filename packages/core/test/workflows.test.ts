@@ -12,6 +12,7 @@ import { startServer } from '../src/server.ts';
 import { HANDOFF } from '../src/threads/handoff.ts';
 import { AGENT_ENV } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
@@ -145,7 +146,7 @@ test('a plan runs as child threads: output feeds a fan-out, a false condition sk
   expect(h.core.journal.listTurns(steps[0]!.id).at(-1)!.status).toBe('done');
   // A retried start is the same run.
   expect((await owner.call('workflows.start', { threadId, plan: REVIEW, requestId: 'review-1' })).id).toBe(run.id);
-  await expect(owner.call('workflows.start', { threadId, plan: { ...REVIEW, name: 'Other' }, requestId: 'review-1' })).rejects.toThrow('different content');
+  expect(await thrown(owner.call('workflows.start', { threadId, plan: { ...REVIEW, name: 'Other' }, requestId: 'review-1' }))).toThrow('different content');
   const recorded = await owner.call('workflows.get', { threadId, runId: run.id });
   await owner.call('threads.remove', { threadId });
   await owner.call('threads.restore', { threadId });
@@ -157,14 +158,14 @@ test('plans are refused by field before anything starts', async () => {
   scripted(() => 'ok');
   const { owner, threadId } = await setup();
   const bad = (plan: unknown) => owner.call('workflows.check', { threadId, plan: plan as WorkflowPlan });
-  await expect(bad({ name: 'x', steps: [] })).rejects.toThrow('steps: expected at least one step');
-  await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'nope', task: 't' }] })).rejects.toThrow('steps[0].profile: "nope" is not a profile of this thread; expected one of fast, reviewer, or leave profile out');
-  await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 'use {{b.x}}' }, { id: 'b', profile: 'fast', task: 'use {{a}}' }] })).rejects.toThrow('cycle a -> b -> a');
-  await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: '{{item}}' }] })).rejects.toThrow('{{item}} exists only in a step with forEach');
-  await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', output: { n: 'integer' } }] })).rejects.toThrow('steps[0].output.n');
-  await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', when: { path: 'a.b', equals: 1, empty: true } }] })).rejects.toThrow('exactly one of');
-  await expect(bad({ name: 'x', limits: { maxSteps: 500 }, steps: [{ id: 'a', profile: 'fast', task: 't' }] })).rejects.toThrow('limits.maxSteps: expected an integer from 1 to 64');
-  await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', context: { drop: ['memory'] } }] })).rejects.toThrow('steps[0].context.drop: expected a list of instructions, guides, mcp, hooks');
+  expect(await thrown(bad({ name: 'x', steps: [] }))).toThrow('steps: expected at least one step');
+  expect(await thrown(bad({ name: 'x', steps: [{ id: 'a', profile: 'nope', task: 't' }] }))).toThrow('steps[0].profile: "nope" is not a profile of this thread; expected one of fast, reviewer, or leave profile out');
+  expect(await thrown(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 'use {{b.x}}' }, { id: 'b', profile: 'fast', task: 'use {{a}}' }] }))).toThrow('cycle a -> b -> a');
+  expect(await thrown(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: '{{item}}' }] }))).toThrow('{{item}} exists only in a step with forEach');
+  expect(await thrown(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', output: { n: 'integer' } }] }))).toThrow('steps[0].output.n');
+  expect(await thrown(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', when: { path: 'a.b', equals: 1, empty: true } }] }))).toThrow('exactly one of');
+  expect(await thrown(bad({ name: 'x', limits: { maxSteps: 500 }, steps: [{ id: 'a', profile: 'fast', task: 't' }] }))).toThrow('limits.maxSteps: expected an integer from 1 to 64');
+  expect(await thrown(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', context: { drop: ['memory'] } }] }))).toThrow('steps[0].context.drop: expected a list of instructions, guides, mcp, hooks');
   expect(await bad(REVIEW)).toEqual({ levels: [['scan'], ['review'], ['fix'], ['report']] });
 });
 
@@ -237,9 +238,9 @@ test('concurrency holds to the run limit, and stop ends running steps without wa
   const stepThread = h.core.workflows.get(threadId, run.id).nodes[0]!.instances[0]!.threadId!;
   const step = await connect(h.url, h.core.agents.tokenFor(stepThread));
   try {
-    await expect(step.call('workflows.output', { threadId: stepThread, value: { items: ['1'] } })).rejects.toThrow('output.items[0]: expected a number');
+    expect(await thrown(step.call('workflows.output', { threadId: stepThread, value: { items: ['1'] } }))).toThrow('output.items[0]: expected a number');
     expect(await step.call('workflows.output', { threadId: stepThread, value: { items: [1, 2, 3, 4] } })).toEqual({ runId: run.id, step: 'list' });
-    await expect(step.call('workflows.start', { threadId: stepThread, plan, requestId: 'nested' })).rejects.toThrow('cannot start a workflow');
+    expect(await thrown(step.call('workflows.start', { threadId: stepThread, plan, requestId: 'nested' }))).toThrow('cannot start a workflow');
   } finally { step.close(); }
   held.get(stepThread)!('Done.');
   await waitFor(() => held.size === 2);
@@ -273,7 +274,7 @@ test('a workflow needs no team: a step without a profile runs on the conversatio
     await waitFor(() => h.core.workflows.get(threadId, run.id).delivered);
     // Nothing was configured along the way, and a name that is no profile still says how to go without one.
     expect(h.core.journal.getSetting(`delegation:${threadId}`)).toBeUndefined();
-    await expect(agent.call('workflows.check', { threadId, plan: { name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't' }] } })).rejects.toThrow('none is configured: leave profile out');
+    expect(await thrown(agent.call('workflows.check', { threadId, plan: { name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't' }] } }))).toThrow('none is configured: leave profile out');
   } finally { agent.close(); }
 });
 
@@ -310,7 +311,7 @@ test('a paused team pauses the run until an owner resumes it', async () => {
     [...held.values()][0]!('A done');
     const paused = await settled(h, threadId, run.id, ['paused']);
     expect(paused.error).toContain('paused');
-    await expect(agent.call('workflows.control', { threadId, runId: run.id, action: 'resume' })).rejects.toThrow('owner');
+    expect(await thrown(agent.call('workflows.control', { threadId, runId: run.id, action: 'resume' }))).toThrow('owner');
     await owner.call('workflows.control', { threadId, runId: run.id, action: 'resume' });
     expect(h.core.delegation.config(threadId).paused).toBe(false);
     await waitFor(() => held.size === 1);
@@ -367,9 +368,9 @@ test('an agent changes only the runs it started, resumes its own pause, and the 
     const mine = await owner.call('workflows.start', { threadId, plan: { name: 'Mine', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'mine' });
     await waitFor(() => held.size === 1);
     for (const action of ['pause', 'stop', 'retry'] as const) {
-      await expect(agent.call('workflows.control', { threadId, runId: mine.id, action })).rejects.toThrow('the user started this run');
+      expect(await thrown(agent.call('workflows.control', { threadId, runId: mine.id, action }))).toThrow('the user started this run');
     }
-    await expect(agent.call('workflows.extend', { threadId, runId: mine.id, steps: [{ id: 'b', profile: 'fast', task: 'b' }], requestId: 'more' })).rejects.toThrow('the user started this run');
+    expect(await thrown(agent.call('workflows.extend', { threadId, runId: mine.id, steps: [{ id: 'b', profile: 'fast', task: 'b' }], requestId: 'more' }))).toThrow('the user started this run');
     await owner.call('workflows.control', { threadId, runId: mine.id, action: 'stop' });
     const theirs = await agent.call('workflows.start', { threadId, plan: { name: 'Theirs', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'theirs' });
     await waitFor(() => held.size === 1);
@@ -384,8 +385,8 @@ test('an agent changes only the runs it started, resumes its own pause, and the 
     expect((await agent.call('delegation.resume', { threadId })).unpaused).toBe(true);
     // The owner's waits for the owner's next word, for a resume and for a retry alike.
     expect(await owner.call('workflows.control', { threadId, runId: theirs.id, action: 'pause' })).toMatchObject({ status: 'paused', pausedBy: 'owner' });
-    await expect(agent.call('workflows.control', { threadId, runId: theirs.id, action: 'resume' })).rejects.toThrow('once they write to the conversation again');
-    await expect(agent.call('workflows.control', { threadId, runId: theirs.id, action: 'retry' })).rejects.toThrow('once they write to the conversation again');
+    expect(await thrown(agent.call('workflows.control', { threadId, runId: theirs.id, action: 'resume' }))).toThrow('once they write to the conversation again');
+    expect(await thrown(agent.call('workflows.control', { threadId, runId: theirs.id, action: 'retry' }))).toThrow('once they write to the conversation again');
     await owner.call('turns.start', { threadId, prompt: 'Carry on with the workflow' });
     const resumed = await agent.call('workflows.control', { threadId, runId: theirs.id, action: 'resume' });
     expect(resumed.status).toBe('running');
@@ -553,7 +554,7 @@ test('a failed step stops what never launched and is told to the parent at once,
   // The archived conversation speaks for nothing once the step moved on.
   const stale = await connect(h.url, h.core.agents.tokenFor(first));
   try {
-    await expect(stale.call('workflows.output', { threadId: first, value: null })).rejects.toThrow('is not running');
+    expect(await thrown(stale.call('workflows.output', { threadId: first, value: null }))).toThrow('is not running');
   } finally { stale.close(); }
   for (const finish of [...held.values()]) finish('ok');
   await waitFor(() => held.size === 1);
@@ -662,8 +663,8 @@ test('an agent saves new templates but never replaces a saved one', async () => 
   const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
   try {
     const saved = await agent.call('workflows.templates.save', { threadId, name: 'Review', plan: REVIEW });
-    await expect(agent.call('workflows.templates.save', { threadId, name: 'Review', plan: { ...REVIEW, steps: REVIEW.steps.slice(0, 1) } })).rejects.toThrow('a template named "Review" already exists');
-    await expect(agent.call('workflows.templates.save', { threadId, name: 'Other', plan: REVIEW, templateId: saved.id })).rejects.toThrow('already exists');
+    expect(await thrown(agent.call('workflows.templates.save', { threadId, name: 'Review', plan: { ...REVIEW, steps: REVIEW.steps.slice(0, 1) } }))).toThrow('a template named "Review" already exists');
+    expect(await thrown(agent.call('workflows.templates.save', { threadId, name: 'Other', plan: REVIEW, templateId: saved.id }))).toThrow('already exists');
     expect((await owner.call('workflows.templates.save', { threadId, name: 'Review', plan: { ...REVIEW, steps: REVIEW.steps.slice(0, 1) } })).id).toBe(saved.id);
   } finally { agent.close(); }
 });
@@ -672,8 +673,8 @@ test('a step names its model and reasoning level, and a level the model lacks is
   scripted(() => 'done');
   const { h, owner, threadId } = await setup();
   const bad: WorkflowPlan = { name: 'Bad', steps: [{ id: 'think', model: 'echo/echo', effort: 'ultra', task: 'Think.' }] };
-  await expect(owner.call('workflows.check', { threadId, plan: bad })).rejects.toThrow('steps[0] (think)');
-  await expect(owner.call('workflows.check', { threadId, plan: { name: 'Missing', steps: [{ id: 'think', model: 'no-such-model', task: 'Think.' }] } })).rejects.toThrow('no installed model');
+  expect(await thrown(owner.call('workflows.check', { threadId, plan: bad }))).toThrow('steps[0] (think)');
+  expect(await thrown(owner.call('workflows.check', { threadId, plan: { name: 'Missing', steps: [{ id: 'think', model: 'no-such-model', task: 'Think.' }] } }))).toThrow('no installed model');
   const run = await owner.call('workflows.start', { threadId, requestId: 'routes', plan: { name: 'Routes', steps: [
     { id: 'quick', model: 'echo', effort: 'low', task: 'Look quickly.' },
     { id: 'plain', after: ['quick'], task: 'Look again.', context: { preset: 'neutral', rules: 'No house style.' } },
@@ -700,8 +701,8 @@ test('retrying one of two failed steps names the other, changes nothing, and a r
   const failed = await settled(h, threadId, run.id);
   expect(failed.nodes.map(node => node.status)).toEqual(['failed', 'failed']);
 
-  await expect(owner.call('workflows.control', { threadId, runId: run.id, action: 'retry', stepId: 'left' }))
-    .rejects.toThrow('the run stays stopped while right has failed; retry that step too, or retry the whole run without naming a step');
+  expect(await thrown(owner.call('workflows.control', { threadId, runId: run.id, action: 'retry', stepId: 'left' })))
+    .toThrow('the run stays stopped while right has failed; retry that step too, or retry the whole run without naming a step');
   const unchanged = h.core.workflows.get(threadId, run.id);
   expect([unchanged.status, ...unchanged.nodes.map(node => node.status)]).toEqual(['failed', 'failed', 'failed']);
 

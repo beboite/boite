@@ -8,6 +8,7 @@ import { PullRequestWatches } from '../src/pull-request-watch.ts';
 import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
 import { parseProtection, parseRules, withRequired } from '../src/pull-request-required.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 const URL = 'https://github.com/example/repo/pull/7';
 let harness: TestCore | undefined;
@@ -607,15 +608,15 @@ test('a rate limit pauses every read until it passes, an unreachable GitHub only
 
 test('Stop ends every watch of the thread, and the refusals name what is wrong', async () => {
   const { owner, threadId, github } = await watchedThread();
-  await expect(owner.call('threads.watchPullRequest', { threadId, url: '8' })).rejects.toThrow('no linked pull request is #8');
-  await expect(owner.call('threads.watchPullRequest', { threadId, url: 'https://gitlab.example/a/b/pull/1' })).rejects.toThrow('host');
+  expect(await thrown(owner.call('threads.watchPullRequest', { threadId, url: '8' }))).toThrow('no linked pull request is #8');
+  expect(await thrown(owner.call('threads.watchPullRequest', { threadId, url: 'https://gitlab.example/a/b/pull/1' }))).toThrow('host');
   await owner.call('threads.watchPullRequest', { threadId });
   // The loop rests a second between its own passes even when a read is due at once:
   // re-arming at 0 ms kept a Windows event loop from reaching anything else.
   const before = github.calls.length;
   await Bun.sleep(300);
   expect(github.calls.length - before).toBeLessThanOrEqual(1);
-  await expect(owner.call('threads.unwatchPullRequest', { threadId, url: '#9' })).rejects.toThrow('does not watch #9');
+  expect(await thrown(owner.call('threads.unwatchPullRequest', { threadId, url: '#9' }))).toThrow('does not watch #9');
   expect((await owner.call('turns.stop', { threadId })).stopped).toBe(true);
   expect(harness!.core.pullRequestWatches.of(threadId)).toEqual([]);
 });
@@ -639,7 +640,7 @@ test('an agent watches its own thread; a paired phone may stop a watch, never st
   const phone = await connect(harness!.url, '', { grant });
   try {
     await agent.call('threads.watchPullRequest', { threadId });
-    await expect(phone.call('threads.watchPullRequest', { threadId })).rejects.toThrow('owner');
+    expect(await thrown(phone.call('threads.watchPullRequest', { threadId }))).toThrow('owner');
     expect(await phone.call('threads.unwatchPullRequest', { threadId })).toEqual([]);
   } finally { agent.close(); phone.close(); }
 });
@@ -768,7 +769,7 @@ test('the parent\'s Stop ends its subagents\' watches, and a workflow step still
   expect(watches.of(child)).toEqual([]);
   // A child the core runs for a plan answers it once: no watch to wake it again.
   spyOn(harness!.core.delegation, 'delegated').mockReturnValue(false);
-  await expect(owner.call('threads.watchPullRequest', { threadId: child })).rejects.toThrow('a workflow step or a reviewer cannot watch');
+  expect(await thrown(owner.call('threads.watchPullRequest', { threadId: child }))).toThrow('a workflow step or a reviewer cannot watch');
 });
 
 test('archive ends the watches and their saved state, and a merged pull request has nothing to watch', async () => {
@@ -780,5 +781,5 @@ test('archive ends the watches and their saved state, and a merged pull request 
   expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toBeUndefined();
   await owner.call('threads.archive', { threadId, archived: false });
   github.state = 'MERGED';
-  await expect(owner.call('threads.watchPullRequest', { threadId })).rejects.toThrow('is merged');
+  expect(await thrown(owner.call('threads.watchPullRequest', { threadId }))).toThrow('is merged');
 });
