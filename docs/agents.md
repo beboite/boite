@@ -25,17 +25,24 @@ A conversation is the whole page, drawn with the thread's bubbles and the
 thread's own composer (`Composer.svelte` with a `ComposerTarget`,
 `lib/composer-target.ts`): attachments by the button, a paste or a drop,
 dictation, ArrowUp recall, undo, the stash chord, and Stop or Escape while the
-agent works, which cancels that work. The model, effort, mode and worktree
-chips, the queue and the slash and mention menus stay out: the agent's model is
-its own setting and a message never queues. Each prompt shows the thread's
-copy button, send time and two ticks, received and taken into a turn. The user
-asks, the agent answers in its bubble, works (three dots in a bubble) and comes
-back with the result, in words, with the pictures and files it attached under
-the bubble. What the user attaches goes with `agents.message.send`: the message
-keeps only each file's name, type and size, the bytes wait in the core's
-settings (`agents:attachments:<message>`) and reach every recipient's turn, and
-leave once each delivery is processed, cancelled or over the limit. An agent's
-own messages carry none. The agent's own thread, where its tools and code
+agent works, which cancels that work. In a direct conversation the owner gets
+the thread's model, effort and mode chips: a pick saves the agent's main route
+through `agents.runtime.configure`, as the Settings tab does, and allows that
+model if it was not. A group shows its recipients there instead, and a paired
+device no chips. The worktree chip, the queue and the slash and mention menus
+stay out: a message never queues. Each prompt is the thread's own
+`UserMessage`: copy button, send time, two ticks (received, taken into a turn)
+and its pictures as thumbnails that open in the viewer. The user asks, the
+agent answers in its bubble, works (three dots in a bubble) and comes back with
+the result, in words, with the pictures and files it attached under the
+bubble. What the user attaches goes with `agents.message.send`: the message
+keeps each file's name, type and size, the bytes wait in the core's settings
+(`agents:attachments:<message>`) and reach every recipient's turn, and leave
+once each delivery is processed, cancelled or over the limit. The first turn
+that takes them sets each attachment's `source` (that turn's prompt in the
+agent's thread and the part's index); the conversation reads the thumbnails
+and originals there with `messages.attachment`, and shows names and sizes
+until then. An agent's own messages carry none. The agent's own thread, where its tools and code
 run, stays one step away: See its work in the header's menu opens it. A
 planned task's result is labelled with the task's name. A question the agent
 asks stands in the conversation with its answers to pick and a free answer. A group names who speaks and shows only deliveries that failed. The

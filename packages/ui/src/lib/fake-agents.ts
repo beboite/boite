@@ -1,5 +1,5 @@
 import { secureId } from './secure-id';
-import type { AgentDraft, AgentEntities, AgentEntityKind, AgentRecord, AgentSave, AgentWork, AgentsRpcMethods, AgentsSnapshot, RpcParams, RpcResult, AgentProfile, Turn } from '@boite/contracts';
+import type { AgentDraft, AgentEntities, AgentEntityKind, AgentRecord, AgentSave, AgentWork, AgentsRpcMethods, AgentsSnapshot, Attachment, RpcParams, RpcResult, AgentProfile, Turn } from '@boite/contracts';
 import { RpcErrorCode, AGENT_HISTORY_PAGE, AGENT_HISTORY_MAX_PAGE } from '@boite/contracts';
 import type { AgentAccountGrant, AgentBrain, AgentBrainRoot, AgentMessageFile, AgentRuntimeConfig, AgentSchedule, AgentSelection, AgentHistoryCursor, AgentHistoryKind, AgentsHistoryPage, AgentRun, AgentRunSummary, AgentScope, AgentConversationMessage, AgentEntrustment, ThreadActivity } from '@boite/contracts';
 import { RpcFailure } from './client';
@@ -49,6 +49,8 @@ export class FakeAgents {
   private closed = false;
   private pumping = false;
   private rows = new Map<string, AgentRecord>();
+  /** The bytes of what the user attached, by message, until a turn took them, as the core's `agents:attachments:` settings. */
+  private held = new Map<string, Attachment[]>();
   private receipts = new Map<string, { fingerprint: string; result: unknown }>();
   private revision = 0;
   private sequence = 0;
@@ -56,8 +58,10 @@ export class FakeAgents {
   private limits: AgentsSnapshot['limits'] = { backgroundConcurrency: 2, paused: false };
   constructor(private readonly changed: (revision: number) => void, private readonly runner?: {
     create: (agent: AgentProfile, sessionId: string, work: AgentWork) => string;
-    start: (threadId: string, prompt: string, agent: AgentProfile) => Turn;
+    start: (threadId: string, prompt: string, agent: AgentProfile, attachments?: Attachment[]) => Turn;
     stop: (threadId: string) => void;
+    /** The id of a turn's prompt in its thread, where the attachments it took are read. */
+    prompt?: (threadId: string, turnId: string) => string | undefined;
     thread?: (threadId: string) => EntrustedThread | undefined;
     /** Starts the thread's goal, or removes it with `null`. */
     goal?: (threadId: string, objective: string | null) => void;
@@ -166,7 +170,9 @@ export class FakeAgents {
         const run = this.save('run', { value: { workId: work.id, agentId: work.agentId, threadId: session.threadId, turnId: null, execution: agent.selection, profileRevision: agent.revision, context: { instructions: work.prompt, memoryIds: [], resources: [], messageIds: work.messageId ? [work.messageId] : [] }, status: 'accepted', startedAt: null, finishedAt: null, actualExecution: null } });
         this.update('work', { ...work, runId: run.id, status: 'running' });
         try {
-          const turn = this.runner.start(session.threadId, work.prompt, agent);
+          const attachments = work.messageId ? this.held.get(work.messageId) ?? [] : [];
+          const turn = this.runner.start(session.threadId, work.prompt, agent, attachments);
+          if (attachments.length) this.given(work.messageId!, session.threadId, turn.id);
           this.update('run', { ...run, status: 'running', turnId: turn.id, actualExecution: turn.execution ?? null, startedAt: Date.now() });
           if (work.taskId) this.update('task', { ...this.get('task', work.taskId), status: 'running', leaseUntil: Date.now() + 30000 });
           for (const d of this.all('delivery').filter(d => d.workId === work.id)) this.update('delivery', { ...d, status: 'included' });
@@ -514,6 +520,13 @@ export class FakeAgents {
     return this.limits;
   }
 
+  /** As the core's `markGiven`: the first turn that took a message's attachments is where the conversation reads them. */
+  private given(messageId: string, threadId: string, turnId: string): void {
+    const message = this.get('message', messageId);
+    const promptId = this.runner?.prompt?.(threadId, turnId);
+    if (!promptId || !message.attachments?.length || message.attachments.some(a => a.source)) return;
+    this.update('message', { ...message, attachments: message.attachments.map((a, at) => ({ ...a, source: { threadId, messageId: promptId, partIndex: at + 1 } })) });
+  }
   private sendMessage(p: RpcParams<'agents.message.send'>): RpcResult<'agents.message.send'> {
     const attachments = p.attachments ?? [];
     if ((!p.text.trim() && !attachments.length) || p.text.length > 32000) this.refuse('text: expected 1 to 32000 characters');
@@ -528,6 +541,7 @@ export class FakeAgents {
       const episodeId = parent?.episodeId ?? `fake-episode-${++this.sequence}`;
       const described = attachments.map(a => ({ kind: a.kind, mimeType: a.mimeType, name: a.name ?? null, bytes: decodedBytes(a.data) }));
       const message = this.save('message', { value: { scope: p.scope, senderId: null, text: p.text.trim(), recipientIds, replyTo: p.replyTo ?? null, episodeId, sourceRunId: null, ...(described.length ? { attachments: described } : {}) } });
+      if (attachments.length) this.held.set(message.id, structuredClone(attachments));
       this.deliver(message);
       return message;
     });

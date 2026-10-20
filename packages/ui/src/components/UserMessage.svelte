@@ -8,7 +8,6 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
-  import type { TurnProgress } from '../lib/turn-progress.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
   import ChatImage from './ChatImage.svelte';
   import { THUMB_HEIGHT } from '../lib/message-window';
@@ -19,19 +18,25 @@
   /**
    * A prompt in the timeline: its bubble, the pictures and files it was sent
    * with, and the two receipts under it. A picture opens in the viewer, with
-   * the thread's other pictures and videos a swipe away.
+   * the thread's other pictures and videos a swipe away. An agent's
+   * conversation draws its user's messages with it too, from a message whose
+   * pictures and files are read where the agent's turn keeps them.
    */
   let {
     store,
     message,
     turn,
-    progress,
+    accepted,
+    responded,
     edit
   }: {
     store: Store;
     message: Message;
     turn: Turn | undefined;
-    progress: TurnProgress;
+    /** The first tick: the core holds the prompt. */
+    accepted: boolean;
+    /** The second tick: the agent took it into a turn. */
+    responded: boolean;
     /** Rewinds the thread to before this prompt and puts it back in the composer. */
     edit?: () => void;
   } = $props();
@@ -94,7 +99,7 @@
 
   /** The picture as the viewer shows it, under a name a saved copy can keep; none while its original is on the core. */
   function viewed(image: ImagePart, at: number): MediaItem | null {
-    if (image.dataDeferred) return null;
+    if (image.dataDeferred || !image.data) return null;
     const extension = image.mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png';
     const name = image.alt || `image-${at + 1}.${extension}`;
     const src = `data:${image.mimeType};base64,${image.data}`;
@@ -113,11 +118,13 @@
    * copy, so its original is fetched first, once, and then opens.
    */
   async function open(from: HTMLElement, image: ImagePart, index: number, at: number): Promise<void> {
+    let shown = image;
     if (image.dataDeferred) {
       if (opening !== null) return;
       opening = index;
       try {
-        await store.loadMessageAttachment(message.threadId, message.id, index);
+        // A message the store holds gets its bytes too; one drawn from elsewhere opens from the answer.
+        shown = { ...image, data: await store.loadMessageAttachment(message.threadId, message.id, index), dataDeferred: undefined };
       } catch (error) {
         store.reportError(error, 'minor');
         return;
@@ -125,7 +132,7 @@
         opening = null;
       }
     }
-    const item = viewed(image, at);
+    const item = viewed(shown, at);
     if (item) show(galleryFrom(from, item));
   }
   const copyText = $derived(message.parts.flatMap((part) => part.type === 'text' ? [promptText(part)] : []).join('\n\n'));
@@ -202,7 +209,7 @@
   {/if}
 </div>
 {#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer} floating>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={() => viewing = null} />{/snippet}</Deferred>{/if}
-<MessageReceipts text={copyText} at={message.createdAt} {edit} accepted={!!turn} responded={progress.responded(message.turnId)} agent={!!startedBy} />
+<MessageReceipts text={copyText} at={message.createdAt} {edit} {accepted} {responded} agent={!!startedBy} />
 
 <style>
   .text-omitted { margin: 4px 0 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }

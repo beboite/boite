@@ -6,7 +6,7 @@ import type {
   AgentMission, AgentMissionTask, AgentSave, AgentScope, AgentMemory, AgentResource,
   AgentWork, AgentSession, AgentsSnapshot, RpcParams, AgentHistoryCursor, AgentHistoryKind,
   AgentsHistoryPage, AgentRun, AgentRunSummary, AgentConversationMessage, AgentRecord, AgentMessageFile,
-  AgentMessageAttachment, Attachment,
+  AgentMessageAttachment, Attachment, Turn,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
@@ -325,10 +325,23 @@ export class AgentStore {
     const held = this.heldFor(work);
     return held && !held.given.includes(work.agentId) ? held.attachments : [];
   }
-  /** The agent's turn took the attachments of the message its work answers. */
-  markGiven(work: AgentWork): void {
+  /**
+   * The agent's turn took the attachments of the message its work answers.
+   * The first turn to take them is where the conversation reads them from
+   * then: each attachment points at its part of that turn's prompt.
+   */
+  markGiven(work: AgentWork, turn: Pick<Turn, 'id' | 'threadId'>): void {
     const held = this.heldFor(work);
-    if (held) this.core.journal.setSetting(heldKey(work.messageId!), { ...held, given: [...held.given, work.agentId] });
+    if (!held || held.given.includes(work.agentId)) return;
+    this.core.journal.setSetting(heldKey(work.messageId!), { ...held, given: [...held.given, work.agentId] });
+    const message = this.records.get('message', work.messageId!);
+    if (!message.attachments?.length || message.attachments.some(a => a.source)) return;
+    const prompt = [...this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })].find(m => m.role === 'user');
+    // The prompt is the instructions, then the attachments in the order they were sent.
+    const parts = prompt?.parts.slice(1) ?? [];
+    if (!prompt || parts.length !== message.attachments.length || parts.some((part, at) => part.type !== message.attachments![at]!.kind)) return;
+    const attachments = message.attachments.map((attachment, at) => ({ ...attachment, source: { threadId: turn.threadId, messageId: prompt.id, partIndex: at + 1 } }));
+    this.records.update('message', message.id, message.revision, { ...message, attachments });
   }
   private heldFor(work: AgentWork): Held | undefined {
     return work.messageId ? this.core.journal.getSetting(heldKey(work.messageId)) as Held | undefined : undefined;

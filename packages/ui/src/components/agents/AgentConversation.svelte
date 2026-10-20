@@ -3,18 +3,19 @@
   import { secureId } from '../../lib/secure-id';
   import { tick, untrack } from 'svelte';
   import { Brain, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, FileText, FolderKanban, Handshake, Image } from '@lucide/svelte';
-  import type { AgentConversationMessage, AgentScope, AgentWork, Attachment, ThreadSummary } from '@boite/contracts';
+  import type { AgentConversationMessage, AgentScope, AgentWork, Attachment, ImageMimeType, Message, MessagePart, ThreadSummary } from '@boite/contracts';
   import { chatKey, type AgentsView } from '../../lib/agents.svelte';
   import { fill, strings } from '../../lib/strings';
   import { avatarStatus } from '../../lib/thread-state';
   import { bytes, longDay } from '../../lib/format';
   import type { ComposerTarget } from '../../lib/composer-target';
+  import type { Choice } from '../../lib/store.svelte';
   import type { SentPrompt } from '../../lib/composer-queue';
   import Prose from '../Prose.svelte';
   import ChatFile from '../ChatFile.svelte';
   import Composer from '../Composer.svelte';
   import MessageActions from '../MessageActions.svelte';
-  import MessageReceipts from '../MessageReceipts.svelte';
+  import UserMessage from '../UserMessage.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentWorkCard from './AgentWorkCard.svelte';
   import AgentPendingQuestions from './AgentPendingQuestions.svelte';
@@ -24,8 +25,8 @@
    * user's messages in bubbles on the right with the thread's receipts, the
    * agents' answers in the thread's answer bubbles under their picture and
    * name, a line while one of them works, and the thread's own composer at
-   * the bottom (`lib/composer-target.ts`): attachments, dictation, recall and
-   * Stop, without the thread's model chips and menus. An agent
+   * the bottom (`lib/composer-target.ts`): attachments, dictation, recall,
+   * Stop and, with a single agent, its model, effort and mode chips. An agent
    * shows no code: its answers carry the pictures and files it attached, and
    * its thread opens from the page's menu, not from here. Decisions
    * an agent asked for stand in the conversation they belong to. Opening it
@@ -114,7 +115,30 @@
     send,
     stop: running ? () => void stopWork() : undefined,
     chips: group ? recipientChips : undefined,
+    // The owner picks the agent's model where a thread's is picked; a group has one per member.
+    selection: agent && view.store.owner ? { choice: { ...agent.selection, model: agent.selection.model ?? defaultModel(agent.selection), speed: null }, save: saveSelection } : undefined,
   });
+  /** An agent saved without a model runs on its account's default one, as the core resolves it: the chip names that one. */
+  function defaultModel(selection: { providerId: string; accountId: string }): string | null {
+    const models = view.store.modelsOf(selection.providerId, selection.accountId);
+    return (models.find(m => m.default) ?? models[0])?.id ?? null;
+  }
+  /**
+   * A pick from the chips, saved as the Settings tab saves the agent's model:
+   * its main route, allowed once picked, so the next piece of work runs on it.
+   */
+  async function saveSelection(next: Choice): Promise<void> {
+    const current = agent;
+    if (!current) return;
+    const config = await view.call('agents.runtime.get', { agentId: current.id });
+    const model = next.model ?? config?.defaultRoute.model ?? null;
+    if (!config || !model) return;
+    const route = { providerId: next.providerId, accountId: next.accountId, model, effort: next.effort, permissionMode: next.permissionMode };
+    const allowed = config.allowedRoutes.some(r => r.providerId === route.providerId && r.accountId === route.accountId && r.model === model)
+      ? config.allowedRoutes
+      : [...config.allowedRoutes, { id: secureId(), name: view.store.modelOf(route)?.name ?? model, providerId: route.providerId, accountId: route.accountId, model, effort: route.effort }];
+    await view.call('agents.runtime.configure', { agentId: current.id, expectedRevision: current.revision, config: { ...config, defaultRoute: route, allowedRoutes: allowed } });
+  }
 
   async function send(text: string, attachments: Attachment[]): Promise<boolean> {
     const recipientIds = scope.kind === 'agent' ? [scope.id] : recipients;
@@ -136,6 +160,23 @@
   async function stopWork() {
     const work = running;
     if (work) await view.call('agents.work.control', { workId: work.id, expectedRevision: work.revision, action: 'cancel' });
+  }
+  /**
+   * The user's message as a thread's prompt, for the thread's own bubble:
+   * its words, then what it was sent with where the agent's turn keeps the
+   * bytes, at the same places as in that turn's prompt. Until a turn took
+   * them it is only the words.
+   */
+  function promptOf(message: AgentConversationMessage): Message {
+    const words: MessagePart = { type: 'text', text: message.text };
+    const attachments = message.attachments ?? [];
+    const source = attachments[0]?.source;
+    const placed = source ? attachments.map((a, at) => a.source?.threadId === source.threadId && a.source.messageId === source.messageId && a.source.partIndex === at + 1) : [];
+    if (!source || !placed.every(Boolean)) return { id: message.id, threadId: '', turnId: '', role: 'user', state: 'complete', createdAt: message.createdAt, parts: [words] };
+    const parts = attachments.map((a): MessagePart => a.kind === 'image'
+      ? { type: 'image', mimeType: a.mimeType as ImageMimeType, data: '', alt: a.name, dataDeferred: true, bytes: a.bytes }
+      : { type: 'file', mimeType: a.mimeType, data: '', name: a.name, dataDeferred: true, bytes: a.bytes });
+    return { id: source.messageId, threadId: source.threadId, turnId: '', role: 'user', state: 'complete', createdAt: message.createdAt, parts: [words, ...parts] };
   }
   /** A user message's two ticks: the core holds it, and an agent took it into a turn. */
   function receipts(message: AgentConversationMessage) {
@@ -170,18 +211,21 @@
         {#if newDay}<p class="agent-day"><span>{longDay(message.createdAt)}</span></p>{/if}
         {#if mine}
           {@const failed = view.seen.deliveries.filter(d => d.messageId === message.id && (d.status === 'failed' || d.status === 'limited'))}
+          {@const prompt = promptOf(message)}
           <article class="agent-message message from-user" class:first data-testid="agent-user-message">
             <span class="agent-sr-only">{labels.user}</span>
-            <div class="bubble">
-              {#if message.text}<p class="user-text">{message.text}</p>{/if}
-              {#each message.attachments ?? [] as attachment, at (at)}
-                <span class="agent-attachment" data-testid="agent-attachment">
-                  {#if attachment.kind === 'image'}<Image size={18} strokeWidth={1.5} />{:else}<FileText size={18} strokeWidth={1.5} />{/if}
-                  <span><span>{attachment.name ?? strings.composer.attachAlt}</span><small>{bytes(attachment.bytes)}</small></span>
-                </span>
-              {/each}
-            </div>
-            <MessageReceipts text={message.text} at={message.createdAt} accepted={true} responded={receipts(message).responded} />
+            <UserMessage store={view.store} message={prompt} turn={undefined} accepted={true} responded={receipts(message).responded} />
+            {#if prompt.parts.length === 1 && message.attachments?.length}
+              <!-- No turn took them yet: their name and size until the agent's thread holds the bytes. -->
+              <div class="agent-attachments">
+                {#each message.attachments as attachment, at (at)}
+                  <span class="agent-attachment" data-testid="agent-attachment">
+                    {#if attachment.kind === 'image'}<Image size={18} strokeWidth={1.5} />{:else}<FileText size={18} strokeWidth={1.5} />{/if}
+                    <span><span>{attachment.name ?? strings.composer.attachAlt}</span><small>{bytes(attachment.bytes)}</small></span>
+                  </span>
+                {/each}
+              </div>
+            {/if}
             {#each failed as delivery (delivery.id)}<p class="failed">{fill(labels.deliveryFailed, { name: nameOf(delivery.agentId) })}</p>{/each}
           </article>
         {:else if message.thread?.event === 'entrusted'}

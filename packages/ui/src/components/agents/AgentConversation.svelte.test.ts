@@ -202,7 +202,7 @@ test('a question the agent asked in its hidden session thread stands in its conv
   expect(answerQuestion).toHaveBeenCalledOnce();
 });
 
-test('the conversation types into the thread composer: attach and dictation stay, the thread and plan chips go', async () => {
+test('the conversation types into the thread composer: attach, dictation and the agent\'s model chips stay, the worktree and plan chips go', async () => {
   const call = vi.fn().mockResolvedValue({ id: 'm-sent' });
   const view = {
     seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
@@ -216,7 +216,9 @@ test('the conversation types into the thread composer: attach and dictation stay
   expect(composer.querySelector('[data-testid="composer-attach"]')).not.toBeNull();
   // The microphone, or its stand-in while its chunk loads.
   expect(composer.querySelector(`[data-testid="dictation"], button[aria-label="${strings.speech.start}"]`)).not.toBeNull();
-  for (const gone of ['agent-schedule-message', 'composer-picker', 'composer-mode', 'composer-effort', 'composer-options', 'composer-worktree']) expect(composer.querySelector(`[data-testid="${gone}"]`)).toBeNull();
+  // The agent's model and mode, where a thread's are; a thread's worktree and the old Plan chip stay out.
+  for (const shown of ['composer-picker', 'composer-mode']) expect(composer.querySelector(`[data-testid="${shown}"]`)).not.toBeNull();
+  for (const gone of ['agent-schedule-message', 'composer-worktree']) expect(composer.querySelector(`[data-testid="${gone}"]`)).toBeNull();
   expect(document.querySelector('[data-testid="agent-message-input"]')).toBeNull();
   // A picture goes with the words to the agent.
   const picture = { kind: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=', name: 'shot.png' } as const;
@@ -252,4 +254,52 @@ test('a retry keeps its request id only for the same bytes: another file of the 
   expect(ids[1]).toBe(ids[0]);
   expect(ids[2]).not.toBe(ids[0]);
   delete realStore.composerStates['agent:agent:a-ada'];
+});
+
+test('the chips pick the agent\'s own mode and model, saved as its Settings tab saves them; a paired device sees none', async () => {
+  const selection = { providerId: 'claude', accountId: 'acc-ada', model: 'opus', effort: null, permissionMode: 'default' };
+  const config = { defaultRoute: selection, allowedRoutes: [{ ...selection, id: 'default', name: 'Default' }], subagents: { enabled: true, paused: false, profiles: [], anyModel: true }, compactAfterTurns: 12, maxRunMinutes: 10, autoMemory: true };
+  const call = vi.fn(async (method: string) => method === 'agents.runtime.get' ? structuredClone(config) : { id: 'a-ada' });
+  const view = (owner: boolean) => ({
+    seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', revision: 7, selection }], groups: [], work: [], sessions: [] },
+    store: useStore({ owner }), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
+  } as unknown as AgentsView);
+  mounted = mount(AgentConversation, { target: document.body, props: { view: view(true), scope } });
+  await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid="composer-mode"]')!.click();
+  await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid="composer-mode-menu"] [data-value="acceptEdits"]')!.click();
+  await settle();
+  expect(call).toHaveBeenCalledWith('agents.runtime.get', { agentId: 'a-ada' });
+  expect(call).toHaveBeenLastCalledWith('agents.runtime.configure', { agentId: 'a-ada', expectedRevision: 7, config: { ...config, defaultRoute: { ...selection, permissionMode: 'acceptEdits' } } });
+  await unmount(mounted);
+  mounted = mount(AgentConversation, { target: document.body, props: { view: view(false), scope } });
+  await settle();
+  for (const gone of ['composer-picker', 'composer-mode']) expect(document.querySelector(`[data-testid="${gone}"]`)).toBeNull();
+});
+
+test('a picture the user sent shows as a thread\'s does once the agent\'s turn holds it, and opens its original', async () => {
+  const data = 'iVBORw0KGgo=';
+  const loadMessageAttachment = vi.fn(async () => data);
+  const loadDisplayImage = vi.fn(async () => `data:image/png;base64,${data}`);
+  const source = { threadId: 't-agent', messageId: 'm-prompt', partIndex: 1 };
+  const sent = { ...message('m-sent', null), text: 'Look', attachments: [{ kind: 'image', mimeType: 'image/png', name: 'shot.png', bytes: 8, source }] };
+  const waiting = { ...message('m-waiting', null), text: 'And this', attachments: [{ kind: 'file', mimeType: 'text/plain', name: 'notes.txt', bytes: 5 }] };
+  const view = {
+    seen: { messages: [sent, waiting], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
+    store: useStore({ loadMessageAttachment, loadDisplayImage }), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
+  } as unknown as AgentsView;
+  mounted = mount(AgentConversation, { target: document.body, props: { view, scope } });
+  await settle();
+  const [first, second] = [...document.querySelectorAll('[data-testid="agent-user-message"]')];
+  // The thread's own row of thumbnails, under the words, read from the agent's thread.
+  expect(first!.querySelector('[data-testid="message-images"]')).not.toBeNull();
+  expect(first!.querySelector('[data-testid="agent-attachment"]')).toBeNull();
+  first!.querySelector<HTMLButtonElement>('[data-testid="image-open"]')!.click();
+  await settle();
+  expect(loadMessageAttachment).toHaveBeenCalledWith('t-agent', 'm-prompt', 1);
+  await vi.waitFor(() => expect(document.querySelector('[data-testid="image-viewer"] img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`));
+  // Before a turn took them, their names and sizes.
+  expect(second!.querySelector('[data-testid="message-images"]')).toBeNull();
+  expect(second!.querySelector('[data-testid="agent-attachment"]')?.textContent).toContain('notes.txt');
 });

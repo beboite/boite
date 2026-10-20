@@ -29,7 +29,8 @@
    * send. A pick on a thread is saved at once, after the switch warnings; on a
    * draft the whole choice is remembered. `choice`, `picking` and `dictating`
    * are the composer's, bound here. An agent's box (`target`) keeps stop,
-   * attach, dictation and send, and shows its own chips in place of the thread's.
+   * attach, dictation and send; its model chips save the agent's own setting,
+   * and a group's box shows its recipients in their place.
    */
   let {
     store,
@@ -88,7 +89,7 @@
   });
   /** The open thread's provider was turned off in Providers: the core refuses its next turn. */
   let providerOff = $derived.by(() => {
-    const entry = store.openThread ? store.providerOf(store.openThread.providerId) : null;
+    const entry = !target && store.openThread ? store.providerOf(store.openThread.providerId) : null;
     return entry && !store.providerOn(entry.id) ? entry : null;
   });
   /**
@@ -102,7 +103,7 @@
    * The thread names an account that was removed and its agent has no other
    * account to move to on the next send: it sends again once another one is picked.
    */
-  let accountRemoved = $derived(store.openThread !== null && store.accounts.length > 0 && store.accountOf(store.openThread.accountId) === null
+  let accountRemoved = $derived(!target && store.openThread !== null && store.accounts.length > 0 && store.accountOf(store.openThread.accountId) === null
     && store.usableAccountOf(store.openThread.providerId, store.openThread.accountId) === null);
   let modeItems = $derived(
     modes.map((mode) => ({
@@ -118,13 +119,14 @@
   // folder the core found a `.git` in. No answer yet, or an older core that
   // never gives one, is no repository: a switch the core would refuse is noise.
   let draftRepository = $derived(
-    work.shows('composer.worktree') && store.draft && !store.draftInDrafts ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository === true : false
+    !target && work.shows('composer.worktree') && store.draft && !store.draftInDrafts ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository === true : false
   );
 
   // The reasoning chip belongs to the model the choice is on, and a model that
   // offers no scale (an agent that keeps its own) gets no chip at all.
   let effortLevels = $derived((store.modelOf(choice)?.effort?.levels ?? []).filter(level => provider?.protocol === 'claude-sdk' || level.id !== 'ultrathink'));
-  let speedOptions = $derived(speedControl(choice ? store.modelsOf(choice.providerId, choice.accountId) : [], choice));
+  // An agent keeps no speed of its own: its chips offer none.
+  let speedOptions = $derived(speedControl(choice && !target ? store.modelsOf(choice.providerId, choice.accountId) : [], choice));
   let speeds = $derived(speedOptions.speeds);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
   /** The model has a scale but no default: its agent picks the level until the user does. */
@@ -144,6 +146,14 @@
   /** On a thread only the model and the effort change and they are saved at once; on a draft the whole choice is remembered. */
   async function pick(patch: PickPatch) {
     if (!choice || picking) return;
+    if (target?.selection) {
+      // Another model runs on its own scale, at its default level until one is picked.
+      const changedModel = patch.model !== undefined || patch.accountId !== undefined;
+      const next = { ...choice, ...patch, effort: patch.effort !== undefined ? patch.effort : changedModel ? null : choice.effort };
+      picking = true;
+      try { await target.selection.save(next); } finally { picking = false; }
+      return;
+    }
     const thread = store.openThread;
 
     if (thread) {
@@ -189,8 +199,8 @@
     }
 
     // Another model runs on its own scale, so the effort goes back to that model's default.
-    const target = { ...choice, ...patch };
-    choice = { ...target, effort: store.defaultEffortOf(target.providerId, target.accountId, target.model), speed: null };
+    const picked = { ...choice, ...patch };
+    choice = { ...picked, effort: store.defaultEffortOf(picked.providerId, picked.accountId, picked.model), speed: null };
     store.remember(choice);
   }
 
@@ -201,6 +211,11 @@
   function pickMode(id: string) {
     const mode = id as PermissionMode;
     if (!choice || picking) return;
+    if (target?.selection) {
+      picking = true;
+      void target.selection.save({ ...choice, permissionMode: mode }).finally(() => { picking = false; });
+      return;
+    }
     choice = { ...choice, permissionMode: mode };
     if (bound) void store.setPermissionMode(mode);
     else store.remember(choice);
@@ -226,7 +241,7 @@
 <svelte:window onstorage={(event) => { if (event.key === VOICE_STORAGE_KEY || event.key === null) voice.load(); }} />
 
 <div class="bar" class:answering class:direct={!!target} bind:this={bar}>
-  {#if target}
+  {#if target && !target.selection}
   <div class="chips">{#if target.chips}{@render target.chips()}{/if}</div>
   {:else if !answering}
   {#key `${key}:${store.draft?.projectId ?? ''}`}
@@ -255,7 +270,7 @@
     {/if}
 
     <!-- A thread keeps its directory, so the switch exists on a draft alone. -->
-    {#if store.draft && draftRepository}
+    {#if !target && store.draft && draftRepository}
       <button
         type="button"
         class="chip worktree"

@@ -147,6 +147,12 @@ export interface AgentMessageAttachment {
   mimeType: string;
   name: string | null;
   bytes: number;
+  /**
+   * Where the bytes live once an agent's turn took them: the prompt of that
+   * turn in the agent's thread, read with `messages.attachment` like a
+   * thread's own picture. Absent until a turn took the message.
+   */
+  source?: { threadId: string; messageId: string; partIndex: number };
 }
 export interface AgentMessageFile {
   threadId: string;

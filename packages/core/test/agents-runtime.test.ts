@@ -143,7 +143,7 @@ test('what the user attaches to an agent message reaches its turn and stays out 
     const thread = h.core.workforce.records.list('run').find(r => r.workId === running.id)!.threadId;
     const worker = await connect(h.url, h.core.agents.tokenFor(thread));
     // An agent speaks in words: its own messages carry no attachments.
-    await expect(worker.call('agents.message.send', { threadId: thread, scope: sleeping, recipientIds: [], text: 'mine', attachments: [notes], requestId: 'attach_002' })).rejects.toThrow(/attachments/);
+    expect(await thrown(worker.call('agents.message.send', { threadId: thread, scope: sleeping, recipientIds: [], text: 'mine', attachments: [notes], requestId: 'attach_002' }))).toThrow(/attachments/);
     worker.close();
     // Cancelled, the work frees them.
     await client.call('agents.work.control', { workId: running.id, expectedRevision: h.core.workforce.records.get('work', running.id).revision, action: 'cancel' });
@@ -160,6 +160,10 @@ test('what the user attaches to an agent message reaches its turn and stays out 
     expect(prompt.parts.some(p => p.type === 'file' && p.name === 'notes.txt')).toBe(true);
     // Once every recipient took them, the bytes leave the core's settings.
     expect(h.core.journal.getSetting(`agents:attachments:${sent.id}`)).toBeUndefined();
+    // The conversation reads them where the turn keeps them, as a thread reads its own pictures.
+    const taken = h.core.workforce.records.get('message', sent.id).attachments!;
+    expect(taken.map(a => a.source)).toEqual([0, 1].map(at => ({ threadId: run.threadId, messageId: prompt.id, partIndex: at + 1 })));
+    expect((await client.call('messages.attachment', { threadId: run.threadId, messageId: prompt.id, partIndex: 1 })).data).toBe(picture.data);
   } finally { await h.stop(); }
 });
 
@@ -188,7 +192,7 @@ test('attachments survive a resume before the turn, and leave once no delivery c
     expect(held(first.id)).toBeUndefined();
 
     // The same request id with other bytes of the same size is another message, refused.
-    await expect(client.call('agents.message.send', { scope, recipientIds: [], text: 'read this', attachments: [notes('other')], requestId: 'attach_resume' })).rejects.toThrow(/different input/);
+    expect(await thrown(client.call('agents.message.send', { scope, recipientIds: [], text: 'read this', attachments: [notes('other')], requestId: 'attach_resume' }))).toThrow(/different input/);
 
     // A group message nobody receives keeps no bytes.
     const quiet = await client.call('agents.group.save', { value: { name: 'Quiet', memberIds: [agent.id], mode: 'mentions', maxTurns: 4, maxTurnsPerAgent: 2, paused: false } });

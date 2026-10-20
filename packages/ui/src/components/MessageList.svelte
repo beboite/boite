@@ -794,7 +794,7 @@
           {:else if startedFrom(message)}
             <SpawnMarker {store} link={startedFrom(message)!} direction="to" />
           {:else if message.role === 'user'}
-            <UserMessage {store} {message} {turn} {progress} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />
+            <UserMessage {store} {message} {turn} accepted={!!turn} responded={progress.responded(message.turnId)} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />
           {:else}
             <AssistantMessage {store} {threadId} {message} from={row.from} to={row.to} {signedOut} showModel={row.first && firstAssistantInTurn.get(message.turnId) === message.id}
               latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} views={views.get(message.turnId)} />
