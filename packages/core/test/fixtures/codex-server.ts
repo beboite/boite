@@ -461,8 +461,8 @@ async function runTurn(turnId: string, text: string): Promise<void> {
           credits: null, planType: null, rateLimitReachedType: null, individualLimit: null, spendControlReached: null, normalModelSlug: null } });
         const read = new Promise<void>((resolve) => { rateLimitsRead = resolve; });
         update(30);
+        // The next update follows the read at once, as it may share the answer's chunk of stdout.
         await read;
-        await Bun.sleep(50);
         update(35);
         await Bun.sleep(50);
         break;

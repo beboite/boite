@@ -15,13 +15,17 @@ const isObject = (value: unknown): value is Snapshot => typeof value === 'object
  * Codex session runs. The update is sparse: a null field means "not in this
  * update", and it carries no reset credits. So it is merged into the latest
  * full read of this same process, which is fetched again once it is older
- * than a minute. A read that fails stops the forwarding for this process, and
- * the quota probe answers as before.
+ * than a minute. An update that comes while that read is out waits for it:
+ * its answer and the next update can share one chunk of stdout, so the update
+ * is handled before the answer lands. A read that fails stops the forwarding
+ * for this process, and the quota probe answers as before.
  */
 export class CodexRateLimits {
   private base: Snapshot | null = null;
   private readAt = 0;
   private reading: Promise<void> | null = null;
+  /** The updates that came while `reading`, merged in order once it lands. */
+  private waiting: Snapshot[] = [];
   private refused = false;
 
   constructor(
@@ -35,17 +39,23 @@ export class CodexRateLimits {
   }
 
   updated(params: Snapshot): void {
-    if (this.refused || this.reading !== null || this.sink() === undefined) return;
+    if (this.refused || this.sink() === undefined) return;
     const update = params['rateLimits'];
     if (!isObject(update) || (update['limitId'] != null && update['limitId'] !== 'codex')) return;
+    // Values are absolute and merged in order: those the read already holds end where it does.
+    if (this.reading !== null) { this.waiting.push(update); return; }
     if (this.base === null || Date.now() - this.readAt > BASE_MS) {
       // The fresh read already holds this update.
       this.reading = this.read().finally(() => { this.reading = null; });
       return;
     }
-    const target = this.target(this.base);
+    this.merge([update]);
+  }
+
+  private merge(updates: Snapshot[]): void {
+    const target = this.base === null ? null : this.target(this.base);
     if (target === null) return;
-    for (const [key, value] of Object.entries(update)) if (value !== null && value !== undefined) target[key] = value;
+    for (const update of updates) for (const [key, value] of Object.entries(update)) if (value !== null && value !== undefined) target[key] = value;
     this.forward();
   }
 
@@ -57,8 +67,12 @@ export class CodexRateLimits {
       if (!isObject(raw)) throw new Error('the answer is not an object');
       this.base = raw;
       this.readAt = Date.now();
-      this.forward();
+      const waiting = this.waiting;
+      this.waiting = [];
+      if (waiting.length) this.merge(waiting);
+      else this.forward();
     } catch (error) {
+      this.waiting = [];
       this.refused = true;
       this.host()?.log('info', `codex: account/rateLimits/read failed in a live session, limits are probed instead: ${messageOf(error)}`);
     }

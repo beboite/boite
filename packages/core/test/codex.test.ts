@@ -10,6 +10,8 @@ import { getDriver, probedModelsOf } from '../src/drivers/index.ts';
 import { readCodexQuota } from '../src/drivers/codex.ts';
 import { codexQuotaDetails } from '../src/quota-details.ts';
 import { consumeCodexReset } from '../src/drivers/codex/models.ts';
+import { CodexRateLimits } from '../src/drivers/codex/rate-limits.ts';
+import type { CodexRpc } from '../src/drivers/codex/rpc.ts';
 import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import { TITLE_RETRY } from '../src/threads/retitle.ts';
@@ -684,15 +686,31 @@ describe('codex driver', () => {
     spyOn(harness!.core.quotas, 'observe').mockImplementation((accountId, reading) => { observed.push({ accountId, reading }); });
     await runTurn(client, threadId, 'Check [limits]');
     const accountId = harness!.core.threads.require(threadId).accountId;
-    // The first update asks the live process for the full reading; the second, sparse one is merged into it.
+    // The first update asks the live process for the full reading; the second, sparse one is merged into it,
+    // forwarded with the read or after it.
     expect(countLines('account/rateLimits/read {}')).toBe(1);
-    expect(observed.map(({ accountId: id }) => id)).toEqual([accountId, accountId]);
-    expect(observed[0]!.reading.windows.map(w => [w.id, w.usedPercent])).toEqual([['primary', 100]]);
-    expect(observed[1]!.reading).toMatchObject({
+    expect(observed.length).toBeGreaterThan(0);
+    expect(observed.every(({ accountId: id }) => id === accountId)).toBe(true);
+    expect(observed.at(-1)!.reading).toMatchObject({
       windows: [{ id: 'primary', usedPercent: 100 }, { id: 'secondary', label: 'Weekly', usedPercent: 35, resetsAt: 1_900_000_000_000 }],
       resetCredits: { availableCount: 2 },
       credits: { kind: 'balance', remaining: 42.5 },
     });
+  });
+
+  test('a rolling update read while the full read is answered is merged into it, not dropped', async () => {
+    // The read's answer and the next update can come in one chunk of stdout: the update is
+    // handled before the awaited answer lands.
+    let answer: (raw: unknown) => void = () => undefined;
+    const rpc = { request: () => new Promise(resolve => { answer = resolve; }) } as unknown as CodexRpc;
+    const readings: QuotaReading[] = [];
+    const limits = new CodexRateLimits(() => rpc, () => ({ quota: reading => { readings.push(reading); }, log: () => undefined }));
+    const update = (usedPercent: number) => ({ rateLimits: { limitId: 'codex', primary: null, secondary: { usedPercent, windowDurationMins: 10080, resetsAt: 1_900_000_000 }, credits: null } });
+    limits.updated(update(30));
+    answer({ rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300 } } });
+    limits.updated(update(35));
+    await Bun.sleep(0);
+    expect(readings.at(-1)!.windows.map(w => [w.id, w.usedPercent])).toEqual([['primary', 100], ['secondary', 35]]);
   });
 
   test('a retry reports live progress without failing the turn or accepting an older native turn', async () => {
