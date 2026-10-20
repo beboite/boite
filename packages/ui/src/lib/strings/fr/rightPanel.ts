@@ -3,6 +3,8 @@ import type { Translation } from '../../i18n.svelte';
 export const fr: Translation = {
 
   rightPanel: {
+    chat: 'Discussion',
+    backToChat: 'Revenir à la discussion',
     resize: 'Redimensionner le panneau, double-clic pour réinitialiser',
     maximize: 'Agrandir le panneau',
     restore: 'Restaurer le panneau',

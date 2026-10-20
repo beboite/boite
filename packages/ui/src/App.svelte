@@ -84,7 +84,7 @@
     const timer = setInterval(look, 1000);
     return () => { live = false; clearInterval(timer); };
   });
-  // A page the agent opens brings its browser forward in the panel, on every client (lib/agent-browser-watch.ts).
+  // New agent pages bring the panel forward on wider clients; phones stay on the user's chosen view.
   $effect(() => {
     const threadId = store.openThread?.id;
     void store.connection;

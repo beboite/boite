@@ -378,7 +378,10 @@ plain browser on the same machine is not told it is local and keeps the cover. A
 the machine, "This agent controls a browser on m2", with the page's title, and
 a **Show** button; nothing is captured or sent before that. Show starts the
 live view and, while a page shows, the eye in the tab strip covers it again. When the agent opens a
-tab in the conversation on screen, the panel opens on that surface. The
+tab in the conversation on screen, the panel opens on that surface on clients
+wider than 720 px. A phone stays in the chat or on the surface the user chose.
+Its **Browser** button opens the viewer, and **Chat** or Back returns to the
+conversation without closing any agent tabs. The
 launcher's **B** opens it by hand, and `boite browse <url>` opens a page in a
 new tab of it. On a client with a cover, it holds for the
 conversation while the app stays open, and a reload covers it again.

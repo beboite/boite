@@ -2,10 +2,17 @@
 
 The Panel button or [surface shortcuts](keybindings.md) open a thread's tabs
 beside the chat. Tabs are stored per machine/thread; width is shared on this device.
-Below 720 px it covers the chat; Back closes it. A mobile reload keeps tabs but
-starts with the panel closed, without changing the stored desktop layout.
+At 720 px and below it covers the chat; **Chat** or Back hides it without
+closing the agent's browser tabs. The phone header's **Browser** button opens
+the agent browser directly. New agent pages leave the phone on its chosen
+view. A mobile reload keeps tabs but starts with the panel closed, without
+changing the stored desktop layout.
 `lib/right-panel.svelte.ts` owns layout and `RightPanel.svelte` renders it;
 `lib/surface-labels.ts` defines labels and availability.
+
+Captures: [phone chat](images/agent-browser-chat-phone.png),
+[phone browser](images/agent-browser-return-phone.png),
+[desktop browser](images/agent-browser-live-desktop.png).
 
 The panel's left edge, the thread list's right edge, the terminal drawer's top
 edge and the line between two terminal panes share `ResizeHandle.svelte`. It is
