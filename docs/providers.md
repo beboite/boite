@@ -674,8 +674,8 @@ is launched, its output is the launch's description, and the agent reports no
 child ids, names, models or results, so the batch stays running while the turn
 runs and reads unknown after it; only a failed launch is final, with its error.
 A shell call (`kind: execute`) still running when the prompt answers is the
-thread's background work: the process stays up past the warm window until the
-command's own update ends it, and Stop on the idle thread closes the process,
+thread's background work: the process stays up past the warm window, and the
+thread's next turns run on it, until the command's own update ends it, and Stop on the idle thread closes the process,
 the only way to end such a command since `session/cancel` stops prompts alone.
 A GIF goes to the agent as a saved file, the server taking PNG, JPEG and WebP
 blocks only. On Linux the launch environment names the first CA bundle found

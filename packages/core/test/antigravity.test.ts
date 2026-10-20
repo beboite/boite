@@ -350,8 +350,15 @@ describe('antigravity', () => {
     const { threadId } = await agyThread(client);
     const background = client.next('thread.background', (event) => event.threadId === threadId && event.tasks.length > 0, 20_000);
     await runTurn(client, threadId, 'build it scenario:command');
-    expect((await background).tasks).toMatchObject([{ kind: 'shell', description: 'sleep 600' }]);
+    const [command] = (await background).tasks;
+    expect(command).toMatchObject({ kind: 'shell', description: 'sleep 600' });
     expect(fakeLog().split('\n').filter((line) => line === 'initialize')).toHaveLength(1);
+
+    // Another turn of the thread, never focused, runs on the same process: the command goes on.
+    await runTurn(client, threadId, 'meanwhile');
+    expect(fakeLog().split('\n').filter((line) => line === 'initialize')).toHaveLength(1);
+    const history = (await client.call('threads.get', { threadId })).backgroundHistory ?? [];
+    expect(history.find((task) => task.id === command!.id)?.state).toBe('running');
 
     const cleared = client.next('thread.background', (event) => event.threadId === threadId && event.tasks.length === 0, 20_000);
     expect((await client.call('turns.stop', { threadId })).stopped).toBe(true);
