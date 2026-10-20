@@ -109,14 +109,17 @@ test('pasted images have linked references and a preview that leaves the compose
       // Typing room keeps the preview open.
       await press(await pointIn('[data-testid=composer-input]'));
       expect(await page.evaluate('document.querySelector("[data-testid=composer-image-preview]") !== null')).toBe(true);
-      // The press below lands on the thread's last answer only while the list keeps to its bottom.
-      expect(await page.evaluate('document.querySelector("[data-testid=jump-to-latest]") === null')).toBe(true);
-      await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, x: mobile ? 190 : 800, y: 160 });
-      await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, x: mobile ? 190 : 800, y: 160 });
+      // The press outside lands in the thread's last answers only while the list keeps to its bottom.
+      const outside = { x: mobile ? 190 : 800, y: 160 };
+      expect(await page.evaluate(`(() => {
+        const list = document.querySelector('[data-testid=timeline]'), target = document.elementFromPoint(${outside.x}, ${outside.y});
+        return { gap: list.scrollHeight - list.clientHeight - list.scrollTop <= 1 ? 0 : [list.scrollHeight, list.clientHeight, list.scrollTop],
+          jump: !!document.querySelector('[data-testid=jump-to-latest]'),
+          target: list.contains(target) && !target.closest('button, a, [tabindex], [data-role=user]') ? 'inert' : target?.outerHTML.slice(0, 120) };
+      })()`)).toEqual({ gap: 0, jump: false, target: 'inert' });
+      await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...outside });
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...outside });
       await page.waitFor('!document.querySelector("[data-testid=composer-image-preview]")');
-      // The shorter composer clamps the list's scroll; its scroll event comes with the next frame. Reopened
-      // before it, the list reads that event against the taller composer as the reader leaving the bottom.
-      await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
       expect(await page.evaluate('document.querySelector("[data-testid=composer-input]").value')).toContain('Check the save button.');
       await page.click('[data-testid=composer-image-open]');
       await page.waitFor('document.querySelector("[data-testid=composer-image-preview]")');
@@ -140,6 +143,50 @@ test('pasted images have linked references and a preview that leaves the compose
     await server.close();
   }
 }, 90_000);
+
+test('the list keeps to its bottom when the image preview closes and opens again before the next frame', async () => {
+  const port = await freePort();
+  const server = await startDevUi(port);
+  let page: BrowserPage | undefined;
+  try {
+    page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
+    await page.waitFor('document.querySelector("[data-testid=composer-input]")');
+    await page.evaluate(`(async () => {
+      const canvas = document.createElement('canvas'); canvas.width = 960; canvas.height = 540;
+      canvas.getContext('2d').fillRect(0, 0, 960, 540);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve));
+      const transfer = new DataTransfer(); transfer.items.add(new File([blob], 'screen.png', { type: 'image/png' }));
+      document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
+    })()`);
+    await page.waitFor('document.querySelector("[data-testid=composer-attachment]")');
+    const bottom = 'document.querySelector("[data-testid=timeline]").scrollHeight - document.querySelector("[data-testid=timeline]").clientHeight - document.querySelector("[data-testid=timeline]").scrollTop';
+    await page.click('[data-testid=composer-image-open]');
+    await page.waitFor(`document.querySelector("[data-testid=composer-image-preview] img")?.naturalWidth === 960 && document.querySelector("[data-testid=timeline]").scrollTop > 0 && ${bottom} <= 1`);
+    // The preview leaves at the end of its animation, the taller list clamps its scroll in that frame's layout and
+    // follows it there; the reopen lands before the next frame delivers the clamp's scroll event, as a test's next
+    // command or a click near the animation's end can.
+    const reopened = await page.evaluate<number>(`new Promise(resolve => {
+      const list = document.querySelector('[data-testid=timeline]');
+      const grown = new ResizeObserver(() => {
+        if (document.querySelector('[data-testid=composer-image-preview]')) return;
+        grown.disconnect();
+        const clamped = list.scrollTop;
+        document.querySelector('[data-testid=composer-image-open]').click();
+        resolve(clamped);
+      });
+      grown.observe(list);
+      document.querySelector('[data-testid=composer-image-close]').click();
+    })`);
+    expect(reopened).toBe(0);
+    await page.waitFor('document.querySelector("[data-testid=composer-image-preview]")');
+    await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    expect(await page.evaluate(`({ bottom: ${bottom} <= 1, jump: !!document.querySelector('[data-testid=jump-to-latest]') })`)).toEqual({ bottom: true, jump: false });
+    expect(page.errors()).toEqual([]);
+  } finally {
+    await page?.close();
+    await server.close();
+  }
+}, 60_000);
 
 test('the paint layer breaks lines where the box does at a fractional width', async () => {
   const port = await freePort();

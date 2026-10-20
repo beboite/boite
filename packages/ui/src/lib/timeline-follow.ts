@@ -90,17 +90,29 @@ export class PointerHold {
  */
 export class BottomEdge {
   #top = 0;
+  #height = 0;
 
   /** Takes the bottom of `box`. */
   follow(box: HTMLElement): void {
     box.scrollTop = box.scrollHeight;
     this.#top = box.scrollTop;
+    this.#height = box.clientHeight;
+  }
+
+  /**
+   * Whether the list's own height changed since its last scroll event or follow. A box that grew and
+   * clamped the scroll, then shrank back before that scroll's event, reads at the same scroll position
+   * and content height as a reader rising: only its height, as the list last stood, tells them apart.
+   */
+  relaid(box: HTMLElement): boolean {
+    return box.clientHeight !== this.#height;
   }
 
   /** How far `box` moved since its last scroll event or follow, negative when it rose. Call it on every scroll event. */
   moved(box: HTMLElement): number {
     const moved = box.scrollTop - this.#top;
     this.#top = box.scrollTop;
+    this.#height = box.clientHeight;
     return moved;
   }
 }
