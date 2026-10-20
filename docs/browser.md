@@ -40,6 +40,17 @@ without a usable GPU gets none rather than SwiftShader on every core. On the
 M2 container on 2026-10-05, WebGL reported `ANGLE (AMD, AMD Radeon Graphics
 (radeonsi renoir ACO), OpenGL ES 3.2)`.
 
+A Mac in a virtual machine, where the kernel sets `kern.hv_vmm_present` to 1,
+starts the browser with `--disable-gpu` instead: pages draw on the CPU and
+WebGL is off. On the paravirtual GPU of a macos-15 arm64 CI runner, Chrome's
+GPU process lost its Metal device (`[Device] is lost`) and restarted. The
+process that exited stayed a zombie with a thread in the kernel's
+`IOService::newUserClient`, and the browser's UI thread sat in `wait4` until
+it ended, so no DevTools command was answered for 10 to 30 seconds. Over 40
+minutes of the browser tests, 1180 browsers had 48 GPU restarts and 20
+silences past 3 seconds; with `--disable-gpu`, 3177 browsers had none, and
+none took more than 1.6 seconds to answer. A Mac's own hardware keeps the GPU.
+
 ### What sites see
 
 Headless Chrome names itself `HeadlessChrome` in its user agent, sets

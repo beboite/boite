@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { SpawnedProcess, SpawnOptions } from '../procs.ts';
 import { Cdp } from './cdp.ts';
-import { chromiumArgs, clearActivePort, IDENTITY_SCRIPT, pipesDevTools, trimProfile, waitForEndpoint, windowedUserAgent, type BrowserIdentity } from './chromium.ts';
+import { chromiumArgs, clearActivePort, drawsWithGpu, IDENTITY_SCRIPT, pipesDevTools, trimProfile, waitForEndpoint, windowedUserAgent, type BrowserIdentity } from './chromium.ts';
 
 /** A browser process the core started and speaks to. */
 export interface Started { cdp: Cdp; kill(): void; exited: Promise<unknown> }
@@ -29,7 +29,7 @@ export async function startChromium(spawn: SpawnBrowser, path: string, dir: stri
   trimProfile(dir);
   const piped = pipesDevTools();
   if (!piped) clearActivePort(dir);
-  const spawned = spawn(path, chromiumArgs(dir, process.platform, userAgent), { agentRoot: false, ...(piped ? { extraPipes: 2 } : {}) });
+  const spawned = spawn(path, chromiumArgs(dir, process.platform, userAgent, await drawsWithGpu()), { agentRoot: false, ...(piped ? { extraPipes: 2 } : {}) });
   // Chromium writes to both pipes; nobody reads them, so they are drained.
   void spawned.proc.stdout.pipeTo(new WritableStream()).catch(() => {});
   void spawned.proc.stderr.pipeTo(new WritableStream()).catch(() => {});
