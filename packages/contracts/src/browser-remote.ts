@@ -21,8 +21,12 @@ export type RemoteBrowserInput =
   | { kind: 'navigate'; url: string }
   | { kind: 'history'; direction: 'back' | 'forward' }
   | { kind: 'reload' }
-  /** An option of the `<select>` a tap at the same point opened: `index` among its options, as the tap's `picker` listed them. */
-  | { kind: 'choose'; x: number; y: number; width: number; height: number; index: number };
+  /**
+   * An option of the `<select>` a tap at the same point opened: `index` among its
+   * options and its `label`, as the tap's `picker` listed them. A list whose option
+   * there reads otherwise changed since, and the pick is refused.
+   */
+  | { kind: 'choose'; x: number; y: number; width: number; height: number; index: number; label: string };
 
 /**
  * The `<select>` a tap landed on. Chrome draws its list in a window of its own,
@@ -36,6 +40,8 @@ export interface RemoteBrowserPicker {
 }
 /** Options a picker lists; a longer list is cut there. */
 export const REMOTE_PICKER_MAX = 1000;
+/** The longest label a picker gives an option; a longer one is cut there. */
+export const REMOTE_PICKER_LABEL_MAX = 200;
 
 export interface RemoteBrowserFrame {
   id: string;
@@ -104,6 +110,7 @@ export function remoteBrowserInputError(input: RemoteBrowserInput): string | nul
     case 'drag': return point(input.from) && point(input.to) && viewport(input) ? null : 'drag needs normalized from and to points and a viewport';
     case 'choose':
       if (!(Number.isInteger(input.index) && input.index >= 0 && input.index < REMOTE_PICKER_MAX)) return `choose index must be an integer from 0 to ${REMOTE_PICKER_MAX - 1}`;
+      if (!(typeof input.label === 'string' && input.label.length <= REMOTE_PICKER_LABEL_MAX)) return `choose label must be the option's label from the picker, at most ${REMOTE_PICKER_LABEL_MAX} characters`;
       return [input.x, input.y].every(normalized) && viewport(input) ? null : 'choose needs normalized coordinates and a viewport';
     case 'text': return typeof input.text === 'string' && input.text.length > 0 && input.text.length <= REMOTE_TEXT_MAX ? null : `remote text must contain 1 to ${REMOTE_TEXT_MAX} characters`;
     case 'press': return Array.isArray(input.keys) && input.keys.length >= 1 && input.keys.length <= REMOTE_PRESS_MAX && input.keys.every(browserKeyValid)

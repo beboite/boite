@@ -388,10 +388,11 @@ focuses it and answers its options (`picker`: labels, the selected one, the
 disabled, hidden and grouped ones, and the field's box, at most 1,000 options),
 and the viewer draws the list under the field, or over it when there is more
 room there. The arrows, Home, End, Enter, Space and Escape work in it. A pick
-goes back as `choose` at the tap's point; the core finds the select there again
-and sets the option as a person would, so the page hears `input` and `change`,
-and refuses an option that is disabled or no longer there. A tap elsewhere, the
-wheel or a resized page closes the list without choosing.
+goes back as `choose` at the tap's point with the option's index and label; the
+core finds the select there again and sets the option as a person would, so the
+page hears `input` and `change`, and refuses an option that is disabled, gone,
+or reads another label there: the page changed the list meanwhile. A tap
+elsewhere, the wheel or a resized page closes the list without choosing.
 
 The clipboard is the viewer's own. Paste inserts this computer's text in the
 focused field of the page. Copy and cut ask the core for the page's selection

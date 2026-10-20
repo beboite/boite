@@ -250,7 +250,7 @@ export class RemoteDrive {
       }
       case 'choose': {
         const point = at(input.x, input.y);
-        if (!await this.context.evaluate(tab, chooseScript(point.x, point.y, input.index), 5000)) throw refused('that option cannot be chosen: the list changed or the option is disabled');
+        if (!await this.context.evaluate(tab, chooseScript(point.x, point.y, input.index, input.label), 5000)) throw refused('that option cannot be chosen: the list changed or the option is disabled');
         break;
       }
       case 'drag': await this.#drag(tab, at(input.from.x, input.from.y), at(input.to.x, input.to.y)); break;

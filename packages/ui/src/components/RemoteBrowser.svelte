@@ -192,7 +192,7 @@
     const option = shown?.picker.options[index];
     // The list belongs to the page it was tapped on: a resized page drops it.
     if (!shown || !option || option.disabled || option.hidden || !target || target.width !== shown.tap.width || target.height !== shown.tap.height) return;
-    if (index !== shown.picker.selected) void input({ kind: 'choose', x: shown.tap.x, y: shown.tap.y, width: shown.tap.width, height: shown.tap.height, index });
+    if (index !== shown.picker.selected) void input({ kind: 'choose', x: shown.tap.x, y: shown.tap.y, width: shown.tap.width, height: shown.tap.height, index, label: option.label });
   }
   /** The keys a list takes while it is open: the arrows, Home, End, Enter, Space and Escape. */
   function pickerKey(event: KeyboardEvent): boolean {

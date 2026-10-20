@@ -171,7 +171,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       if (Date.now() - browser.requestedAt < 220) throw refusal('wait before requesting another browser frame');
       browser.requestedAt = Date.now();
       // What the page shows, as `fakeBrowserScreen` draws it.
-      const drawn = JSON.stringify([tab.url, tab.title, tab.width, tab.height, tab.taps, tab.text, tab.scrollY]);
+      const drawn = JSON.stringify([tab.url, tab.title, tab.width, tab.height, tab.taps, tab.text, tab.scrollY, tab.choice ?? null]);
       // The page drew nothing new since the frame the viewer shows: it keeps it, still valid for input. The core waits a second first.
       const held = after === undefined ? undefined : browser.frames.find(one => one.id === after && one.tabId === tab.tabId && Date.now() - one.taken < 5000);
       if (held && held.drawn === drawn) { held.taken = Date.now(); return { unchanged: true, id: held.id, tabId: tab.tabId, at: Date.now(), waitedMs: 0 }; }
@@ -199,7 +199,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       }
       if (input.kind === 'choose') {
         const option = FAKE_SELECT.options[input.index];
-        if (!onSelect(input.x, input.y) || !option || 'disabled' in option) throw refusal('that option cannot be chosen: the list changed or the option is disabled');
+        if (!onSelect(input.x, input.y) || !option || 'disabled' in option || option.label !== input.label) throw refusal('that option cannot be chosen: the list changed or the option is disabled');
         tab.choice = option.label;
         return { ok: true };
       }

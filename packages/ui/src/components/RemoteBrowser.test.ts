@@ -250,7 +250,7 @@ test('a tap on a <select> draws its list here, since Chrome draws its own on the
   expect(rows.map(row => [row.textContent, row.getAttribute('aria-selected'), row.disabled])).toEqual([['1', 'false', false], ['20', 'true', false], ['21', 'false', true], ['Thirty', 'false', false]]);
   expect(list.querySelector('.group')!.textContent).toBe('Late');
   rows[3]!.click(); await settle();
-  expect(inputs).toEqual([{ kind: 'tap', x: 80 / 390, y: 67 / 300, width: 780, height: 600 }, { kind: 'choose', x: 80 / 390, y: 67 / 300, width: 780, height: 600, index: 4 }]);
+  expect(inputs).toEqual([{ kind: 'tap', x: 80 / 390, y: 67 / 300, width: 780, height: 600 }, { kind: 'choose', x: 80 / 390, y: 67 / 300, width: 780, height: 600, index: 4, label: 'Thirty' }]);
   expect(document.querySelector('[data-testid=remote-browser-picker]')).toBeNull();
   // A tap elsewhere on the page closes an open list without choosing.
   tap(80, 67); await settle();

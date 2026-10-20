@@ -200,8 +200,11 @@ real('a tap on a <select> answers its options for the viewer to draw, since Chro
   const rect = reply.picker!.rect;
   expect([rect.x * frame.width, rect.y * frame.height, rect.width * frame.width, rect.height * frame.height].map(Math.round)).toEqual([100, 420, 120, 32]);
   expect(await evaluate('document.activeElement.id', tabId)).toBe('day');
-  await expect(owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'choose', ...on, index: 2 } })).rejects.toThrow('option');
-  await owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'choose', ...on, index: 4 } });
+  await expect(owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'choose', ...on, index: 2, label: '21' } })).rejects.toThrow('option');
+  // A list the page rewrote while the viewer showed it: the option at that index reads otherwise.
+  await evaluate('document.querySelector("#day").options[0].text = "Zero"', tabId);
+  await expect(owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'choose', ...on, index: 0, label: '1' } })).rejects.toThrow('the list changed');
+  await owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'choose', ...on, index: 4, label: 'Thirty' } });
   expect(await evaluate('[document.querySelector("#day").value, changes.join()]', tabId)).toEqual(['30', '30']);
   // Anywhere else a tap stays a click.
   expect(await owner.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'tap', x: 200 / frame.width, y: 140 / frame.height, width: frame.width, height: frame.height } })).toEqual({ ok: true });

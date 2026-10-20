@@ -41,6 +41,9 @@ const SELECT_AT = `(x, y) => {
   return e && !e.multiple && e.size <= 1 && !e.matches(':disabled') ? e : null;
 }`;
 
+/** An option's label as a viewer reads it: spaces folded, at most `REMOTE_PICKER_LABEL_MAX` characters. */
+const LABEL_OF = `o => String(o.label || o.text || '').replace(/\\s+/g, ' ').trim().slice(0, 200)`;
+
 /**
  * The `<select>` at a point, focused as a click would, with its options for a
  * viewer to draw: Chrome draws the list in a window of its own that no frame shows.
@@ -52,7 +55,7 @@ export const pickerScript = (x: number, y: number, max: number) => `(() => {
   e.focus();
   const clip = s => String(s ?? '').replace(/\\s+/g, ' ').trim().slice(0, 200), unit = n => Math.max(0, Math.min(1, n));
   const options = Array.from(e.options).slice(0, ${max}).map(o => {
-    const item = { label: clip(o.label || o.text) }, group = o.parentElement?.tagName === 'OPTGROUP' ? o.parentElement : null;
+    const item = { label: (${LABEL_OF})(o) }, group = o.parentElement?.tagName === 'OPTGROUP' ? o.parentElement : null;
     if (o.disabled || group?.disabled) item.disabled = true;
     if (o.hidden) item.hidden = true;
     if (group) item.group = clip(group.label);
@@ -62,10 +65,14 @@ export const pickerScript = (x: number, y: number, max: number) => `(() => {
   return { selected: e.selectedIndex, options, rect: { x: unit(r.left / innerWidth), y: unit(r.top / innerHeight), width: unit(r.width / innerWidth), height: unit(r.height / innerHeight) } };
 })()`;
 
-/** Chooses option `index` of the `<select>` at a point as a person would: the page hears input and change. False when there is no such option to choose. */
-export const chooseScript = (x: number, y: number, index: number) => `(() => {
+/**
+ * Chooses option `index` of the `<select>` at a point as a person would: the page
+ * hears input and change. False when there is no such option to choose, or when
+ * it no longer reads `label`: the list changed since the viewer drew it.
+ */
+export const chooseScript = (x: number, y: number, index: number, label: string) => `(() => {
   const e = (${SELECT_AT})(${x}, ${y}), o = e?.options[${index}];
-  if (!o || o.disabled || o.hidden || o.parentElement?.disabled) return false;
+  if (!o || o.disabled || o.hidden || o.parentElement?.disabled || (${LABEL_OF})(o) !== ${JSON.stringify(label)}) return false;
   e.focus();
   if (e.selectedIndex !== ${index}) {
     e.selectedIndex = ${index};
