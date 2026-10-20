@@ -761,6 +761,11 @@ compiled worker, and uses fresh data without provider calls.
 
 ## The opt-in live tests
 
+The installed-binary compatibility check uses a local mock API, fresh homes
+and no login: `BOITE_E2E_OPENCODE2_BINARY=/absolute/path/to/opencode2 bun test packages/core/test/opencode2.compat.test.ts`
+from the repository root. It covers discovery, a read tool, cold resume, plan
+mode and cancellation beside a locked, incompatible version 1 profile.
+
 Real-provider tests use CLI logins and spend tokens. Run selected cases from
 `packages/core`, one at a time; never enable them for an ordinary fixture run.
 

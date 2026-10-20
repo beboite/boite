@@ -193,6 +193,10 @@ their native harnesses. Older catalogs without endpoint metadata still offer
 Gemini, Muse and open models. Gateway model IDs retain their routing prefix in
 the provider configuration, so selecting `douane/antigravity/claude-opus-4-6-thinking`
 calls the gateway with `antigravity/claude-opus-4-6-thinking`.
+The picker groups gateway models by their upstream provider, even in short
+catalogs and search results. For example, `douane/opencode` and
+`douane/openrouter` distinguish two MiniMax entries. Favorites show the same
+source, and a model's tooltip gives its complete id.
 
 The injected models preserve positive integer `context_length` (or
 `context_window`) and `max_output_tokens` as their context and output limits.
@@ -739,12 +743,17 @@ descriptor accounts for, each point read off OpenCode 2.0.24 on Linux:
 - Its own subagent tool is denied, as version 1's `task` is, since delegation
   goes through Boite. The profile's `env` sends it in version 2's syntax, a
   `permissions` rule on the `subagent` action, as `OPENCODE_CONFIG_CONTENT`.
+- Default profiles use separate XDG homes: `~/.local/share/opencode-v2`,
+  `~/.config/opencode-v2`, `~/.local/state/opencode-v2` and
+  `~/.cache/opencode-v2`. OpenCode adds its `opencode/` subdirectory to each.
+  This keeps version 1's database locks and incompatible plugins out of version
+  2. Login checks, login terminals, hooks and isolated-account sharing use
+  these same homes, rather than an inherited version 1 XDG directory.
 - A sign-in is a row of `opencode/opencode.db`, in its `credential`, `account`
   or `control_account` table, which `auth.sqlite` names. Version 2 never reads
   version 1's `auth.json`: each is signed in on its own, even on the default
-  account, whose folder the two share. The same database holds the sessions of
-  both. Version 2 loads a session version 1 created; version 1 answers -32603
-  to one version 2 created, so a thread moved to version 2 stays there.
+  account. Session databases are separate too; a thread cannot reuse a native
+  session from the other version.
 - Every command but `acp` talks to a background service that outlives it and
   listens on one fixed port, so a second account could never start its own.
   Boite never starts it: turns and probes run over `acp`, which serves itself,
@@ -755,9 +764,8 @@ descriptor accounts for, each point read off OpenCode 2.0.24 on Linux:
 - OpenCode Go usage is read with the key version 2 stored for `opencode-go`
   in the `credential` table (`packages/core/src/providers/opencode.ts`).
 - The plugin API changed: a plugin written for version 1 does not load in
-  version 2. The descriptor shares the same `opencode/plugins` folder with an
-  isolated account and Settings counts what is in it, whatever it was written
-  for.
+  version 2. Version 2 loads plugins from its own configuration home only.
+  Isolated version 2 accounts share those plugins; Settings counts that source.
 - It has no managed install: version 2 is published as npm tarballs, a
   format the installer does not unpack, so its row links to the install guide.
 
@@ -773,6 +781,13 @@ gateway, declared with the same provider block Boite writes, as a Chat
 Completions `image_url` part. OpenCode 1 stays at `images: false`: 1.19.2 also
 advertises images, but replaces one with an error text for a gateway model
 that declares no image input, which is every model the gateway block lists.
+
+`BOITE_E2E_OPENCODE2_BINARY=/absolute/path/to/opencode2 bun test packages/core/test/opencode2.compat.test.ts`
+uses the installed binary with a local API and disposable profiles. On 2.1.1
+it covers model discovery, a file-reading tool, cold resume, plan mode, stop
+and another turn while a version 1 database is locked and its plugin API is
+incompatible. It needs no login or external model. Windows and macOS remain
+unchecked by this run.
 
 ## Turning a provider off
 

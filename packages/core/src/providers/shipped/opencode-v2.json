@@ -5,7 +5,7 @@
   "shortName": "OpenCode 2",
   "protocol": "acp",
   "experimental": true,
-  "roots": ["{home}/.local/share/opencode", "{home}/.config/opencode", "{home}/.local/state/opencode", "{isolationDir}"],
+  "roots": ["{home}/.local/share/opencode-v2", "{home}/.config/opencode-v2", "{home}/.local/state/opencode-v2", "{home}/.cache/opencode-v2", "{isolationDir}"],
   "profiles": {
     "windows": {
       "detect": {},
@@ -17,7 +17,7 @@
         { "kind": "file", "value": "{home}/.opencode/bin/opencode.exe", "major": 2 }
       ],
       "launch": { "args": ["acp"] },
-      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
+      "env": { "XDG_DATA_HOME": "{home}/.local/share/opencode-v2", "XDG_CONFIG_HOME": "{home}/.config/opencode-v2", "XDG_STATE_HOME": "{home}/.local/state/opencode-v2", "XDG_CACHE_HOME": "{home}/.cache/opencode-v2", "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
       "close": { "processes": ["opencode.exe"] }
     },
@@ -32,7 +32,7 @@
         { "kind": "file", "value": "{home}/.opencode/bin/opencode", "major": 2 }
       ],
       "launch": { "args": ["acp"] },
-      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
+      "env": { "XDG_DATA_HOME": "{home}/.local/share/opencode-v2", "XDG_CONFIG_HOME": "{home}/.config/opencode-v2", "XDG_STATE_HOME": "{home}/.local/state/opencode-v2", "XDG_CACHE_HOME": "{home}/.cache/opencode-v2", "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
       "close": { "processes": ["opencode.exe", "opencode2"] }
     },
@@ -47,7 +47,7 @@
         { "kind": "file", "value": "{home}/.opencode/bin/opencode", "major": 2 }
       ],
       "launch": { "args": ["acp"] },
-      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
+      "env": { "XDG_DATA_HOME": "{home}/.local/share/opencode-v2", "XDG_CONFIG_HOME": "{home}/.config/opencode-v2", "XDG_STATE_HOME": "{home}/.local/state/opencode-v2", "XDG_CACHE_HOME": "{home}/.cache/opencode-v2", "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
       "close": { "processes": ["opencode.exe", "opencode2"] }
     }

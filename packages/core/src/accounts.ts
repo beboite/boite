@@ -830,15 +830,15 @@ export class AccountStore {
   }
 
   /**
-   * The provider's own login directory: its isolation variable if the environment
-   * carries one, that variable's own default when Boite knows it, else
+   * The provider's own login directory: its configured isolation variable,
+   * the inherited variable, that variable's default when Boite knows it, else
    * `~/.<id>`.
    */
   defaultLocation(provider: ProviderDescriptor): string | null {
     const profile = profileFor(provider);
     if (profile !== undefined) {
       for (const key of Object.keys(profile.isolation)) {
-        const value = process.env[key];
+        const value = profile.env?.[key] ?? process.env[key];
         if (value !== undefined && value.length > 0) return value;
         const fallback = ISOLATION_DEFAULTS[key];
         if (fallback !== undefined) return join(homePath(), ...fallback);

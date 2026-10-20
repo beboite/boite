@@ -9,17 +9,26 @@ import type { FavoriteModel } from './model-order';
 export const FIRST_MODELS = 60;
 
 export interface ModelGroup {
-  /** The part of the id before the first slash, empty for a model that has none. */
+  /** The provider route, including the upstream provider behind a gateway. */
   key: string;
   models: ModelInfo[];
+}
+
+/** OpenCode wraps gateway routes once; model ids after the upstream provider may themselves contain slashes. */
+export function modelSource(model: ModelInfo): string {
+  const slash = model.id.indexOf('/');
+  if (slash <= 0) return '';
+  const provider = model.id.slice(0, slash);
+  if (provider !== 'douane' && provider !== 'cliproxyapi') return provider;
+  const upstream = model.id.indexOf('/', slash + 1);
+  return upstream > slash + 1 ? model.id.slice(0, upstream) : provider;
 }
 
 /** One label per prefix, the groups in the order the agent first mentioned each. */
 export function groupModels(models: ModelInfo[]): ModelGroup[] {
   const byKey = new Map<string, ModelGroup>();
   for (const model of models) {
-    const slash = model.id.indexOf('/');
-    const key = slash > 0 ? model.id.slice(0, slash) : '';
+    const key = modelSource(model);
     const group = byKey.get(key);
     if (group) group.models.push(model);
     else byKey.set(key, { key, models: [model] });
