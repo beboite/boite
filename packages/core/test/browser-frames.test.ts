@@ -70,6 +70,8 @@ real('a snapshot lists the elements of frames from other origins with refs, and 
   expect(await settled('local 77 true')).toBe('local 77 true');
 
   await command({ kind: 'fill', selector: card, text: '4242 4242' });
+  // Every command that takes a target reaches one in a frame, a scroll too.
+  expect(await command({ kind: 'scroll', x: 0, y: 10, selector: card })).toMatchObject({ ok: true });
   const clicked = await command({ kind: 'click', selector: pay });
   expect(clicked.note).toBeUndefined();
   expect(await settled('card 4242 4242 true')).toBe('card 4242 4242 true');

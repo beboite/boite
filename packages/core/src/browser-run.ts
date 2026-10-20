@@ -70,13 +70,18 @@ async function scriptLine(error: unknown, name: string): Promise<number | null> 
 export async function browserRun(args: string[], io: CliIo, client: CoreClient, threadId: string): Promise<{ lines: string[]; value: unknown }> {
   const rest = [...args];
   let current: string | undefined;
-  if (rest[0] === '--tab') {
+  // `--tab <id>` before the script or right after it; the words after that are the script's own.
+  const takeTab = () => {
+    if (rest[0] !== '--tab') return;
+    if (current !== undefined) throw new Error('browser run accepts one --tab');
     current = rest[1];
     if (!current) throw new Error('browser run --tab needs a tab id');
     rest.splice(0, 2);
-  }
+  };
+  takeTab();
   const file = rest.shift();
   if (file === undefined || file === '') throw new Error('browser run needs a script file, or - to read it from stdin; boite browser help shows what a script can call');
+  takeTab();
   let source: string;
   if (file === '-') {
     if (!io.stdin) throw new Error('browser run - reads the script from stdin, which this caller does not provide');

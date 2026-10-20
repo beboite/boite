@@ -157,12 +157,12 @@ test('browser run sends a script\'s steps in order in one call, prints what they
   const owner = await harness.connect();
   try {
     const { threadId } = await echoThread(harness, owner);
-    const sent: BrowserAction[] = [];
+    const sent: BrowserAction[] = [], tabs: Array<string | undefined> = [];
     const page = { tabId: 'browser:t', url: 'https://shop.test/', title: 'Shop' };
     // The CLI's own work: the core's answers are tested in browser.test.ts.
     spyOn(harness.core.browser, 'command').mockImplementation(async request => {
       const action = request.action as BrowserAction;
-      sent.push(action);
+      sent.push(action); tabs.push(request.tabId);
       if (action.kind === 'open') return { ...page, value: { ok: true, navigated: true, url: page.url, title: page.title } };
       if (action.kind === 'snapshot') return { tabId: page.tabId, value: { text: '- button "Go" [ref=e1]\n- textbox "Name" [ref=e2]', refs: 2, url: page.url, title: page.title } };
       if (action.kind === 'click' && action.selector === '@e7') throw refused('ref @e7 is stale because the page changed; take a new snapshot');
@@ -213,6 +213,12 @@ test('browser run sends a script\'s steps in order in one call, prints what they
     expect(plain.out).toEndWith('✓ 1 step; the page is Shop  https://shop.test/\n');
     let help = '';
     await runCli(['browser', 'help'], { cwd, env: { [AGENT_ENV.threadId]: threadId, [AGENT_ENV.coreUrl]: harness.url, [AGENT_ENV.token]: harness.core.agents.tokenFor(threadId) }, out: text => help += text, err: () => {} });
-    expect(help).toContain('run <script.js|-> [args...]');
+    expect(help).toContain('run <script.js|-> [--tab <id>] [args...]');
+    // A tab named before the script or right after it drives every step; later words are the script's.
+    for (const args of [['--tab', 'browser:x', '-'], ['-', '--tab', 'browser:x', '--tab']]) {
+      tabs.length = 0;
+      expect((await run(args, "await page.click('@e1'); return args")).out).toEndWith(`${JSON.stringify(args.slice(3), null, 2)}\n`);
+      expect(tabs).toEqual(['browser:x']);
+    }
   } finally { owner.close(); await harness.stop(); }
 });

@@ -45,7 +45,8 @@ Targets: @e3 (a ref from the last snapshot), a CSS selector matching one element
   download save <id> [path]       copy a finished download out of quarantine into cwd or a folder
                                   under it (default: its name), never overwriting, never executable
   download wait <id> [--timeout <ms>] | download discard <id>
-  run <script.js|-> [args...]     run many steps in one call (see Batching)
+  run <script.js|-> [--tab <id>] [args...]
+                                  run many steps in one call (see Batching)
 
 Each action waits for the navigation it starts and reports where the page went and the
 dialogs it answered. Refs change after every snapshot; take a new one after the page changes.

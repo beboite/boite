@@ -374,7 +374,10 @@ async function act(page: AgentPage, tabId: string, action: BrowserAction): Promi
       await run(scope.channel, `return K.scrollIntoView(${js(action.selector)})`);
       return reply({ ok: true });
     }
-    case 'scroll': return reply({ ok: true, value: await run(page, `return K.scroll(${action.x}, ${action.y}, ${js(action.selector ?? null)})`) });
+    case 'scroll': {
+      const scope = await scopeOf(page, action.selector);
+      return reply({ ok: true, value: await run(scope.channel, `return K.scroll(${action.x}, ${action.y}, ${js(action.selector ?? null)})`) });
+    }
     case 'wait': return reply(await wait(page, action));
     case 'history': {
       const before = await begin(page);
