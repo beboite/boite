@@ -92,6 +92,7 @@ import { strings as effortLevels } from './strings/en/effortLevels';
 import { strings as parts } from './strings/en/parts';
 import { strings as common } from './strings/en/common';
 import { strings as onboarding } from './strings/en/onboarding';
+import { strings as contacts } from './strings/en/contacts';
 
 export const strings = {
   ...subscriptionProxy,
@@ -180,6 +181,7 @@ export const strings = {
   ...parts,
   ...common,
   ...onboarding,
+  ...contacts,
 } as const;
 
 export type Strings = typeof strings;

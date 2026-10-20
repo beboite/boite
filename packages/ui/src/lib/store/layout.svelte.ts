@@ -25,6 +25,7 @@ import { rightPanel, type BoundPanel } from '../right-panel.svelte';
 import { strings } from '../strings';
 import type { Page, SettingsTab } from '../store.svelte';
 import type { StoreContext } from './context';
+import { contactsShown } from '../contacts-rail.svelte';
 
 /** The kinds are this device's whichever machine is shown: one state every Store's Layout reads. */
 const deviceKinds = $state({ list: readNotificationKinds() });
@@ -60,6 +61,8 @@ export class Layout {
   search = $state('');
   /** The agent an outside link asked the Agents page to open, with a fresh key for repeated asks; the page takes it once. */
   agentsTarget = $state<{ agentId: string; request: number; pane?: 'settings'; kind?: 'profile' | 'group' | 'team' | 'mission' } | null>(null);
+  /** The contact the Contacts page shows, by core id; null shows the page that adds one. */
+  contact = $state<string | null>(null);
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -118,6 +121,15 @@ export class Layout {
     this.ctx.threads.invalidateNavigation();
     if (agentId) this.agentsTarget = { agentId, request: (this.agentsTarget?.request ?? 0) + 1, ...(pane ? { pane } : {}), ...(kind && kind !== 'profile' ? { kind } : {}) };
     this.page = 'agents';
+    this.sidebarOpen = false;
+  }
+
+  /** The Contacts page: one contact, or with none the way to add one. An experiment too: with it off, nothing leads there. */
+  showHome(contact: string | null = null): void {
+    if (!contactsShown(this.ctx.store)) return;
+    this.ctx.threads.invalidateNavigation();
+    this.contact = contact;
+    this.page = 'home';
     this.sidebarOpen = false;
   }
 

@@ -1,4 +1,4 @@
-import { RpcErrorCode, isThreadTerminal, threadTerminalId, type KeybindingCommand, type RpcEvents, type TerminalState, type ThreadId, type ThreadTerminal } from '@boite/contracts';
+import { RpcErrorCode, isThreadTerminal, threadTerminalId, type KeybindingCommand, type ProjectId, type RpcEvents, type TerminalState, type ThreadId, type ThreadSummary, type ThreadTerminal } from '@boite/contracts';
 import { RpcFailure } from '../client';
 // A type only: xterm's screen class rides in the terminal view's chunk, which hands it over.
 import type { TerminalSession, TerminalStart } from '../terminal-session.svelte';
@@ -174,6 +174,36 @@ export class Terminals {
 
   hideBoard(): void {
     this.boardShown = false;
+  }
+
+  /**
+   * The conversation a project's board opens in from outside the project, a
+   * contact's page: its last changed one, not archived. Null when the core
+   * serves no board or the project has no conversation to hold it.
+   */
+  projectBoardThread(projectId: ProjectId): ThreadSummary | null {
+    const s = this.ctx.store;
+    if (!experimentOn('goal2') || s.core?.features?.projectBoard !== true) return null;
+    let last: ThreadSummary | null = null;
+    for (const thread of s.threadsOf(projectId)) {
+      if (!thread.archived && !thread.incognito && (!last || thread.updatedAt > last.updatedAt)) last = thread;
+    }
+    return last;
+  }
+
+  /**
+   * That project's board, in the drawer of that conversation. A Back, a page
+   * or another conversation picked while it opens is a newer navigation: the
+   * board then stays hidden.
+   */
+  async openProjectBoard(projectId: ProjectId): Promise<void> {
+    const s = this.ctx.store;
+    const thread = this.projectBoardThread(projectId);
+    if (!thread) return;
+    const opening = s.open(thread.id);
+    const generation = s.navigationGeneration;
+    await opening;
+    if (s.navigationGeneration === generation && s.page === 'chat' && s.openThread?.id === thread.id) this.showBoard();
   }
 
   private pickTab(tab: DrawerTab): void {

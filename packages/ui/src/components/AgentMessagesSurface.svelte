@@ -9,6 +9,7 @@
   import { page } from '../lib/page-hidden.svelte';
   import { fill, strings } from '../lib/strings';
   import AgentAvatar from './AgentAvatar.svelte';
+  import RemoteChip from './RemoteChip.svelte';
   import AgentDiscussion from './AgentDiscussion.svelte';
 
   /**
@@ -71,8 +72,9 @@
               <strong>{discussion.title}</strong>
               <time datetime={new Date(last.createdAt).toISOString()}>{relativeTime(last.createdAt, now)}</time>
             </span>
-            {#if tag || where}
+            {#if tag || where || discussion.contact}
               <span class="line facts">
+                {#if discussion.contact}<RemoteChip name={discussion.contact} />{/if}
                 {#if tag}<span class="tag" data-relation={tag}>{strings.agentMessages.relation[tag]}</span>{/if}
                 {#if where}<span class="where">{where}</span>{/if}
               </span>

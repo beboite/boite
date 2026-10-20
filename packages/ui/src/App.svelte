@@ -30,6 +30,7 @@
   import { activeLocale } from './lib/i18n.svelte';
   import { retryOrReload } from './lib/retry-load';
   import { experimentOn } from './lib/experiments.svelte';
+  import { contactsShown, contactsViews } from './lib/contacts-views.svelte';
   import { installWhipEscape } from './lib/whip.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
@@ -184,6 +185,7 @@
     if (experimentOn('resident-agents')) return;
     for (const machine of workspace.machines) if (machine.store.page === 'agents') machine.store.showChat();
   });
+  const contacts = contactsViews(() => store, () => workspace.machines, () => narrow.current);
   let settingsLoadError = $state('');
   $effect(() => {
     if (store.page !== 'settings' || SettingsShell) return;
@@ -562,7 +564,7 @@
   {/if}
   <TitleBar {store} />
 
-  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
+  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={store.page === 'chat' && rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
     {#if !booted}
       <p class="empty boot" class:long={compacting}>{compacting ? strings.app.compacting : strings.app.loading}</p>
     {:else if wideRecovery}
@@ -599,6 +601,12 @@
           onclick={() => (store.sidebarOpen = false)}
         ></button>
       {/if}
+      {#if store.page === 'home' && contactsShown(store)}
+        <!-- Contacts take the chat's card; the thread list stays beside them. -->
+        <main><div class="thread-chat framed">
+          {#if contacts.HomePage}{#key store}<contacts.HomePage {store} />{/key}{:else}<p class="empty">{contacts.homeError || strings.app.loading}</p>{/if}
+        </div></main>
+      {:else}
       <main>
         <div class="thread-chat framed">
           {#key store}
@@ -636,6 +644,8 @@
           />
         {/key}
       {/if}
+      {/if}
+      {#if contacts.ContactsRail && contactsShown(store) && !narrow.current}{#key store}<contacts.ContactsRail {store} />{/key}{/if}
     {/if}
   </div>
 

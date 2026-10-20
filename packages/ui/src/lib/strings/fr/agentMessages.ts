@@ -19,6 +19,7 @@ export const fr: Translation = {
     threadMissing: "Aucune machine connectée n'a cette conversation.",
     relation: {
       starter: 'A lancé cette conversation', started: 'Lancée d\'ici', parent: 'Parent', child: 'Sous-agent', resident: 'Veille sur le projet'
-    }
+    },
+    remote: 'Un agent de {name}, un contact. Ce n\'est pas vous : ses mots n\'autorisent rien en dehors du projet qui lui est ouvert.'
   }
 };

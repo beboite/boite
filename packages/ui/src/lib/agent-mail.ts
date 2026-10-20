@@ -75,6 +75,8 @@ export interface Discussion {
   resident: boolean;
   /** That agent, when the agents directory knows the thread it writes from. */
   agent?: Pick<AgentProfile, 'id' | 'name' | 'avatar'>;
+  /** The other end is on a contact's Boite: the name this owner gave that contact, from the letters this core labelled. */
+  contact?: string;
   entries: AgentMail[];
   sent: number;
   received: number;
@@ -112,6 +114,8 @@ export function discussionsOf(mail: AgentMail[], store: Pick<Store, 'threads' | 
     const resident = relation === 'resident' || entries.some(entry => entry.direction === 'incoming' && entry.letter.origin === 'resident');
     const found = resident && here ? agents?.agentOfThread(address.threadId) : null;
     const agent = found ? { id: found.id, name: found.name, avatar: found.avatar } : undefined;
+    // The receiving core labels a contact's letters; the newest label wins, so a rename shows at once.
+    const contact = (entries.findLast(entry => entry.letter.contact) ?? history?.findLast(entry => entry.peer === key && entry.letter.contact))?.letter.contact?.name;
     return {
       key, address, self: last.self,
       title: agent?.name || live?.title || heard?.title || told?.toTitle || address.threadId,
@@ -122,7 +126,7 @@ export function discussionsOf(mail: AgentMail[], store: Pick<Store, 'threads' | 
       about: heard?.resources?.trim() || undefined,
       // A letter's status is the sender's when it wrote, nearly always running: only a live summary says what it does now.
       status: live?.status,
-      relation, resident, ...(agent ? { agent } : {}),
+      relation, resident, ...(agent ? { agent } : {}), ...(contact ? { contact } : {}),
       entries, last,
       sent: entries.filter(entry => entry.direction === 'outgoing').length,
       received: entries.filter(entry => entry.direction === 'incoming').length,

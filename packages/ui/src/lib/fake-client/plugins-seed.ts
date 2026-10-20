@@ -34,7 +34,7 @@ export function runningGateway(version: string | null, pid: number, startedAt: n
 export const FAKE_RELEASES: Record<string, { version: string; commit: string; artifact: { url: string; sha256: string } }> = {
   bots: {
     version: '0.1.10', commit: '6b2e4d8f0a1c3e5b7d9f2a4c6e8b0d1f3a5c7e9b',
-    artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.10/bots-x86_64-pc-windows-msvc.exe', sha256: '2c4e6a8b0d1f3a5c7e9b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f2a4c' }
+    artifact: { url: 'https://github.com/Skollheim/bots/releases/download/v0.1.10/bots-x86_64-pc-windows-msvc.exe', sha256: '2c4e6a8b0d1f3a5c7e9b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f2a4c' }
   }
 };
 
@@ -51,12 +51,12 @@ export function fakePlugins(): PluginState[] {
     {
       ...base, id: 'bots', name: 'B.O.T.S', origin: 'recommended',
       description: 'Little robots on your desktop that follow your Boite agents, answer your questions and keep you company while you work.',
-      homepage: 'https://github.com/beboite/bots', version: '0.1.9', availableVersion: '0.1.9', status: 'installed', source: null,
-      artifact: { url: 'https://github.com/beboite/bots/releases/download/v0.1.9/bots-x86_64-pc-windows-msvc.exe', sha256: 'b21ad5a3d248f8653808944021e4b84293eb0653abb1b65a76a265aaa3de5820' },
+      homepage: 'https://github.com/Skollheim/bots', version: '0.1.9', availableVersion: '0.1.9', status: 'installed', source: null,
+      artifact: { url: 'https://github.com/Skollheim/bots/releases/download/v0.1.9/bots-x86_64-pc-windows-msvc.exe', sha256: 'b21ad5a3d248f8653808944021e4b84293eb0653abb1b65a76a265aaa3de5820' },
       commands: appCommands('bots', 'bots'), pools: [],
       app: { enabled: true, autostart: true, status: 'running', pid: 4242, exitCode: null, error: null, startedAt: Date.parse('2026-10-10T08:00:00Z') },
       updates: {
-        source: { url: 'https://github.com/beboite/bots', ref: 'main' }, checking: false,
+        source: { url: 'https://github.com/Skollheim/bots', ref: 'main' }, checking: false,
         checkedAt: Date.parse('2026-10-10T08:01:00Z'), nextCheckAt: Date.parse('2026-10-10T14:01:00Z'),
         available: null, ignored: null, error: null
       }
@@ -64,12 +64,12 @@ export function fakePlugins(): PluginState[] {
     {
       ...base, id: 'douane', name: 'Douane', origin: 'recommended',
       description: 'Your Claude, Codex, Grok and Copilot subscriptions behind one local gateway, with quota routing and a dashboard. Boite\'s subscription proxy can point at it.',
-      homepage: 'https://github.com/beboite/douane', version: '0.3.0', availableVersion: '0.3.0', status: 'installed', source: null,
-      artifact: { url: 'https://github.com/beboite/douane/releases/download/v0.3.0/douane-windows-x64.exe', sha256: '7e1a3c5b9d2f4a6c8e0b1d3f5a7c9e2b4d6f8a0c1e3b5d7f9a2c4e6b8d0f1a3c' },
+      homepage: 'https://github.com/mtsu-dev/douane', version: '0.3.0', availableVersion: '0.3.0', status: 'installed', source: null,
+      artifact: { url: 'https://github.com/mtsu-dev/douane/releases/download/v0.3.0/douane-windows-x64.exe', sha256: '7e1a3c5b9d2f4a6c8e0b1d3f5a7c9e2b4d6f8a0c1e3b5d7f9a2c4e6b8d0f1a3c' },
       commands: gatewayCommands('douane'), pools: [],
       gateway: runningGateway('0.3.0', 4343, Date.parse('2026-10-10T08:00:00Z')),
       updates: {
-        source: { url: 'https://github.com/beboite/douane', ref: 'main' }, checking: false,
+        source: { url: 'https://github.com/mtsu-dev/douane', ref: 'main' }, checking: false,
         checkedAt: Date.parse('2026-10-10T08:01:00Z'), nextCheckAt: Date.parse('2026-10-10T14:01:00Z'),
         available: null, ignored: null, error: null
       }

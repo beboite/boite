@@ -26,7 +26,8 @@ function machineOf(core: Core, raw: unknown): string | undefined {
     throw invalidParams(`ui.reveal target.coreId must be ${MACHINE}, 64 lowercase hex characters`, { field: 'target.coreId', expected: MACHINE });
   }
   if (raw === core.coordination.card().coreId) return undefined;
-  if (!core.coordination.trusted().some((peer) => peer.coreId === raw)) {
+  // A contact's threads are its owner's: this owner's windows never open them.
+  if (core.contacts.has(raw) || !core.coordination.trusted().some((peer) => peer.coreId === raw)) {
     throw invalidParams(`ui.reveal target.coreId ${raw} is not ${MACHINE}`, { field: 'target.coreId', expected: MACHINE });
   }
   return raw;

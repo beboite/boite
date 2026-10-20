@@ -27,7 +27,7 @@ import type { Threads } from './store/threads.svelte';
 import type { Workbench } from './store/workbench.svelte';
 import type { Workflows } from './store/workflows.svelte';
 
-export type Page = 'chat' | 'settings' | 'agents';
+export type Page = 'chat' | 'settings' | 'agents' | 'home';
 export type { SettingsTab } from './settings-tabs';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
@@ -299,6 +299,7 @@ export class Store {
   set settingsSection(value) { this.#ctx.layout.settingsSection = value; }
   get agentsTarget() { return this.#ctx.layout.agentsTarget; }
   set agentsTarget(value) { this.#ctx.layout.agentsTarget = value; }
+  get contact() { return this.#ctx.layout.contact; }
   get sidebarOpen() { return this.#ctx.layout.sidebarOpen; }
   set sidebarOpen(value) { this.#ctx.layout.sidebarOpen = value; }
   get sidebarCollapsed() { return this.#ctx.layout.sidebarCollapsed; }
@@ -318,6 +319,7 @@ export class Store {
   showSettings(...args: Parameters<Layout['showSettings']>) { return this.#ctx.layout.showSettings(...args); }
   showChat(...args: Parameters<Layout['showChat']>) { return this.#ctx.layout.showChat(...args); }
   showAgents(...args: Parameters<Layout['showAgents']>) { return this.#ctx.layout.showAgents(...args); }
+  showHome(contact: string | null = null) { return this.#ctx.layout.showHome(contact); }
   togglePanel(...args: Parameters<Layout['togglePanel']>) { return this.#ctx.layout.togglePanel(...args); }
   setNotifications(...args: Parameters<Layout['setNotifications']>) { return this.#ctx.layout.setNotifications(...args); }
   setNotificationKind(...args: Parameters<Layout['setNotificationKind']>) { return this.#ctx.layout.setNotificationKind(...args); }
@@ -365,6 +367,8 @@ export class Store {
   toggleBoard(...args: Parameters<Terminals['toggleBoard']>) { return this.#ctx.terminals.toggleBoard(...args); }
   showBoard(...args: Parameters<Terminals['showBoard']>) { return this.#ctx.terminals.showBoard(...args); }
   hideBoard(...args: Parameters<Terminals['hideBoard']>) { return this.#ctx.terminals.hideBoard(...args); }
+  projectBoardThread(...args: Parameters<Terminals['projectBoardThread']>) { return this.#ctx.terminals.projectBoardThread(...args); }
+  openProjectBoard(...args: Parameters<Terminals['openProjectBoard']>) { return this.#ctx.terminals.openProjectBoard(...args); }
   hideTerminal(...args: Parameters<Terminals['hideTerminal']>) { return this.#ctx.terminals.hideTerminal(...args); }
   openTerminal(...args: Parameters<Terminals['openTerminal']>) { return this.#ctx.terminals.openTerminal(...args); }
   loginTerminal(...args: Parameters<Terminals['loginTerminal']>) { return this.#ctx.terminals.loginTerminal(...args); }
