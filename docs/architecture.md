@@ -147,7 +147,9 @@ tick that writes more than the room left, such as one value larger than its
 byte budget, can still cross that mark. The idle truncation empties the WAL
 with no further write, on the Worker or on the main thread without one.
 
-Space goes back to the disk once. When every one-time pass has finished and
+A new journal is created in incremental auto-vacuum, so it gives free pages
+back from its first compaction ticks. A journal created before that gets its
+space back once. When every one-time pass has finished and
 the trace was cut once, the next core start checks the journal before opening
 it (`journal/vacuum.ts`): with free pages over a quarter of the file and over
 256 MiB, and room on the volume for the live pages plus 512 MiB, it writes
