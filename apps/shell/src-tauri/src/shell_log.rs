@@ -315,14 +315,23 @@ static DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) fn init(data_dir: &Path) {
     if LOGGER.get().is_some() { return; }
     let (logger, receiver, shared) = channel(QUEUE);
-    let directory = data_dir.join("logs");
+    let directory = create_logs_directory(data_dir);
+    let published = directory.clone();
     let started = std::thread::Builder::new().name("shell-log".into()).spawn(move || {
         serve(receiver, Writer::open(directory, MAX_FILE_BYTES), shared);
     });
     if started.is_ok() {
-        let _ = DIRECTORY.set(data_dir.join("logs"));
+        let _ = DIRECTORY.set(published);
         let _ = LOGGER.set(logger);
     }
+}
+
+/// `<dataDir>/logs`, created before `directory()` hands it out: WebView2
+/// writes a test shell's net log there and does not create the folder.
+fn create_logs_directory(data_dir: &Path) -> PathBuf {
+    let directory = data_dir.join("logs");
+    create_private_dir(&directory);
+    directory
 }
 
 /// `<dataDir>/logs` once the writer runs, where the watchdog also leaves its hang dumps.
@@ -409,6 +418,15 @@ mod tests {
         // Two 40-byte lines fit in 100 bytes; a third starts a new file.
         assert_eq!(sizes, vec![Some(80), Some(80), Some(80), Some(80), None, None]);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_logs_directory_exists_before_it_is_handed_out() {
+        let data_dir = temp("published");
+        let directory = create_logs_directory(&data_dir);
+        assert_eq!(directory, data_dir.join("logs"));
+        assert!(directory.is_dir());
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]
