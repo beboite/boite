@@ -366,3 +366,18 @@ test('a live end past its bound lets its oldest messages go and reads them again
   expect(messages.findIndex(message => message.id === first)).toBeGreaterThan(0);
   expect(new Set(messages.map(message => message.id)).size).toBe(messages.length);
 });
+
+test('a live end past its bound keeps the messages the timeline draws near the bottom', async ({ ready }) => {
+  const { store } = await ready({ delayMs: 0, long: true });
+  await store.open('t-long');
+  const thread = store.openThread!;
+  const count = thread.messages.length;
+  // A song the agent published, 5.2 million base64 characters, under the answer that closes its turn.
+  thread.messages.at(-2)!.parts = [{ type: 'file', name: 'menu-theme.mp3', mimeType: 'audio/mpeg', data: 'A'.repeat(5_200_000) }];
+  expect(store.releaseOlder('t-long', () => 6)).toBe(count - 6);
+  expect(store.openThread!.messages).toHaveLength(6);
+  thread.messages.push({ ...thread.messages.at(-1)!, id: 'm-next' });
+  // Everything held is drawn near the bottom: nothing goes.
+  expect(store.releaseOlder('t-long', () => 7)).toBe(0);
+  expect(store.openThread!.messages).toHaveLength(7);
+});

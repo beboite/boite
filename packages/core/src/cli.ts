@@ -22,6 +22,7 @@ import { agentCommand } from './agents/cli.ts';
 import { workflowCommand } from './workflow-cli.ts';
 import { DELEGATE_ACTIONS, delegateCommand } from './delegate-cli.ts';
 import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
+import { browserRun } from './browser-run.ts';
 import { deviceCommand } from './device-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 import type { RpcParams } from '@boite/contracts';
@@ -34,6 +35,8 @@ export interface CliIo {
   err(text: string): void;
   env: Record<string, string | undefined>;
   cwd: string;
+  /** Everything piped in, for a command that reads `-`. */
+  stdin?(): Promise<string>;
 }
 
 export const USAGE = `usage: boite <command> [args] [--json]
@@ -388,7 +391,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     },
     browser: async () => {
       if (rest[0] === 'help') { print([BROWSER_HELP], { help: BROWSER_HELP }); return; }
-      const result = await browserCommand(rest, io, client, threadId);
+      const result = rest[0] === 'run' ? await browserRun(rest.slice(1), io, client, threadId) : await browserCommand(rest, io, client, threadId);
       print(result.lines, result.value);
     },
     device: async () => {
@@ -737,6 +740,7 @@ export function processIo(): CliIo {
     err: (text) => process.stderr.write(text),
     env: process.env,
     cwd: process.cwd(),
+    stdin: () => Bun.stdin.text(),
   };
 }
 

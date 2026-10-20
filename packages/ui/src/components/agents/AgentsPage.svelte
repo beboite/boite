@@ -44,8 +44,6 @@
   let visit = $state(0);
   /** The conversation a mission was opened from: its back arrow returns there. */
   let origin = $state<AgentSelection | null>(null);
-  /** A message the user asked to plan instead of sending: the planned tasks open with it. */
-  let draft = $state<string | null>(null);
 
   const labels = $derived(strings.agents);
   const icons: Record<Pane, Component<{ size?: number; strokeWidth?: number }>> = { conversation: MessageSquare, members: Users, missions: Target, activity: History, memory: Brain, routines: CalendarClock, settings: Settings2, tasks: Target };
@@ -225,10 +223,6 @@
     if (!snapshot || !partner || !selected) return;
     creating = { kind: 'mission', preset: missionPreset(snapshot, partner), from: selected };
   }
-  function plan(text: string) {
-    draft = text;
-    pane = 'routines';
-  }
 </script>
 
 {#snippet backButton(label: string)}
@@ -294,7 +288,7 @@
       {#key `${selected.kind}:${selected.id}:${current}:${visit}`}
         <div class="agents-body" class:chat={current === 'conversation'}>
           {#if current === 'conversation' && conversation}
-            <AgentConversation {view} scope={conversation} live={liveHere} onschedule={profile ? plan : undefined} />
+            <AgentConversation {view} scope={conversation} live={liveHere} />
           {:else if current === 'members' && partner}
             <AgentMembers {view} memberIds={partner.members} {group} {team} onopen={id => open({ kind: 'profile', id })} />
           {:else if current === 'missions'}
@@ -310,7 +304,7 @@
               <AgentKnowledge {view} scope={{ kind: 'team', id: team.id }} />
             {/if}
           {:else if current === 'routines' && profile}
-            <AgentRoutines {view} agentId={profile.id} {draft} ondraft={() => { draft = null; }} />
+            <AgentRoutines {view} agentId={profile.id} />
           {:else if current === 'settings'}
             <AgentEditor {view} kind={selected.kind} {record} embedded ondone={() => {}} oncancel={() => {}} />
             {#if profile}<AgentRuntimeSettings {view} agent={profile} />{/if}

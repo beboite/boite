@@ -29,7 +29,7 @@
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, keepOnly, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
   import { TimelineRows, rowEstimate, rowIndexOf, seam, type TimelineRow } from '../lib/timeline-rows';
-  import { GapRows, NO_GAPS, READ_AHEAD, RangeAsk, gapHeight, loadKeepingReader, wantedRange } from '../lib/history-gaps';
+  import { GapRows, NO_GAPS, READ_AHEAD, RangeAsk, gapHeight, heldNear, loadKeepingReader, wantedRange } from '../lib/history-gaps';
   import TimelineGap from './TimelineGap.svelte';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
@@ -669,8 +669,8 @@
     } else if (opened || pinned) {
       // Held by the reader or on its way down, the list is still at the bottom: it takes the new height once free.
       if (opened || untrack(following)) {
-        // Followed, the live end lets go of the messages far above it, and the heights measured for them.
-        if (untrack(following) && untrack(() => store.releaseOlder(threadId)) > 0) void tick().then(() => keepOnly([heights, risen], rows, messages));
+        // Followed, the live end lets go of the messages far above it, and the heights measured for them; never those within reach of the view.
+        if (untrack(following) && untrack(() => store.releaseOlder(threadId, () => heldNear(totals(rows), rows, messages, viewHeight * (READ_AHEAD + 1), views))) > 0) void tick().then(() => keepOnly([heights, risen], rows, messages));
         scrolledHeight = box.scrollHeight; edge.follow(box); scrollTop = box.scrollTop;
       }
       pinned = true; behind = false;
@@ -794,7 +794,7 @@
           {:else if startedFrom(message)}
             <SpawnMarker {store} link={startedFrom(message)!} direction="to" />
           {:else if message.role === 'user'}
-            <UserMessage {store} {message} {turn} {progress} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />
+            <UserMessage {store} {message} {turn} accepted={!!turn} responded={progress.responded(message.turnId)} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />
           {:else}
             <AssistantMessage {store} {threadId} {message} from={row.from} to={row.to} {signedOut} showModel={row.first && firstAssistantInTurn.get(message.turnId) === message.id}
               latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} views={views.get(message.turnId)} />

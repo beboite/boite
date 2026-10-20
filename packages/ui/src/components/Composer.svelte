@@ -33,16 +33,19 @@
   import SideAnswer from './SideAnswer.svelte';
   import { ComposerSide } from '../lib/composer-side.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
+  import { chipChoice, sendToTarget, type ComposerTarget } from '../lib/composer-target';
 
-  /** A centred draft drops the bottom padding so its heading and input form one block. */
-  let { store, centered = false }: { store: Store; centered?: boolean } = $props();
+  /** A centred draft drops the bottom padding so its heading and input form one block. A `target` makes it an agent's box. */
+  let { store, centered = false, target = null }: { store: Store; centered?: boolean; target?: ComposerTarget | null } = $props();
 
   const MAX_LINES = 8, sizesItself = selfSizing();
   const side = new ComposerSide();
   $effect(() => { key; store.client; return () => side.clear(); });
-  let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
+  let key = $derived(target?.key ?? store.openThread?.id ?? DRAFT_STASH_KEY);
+  /** The thread this box sends to: none when it speaks to an agent, whatever thread is open behind it. */
+  let thread = $derived(target ? null : store.openThread);
   let composer = $derived(store.composerStates[key]);
-  let hasQueue = $derived(!!(composer?.queued.length || store.openThread?.pendingAnswers?.length));
+  let hasQueue = $derived(!!(composer?.queued.length || thread?.pendingAnswers?.length));
   let activityRoom = $state(0);
   const answerEntries = textEntries();
   let text = $derived(composer?.text ?? '');
@@ -80,26 +83,11 @@
     mode: { testid: 'composer-mode', description: strings.slash.mode }
   };
 
-  /** The chips follow the open thread, or the remembered choice on a draft. */
+  /** The chips follow the open thread, or the remembered choice on a draft; an agent's box has none. */
   $effect(() => {
-    const thread = store.openThread;
-    const draft = store.draft;
     store.providers;
     store.accounts;
-    if (thread) {
-      choice = store.composerChoice({
-        providerId: thread.providerId,
-        accountId: thread.accountId,
-        permissionMode: thread.permissionMode,
-        model: thread.model,
-        effort: thread.effort,
-        speed: thread.speed ?? null
-      });
-    } else if (draft) {
-      choice = store.defaultChoice();
-    } else {
-      choice = null;
-    }
+    choice = chipChoice(store, thread, target);
   });
 
   /** A new draft or thread gets the keyboard; reloading the same thread preserves focus. */
@@ -111,9 +99,9 @@
   });
 
   /** This thread's own sent prompts, most recent first: what ArrowUp walks. */
-  let sent = $derived(sentPrompts(store.openThread?.messages ?? []));
+  let sent = $derived(target ? target.sent : sentPrompts(thread?.messages ?? []));
 
-  let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
+  let provider = $derived(target ? target.provider : choice ? store.providerOf(choice.providerId) : null);
   $effect(() => {
     if (provider?.available && provider.protocol !== 'echo' && choice) {
       const id = provider.id, accountId = choice.accountId;
@@ -132,34 +120,36 @@
    * which the store keeps on the device and sends once the machine is back.
    * A new thread needs the core to exist, so a draft waits for the machine.
    */
-  let offline = $derived(store.connection !== 'ready' && store.openThread !== null && !store.draft);
+  let offline = $derived(store.connection !== 'ready' && thread !== null && !store.draft);
   let machineLabel = $derived(workspace.machines.find((machine) => machine.store === store)?.label ?? strings.machines.local);
   /**
    * A question waiting for a written answer makes the box its free field: Send
    * answers it with the card's picks, the text and the attachments
    * (`lib/question-reply.svelte.ts`). Editing a sent message takes precedence.
    */
-  let reply = $derived(replyTarget(store));
+  let reply = $derived(target ? null : replyTarget(store));
   // An answer counts the card's picks, needs no model and cannot wait in the outbox.
   let canSend = $derived(
     (text.trim().length > 0 || attachments.length > 0 || (reply ? !!repliesOf(store).picks[reply.id]?.length : previewReferences.length > 0)) &&
       readingFiles === 0 &&
       !attachments.some(unresolvedAssetId) &&
-      (reply !== null || choice !== null) &&
+      (reply !== null || choice !== null || target !== null) &&
       (store.connection === 'ready' || (offline && !reply)) &&
       !picking &&
       !dictating &&
       // A prompt on its way holds back an edit, an answer and a draft's second prompt; on a thread the next one queues.
-      !(composer?.sending && (composer.editing || reply !== null || !store.openThread))
+      !(composer?.sending && (composer.editing || reply !== null || !thread))
   );
 
   // A new conversation asks what the user wants done; one under way names who reads the message.
   let placeholder = $derived(
-    reply
+    target
+      ? target.placeholder
+      : reply
       ? strings.composer.replyPlaceholder
       : offline
       ? fill(strings.composer.placeholderOffline, { machine: machineLabel })
-      : !store.openThread && store.draft
+      : !thread && store.draft
       ? strings.composer.placeholderNew
       : store.openProject && provider
         ? fill(strings.composer.placeholder, { provider: provider.name, project: store.openProject.name })
@@ -180,7 +170,7 @@
   let mentionQuery = $derived(mentionQueryOf(text, caret, previewReferences));
 
   /** A mention wins over the slash menu on the odd `/@word`: it is the word under the caret. */
-  let slashOpen = $derived(slashQuery !== null && mentionQuery === null && focused && !slashDismissed);
+  let slashOpen = $derived(!target && slashQuery !== null && mentionQuery === null && focused && !slashDismissed);
 
   /** Typing anything takes the box out of the dismissal Escape put it in. */
   $effect(() => {
@@ -189,22 +179,22 @@
     mentions.dismissed = false;
   });
 
-  let mentionOpen = $derived(mentionQuery !== null && focused && !mentions.dismissed);
+  let mentionOpen = $derived(!target && mentionQuery !== null && focused && !mentions.dismissed);
 
   /** The project whose files are named: the open thread's, or the draft's. */
-  let mentionProject = $derived(store.openThread?.projectId ?? store.draft?.projectId ?? null);
+  let mentionProject = $derived(target ? null : thread?.projectId ?? store.draft?.projectId ?? null);
 
   $effect(() => mentions.follow(mentionQuery, mentionProject, store.client));
 
-  let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(store.openThread?.commands ?? []));
+  let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(thread?.commands ?? []));
 
   /** Boite's prompt controls follow the agent's own commands. */
-  let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(CHIP_COMMANDS, !!store.openThread && !!provider && supportsSideQuestions(provider.protocol)));
+  let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(CHIP_COMMANDS, !!thread && !!provider && supportsSideQuestions(provider.protocol)));
 
   /** Agent commands first, so a tie goes to the agent's own. */
   let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
   let commandToken = $derived.by(() => {
-    const token = /^\/[^\s]+/.exec(text)?.[0];
+    const token = target ? undefined : /^\/[^\s]+/.exec(text)?.[0];
     return token && [...agentItems, ...boiteItems].some(item => item.label === token) ? token : '';
   });
   let keywords = $derived(claudeKeywords(provider?.protocol, choice?.model));
@@ -364,6 +354,11 @@
       }
       return;
     }
+    if (target) {
+      if (canSend && await sendToTarget(target, stateForInput(), prompt, images)) recall = null;
+      requestAnimationFrame(grow);
+      return;
+    }
     if (!canSend || !choice) return;
     const inputStore = store, inputKey = key, sendChoice = choice;
     const state = stateForInput();
@@ -494,10 +489,10 @@
    * after a refusal held it, or nothing while a pending prompt is going out.
    */
   let sendNow = $derived<'steer' | 'resume' | null>(
-    !composer?.queued.length || composer.sending || store.connection !== 'ready' || !store.openThread ? null
+    !composer?.queued.length || composer.sending || store.connection !== 'ready' || !thread ? null
       // A refused outbox prompt has its own Send again; one written offline is a turn of its own, not steering.
       : composer.queued[0]!.request?.failed !== undefined ? null
-      : store.openThread.status === 'running' ? (composer.queued[0]!.request ? null : 'steer') : store.busy ? null : composer.paused ? 'resume' : null
+      : thread.status === 'running' ? (composer.queued[0]!.request ? null : 'steer') : store.busy ? null : composer.paused ? 'resume' : null
   );
 
   /**
@@ -532,7 +527,6 @@
    */
   function recallPrompt(prompt: SentPrompt) {
     const state = stateForInput();
-    const thread = store.openThread;
     const edit = !store.busy && state.queued.length === 0 && thread !== null && !thread.agentSessionId && thread.projectId !== null;
     restorePrompt(prompt.text, prompt.previewReferences);
     if (edit) state.attachments = prompt.attachments;
@@ -593,9 +587,9 @@
   /** The stash chord sets text aside for this thread; an empty composer takes it back. */
   function stash() {
     if (previewReferences.length) { store.error = strings.previewComments.stashUnsupported; return; }
-    const key = store.threadKey(store.openThread?.id ?? DRAFT_STASH_KEY);
+    const stashKey = store.threadKey(key);
     if (text.trim().length > 0) {
-      writeStash(key, text);
+      writeStash(stashKey, text);
       recall = null;
       // The text set aside is plain text: the next prompt typed is not an edit of a sent one.
       const state = stateForInput();
@@ -604,9 +598,9 @@
       put('');
       return;
     }
-    const stashed = readStash(key);
+    const stashed = readStash(stashKey);
     if (stashed === null) return;
-    clearStash(key);
+    clearStash(stashKey);
     recall = null;
     put(stashed);
   }
@@ -696,9 +690,9 @@
       if (older()) event.preventDefault();
     } else if (event.key === 'ArrowDown' && !event.shiftKey) {
       if (newer()) event.preventDefault();
-    } else if (event.key === 'Escape' && (store.busy || store.openThread?.activity?.goal?.status === 'active' || store.openThread?.activity?.loop?.status === 'active')) {
+    } else if (event.key === 'Escape' && (target ? target.busy && !!target.stop : store.busy || thread?.activity?.goal?.status === 'active' || thread?.activity?.loop?.status === 'active')) {
       event.preventDefault();
-      void store.stop();
+      if (target) target.stop?.(); else void store.stop();
     } else if (event.key === 'Escape' && composer?.editing) {
       event.preventDefault();
       cancelEdit();
@@ -713,9 +707,9 @@
   }
 }}>
   <div class="queue-region" style:padding-bottom={hasQueue ? `${activityRoom}px` : undefined}>
-    {#if store.openThread?.pendingAnswers?.length}
+    {#if thread?.pendingAnswers?.length}
       <div data-testid="question-queued">
-        <ComposerQueue queued={answerEntries(store.openThread.pendingAnswers)} disabled={true} paused={false} sendNow={null} onrestore={() => {}} onsendnow={() => {}} />
+        <ComposerQueue queued={answerEntries(thread.pendingAnswers)} disabled={true} paused={false} sendNow={null} onrestore={() => {}} onsendnow={() => {}} />
       </div>
     {/if}
     {#if composer && composer.queued.length > 0}
@@ -729,10 +723,10 @@
   </div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="composer" class:dictating data-testid="composer" {ondragover} {ondrop}>
-    <ThreadActivity {store} reserveInComposer={hasQueue} onroom={(height) => (activityRoom = height)} />
+    {#if !target}<ThreadActivity {store} reserveInComposer={hasQueue} onroom={(height) => (activityRoom = height)} />{/if}
     <ComposerIntent editing={!!composer?.editing} reply={reply?.async && reply.id === repliesOf(store).docked ? null : reply} oncancel={cancelEdit} onignore={() => ignoreQuestions(store)} />
 
-    {#if side.current && side.current.threadId === store.openThread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); box?.focus({ preventScroll: true }); }} />{/if}
+    {#if side.current && side.current.threadId === thread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); box?.focus({ preventScroll: true }); }} />{/if}
     {#if attachments.length > 0}
       {#key composer}<ComposerAttachments bind:this={attachmentStrip} {attachments} highlighted={highlightedImage} onremove={removeAttachment} onfocus={() => box?.focus({ preventScroll: true })} />{/key}
     {/if}
@@ -799,7 +793,7 @@
       </div>
     {/if}
 
-    <ComposerBar bind:this={toolbar} {store} {key} {provider} {canSend} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
+    <ComposerBar bind:this={toolbar} {store} {key} {target} {provider} {canSend} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
       onsubmit={() => void submit()}
       onfiles={(files) => void take(files)}
       onpreview={(text, status, error) => { speechPreview = text; speechStatus = status; speechError = error; }}

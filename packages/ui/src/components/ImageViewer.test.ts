@@ -7,7 +7,6 @@ import ChatFile from './ChatFile.svelte';
 import UserMessage from './UserMessage.svelte';
 import type { MediaItem } from '../lib/media-gallery';
 import type { Store } from '../lib/store.svelte';
-import type { TurnProgress } from '../lib/turn-progress.svelte';
 
 const mounted: Record<string, unknown>[] = [];
 const createObjectURL = URL.createObjectURL;
@@ -209,8 +208,7 @@ test('a picture sent with a prompt opens in the viewer among the others', () => 
     ]
   } as unknown as Message;
   const store = { providerOf: () => undefined, openThread: null } as unknown as Store;
-  const progress = { responded: () => false } as unknown as TurnProgress;
-  mounted.push(mount(UserMessage, { target: thread, props: { store, message, turn: undefined, progress } }));
+  mounted.push(mount(UserMessage, { target: thread, props: { store, message, turn: undefined, accepted: false, responded: false } }));
   flushSync();
   const shots = [...document.querySelectorAll<HTMLButtonElement>('[data-testid=image-open]')];
   shots[1]!.click(); flushSync();
@@ -236,8 +234,7 @@ test('a deferred picture drawn from its light copy opens its original in the vie
   const loadMessageAttachment = vi.fn(async () => { part.data = btoa('original'); delete part.dataDeferred; return part.data; });
   const loadDisplayImage = vi.fn(async () => 'data:image/webp;base64,COPY');
   const store = { providerOf: () => undefined, openThread: null, loadMessageAttachment, loadDisplayImage, reportError: vi.fn() } as unknown as Store;
-  const progress = { responded: () => false } as unknown as TurnProgress;
-  mounted.push(mount(UserMessage, { target: thread, props: { store, message, turn: undefined, progress } }));
+  mounted.push(mount(UserMessage, { target: thread, props: { store, message, turn: undefined, accepted: false, responded: false } }));
   flushSync();
 
   query<HTMLButtonElement>('[data-testid=image-open]').click();
