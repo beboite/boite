@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AnswerAttachment, Attachment, FileAttachment, ImageAttachment, MessagePart, QuestionAnswer } from '@boite/contracts';
+import type { AnswerAttachment, Attachment, FileAttachment, ImageAttachment, MessagePart, ProviderDescriptor, QuestionAnswer } from '@boite/contracts';
 
 /**
  * Copies this process wrote, or found equal to their upload, with the stats
@@ -106,11 +106,22 @@ export function answerText(answer: QuestionAnswer): string {
   return [answer.text ?? '', answerNotes.get(answer) ?? ''].filter(part => part.length > 0).join('\n\n');
 }
 
-/** All drivers read files through their existing local tools; images retain native payloads. */
-export function prepareAttachments(dataDir: string, input: { prompt: string; attachments: Attachment[] }): { prompt: string; attachments: ImageAttachment[] } {
-  const files = input.attachments.filter(file => file.kind === 'file');
+/** The image formats Antigravity's server takes in a prompt: no GIF. */
+const ANTIGRAVITY_IMAGES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+
+/** An image this provider's agent takes as a prompt block; any other is handed over as a file. */
+function nativeImage(provider: ProviderDescriptor | undefined, file: Attachment): file is ImageAttachment {
+  return file.kind === 'image' && (provider?.quirks?.includes('antigravity') !== true || ANTIGRAVITY_IMAGES.has(file.mimeType));
+}
+
+/**
+ * All drivers read files through their existing local tools; images retain
+ * native payloads, unless the provider's agent takes none of that format.
+ */
+export function prepareAttachments(dataDir: string, input: { prompt: string; attachments: Attachment[] }, provider?: ProviderDescriptor): { prompt: string; attachments: ImageAttachment[] } {
+  const files = input.attachments.filter(file => !nativeImage(provider, file));
   return {
-    prompt: input.prompt + (files.length ? `\n\n${FILES_NOTE}\n${files.map(file => fileReference(dataDir, file)).join('\n')}` : ''),
-    attachments: input.attachments.filter(file => file.kind === 'image'),
+    prompt: input.prompt + (files.length ? `\n\n${FILES_NOTE}\n${files.map(file => fileReference(dataDir, { ...file, kind: 'file' })).join('\n')}` : ''),
+    attachments: input.attachments.filter(file => nativeImage(provider, file)),
   };
 }

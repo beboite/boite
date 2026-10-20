@@ -673,7 +673,21 @@ descriptor uses additional fields available to other providers:
 `quirks: ["antigravity"]` folds a tool call's command, working directory and
 output under one spelling and draws an `interaction_` permission request as the
 agent's own question; its modes are `default`, `auto_edit` and `yolo`, with no
-plan mode. `quirks: ["grok"]` selects Grok behavior
+plan mode. A `start_subagent` call (titled `Running start_subagent` or `Run
+start_subagent?`, without `_meta.is_mcp_tool_call`) carries the batch it
+launched as `nativeAgents`, listed in Subagents: the call returns once the batch
+is launched, its output is the launch's description, and the agent reports no
+child ids, names, models or results, so the batch stays running while the turn
+runs and reads unknown after it; only a failed launch is final, with its error.
+A shell call (`kind: execute`) still running when the prompt answers is the
+thread's background work: the process stays up past the warm window until the
+command's own update ends it, and Stop on the idle thread closes the process,
+the only way to end such a command since `session/cancel` stops prompts alone.
+A GIF goes to the agent as a saved file, the server taking PNG, JPEG and WebP
+blocks only. On Linux the launch environment names the first CA bundle found
+(`NIX_SSL_CERT_FILE`, then the usual `/etc` paths) as `SSL_CERT_FILE` unless
+`SSL_CERT_FILE` or `SSL_CERT_DIR` is set, since the server's bundled Python
+finds none on NixOS. `quirks: ["grok"]` selects Grok behavior
 (`packages/core/src/drivers/grok.ts`). Text sent while a prompt runs, an
 asynchronous answer or a coordination message, goes out as Grok's
 `_x.ai/interject { sessionId, text }`, which joins the running turn at its next

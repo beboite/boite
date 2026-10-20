@@ -19,7 +19,8 @@ import { currentOs, homePath } from './paths.ts';
 /**
  * What an isolation variable means when it is not set, as segments under the
  * home directory. A descriptor that isolates an account through one of them
- * (OpenCode uses the XDG pair, Codex `CODEX_HOME`, pi `PI_CODING_AGENT_DIR`)
+ * (OpenCode uses the XDG pair, Codex `CODEX_HOME`, pi `PI_CODING_AGENT_DIR`,
+ * Antigravity `GEMINI_HOME`)
  * puts its session file under that same variable, so the provider's own location
  * is the variable's own default, never `~/.<id>`.
  */
@@ -32,6 +33,7 @@ export const ISOLATION_DEFAULTS: Record<string, string[]> = {
   CLAUDE_CONFIG_DIR: ['.claude'],
   GROK_HOME: ['.grok'],
   PI_CODING_AGENT_DIR: ['.pi', 'agent'],
+  GEMINI_HOME: ['.gemini'],
 };
 
 /** The file at the root of an account's directory that says what Boite linked and copied there. */

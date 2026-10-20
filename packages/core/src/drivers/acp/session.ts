@@ -18,6 +18,7 @@ import { grokLaunchArgs } from '../grok.ts';
 import { stderrLines } from '../lines.ts';
 import { exitWithin } from '../exit.ts';
 import type { LiveTurnSettings, ProbeContext, ProbeFilter, SessionContext } from '../types.ts';
+import { OpenCommands } from './commands.ts';
 import { SessionControls } from './controls.ts';
 import { failureText, loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
 import { AGENT_OWN_MODEL } from './models.ts';
@@ -111,6 +112,8 @@ export class AcpSession {
   /** Armed by a stop on a prompt in flight: an agent that ignores the cancel is closed. */
   private stopTimer: Timer | null = null;
   private queue: Promise<void> = Promise.resolve();
+  /** Antigravity's shell commands, the ones that outlived their turn included. */
+  private readonly commands = new OpenCommands();
   /** Grok answered `_x.ai/interject` with an error once: this process has no mid-turn input. */
   private interjectRefused = false;
   private running = 0;
@@ -430,7 +433,10 @@ export class AcpSession {
       this.stopTimer = null;
     }
     if (this.active === turn) this.active = null;
-    const dropping = drop || this.closing || this.retention.idleMs(this.warmMs) <= 0;
+    // A command the prompt left running keeps the process: closing it would
+    // end the command, which Stop on the idle thread does when asked.
+    const outlived = !drop && !this.closing && turn.antigravity && this.commands.promote(turn.ctx);
+    const dropping = drop || this.closing || (!outlived && this.retention.idleMs(this.warmMs) <= 0);
     turn.settle();
     this.running = Math.max(0, this.running - 1);
     if (dropping) {
@@ -629,6 +635,7 @@ export class AcpSession {
     this.ended = true;
     this.closing = true;
     this.clearIdle();
+    this.commands.clear();
     const connection = this.connection;
     this.connection = null;
     this.agent = null;
@@ -657,6 +664,8 @@ export class AcpSession {
 
   private armIdle(): void {
     this.clearIdle();
+    // The window starts once the last command that outlived its turn ended.
+    if (this.commands.outlived()) return;
     this.idle = setTimeout(() => {
       this.idle = null;
       this.drop();
@@ -705,6 +714,13 @@ export class AcpSession {
     if (update.sessionUpdate === 'usage_update') {
       const cost = usdCostOf(update);
       if (cost !== null) this.reportedCost = cost;
+    }
+    // This session's own: a `session/load` replays its history before the id is set.
+    if (this.ctx?.provider.quirks?.includes('antigravity') === true && params.sessionId === this.sessionId
+      && this.commands.note(update) && !this.busy()) {
+      // The last command a finished turn left running ended: the warm rule applies from now.
+      if (this.retention.idleMs(this.warmMs) <= 0) this.drop();
+      else if (!this.retention.viewed) this.armIdle();
     }
     const turn = this.current;
     if (turn === null) return;
