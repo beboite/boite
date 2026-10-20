@@ -59,6 +59,21 @@ afterEach(async () => {
 });
 
 describe('providers', () => {
+  test('common environment expands for every OS and profile values override it', () => {
+    const descriptor = validDescriptor();
+    descriptor.env = { XDG_DATA_HOME: '{home}/.local/share/mine', MINE_MODE: 'common' };
+    (descriptor.profiles as Record<string, Record<string, unknown>>).windows!.env = { MINE_MODE: 'windows' };
+    writeUserDescriptor('common-env.json', descriptor);
+    expect(harness.core.providers.load().rejected).toEqual([]);
+    const profiles = harness.core.providers.require('mine').profiles;
+    for (const os of ['windows', 'linux', 'macos'] as const) {
+      expect(profiles[os]?.env).toEqual({ XDG_DATA_HOME: `${homePath()}/.local/share/mine`, MINE_MODE: os === 'windows' ? 'windows' : 'common' });
+    }
+    descriptor.env = { XDG_DATA_HOME: 42 };
+    writeUserDescriptor('common-env.json', descriptor);
+    expect(harness.core.providers.load().rejected).toMatchObject([{ field: 'env.XDG_DATA_HOME' }]);
+  });
+
   test('a directory cannot mask a runnable fallback executable', () => {
     const directory = join(harness.dataDir, 'not-an-executable');
     mkdirSync(directory);

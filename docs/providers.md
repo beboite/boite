@@ -299,6 +299,8 @@ OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
   segments are refused. It is not an OS filesystem sandbox for the agent.
 - `profiles` holds one `OsProfile` per operating system, keyed `windows`, `linux`,
   `macos`. A provider with no profile for the running OS is not offered.
+- `env` supplies common environment defaults for every OS profile; each profile's
+  `env` overrides them before path tokens are expanded.
 - `auth.kind` is `oauth-cli`, `api-key` or `none`, and `auth.session` names the
   files inside the isolation directory that carry the login, which is what the
   core reads to tell `ok` from `unauthenticated`. `auth.sqlite` is the same
