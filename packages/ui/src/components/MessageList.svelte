@@ -541,7 +541,7 @@
     const distance = height - box.scrollTop - box.clientHeight, closer = distance < scrolledGap - 1; scrolledGap = distance;
     // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
     if (hold.held && box.scrollTop < scrollTop - 1) leftBottom = true;
-    const moved = edge.moved(box);
+    const relaid = edge.relaid(box), moved = edge.moved(box);
     // `scrollTop` lags the observer's follows; the edge alone counts this list's own corrections.
     const rose = moved < -1, descended = moved > 1 && box.scrollTop > scrollTop + 1;
     scrollTop = box.scrollTop;
@@ -558,8 +558,8 @@
     // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom. Moved down
     // as far from it, by a row growing above after a small notch up, the list took it back and bounced each notch.
     if (descended && closer && atBottom(box)) leftBottom = false;
-    // A card shrinking can clamp scrollTop before new output grows the list again.
-    pinned = !cutBelow && !leftBottom && (atBottom(box) || (pinned && resized && !hold.held));
+    // A card shrinking can clamp scrollTop before new output grows the list again; so can its own box growing and shrinking back (`relaid`).
+    pinned = !cutBelow && !leftBottom && (atBottom(box) || (pinned && (resized || relaid) && !hold.held));
     if (anchors.restoring) pinned = false;
     // Away from the bottom, the way back shows, whether or not anything new came in.
     behind = !pinned;
