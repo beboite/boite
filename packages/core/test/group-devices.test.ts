@@ -293,9 +293,9 @@ test('a machine joining a group tells a device of it to come back, not that it i
   let asked!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
   const asking = new Promise<void>((resolve) => { asked = resolve; });
-  const group = b.core.group as unknown as { askToJoin: (...args: unknown[]) => Promise<unknown> };
-  const ask = group.askToJoin.bind(b.core.group);
-  group.askToJoin = async (...args) => { asked(); await held; return ask(...args); };
+  const group = a.core.group as { http: (request: Request) => Promise<Response> };
+  const answer = group.http.bind(a.core.group);
+  group.http = async (request) => { asked(); await held; return answer(request); };
   const joining = b.core.group.join(invite);
   await asking;
   let refusal: { code?: number; data?: unknown } | undefined;
