@@ -109,9 +109,14 @@ test('pasted images have linked references and a preview that leaves the compose
       // Typing room keeps the preview open.
       await press(await pointIn('[data-testid=composer-input]'));
       expect(await page.evaluate('document.querySelector("[data-testid=composer-image-preview]") !== null')).toBe(true);
+      // The press below lands on the thread's last answer only while the list keeps to its bottom.
+      expect(await page.evaluate('document.querySelector("[data-testid=jump-to-latest]") === null')).toBe(true);
       await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, x: mobile ? 190 : 800, y: 160 });
       await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, x: mobile ? 190 : 800, y: 160 });
       await page.waitFor('!document.querySelector("[data-testid=composer-image-preview]")');
+      // The shorter composer clamps the list's scroll; its scroll event comes with the next frame. Reopened
+      // before it, the list reads that event against the taller composer as the reader leaving the bottom.
+      await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
       expect(await page.evaluate('document.querySelector("[data-testid=composer-input]").value')).toContain('Check the save button.');
       await page.click('[data-testid=composer-image-open]');
       await page.waitFor('document.querySelector("[data-testid=composer-image-preview]")');
