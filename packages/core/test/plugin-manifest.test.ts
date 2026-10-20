@@ -129,18 +129,18 @@ describe('the recommended list', () => {
     expect(bots.executable).toBe('bots');
     expect(bots.provides).toEqual({ desktopApp: {} });
     expect(bots.artifacts['win32-x64']).toEqual({
-      url: 'https://github.com/beboite/bots/releases/download/v0.1.16/bots-x86_64-pc-windows-msvc.exe',
+      url: 'https://github.com/Skollheim/bots/releases/download/v0.1.16/bots-x86_64-pc-windows-msvc.exe',
       sha256: '2d04730442c180197d289e839ce537000b5b50d03ea73f82340e21d11aecab35',
     });
     expect(bots.artifacts['linux-arm64']?.sha256).toBe('66b3ed9dd2434eded78aff427d4c85936ef497ca54f0084b5aed766c443d17e9');
     expect(Object.keys(bots.artifacts)).toHaveLength(6);
-    for (const artifact of Object.values(bots.artifacts)) expect(artifact?.url).toMatch(/^https:\/\/github\.com\/beboite\/bots\/releases\/download\/v0\.1\.16\/bots-/);
+    for (const artifact of Object.values(bots.artifacts)) expect(artifact?.url).toMatch(/^https:\/\/github\.com\/Skollheim\/bots\/releases\/download\/v0\.1\.16\/bots-/);
   });
 
   test('Bots and Douane find their newer releases on their own repositories', () => {
     expect(recommendedUpdates()).toEqual({
-      bots: { url: 'https://github.com/beboite/bots', ref: 'main' },
-      douane: { url: 'https://github.com/beboite/douane', ref: 'main' },
+      bots: { url: 'https://github.com/Skollheim/bots', ref: 'main' },
+      douane: { url: 'https://github.com/mtsu-dev/douane', ref: 'main' },
     });
   });
 });
