@@ -11,7 +11,7 @@ use serde_json::json;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     ContentLoadingEventHandler, CoTaskMemPWSTR, NavigationCompletedEventHandler, NavigationStartingEventHandler,
-    ProcessFailedEventHandler,
+    ProcessFailedEventHandler, WebResourceRequestedEventHandler,
 };
 use windows::core::{Interface, BOOL, PWSTR};
 
@@ -222,13 +222,14 @@ fn error_name(status: COREWEBVIEW2_WEB_ERROR_STATUS) -> &'static str {
 }
 
 /// Logs each navigation of the main page as `shell.webview.navigation`: when
-/// it starts and to which URL, whether its content is an error page, and how
-/// it ends, with WebView2's error status and the HTTP status. A page left on
-/// about:blank on Windows runners logged only `page-load` started and
-/// finished, 17 and 22 s after the shell started, which says neither when the
-/// navigation was asked for nor why it ended without a document (2026-10-19).
-/// The first record says where the page is when the watch begins, in case
-/// its first navigation started before.
+/// it starts and to which URL, when its document request reaches the host,
+/// whether its content is an error page, and how it ends, with WebView2's
+/// error status and the HTTP status. A page left on about:blank on Windows
+/// runners logged only `page-load` started and finished, 17 and 22 s after
+/// the shell started, which says neither when the navigation was asked for
+/// nor why it ended without a document (2026-10-19). The first record says
+/// where the page is when the watch begins, in case its first navigation
+/// started before.
 fn watch_navigations(webview: &ICoreWebView2) -> windows::core::Result<()> {
     let mut source = PWSTR::null();
     let at = if unsafe { webview.Source(&mut source) }.is_ok() { bare(source) } else { String::new() };
@@ -245,6 +246,22 @@ fn watch_navigations(webview: &ICoreWebView2) -> windows::core::Result<()> {
         Ok(())
     }));
     unsafe { webview.add_NavigationStarting(&starting, &mut token)? };
+    // Wry's handler, registered when the webview was built, runs first and
+    // hands the request to Tauri's asset protocol, which answers from its own
+    // thread (`shell.webview.navigation` `answered`, `window.rs`).
+    let requested = WebResourceRequestedEventHandler::create(Box::new(|_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT::default();
+        unsafe { args.ResourceContext(&mut context)? };
+        if context != COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT { return Ok(()) }
+        let mut uri = PWSTR::null();
+        unsafe { args.Request()?.Uri(&mut uri)? };
+        let url = bare(uri);
+        shell_log::info("webview", "shell.webview.navigation", format!("the host got the document request for {url}"),
+            json!({ "phase": "requested", "url": url }));
+        Ok(())
+    }));
+    unsafe { webview.add_WebResourceRequested(&requested, &mut token)? };
     let content = ContentLoadingEventHandler::create(Box::new(|_, args| {
         let Some(args) = args else { return Ok(()) };
         let (mut id, mut error_page) = (0u64, BOOL::default());
