@@ -13,7 +13,8 @@ browser and holds its flags, `browser/launch.ts` starts it, `browser/cdp.ts` is 
 `browser/recorder.ts` records, `browser/frames.ts` takes a viewer's frames and `browser/scripts.ts` holds what is evaluated
 in a page for viewers. `browser/automation.ts` runs agent-browser's commands
 with `browser/page-kit.ts`, the script that reads a page into a snapshot with
-refs and finds `@eN`, CSS and `text=` targets.
+refs and finds `@eN`, CSS and `text=` targets, and `browser/page-frames.ts`
+reaches the frames of other origins.
 
 ## Which browser
 
@@ -222,6 +223,40 @@ error. A click, a key or a fill that starts a navigation waits the same way and
 reports where the page went. Clicks, keys and text are native input; an element
 something covers is clicked through the DOM, and the agent hears what covered
 it.
+
+## Frames from other origins
+
+The page kit reads a frame of its own origin through the iframe, and measures
+an element there in its own document, then moves the point out through each
+iframe around it. The browser hides the document of another origin from the
+page's script: a payment form, a captcha or an embedded sign-in would show only
+its iframe. The kit lists each such iframe that has a size, and the core reads
+its document in the frame's own context, then sets the lines under the iframe
+and numbers its refs after those read before (`browser/page-frames.ts`):
+
+- A frame of the same site runs in the page's renderer, in an execution context
+  of its own on the tab's session; the core keeps each frame's context from the
+  `Runtime.executionContextCreated` events.
+- A frame of another site runs in a process of its own, a target whose id is
+  the frame's. The command attaches to it, enables its runtime, so its own
+  frames of the same site are listed too, and leaves it when it ends.
+- The iframe's element names its frame through `DOM.describeNode`.
+
+The kit keeps its refs in each frame's own window, and the core keeps, for each
+ref the last snapshot read in a frame, the iframe refs that lead to it. A
+command on such a ref runs in that frame's document. Native input is sent to
+the tab in the top document's coordinates: each iframe around the element is
+scrolled into its parent's view, and its content box's position is added to
+the point. A point outside a parent's view is clicked through the DOM, with a
+note. A navigation of the top document forgets the frame refs, so an old one
+is refused by name.
+
+A snapshot reads at most 30 frames of other origins, within its 40,000
+characters; one past either is a note under its iframe. With `-i`, a frame with
+nothing to act on is left out. The desktop app relays no
+`Runtime.executionContextDestroyed` and attaches to no frame's process: a hosted
+tab reaches a frame of the same site through its context, and a frame of
+another site shows as a note.
 
 ## The desktop app hosts the tabs
 
@@ -473,7 +508,12 @@ one kept awake by `browser.remoteWatch`, and a machine without a browser. `brows
 stubbed, that a command arriving during a freeze runs after the wake, and that
 a held or closed tab never sleeps, that a running turn holds an unused
 tab only 5 minutes, and that a wake call that misses its time fails at once and then names who stalled. `AgentBrowserSurface.test.ts` checks that the desktop app
-reports a hosted tab it shows, only while its window is visible. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
+reports a hosted tab it shows, only while its window is visible. `browser-cli.test.ts` checks the CLI's files and `browser run` scripts with the browser stubbed.
+`browser-frames.test.ts` reads and drives a payment form in a frame of the
+page's origin, one of another site, one of another origin of the same site
+below the fold, and a frame of another site nested in the second: native clicks land in each (`isTrusted`),
+fill and get reach them, and a frame ref is refused after the page moves on.
+The desktop app's relay of frames is not covered.
 `tests/e2e/agent-browser-core.test.ts` runs the whole path on a real core: the
 owner's desktop at 1280 × 900 and a paired phone at 390 × 844 see the cover,
 show the page and tap it, and the tap reaches the page. `browser-remote.test.ts`

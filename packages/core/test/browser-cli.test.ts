@@ -1,11 +1,12 @@
 import { expect, spyOn, test } from 'bun:test';
-import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_ENV, BROWSER_RECORDING_CHUNK_BYTES, type BrowserReply } from '@boite/contracts';
+import { AGENT_ENV, BROWSER_RECORDING_CHUNK_BYTES, type BrowserAction, type BrowserReply } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { browserAction, browserLines } from '../src/browser-cli.ts';
 import { parse } from '../src/cli-args.ts';
 import { echoThread, startTestCore } from './harness.ts';
+import { refused } from '../src/errors.ts';
 
 test('browser screenshots accept explicit destinations, preserve existing files and document default cleanup', async () => {
   const harness = await startTestCore();
@@ -149,4 +150,69 @@ test('browser output is agent-browser text: a check, the page reached and the di
   expect(lines({ kind: 'get', what: 'text', selector: '@e1' }, 'plain words')).toEqual(['plain words']);
   expect(lines({ kind: 'get', what: 'checked', selector: '@e1' }, false)).toEqual(['false']);
   expect(lines({ kind: 'status' }, { tabs: [{ tabId: 'browser:t', url: 'https://x.test/', title: 'X', profileName: 'Privé', active: true }] })).toEqual(['* browser:t  X  https://x.test/  [Privé]']);
+});
+
+test('browser run sends a script\'s steps in order in one call, prints what they did and what it returns, and stops at a failed step with the page it left', async () => {
+  const harness = await startTestCore();
+  const owner = await harness.connect();
+  try {
+    const { threadId } = await echoThread(harness, owner);
+    const sent: BrowserAction[] = [];
+    const page = { tabId: 'browser:t', url: 'https://shop.test/', title: 'Shop' };
+    // The CLI's own work: the core's answers are tested in browser.test.ts.
+    spyOn(harness.core.browser, 'command').mockImplementation(async request => {
+      const action = request.action as BrowserAction;
+      sent.push(action);
+      if (action.kind === 'open') return { ...page, value: { ok: true, navigated: true, url: page.url, title: page.title } };
+      if (action.kind === 'snapshot') return { tabId: page.tabId, value: { text: '- button "Go" [ref=e1]\n- textbox "Name" [ref=e2]', refs: 2, url: page.url, title: page.title } };
+      if (action.kind === 'click' && action.selector === '@e7') throw refused('ref @e7 is stale because the page changed; take a new snapshot');
+      if (action.kind === 'click') return { tabId: page.tabId, value: { ok: true, navigated: true, url: 'https://shop.test/next', title: 'Next' } };
+      if (action.kind === 'evaluate') return { tabId: page.tabId, value: 42 };
+      if (action.kind === 'status') return { value: { tabs: [{ ...page, active: true }] } };
+      return { tabId: page.tabId, value: { ok: true } };
+    });
+    const cwd = join(harness.dataDir, 'scripts'); mkdirSync(cwd);
+    const run = async (args: string[], stdin?: string) => {
+      let out = '', error = '';
+      const code = await runCli(['browser', 'run', ...args], { cwd, ...(stdin === undefined ? {} : { stdin: async () => stdin }),
+        env: { [AGENT_ENV.threadId]: threadId, [AGENT_ENV.coreUrl]: harness.url, [AGENT_ENV.token]: harness.core.agents.tokenFor(threadId) },
+        out: text => out += text, err: text => error += text });
+      return { code, out, error };
+    };
+    writeFileSync(join(cwd, 'flow.js'), [
+      "await page.open('https://shop.test/')",
+      'const tree = await page.snapshot({ interactive: true })',
+      "await page.fill('@e2', args[0])",
+      "await page.click(tree.includes('Go') ? '@e1' : '@e9')",
+      "console.log('clicked', { at: 1 })",
+      'return { sum: await page.eval((a, b) => a + b, 40, 2) }',
+    ].join('\n'));
+    const done = await run(['flow.js', 'secret-name']);
+    expect(done.code).toBe(0);
+    expect(sent.map(action => action.kind)).toEqual(['open', 'snapshot', 'fill', 'click', 'evaluate']);
+    expect(sent[1]).toEqual({ kind: 'snapshot', interactive: true });
+    expect(sent[2]).toEqual({ kind: 'fill', selector: '@e2', text: 'secret-name' });
+    expect(sent[4]).toEqual({ kind: 'evaluate', expression: '((a, b) => a + b)(...[40,2])' });
+    expect(done.out).toContain('> click @e1\n✓ Next\n  https://shop.test/next\n');
+    expect(done.out).toContain('clicked {"at":1}\n');
+    expect(done.out).toEndWith('{\n  "sum": 42\n}\n');
+    // What was typed stays out of the output: it can be a password.
+    expect(done.out).not.toContain('secret-name');
+
+    sent.length = 0;
+    const stopped = await run(['-'], "await page.click('@e1')\nawait page.click('@e7')\nawait page.click('@e8')");
+    expect(stopped.code).toBe(1);
+    expect(sent.map(action => action.kind === 'click' ? action.selector : action.kind)).toEqual(['@e1', '@e7', 'snapshot']);
+    expect(stopped.out).toContain('✗ step 2, click @e7: ref @e7 is stale because the page changed; take a new snapshot\npage now: Shop  https://shop.test/\n- button "Go" [ref=e1]');
+    expect(stopped.error).toContain('browser run stopped at step 2, click @e7');
+
+    const broken = await run(['-'], "await page.click('@e1')\nnull.go()");
+    expect(broken.out).toContain('✗ stdin.js line 2: ');
+    expect((await run(['-'], 'await page.click(')).error).toContain('stdin.js does not parse');
+    const plain = await run(['-'], "await page.click('@e1')");
+    expect(plain.out).toEndWith('✓ 1 step; the page is Shop  https://shop.test/\n');
+    let help = '';
+    await runCli(['browser', 'help'], { cwd, env: { [AGENT_ENV.threadId]: threadId, [AGENT_ENV.coreUrl]: harness.url, [AGENT_ENV.token]: harness.core.agents.tokenFor(threadId) }, out: text => help += text, err: () => {} });
+    expect(help).toContain('run <script.js|-> [args...]');
+  } finally { owner.close(); await harness.stop(); }
 });

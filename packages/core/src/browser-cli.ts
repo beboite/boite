@@ -45,9 +45,33 @@ Targets: @e3 (a ref from the last snapshot), a CSS selector matching one element
   download save <id> [path]       copy a finished download out of quarantine into cwd or a folder
                                   under it (default: its name), never overwriting, never executable
   download wait <id> [--timeout <ms>] | download discard <id>
+  run <script.js|-> [args...]     run many steps in one call (see Batching)
 
 Each action waits for the navigation it starts and reports where the page went and the
 dialogs it answered. Refs change after every snapshot; take a new one after the page changes.
+A frame from another site (a payment form, a captcha, a sign-in widget) is listed under its
+iframe; its elements have refs like any other.
+
+Batching: each separate call waits for your next turn, which is most of the time a page takes.
+Chain the steps you can foresee in one shell call and end on a snapshot:
+  boite browser click @e3 && boite browser wait --load load && boite browser snapshot -i
+For loops and conditions, run a script. The file, or stdin with -, is the body of an async
+function with page, args (the words after the script), console and sleep(ms) in scope:
+  boite browser run - <<'EOF'
+  await page.open('https://example.com/login')
+  await page.fill('#email', 'ada@example.com')
+  await page.click('text=Continue')
+  await page.wait({ url: '**/inbox' })
+  return page.snapshot({ interactive: true })
+  EOF
+page has one method per command: open(url, { profile }), goto, snapshot({ interactive, compact,
+depth, selector, urls }) returning its text, click, dblclick, hover, focus, check, uncheck,
+scrollIntoView, fill, type, select(target, ...values), press, scroll(direction, px),
+wait(target | ms | { text, url, fn, load, timeout }), get(what, target, attr), is(what, target),
+eval(js, or a function and its JSON arguments), back, forward, reload, screenshot(path),
+dialog(decision, text), tabs(), tab(id), and command(...words) for any other, returning what
+--json prints. A failed step stops the script: the output names it, then shows the page's
+interactive snapshot. What the script returns is printed.
 The browser is a headless Chrome, Chromium, Edge or Brave on the machine that runs this
 conversation (BOITE_BROWSER names another executable). The user sees your tabs live in the
 conversation's panel, from any device, and can take over. Profiles keep their logins here.
@@ -410,6 +434,11 @@ export function browserLines(action: BrowserAction, result: BrowserReply): strin
 
 export async function browserCommand(args: string[], io: CliIo, client: CoreClient, threadId: string): Promise<{ lines: string[]; value: unknown }> {
   const { action, tabId, output } = browserAction(args);
+  return browserStep(action, tabId, output, io, client, threadId);
+}
+
+/** One action sent to the conversation's browser, and the file it saves when it carries one. */
+export async function browserStep(action: BrowserAction, tabId: string | undefined, output: string | undefined, io: CliIo, client: CoreClient, threadId: string): Promise<{ lines: string[]; value: unknown }> {
   if (action.kind === 'download-read') {
     const saved = await saveDownload(action.downloadId, io, client, threadId, output);
     return { lines: [`✓ Saved ${saved.name} to ${saved.path}`, ...downloadLines(saved).slice(1)], value: saved };

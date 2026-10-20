@@ -47,6 +47,7 @@ import type { Engine, Tab } from './browser/types.ts';
 import { SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
 import { screenTurns, takeTurn } from './browser/frames.ts';
 import { automate, awaitDocument, documentToken, PAGE_ACTIONS } from './browser/automation.ts';
+import { pageFrames } from './browser/page-frames.ts';
 import { sleepState, TabSleep } from './browser/sleep.ts';
 import { BrowserDownloads } from './browser/downloads.ts';
 
@@ -221,13 +222,14 @@ export class AgentBrowser {
       recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], frames: new Set(), acting: false, sleep: sleepState(),
       page: {
         send: (method, params = {}, timeoutMs) => engine.cdp.send(method, params, sessionId, timeoutMs),
-        dialogs: [], dialogPolicy: { accept: true, text: null }, downloads: 0,
+        dialogs: [], dialogPolicy: { accept: true, text: null }, downloads: 0, frameRefs: new Map(),
       },
     };
     const on = (method: string, listener: (params: Record<string, unknown>) => void) =>
       tab.off.push(engine.cdp.on(method, (params, session) => { if (session === sessionId) listener(params); }));
+    tab.page.frames = pageFrames(engine.cdp, sessionId, on);
     watchPage(tab, on, (accept, promptText) => void engine.cdp.send('Page.handleJavaScriptDialog', { accept, ...(promptText === undefined ? {} : { promptText }) }, sessionId).catch(() => {}),
-      url => { tab.url = url; this.#remote.stale(tab); this.#changed(threadId); this.#engines.saveCookiesSoon(engine); });
+      url => { tab.url = url; tab.page.frameRefs?.clear(); this.#remote.stale(tab); this.#changed(threadId); this.#engines.saveCookiesSoon(engine); });
     on('Page.frameAttached', params => { if (tab.frames.size < 500) tab.frames.add(String(params.frameId)); });
     on('Page.frameNavigated', params => { const frame = params.frame as { id: string }; if (tab.frames.size < 500) tab.frames.add(String(frame.id)); });
     // A frame moving to another process (`swap`) is still the page's: only a removed one goes.
