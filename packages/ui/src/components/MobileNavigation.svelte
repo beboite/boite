@@ -32,9 +32,16 @@
   import { compareThreads } from '../lib/thread-order';
   import { needsUser } from '../lib/thread-state';
   import { minuteClock } from '../lib/clock.svelte';
+  import { contactsShown } from '../lib/contacts-rail.svelte';
 
   let { store, recover = false, screen = $bindable('chat') }: { store: Store; recover?: boolean; screen: 'chat' | 'threads' | 'activity' } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
+  // The contacts under the projects, loaded with their experiment; a desktop window shows them in the column on the right.
+  let SidebarContacts = $state<typeof import('./home/SidebarContacts.svelte').default>();
+  $effect(() => {
+    if (!contactsShown(store) || SidebarContacts) return;
+    void import('./home/SidebarContacts.svelte').then(module => { SidebarContacts = module.default; }).catch(() => {});
+  });
   let search = $state('');
   const query = $derived(search.trim().toLocaleLowerCase());
   const chatting = $derived(screen === 'chat' && !recover && store.page === 'chat');
@@ -103,6 +110,12 @@
     if (store.page !== 'chat' || screen !== 'chat' || !from) return;
     const list = from;
     return mobileOverlay(() => { from = null; screen = list; });
+  });
+  // A contact's page covers the list, and what it opens (its project's board) lands on the chat: Back returns to the list it came from.
+  $effect(() => {
+    if (store.page !== 'home' || screen === 'chat') return;
+    from = screen;
+    screen = 'chat';
   });
 
   function show(next: typeof screen) {
@@ -177,7 +190,7 @@
         <span class="ui-label">{store.draftInDrafts && !store.openThread ? strings.drafts.name : project ? projectName(project) : strings.mobile.project}</span><ChevronDown size={14} />
       </Menu>
     {:else}
-      <strong>{store.page === 'settings' ? strings.settings.heading : store.page === 'agents' ? strings.agents.heading : screen === 'activity' ? strings.mobile.activity : 'Boite'}</strong>
+      <strong>{store.page === 'settings' ? strings.settings.heading : store.page === 'agents' ? strings.agents.heading : store.page === 'home' ? strings.contacts.heading : screen === 'activity' ? strings.mobile.activity : 'Boite'}</strong>
       <button class="ghost connection" data-testid="mobile-connection" onclick={() => store.showSettings('machines')}><span class="dot" class:ready={store.connection === 'ready'}></span><span class="ui-label">{place}</span><ChevronDown size={12} /></button>
     {/if}
   </div>
@@ -187,6 +200,10 @@
   <!-- A conversation's header holds its title's menu only: the navigation is one Back away. -->
   {#if !chatting}<MobileMenu {store} {place} waiting={waiting.length} {screen} navigate={show} />{/if}
 </header>
+
+{#snippet contacts()}
+  {#if SidebarContacts && contactsShown(store)}<div class="contacts-slot"><SidebarContacts {store} {machines} /></div>{/if}
+{/snippet}
 
 {#if narrow.current && store.page === 'chat' && (screen !== 'chat' || recover)}
   <section class="mobile-list" class:recent={inRecent} bind:this={scrollRoot} onscroll={() => { if (scrollRoot) scrollPositions.set(listKey, scrollRoot.scrollTop); }} data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
@@ -272,6 +289,7 @@
       {#if !query}
         {#if groups.length > 0 && activeGroups.length === 0}<p class="empty">{strings.sidebar.noActiveProjects}</p>{/if}
         <ProjectShelf idle={otherGroups} archived={shelved} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
+        {@render contacts()}
       {/if}
       <WindowList items={rows.filter(row => row.thread.projectId === null)} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements('unassigned')}>
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
@@ -292,6 +310,7 @@
           <RecentDone entries={recentGroups} {scrollRoot} {now} {query} onopen={() => show('chat')} />
           <RecentDone kind="archived" entries={recentGroups} {scrollRoot} {now} {query} onopen={() => show('chat')} />
         </div>
+        {#if !query}{@render contacts()}{/if}
       {/if}
     {/if}
     {#if rows.length === 0 && (query || screen === 'activity' || workspace.view === 'recent' || groups.length === 0) && !(inRecent && !query && recentGroups.some(entry => entry.project.archivedThreads))}

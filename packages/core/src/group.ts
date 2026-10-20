@@ -275,6 +275,9 @@ export class GroupStore {
     return { key: this.boxKey, box: boxPublic(this.boxKey) };
   }
 
+  /** This machine's sealing key, public half: what a contact seals its requests to. */
+  boxPublic(): string { return this.box().box; }
+
   /** A signed message sealed to a machine of the roster, or null for a machine outside it. */
   sealFor(coreId: string, plaintext: string): ({ body: string } & Sealing) | null {
     const entry = this.roster?.cores.find((core) => core.coreId === coreId);
@@ -296,10 +299,14 @@ export class GroupStore {
     this.tailnet = await probeTailnet(this.tailnet, stale);
   }
 
-  /** A member answers on its tailnet address; a core in no group opens nothing. */
+  /** A member answers on its tailnet address, and so does a core a contact dials; any other core opens nothing. */
   private listen(member: boolean): void {
-    this.onTailnet = this.core.network.also(member && this.tailnet !== null ? this.tailnet.ip : null);
+    const wanted = member || this.core.contacts?.wantsTailnet() === true;
+    this.onTailnet = this.core.network.also(wanted && this.tailnet !== null ? this.tailnet.ip : null);
   }
+
+  /** Contacts changed: the tailnet listener follows. */
+  relisten(): void { if (!this.closed && this.live) this.listen(this.roster !== null); }
 
   private card(): CoreCard {
     const { coreId, publicKey } = this.core.coordination.card();

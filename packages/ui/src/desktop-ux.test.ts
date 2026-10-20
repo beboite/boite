@@ -11,6 +11,8 @@ import { runCommand } from './lib/commands.svelte';
 import { undo } from './lib/undo.svelte';
 import { confirm } from './lib/confirm.svelte';
 import { strings } from './lib/strings';
+import { clampPanel, rightPanel } from './lib/right-panel.svelte';
+import { contactsRail } from './lib/contacts-rail.svelte';
 
 /**
  * The desktop behaviours the UX audit found broken, on the whole app over the
@@ -36,6 +38,81 @@ afterEach(() => {
   work.load();
   workspace.view = 'projects';
   undo.dismiss();
+});
+
+test('a maximized panel stays with its thread: the Contacts page beside the list is not squeezed to nothing', async () => {
+  writeExperiments(['contacts']);
+  await mountOnFake();
+  try {
+    if (!store.panelOpen) store.togglePanel();
+    rightPanel.maximized = true;
+    await waitFor(() => query('.body').classList.contains('panel-maximized'));
+    store.showHome();
+    await waitFor(() => document.querySelector('[data-testid=home-page]') !== null);
+    expect(query('.body').classList.contains('panel-maximized')).toBe(false);
+    // Back on the chat, the thread finds its panel as it left it.
+    store.showChat();
+    await waitFor(() => query('.body').classList.contains('panel-maximized'));
+  } finally {
+    rightPanel.maximized = false;
+  }
+});
+
+test('contacts stand in their own column on the right: the thread list keeps the projects, a row opens the page between them, the bar folds the column', async () => {
+  writeExperiments(['contacts']);
+  await mountOnFake();
+  try {
+    await waitFor(() => document.querySelector('[data-testid=rail-contact]') !== null);
+    const rail = query('[data-testid=contacts-rail]');
+    expect(query('main').compareDocumentPosition(rail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.querySelector('[data-testid=sidebar] [data-testid=sidebar-contacts]')).toBeNull();
+
+    query<HTMLButtonElement>('[data-testid=rail-contact]').click();
+    await waitFor(() => document.querySelector('[data-testid=home-page]') !== null);
+    expect([store.page, store.contact]).toEqual(['home', 'core-chris']);
+    expect(document.querySelector('[data-testid=sidebar]')).not.toBeNull();
+    flushSync();
+    expect(query('[data-testid=rail-contact]').getAttribute('aria-current')).toBe('page');
+
+    // Folded, the bar's button alone says Chris asks something, and the next start finds it folded.
+    query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
+    flushSync();
+    expect(rail.classList.contains('collapsed')).toBe(true);
+    expect(query('[data-testid=contacts-toggle]').getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('[data-testid=contacts-toggle-waiting]')).not.toBeNull();
+    expect(window.localStorage.getItem('boite.contacts-rail-folded')).toBe('1');
+    query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
+    flushSync();
+    expect(rail.classList.contains('collapsed')).toBe(false);
+  } finally {
+    if (contactsRail.folded) contactsRail.toggle();
+  }
+});
+
+test('a panel widened while the contacts column was folded gives the chat its room back when the column unfolds', async () => {
+  writeExperiments(['contacts']);
+  contactsRail.toggle();
+  const stored = rightPanel.width;
+  rightPanel.width = 700;
+  await mountOnFake();
+  try {
+    if (!store.panelOpen) store.togglePanel();
+    await waitFor(() => document.querySelector('[data-testid=right-panel]') !== null);
+    const width = () => query('[data-testid=right-panel]').style.getPropertyValue('--panel-width');
+    const list = store.sidebarCollapsed ? 0 : store.sidebarWidth;
+    const folded = clampPanel(700, window.innerWidth, list);
+    expect(width()).toBe(`${folded}px`);
+    query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
+    flushSync();
+    const unfolded = clampPanel(700, window.innerWidth, list + 240);
+    expect(unfolded).toBeLessThan(folded);
+    expect(width()).toBe(`${unfolded}px`);
+    // The width asked for stays, for the day the room comes back.
+    expect(rightPanel.width).toBe(700);
+  } finally {
+    if (contactsRail.folded) contactsRail.toggle();
+    rightPanel.width = stored;
+  }
 });
 
 test('typed confirmation supports Enter and cancellation restores focus', async () => {

@@ -124,6 +124,10 @@ ${CONTROL_HELP}
   agents wait [agent]            the next message (--timeout <s>, default 90)
   agents inbox                   every exchange and its delivery state
                                  <agent>: <thread-id>, <machine>/<thread-id>
+  agents contacts                other owners' Boites linked as contacts and
+                                 the projects each opened to you
+  agents ask <contact> <text>    ask a contact for an agent on a project like
+                                 yours; the answer comes back as a message
   agent context|inbox|missions   this persistent agent's authorized context
   agent send <ids|-> <text>      post to its group or direct conversation
   agent reply <message-id> <text>

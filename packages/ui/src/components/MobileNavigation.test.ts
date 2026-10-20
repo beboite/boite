@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { setExperiment } from '../lib/experiments';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
@@ -14,6 +15,7 @@ afterEach(async () => {
   if (mounted) await unmount(mounted);
   mounted = undefined; store?.detach(); client?.close();
   workspace.machines = []; workspace.active = previousActive;
+  setExperiment('contacts', false); setExperiment('goal2', false);
   vi.restoreAllMocks(); document.body.innerHTML = ''; localStorage.clear();
 });
 
@@ -138,4 +140,25 @@ test('a parent on another machine shows its working sub-agents, counted, and Rec
   } finally {
     remote.detach(); remoteClient.close();
   }
+});
+
+test("a contact's page opened from the list leaves for the board on the chat screen, and Back returns to the list", async () => {
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: true, onchange: null, addListener() {}, removeListener() {}
+  }));
+  setExperiment('contacts', true); setExperiment('goal2', true);
+  client = new FakeClient({ delayMs: 0 });
+  store = new Store(); store.attach(client); await store.connect();
+  workspace.machines = [{ id: 'local', label: 'Local', store }]; workspace.active = store;
+  mounted = mount(MobileNavigation, { target: document.body, props: { store, screen: 'threads' } });
+  await settle();
+  // What the contact's row under the projects does.
+  store.showHome('core-chris'); await settle();
+  expect(document.querySelector('.mobile-list')).toBeNull();
+
+  await store.openProjectBoard('p-boite'); await settle();
+  expect([store.page, store.openThread?.projectId, store.boardShown]).toEqual(['chat', 'p-boite', true]);
+  expect(document.querySelector('.mobile-list')).toBeNull();
+  document.querySelector<HTMLButtonElement>('[data-testid=mobile-back]')!.click(); await settle();
+  expect(document.querySelector('.mobile-list')).not.toBeNull();
 });

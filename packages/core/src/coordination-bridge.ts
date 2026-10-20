@@ -4,6 +4,14 @@ import type { Connection } from './router.ts';
 import { invalidParams, refused, unavailable } from './errors.ts';
 
 const MAX_BODY = 262_144;
+/**
+ * Where a relayed request goes: an owner app's connection, or a contact's
+ * link socket, which carries this core's requests to a contact it cannot dial.
+ */
+export interface BridgeRoute {
+  id: string;
+  sendEvent(name: 'collaboration.bridge.request', payload: RpcEvents['collaboration.bridge.request']): void;
+}
 type Pending = {
   coreId: string;
   connectionId: string;
@@ -12,12 +20,12 @@ type Pending = {
 
 /** An owner app relays signed envelopes; it never supplies a peer's identity or permissions. */
 export class CoordinationBridge {
-  private readonly routes = new Map<string, Map<string, Connection>>();
+  private readonly routes = new Map<string, Map<string, BridgeRoute>>();
   private readonly pending = new Map<string, Pending>();
 
-  register(coreId: string, enabled: boolean, connection: Connection): { ok: true } {
+  register(coreId: string, enabled: boolean, connection: BridgeRoute): { ok: true } {
     if (typeof enabled !== 'boolean') throw invalidParams('enabled: expected a boolean');
-    const routes = this.routes.get(coreId) ?? new Map<string, Connection>();
+    const routes = this.routes.get(coreId) ?? new Map<string, BridgeRoute>();
     if (enabled) routes.set(connection.id, connection);
     else {
       routes.delete(connection.id);
@@ -49,7 +57,7 @@ export class CoordinationBridge {
     });
   }
 
-  reply(requestId: string, response: CoordinationBridgeResponse, connection: Connection): { ok: true } {
+  reply(requestId: string, response: CoordinationBridgeResponse, connection: Pick<Connection, 'id'>): { ok: true } {
     const request = this.pending.get(requestId);
     if (!request || request.connectionId !== connection.id) throw refused('requestId: expected a request sent to this owner connection');
     if (!response || !Number.isInteger(response.status) || response.status < 100 || response.status > 599

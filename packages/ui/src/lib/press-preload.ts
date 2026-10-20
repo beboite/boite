@@ -9,7 +9,7 @@
  *   page now, and the `open()` the click runs takes both over
  *   (`store/threads.svelte.ts`). A press that never becomes a click (a drag,
  *   a scroll on a phone, a release elsewhere) gives the subscription back.
- * - `data-preload-view="settings" | "agents"`: the page's code chunk.
+ * - `data-preload-view="settings" | "agents" | "home"`: the page's code chunk.
  *
  * It stays off under automation (`navigator.webdriver`), so benchmarks and
  * end-to-end runs measure the plain click even on a profile that has the
@@ -35,7 +35,8 @@ export const PRESS_HOLD_MS = 8_000;
 
 const views: Record<string, () => Promise<unknown>> = {
   settings: () => import('../components/SettingsShell.svelte'),
-  agents: () => import('../components/agents/AgentsPage.svelte')
+  agents: () => import('../components/agents/AgentsPage.svelte'),
+  home: () => import('../components/home/HomePage.svelte')
 };
 
 /** False under a driven browser, unless the experiment's own test asked for it. */

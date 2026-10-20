@@ -546,7 +546,7 @@ test('a member that stops answering waits longer each time, unless the roster ch
     expect(await round()).toBe(0);
     // b speaks, signed, past its quota: turned away, it is still up, and a offers it the roster on its next round.
     down = false;
-    const rates = (a.core.coordination as unknown as { rates: Map<string, { since: number; count: number }> }).rates;
+    const rates = (a.core.coordination as unknown as { desk: { rates: Map<string, { since: number; count: number }> } }).desk.rates;
     rates.set(id(b), { since: Date.now(), count: 120 });
     await expect(b.core.coordination.request(b.core.group.peers().find((peer) => peer.coreId === id(a))!, 'directory', {})).rejects.toThrow();
     rates.set(id(b), { since: Date.now(), count: 0 });
@@ -1077,7 +1077,7 @@ test('a recorded request sent again and again never spends the member\'s allowan
   expect(await b.core.coordination.request(peer, 'directory', {})).toEqual([]);
 
   // A request turned away for the quota is remembered too: recorded and sent again once the minute is over, it spends nothing of the next.
-  const rates = (a.core.coordination as unknown as { rates: Map<string, { since: number; count: number }> }).rates;
+  const rates = (a.core.coordination as unknown as { desk: { rates: Map<string, { since: number; count: number }> } }).desk.rates;
   rates.set(id(b), { since: Date.now(), count: 120 });
   const fresh = JSON.stringify({ from: id(b), to: id(a), at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
   const over = b.core.group.sealFor(id(a), pack(fresh, b.core.coordination.signature(Buffer.from(fresh)).toString('base64')))!;
@@ -1087,7 +1087,7 @@ test('a recorded request sent again and again never spends the member\'s allowan
   expect((await late()).status).toBe(403);
   expect(rates.get(id(b))!.count).toBe(0);
   // Past three times the quota nothing more is remembered: what one machine can make this core hold is bounded.
-  const nonces = (a.core.coordination as unknown as { nonces: Map<string, number> }).nonces;
+  const nonces = (a.core.coordination as unknown as { desk: { nonces: Map<string, number> } }).desk.nonces;
   rates.set(id(b), { since: Date.now(), count: 360 });
   const held = nonces.size;
   const more = JSON.stringify({ from: id(b), to: id(a), at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
