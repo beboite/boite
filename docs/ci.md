@@ -24,10 +24,13 @@ against its `main` base: the same path rules, skips and platforms as a pull
 request, with the diff covering every pull request ahead of it. `Bundle size`
 skips there, since it compares a pull request with its base. A group's `PR
 title` checks the squash title of its last commit, the one `main` receives.
-The queue builds up to five groups at once and merges each as soon as it passes,
-without waiting to fill a group. It removes a pull request whose group fails,
-or whose checks have not reported within 60 minutes. A green `ci` run takes
-about 12 minutes (2026-10-20), so a pull request lands that long after entering.
+The queue builds up to five groups at once, each on top of the ones ahead of
+it, without waiting to fill a group. Pull requests land in queue order: one
+whose group passed waits for those ahead of it. A failed group removes its pull
+request and rebuilds the groups behind it without that one; so do checks that
+have not reported within 60 minutes. A green `ci` run takes about 12 minutes
+(2026-10-20): that is the shortest time from entering the queue to landing, and
+waits or rebuilds add to it.
 
 An agent merges with `gh pr merge <number> --squash --match-head-commit <sha>`:
 the pull request enters the queue once its own checks pass, and lands when its
