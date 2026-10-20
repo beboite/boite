@@ -30,6 +30,19 @@ const DIAGNOSIS_TIMEOUT_MS = 20_000;
 const WAIT_DIAGNOSTIC_TIMEOUT_MS = 250;
 /** Main-frame navigation events a page keeps for its failure reports. */
 const NAVIGATION_EVENTS = 30;
+/**
+ * Each `history.back()` and `popstate` of a main-frame document, sent to the navigation log through a binding:
+ * a back that lands late takes over the navigation that follows it, and the document that called it is gone
+ * by the time that navigation fails.
+ */
+const HISTORY_BINDING = '__boiteE2eHistory';
+const HISTORY_WATCH = `if (window === top && typeof ${HISTORY_BINDING} === 'function') {
+  const report = ${HISTORY_BINDING};
+  const state = () => { try { return String(JSON.stringify(history.state)).slice(0, 160); } catch { return '?'; } };
+  const back = History.prototype.back;
+  History.prototype.back = function () { report('history.back() with state ' + state()); return back.call(this); };
+  addEventListener('popstate', () => report('popstate to state ' + state()));
+}`;
 /** What a page that left an evaluate hanging is doing: frames drawn in a second, fonts and animations still pending. */
 const HUNG_PAGE = `new Promise((resolve) => {
   let frames = 0;
@@ -346,6 +359,7 @@ export class BrowserPage {
       await page.send('Runtime.enable', {});
       await page.send('Network.enable', {});
       await page.#enableHangProbes();
+      await page.#watchHistory();
       if (options.showTour !== true) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
       if (options.terminalGpu !== true) {
         // Only on a fresh profile: a test that turns the GPU on and reloads keeps its choice.
@@ -402,6 +416,7 @@ export class BrowserPage {
     // A page launched here reports its requests; one attached to, its own document request too (`navigationLog`).
     await this.send('Network.enable', {});
     await this.#enableHangProbes();
+    await this.#watchHistory();
     // The page booted before we got here, on a profile as new as the data
     // directory it sits in: it read "never seen" already. Record the tour and
     // boot it again, once, so every later reload finds the record too.
@@ -516,14 +531,27 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     if (result.loaderId) {
       const deadline = Date.now() + CONNECT_TIMEOUT_MS;
       for (;;) {
-        const tree = await this.send('Page.getFrameTree', {}) as { frameTree: { frame: { loaderId: string } } };
+        const tree = await this.send('Page.getFrameTree', {}) as { frameTree: { frame: { loaderId: string; url: string } } };
         if (tree.frameTree.frame.loaderId === result.loaderId) break;
-        if (Date.now() > deadline) throw new Error('the requested navigation never committed');
+        if (Date.now() > deadline) throw new Error(`the requested navigation never committed in ${CONNECT_TIMEOUT_MS / 1000} s: loader ${result.loaderId}, the frame is on ${tree.frameTree.frame.url.split(/[?#]/, 1)[0]} loader ${tree.frameTree.frame.loaderId}
+${await this.#historyReport()}`);
         await Bun.sleep(POLL_MS);
       }
     }
     // A cold Vite dependency build on the Windows runner can outlast the normal DOM wait.
     await this.waitFor("document.readyState === 'complete'", 60_000);
+  }
+
+  /** The tab's last history entries, `*` on the current one, and the main frame's navigation log. */
+  async #historyReport(): Promise<string> {
+    const history = await this.send('Page.getNavigationHistory', {}, WAIT_DIAGNOSTIC_TIMEOUT_MS * 4)
+      .then((answer) => {
+        const { currentIndex, entries } = answer as { currentIndex: number; entries: { url: string; transitionType: string }[] };
+        // Without their query strings, as in the navigation log.
+        return entries.map((entry, index) => `${index === currentIndex ? '* ' : ''}${entry.url.split(/[?#]/, 1)[0]} (${entry.transitionType})`).slice(-8).join(', ');
+      })
+      .catch((error: unknown) => `unread (${error instanceof Error ? error.message : String(error)})`);
+    return `History: ${history}\nNavigations:\n  ${this.#navigations.join('\n  ')}`;
   }
 
   /** Boots the same page again and returns once the new document has loaded. */
@@ -638,6 +666,11 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     open.delete(this);
     if (this.#proc !== null) await stopBrowser(this.#proc, this.#userDataDir, this.#watch);
     else if (this.#userDataDir !== null) await removeDirectory(this.#userDataDir);
+  }
+
+  async #watchHistory(): Promise<void> {
+    await this.send('Runtime.addBinding', { name: HISTORY_BINDING });
+    await this.send('Page.addScriptToEvaluateOnNewDocument', { source: HISTORY_WATCH });
   }
 
   /** What a run stopped at its deadline reports of this page: its target, what it waits on and whether its main thread answers. */
@@ -766,7 +799,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
         exceptionDetails?: { text?: string; exception?: { description?: string } };
         requestId?: string; frameId?: string; loaderId?: string; wallTime?: number; request?: { url?: string }; response?: { status?: number }; errorText?: string;
         frame?: { id: string; loaderId: string; url?: string; parentId?: string };
-        url?: string; reason?: string; type?: string; canceled?: boolean; blockedReason?: string;
+        url?: string; reason?: string; type?: string; canceled?: boolean; blockedReason?: string; name?: string; payload?: string;
         callFrames?: { functionName: string; url: string; location: { lineNumber: number; columnNumber: number } }[];
       };
       result?: unknown;
@@ -783,6 +816,10 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
       return;
     }
     if (typeof frame.id !== 'number') {
+      if (frame.method === 'Runtime.bindingCalled' && frame.params?.name === HISTORY_BINDING) {
+        this.#navigated(String(frame.params.payload));
+        return;
+      }
       if (frame.method === 'Runtime.exceptionThrown') {
         const detail = frame.params?.exceptionDetails;
         this.#pageErrors.push(detail?.exception?.description ?? detail?.text ?? 'unknown page exception');

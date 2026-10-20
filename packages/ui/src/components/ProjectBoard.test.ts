@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { setExperiment } from '../lib/experiments';
@@ -68,13 +68,17 @@ test('the board puts each card in its column, starts a /goal2 for a card put in 
 
     // In progress: a new conversation of the project works on the card as a reviewed goal, and the card links it.
     const before = new Set(store.threads.map(thread => thread.id));
+    const calls = vi.spyOn(client, 'call');
     await pick('Export invoices as CSV', 'move:doing');
     await settle();
     // The fake agent claims at once, so its goal may already be under review.
     expect(texts('todo')).not.toContain('Export invoices as CSV');
     expect([...texts('doing'), ...texts('review')]).toContain('Export invoices as CSV');
     const started = store.threads.find(thread => !before.has(thread.id))!;
-    expect(started).toMatchObject({ projectId: 'p-boite', title: 'Export invoices as CSV' });
+    // Named after the card when created. Its first turn then has it retitled (`Echo: /goal2 ...` here, 200 ms
+    // later in the fake), which a slow runner reached before this line.
+    expect(calls.mock.calls.find(([method]) => method === 'threads.create')?.[1]).toMatchObject({ projectId: 'p-boite', title: 'Export invoices as CSV' });
+    expect(started.projectId).toBe('p-boite');
     const [linked] = (await client.call('todos.list', { threadId: 't-trace' })).filter(todo => todo.text === 'Export invoices as CSV');
     expect(linked!.goalThreadId).toBe(started.id);
     const goal = (await client.call('threads.get', { threadId: started.id })).activity?.goal;
