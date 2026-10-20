@@ -11,11 +11,21 @@
       "detect": {},
       "update": { "args": ["upgrade"], "latestNpm": "@opencode/cli" },
       "executable": [
+        { "kind": "file", "value": "{agentsDir}/package/bin/opencode.exe" },
         { "kind": "file", "value": "{npmRoot}/@opencode/cli/bin/opencode.exe" },
         { "kind": "path", "value": "opencode2" },
         { "kind": "path", "value": "opencode", "major": 2 },
         { "kind": "file", "value": "{home}/.opencode/bin/opencode.exe", "major": 2 }
       ],
+      "install": {
+        "arch": "x64",
+        "version": "2.1.1",
+        "format": "tgz",
+        "url": "https://registry.npmjs.org/@opencode/cli-windows-x64/-/cli-windows-x64-2.1.1.tgz",
+        "sha256": "3343e8140dde91e45bee24ee6dbabc16aa0cae5b1e1a0184b580b1c8b0530e12",
+        "archiveBytes": 101966282,
+        "files": [{ "path": "package/bin/opencode.exe", "bytes": 218766376 }]
+      },
       "launch": { "args": ["acp"] },
       "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
