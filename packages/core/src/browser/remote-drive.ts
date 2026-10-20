@@ -1,12 +1,12 @@
 // Validates remote viewers and owns their captures, saved frames and page input.
 import {
-  remoteBrowserInputError, remoteFrameOptionsError, REMOTE_SELECTION_MAX, REMOTE_URL_MAX, REMOTE_WATCH_MS,
-  type AgentBrowserStatus, type RemoteBrowserFrame, type RemoteBrowserSelection, type RemoteBrowserUnchanged, type RpcParams, type ThreadId,
+  remoteBrowserInputError, remoteFrameOptionsError, REMOTE_PICKER_MAX, REMOTE_SELECTION_MAX, REMOTE_URL_MAX, REMOTE_WATCH_MS,
+  type AgentBrowserStatus, type RemoteBrowserFrame, type RemoteBrowserPicker, type RemoteBrowserSelection, type RemoteBrowserUnchanged, type RpcParams, type ThreadId,
 } from '@boite/contracts';
 import type { Connection } from '../router.ts';
 import { refused } from '../errors.ts';
 import { captureFrame, ViewerStream, type PageInfo, type StreamOptions } from './frames.ts';
-import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, selectionScript } from './scripts.ts';
+import { chooseScript, EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, pickerScript, selectionScript } from './scripts.ts';
 import { press } from './automation.ts';
 import type { Tab } from './types.ts';
 
@@ -204,7 +204,7 @@ export class RemoteDrive {
     }
   }
 
-  async remoteInput({ threadId, frameId, input }: RpcParams<'browser.remoteInput'>, connection: Connection): Promise<{ ok: true }> {
+  async remoteInput({ threadId, frameId, input }: RpcParams<'browser.remoteInput'>, connection: Connection): Promise<{ ok: true; picker?: RemoteBrowserPicker }> {
     this.#viewer(threadId, connection);
     const problem = remoteBrowserInputError(input);
     if (problem) throw refused(problem);
@@ -214,7 +214,7 @@ export class RemoteDrive {
     return this.context.use(tab, () => this.#input(tab, saved, input));
   }
 
-  async #input(tab: Tab, saved: Saved, input: RpcParams<'browser.remoteInput'>['input']): Promise<{ ok: true }> {
+  async #input(tab: Tab, saved: Saved, input: RpcParams<'browser.remoteInput'>['input']): Promise<{ ok: true; picker?: RemoteBrowserPicker }> {
     const changed = () => refused('the page changed; wait for a fresh frame before interacting');
     const retire = () => { this.stale(tab); for (const viewer of this.#viewers.values()) viewer.frames = viewer.frames.filter(entry => entry.frame.tabId !== tab.id); };
     switch (input.kind) {
@@ -234,14 +234,25 @@ export class RemoteDrive {
       default: break;
     }
     // The size the viewer aimed at is known without the page: a tap on another one is refused before a read of it.
-    if ((input.kind === 'tap' || input.kind === 'drag') && (input.width !== saved.frame.width || input.height !== saved.frame.height)) throw refused('the browser viewport changed; refresh before tapping');
+    if ((input.kind === 'tap' || input.kind === 'drag' || input.kind === 'choose') && (input.width !== saved.frame.width || input.height !== saved.frame.height)) throw refused('the browser viewport changed; refresh before tapping');
     // Read in turn with captures: a scaled one in flight resizes the page for its shot.
     const page = await this.context.screen(tab, () => this.context.evaluate(tab, PAGE_INFO_SCRIPT, 5000), true) as PageInfo;
     const same = page.width === saved.page.width && page.height === saved.page.height && page.href === saved.page.href && page.origin === saved.page.origin;
     if (!same) throw changed();
     const at = (x: number, y: number) => ({ x: Math.min(page.width - 1, x * page.width), y: Math.min(page.height - 1, y * page.height) });
     switch (input.kind) {
-      case 'tap': await this.#click(tab, at(input.x, input.y), input.count ?? 1, input.shift === true); break;
+      case 'tap': {
+        const point = at(input.x, input.y);
+        // A plain tap on a <select> focuses it and answers its options: Chrome's own list would open on this machine, in no frame.
+        const picker = (input.count ?? 1) === 1 && !input.shift ? await this.context.evaluate(tab, pickerScript(point.x, point.y, REMOTE_PICKER_MAX), 5000) as RemoteBrowserPicker | null : null;
+        if (picker) { await this.context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...point }); tab.frame = null; return { ok: true, picker }; }
+        await this.#click(tab, point, input.count ?? 1, input.shift === true); break;
+      }
+      case 'choose': {
+        const point = at(input.x, input.y);
+        if (!await this.context.evaluate(tab, chooseScript(point.x, point.y, input.index), 5000)) throw refused('that option cannot be chosen: the list changed or the option is disabled');
+        break;
+      }
       case 'drag': await this.#drag(tab, at(input.from.x, input.from.y), at(input.to.x, input.to.y)); break;
       case 'press': for (const key of input.keys) await press(tab.page, key); break;
       case 'select-all':

@@ -382,6 +382,17 @@ page, so it selects text; a second click selects the word, a third the
 paragraph, and Shift with a click extends the selection. Control or Command
 with A selects all, with Z or Y undoes and redoes.
 
+A `<select>` opens here, not on the agent's machine. Chrome draws a select's
+list in a window of its own, which no frame shows, so a plain tap on one only
+focuses it and answers its options (`picker`: labels, the selected one, the
+disabled, hidden and grouped ones, and the field's box, at most 1,000 options),
+and the viewer draws the list under the field, or over it when there is more
+room there. The arrows, Home, End, Enter, Space and Escape work in it. A pick
+goes back as `choose` at the tap's point; the core finds the select there again
+and sets the option as a person would, so the page hears `input` and `change`,
+and refuses an option that is disabled or no longer there. A tap elsewhere, the
+wheel or a resized page closes the list without choosing.
+
 The clipboard is the viewer's own. Paste inserts this computer's text in the
 focused field of the page. Copy and cut ask the core for the page's selection
 (`browser.remoteSelection`) and write it to this computer's clipboard; cut then

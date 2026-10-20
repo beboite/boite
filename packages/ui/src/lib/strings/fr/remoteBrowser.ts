@@ -7,7 +7,7 @@ export const fr: Translation = {
     title: 'Navigateur de l’agent', waiting: 'En attente de la page', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
     interact: 'Toucher ou faire défiler la page partagée', interactDesk: 'La page partagée : cliquez dessus, puis écrivez',
     deskHint: 'Cliquez dans la page, puis écrivez. Glissez pour sélectionner, double-cliquez un mot, défilez à la molette. Copier, couper et coller passent par le clavier.',
-    copy: 'Copier le texte sélectionné', copied: 'Copié.', nothingSelected: 'Rien n’est sélectionné dans la page. Touchez deux fois un mot d’abord.', copyCut: 'La sélection était trop longue : son début a été copié.', image: 'Vue en direct du navigateur de l’agent', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
+    copy: 'Copier le texte sélectionné', copied: 'Copié.', nothingSelected: 'Rien n’est sélectionné dans la page. Touchez deux fois un mot d’abord.', copyCut: 'La sélection était trop longue : son début a été copié.', image: 'Vue en direct du navigateur de l’agent', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas', options: 'Options de la liste',
     text: 'Touchez un champ de la page, puis écrivez ici', send: 'Envoyer le texte à la page', gesture: 'Touchez pour cliquer. Glissez pour défiler. Retour envoie le texte puis Entrée ; ⌫ sur un champ vide efface dans la page.'
   }
 };

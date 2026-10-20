@@ -2,7 +2,7 @@
   import { errorText } from '../lib/errors';
   import { onMount, untrack } from 'svelte';
   import { Pause, Play, ArrowUp, ArrowDown, Copy, MonitorSmartphone, Send } from '@lucide/svelte';
-  import { REMOTE_PRESS_MAX, REMOTE_TEXT_MAX, type RemoteBrowserFrame, type RemoteBrowserInput } from '@boite/contracts';
+  import { REMOTE_PRESS_MAX, REMOTE_TEXT_MAX, type RemoteBrowserFrame, type RemoteBrowserInput, type RemoteBrowserPicker } from '@boite/contracts';
   import { browserKey, hasKeyboard, liveInput, writeClipboardLater } from '../lib/live-input';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
@@ -28,6 +28,14 @@
   // A computer drives the page itself: keys, wheel, mouse selection and the clipboard, with no keys or text field below.
   const desk = hasKeyboard();
   let area = $state<HTMLElement>(), screen = $state<HTMLButtonElement>(), note = $state(''), noteTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * The `<select>` a tap opened. Chrome draws its list in a window of its own on
+   * the agent's machine, which no frame shows: the list is drawn here, and a
+   * choice goes back as `choose` at the tap's point.
+   */
+  type Tapped = Extract<RemoteBrowserInput, { kind: 'tap' }>;
+  let choice = $state.raw<{ picker: RemoteBrowserPicker; tap: Tapped; place: { left: number; width: number; top?: number; bottom?: number; maxHeight: number } } | null>(null);
+  let active = $state(-1), viewer = $state<HTMLElement>(), pickerList = $state<HTMLElement>();
   let lastTap = { at: 0, x: 0, y: 0, count: 0 };
   // Mouse and keyboard input, sent one at a time in the order it was made, without freezing the view between two.
   type Direct = Extract<RemoteBrowserInput, { kind: 'tap' | 'drag' | 'press' | 'text' | 'select-all' }>;
@@ -38,12 +46,14 @@
   let displaySettings = $state(false), viewportWidth = $state<number | undefined>(393), viewportHeight = $state<number | undefined>(700);
   let areaWidth = $state(0), areaHeight = $state(0), zoom = $state(0);
   let address = $state(''), editingAddress = false, fresh = $state(true);
-  const addressId = `remote-address-${crypto.randomUUID()}`, hintId = `${addressId}-hint`;
+  const addressId = `remote-address-${crypto.randomUUID()}`, hintId = `${addressId}-hint`, pickerId = `${addressId}-picker`;
   const secure = $derived(/^https:\/\//i.test(frame?.url ?? ''));
   const previewScale = $derived(frame ? (zoom || Math.min(areaWidth / frame.width, areaHeight / frame.height)) : 1);
   const validSize = $derived([viewportWidth, viewportHeight].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 240 && n <= 3840));
   const usable = $derived(!!frame && frameClient === store.client && !paused && !busy && !error && store.connection === 'ready');
   function stop() { generation++; clearTimeout(timer); }
+  // A list stays with the page it was tapped on.
+  $effect(() => { if (choice && (!frame || frame.width !== choice.tap.width || frame.height !== choice.tap.height || paused)) choice = null; });
   async function decoded(base64: string): Promise<void> {
     const image = new Image();
     image.src = `data:image/jpeg;base64,${base64}`;
@@ -129,8 +139,9 @@
     const run = generation;
     busy = true;
     try {
-      await client.call('browser.remoteInput', { threadId, frameId: target.id, input: value });
+      const reply = await client.call('browser.remoteInput', { threadId, frameId: target.id, input: value });
       if (alive && run === generation && client === store.client && value.kind === 'text') text = '';
+      if (alive && run === generation && client === store.client && value.kind === 'tap' && reply?.picker) open(reply.picker, value);
       // Those retire the frame on the agent's machine: show it as stale until the next one.
       if (moving) fresh = false;
       return true;
@@ -155,10 +166,48 @@
       const { value, target = frame } = queue.shift()!, client = store.client;
       // What cannot land on the page the user saw is dropped, never replayed on another.
       if (!alive || !client || frameClient !== client || !target || paused || store.connection !== 'ready' || old(target)) { queue = []; return; }
-      try { await client.call('browser.remoteInput', { threadId, frameId: target.id, input: value }); }
+      try {
+        const reply = await client.call('browser.remoteInput', { threadId, frameId: target.id, input: value });
+        if (alive && client === store.client && value.kind === 'tap' && reply?.picker) open(reply.picker, value);
+      }
       catch (cause) { queue = []; if (alive && client === store.client) error = errorText(cause); return; }
       finally { if (alive) kick(); }
     }
+  }
+  /** Draws the tapped list under its field, or over it when the view has more room there. */
+  function open(picker: RemoteBrowserPicker, tap: Tapped) {
+    const box = picture?.getBoundingClientRect(), frameBox = viewer?.getBoundingClientRect();
+    if (!box || !frameBox || !picker.options.some(option => !option.hidden)) return;
+    const left = box.left - frameBox.left + picker.rect.x * box.width, top = box.top - frameBox.top + picker.rect.y * box.height;
+    const width = Math.min(frameBox.width - 8, Math.max(160, picker.rect.width * box.width)), field = picker.rect.height * box.height;
+    const below = frameBox.height - top - field - 4, above = top - 4;
+    const room = below >= Math.min(240, above) ? { top: top + field + 2, maxHeight: Math.min(320, below - 4) } : { bottom: frameBox.height - top + 2, maxHeight: Math.min(320, above - 4) };
+    choice = { picker, tap, place: { left: Math.max(4, Math.min(left, frameBox.width - width - 4)), width, ...room } };
+    active = picker.selected;
+    requestAnimationFrame(() => pickerList?.querySelector('[aria-selected=true]')?.scrollIntoView?.({ block: 'nearest' }));
+  }
+  function choose(index: number) {
+    const shown = choice, target = frame;
+    choice = null;
+    const option = shown?.picker.options[index];
+    // The list belongs to the page it was tapped on: a resized page drops it.
+    if (!shown || !option || option.disabled || option.hidden || !target || target.width !== shown.tap.width || target.height !== shown.tap.height) return;
+    if (index !== shown.picker.selected) void input({ kind: 'choose', x: shown.tap.x, y: shown.tap.y, width: shown.tap.width, height: shown.tap.height, index });
+  }
+  /** The keys a list takes while it is open: the arrows, Home, End, Enter, Space and Escape. */
+  function pickerKey(event: KeyboardEvent): boolean {
+    if (!choice) return false;
+    const options = choice.picker.options, usable = (i: number) => !!options[i] && !options[i]!.disabled && !options[i]!.hidden;
+    const step = (from: number, by: number) => { for (let i = from + by; i >= 0 && i < options.length; i += by) if (usable(i)) return i; return from; };
+    if (event.key === 'Escape') choice = null;
+    else if (event.key === 'Enter' || event.key === ' ') choose(active);
+    else if (event.key === 'ArrowDown') active = step(active, 1);
+    else if (event.key === 'ArrowUp') active = step(active, -1);
+    else if (event.key === 'Home') active = step(-1, 1);
+    else if (event.key === 'End') active = step(options.length, -1);
+    else return false;
+    requestAnimationFrame(() => document.getElementById(`${pickerId}-${active}`)?.scrollIntoView?.({ block: 'nearest' }));
+    return true;
   }
   /** The page's selected text, once what was typed before the copy has reached it. */
   async function selection(): Promise<string> {
@@ -178,6 +227,7 @@
   onMount(() => {
     const live = liveInput(() => area, {
       key(event) {
+        if (choice) return pickerKey(event);
         if (!frame || paused) return false;
         const sent = browserKey(event);
         if (!sent) return false;
@@ -199,6 +249,7 @@
     return () => node.removeEventListener('wheel', wheel);
   });
   function wheel(event: WheelEvent) {
+    choice = null;
     if (zoom || event.ctrlKey || !usable || !frame) return;
     event.preventDefault();
     const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? frame.height : 1;
@@ -247,6 +298,7 @@
     return framePoint(box, current, within(event.clientX, box.left, box.width), within(event.clientY, box.top, box.height));
   }
   function down(event: PointerEvent) {
+    choice = null;
     if (!usable || !frame || event.button !== 0) return;
     pointer = { x: event.clientX, y: event.clientY, lastX: event.clientX, lastY: event.clientY, moved: false, mouse: event.pointerType === 'mouse', shift: event.shiftKey, from: point(event, frame), frame, client: frameClient };
     scrollX = 0; scrollY = 0; scrollAt = point(event, frame);
@@ -334,7 +386,7 @@
     {/snippet}
   </BrowserNav>
   {#if error}<div class="error" role="status" data-testid="remote-browser-error"><p>{error}</p></div>{/if}
-  <div class="viewer">
+  <div class="viewer" bind:this={viewer}>
   {#if displaySettings}
     <section class="display-settings" aria-label={strings.remoteBrowser.display}>
       <strong>{strings.remoteBrowser.resolution} {frame ? `${frame.width} × ${frame.height}` : ''}</strong>
@@ -365,6 +417,19 @@
         <img bind:this={picture} src={`data:image/jpeg;base64,${frame.base64}`} alt={strings.remoteBrowser.image} draggable="false" data-testid="remote-browser-frame" />
       </button>
     {:else}<p class="empty">{strings.remoteBrowser.waiting}</p>{/if}
+    {#if choice}
+      {@const place = choice.place}
+      {@const options = choice.picker.options}
+      <div class="picker" role="listbox" tabindex="-1" bind:this={pickerList} data-testid="remote-browser-picker" aria-label={strings.remoteBrowser.options} aria-activedescendant={active >= 0 ? `${pickerId}-${active}` : undefined}
+        style:left={`${place.left}px`} style:width={`${place.width}px`} style:top={place.top === undefined ? undefined : `${place.top}px`} style:bottom={place.bottom === undefined ? undefined : `${place.bottom}px`} style:max-height={`${Math.max(80, place.maxHeight)}px`}>
+        {#each options as option, index}
+          {#if !option.hidden}
+            {#if option.group && option.group !== options.slice(0, index).findLast(other => !other.hidden)?.group}<span class="group ui-label">{option.group}</span>{/if}
+            <button type="button" role="option" tabindex="-1" id={`${pickerId}-${index}`} class:active={index === active} class:grouped={!!option.group} aria-selected={index === choice.picker.selected} disabled={option.disabled} onpointerenter={() => { if (!option.disabled) active = index; }} onclick={() => choose(index)}>{option.label || '\u00a0'}</button>
+          {/if}
+        {/each}
+      </div>
+    {/if}
     {#if desk}<span id={hintId} class="visually-hidden">{strings.remoteBrowser.deskHint}</span>{/if}
   </div>
   {#if desk && note}<small class="toast" role="status" data-testid="remote-browser-note">{note}</small>{/if}
@@ -404,6 +469,13 @@
   .screen:active:not(:disabled) { transform: none; }
   .screen:disabled { opacity: 1; } .screen.stale { opacity: .55; }
   img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-select: none; user-select: none; }
+  .picker { position: absolute; z-index: 4; overflow: auto; padding: 4px; display: flex; flex-direction: column; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e3); overscroll-behavior: contain; }
+  .picker button { flex: none; justify-content: flex-start; min-height: var(--control-sm); padding: 4px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; box-shadow: none; color: var(--color-foreground); font-size: var(--text-sm); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .picker button.grouped { padding-left: 20px; }
+  .picker button.active:not(:disabled) { background: var(--color-surface-3); }
+  .picker button[aria-selected=true] { color: var(--color-accent); background: var(--color-accent-soft); }
+  .picker button:disabled { color: var(--color-muted-foreground); opacity: .6; }
+  .picker .group { padding: 6px 10px 2px; font-size: var(--text-xs); font-weight: 600; color: var(--color-muted-foreground); }
   .toast { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 6px 12px; border-radius: var(--radius-full); background: var(--color-surface-3); color: var(--color-foreground); box-shadow: var(--shadow-e2); font-size: var(--text-xs); pointer-events: none; }
   footer { padding: 6px 8px max(8px, env(safe-area-inset-bottom)); display: grid; gap: 6px; border-top: 1px solid var(--color-border); background: var(--color-surface); }
   .keys { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
@@ -413,6 +485,6 @@
   footer input { min-width: 0; flex: 1; height: var(--control); border-radius: var(--radius-full); padding: 0 12px; font-size: var(--text-md); }
   .error { padding: 6px 12px; border-bottom: 1px solid var(--color-border); } .error p { margin: 0; font-size: var(--text-sm); color: var(--color-danger); max-height: 90px; overflow: auto; overflow-wrap: anywhere; }
   .empty { margin: auto; padding: 24px; }
-  @media (max-width: 720px), (pointer: coarse) { .display-settings input { font-size: var(--text-md); } }
+  @media (max-width: 720px), (pointer: coarse) { .display-settings input { font-size: var(--text-md); } .picker button { min-height: var(--control); font-size: var(--text-md); } }
   @media (max-width: 720px) { footer .hint { display: none; } }
 </style>
