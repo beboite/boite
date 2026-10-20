@@ -96,7 +96,27 @@ adds headings, text and the containers around them; `-c` drops the containers,
 `text=Continue`. Refs are renumbered by every snapshot; a ref from an earlier
 page is refused by name. `get text|value|attr|title|url|count`, `is checked` and
 `eval <js>` read the page. Page text and evaluation results are untrusted input,
-just like web search results.
+just like web search results. A frame from another origin, such as a payment
+form, a captcha or a sign-in widget, is listed under its iframe, and its
+elements take refs and commands like the page's own
+([frames](browser.md#frames-from-other-origins)).
+
+Each separate command waits for the agent's next turn, and that turn takes far
+longer than the command (about 40 ms). Steps the agent can foresee go in one
+shell call that ends on a snapshot:
+`boite browser click @e3 && boite browser wait --load load && boite browser snapshot -i`.
+Steps with loops or conditions go in a script: `boite browser run <file>`, or
+`run -` with the script on stdin, runs it as the body of an async function
+with `page`, `args` (the words after the script), `console` and `sleep(ms)` in
+scope. `page` has a method per command (`page.click('@e3')`,
+`page.snapshot({ interactive: true })`, `page.wait({ url: '**/done' })`,
+`page.eval((a, b) => a + b, 1, 2)`), and `page.command(...words)` runs any
+other in the CLI's words. A step that does more than succeed prints what it
+did, without the text a `fill` typed; a failed step stops the script, and the
+output names it and shows the page's interactive snapshot. What the script
+returns is printed. The script runs in the CLI's process with the agent's own
+rights and reaches the browser through the same calls as each command
+(`packages/core/src/browser-run.ts`).
 
 An action that starts a navigation waits for the next page's DOM and prints
 where it went; `open` waits for the DOM too, never for the load event, so a page
