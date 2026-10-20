@@ -558,8 +558,7 @@
     // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom. Moved down
     // as far from it, by a row growing above after a small notch up, the list took it back and bounced each notch.
     if (descended && closer && atBottom(box)) leftBottom = false;
-    // A card shrinking can clamp scrollTop before new output grows the list again; the list's own box growing,
-    // say a composer that shrank, clamps it too, and may shrink back before this event: the observer follows it.
+    // A card shrinking can clamp scrollTop before new output grows the list again; so can its own box growing and shrinking back (`relaid`).
     pinned = !cutBelow && !leftBottom && (atBottom(box) || (pinned && (resized || relaid) && !hold.held));
     if (anchors.restoring) pinned = false;
     // Away from the bottom, the way back shows, whether or not anything new came in.
