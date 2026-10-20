@@ -698,19 +698,25 @@ describe('codex driver', () => {
     });
   });
 
-  test('a rolling update read while the full read is answered is merged into it, not dropped', async () => {
-    // The read's answer and the next update can come in one chunk of stdout: the update is
-    // handled before the awaited answer lands.
+  test('a rolling update sent after the answer to the full read is merged into it; one sent before is older and dropped', async () => {
+    // The answer and the updates around it can come in one chunk of stdout: each is handled
+    // before the awaited answer lands, and only the answer's place among them tells which is newer.
     let answer: (raw: unknown) => void = () => undefined;
-    const rpc = { request: () => new Promise(resolve => { answer = resolve; }) } as unknown as CodexRpc;
+    const rpc = { request: (_method: string, _params: unknown, options?: { onAccepted?(): void }) => new Promise(resolve => {
+      answer = raw => { options?.onAccepted?.(); resolve(raw); };
+    }) } as unknown as CodexRpc;
     const readings: QuotaReading[] = [];
     const limits = new CodexRateLimits(() => rpc, () => ({ quota: reading => { readings.push(reading); }, log: () => undefined }));
-    const update = (usedPercent: number) => ({ rateLimits: { limitId: 'codex', primary: null, secondary: { usedPercent, windowDurationMins: 10080, resetsAt: 1_900_000_000 }, credits: null } });
-    limits.updated(update(30));
-    answer({ rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300 } } });
-    limits.updated(update(35));
+    const update = (primary: number | null, secondary: number) => ({ rateLimits: { limitId: 'codex', primary: primary === null ? null : { usedPercent: primary, windowDurationMins: 300 },
+      secondary: { usedPercent: secondary, windowDurationMins: 10080, resetsAt: 1_900_000_000 }, credits: null } });
+    limits.updated(update(10, 10));
+    limits.updated(update(20, 20));
+    answer({ rateLimits: { limitId: 'codex', primary: { usedPercent: 30, windowDurationMins: 300 }, secondary: { usedPercent: 30, windowDurationMins: 10080 } } });
+    limits.updated(update(null, 35));
+    limits.updated(update(null, 40));
     await Bun.sleep(0);
-    expect(readings.at(-1)!.windows.map(w => [w.id, w.usedPercent])).toEqual([['primary', 100], ['secondary', 35]]);
+    expect(readings).toHaveLength(1);
+    expect(readings[0]!.windows.map(w => [w.id, w.usedPercent])).toEqual([['primary', 30], ['secondary', 40]]);
   });
 
   test('a retry reports live progress without failing the turn or accepting an older native turn', async () => {
