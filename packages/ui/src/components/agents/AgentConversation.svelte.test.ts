@@ -256,22 +256,40 @@ test('a retry keeps its request id only for the same bytes: another file of the 
   delete realStore.composerStates['agent:agent:a-ada'];
 });
 
-test('the chips pick the agent\'s own mode and model, saved as its Settings tab saves them; a paired device sees none', async () => {
+test('the chips pick the agent\'s own mode, saved as its Settings tab saves it, even while a message is being sent; a paired device sees none', async () => {
   const selection = { providerId: 'claude', accountId: 'acc-ada', model: 'opus', effort: null, permissionMode: 'default' };
   const config = { defaultRoute: selection, allowedRoutes: [{ ...selection, id: 'default', name: 'Default' }], subagents: { enabled: true, paused: false, profiles: [], anyModel: true }, compactAfterTurns: 12, maxRunMinutes: 10, autoMemory: true };
-  const call = vi.fn(async (method: string) => method === 'agents.runtime.get' ? structuredClone(config) : { id: 'a-ada' });
-  const view = (owner: boolean) => ({
-    seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', revision: 7, selection }], groups: [], work: [], sessions: [] },
-    store: useStore({ owner }), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
-  } as unknown as AgentsView);
+  const call = vi.fn(async (method: string, _params?: unknown) => method === 'agents.runtime.get' ? structuredClone(config) : { id: 'a-ada' });
+  const view = (owner: boolean) => {
+    // As the page: saves wait in one queue, and each refreshes the snapshot, the agent's revision with it.
+    let saves = Promise.resolve();
+    const v = {
+      seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', revision: 7, selection }], groups: [], work: [], sessions: [] },
+      store: useStore({ owner, client: { call } }), pending: true, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {},
+      // A message is on its way: the page's one-shot calls are refused until it lands.
+      call: vi.fn(async () => null),
+      save(method: string, params: () => Promise<unknown>) {
+        const run = saves.then(async () => { const result = await call(method, await params()); v.snapshot.profiles[0]!.revision++; return result; });
+        saves = run.then(() => undefined, () => undefined);
+        return run;
+      },
+    };
+    return v as unknown as AgentsView;
+  };
   mounted = mount(AgentConversation, { target: document.body, props: { view: view(true), scope } });
   await settle();
-  document.querySelector<HTMLButtonElement>('[data-testid="composer-mode"]')!.click();
-  await settle();
-  document.querySelector<HTMLButtonElement>('[data-testid="composer-mode-menu"] [data-value="acceptEdits"]')!.click();
-  await settle();
+  const pickMode = async (mode: string) => {
+    document.querySelector<HTMLButtonElement>('[data-testid="composer-mode"]')!.click();
+    await settle();
+    document.querySelector<HTMLButtonElement>(`[data-testid="composer-mode-menu"] [data-value="${mode}"]`)!.click();
+    await settle();
+  };
+  await pickMode('acceptEdits');
   expect(call).toHaveBeenCalledWith('agents.runtime.get', { agentId: 'a-ada' });
   expect(call).toHaveBeenLastCalledWith('agents.runtime.configure', { agentId: 'a-ada', expectedRevision: 7, config: { ...config, defaultRoute: { ...selection, permissionMode: 'acceptEdits' } } });
+  // The next pick reads the revision the first save left, not the one the chips were drawn with.
+  await pickMode('bypassPermissions');
+  expect(call).toHaveBeenLastCalledWith('agents.runtime.configure', expect.objectContaining({ expectedRevision: 8 }));
   await unmount(mounted);
   mounted = mount(AgentConversation, { target: document.body, props: { view: view(false), scope } });
   await settle();

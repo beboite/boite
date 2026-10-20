@@ -126,18 +126,26 @@
   /**
    * A pick from the chips, saved as the Settings tab saves the agent's model:
    * its main route, allowed once picked, so the next piece of work runs on it.
+   * It waits in the page's save queue, so a message being sent does not drop
+   * it, and reads the agent's revision and runtime when its turn comes.
    */
   async function saveSelection(next: Choice): Promise<void> {
-    const current = agent;
-    if (!current) return;
-    const config = await view.call('agents.runtime.get', { agentId: current.id });
-    const model = next.model ?? config?.defaultRoute.model ?? null;
-    if (!config || !model) return;
-    const route = { providerId: next.providerId, accountId: next.accountId, model, effort: next.effort, permissionMode: next.permissionMode };
-    const allowed = config.allowedRoutes.some(r => r.providerId === route.providerId && r.accountId === route.accountId && r.model === model)
-      ? config.allowedRoutes
-      : [...config.allowedRoutes, { id: secureId(), name: view.store.modelOf(route)?.name ?? model, providerId: route.providerId, accountId: route.accountId, model, effort: route.effort }];
-    await view.call('agents.runtime.configure', { agentId: current.id, expectedRevision: current.revision, config: { ...config, defaultRoute: route, allowedRoutes: allowed } });
+    const agentId = agent?.id;
+    if (!agentId) return;
+    try {
+      await view.save('agents.runtime.configure', async () => {
+        const client = view.store.client;
+        const current = view.snapshot?.profiles.find(p => p.id === agentId);
+        if (!client || !current) throw new Error(strings.connection.unavailable);
+        const config = await client.call('agents.runtime.get', { agentId });
+        const model = next.model ?? config.defaultRoute.model!;
+        const route = { providerId: next.providerId, accountId: next.accountId, model, effort: next.effort, permissionMode: next.permissionMode };
+        const allowed = config.allowedRoutes.some(r => r.providerId === route.providerId && r.accountId === route.accountId && r.model === model)
+          ? config.allowedRoutes
+          : [...config.allowedRoutes, { id: secureId(), name: view.store.modelOf(route)?.name ?? model, providerId: route.providerId, accountId: route.accountId, model, effort: route.effort }];
+        return { agentId, expectedRevision: current.revision, config: { ...config, defaultRoute: route, allowedRoutes: allowed } };
+      });
+    } catch (error) { view.error = errorText(error); }
   }
 
   async function send(text: string, attachments: Attachment[]): Promise<boolean> {
