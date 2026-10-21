@@ -74,6 +74,9 @@ The [CLI](cli.md) uses the agent credential inside a thread.
 Project, settings, provider and account changes reach authenticated connections
 allowed to receive them. Message, permission, question, panel, process and
 activity events are scoped to subscribed threads as well as principal access.
+Questions from persistent agents' hidden session threads also reach owner and
+paired-device clients without a subscription, so their conversation cards stay
+current; the hidden transcript keeps its subscription boundary.
 Subscribing does not prepare a provider session. A reconnect reads pending cards
 from `permissions.list`; an answered, ended or withdrawn request leaves the list
 and emits `permission.resolved`. Driver cancellation withdraws the card instead

@@ -801,6 +801,9 @@ export function startServer(options: ServerOptions): RunningServer {
     const parentId = threadId !== null && (name.startsWith('question.') || name.startsWith('permission.'))
       ? core.journal.getThread(threadId)?.parentThreadId ?? null
       : null;
+    // Agent conversations draw their hidden session's cards without opening
+    // its transcript. They need both new questions and their resolution.
+    const agentQuestion = threadId !== null && name.startsWith('question.') && !!core.journal.getThread(threadId)?.agentSessionId;
     const loadRow = name === 'thread.load' ? loadRowSender(core, payload as RpcEvents['thread.load']) : null;
     // Serialized once per projection, not once per socket.
     const frames: EventFrames = new Map();
@@ -809,7 +812,7 @@ export function startServer(options: ServerOptions): RunningServer {
       if (!mayReceiveEvent(name, connection)) continue;
       if (connection.identity.principal === 'agent' && name !== 'todos.updated' && name !== 'agents.changed' && connection.identity.threadId !== threadId) continue;
       if ((name === 'collaboration.changed' || name === 'delegation.changed' || name === 'workflows.changed') && !connection.subscriptions.has(threadId ?? '')) continue;
-      if (scoped && (threadId === null || !(connection.subscriptions.has(threadId) || (parentId !== null && connection.subscriptions.has(parentId))))) continue;
+      if (scoped && !agentQuestion && (threadId === null || !(connection.subscriptions.has(threadId) || (parentId !== null && connection.subscriptions.has(parentId))))) continue;
       // The whole activity, loop history included, is for the clients that have
       // that thread open; an agent socket still gets its own thread's.
       if (name === 'thread.activity' && connection.identity.principal !== 'agent' && (threadId === null || !connection.subscriptions.has(threadId))) continue;
