@@ -89,7 +89,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('threads.capabilities', params => threadCapabilities(core, params.threadId));
   core.router.register('threads.agentShape', params => agentShape(core, params.threadId));
   const pullRequests = core.pullRequests;
-  const linked = new LinkedPullRequests(core, (threadId, url) => pullRequests.detail(threadId, url));
+  const linked = core.linkedPullRequests;
   core.router.register('threads.pullRequestReview', async p => {
     const url = linked.requireLink(p.threadId, p.url), result = await pullRequests.reviews.review(p.threadId, url);
     linked.requireLink(p.threadId, url); return result;

@@ -41,6 +41,8 @@ async function fixture() {
   let candidates = [{ number: 7, url: 'https://github.com/example/repo/pull/7', state: 'MERGED', headRefName: 'topic', headRefOid: sha, headRepository: { name: 'repo' }, headRepositoryOwner: { login: 'example' }, isCrossRepository: false, mergedAt: '2026-10-01T12:00:00Z' }];
   const spawn = harness.core.procs.spawn.bind(harness.core.procs);
   let ghGate: string | undefined;
+  let hideList = false;
+  let unavailableView: string | undefined;
   let ghCalls = 0;
   const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
     if (command !== 'gh') return spawn(scope, command, args, options);
@@ -48,10 +50,11 @@ async function fixture() {
     const wait = ghGate ? `while (!require('node:fs').existsSync(${JSON.stringify(ghGate)})) await Bun.sleep(5);` : '';
     // `gh pr view <url>` answers one object, or fails for an unknown PR.
     if (args[1] === 'view') {
+      if (args[2] === unavailableView) return spawn(scope, process.execPath, ['-e', 'console.error("HTTP 502: Bad Gateway"); process.exit(1)'], options);
       const found = candidates.find(candidate => candidate.url === args[2]);
       return spawn(scope, process.execPath, ['-e', found ? `${wait}console.log(${JSON.stringify(JSON.stringify(found))})` : 'console.error("no pull requests found"); process.exit(1)'], options);
     }
-    return spawn(scope, process.execPath, ['-e', `${wait}console.log(${JSON.stringify(JSON.stringify(candidates))})`], options);
+    return spawn(scope, process.execPath, ['-e', `${wait}console.log(${JSON.stringify(JSON.stringify(hideList ? [] : candidates))})`], options);
   });
   restoreSpawn = () => replacement.mockRestore();
   await harness.core.mergedPrArchive.close();
@@ -61,6 +64,8 @@ async function fixture() {
     holdGh: () => { ghGate = join(harness.dataDir, 'gh-gate'); },
     releaseGh: () => { if (ghGate) writeFileSync(ghGate, 'ready'); },
     ghCalls: () => ghCalls,
+    hideList: () => { hideList = true; },
+    failView: (url: string) => { unavailableView = url; },
     /** Every process the core spawned since the fixture started, as `<command> <first argument>`. */
     spawned: () => replacement.mock.calls.map(([, command, args]) => `${command} ${args[0]}`),
   };
@@ -148,7 +153,7 @@ test('large archive sweeps bound hydration, yield to owner RPCs and advance beyo
   } finally { proof.mockRestore(); enumerations.mockRestore(); hydration.mockRestore(); scheduler.mockRestore(); }
 });
 
-test('unmerged worktree threads cost one git and one gh call per pass, then wait longer before each new proof', async () => {
+test('unmerged worktree threads share repository reads and check again once a minute', async () => {
   const f = await fixture();
   const journal = harness.core.journal;
   const original = harness.core.threads.require(f.threadId);
@@ -182,12 +187,12 @@ test('unmerged worktree threads cost one git and one gh call per pass, then wait
     const updated = await sweep();
     expect(updated.proofs).toBe(1);
     expect(updated.spawned).not.toContain('git status');
-    // Five minutes later every thread is asked again; the next wait is ten minutes.
-    elapsed = 5 * 60_000 + 1;
-    expect(await sweep()).toEqual({ proofs: 4, spawned: ['git remote', 'gh pr'] });
-    elapsed += 5 * 60_000;
+    // Each minute asks again, sharing the cached remotes and one fresh repository list.
+    elapsed = 60_001;
+    expect(await sweep()).toEqual({ proofs: 4, spawned: ['gh pr'] });
+    elapsed += 30_000;
     expect((await sweep()).proofs).toBe(0);
-    elapsed += 5 * 60_000;
+    elapsed += 30_001;
     expect((await sweep()).proofs).toBe(4);
     // A merge is found once the thread changes, and only that checkout's status is walked.
     f.setCandidates([{ ...open[0]!, state: 'MERGED' }, ...open.slice(1)]);
@@ -231,6 +236,17 @@ test('archive rowid cycles revisit old candidates while appends and replacements
     expect(await service.sweep()).toBe(0);
     expect(proved.slice(secondCycle)).toContain(ids[0]!);
   } finally { proof.mockRestore(); clock.mockRestore(); }
+});
+
+test('a PR merging outside Boite is archived on the next minute without a thread mutation', async () => {
+  const f = await fixture();
+  f.setCandidates([{ ...f.candidates[0]!, state: 'OPEN' }]);
+  expect(await service.sweep()).toBe(0);
+  f.setCandidates([{ ...f.candidates[0]!, state: 'MERGED' }]);
+  const now = Date.now();
+  const clock = spyOn(Date, 'now').mockReturnValue(now + 61_000);
+  try { expect(await service.sweep()).toBe(1); }
+  finally { clock.mockRestore(); }
 });
 
 test('root mutations during archive selection yields are observed before proof admission', async () => {
@@ -547,6 +563,8 @@ test('a worktree branch renamed by its agent archives through its own merged PR'
 
 test('a linked PR pushed under another branch name archives the conversation', async () => {
   const f = await fixture();
+  // A repository discovery page cannot disprove an explicit URL, even when it is not full.
+  f.hideList();
   const pushed = { ...f.candidates[0]!, headRefName: 'fix/elsewhere' };
   f.setCandidates([pushed]);
   // `git push origin HEAD:fix/elsewhere` leaves no local branch of that name to look up.
@@ -639,5 +657,38 @@ test('project opt-out survives other policy writers and default access denies de
   expect(harness.core.projects.require(f.project.id).autoArchiveMergedPr).toBe(false);
   for (const principal of ['session', 'agent'] as const) expect(() => assertAllowed('projects.setAutoArchiveMergedPr', { identity: { principal, threadId: f.threadId, sessionId: 'fixture' } } as never, { projectId: f.project.id, enabled: true })).toThrow();
   expect(await thrown(f.client.call('projects.setAutoArchiveMergedPr', { projectId: f.project.id, enabled: 'yes' as never }))).toThrow('boolean');
+  expect(await service.sweep()).toBe(0);
+});
+
+test('foreign fork must not block the local merged PR', async () => {
+  const f = await fixture();
+  f.setCandidates([f.candidates[0]!, {...f.candidates[0]!, number: 8, url: 'https://github.com/example/repo/pull/8', state: 'OPEN', isCrossRepository: true, headRepositoryOwner: {login: 'foreigner'}}]);
+  expect(await service.sweep()).toBe(1);
+});
+
+test('an old linked merge must not archive a newer open PR', async () => {
+  const f = await fixture();
+  const opened = {...f.candidates[0]!, number: 8, url: 'https://github.com/example/repo/pull/8', state: 'OPEN'};
+  f.setCandidates([opened, f.candidates[0]!]);
+  const link = {url: f.candidates[0]!.url, repository: 'example/repo', number: 7, title: 'Old', state: 'MERGED', draft: false, head: 'topic', base: 'main', headRepository: 'example/repo', checkedAt: 1};
+  harness.core.journal.setSetting(`linked-pull-requests:${f.threadId}`, [link, {...link, number: 8, url: opened.url, state: 'OPEN'}]);
+  expect(await service.sweep()).toBe(0);
+});
+
+
+test('a new automatic open PR blocks an older linked merge on the same checkout', async () => {
+  const f = await fixture();
+  const merged = f.candidates[0]!;
+  f.setCandidates([{ ...merged, number: 8, url: 'https://github.com/example/repo/pull/8', state: 'OPEN' }, merged]);
+  harness.core.journal.setSetting(`linked-pull-requests:${f.threadId}`, [{ url: merged.url }]);
+  expect(await service.sweep()).toBe(0);
+});
+
+
+test('an unreadable linked PR keeps the conversation visible despite another merged link', async () => {
+  const f = await fixture();
+  const unknown = 'https://github.com/example/repo/pull/8';
+  f.failView(unknown);
+  harness.core.journal.setSetting(`linked-pull-requests:${f.threadId}`, [{ url: f.candidates[0]!.url }, { url: unknown }]);
   expect(await service.sweep()).toBe(0);
 });

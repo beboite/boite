@@ -340,12 +340,21 @@ the project; empty projects follow those with conversations. A selected project
 promoted to the top by a new prompt also scrolls the desktop sidebar to the top.
 Custom project order remains fixed until the user changes it.
 
-Visible desktop thread rows read their PR again every 15 seconds, on a turn's
-status change and when the app becomes visible. Folded rows and hidden windows
-skip background reads; a failed read keeps the last successful link. The core
-shares a 15-second PR list cache across a repository's worktrees and reads each
-worktree's own HEAD, so an agent's branch rename or switch does not lose its PR.
+Visible desktop and phone rows read their PR every 15 seconds during a turn,
+every minute at rest, on a status change and when the app becomes visible.
+Polling continues after a merge so a reused branch can acquire another PR.
+Folded rows and hidden windows skip background reads; errors keep the last
+successful badge. Open, closed and merged PRs have distinct icons and colors.
+Linked PR state events update both views immediately; an unlink waits out an
+older pending lookup before reading again.
+
+Explicit conversation links work without a branch or a surviving checkout. An
+open link takes priority; when every link is terminal, a newly discovered open
+PR can replace it. The core shares 15-second list and detail caches, pins GitHub
+queries to the origin fetch repository, and ignores foreign forks sharing a
+branch name. A private worktree's own HEAD follows an agent's branch rename.
 Shared project-directory threads never inherit that directory's current branch.
+Missing GitHub CLI or login retries after a minute; manual refresh retries at once.
 
 Deletion is separate from archive. `threads.remove` stops the thread family and
 waits for processes before hiding it behind persistent markers.
@@ -376,19 +385,19 @@ Projects default to `autoArchiveMergedPr: true`; the owner changes it through
 root conversation only for a clean linked worktree and a uniquely identified,
 merged, non-fork PR from the same repository with the exact branch tip. The
 proof takes the checkout's current branch from `git status`, not the thread's
-recorded starting branch. Cheapest evidence comes first: the repository's cached
-`git remote -v`, the branch in the worktree's `HEAD` file, then the repository's
-list of its newest 200 PRs, which the sidebar badges read too. `git status` runs
-only when a listed merged PR could match. Up to five PRs the conversation
-linked are tried first, newest first: a linked PR needs the tip as its head
-commit but may have another head name, because agents often push
-`HEAD:fix/...`. A link absent from a list that is not full does not exist and
-is skipped; one absent from a full list is asked with `gh pr view`. The
-checkout's branch then needs exactly one PR of that name in the list. When the
-list is full and holds a merged PR of that branch, or none, `gh pr list --head`
-confirms it. A thread whose proof finds nothing is not proved again for 5
-minutes, then 10, 20 and so on up to an hour, until the thread changes or
-links another PR.
+recorded starting branch. The repository's cached fetch remotes identify origin,
+then explicitly linked URLs are read directly with `gh pr view`, even when they
+are absent from the repository list. Every linked PR is checked before accepting
+a merge: another open linked PR keeps the conversation visible. A linked merge
+needs the exact tip but may have another head name, because agents often push
+`HEAD:fix/...`.
+
+Without a linked proof, the repository's newest 200 PRs are shared with sidebar
+discovery. Its branch needs exactly one local PR; unrelated fork branches do not
+count. A full page requires a branch-specific query and a complete result before
+archiving. `git status` runs only when a merged PR could match. A negative proof
+retries after one minute even when the thread has not changed, so an external
+merge is detected without further conversation activity.
 The grouping menu in both views exposes this project policy as Hide merged PR
 conversations and names the project it affects. In Recent it follows the project
 filter, or the current project when all projects are shown. Disabling reveals

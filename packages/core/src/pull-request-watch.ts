@@ -247,6 +247,8 @@ export class PullRequestWatches {
       const remarks = remarksDue ? await this.#shared(memo, `remarks ${record.url}`, () => this.#remarks(threadId, record)) : null;
       // A stop or an unwatch that landed during the reads wins.
       if (this.#find(threadId, record.url) !== record) return 'OPEN';
+      await this.core.linkedPullRequests.observe(threadId, record.url, 'OPEN');
+      if (this.#find(threadId, record.url) !== record) return 'OPEN';
       const { changes, next } = evaluate(record.memory, detail, remarks);
       runtime.detail = read;
       runtime.rules = read.base ? this.#required.stamp(rulesKey(record, read.base)) : null;
@@ -292,6 +294,8 @@ export class PullRequestWatches {
    */
   async #end(threadId: ThreadId, record: WatchRecord, runtime: Runtime, memo: Map<string, Promise<unknown>>, state: 'MERGED' | 'CLOSED'): Promise<void> {
     const closer = await this.#shared(memo, `closer ${record.url}`, () => this.#graphql(threadId, record, CLOSER_QUERY).then(parseCloser));
+    if (this.#find(threadId, record.url) !== record) return;
+    await this.core.linkedPullRequests.observe(threadId, record.url, state);
     if (this.#find(threadId, record.url) !== record) return;
     this.#answered(runtime, record);
     this.core.log('info', `pull request #${record.number} is ${state.toLowerCase()}${closer.by ? ` by ${closer.by}` : ''}: its watch ended`, { source: 'pull-request-watch', threadId });

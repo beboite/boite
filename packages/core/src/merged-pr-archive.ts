@@ -7,13 +7,12 @@ import { repositoryOf, type PullRequests } from './pull-requests.ts';
 const ARCHIVE_SCAN_ROWS = 128;
 const ARCHIVE_PROOFS = 8;
 const ARCHIVE_YIELD_ROWS = 8;
-/** A thread whose PR is not merged is asked again after 5 minutes, then 10, 20 and so on up to an hour. */
-const NEGATIVE_FIRST_MS = 5 * 60_000;
-const NEGATIVE_LAST_MS = 60 * 60_000;
+/** A merge can happen elsewhere without changing the conversation. Check again next minute. */
+const NEGATIVE_RETRY_MS = 60_000;
 const NEGATIVE_ENTRIES = 2_000;
 
 /** What a thread looked like when its proof failed: any update or new PR link starts over. */
-interface Negative { signature: string; delayMs: number; nextAt: number }
+interface Negative { signature: string; nextAt: number }
 
 /** Visibility maintenance owns one timer and one bounded, non-overlapping pass. */
 export class MergedPrArchive {
@@ -141,12 +140,10 @@ export class MergedPrArchive {
     const entry = this.negative.get(thread.id);
     return entry !== undefined && entry.signature === this.signature(thread) && Date.now() < entry.nextAt;
   }
-  /** The same answer again doubles the wait; a changed thread starts at five minutes. */
+  /** Suppress repeated reads within one round, without delaying an external merge for an hour. */
   private remember(thread: ThreadSummary, signature: string): void {
-    const previous = this.negative.get(thread.id);
-    const delayMs = previous?.signature === signature ? Math.min(previous.delayMs * 2, NEGATIVE_LAST_MS) : NEGATIVE_FIRST_MS;
     this.negative.delete(thread.id);
-    this.negative.set(thread.id, { signature, delayMs, nextAt: Date.now() + delayMs });
+    this.negative.set(thread.id, { signature, nextAt: Date.now() + NEGATIVE_RETRY_MS });
     if (this.negative.size > NEGATIVE_ENTRIES) this.negative.delete(this.negative.keys().next().value!);
   }
   private async pass(signal: AbortSignal): Promise<number> {
