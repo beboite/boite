@@ -580,8 +580,8 @@ Dependabot alerts/security updates. Vulnerability reports use the private
 channel in [SECURITY.md](../SECURITY.md). Actions are pinned to full commit SHAs.
 Hosted rulesets and security settings are managed separately from these files.
 
-Dependabot runs weekly for the Bun workspace, `docker/agents`, Cargo, Docker
-and Actions. Actions, agent CLIs and Cargo share the `weekly` multi-ecosystem
+Dependabot runs monthly for the Bun workspace, `docker/agents`, Cargo, Docker
+and Actions. Actions, agent CLIs and Cargo share the `monthly` multi-ecosystem
 group. Workspace minor/patch updates share another PR; majors are separate.
 
 The labeler uses `.github/labeler.yml` for `core`, `ui`, `shell`, `server`, `ci`
