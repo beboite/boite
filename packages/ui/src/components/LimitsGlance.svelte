@@ -87,10 +87,14 @@
   /**
    * Captured on the window: the focus stays on the trigger after a press, so
    * the Escape that shuts the glance never reaches the dialog, and it is
-   * spent here rather than also stopping the running turn.
+   * spent here rather than also stopping the running turn. Only from the
+   * trigger, the glance or no focus at all: the palette opened over it keeps
+   * its own Escape.
    */
   function closeOnEscape(event: KeyboardEvent) {
     if (event.key !== 'Escape' || !popover.open) return;
+    const target = event.target;
+    if (target !== document.body && target !== trigger && !(target instanceof Node && content?.contains(target))) return;
     event.preventDefault();
     event.stopPropagation();
     close();
