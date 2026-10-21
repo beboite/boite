@@ -62,6 +62,13 @@ else if (command === 'check') {
   console.log('Using global installation update method...');
   console.error('error: the release server refused the download');
   process.exit(3);
+} else if (command === 'update-unknown-method') {
+  console.log('\x1b[90mT\x1b[39m  Upgrade');
+  console.log('|');
+  console.log('\x1b[31mx\x1b[39m  Could not detect the installation method. Pass --method to choose how to upgrade OpenCode.');
+  console.log('|');
+  console.log('\x1b[90m-\x1b[39m  Failed');
+  process.exit(1);
 } else if (command === 'update-permission') {
   console.log('Updating agent via npm install -g...');
   console.error('npm error code EACCES');
