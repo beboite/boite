@@ -147,10 +147,14 @@ export class ContactsView {
     return next;
   }
 
-  /** `share` false: the invitee already reaches this machine on Tailscale, so the link alone does. */
-  async createInvite(share = true): Promise<void> {
+  /**
+   * `share` false: the invitee already reaches this machine on Tailscale, so
+   * the link alone does. True once this call made the invitation now shown.
+   */
+  async createInvite(share = true): Promise<boolean> {
     const invite = await this.#run('invite', () => this.#connected().call('contacts.invite', { share }));
     if (invite) this.invite = invite;
+    return invite !== null;
   }
 
   async join(link: string): Promise<Contact | null> {

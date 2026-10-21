@@ -32,7 +32,8 @@
     timer = setTimeout(() => { copied = false; }, 1500);
   }
   async function invite(share: boolean) {
-    await view.createInvite(share);
+    // A failed call leaves the last link shown, made for another kind of invitee: never copied in its place.
+    if (!(await view.createInvite(share))) return;
     await tick();
     await copy();
   }
