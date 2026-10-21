@@ -31,6 +31,9 @@ beforeAll(async () => {
 
 afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
+// Each test names its budget: a cold dev server on a loaded Windows runner
+// transformed the launcher past bun's 5 s default (E2E 3/3, 2026-10-21).
+
 test('a composer the side panel narrows keeps its send button on the row of the chips', async () => {
   await size(1024, 700);
   await onStore(`store.panel.closeAll(); store.panel.open('files');`);
@@ -61,7 +64,7 @@ test('a composer the side panel narrows keeps its send button on the row of the 
   })()`);
   expect(Math.abs(wide.picker - wide.send)).toBeLessThanOrEqual(1);
   expect(wide.label).not.toBe('none');
-});
+}, 30_000);
 
 test('a panel tab centres its icon on its label, and the strip fades the end that hides a tab', async () => {
   await size(1180, 800);
@@ -111,7 +114,7 @@ test('a panel tab centres its icon on its label, and the strip fades the end tha
   // Closed by its X, the panel hands the keys to the toggle that opens it again, not to the page.
   await page.click(id('panel-close'));
   await page.waitFor(`document.activeElement?.dataset?.testid === 'panel-toggle'`);
-});
+}, 30_000);
 
 test('the launcher letters are whole keycaps', async () => {
   await onStore(`store.panel.closeAll(); store.panel.open('files'); store.panel.closeAll();`);
@@ -130,7 +133,7 @@ test('the launcher letters are whole keycaps', async () => {
     expect(key.height).toBeGreaterThanOrEqual(18);
     expect(Math.abs(key.offset)).toBeLessThanOrEqual(1);
   }
-});
+}, 30_000);
 
 test('a turn footer that wraps leaves no dot at either end of a line', async () => {
   await onStore(`store.panel.closeAll(); store.panel.hide();`);
@@ -155,4 +158,4 @@ test('a turn footer that wraps leaves no dot at either end of a line', async () 
   }
   await capture('polish-turn-footer-phone.png');
   await size(1440, 900);
-});
+}, 30_000);
