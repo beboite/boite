@@ -117,8 +117,11 @@ test('a panel tab centres its icon on its label, and the strip fades the end tha
 }, 30_000);
 
 test('the launcher letters are whole keycaps', async () => {
-  await onStore(`store.panel.closeAll(); store.panel.open('files'); store.panel.closeAll();`);
+  // An empty panel that is open is the launcher; closing every tab shuts the
+  // panel, which only showed the launcher while its exit animation ran.
+  await onStore(`store.panel.closeAll(); store.panel.toggle();`);
   await page.waitFor(`document.querySelector('${id('launch-files')}')`);
+  await page.settleAnimations();
   const keys = await page.evaluate<{ height: number; offset: number }[]>(`[...document.querySelectorAll('[data-testid^="launch-"] .kbd')].map((key) => {
     const box = key.getBoundingClientRect(), style = getComputedStyle(key);
     const face = (box.top + parseFloat(style.borderTopWidth) + box.bottom - parseFloat(style.borderBottomWidth)) / 2;
