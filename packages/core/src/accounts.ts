@@ -12,7 +12,7 @@ import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-pr
 import { agentEnv, hostAgentsEnabled, profileFor, resolveExecutable, resolveLaunch } from './providers/resolve.ts';
 import { sqliteHasRows } from './providers/sqlite-login.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
-import { ISOLATION_DEFAULTS, shareKeys, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
+import { variableHome, shareKeys, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
 import { logAccountStatus, logLoginState } from './account-log.ts';
 
@@ -830,18 +830,16 @@ export class AccountStore {
   }
 
   /**
-   * The provider's own login directory: its isolation variable if the environment
-   * carries one, that variable's own default when Boite knows it, else
+   * The provider's own login directory: its configured isolation variable,
+   * the inherited variable, that variable's default when Boite knows it, else
    * `~/.<id>`.
    */
   defaultLocation(provider: ProviderDescriptor): string | null {
     const profile = profileFor(provider);
     if (profile !== undefined) {
       for (const key of Object.keys(profile.isolation)) {
-        const value = process.env[key];
-        if (value !== undefined && value.length > 0) return value;
-        const fallback = ISOLATION_DEFAULTS[key];
-        if (fallback !== undefined) return join(homePath(), ...fallback);
+        const value = variableHome(key, profile);
+        if (value !== null) return value;
       }
     }
     return join(homePath(), `.${provider.id}`);

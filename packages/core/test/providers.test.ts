@@ -1,4 +1,4 @@
-import { currentOs } from '../src/paths.ts';
+import { currentOs, homePath } from '../src/paths.ts';
 import { chmodSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { Account } from '@boite/contracts';
 import { assertDriverRunnable } from '../src/drivers/index.ts';
@@ -59,6 +59,21 @@ afterEach(async () => {
 });
 
 describe('providers', () => {
+  test('common environment expands for every OS and profile values override it', () => {
+    const descriptor = validDescriptor();
+    descriptor.env = { XDG_DATA_HOME: '{home}/.local/share/mine', MINE_MODE: 'common' };
+    (descriptor.profiles as Record<string, Record<string, unknown>>).windows!.env = { MINE_MODE: 'windows' };
+    writeUserDescriptor('common-env.json', descriptor);
+    expect(harness.core.providers.load().rejected).toEqual([]);
+    const profiles = harness.core.providers.require('mine').profiles;
+    for (const os of ['windows', 'linux', 'macos'] as const) {
+      expect(profiles[os]?.env).toEqual({ XDG_DATA_HOME: `${homePath()}/.local/share/mine`, MINE_MODE: os === 'windows' ? 'windows' : 'common' });
+    }
+    descriptor.env = { XDG_DATA_HOME: 42 };
+    writeUserDescriptor('common-env.json', descriptor);
+    expect(harness.core.providers.load().rejected).toMatchObject([{ field: 'env.XDG_DATA_HOME' }]);
+  });
+
   test('a directory cannot mask a runnable fallback executable', () => {
     const directory = join(harness.dataDir, 'not-an-executable');
     mkdirSync(directory);
@@ -388,6 +403,9 @@ describe('providers', () => {
     expect(descriptor.login).toEqual({ command: ['opencode2', 'auth', 'login', '--standalone'], terminal: true });
     for (const os of ['windows', 'linux', 'macos'] as const) {
       const profile = descriptor.profiles[os];
+      for (const [variable, directory] of Object.entries({ XDG_DATA_HOME: '.local/share', XDG_CONFIG_HOME: '.config', XDG_STATE_HOME: '.local/state', XDG_CACHE_HOME: '.cache' })) {
+        expect(profile?.env?.[variable]).toBe(`${homePath()}/${directory}/opencode-v2`);
+      }
       // Version 2 refuses `--port`, which version 1's line carries.
       expect(profile?.launch?.args).toEqual(['acp']);
       expect(profile?.isolation).toEqual({ XDG_DATA_HOME: '{isolationDir}', XDG_CONFIG_HOME: '{isolationDir}', XDG_STATE_HOME: '{isolationDir}/state' });
@@ -399,6 +417,7 @@ describe('providers', () => {
       const first = harness.core.providers.require('opencode').profiles[os];
       expect(first?.executable.filter((candidate) => candidate.kind === 'path' && candidate.value === 'opencode').map((candidate) => candidate.major)).toEqual([1]);
     }
+    expect(harness.core.accounts.defaultLocation(descriptor)).toBe(descriptor.profiles[currentOs()]?.env?.['XDG_DATA_HOME'] ?? null);
   });
 
   test('the opencode profile carries the acp launch arguments and the xdg isolation', async () => {

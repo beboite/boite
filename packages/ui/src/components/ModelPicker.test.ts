@@ -96,6 +96,38 @@ test('a column of hundreds of models draws its first rows until asked for all', 
   expect(showAll()).toBeNull();
 });
 
+test('a short gateway catalog identifies each upstream provider, including after a search', async () => {
+  const models: ModelInfo[] = [
+    { id: 'douane/opencode/minimax-m3.1-flash-free', name: 'MiniMax (free)' },
+    { id: 'douane/openrouter/minimax/minimax-m3.1-flash:free', name: 'MiniMax (free)' },
+    { id: 'douane/openrouter/cohere/north-mini:free', name: 'North Mini (free)' },
+  ];
+  vi.spyOn(store, 'favorites', 'get').mockReturnValue(models.slice(0, 2).map(model => ({
+    providerId: 'opencode', accountId: 'a-opencode', model, items: [],
+  })));
+  await mountAt('landing');
+  const real = store.modelsOf.bind(store);
+  vi.spyOn(store, 'modelsOf').mockImplementation((providerId, accountId) => providerId === 'opencode' ? models : real(providerId, accountId));
+  document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+  document.querySelector<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=opencode]')!.click();
+  await waitFor(() => rows() === 3);
+  const sources = () => [...document.querySelectorAll<HTMLElement>('[data-group]')].map(el => el.dataset.group);
+  expect(sources()).toEqual(['douane/opencode', 'douane/openrouter']);
+  const search = document.querySelector<HTMLInputElement>('[data-testid=picker-search]')!;
+  search.value = 'free minimax';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => rows() === 2);
+  expect(sources()).toEqual(['douane/opencode', 'douane/openrouter']);
+  expect(document.querySelector<HTMLButtonElement>(`[data-model="${models[1]!.id}"]`)!.title).toBe(models[1]!.id);
+  document.querySelector<HTMLButtonElement>('[data-provider=favorites]')!.click();
+  await waitFor(() => document.querySelectorAll('[data-testid=favorite-model]').length >= 2);
+  for (const [index, source] of ['douane/opencode', 'douane/openrouter'].entries()) {
+    const favorite = document.querySelector<HTMLButtonElement>(`[data-testid=favorite-model][title="${models[index]!.id}"]`)!;
+    expect(favorite.querySelector('.account-label')?.textContent).toBe(source);
+  }
+});
+
 test('a first probe shows a reading column, never the descriptor list it is about to replace', async () => {
   // Every Claude probe waits for the test: the first one lands, the second one fails.
   const original = FakeClient.prototype.call;

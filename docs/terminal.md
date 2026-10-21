@@ -157,6 +157,9 @@ buffered; the snapshot sequence excludes events already represented. Older cores
 without sequences can show overlap. Snapshot replay mutes xterm responses to
 terminal queries so reopening cannot type them into the shell; keys typed during
 the replay, or while a new split attaches, reach the shell once it is drawn.
+The local attachment records where replay ends. Buffered live output follows it
+with responses enabled, so a cursor query arriving while the opening response
+travels back still gets its answer rather than leaving PowerShell waiting.
 
 The screen fits each animation frame during a drag. A resize RPC follows 80 ms
 after the last change. ConPTY snapshots include the Windows build number so xterm

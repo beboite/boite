@@ -52,9 +52,9 @@ interface Marker {
   keys: Record<string, string>;
 }
 
-/** The provider's own directory behind an isolation variable: the environment's value, else its default. */
-export function variableHome(variable: string): string | null {
-  const value = process.env[variable];
+/** The provider's configured home, then its inherited environment, then the variable's default. */
+export function variableHome(variable: string, profile?: Pick<OsProfile, 'env'>): string | null {
+  const value = profile?.env?.[variable] ?? process.env[variable];
   if (value !== undefined && value.length > 0) return value;
   const fallback = ISOLATION_DEFAULTS[variable];
   return fallback === undefined ? null : join(homePath(), ...fallback);
@@ -76,7 +76,7 @@ export function shareProfile(isolationDir: string, profile: OsProfile, shares: r
   for (const share of shares) {
     const template = profile.isolation[share.variable];
     if (template === undefined) continue;
-    const from = variableHome(share.variable);
+    const from = variableHome(share.variable, profile);
     if (from === null) {
       for (const path of share.paths) {
         problems.push({ path, message: `Boite does not know where ${share.variable} points when it is not set` });

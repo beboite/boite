@@ -16,7 +16,7 @@ accounts, and the Claude and Codex drivers for the reports.
 | Grok | `hooks/*.json` under `GROK_HOME`, and Claude's `~/.claude/settings.json` | events | no |
 | pi | extensions under `PI_CODING_AGENT_DIR/extensions` | modules | no |
 | OpenCode | plugins under `XDG_CONFIG_HOME/opencode/plugins` | modules | no |
-| OpenCode 2 | the same folder, read with another plugin API | modules | no |
+| OpenCode 2 | `~/.config/opencode-v2/opencode/plugins`, with the version 2 plugin API | modules | no |
 
 The descriptor's `hookSources` names these places
 ([providers.md](providers.md#hooks-and-shared-configuration)), and Settings reads
@@ -25,6 +25,10 @@ directory of them, shaped `{ "hooks": { "<Event>": [{ "matcher": "...",
 "hooks": [...] }] } }`; each inner entry counts as one hook. A `modules` source
 is a directory of scripts, where each `.js`, `.ts`, `.mjs` or `.cjs` file and
 each package directory counts as one.
+
+When a profile sets an XDG home itself, source counting and isolated-account
+sharing use that home. OpenCode 2 therefore never loads version 1's plugins
+from an inherited `XDG_CONFIG_HOME`.
 
 ## Isolated accounts
 

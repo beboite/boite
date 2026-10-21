@@ -1,7 +1,7 @@
 import { RpcErrorCode, isThreadTerminal, threadTerminalId, type KeybindingCommand, type ProjectId, type RpcEvents, type TerminalState, type ThreadId, type ThreadSummary, type ThreadTerminal } from '@boite/contracts';
 import { RpcFailure } from '../client';
 // A type only: xterm's screen class rides in the terminal view's chunk, which hands it over.
-import type { TerminalSession, TerminalStart } from '../terminal-session.svelte';
+import type { TerminalAttachment, TerminalSession, TerminalStart } from '../terminal-session.svelte';
 import {
   MAX_PANES, activeTab, addTab, firstLayout, nextPane, panesOf, parseLayout, reconcile, removePane, resizePanes, splitPane, terminalIdOf,
   type SplitDirection, type TerminalLayout
@@ -26,7 +26,7 @@ interface StoredLayout { layout: TerminalLayout; open: boolean }
 export class Terminals {
   /** Close blocks delayed attachments of that shell on that client until it is opened again on purpose. */
   private readonly closed = new WeakMap<NonNullable<StoreContext['client']>, Set<string>>();
-  private readonly opening = new Map<string, { client: StoreContext['client']; result: Promise<TerminalState | null> }>();
+  private readonly opening = new Map<string, { client: StoreContext['client']; result: Promise<TerminalAttachment | null> }>();
   /** Clients whose core predates `terminals.list`: one shell per thread there, the first. */
   private readonly single = new WeakSet<NonNullable<StoreContext['client']>>();
   /** Threads whose layout is being matched with `terminals.list`; their screens wait for it before attaching. */
@@ -294,7 +294,7 @@ export class Terminals {
   }
 
   /** One of the thread's shells, attached or started; null when the core refused, with the reason in the toast. */
-  openTerminal(threadId: ThreadId, cols: number, rows: number, terminalId?: string): Promise<TerminalState | null> {
+  openTerminal(threadId: ThreadId, cols: number, rows: number, terminalId?: string): Promise<TerminalAttachment | null> {
     const client = this.ctx.client;
     const id = threadTerminalId(threadId, terminalId);
     if (!client || this.closed.get(client)?.has(id)) return Promise.resolve(null);
@@ -323,7 +323,8 @@ export class Terminals {
         if (state.sequence === undefined && output.length > 0) return client.call('terminals.open', params);
         const after = output.filter((event) => state.sequence !== undefined && event.sequence !== undefined && event.sequence > state.sequence);
         return after.length === 0 ? state : {
-          ...state, output: state.output + after.map((event) => event.data).join(''), sequence: after.at(-1)!.sequence
+          ...state, replayChars: state.output.length,
+          output: state.output + after.map((event) => event.data).join(''), sequence: after.at(-1)!.sequence
         };
       })
       .catch((error) => { if (this.ctx.client === client) this.ctx.fail(error); return null; })
