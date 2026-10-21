@@ -15,6 +15,7 @@ import type { PermissionTicket } from '../types.ts';
 
 type Pending = { resolve: (response: PromptResponse) => void; reject: (error: Error) => void };
 type Notify = (notification: SessionNotification) => void;
+type Terminal = { stopReason: 'end_turn' | 'cancelled'; error?: string };
 
 export class OpenCodeConnection {
   readonly agent: ClientContext;
@@ -30,6 +31,8 @@ export class OpenCodeConnection {
   private commitInput: (() => void) | null = null;
   private readonly permissions = new Map<string, PermissionTicket>();
   private readonly children = new Set<string>();
+  private readonly inbox = new Set<string>();
+  private deferredTerminal: Terminal | null = null;
 
   private constructor(private readonly url: string, private readonly authorization: string, cwd: string,
     private readonly notify: Notify, private readonly current: () => AcpTurn | null) {
@@ -73,14 +76,8 @@ export class OpenCodeConnection {
 
   async steer(prompt: ContentBlock[], onAccepted?: () => void): Promise<boolean> {
     if (!this.pending || this.inputCommitted || !this.current() || this.current()?.isStopped) return false;
-    this.inputCommitted = new Promise(resolve => { this.commitInput = resolve; });
-    try {
-      await this.submit(prompt);
-      onAccepted?.();
-      return true;
-    } finally {
-      this.commitInput?.(); this.commitInput = null; this.inputCommitted = null;
-    }
+    await this.submit(prompt, onAccepted);
+    return true;
   }
 
   private async call(path: string, method = 'GET', body?: unknown): Promise<unknown> {
@@ -120,6 +117,8 @@ export class OpenCodeConnection {
     this.tools.clear();
     this.lastTokens = 0;
     this.compacting = false;
+    this.inbox.clear();
+    this.deferredTerminal = null;
     this.tokens = { inputTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedReadTokens: 0, cachedWriteTokens: 0, totalTokens: 0 };
     const response = new Promise<PromptResponse>((resolve, reject) => { this.pending = { resolve, reject }; });
     void this.submit(params['prompt'] as ContentBlock[]).catch(error => { this.pending?.reject(error); this.pending = null; });
@@ -132,7 +131,20 @@ export class OpenCodeConnection {
 
   private path(): string { return `/api/session/${encodeURIComponent(this.sessionId)}`; }
 
-  private submit(prompt: ContentBlock[]): Promise<unknown> {
+  private async submit(prompt: ContentBlock[], onAccepted?: () => void): Promise<void> {
+    this.inputCommitted = new Promise(resolve => { this.commitInput = resolve; });
+    try {
+      const response = object(await this.send(prompt));
+      const id = text(object(response['data'])['id']);
+      if (!id) throw new Error('OpenCode prompt response data.id must be a nonempty inbox ID');
+      this.inbox.add(id);
+      onAccepted?.();
+    } finally {
+      this.commitInput?.(); this.commitInput = null; this.inputCommitted = null;
+    }
+  }
+
+  private send(prompt: ContentBlock[]): Promise<unknown> {
     const value = prompt.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n');
     const files = prompt.flatMap(block => block.type === 'image' ? [{ uri: `data:${block.mimeType};base64,${block.data}` }] : []);
     const slash = /^\/([^\s]+)\s*([\s\S]*)$/.exec(value.trim());
@@ -198,6 +210,12 @@ export class OpenCodeConnection {
     if (child && !type.startsWith('permission.') && !type.startsWith('form.') && !type.startsWith('session.tool.')) return;
     const id = text(data['id']);
     switch (type) {
+      case 'session.execution.started': this.deferredTerminal = null; break;
+      case 'session.inbox.delivered': this.inbox.delete(text(data['inboxID'])); break;
+      case 'session.inbox.cancelled':
+        this.inbox.delete(text(data['inboxID']));
+        if (this.inbox.size === 0 && this.deferredTerminal) this.complete(this.deferredTerminal);
+        break;
       case 'session.text.delta': turn.writeText(text(data['delta'])); break;
       case 'session.reasoning.delta': turn.writeThinking(text(data['delta'])); break;
       case 'session.tool.input.started':
@@ -223,18 +241,25 @@ export class OpenCodeConnection {
       case 'session.compaction.started': turn.ctx.reportProgress?.('compacting'); break;
       case 'session.compaction.ended':
         turn.ctx.reportProgress?.('working');
-        if (this.compacting) void this.finish('end_turn');
+        if (this.compacting) this.complete({ stopReason: 'end_turn' });
         break;
       case 'session.compaction.failed':
-        if (this.compacting) { turn.fail(text(object(data['error'])['message']) || 'OpenCode compaction failed'); void this.finish('end_turn'); }
+        if (this.compacting) this.complete({ stopReason: 'end_turn', error: text(object(data['error'])['message']) || 'OpenCode compaction failed' });
         break;
       case 'session.execution.succeeded':
       case 'session.execution.interrupted':
       case 'session.execution.failed':
-        if (type.endsWith('failed')) turn.fail(text(object(data['error'])['message']) || 'OpenCode execution failed');
-        void this.finish(type.endsWith('interrupted') ? 'cancelled' : 'end_turn');
+        this.complete({ stopReason: type.endsWith('interrupted') ? 'cancelled' : 'end_turn',
+          ...(type.endsWith('failed') ? { error: text(object(data['error'])['message']) || 'OpenCode execution failed' } : {}) });
         break;
       case 'permission.asked': {
+        const path = `/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(id)}/reply`;
+        if (turn.ctx.thread.permissionMode === 'yolo') {
+          if (!turn.isStopped && !turn.settled) void this.call(path, 'POST', { decision: 'once' }).catch(error => {
+            if (!this.abort.signal.aborted && !turn.isStopped && !turn.settled) turn.fail(messageOf(error));
+          });
+          break;
+        }
         const tool = this.tools.get(text(object(data['source'])['id']));
         const toolName = tool?.name ?? text(data['action']);
         const ticket = turn.ctx.requestPermission(toolName, tool?.input ?? data['metadata'] ?? null, text(data['message']) || null);
@@ -244,7 +269,7 @@ export class OpenCodeConnection {
         void Promise.race([ticket, turn.stopped.then(() => 'deny' as const)]).then(async decision => {
           if (!this.permissions.delete(id) || turn.isStopped || turn.settled) return;
           turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision });
-          await this.call(`/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(id)}/reply`, 'POST', { decision: decision === 'allow' ? 'once' : 'reject' });
+          await this.call(path, 'POST', { decision: decision === 'allow' ? 'once' : 'reject' });
         }).catch(error => { if (!this.abort.signal.aborted && !turn.isStopped && !turn.settled) turn.fail(messageOf(error)); });
         break;
       }
@@ -271,6 +296,17 @@ export class OpenCodeConnection {
     this.tokens.cachedReadTokens += read; this.tokens.cachedWriteTokens += write;
     this.lastTokens = input + output + reasoning + read + write;
     this.tokens.totalTokens += this.lastTokens;
+  }
+
+  private complete(terminal: Terminal): void {
+    // Admission can race the previous execution's terminal event. Its inbox
+    // entry must deliver before a terminal event can end this Boite turn.
+    if (this.inbox.size > 0 && !this.current()?.isStopped) {
+      this.deferredTerminal = terminal;
+      return;
+    }
+    if (terminal.error) this.current()?.fail(terminal.error);
+    void this.finish(terminal.stopReason);
   }
 
   private async finish(stopReason: 'end_turn' | 'cancelled'): Promise<void> {

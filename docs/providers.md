@@ -193,6 +193,9 @@ Follow-ups use the native prompt inbox with `delivery: "steer"`, so queued
 messages and Send now join the running execution. OpenCode 2's ACP endpoint
 rejects concurrent prompts. Events received during a follow-up submission wait
 until its acceptance is journalled, keeping the user message before its reply.
+Accepted inbox IDs remain tracked until delivery or cancellation, so a previous
+execution's terminal event cannot discard a late follow-up. Yolo mode approves
+native permissions without opening a permission card, including child sessions.
 
 The picker lists OpenCode's own models first, then the gateway's as
 `douane/<gateway id>`: Gemini, Muse, the open families, and Antigravity Claude

@@ -50,7 +50,7 @@ test('OpenCode 2 keeps the tool name and plain output when ACP titles change', (
   expect(parts.at(-1)).not.toHaveProperty('documents');
 });
 
-test('OpenCode 2 answers permissions from its native child sessions', async () => {
+test('OpenCode 2 answers child permissions interactively and allows them without a card in yolo mode', async () => {
   harness = await startTestCore();
   const owner = await harness.connect();
   const profile = { executable: [{ kind: 'path' as const, value: 'bun' }], detect: {}, isolation: {}, launch: { args: [join(import.meta.dir, 'fixtures/opencode2-server.ts'), 'acp'] } };
@@ -60,8 +60,8 @@ test('OpenCode 2 answers permissions from its native child sessions', async () =
   const project = await owner.call('projects.add', { path: harness.dataDir, name: 'Fixture' });
   const thread = await owner.call('threads.create', { projectId: project.id, accountId: account.id, providerId: 'opencode-v2' });
   await owner.call('threads.subscribe', { threadId: thread.id });
-  const requested = owner.next('permission.requested', request => request.threadId === thread.id, 2000);
-  const finished = owner.next('turn.finished', result => result.threadId === thread.id, 5000);
+  const requested = owner.next('permission.requested', request => request.threadId === thread.id, 20000);
+  const finished = owner.next('turn.finished', result => result.threadId === thread.id, 20000);
   await owner.call('turns.start', { threadId: thread.id, prompt: '[child-permission]' });
   const permission = await requested;
   expect(permission.toolName).toBe('shell');
@@ -69,4 +69,37 @@ test('OpenCode 2 answers permissions from its native child sessions', async () =
   expect(await finished).toMatchObject({ status: 'done', error: null });
   const current = await owner.call('threads.get', { threadId: thread.id });
   expect(current.messages.some(message => message.parts.some(part => part.type === 'text' && part.text === 'child allowed'))).toBe(true);
-}, 15000);
+  await owner.call('threads.update', { threadId: thread.id, permissionMode: 'yolo' });
+  const requests: string[] = [];
+  owner.on('permission.requested', request => requests.push(request.id));
+  const yoloFinished = owner.next('turn.finished', result => result.threadId === thread.id, 20000);
+  await owner.call('turns.start', { threadId: thread.id, prompt: '[child-permission]' });
+  expect(await yoloFinished).toMatchObject({ status: 'done', error: null });
+  const yolo = await owner.call('threads.get', { threadId: thread.id });
+  expect(requests).toEqual([]);
+  expect(yolo.messages.filter(message => message.turnId === yolo.turns.at(-1)?.id).flatMap(message => message.parts).map(part => part.type)).not.toContain('permission');
+}, 30000);
+
+for (const outcome of ['delivered', 'cancelled'] as const) {
+  test(`OpenCode 2 keeps late admitted input until it is ${outcome}`, async () => {
+    const cancelled = outcome === 'cancelled';
+    harness = await startTestCore();
+    const owner = await harness.connect();
+    const profile = { executable: [{ kind: 'file' as const, value: process.execPath }], detect: {}, isolation: {}, launch: { args: [join(import.meta.dir, 'fixtures/opencode2-server.ts'), 'acp'] } };
+    Object.assign(harness.core.providers.require('opencode-v2'), { auth: { kind: 'none' }, env: {}, profiles: { windows: profile, linux: profile, macos: profile } });
+    await owner.call('providers.setEnabled', { providerId: 'opencode-v2', enabled: true });
+    const account = await owner.call('accounts.add', { providerId: 'opencode-v2', label: 'Fixture' });
+    const project = await owner.call('projects.add', { path: harness.dataDir, name: 'Fixture' });
+    const thread = await owner.call('threads.create', { projectId: project.id, accountId: account.id, providerId: 'opencode-v2' });
+    const boundary = owner.next('turn.toolCompleted', event => event.threadId === thread.id);
+    const turn = await owner.call('turns.start', { threadId: thread.id, prompt: `[late-admission][slow]${cancelled ? '[cancelled]' : ''}` });
+    await boundary;
+    const finished = owner.next('turn.finished', result => result.threadId === thread.id, 20000);
+    expect(await owner.call('turns.steer', { threadId: thread.id, turnId: turn.id, prompt: 'Late follow-up', clientRequestId: 'late_follow_up' })).toEqual({ accepted: true });
+    expect(await finished).toMatchObject({ status: 'done', error: null });
+    const current = await owner.call('threads.get', { threadId: thread.id });
+    expect(current.turns).toHaveLength(1);
+    expect(current.messages.filter(message => message.role === 'user')).toHaveLength(2);
+    expect(current.messages.some(message => message.turnId === turn.id && message.parts.some(part => part.type === 'text' && part.text === 'Late follow-up answered'))).toBe(!cancelled);
+  }, 30000);
+}

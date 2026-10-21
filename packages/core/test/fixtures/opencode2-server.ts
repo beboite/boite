@@ -8,6 +8,9 @@ if (!process.argv.includes('serve')) {
   const sessionID = 'ses_fixture';
   let cost = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let inboxSequence = 0;
+  let lateAdmission = false;
+  let cancelAdmission = false;
   const event = (type: string, data: Record<string, unknown>) => {
     const bytes = encoder.encode(`data: ${JSON.stringify({ type, data: { sessionID, ...data } })}\n\n`);
     for (const stream of streams) stream.enqueue(bytes);
@@ -28,12 +31,32 @@ if (!process.argv.includes('serve')) {
     if (url.pathname.endsWith('/prompt')) {
       const body = await request.json() as { text: string; delivery: string; files?: unknown[] };
       if (body.delivery !== 'steer') return new Response('delivery must be steer', { status: 400 });
+      const inbox = { id: `msg_fixture_${++inboxSequence}`, delivery: 'steer' };
+      if (lateAdmission) {
+        clearTimeout(timer);
+        event('session.execution.succeeded', {});
+        if (cancelAdmission) event('session.inbox.cancelled', { inboxID: inbox.id });
+        else {
+          event('session.execution.started', {});
+          setTimeout(() => {
+            event('session.inbox.delivered', { inboxID: inbox.id });
+            event('session.text.delta', { delta: 'Late follow-up answered' });
+            event('session.step.ended', { tokens: { input: 17, output: 3 } });
+            event('session.execution.succeeded', {});
+          }, 50);
+        }
+        lateAdmission = false;
+        return Response.json({ data: inbox });
+      }
+      event('session.inbox.delivered', { inboxID: inbox.id });
       if (body.text === '[child-permission]') {
         event('session.created', { sessionID: 'ses_child', parentID: sessionID });
         event('permission.asked', { sessionID: 'ses_child', id: 'permission_child', action: 'shell', metadata: { command: 'git status' } });
-        return Response.json({ id: 'inbox_fixture', delivery: 'steer' });
+        return Response.json({ data: inbox });
       }
       if (body.text.includes('[slow]')) {
+        lateAdmission = body.text.includes('[late-admission]');
+        cancelAdmission = body.text.includes('[cancelled]');
         event('session.execution.started', {});
         const tool = async () => {
           const gate = process.env['OPENCODE_FIXTURE_TOOL_GATE'];
@@ -45,7 +68,7 @@ if (!process.argv.includes('serve')) {
         setTimeout(() => void tool(), 400);
         if (!process.env['OPENCODE_FIXTURE_TOOL_GATE']) timer = setTimeout(() => { cost += 0.01; event('session.execution.succeeded', {}); }, 4000);
       } else event('session.text.delta', { delta: `Received: ${body.text}; images: ${body.files?.length ?? 0}\n` });
-      return Response.json({ id: 'inbox_fixture', delivery: 'steer' });
+      return Response.json({ data: inbox });
     }
     if (url.pathname.endsWith('/interrupt')) {
       clearTimeout(timer); event('session.execution.interrupted', {});
