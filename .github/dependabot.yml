@@ -24,8 +24,10 @@ updates:
     multi-ecosystem-group: monthly
     patterns: ['*']
     ignore:
-      # windows-core must stay on the windows line webview2-com uses; for a 0.x
-      # crate Dependabot counts 0.62 -> 0.100 as minor, so ignore both.
+      # windows and windows-core must stay on the line webview2-com uses; for a
+      # 0.x crate Dependabot counts 0.62 -> 0.100 as minor, so ignore both.
+      - dependency-name: windows
+        update-types: [version-update:semver-major, version-update:semver-minor]
       - dependency-name: windows-core
         update-types: [version-update:semver-major, version-update:semver-minor]
   - package-ecosystem: bun
