@@ -264,7 +264,19 @@ test('production desktop and phone embed the dashboard through the real core wit
   let browser: BrowserPage | undefined;
   try {
     await client.call('settings.set', { subscriptionProxy: { enabled: true, kind: 'douane', baseUrl: dashboard, dashboardUrl: `${dashboard}/admin/#quotas` } });
-    browser = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
+    browser = await BrowserPage.launch({ url: 'about:blank', windowSize: { width: 1280, height: 900 } });
+    // Reproduce a loaded runner: the page loads before its first authenticated hello completes.
+    const { identifier: slowHello } = await browser.send('Page.addScriptToEvaluateOnNewDocument', { source: `{
+      const send = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        if (typeof data !== 'string' || JSON.parse(data).method !== 'hello') return send.call(this, data);
+        setTimeout(() => { if (this.readyState === WebSocket.OPEN) send.call(this, data); }, 1500);
+      };
+    }` }) as { identifier: string };
+    await browser.navigate(pairingUrlOf(core));
+    await browser.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: slowHello });
+    // The token leaves the URL before hello; it is remembered only once the connection is ready.
+    await browser.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`);
     const profileKey = JSON.stringify([client.core.hostname, client.core.dataDir, client.core.channel]);
     await browser.evaluate(`localStorage.setItem('boite.machine-profiles', ${JSON.stringify(JSON.stringify({ [profileKey]: { label: 'Test core' } }))})`);
     await browser.reload();
