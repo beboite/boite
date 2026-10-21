@@ -77,7 +77,6 @@
         {#if row.windows.length === 0 && !row.gateway?.credits.length && !row.error}
           {#if pending}
             <p class="muted" role="status" data-testid="usage-limit-loading">{strings.quotas.loading}</p>
-            {#if row.providerId === 'antigravity'}<small>{strings.quotas.slowHint}</small>{/if}
           {:else}<p class="muted">{strings.quotas.unavailable}</p>{/if}
         {/if}
         {#if row.error}<p class="error" role="status">{row.error}</p>{/if}

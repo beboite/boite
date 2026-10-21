@@ -8,9 +8,8 @@ logins and files. Desktop and phone clients connect through
 
 The image includes the built UI, Bun, Node.js, Git, ripgrep and pinned Claude
 Code, Codex, OpenCode and pi CLIs. It runs as UID 1000. Grok, Antigravity and
-Muse Code are not preinstalled, and neither is the Antigravity CLI. Antigravity
-has a managed installer on Linux; Grok, Muse Code and the Antigravity CLI have
-none there, so they need a custom image. The x64 image carries OpenCode's
+Muse Code are not preinstalled. Antigravity has a managed installer on Linux;
+Grok and Muse Code have none there, so they need a custom image. The x64 image carries OpenCode's
 baseline build only, which also runs on CPUs without AVX2. Agent
 authentication is still required. No login is built into the image.
 

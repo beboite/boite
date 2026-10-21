@@ -64,8 +64,6 @@ estimate](#the-api-estimate)).
   when it stops belonging to the account: removed, switched off, signed in
   under another identity, or its saved login switched by a plugin.
 - An account with nothing read yet says it is being read while a read runs.
-  Antigravity adds that it can take up to two minutes, the time `agy` may take
-  to answer `/usage`.
 
 ### Gateway quotas
 
@@ -126,8 +124,7 @@ quota views update the label immediately while retaining their cached windows.
 | Muse Code | Last `usage/changed` observation from an existing host supporting that event; no host or prompt starts to refresh limits |
 | Grok | Credit percentage or legacy credit amounts from the selected CLI login's billing endpoint |
 | OpenCode Go | Rolling, weekly and monthly limits from its Go usage API, using its own saved API login or the default account's `OPENCODE_API_KEY`. OpenCode 2 accounts read the key from their own database |
-| Antigravity | The managed server's sign-in under `GEMINI_HOME` (`antigravity-acp/acp_token.json`): its refresh token is traded for an access token, held in memory until a minute before it expires, then the Cloud Code `retrieveUserQuotaSummary` buckets (5 hours, weekly, per model group), or per-model `fetchAvailableModels` quotas for an account with no summary. Nothing is spawned |
-| Antigravity CLI | `agy -p /usage --output-format json` in a temporary directory, with version, output and timeout checks; no model prompt. The row `quota:antigravity-cli` belongs to the `antigravity-cli` provider, so switching the managed Antigravity server off leaves it alone. With no saved choice it is monitored once agy is found, and off otherwise |
+| Antigravity | The managed server's sign-in under `GEMINI_HOME` (`antigravity-acp/acp_token.json`): its refresh token is traded for an access token, held in memory until a minute before it expires, then the Cloud Code `retrieveUserQuotaSummary` buckets (5 hours, weekly, per model group), or per-model `fetchAvailableModels` quotas for an account with no summary. Both endpoints are asked and their buckets merged, a bucket both report keeping the higher use: the daily one has answered with the Claude and GPT group and no Gemini one. Nothing is spawned |
 
 Quota readers live in `packages/core/src/quotas.ts`, `quota-readers.ts` and
 `antigravity-quota.ts`, with Claude's fallback under `drivers/claude/quota.ts`. Successful snapshots cache for
@@ -192,9 +189,6 @@ A dated credit period with an omitted proto3 percentage means zero usage;
 a missing report or malformed percentage stays unavailable. Account failures
 remain visible beneath their provider.
 
-Antigravity's source belongs to the CLI login on the core machine, independently
-of isolated ACP accounts. It requires agy 1.1.11 or later and an existing sign-in.
-Its monitoring preference persists; disabling it launches no CLI process.
 The shipped quota adapters and their fixtures define accepted response shapes.
 External format references are
 [CodexBar's source notes](https://github.com/steipete/CodexBar/tree/main/docs) and
@@ -224,7 +218,7 @@ corners and a border; Windows 10 keeps the opaque popup square.
 
 Usage provider colours come from `--series-1` to `--series-8` in `app.css`, with a
 light and a dark set. The order is fixed (Claude, Codex, OpenCode, Grok,
-Antigravity, pi, Antigravity CLI, Muse Code), so shipped providers keep their
+Antigravity, pi, Muse Code), so shipped providers keep their
 colour whatever the range shows. Custom providers have individual rows and
 series, reusing the last two palette colours as needed.
 
@@ -431,9 +425,9 @@ Settings > Machines, as Usage and Limits.
 ## The fake client
 
 `?fake=1` draws a believable ledger from `packages/ui/src/lib/fake-usage.ts`:
-eight providers with their own models, rhythm and prices. Claude, GPT-6.1 Sol
+seven providers with their own models, rhythm and prices. Claude, GPT-6.1 Sol
 and pi's Sonnet carry public rates, OpenCode's default model a reported cost,
-and Codex's default model, Grok, Antigravity, Antigravity CLI and Muse Code no
+and Codex's default model, Grok, Antigravity and Muse Code no
 price. One Claude model is recorded with its provider prefix, a few turns have
 no usage, and the threads match the fake sidebar. Each day's numbers come from a generator seeded with the calendar date,
 so a reload shows the same history. Turns finished in the fake session are

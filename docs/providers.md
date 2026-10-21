@@ -293,7 +293,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
   shipped one. `schemaVersion` is `1` and is checked. `name` and `shortName` are
   what the picker and the chips show.
 - `protocol` picks the driver: `claude-sdk`, `acp`, `codex-appserver`, `muse`,
-  `pi`, `agy` or `echo`. OpenCode uses `acp`. A protocol with no driver behind it has nothing to run,
+  `pi` or `echo`. OpenCode uses `acp`. A protocol with no driver behind it has nothing to run,
   so it is the one field that cannot be invented.
 - `roots` bounds core-owned provider file access. Paths outside them and `..`
   segments are refused. It is not an OS filesystem sandbox for the agent.
@@ -427,10 +427,7 @@ session protocol either.
   `codex update` which package manager owns the install. The launcher is a
   Node process that otherwise stays up beside each Codex process. A wrapper script in front of it, which may set limits of its
   own, is still what runs (`packages/core/src/providers/codex-launcher.ts`).
-- `launch.args` put the agent into the mode Boite speaks to. The `agy` driver
-  adds its print-mode flags itself, because the same binary also answers
-  `agy models` for the probe, so the Antigravity CLI declares none; anything a
-  descriptor puts there goes first on both command lines.
+- `launch.args` put the agent into the mode Boite speaks to.
 - `isolation` is the environment that makes one account blind to the others, with
   `{isolationDir}` substituted per account at spawn ([accounts.md](accounts.md)).
 - `close.processes` names what the core closes when an account is removed, and is
@@ -505,9 +502,7 @@ descriptor folder, so a shipped login command can name a script beside it.
 at spawn, in the `isolation` map and in a login command's `env`.
 
 The driver adds model, effort and permission arguments; they are not descriptor
-tokens. The `agy` driver
-builds the whole print-mode line itself (below). Grok needs it for the permission
-mode alone: the `grok` quirk splices
+tokens. Grok needs it for the permission mode alone: the `grok` quirk splices
 `--permission-mode <mode>` before the `agent` subcommand, or `--always-approve`
 after it, on the way to the spawn. A probe has no thread, so it launches the
 declared line as it is.
@@ -615,7 +610,7 @@ left for the next of those moments.
 
 ## What ships
 
-Ten descriptors ship, and only the first nine are ever visible to a user: `echo`
+Nine descriptors ship, and only the first eight are ever visible to a user: `echo`
 is the deterministic fake the tests and the bench run on, loaded only under
 `BOITE_ECHO=1`.
 
@@ -625,7 +620,6 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | OpenCode | `acp` | `opencode acp --port 0` |
 | OpenCode 2 | `acp` | `opencode2 acp`, experimental and off until turned on |
 | Antigravity | `acp` | Managed `agy_acp_server` for the host OS |
-| Antigravity CLI | `agy` | `agy --input-format stream-json --output-format stream-json -p=` |
 | Grok | `acp` | `grok [permission flags] agent [approval flag] stdio` |
 | Codex | `codex-appserver` | `codex app-server` |
 | Muse Code | `muse` | `muse serve --trust-workspace [mode flags]` |
@@ -679,7 +673,21 @@ descriptor uses additional fields available to other providers:
 `quirks: ["antigravity"]` folds a tool call's command, working directory and
 output under one spelling and draws an `interaction_` permission request as the
 agent's own question; its modes are `default`, `auto_edit` and `yolo`, with no
-plan mode. `quirks: ["grok"]` selects Grok behavior
+plan mode. A `start_subagent` call (titled `Running start_subagent` or `Run
+start_subagent?`, without `_meta.is_mcp_tool_call`) carries the batch it
+launched as `nativeAgents`, listed in Subagents: the call returns once the batch
+is launched, its output is the launch's description, and the agent reports no
+child ids, names, models or results, so the batch stays running while the turn
+runs and reads unknown after it; only a failed launch is final, with its error.
+A shell call (`kind: execute`) still running when the prompt answers is the
+thread's background work: the process stays up past the warm window, and the
+thread's next turns run on it, until the command's own update ends it, and Stop on the idle thread closes the process,
+the only way to end such a command since `session/cancel` stops prompts alone.
+A GIF goes to the agent as a saved file, the server taking PNG, JPEG and WebP
+blocks only. On Linux the launch environment names the first CA bundle found
+(`NIX_SSL_CERT_FILE`, then the usual `/etc` paths) as `SSL_CERT_FILE` unless
+`SSL_CERT_FILE` or `SSL_CERT_DIR` is set, since the server's bundled Python
+finds none on NixOS. `quirks: ["grok"]` selects Grok behavior
 (`packages/core/src/drivers/grok.ts`). Text sent while a prompt runs, an
 asynchronous answer or a coordination message, goes out as Grok's
 `_x.ai/interject { sessionId, text }`, which joins the running turn at its next
@@ -813,42 +821,21 @@ are released at once; a turn already queued or running ends by itself.
 Nothing is removed. Accounts, threads, the managed install and the user's own
 install stay as they are, and turning the provider back on adopts an existing
 login the way a fresh install does. The page lists the off providers last,
-dimmed, under Turned off, with no install or sign-in step; a row that holds
-two providers, Antigravity and its CLI, has one switch per provider inside
-it. The clients hide an off provider from every list that offers one, the
+dimmed, under Turned off, with no install or sign-in step. The clients hide an off provider from every list that offers one, the
 model picker included, and a thread that was on it shows a Turned off chip in
 its composer. The method is the owner's: a paired device reads `enabled` and
 cannot change it.
 
-## The Antigravity CLI
+## Retired providers
 
-`antigravity` is the managed ACP server with isolated logins.
-`antigravity-cli` runs an already installed and signed-in `agy` from PATH or its
-Windows installation path. Both appear in one provider family. agy's system
-keyring token and `~/.gemini/antigravity-cli` settings cannot be relocated, so it
-supports only the default account. A signed-out model probe asks the user to
-sign in through agy's terminal.
-
-Turns, probes and usage reads set `AGY_CLI_DISABLE_AUTO_UPDATE=true` to prevent
-a detached updater from opening a console. The explicit updater leaves it unset.
-`BROWSER={browserNoop}` also prevents automatic browser windows.
-
-The driver and `drivers/agy/` modules use
-`--input-format stream-json --output-format stream-json -p=`. The empty value
-is required; bare `-p` consumes the next argument. Each prompt is one stdin JSON
-line with `event: 'user'` and a user message. `init` supplies `conversation_id`,
-`step_update` streams text or tools by `step_index`, and `result` completes the
-turn. `result.status: 'ERROR'` fails with its message. Usage sums that turn's
-steps, counting thinking as output; the last answer feeds the context count
-without a reported window.
-
-A new process resumes through `--conversation <id>`. Model, effort and mode are
-launch flags in the process key; changing them reopens the same conversation.
-A positive `warmProcessMinutes` keeps the process between turns. Otherwise stdin
-closes and exit has eight seconds; a following turn waits. Stop ends the
-registered process tree or POSIX group, subject to [trace limits](trace.md#linux-and-macos).
-Stop during model discovery sends no prompt. Print mode refuses `/compact` and
-other interactive-only commands.
+Boite once shipped `antigravity-cli`, which ran the user's own `agy` in print
+mode; the managed `antigravity` ACP server replaces it. A data directory from
+that Boite still names it, so `providers/retired.ts` lists the id and startup
+cleans up after it (`account-retirement.ts`): its accounts and the limits
+switch of its `quota:antigravity-cli` source leave. A conversation on it stays
+listed and readable, and reads as on a removed account: its next turn refuses
+until the user picks another account in its model picker. An installed plugin
+whose account pool names it keeps loading, without that id.
 
 ## The models probe
 
@@ -897,8 +884,10 @@ a Job Object and in the trace like any other, then asks the protocol's own quest
   starts for an account that just signed in. A sign-in whose session did not
   open within 30 seconds is still signed in; the next look at the models probes.
 - Under the `antigravity` quirk a probe waits 90 seconds instead of 20. The
-  agent is a PyInstaller one-file program that unpacks about 1.2 GB before its
-  server reads a line: 45 to 54 seconds on an 8 GB laptop with 600 MB free.
+  agent is a PyInstaller one-file program that unpacks itself before its
+  server reads a line: 45 to 54 seconds on an 8 GB laptop with 600 MB free
+  under 1.1.1, whose Windows build unpacked about 1.2 GB. The 1.4.1 builds are
+  smaller (Linux 930 MB, Windows 86 MB plus a 146 MB harness).
   Each launch, probe, sign-in or session, unpacks into its own folder under
   `<isolationDir>/tmp`, set as `TEMP`, `TMP` and `TMPDIR`, and the folder goes
   once the process has exited. Every one of them ends in a forced stop, which
@@ -926,13 +915,6 @@ a Job Object and in the trace like any other, then asks the protocol's own quest
   `reasoning_effort_variants`); a model the catalog does not describe gets
   `low` to `max` with `high` preselected, which is Muse's own default. A host
   that is not signed in lists nothing, and the descriptor's models stand.
-- agy: `agy models`, one `id<TAB>label` line per model. agy lists
-  reasoning variants as separate IDs, so two or more variants of one base become
-  one model
-  whose effort scale is those variants, `medium` preselected when it is there.
-  The thread's model and effort then go out as the one id agy knows,
-  `--model <base>-<level>`. A variant alone, and an id without a level
-  suffix, stays as listed.
 - pi: `get_state`, `get_available_models` and `get_available_thinking_levels`.
   Each model id carries its provider prefix, because that is what pi's `--model`
   takes and two providers can ship a name. The thinking level `get_state` reports
@@ -1045,12 +1027,6 @@ answers; YOLO does not invent form values or complete a device sign-in.
   the session. `acceptEdits` adds one rule of the driver's: a file write inside
   the thread's folder that Muse neither marks `protectedWrite` nor escalated
   through its own judge is approved once without a card.
-- agy asks nothing in print mode: whatever its mode does not allow, it denies by
-  itself. So the mode is a launch flag and part of the session key.
-  `acceptEdits` and `plan` become `--mode accept-edits` and `--mode plan`,
-  `bypassPermissions` and `dontAsk` become `--dangerously-skip-permissions`,
-  and `default` sends nothing, which leaves agy's own `toolPermission` setting
-  in charge.
 - pi has no approval call anywhere in its RPC mode, so `capabilities.approvals` is
   false, the thread's permission mode never reaches the agent, and each session
   says so once in the log. A driver that waited for a permission question there
@@ -1060,10 +1036,7 @@ The composer offers four of the six and names each by what the agent may do
 without asking (`lib/permission-modes.ts`): Ask, Edit freely, Auto and YOLO.
 The list follows the agent. Codex loses Edit freely, which is the same pair as
 its default, and its default reads "This folder", because workspace-write lets
-it edit and run commands there without a card. agy asks nothing but takes the
-mode at launch, so it keeps a chip with Auto, Edit freely and its default, read
-as "agy settings"; YOLO is the same flag as Auto there and shows as Auto. Any
-other agent whose `capabilities.approvals` is false gets no mode chip: every
+it edit and run commands there without a card. An agent whose `capabilities.approvals` is false gets no mode chip: every
 choice would describe something it does not do. No confirmation keeps the warning colour on its chip,
 since it reaches the whole computer.
 

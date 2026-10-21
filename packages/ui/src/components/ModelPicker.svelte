@@ -104,7 +104,7 @@
 
   /** The agent owns its list, so the core only accepts a model it read from it. */
   function agentListed(protocol: string | undefined): boolean {
-    return protocol === 'claude-sdk' || protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'muse' || protocol === 'pi' || protocol === 'agy';
+    return protocol === 'claude-sdk' || protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'muse' || protocol === 'pi';
   }
 
   function pickFavorite(entry: FavoriteModel) {

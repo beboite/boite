@@ -25,7 +25,7 @@ export function capabilityMethods(ctx: FakeContext): Pick<FakeMethods, 'threads.
         runtimeReason: !provider ? 'provider-unavailable' : !providerEnabled(provider) ? 'provider-disabled' : !provider.available ? 'provider-unavailable' : !account || account.providerId !== thread.providerId || account.status === 'unauthenticated' ? 'account-unavailable' : null,
         conversationReason: thread.agentSessionId || thread.projectId === null ? 'agent-session' : thread.archived ? 'archived' : null,
         busy: threadActive(thread.status) || Boolean(running), steeringSupported, steeringReason,
-        compactionReason: !thread.sessionId ? 'no-session' : protocol === 'acp' && !thread.commands.some(command => command.name === 'compact') ? 'no-command' : protocol === 'agy' ? 'unsupported' : null,
+        compactionReason: !thread.sessionId ? 'no-session' : protocol === 'acp' && !thread.commands.some(command => command.name === 'compact') ? 'no-command' : null,
         preparationSupported: protocol === 'claude-sdk' || protocol === 'codex-appserver',
         pendingApprovals, pendingQuestions: pendingQuestions.length > 0,
         hasForkHistory: thread.messages.some(message => message.state !== 'streaming'),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Protocol, ProviderSummary } from '@boite/contracts';
-import { modeHint, modeLabel, modePhrase, modesFor, shownMode } from './permission-modes';
+import { modeHint, modeLabel, modesFor, shownMode } from './permission-modes';
 import { defaultPrefs, PREFS_STORAGE_KEY, readPrefs, writePrefs } from './prefs';
 
 const provider = (protocol: Protocol, approvals = true) => ({
@@ -27,16 +27,6 @@ describe('permission modes', () => {
 
   it('offers nothing to an agent that never asks', () => {
     expect(modesFor(provider('pi', false))).toEqual([]);
-  });
-
-  it('offers agy its launch modes though it never asks, Auto standing for YOLO', () => {
-    const agy = provider('agy', false);
-    expect(modesFor(agy)).toEqual(['bypassPermissions', 'acceptEdits', 'default']);
-    expect(shownMode('yolo', agy)).toBe('bypassPermissions');
-    expect(modeLabel('default', agy)).toBe('agy settings');
-    expect(modeHint('acceptEdits', agy)).toContain('refuses commands');
-    expect(modePhrase('default', agy)).toBe("with agy's own permission settings");
-    expect(modePhrase('yolo', agy)).toBe('with all permissions');
   });
 
   it('says Codex writes in the folder on its default, and the open mode reaches the whole computer', () => {

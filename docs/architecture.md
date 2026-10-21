@@ -370,7 +370,6 @@ later. Protocol-specific deadlines can be shorter.
 | `codex-appserver` | Codex JSON-RPC peer, process/session key and turn notifications |
 | `muse` | MSP envelope, host sandbox flags and session approval mode |
 | `pi` | JSON-line commands, CLI session ID and `agent_settled` completion |
-| `agy` | Stream-json print mode, conversation resume and launch flags |
 | `echo` | Deterministic in-process fixture with no network calls |
 
 Codex, Muse and pi share `drivers/stdio.ts` for bounded framing and pending

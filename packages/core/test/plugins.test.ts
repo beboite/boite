@@ -451,6 +451,25 @@ describe('plugins from a git URL', () => {
     expect(existsSync(dir)).toBe(false);
   });
 
+  test('an installed.json whose pool names the retired Antigravity CLI still loads, without that provider', async () => {
+    harness = await startTestCore(); const client = await harness.connect();
+    const install = (id: string, providers: string[]) => {
+      const dir = join(harness!.dataDir, 'plugins', id); mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${id}${EXE}`), 'fixture');
+      writeFileSync(join(dir, 'installed.json'), JSON.stringify({
+        schema: 1, origin: 'url', installedAt: 1,
+        source: { url: `https://plugins.example.invalid/${id}`, ref: 'HEAD', commit: 'c'.repeat(40) },
+        manifest: manifest({ id, executable: id, provides: { accountPools: { providers } } }),
+      }));
+    };
+    install('pool-agy', ['antigravity-cli', 'opencode']);
+    install('pool-unknown', ['opencode', 'not-a-provider']);
+    const listed = await client.call('plugins.list', {});
+    expect(listed.find((plugin) => plugin.id === 'pool-agy')).toMatchObject({ status: 'installed', pools: ['opencode'], rejected: null });
+    // Any other id the core does not know still refuses the manifest.
+    expect(listed.find((plugin) => plugin.id === 'pool-unknown')).toMatchObject({ status: 'rejected', rejected: { field: 'manifest.provides.accountPools.providers[1]' } });
+  });
+
   test('a paired device reaches none of it', async () => {
     harness = await startTestCore(); const owner = await harness.connect();
     const { grant } = await owner.call('pairing.grant', {});

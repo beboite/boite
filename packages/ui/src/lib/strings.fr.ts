@@ -54,7 +54,6 @@ import { fr as notify } from './strings/fr/notify';
 import { fr as permissionMode } from './strings/fr/permissionMode';
 import { fr as permissionModeLong } from './strings/fr/permissionModeLong';
 import { fr as permissionModeCodex } from './strings/fr/permissionModeCodex';
-import { fr as permissionModeAgy } from './strings/fr/permissionModeAgy';
 import { fr as thread } from './strings/fr/thread';
 import { fr as chat } from './strings/fr/chat';
 import { fr as agentMessages } from './strings/fr/agentMessages';
@@ -143,7 +142,6 @@ export const fr: Translation = {
   ...permissionMode,
   ...permissionModeLong,
   ...permissionModeCodex,
-  ...permissionModeAgy,
   ...thread,
   ...chat,
   ...agentMessages,

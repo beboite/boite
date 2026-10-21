@@ -13,18 +13,18 @@ afterEach(async () => { await h?.stop(); });
 function snapshot(protocol: Protocol | null): ThreadCapabilitySnapshot {
   return { threadId: 't', providerId: 'p', protocol, selectionVersion: 0,
     providerCapabilities: protocol === null ? null : { approvals: true, images: true, planMode: true, checkpoint: false, resume: true, hooks: false },
-    runtimeReason: null, conversationReason: null, busy: false, steeringSupported: protocol !== 'agy' && protocol !== 'acp' && protocol !== null,
+    runtimeReason: null, conversationReason: null, busy: false, steeringSupported: protocol !== 'acp' && protocol !== null,
     steeringReason: 'not-running', compactionReason: 'no-session', preparationSupported: protocol !== null && ['claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse'].includes(protocol),
     pendingApprovals: false, pendingQuestions: false, hasForkHistory: true, hasRewindHistory: true,
     nativeForkSupported: protocol === 'claude-sdk', nativeForkAvailable: false, nativeRewindSupported: protocol === 'claude-sdk', nativeRewindAvailable: false,
     backgroundSupported: protocol === 'claude-sdk' };
 }
 
-test('capability mapping covers every protocol without inventing interactive agy compaction', () => {
-  for (const protocol of ['echo', 'claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse', 'agy', null] as const) {
+test('capability mapping covers every protocol', () => {
+  for (const protocol of ['echo', 'claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse', null] as const) {
     const result = deriveThreadCapabilities(snapshot(protocol));
     expect(result.protocol).toBe(protocol);
-    expect(result.compaction.reason).toBe(protocol === 'agy' || protocol === null ? 'unsupported' : 'no-session');
+    expect(result.compaction.reason).toBe(protocol === null ? 'unsupported' : 'no-session');
     expect(result.steering.available).toBe(false);
     expect(result.sessionPreparation.supported).toBe(protocol !== null && ['claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse'].includes(protocol));
     expect(result.fork.native.available).toBe(false);
@@ -84,12 +84,12 @@ test('registered protocol metadata stays cold and live steering uses the action 
   const child = spyOn(h.core.procs, 'spawnChild');
   const piped = spyOn(h.core.procs, 'spawnPiped');
   try {
-    for (const protocol of ['echo', 'claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse', 'agy'] as const) {
+    for (const protocol of ['echo', 'claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse'] as const) {
       get.mockImplementation(() => ({ ...provider, protocol }));
       const result = threadCapabilities(h.core, threadId);
       expect(result.protocol).toBe(protocol);
       expect(result.sessionPreparation.supported).toBe(['claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse'].includes(protocol));
-      expect(result.steering.supported).toBe(protocol !== 'acp' && protocol !== 'agy');
+      expect(result.steering.supported).toBe(protocol !== 'acp');
       expect(result.steering.available).toBe(false);
     }
     get.mockRestore();
@@ -123,7 +123,7 @@ test('real and fake capability RPCs agree on echo facts and idle steering for ev
   const provider = h.core.providers.require('echo');
   const get = spyOn(h.core.providers, 'get');
   try {
-    for (const protocol of ['echo', 'claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse', 'agy'] as const) {
+    for (const protocol of ['echo', 'claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse'] as const) {
       get.mockImplementation(() => ({ ...provider, protocol }));
       const fake = await capabilityMethods({ ...ctx, providers: ctx.providers.map(item => ({ ...item, protocol })) })['threads.capabilities']({ threadId });
       expect(fake.steering).toEqual(threadCapabilities(h.core, threadId).steering);

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Core } from '../src/core.ts';
 import type { Account } from '@boite/contracts';
-import { antigravityQuotaWindows, grokQuotaWindows, openCodeQuotaWindows, readExtraQuota, supportsAntigravityUsage } from '../src/quota-readers.ts';
+import { grokQuotaWindows, openCodeQuotaWindows, readExtraQuota } from '../src/quota-readers.ts';
 import { forgetAntigravityTokens } from '../src/antigravity-quota.ts';
 import { thrown } from './settle.ts';
 let directory = '';
@@ -36,17 +36,6 @@ test('OpenCode Go percentages below one stay percentages and relative resets use
     { id: 'rolling', label: '5 hours', usedPercent: 0.5, resetsAt: now + 60000 },
     { id: 'weekly', label: 'Weekly', usedPercent: 100, resetsAt: null },
   ]);
-});
-test('Antigravity requires a usage command, preserves groups and refuses unknown or disabled buckets', () => {
-  const groups = [{ name: 'Gemini', buckets: [{ id: '5h', window: '5h', remaining_fraction: 1 }, { id: 'weekly', remaining_fraction: 0, disabled: true }, { id: 'missing' }] }, { name: 'Claude and GPT', buckets: [{ id: '5h', window: '5h', remaining_fraction: 0.4 }] }];
-  const result = antigravityQuotaWindows({ status: 'SUCCESS', command: { name: 'usage', data: { groups } } });
-  expect(result.map((row) => [row.id, row.usedPercent])).toEqual([['0:5h', 0], ['1:5h', 60]]);
-  expect(() => antigravityQuotaWindows({ status: 'ERROR', command: { name: 'usage' } })).toThrow('successful usage report');
-  expect(() => antigravityQuotaWindows({ status: 'SUCCESS', command: { name: 'models' } })).toThrow('successful usage report');
-});
-test('Antigravity print mode is gated on a stable supported version', () => {
-  for (const version of ['1.1.11', 'agy 1.2.2', '2.0.0']) expect(supportsAntigravityUsage(version)).toBe(true);
-  for (const version of ['1.1.10', '1.0.99', '1.2.2-preview', '1.2.2.3', 'running']) expect(supportsAntigravityUsage(version)).toBe(false);
 });
 test('OpenCode 2 reads the Go key from its database, never from auth.json', async () => {
   directory = await mkdtemp(join(tmpdir(), 'boite-quota-test-'));

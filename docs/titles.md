@@ -43,8 +43,8 @@ can replace the prompt title during the first turn. It preserves manual names.
   the revision and clears refinement. An in-flight call cannot overwrite a
   newer rename, even when the user types the same name or changes it back.
 
-Drivers without a `title` hook (Muse Code, OpenCode, Antigravity, the
-Antigravity CLI, Grok, pi today) keep the prompt's title when Automatic is
+Drivers without a `title` hook (Muse Code, OpenCode, Antigravity, Grok, pi
+today) keep the prompt's title when Automatic is
 chosen, so their threads read as they always did. `ProviderSummary.titles`
 says which providers have the hook.
 

@@ -441,6 +441,38 @@ describe('accounts', () => {
     await harness.core.scheduler.stopAndWait(thread.id);
   });
 
+  test('an Antigravity CLI account from an older Boite leaves at startup, and its thread waits for another account', async () => {
+    const client = await harness.connect();
+    const echo = harness.core.accounts.list().find(entry => entry.providerId === 'echo')!;
+    const project = await client.call('projects.add', { path: harness.dataDir });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: echo.id });
+    await client.call('turns.start', { threadId: thread.id, prompt: 'hello from agy' });
+    await waitFor(() => harness.core.threads.require(thread.id).status === 'idle');
+    // What the retired provider left: its default account, a conversation on it and its quota switch.
+    harness.core.journal.putAccount({ id: 'acc_agy', providerId: 'antigravity-cli', label: 'Default', isolationDir: null, status: 'ok', identity: null, createdAt: 1 });
+    harness.core.journal.putThread({ ...harness.core.threads.require(thread.id), providerId: 'antigravity-cli', accountId: 'acc_agy', model: 'default', sessionId: 'agy-conversation' });
+    harness.core.journal.setSetting('quota-accounts', { 'quota:antigravity-cli': true, [echo.id]: false });
+    client.close();
+    await harness.server.stop();
+    await harness.core.close();
+
+    const next = new Core({ dataDir: harness.dataDir, token: harness.token });
+    try {
+      expect(next.accounts.list().some(entry => entry.providerId === 'antigravity-cli')).toBe(false);
+      expect(next.journal.getSetting('quota-accounts')).toEqual({ [echo.id]: false });
+      expect((await next.quotas.list()).some(row => row.accountId === 'quota:antigravity-cli' || row.providerId === 'antigravity-cli')).toBe(false);
+      expect(next.threads.get(thread.id).messages.some(message => message.role === 'user')).toBe(true);
+      expect(next.threads.list({}).some(entry => entry.id === thread.id)).toBe(true);
+      expect(next.threads.compactRefusal(next.threads.require(thread.id))).toContain('not installed');
+      // The refusal of a removed account; the model picker's switch moves it.
+      expect(() => next.threads.startTurn(thread.id, 'hello again')).toThrow('was removed');
+      const moved = next.threads.update({ threadId: thread.id, accountId: echo.id });
+      expect(moved).toMatchObject({ providerId: 'echo', accountId: echo.id, sessionId: null });
+      await next.logs.flush();
+      expect(await next.logs.select(record => record.message.includes('unknown provider'), 10)).toEqual([]);
+    } finally { await next.close(); }
+  });
+
   test('a thread whose account signed out runs its next turn on another signed-in account of its agent', async () => {
     const client = await harness.connect();
     const providerId = await addLoginProvider(harness, client);

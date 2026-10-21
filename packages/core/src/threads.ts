@@ -52,7 +52,7 @@ import { AutoContinues } from './threads/auto-continue.ts';
 import { ThreadTitles } from './threads/retitle.ts';
 import { SideQuestions } from './threads/side-questions.ts';
 import { messagePage, threadSnapshot, type MessagePage } from './threads/snapshot.ts';
-import { checkEffort, checkModel, checkSpeed, checkStoredEffort, checkStoredSpeed, defaultModel } from './threads/selection.ts';
+import { agentProvider, checkEffort, checkModel, checkSpeed, checkStoredEffort, checkStoredSpeed, defaultModel } from './threads/selection.ts';
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
 import { markQueuedStopped } from './threads/turn-settlement.ts';
@@ -73,7 +73,7 @@ type CreateParams = RpcParams<'threads.create'>;
 export class ThreadStore {
   /** Internal-only entry: callers supply an already authorized workspace, never a fabricated project. */
   createAgentSession(agent: AgentProfile, sessionId: string, cwd: string, projectId: string | null = null, branch: string | null = null): ThreadSummary {
-    const provider = this.core.providers.require(agent.selection.providerId);
+    const provider = agentProvider(this.core, agent);
     const account = this.core.accounts.require(agent.selection.accountId);
     if (account.providerId !== provider.id) throw refused('agent account belongs to another provider');
     const now = Date.now();
@@ -569,13 +569,13 @@ export class ThreadStore {
 
   /** Why this thread's agent cannot compact, or null. */
   compactRefusal(thread: ThreadSummary): string | null {
-    const protocol = this.core.providers.require(thread.providerId).protocol;
+    // A provider Boite no longer has, `providers/retired.ts`, runs nothing: there is nothing to compact.
+    const protocol = this.core.providers.get(thread.providerId)?.protocol;
+    if (protocol === undefined) return 'this thread\'s provider is not installed';
     if (!thread.sessionId) return 'this thread has no native session to compact';
     if (protocol === 'acp' && !this.agentState.commands.get(thread.id)?.some((command) => command.name === 'compact')) {
       return 'this agent has not advertised a compact command';
     }
-    // agy's print mode refuses every interactive-only slash command, `/compact` among them.
-    if (protocol === 'agy') return 'the Antigravity CLI takes no /compact in print mode';
     return null;
   }
 

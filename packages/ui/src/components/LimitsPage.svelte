@@ -151,7 +151,7 @@
     {#if store.owner}<section class="card tracked" data-testid="limits-tracked">
       <h2 class="ui-label-box"><span class="ui-label">{strings.quotas.tracked}</span><InfoTip topic={strings.quotas.tracked} text={strings.quotas.trackedHint} /></h2>
       {#each tracked as row (row.accountId)}
-        {@const account = row.accountId.startsWith('quota:') ? strings.quotas.cliSource : row.label}
+        {@const account = row.label}
         {@const entry = store.accounts?.find((entry) => entry.id === row.accountId)}
         <div class="tracked-account" data-testid="tracked-account" data-account-id={row.accountId}>
           <label class="track-row">

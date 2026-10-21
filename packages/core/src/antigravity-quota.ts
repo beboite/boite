@@ -125,11 +125,12 @@ export async function readAntigravityQuota(home: string, fetchImpl: Fetch = fetc
   /** The windows, or none and whether an endpoint refused the access token. */
   const readWith = async (token: string): Promise<{ windows: QuotaWindow[]; rejected: boolean }> => {
     let rejected = false;
+    // Every endpoint, merged: the daily one has answered with the Claude and
+    // GPT group and no Gemini one. A bucket both report keeps its higher use.
     const ask = async (operation: string, parse: (raw: unknown) => QuotaWindow[]): Promise<QuotaWindow[]> => {
-      for (const endpoint of ENDPOINTS) {
-        let windows: QuotaWindow[] = [];
+      const answers = await Promise.all(ENDPOINTS.map(async (endpoint): Promise<QuotaWindow[]> => {
         try {
-          windows = parse(await json(fetchImpl, `${endpoint}/v1internal:${operation}`, {
+          return parse(await json(fetchImpl, `${endpoint}/v1internal:${operation}`, {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${token}`,
@@ -140,12 +141,17 @@ export async function readAntigravityQuota(home: string, fetchImpl: Fetch = fetc
             body: JSON.stringify(project === null ? {} : { project }),
           }));
         } catch (error) {
-          // The next endpoint, then the other operation, may answer.
+          // The other endpoint, then the other operation, may answer.
           if (error instanceof RejectedSignIn) rejected = true;
+          return [];
         }
-        if (windows.length > 0) return windows;
+      }));
+      const windows = new Map<string, QuotaWindow>();
+      for (const row of answers.flat()) {
+        const previous = windows.get(row.id);
+        if (previous === undefined || row.usedPercent > previous.usedPercent) windows.set(row.id, row);
       }
-      return [];
+      return [...windows.values()];
     };
     const summary = await ask('retrieveUserQuotaSummary', antigravitySummaryWindows);
     if (summary.length > 0) return { windows: summary, rejected };

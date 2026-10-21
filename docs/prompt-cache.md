@@ -46,7 +46,7 @@ account retention policies can change independently of Boite.
 | pi on OpenAI | Same OpenAI model mapping as Codex | `documented` |
 | OpenCode `anthropic/` | Five-minute default | `documented` |
 | OpenCode `openai/` | Same OpenAI model mapping as Codex | `documented` |
-| Grok, Antigravity, agy, Muse and unmapped endpoints | No timer supplied by the current driver | None |
+| Grok, Antigravity, Muse and unmapped endpoints | No timer supplied by the current driver | None |
 | echo | Five-minute deterministic fixture | Fixed |
 
 ### Claude

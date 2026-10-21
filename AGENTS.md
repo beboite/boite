@@ -65,7 +65,7 @@ prerequisites, adjacent runtime files and shell E2E coverage.
 ## Check the affected paths
 
 - Desktop and phone. A right-click-only action is unavailable on a phone.
-- All affected protocols: Claude, ACP, Codex, Muse, pi, agy and echo. Their
+- All affected protocols: Claude, ACP, Codex, Muse, pi and echo. Their
   drivers own runtime behavior; [providers](docs/providers.md) documents the
   current protocol limits.
 - Both transports. The real core and `lib/fake-client.ts` share one contract.
