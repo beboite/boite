@@ -118,7 +118,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['resident.view', 'the projects the owner entrusted to it, so it knows what it may touch'],
   ['resident.threads', 'the state of the threads in those projects, nothing outside them'],
   ['resident.thread', 'one of those threads with its pending questions, permissions and last answer'],
-  ['resident.act', 'archiving, moving between its projects, stopping or renaming one of those threads, with a line in its timeline saying so; deleting stays the owner\'s'],
+  ['resident.act', 'marking done, archiving, moving between its projects, stopping or renaming one of those threads, with a line in its timeline saying so; deleting stays the owner\'s'],
   ['resident.answer', 'answering a question one of those threads asked, marked as the agent\'s in that timeline; tool permissions stay the owner\'s'],
   ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
   ['agent.projects', 'the names and folders of the projects the owner added, so it can name one to delegation.spawn or agent.move; reading them opens nothing'],

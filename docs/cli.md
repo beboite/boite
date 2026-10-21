@@ -353,6 +353,7 @@ boite threads [--project <p>] [--archived]
                                  every thread as the owner, an agent's projects'
 boite thread show <id>           state, pending questions and permissions, last answer
 boite thread send <id> <text>    the owner's prompt, or the agent's letter
+boite thread done <id>           put a thread that is not at work in Done
 boite thread stop|archive|unarchive|remove <id>
 boite thread rename <id> <title>
 boite thread move <project> <id> move another thread

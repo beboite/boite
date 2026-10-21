@@ -500,7 +500,8 @@ test('the parent writing to its subagent lifts the coordination pause the core l
   const childId = child.thread.id;
   await waitFor(() => runs.has(childId));
   h.core.coordination.configure(childId, { mode: 'brief', resources: '', remote: false, paused: false });
-  runs.get(childId)!.finish('', 'error');
+  // A stopped turn pauses coordination; a failed one no longer does.
+  runs.get(childId)!.finish('', 'stopped');
   await waitFor(() => h.core.coordination.get(childId).config.paused);
   await owner.call('delegation.send', { threadId, toThreadId: childId, text: 'Carry on with the port', requestId: 'carry-on' });
   await waitFor(() => runs.get(childId)!.ctx.prompt.includes('Carry on with the port'), 5000);

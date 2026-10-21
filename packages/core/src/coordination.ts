@@ -71,7 +71,7 @@ export class Coordination {
     for (const thread of interrupted) {
       if (thread.rowid === invalidConfig?.rowid) core.journal.getSetting(invalidConfig.key);
       const pending = core.journal.db.query("SELECT 1 FROM coordination_letters WHERE thread_id = ? AND (status IN ('queued', 'received') OR (status = 'uncertain' AND json_extract(data, '$.error') = 'Queued for provider delivery')) LIMIT 1").get(thread.id);
-      if (pending || ['queued', 'running', 'waiting'].includes(thread.status)) this.pause(thread.id);
+      if (pending || ['queued', 'running', 'waiting'].includes(thread.status)) this.pause(thread.id, 'restart');
     }
     // A thread that finishes a turn can take its waiting letters now, not at the next sweep.
     this.off = core.bus.onAny((name, payload) => {
@@ -207,11 +207,14 @@ export class Coordination {
     }
     return this.get(threadId);
   }
-  /** A pause the core applies by itself (Stop, a restart, a failed wake). It lasts until the user's next message. */
-  pause(threadId: string): void {
+  /**
+   * A pause the core applies by itself (Stop, a restart, a failed wake). It lasts until the user's next message;
+   * after a restart or a failed wake, another agent's next letter ends it too, so a crashed thread can be woken.
+   */
+  pause(threadId: string, reason: 'stop' | 'restart' | 'failure' = 'stop'): void {
     const config = this.config(threadId);
     if (config.mode === 'off' || config.paused) return;
-    this.core.journal.setSetting(`${AUTO_PAUSE_PREFIX}${threadId}`, true);
+    this.core.journal.setSetting(`${AUTO_PAUSE_PREFIX}${threadId}`, reason);
     this.saveConfig(threadId, { ...config, paused: true });
   }
   /** The user wrote to the thread again: a pause the core applied by itself ends, the owner's stays. */
@@ -220,6 +223,14 @@ export class Coordination {
     this.core.journal.deleteSetting(`${AUTO_PAUSE_PREFIX}${threadId}`);
     const config = this.config(threadId);
     if (config.paused) this.saveConfig(threadId, { ...config, paused: false });
+  }
+  /** A pause another agent's letter ends: a restart's or a failed wake's, not Stop's or the owner's. One saved before reasons were recorded reads as a restart's. */
+  private wakesForAgent(threadId: string): boolean {
+    const reason = this.core.journal.getSetting(`${AUTO_PAUSE_PREFIX}${threadId}`);
+    return Boolean(reason) && reason !== 'stop';
+  }
+  private resumeForAgent(threadId: string): void {
+    if (this.wakesForAgent(threadId)) this.resumeForUser(threadId);
   }
   get(threadId: string): CoordinationView {
     this.core.threads.require(threadId);
@@ -261,7 +272,8 @@ export class Coordination {
       activeAt: thread.updatedAt,
       lastCompletedAt: this.core.journal.lastCompletedAt(threadId),
       projectArchived: project?.archived === true,
-      paused: config.paused,
+      // Paused for a sender only when its letter would wait: one a restart left ends with that letter.
+      paused: config.paused && !this.wakesForAgent(threadId),
     };
   }
   /** This thread as the directory lists it: what a contact request names as its sender. */
@@ -522,6 +534,7 @@ export class Coordination {
       ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}) };
     this.core.journal.append({ type: 'coordination.received', threadId: target.threadId, version: 1, payload: accepted }, () => this.put(accepted, 'in', target.threadId));
     this.core.threads.runner.noteMail(target.threadId, accepted.createdAt);
+    this.resumeForAgent(target.threadId);
     this.update(accepted, 'received');
     if (!this.handToWaiter(accepted)) this.kick(target.threadId);
     return this.find(accepted.id, 'in') ?? accepted;
@@ -662,7 +675,8 @@ export class Coordination {
   private async deliver(threadId: string): Promise<void> {
     if (this.closed || this.delivering.has(threadId)) return;
     const thread = this.core.journal.getThread(threadId);
-    if (!thread || thread.archived || thread.status === 'error' || thread.status === 'waiting' || thread.status === 'queued') return;
+    // A thread whose last turn failed wakes like an idle one: each letter starts at most one turn, so a failing provider cannot loop.
+    if (!thread || thread.archived || thread.status === 'waiting' || thread.status === 'queued') return;
     const letters = this.inbox(threadId);
     if (!letters.length) return;
     this.delivering.add(threadId);
@@ -696,7 +710,7 @@ export class Coordination {
       }
     } catch (error) {
       if (!this.closed && !this.core.journal.isClosed()) {
-        this.pause(threadId); this.core.log('warn', `coordination ${threadId}: ${messageOf(error)}`);
+        this.pause(threadId, 'failure'); this.core.log('warn', `coordination ${threadId}: ${messageOf(error)}`);
       }
     }
     finally { this.delivering.delete(threadId); }
