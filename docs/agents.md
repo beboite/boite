@@ -295,8 +295,8 @@ compare; the records themselves stay.
 ## Providers and tools
 
 Profiles use existing model probing, account selection, effort and drivers.
-A newly selected model must appear in the account's current probe; examples and saved
-profiles do not establish availability.
+A newly selected model must appear in the combined provider and account-probed
+catalog; examples and saved profiles do not establish availability.
 
 Muse Code uses MSP, including approvals and session resume. Antigravity runs
 its managed ACP server, with accounts of its own. See [providers](providers.md) and [accounts](accounts.md).
@@ -381,7 +381,8 @@ and allowed subagent profiles. A route names a provider, account and model.
 Subagents are on by default: with no profile listed, an agent's children run
 on any model of an account granted to it, unless the owner turns free model
 choice off; listing profiles restricts children to them, without gaining other
-main routes. The subagent guide joins a fresh session while they are on. Provider/account probes determine availability.
+main routes. The subagent guide joins a fresh session while they are on. The
+combined provider and account-probed catalog determines availability.
 There is no silent fallback to an unapproved model.
 
 Saving settings retains a previously approved model and unchanged effort if a
