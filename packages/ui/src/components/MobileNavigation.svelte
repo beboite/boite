@@ -18,6 +18,7 @@
   import type { ThreadSummary } from '@boite/contracts';
   import Menu from './Menu.svelte';
   import ThreadState from './ThreadState.svelte';
+  import ThreadPullRequest from './ThreadPullRequest.svelte';
   import ThreadHeadline from './ThreadHeadline.svelte';
   import DisplayOptions from './DisplayOptions.svelte';
   import RecentGroup from './RecentGroup.svelte';
@@ -235,6 +236,7 @@
           <span class="summary"><ThreadHeadline owner={row.machine.store} thread={row.thread} wrap /><span class="detail" title={row.thread.branch ?? undefined}>{[projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
           <ThreadState thread={row.thread} {now} subagents={row.machine.store.subagents(row.thread.id)} away={row.machine.store.connection !== 'ready'} />
         </button>
+        <ThreadPullRequest owner={row.machine.store} thread={row.thread} />
         <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => rowAction(row.machine.store, row.thread, action, row.machine.id)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
       </div>
     {/snippet}

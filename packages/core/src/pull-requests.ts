@@ -97,6 +97,23 @@ function mergedEvidence(value: unknown): boolean {
   return (value as { state?: unknown } | null)?.state === 'MERGED';
 }
 
+/** Fetch identity wins over push URLs; origin identifies the checkout when upstream is also configured. */
+function discoveryRepository(remotes: string): string | null {
+  const fetches = remotes.split('\n').filter(line => /\(fetch\)\s*$/.test(line));
+  const origin = fetches.find(line => /^origin\s/.test(line));
+  return origin ? githubRepository(origin) : githubRepository(fetches.join('\n'));
+}
+
+function localCandidates(values: unknown[]): unknown[] {
+  // Branch names are not unique across forks. Fork PRs need an explicit conversation link.
+  return values.filter(value => (value as { isCrossRepository?: unknown })?.isCrossRepository !== true);
+}
+
+function displayCandidate(values: unknown[]): PullRequest {
+  const candidates = localCandidates(values).map(toPullRequest);
+  return candidates.find(pr => pr.state === 'OPEN') ?? candidates[0] ?? null;
+}
+
 /**
  * The repository a checkout belongs to: its common git directory. Every
  * `git worktree add` checkout has a `.git` file of its own, and each of those
@@ -176,9 +193,8 @@ const LIST_TTL_MS = 15_000;
 /** A failed read is kept this long, whatever the success TTL of its cache. */
 const FAILURE_TTL_MS = LIST_TTL_MS;
 const PROOF_TTL_MS = 60_000;
-/** Linked PRs asked about per proof, newest first: a conversation can link twenty. */
-const LINKED_PROOFS = 5;
 const PROOF_FIELDS = 'number,url,state,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergedAt';
+const DETAIL_FIELDS = `${PROOF_FIELDS},title,isDraft,baseRefName`;
 /** A repository's remotes rarely change: they are read once per five minutes. */
 const REMOTES_TTL_MS = 5 * 60_000;
 const TIMEOUT_MS = 10_000;
@@ -216,8 +232,9 @@ export class PullRequests {
   #remotes = new Map<string, Shared<string>>();
   #lists = new Map<string, Shared<PullRequestList>>();
   #branches = new Map<string, Shared<PullRequest>>();
-  /** Why gh cannot answer, once it said so; automatic lookups then spawn nothing. */
-  #ghUnavailable: string | null = null;
+  #details = new Map<string, Shared<Record<string, unknown>>>();
+  /** Automatic discovery pauses for a minute after gh is missing or signed out. */
+  #ghUnavailableUntil = 0;
   #running = 0;
   #queue: WaitingLookup[] = [];
   #sequence = 0;
@@ -238,14 +255,11 @@ export class PullRequests {
     return this.#run(thread, existsSync(thread.cwd) ? thread.cwd : this.core.dataDir, 'gh', args);
   }
 
-  async detail(threadId: string, input: string): Promise<LinkedPullRequest> {
+  async detail(threadId: string, input: string, refresh = false): Promise<LinkedPullRequest> {
     const address = pullRequestAddress(input);
     const host = (process.env.GH_HOST ?? 'github.com').toLowerCase();
     if (address.host !== host) throw refused(`pull request host must be ${host}`);
-    const thread = this.core.threads.require(threadId);
-    const raw = await this.#run(thread, thread.cwd, 'gh', ['pr', 'view', address.url, '--json', 'url,number,title,state,isDraft,headRefName,baseRefName,headRepository,headRepositoryOwner']);
-    if (raw.length > 64 * 1024) throw refused('pull request metadata exceeds 64 KB');
-    const value = JSON.parse(raw) as Record<string, unknown>;
+    const value = await this.#detail(this.core.threads.require(threadId), address.url, refresh);
     const basic = toPullRequest(value);
     if (pullRequestAddress(basic.url).url.toLowerCase() !== address.url.toLowerCase()) throw refused('gh returned a different pull request URL');
     if (typeof value.title !== 'string' || typeof value.headRefName !== 'string' || typeof value.baseRefName !== 'string') throw refused('gh returned incomplete pull request metadata');
@@ -254,6 +268,17 @@ export class PullRequests {
     return { ...address, title: value.title.slice(0, 500), state: basic.state, draft: value.isDraft === true,
       head: value.headRefName.slice(0, 500), base: value.baseRefName.slice(0, 500),
       headRepository: owner?.login && repository?.name ? `${owner.login}/${repository.name}` : '', checkedAt: Date.now() };
+  }
+
+  #detail(thread: Pick<ThreadSummary, 'id' | 'cwd'>, url: string, refresh = false, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (refresh) this.#details.delete(url.toLowerCase());
+    return this.#shared(this.#details, url.toLowerCase(), LIST_TTL_MS, async ownerSignal => {
+      const raw = await this.#run(thread, existsSync(thread.cwd) ? thread.cwd : this.core.dataDir, 'gh', ['pr', 'view', url, '--json', DETAIL_FIELDS], ownerSignal);
+      if (raw.length > 64 * 1024) throw refused('pull request metadata exceeds 64 KB');
+      const value = JSON.parse(raw) as Record<string, unknown>;
+      if (pullRequestAddress(toPullRequest(value).url).url.toLowerCase() !== url.toLowerCase()) throw refused('gh returned a different pull request URL');
+      return value;
+    }, signal);
   }
 
   read(threadId: string, refresh = false): Promise<PullRequest> {
@@ -281,7 +306,7 @@ export class PullRequests {
 
   async validateMergedCheckout(thread: CheckoutOwner, proof: MergedPrProof, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
-    if (repositoryOf(thread.cwd) !== proof.checkoutRepository || githubRepository(await this.#run(thread, thread.cwd, 'git', ['remote', '-v'], signal)) !== proof.repository) return false;
+    if (repositoryOf(thread.cwd) !== proof.checkoutRepository || discoveryRepository(await this.#run(thread, thread.cwd, 'git', ['remote', '-v'], signal)) !== proof.repository) return false;
     return (await this.cleanCheckout(thread, proof.sha, signal))?.branch === proof.branch;
   }
 
@@ -300,61 +325,59 @@ export class PullRequests {
     if (!await hasGitMarker(thread.cwd) || !await hasGitMarker(project.path)) return null;
     signal?.throwIfAborted();
     const checkoutRepository = repositoryOf(thread.cwd);
-    if (checkoutRepository !== repositoryOf(project.path) || this.#ghUnavailable !== null) return null;
-    const repository = githubRepository(await this.#remote(thread, thread.cwd, checkoutRepository, signal));
-    if (!repository || this.#ghUnavailable !== null) return null;
+    if (checkoutRepository !== repositoryOf(project.path) || Date.now() < this.#ghUnavailableUntil) return null;
+    const repository = discoveryRepository(await this.#remote(thread, thread.cwd, checkoutRepository, signal));
+    if (!repository || Date.now() < this.#ghUnavailableUntil) return null;
     const head = await checkoutBranch(thread.cwd);
-    const list = await this.#gh(false, () => this.#list(thread, thread.cwd, checkoutRepository, signal));
-    if (list === null) return null;
-    // gh lists the repository it resolves from the remotes. A list of another
-    // repository's pull requests, or a full page, cannot rule a pull request out.
-    const [host, owner, name] = repository.split('/');
-    const prefix = `https://${host}/${owner}/${name}/pull/`;
-    const usable = [...list.urls.keys()].every(url => url.startsWith(prefix));
-    const complete = usable && list.count < LIST_LIMIT;
     let tip: { branch: string | null; sha: string } | null | undefined;
     const checkout = async () => tip === undefined ? (tip = await this.cleanCheckout(thread, undefined, signal)) : tip;
     // `boite pr link` is how an agent names its PR: it holds even when the agent
     // pushed the tip under a branch name the checkout does not have.
-    for (const url of linkedPullRequestUrls(this.core.journal, thread.id, repository).slice(0, LINKED_PROOFS)) {
-      const listed = usable ? list.urls.get(url.toLowerCase()) : undefined;
-      if (listed === undefined && complete) continue;
-      if (listed !== undefined && !mergedEvidence(listed)) continue;
-      const clean = await checkout();
-      if (!clean) return null;
-      const expected = { repository, checkoutRepository, branch: clean.branch, sha: clean.sha };
-      if (listed !== undefined) {
-        const proof = parseMergedPrProof(JSON.stringify([listed]), expected, true);
-        if (proof) return proof;
-        continue;
-      }
+    let linkedProof: MergedPrProof | null = null;
+    for (const url of linkedPullRequestUrls(this.core.journal, thread.id, repository)) {
       try {
-        const proof = await this.#gh(false, () => this.#shared(this.#proofs, `${checkoutRepository}\n${url}\n${clean.sha}`, PROOF_TTL_MS, async ownerSignal => parseMergedPrProof(
-          `[${await this.#run(thread, thread.cwd, 'gh', ['pr', 'view', url, '--json', PROOF_FIELDS], ownerSignal)}]`, expected, true,
-        ), signal));
-        if (proof) return proof;
-        if (this.#ghUnavailable !== null) return null;
+        // A repository list is a discovery hint, never negative evidence about a known URL.
+        const value = await this.#gh(false, () => this.#detail(thread, url, false, signal));
+        if (!value) return null;
+        if (value.state === 'OPEN') return null;
+        if (!mergedEvidence(value)) continue;
+        const clean = await checkout();
+        if (!clean) return null;
+        const proof = parseMergedPrProof(JSON.stringify([value]), { repository, checkoutRepository, branch: clean.branch, sha: clean.sha }, true);
+        linkedProof ??= proof;
+        if (Date.now() < this.#ghUnavailableUntil) return null;
       } catch (error) {
-        // One deleted or unreadable link does not hide the conversation's other PRs.
+        // A deleted link can be skipped. A failed read cannot prove its work finished.
         signal?.throwIfAborted();
+        if (!/no pull requests found|could not resolve to a PullRequest\b/i.test(messageOf(error))) return null;
       }
     }
-    if (!head) return null;
-    const listed = usable ? list.heads.get(head) ?? [] : [];
+    if (!head) return linkedProof;
+    const list = await this.#gh(false, () => this.#list(thread, thread.cwd, checkoutRepository, repository, signal));
+    if (list === null) return null;
+    const complete = list.count < LIST_LIMIT;
+    const listed = localCandidates(list.heads.get(head) ?? []);
+    // A reused checkout can have new work even when its last linked PR merged.
+    if (listed.some(value => toPullRequest(value).state === 'OPEN')) return null;
+    if (linkedProof && complete) return linkedProof;
     // A branch reused by two pull requests proves nothing; a newest one that is
     // not merged means the branch has no single merged pull request either.
     if (complete && (listed.length !== 1 || !mergedEvidence(listed[0]))) return null;
-    if (usable && listed.length && !listed.some(mergedEvidence)) return null;
+    if (!linkedProof && listed.length && !listed.some(mergedEvidence)) return null;
     const clean = await checkout();
     if (!clean?.branch) return null;
     const expected = { repository, checkoutRepository, branch: clean.branch, sha: clean.sha };
     if (complete) return parseMergedPrProof(JSON.stringify(listed), expected);
     // A full page may hold only the newest pull request of a reused branch.
     const branch = clean.branch;
-    return this.#gh(false, () => this.#shared(this.#proofs, `${checkoutRepository}\n${repository}\n${branch}\n${clean.sha}`, PROOF_TTL_MS, async ownerSignal => parseMergedPrProof(
-      await this.#run(thread, thread.cwd, 'gh', ['pr', 'list', '--repo', repository, '--head', branch, '--state', 'all', '--limit', '2', '--json', PROOF_FIELDS], ownerSignal),
-      expected,
-    ), signal));
+    return this.#gh(false, () => this.#shared(this.#proofs, `${checkoutRepository}\n${repository}\n${branch}\n${clean.sha}\n${linkedProof?.url ?? ''}`, PROOF_TTL_MS, async ownerSignal => {
+      const values = pullRequestArray(await this.#run(thread, thread.cwd, 'gh', ['pr', 'list', '--repo', repository, '--head', branch, '--state', 'all', '--limit', String(LIST_LIMIT), '--json', PROOF_FIELDS], ownerSignal));
+      // Filtering foreign forks cannot turn a truncated page into complete evidence.
+      if (values.length >= LIST_LIMIT) return null;
+      const local = localCandidates(values);
+      if (local.some(value => toPullRequest(value).state === 'OPEN')) return null;
+      return linkedProof ?? parseMergedPrProof(JSON.stringify(local), expected);
+    }, signal));
   }
 
   /** `git remote -v`, read once per repository every five minutes. */
@@ -363,13 +386,32 @@ export class PullRequests {
   }
 
   /** The repository's newest pull requests, read once per fifteen seconds for badges and merge proofs alike. */
-  #list(thread: Pick<ThreadSummary, 'id'>, cwd: string, repository: string, signal?: AbortSignal): Promise<PullRequestList> {
-    return this.#shared(this.#lists, repository, LIST_TTL_MS, async ownerSignal => parsePullRequestList(
-      await this.#run(thread, cwd, 'gh', ['pr', 'list', '--state', 'all', '--limit', String(LIST_LIMIT), '--json', PROOF_FIELDS], ownerSignal),
-    ), signal);
+  #list(thread: Pick<ThreadSummary, 'id'>, cwd: string, repository: string, target: string, signal?: AbortSignal): Promise<PullRequestList> {
+    return this.#shared(this.#lists, `${repository}\n${target}`, LIST_TTL_MS, async ownerSignal => {
+      const list = parsePullRequestList(await this.#run(thread, cwd, 'gh', ['pr', 'list', '--repo', target, '--state', 'all', '--limit', String(LIST_LIMIT), '--json', PROOF_FIELDS], ownerSignal));
+      const prefix = `https://${target}/pull/`;
+      if (![...list.urls.keys()].every(url => url.startsWith(prefix))) throw refused(`gh pull request URLs must belong to ${target}`);
+      return list;
+    }, signal);
   }
 
   async #read(thread: ThreadSummary, refresh: boolean): Promise<PullRequest> {
+    // Explicit links belong to the conversation even after its branch or checkout disappears.
+    const links = await this.core.linkedPullRequests.list(thread.id, refresh);
+    const linked = links.findLast(pr => pr.state === 'OPEN') ?? links.at(-1);
+    if (refresh && linked?.error) throw refused(linked.error);
+    const known = linked ? { number: linked.number, url: linked.url, state: linked.state } : null;
+    if (known?.state === 'OPEN') return known;
+    try {
+      const found = await this.#discover(thread, refresh);
+      return found?.state === 'OPEN' ? found : known ?? found;
+    } catch (error) {
+      if (known && !refresh) return known;
+      throw error;
+    }
+  }
+
+  async #discover(thread: ThreadSummary, refresh: boolean): Promise<PullRequest> {
     // A shared checkout's current branch belongs to no particular thread.
     // Only a branch associated with this thread can identify its pull request.
     let branch = thread.branch;
@@ -395,22 +437,26 @@ export class PullRequests {
     // Kept per repository: the worktrees of one repository share what is kept.
     const repository = repositoryOf(root);
     if (refresh) {
-      this.#ghUnavailable = null;
+      this.#ghUnavailableUntil = 0;
       this.#remotes.delete(repository);
-      this.#lists.delete(repository);
+      for (const key of this.#lists.keys()) if (key.startsWith(`${repository}\n`)) this.#lists.delete(key);
       for (const key of this.#branches.keys()) if (key.startsWith(`${repository}\n`)) this.#branches.delete(key);
     }
     // Forgejo, GitLab and local repositories have no GitHub PR to query.
-    if (!hasGitHubRemote(await this.#remote(thread, root, repository))) return null;
-    if (this.#ghUnavailable !== null) return null;
-    const list = await this.#gh(refresh, () => this.#list(thread, root, repository));
+    const target = discoveryRepository(await this.#remote(thread, root, repository));
+    if (!target || Date.now() < this.#ghUnavailableUntil) return null;
+    const list = await this.#gh(refresh, () => this.#list(thread, root, repository, target));
     if (list === null) return null;
-    const found = list.byHead.get(branch);
+    const found = displayCandidate(list.heads.get(branch) ?? []);
     // A full page may have left an older pull request out: that branch alone is asked for.
-    if (found !== undefined || list.count < LIST_LIMIT) return found ?? null;
-    return this.#gh(refresh, () => this.#shared(this.#branches, `${repository}\n${branch}`, LIST_TTL_MS, async ownerSignal => parsePullRequests(
-      await this.#run(thread, root, 'gh', ['pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', 'number,url,state'], ownerSignal),
-    )));
+    if (found || list.count < LIST_LIMIT) return found;
+    return this.#gh(refresh, () => this.#shared(this.#branches, `${repository}\n${target}\n${branch}`, LIST_TTL_MS, async ownerSignal => {
+      const raw = await this.#run(thread, root, 'gh', ['pr', 'list', '--repo', target, '--head', branch, '--state', 'all', '--limit', String(LIST_LIMIT), '--json', PROOF_FIELDS], ownerSignal);
+      const values = pullRequestArray(raw);
+      const found = displayCandidate(values);
+      if (found && !found.url.toLowerCase().startsWith(`https://${target}/pull/`)) throw refused(`gh pull request URLs must belong to ${target}`);
+      return found;
+    }));
   }
 
   /**
@@ -422,7 +468,7 @@ export class PullRequests {
       return await call();
     } catch (error) {
       if (!unavailable(error)) throw error;
-      this.#ghUnavailable = messageOf(error);
+      this.#ghUnavailableUntil = Date.now() + 60_000;
       if (refresh) throw error;
       return null;
     }

@@ -1,5 +1,6 @@
 import { MergedPrArchive } from './merged-pr-archive.ts';
 import { PullRequests } from './pull-requests.ts';
+import { LinkedPullRequests } from './linked-pull-requests.ts';
 import { PullRequestWatches, type WatchTiming } from './pull-request-watch.ts';
 import { existsSync, mkdirSync } from 'node:fs';
 import { hostname } from 'node:os';
@@ -142,6 +143,7 @@ export class Core {
   readonly logs: DiagnosticLogs;
   readonly diagnostics: Diagnostics;
   readonly pullRequests: PullRequests;
+  readonly linkedPullRequests: LinkedPullRequests;
   readonly mergedPrArchive: MergedPrArchive;
   readonly worktreeCleanup: WorktreeCleanup;
   readonly pullRequestWatches: PullRequestWatches;
@@ -383,6 +385,7 @@ export class Core {
 
     this.workforce = new AgentStore(this);
     this.pullRequests = new PullRequests(this);
+    this.linkedPullRequests = new LinkedPullRequests(this, (threadId, url, refresh) => this.pullRequests.detail(threadId, url, refresh));
     this.pullRequestWatches = new PullRequestWatches(this, (threadId, args) => this.pullRequests.gh(threadId, args), options.pullRequestWatches);
     registerModules(this);
     phase('startup.stores-ready', 'Stores and RPC handlers ready', { methods: this.router.methods().length });

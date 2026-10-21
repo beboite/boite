@@ -2,7 +2,9 @@ import { orderPullRequests, pullRequestAddress, type LinkedPullRequest, type Pul
 import type { FakeContext, FakeMethods } from './context';
 import { refusal, toSummary } from './shared';
 
-export function pullRequestMethods(ctx: FakeContext): Pick<FakeMethods, 'threads.pullRequests' | 'threads.linkPullRequest' | 'threads.unlinkPullRequest' | 'threads.pullRequestReview' | 'threads.pullRequestFiles' | 'threads.watchPullRequest' | 'threads.unwatchPullRequest'> {
+type Methods = Pick<FakeMethods, 'threads.pullRequest' | 'threads.pullRequests' | 'threads.linkPullRequest' | 'threads.unlinkPullRequest' | 'threads.pullRequestReview' | 'threads.pullRequestFiles' | 'threads.watchPullRequest' | 'threads.unwatchPullRequest'>;
+
+export function pullRequestMethods(ctx: FakeContext): Methods {
   const lists = new Map<string, LinkedPullRequest[]>();
   const read = (id: string) => { ctx.thread(id); return lists.get(id) ?? []; };
   const linked = (id: string, url: string) => {
@@ -38,7 +40,14 @@ export function pullRequestMethods(ctx: FakeContext): Pick<FakeMethods, 'threads
     const url = pullRequestAddress(input).url;
     return list.find(pr => pr.url.toLowerCase() === url.toLowerCase()) ?? (await methods['threads.linkPullRequest']({ threadId: id, url })).find(pr => pr.url.toLowerCase() === url.toLowerCase())!;
   };
-  const methods: Pick<FakeMethods, 'threads.pullRequests' | 'threads.linkPullRequest' | 'threads.unlinkPullRequest' | 'threads.pullRequestReview' | 'threads.pullRequestFiles' | 'threads.watchPullRequest' | 'threads.unwatchPullRequest'> = {
+  const methods: Methods = {
+    'threads.pullRequest': async ({ threadId }) => {
+      const list = read(threadId), linked = list.findLast(pr => pr.state === 'OPEN') ?? list.at(-1);
+      const thread = ctx.thread(threadId);
+      const discovered = thread.branch && thread.branch !== 'HEAD' ? thread.pullRequest ?? null : null;
+      const pr = linked?.state === 'OPEN' ? linked : discovered?.state === 'OPEN' ? discovered : linked ?? discovered;
+      return pr ? { number: pr.number, url: pr.url, state: pr.state } : null;
+    },
     'threads.watchPullRequest': async ({ threadId, url }) => {
       const thread = ctx.thread(threadId);
       if (thread.archived) throw refusal('watching a pull request needs an active conversation');

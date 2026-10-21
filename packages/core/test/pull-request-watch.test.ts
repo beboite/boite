@@ -543,6 +543,7 @@ test('a merge or a close by someone else is told with what still waited, a faile
   expect(text).toContain('maintainer merged the pull request; its watch ended.');
   expect(watches.of(threadId)).toEqual([]);
   expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toBeUndefined();
+  expect(harness!.core.linkedPullRequests.saved(threadId)[0]?.state).toBe('MERGED');
 });
 
 test('a pull request in the merge queue keeps its watch waiting, and leaving the queue unmerged wakes the agent', async () => {

@@ -280,10 +280,6 @@ export function threadMethods(ctx: FakeContext) {
   const removing = new Set<string>();
   return {
     ...sideQuestionMethods(ctx, (source, messages) => writeFakeFork(ctx, source, messages)),
-    'threads.pullRequest': async (params) => {
-      const thread = ctx.threads.get(params.threadId);
-      return thread?.branch && thread.branch !== 'HEAD' ? thread.pullRequest ?? null : null;
-    },
     'threads.list': async (params) => {
       return [...ctx.threads.values()]
         .filter((t) => (params.projectId ? t.projectId === params.projectId : true))
