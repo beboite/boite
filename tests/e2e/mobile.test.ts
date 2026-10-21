@@ -178,6 +178,22 @@ test('model sheets stay on screen and browser Back closes the sheet without losi
   expect(bounds.right).toBeLessThanOrEqual(390);
   expect(bounds.top).toBeGreaterThanOrEqual(0);
   expect(bounds.bottom).toBeLessThanOrEqual(844);
+  // An open phone sheet becomes an anchored desktop menu when the window grows.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 960, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor('innerWidth === 1440');
+  const desktop = await page.evaluate<number>(`document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect().width`);
+  expect(desktop).toBeLessThanOrEqual(440);
+  expect(await page.evaluate(`document.querySelector('.mobile-sheet-backdrop') === null`)).toBe(true);
+  await capture('model-menu-resized-desktop.png');
+  // Narrowing again restores the sheet, its backdrop and browser Back handling.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu]')?.dataset.mobileSheet === 'true'`);
+  const search = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('[data-testid=picker-search]').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...search, button: 'left', clickCount: 1 });
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...search, button: 'left', clickCount: 1 });
+  expect(await page.evaluate(`document.activeElement === document.querySelector('[data-testid=picker-search]')`)).toBe(true);
+  expect(await page.evaluate(`document.querySelectorAll('.mobile-sheet-backdrop').length`)).toBe(1);
+  await capture('model-menu-resized-phone.png');
   await page.evaluate('history.back()');
   await page.waitFor(`!document.querySelector('[data-testid=composer-picker-menu]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('Keep this draft');
@@ -493,8 +509,9 @@ test('every phone control on the chat, the panel, the list and Appearance takes 
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
     await openMobilePanel(page);
     await page.waitFor(`document.querySelector('[data-testid=panel-launcher]')`);
-    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+    // The capture settles the panel's entrance before measuring hit targets behind it.
     await capture('mobile-panel-launcher.png');
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
     await page.click('[data-testid=launch-changes]');
     // The strip shows its scroll chevrons for a frame while the new tab lays out.
     await page.waitFor(`document.querySelector('[data-testid=panel-tab-close]') && !document.querySelector('[data-testid=right-panel] .chev')`);
