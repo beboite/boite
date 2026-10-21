@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import type { AgentAccountGrant, AgentBrain, AgentBrainRoot, AgentProfile, AgentRuntimeConfig, AgentScope, AgentSelection, AgentWork, RpcParams } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
-import { agentProvider, checkEffort, checkModel } from '../threads/selection.ts';
+import { agentProvider, checkSavedSelection } from '../threads/selection.ts';
 import { ids, integer, object, text } from './validation.ts';
 import { OPEN_WORK } from './repository.ts';
 import { withLoad } from '../threads/records.ts';
@@ -47,25 +47,26 @@ export class ResidentAgents {
     if(child&&config.subagents.profiles.length===0)return config.subagents.anyModel!==false;
     return (child ? config.subagents.profiles : config.allowedRoutes).some(p=>sameRoute(p,{...selection,model:selection.model??config.defaultRoute.model}));
   }
-  route(agentId: string, value: AgentSelection): AgentSelection {
+  route(agentId: string, value: AgentSelection, previous?: Pick<AgentSelection, 'providerId' | 'accountId' | 'model' | 'effort'>): AgentSelection {
     object(value,'route');
     const provider=this.core.providers.require(text(value.providerId,'route.providerId',100));
     const account=this.core.accounts.require(text(value.accountId,'route.accountId',160));
     if(account.providerId!==provider.id || !this.accountAllowed(agentId,account.id))throw refused('route.accountId: account is not granted to this agent');
     const model=text(value.model,'route.model',256);
-    checkModel(provider,account.id,model);
-    return {...value,model,effort:checkEffort(provider,account.id,model,value.effort)};
+    checkSavedSelection(provider,account.id,{...value,model},previous);
+    return {...value,model};
   }
   configure(params: RpcParams<'agents.runtime.configure'>): AgentProfile {
     const agent=this.records.get('profile',params.agentId), v=params.config;
     object(v,'config');
-    const selection=this.route(agent.id,v.defaultRoute);
+    const previous=this.config(agent.id);
+    const selection=this.route(agent.id,v.defaultRoute,agent.selection);
     if(!Array.isArray(v.allowedRoutes)||v.allowedRoutes.length>32)throw refused('allowedRoutes: expected at most 32 routes');
-    const routes=v.allowedRoutes.map(p=>({...this.route(agent.id,{...p,permissionMode:selection.permissionMode}),id:text(p.id,'route.id',64),name:text(p.name,'route.name',100),model:p.model}));
+    const routes=v.allowedRoutes.map(p=>({...this.route(agent.id,{...p,permissionMode:selection.permissionMode},previous.allowedRoutes.find(r=>r.id===p.id)),id:text(p.id,'route.id',64),name:text(p.name,'route.name',100),model:p.model}));
     if(!routes.some(r=>sameRoute(r,selection)))throw refused('defaultRoute: default model must be in allowedRoutes');
     if(new Set(routes.map(r=>r.id)).size!==routes.length)throw refused('allowedRoutes: route ids must be unique');
-    const subagents=this.core.delegation.validateConfig(v.subagents);
-    for(const p of subagents.profiles)this.route(agent.id,{...p,permissionMode:selection.permissionMode});
+    const subagents=this.core.delegation.validateConfig(v.subagents,previous.subagents);
+    for(const p of subagents.profiles)this.route(agent.id,{...p,permissionMode:selection.permissionMode},previous.subagents.profiles.find(r=>r.id===p.id));
     if(v.autoMemory!==undefined&&typeof v.autoMemory!=='boolean')throw refused('autoMemory: expected true or false');
     const config:AgentRuntimeConfig={defaultRoute:selection,allowedRoutes:routes,subagents,compactAfterTurns:integer(v.compactAfterTurns,'compactAfterTurns',2,100),maxRunMinutes:integer(v.maxRunMinutes,'maxRunMinutes',1,120),autoMemory:v.autoMemory!==false};
     const saved=this.records.transaction(()=>{

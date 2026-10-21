@@ -61,6 +61,8 @@ import {
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { FakeAgents } from '../fake-agents';
+import { checkEffort, checkModel } from './checks';
+import { modelsOf } from './provider-catalog';
 import { settleAgentSettings } from './agent-settings';
 import type { FakeFinishedTurn } from '../fake-usage';
 import { activityMethods, finishActivityTurn } from './activity';
@@ -320,6 +322,15 @@ export class FakeContext {
       },
       // A project's folder holds files: a brain root refuses it.
       occupied: path => this.projects.some(p => p.path.replace(/[\\/]+$/, '') === path),
+      checkRoute: (value, previous) => {
+        const provider = this.providers.find(p => p.id === value.providerId);
+        const account = this.accounts.find(a => a.id === value.accountId);
+        if (!provider || !account || account.providerId !== provider.id) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'route.accountId: expected an account of route.providerId' });
+        const models = modelsOf(this, provider.id, account.id);
+        const kept = previous?.providerId === provider.id && previous.accountId === account.id && previous.model === value.model;
+        if (!kept) checkModel(provider, account.id, models, value.model, this.modelCatalogs.has(provider.id + '::' + account.id));
+        if (!kept || previous.effort !== value.effort) checkEffort(provider, models, value.model, value.effort);
+      },
     });
     this.plugins = new FakePlugins({
       emit: (event, payload) => this.emit(event, payload),

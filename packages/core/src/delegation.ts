@@ -4,7 +4,7 @@ import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, Del
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, requiredText as text } from './errors.ts';
 import { checkContext } from './context-mode.ts';
-import { checkEffort, checkModel, checkSpeed } from './threads/selection.ts';
+import { checkSavedSelection, checkSpeed } from './threads/selection.ts';
 import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
 import type { ProviderProbe } from './providers/probe.ts';
 import { newId } from './ids.ts';
@@ -233,7 +233,7 @@ export class Delegation {
   configure(threadId: string, value: DelegationConfig): DelegationView {
     const thread = this.core.threads.require(threadId);
     if (thread.parentThreadId || thread.archived) throw refused('delegation.configure requires an unarchived parent thread');
-    const config = this.validateConfig(value);
+    const config = this.validateConfig(value, this.config(threadId));
     // Saving other settings of a paused team keeps who paused it; pausing it here is the owner's.
     const current = this.config(threadId);
     const pause = current.paused ? { by: current.pausedBy ?? 'owner', at: current.pausedAt ?? Date.now() } : { by: 'owner' as const, at: Date.now() };
@@ -248,7 +248,7 @@ export class Delegation {
   private handOver(rootId: string): void {
     for (const row of this.core.journal.db.query("SELECT DISTINCT recipient_id FROM delegation_messages WHERE root_id = ? AND status = 'received'").all(rootId) as { recipient_id: string }[]) this.kick(row.recipient_id);
   }
-  validateConfig(value: DelegationConfig): DelegationConfig {
+  validateConfig(value: DelegationConfig, previous?: DelegationConfig): DelegationConfig {
     if (!value || typeof value.enabled !== 'boolean' || typeof value.paused !== 'boolean' || !Array.isArray(value.profiles) || value.profiles.length > 16) throw invalidParams('config: expected enabled, paused and up to 16 profiles');
     if (value.anyModel !== undefined && typeof value.anyModel !== 'boolean') throw invalidParams('config.anyModel: expected a boolean');
     const config: DelegationConfig = {
@@ -261,8 +261,7 @@ export class Delegation {
         const account = this.core.accounts.require(text(p.accountId, 'profile.accountId', 128));
         if (account.providerId !== provider.id) throw refused('profile.accountId must belong to profile.providerId');
         const model = text(p.model, 'profile.model', 256);
-        checkModel(provider, account.id, model);
-        checkEffort(provider, account.id, model, p.effort);
+        checkSavedSelection(provider, account.id, { model, effort: p.effort }, previous?.profiles.find(profile => profile.id === id));
         return { id, name: text(p.name, 'profile.name', 80), providerId: provider.id, accountId: account.id, model, effort: p.effort };
       }),
     };

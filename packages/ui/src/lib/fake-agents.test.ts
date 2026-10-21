@@ -4,6 +4,26 @@ import { oldestOf } from './agents.svelte';
 import { FakeAgents } from './fake-agents';
 import { FakeClient } from './fake-client';
 
+test('runtime settings retain approved missing models but refuse newly added unlisted routes', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    let agent = await client.call('agents.profile.save', { value: {
+      name: 'Ada', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'],
+      selection: { providerId: 'echo', accountId: 'a-echo', model: 'old-echo', effort: null, permissionMode: 'default' },
+    } });
+    let config = await client.call('agents.runtime.get', { agentId: agent.id });
+    config.defaultRoute.permissionMode = 'yolo';
+    agent = await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config });
+    expect(agent.selection).toMatchObject({ model: 'old-echo', permissionMode: 'yolo' });
+    config = await client.call('agents.runtime.get', { agentId: agent.id });
+    config.allowedRoutes.push({ ...config.allowedRoutes[0]!, id: 'added', model: 'unknown' });
+    await expect(client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config }))
+      .rejects.toThrow('the provider does not offer this model');
+    expect((await client.call('agents.runtime.get', { agentId: agent.id })).allowedRoutes).toHaveLength(1);
+  } finally { client.close(); }
+});
+
 test('the fake executes bounded groups, keeps native contexts distinct and refuses direct starts', async () => {
   const client = new FakeClient({ delayMs: 0 }); await client.connect();
   try {

@@ -67,6 +67,8 @@ export class FakeAgents {
     goal?: (threadId: string, objective: string | null) => void;
     /** Whether a folder on this core already holds files: a brain never moves into one, it takes the next name. */
     occupied?: (path: string) => boolean;
+    /** Validate new choices against the host catalog while retaining previously approved choices. */
+    checkRoute?: (value: AgentSelection, previous?: Pick<AgentSelection, 'providerId' | 'accountId' | 'model' | 'effort'>) => void;
   }) {}
   /** The core's reason to keep a project: a mission, team, resource or memory of an agent names it. */
   referencesProject(projectId: string): boolean {
@@ -362,6 +364,10 @@ export class FakeAgents {
 
   private configureRuntime(p: RpcParams<'agents.runtime.configure'>): RpcResult<'agents.runtime.configure'> {
     const agent = this.get('profile', p.agentId);
+    const previous = this.runtime(agent.id);
+    this.runner?.checkRoute?.(p.config.defaultRoute, agent.selection);
+    for (const route of p.config.allowedRoutes) this.runner?.checkRoute?.({ ...route, permissionMode: p.config.defaultRoute.permissionMode }, previous.allowedRoutes.find(r => r.id === route.id));
+    for (const route of p.config.subagents.profiles) this.runner?.checkRoute?.({ ...route, permissionMode: p.config.defaultRoute.permissionMode }, previous.subagents.profiles.find(r => r.id === route.id));
     if (!p.config.defaultRoute.model || !p.config.allowedRoutes.some(r => r.providerId === p.config.defaultRoute.providerId && r.accountId === p.config.defaultRoute.accountId && r.model === p.config.defaultRoute.model)) this.refuse('defaultRoute must be allowed');
     for (const route of [...p.config.allowedRoutes, ...p.config.subagents.profiles]) { const grant = this.grants.find(g => g.accountId === route.accountId); if (grant?.agentIds && !grant.agentIds.includes(agent.id)) this.refuse('account is not granted to this agent'); }
     // The core's field checks: a route keeps a trimmed name of 1 to 100 characters, and the limits stay whole numbers in range.
