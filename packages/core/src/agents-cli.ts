@@ -53,7 +53,9 @@ export function contactLine(contact: AgentContact, selfCore: string, now = Date.
     contact.paused ? 'coordination paused' : undefined, contact.projectArchived ? 'project archived; delivery will restore it' : undefined]
     .filter((fact): fact is string => typeof fact === 'string' && fact.length > 0);
   const resources = contact.resources ? `\n    resources: ${contact.resources}` : '';
-  const warning = !working && (contact.status === 'error' || !recent) ? '\n    warning: contacting this inactive thread is allowed but discouraged unless it completed work in the last 15 minutes.' : '';
+  // A failed thread left its work unfinished: a message wakes it to resume, unlike one that is merely done.
+  const warning = working ? '' : contact.status === 'error' ? '\n    note: its last turn failed; a message wakes it to resume.'
+    : !recent ? '\n    warning: contacting this inactive thread is allowed but discouraged unless it completed work in the last 15 minutes.' : '';
   return `${shortAddress(contact, selfCore)}  ${JSON.stringify(contact.title)}  (${facts.join(', ')})${resources}${warning}`;
 }
 

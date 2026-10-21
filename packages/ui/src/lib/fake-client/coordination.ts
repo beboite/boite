@@ -131,11 +131,11 @@ function reachable(ctx: FakeContext, threadId: ThreadId): { contact: AgentContac
   return found;
 }
 
-/** Fake delivery is immediate, but it still respects pauses and restores the owning project. */
+/** Fake delivery is immediate, but it still respects pauses and restores the owning project. A failed thread receives, as on the core. */
 function deliverPending(ctx: FakeContext, threadId: ThreadId): void {
   const thread = ctx.thread(threadId);
   const config = coordinationConfig(ctx, threadId);
-  if (thread.archived || config.mode === 'off' || config.paused || ['error', 'waiting', 'queued'].includes(thread.status)) return;
+  if (thread.archived || config.mode === 'off' || config.paused || ['waiting', 'queued'].includes(thread.status)) return;
   for (const letter of ctx.letters.get(threadId) ?? []) {
     if (letter.status !== 'received' || letter.to.coreId !== ctx.identity.coreId || letter.to.threadId !== threadId) continue;
     if (letter.expiresAt <= ctx.now()) { letter.status = 'expired'; continue; }

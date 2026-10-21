@@ -177,6 +177,27 @@ test('it starts threads in its projects only, and the thread\'s first answer com
   await waitFor(() => notices().some(w => w.prompt.includes(`(${id})`)));
 });
 
+test('the agent wakes a thread whose turn failed and puts it in Done once it is', async () => {
+  const prompts = answering(); const { h, worker, cli, terminal } = await setup();
+  h.core.threads.startTurn(worker, 'FAIL-ME');
+  await waitFor(() => h.core.threads.require(worker).status === 'error');
+  expect((await cli(['thread', 'send', worker, 'Resume the recovery batch'])).err).toBe('');
+  await waitFor(() => (prompts.get(worker) ?? []).some(p => p.includes('Resume the recovery batch')));
+  await waitFor(() => h.core.threads.require(worker).status === 'idle');
+
+  const done = await cli(['thread', 'done', worker]);
+  expect(done.err).toBe('');
+  expect(done.out).toContain(`${worker} idle,done`);
+  expect(h.core.threads.require(worker).doneAt).toBeNumber();
+  expect(lines(worker, h)).toContain('Marked done by Ada, the agent the user entrusted this project to.');
+  // The owner's terminal marks done too; a plain archive stays out of the Done list.
+  await terminal(['thread', 'unarchive', worker]);
+  await terminal(['thread', 'archive', worker]);
+  expect((await terminal(['threads', '--archived'])).out).toContain(`${worker} idle,archived`);
+  expect((await terminal(['thread', 'done', worker])).out).toContain(`done: ${worker}`);
+  expect(h.core.threads.require(worker).doneAt).toBeNumber();
+});
+
 test('the owner drives every thread from a terminal, and what it sends is its own prompt', async () => {
   answering(); const { h, worker, outside, project, terminal } = await setup();
   const listed = await terminal(['threads']);

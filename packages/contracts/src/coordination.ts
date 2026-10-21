@@ -129,6 +129,8 @@ export interface ProjectThreadRow {
   project: string | null;
   status: ThreadStatus;
   archived: boolean;
+  /** Archived as done: it sits in the Done list. */
+  done?: true;
   branch: string | null;
   /** Unanswered questions and permission requests. */
   questions: number;
@@ -148,7 +150,7 @@ export interface ProjectThreadDetail {
  * What a persistent agent does to a thread of a project entrusted to it.
  * Deleting threads and deciding tool permissions stay the owner's.
  */
-export type ResidentThreadAction = 'archive' | 'unarchive' | 'stop' | 'rename' | 'move';
+export type ResidentThreadAction = 'archive' | 'done' | 'unarchive' | 'stop' | 'rename' | 'move';
 /** The calling agent and the projects the owner entrusted to it. Empty when this thread is not such an agent's. */
 export interface ResidentView {
   agentId: string | null;

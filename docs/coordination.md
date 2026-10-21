@@ -35,14 +35,18 @@ Off stops automatic delivery. Messages are limited to 4,000 characters, batched
 up to four and expire after 15 minutes while waiting.
 
 Coordination settings hold contacts and permissions. Pause suspends
-automatic coordination; Resume enables it again. Stop
-and a failed turn pause coordination too. A core restart pauses conversations
-with unfinished turns or pending messages; idle conversations without pending
-work remain reachable. A pause the core applied by itself ends with your next
-message in that conversation, with a turn that resumes it after a restart or a
-failure, or with its parent's message to a subagent, so the agent can be woken
-again; a pause you set
-in Communication settings stays until you resume it. Paired devices can read the panel;
+automatic coordination; Resume enables it again. Stop pauses coordination too.
+A failed turn does not: another agent's message wakes the thread to resume, and
+a message that arrived during the failed turn reaches it right after. Each
+message starts at most one turn, so a provider that keeps failing cannot loop.
+A core restart pauses conversations with unfinished turns or pending messages;
+idle conversations without pending work remain reachable. A pause the core
+applied by itself ends with your next message in that conversation, with a turn
+that resumes it after a restart or a failure, or with its parent's message to a
+subagent. A restart's pause, or one left by a wake that could not start, also
+ends with the next agent message, so a crashed thread can be woken; the
+directory does not list it as paused. Stop's pause waits for you, and a pause
+you set in Communication settings stays until you resume it. Paired devices can read the panel;
 only an owner
 connection can change permissions.
 

@@ -21,13 +21,14 @@ export type Caller = 'owner' | 'agent';
 /** Commands this file answers, with the words that follow them. */
 export const CONTROL_COMMANDS = ['threads', 'thread', 'questions', 'answer', 'permissions', 'allow', 'deny'] as const;
 /** `thread` actions this file answers; `new` and `move <project>` without a target stay with the agent's own commands. */
-const THREAD_ACTIONS = ['show', 'send', 'stop', 'archive', 'unarchive', 'remove', 'rename'] as const;
+const THREAD_ACTIONS = ['show', 'send', 'stop', 'done', 'archive', 'unarchive', 'remove', 'rename'] as const;
 
 export const CONTROL_HELP = `  threads [--project <p>] [--archived]
                                  threads you may drive: every one as the owner,
                                  those of the projects entrusted to you as an agent
   thread show <id>               state, pending questions and permissions, last answer
   thread send <id> <text>        the owner's prompt, or the agent's message
+  thread done <id>               put a thread that is not at work in Done
   thread stop|archive|unarchive|remove <id>   (remove: owner only)
   thread rename <id> <title>
   thread move <project> <id>     move another thread (without <id>: this one)
@@ -55,8 +56,8 @@ export function ownerWithoutThread(parsed: Parsed): boolean {
   return command === 'thread' && action === 'new';
 }
 
-function statusOf(row: { status: string; archived: boolean }): string {
-  return row.archived ? `${row.status},archived` : row.status;
+function statusOf(row: { status: string; archived: boolean; done?: true }): string {
+  return row.archived ? `${row.status},${row.done ? 'done' : 'archived'}` : row.status;
 }
 
 function threadLine(row: ProjectThreadRow): string {
@@ -137,7 +138,7 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
   const ownerRow = (thread: ThreadSummary, projects: Project[], questions: QuestionRequest[], permissions: PermissionRequest[]): ProjectThreadRow => ({
     id: thread.id, title: thread.title, projectId: thread.projectId,
     project: projects.find(project => project.id === thread.projectId)?.name ?? null,
-    status: thread.status, archived: thread.archived, branch: thread.branch,
+    status: thread.status, archived: thread.archived, ...(thread.archived && thread.doneAt != null ? { done: true as const } : {}), branch: thread.branch,
     questions: questions.filter(question => question.threadId === thread.id).length,
     permissions: permissions.filter(request => request.threadId === thread.id).length,
     pullRequest: thread.pullRequest ?? null, updatedAt: thread.updatedAt, lastCompletedAt: null,
@@ -230,7 +231,7 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
         }
         return;
       }
-      if (action !== 'stop' && action !== 'archive' && action !== 'unarchive' && action !== 'remove') throw new Usage(`thread: unknown action ${action}`);
+      if (action !== 'stop' && action !== 'done' && action !== 'archive' && action !== 'unarchive' && action !== 'remove') throw new Usage(`thread: unknown action ${action}`);
       if (!owner) {
         if (action === 'remove') ownerOnly('deleting a thread');
         const result = await client.call('resident.act', { threadId, target, action: action as Exclude<typeof action, 'remove'> });
@@ -240,6 +241,9 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
       if (action === 'stop') {
         const result = await client.call('turns.stop', { threadId: target });
         print([`stopped: ${result.stopped ? 'yes' : 'no, nothing was running'}`], result);
+      } else if (action === 'done') {
+        const thread = await client.call('threads.archive', { threadId: target, archived: true, onlyIfIdle: true });
+        print([`done: ${thread.id}`], thread);
       } else if (action === 'remove') {
         const result = await client.call('threads.remove', { threadId: target });
         print([`removed: ${target}`], result);

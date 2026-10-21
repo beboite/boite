@@ -130,8 +130,10 @@ would, through the `boite threads`, `boite thread` and `boite answer` commands
   never shows code itself;
 - it steers a thread with a letter marked as its own (`origin: 'resident'`,
   see [coordination](coordination.md#letters-from-the-agent-of-a-project)),
-  whatever that thread's communication settings;
-- it archives, restores, renames, stops, or moves a thread to another of its
+  whatever that thread's communication settings, which wakes it even when its
+  last turn failed;
+- it marks a thread done (`boite thread done`, the Done list, refused while a
+  turn or input is pending), archives, restores, renames, stops, or moves a thread to another of its
   projects, and answers or skips a thread's question; each action leaves a
   line in that thread's timeline naming the agent.
 

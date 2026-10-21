@@ -470,6 +470,37 @@ test('a pause left by Stop ends with the user\'s next message, the owner\'s paus
   expect(h.core.coordination.get(b).config.paused).toBe(true);
 }, 20000);
 
+test('a letter wakes a thread whose last turn failed, and ends the pause a restart left, not Stop\'s', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  let fail = true;
+  restores.push(setDriver('echo', { protocol: 'echo', startTurn() {
+    const status = fail ? 'error' as const : 'done' as const;
+    return { done: Promise.resolve({ status, sessionId: null, usage: null, error: status === 'error' ? 'API Error: 503 no available subscription' : undefined }), stop() {} };
+  } }));
+  h.core.threads.startTurn(b, 'Long job');
+  await waitFor(() => h.core.threads.require(b).status === 'error');
+  expect(h.core.coordination.get(b).config.paused).toBe(false);
+  fail = false;
+  const crashed = await send(h, a, dest(h, b), 'Resume the recovery batch');
+  await waitFor(() => h.core.coordination.get(b).messages.find(m => m.id === crashed.id)?.status === 'delivered', 5000);
+  await waitFor(() => h.core.threads.require(b).status === 'idle');
+
+  // A restart left the pause: the next agent's letter lifts it and wakes the thread.
+  h.core.coordination.pause(b, 'restart');
+  expect((await h.core.coordination.directory(a)).agents.find(agent => agent.threadId === b)?.paused).toBe(false);
+  const restarted = await send(h, a, dest(h, b), 'The core is back, carry on');
+  expect(h.core.coordination.get(b).config.paused).toBe(false);
+  await waitFor(() => h.core.coordination.get(b).messages.find(m => m.id === restarted.id)?.status === 'delivered', 5000);
+  await waitFor(() => h.core.threads.require(b).status === 'idle');
+
+  // Stop is the user's word, even over a restart's pause: letters wait for his next message.
+  h.core.coordination.pause(b, 'restart');
+  h.core.threads.stopTurn(b);
+  const held = await send(h, a, dest(h, b), 'Still there?');
+  expect(h.core.coordination.get(b).config.paused).toBe(true);
+  expect(h.core.coordination.get(b).messages.find(m => m.id === held.id)?.status).toBe('received');
+}, 15000);
+
 test('a letter wakes an idle recipient at once, without waiting for the sweep', async () => {
   const { h, a, b } = await setup();
   await send(h, a, dest(h, b));
