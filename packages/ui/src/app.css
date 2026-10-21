@@ -371,6 +371,9 @@
   --dur-demo-word: 150ms;
   --ease-slide: cubic-bezier(0.2, 0, 0, 1);
   --z-whip: 100;
+  --z-window-resize: 11000;
+  --window-resize-edge: 5px;
+  --window-resize-corner: 12px;
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 
   color-scheme: dark;

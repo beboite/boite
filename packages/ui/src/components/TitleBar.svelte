@@ -12,6 +12,7 @@
   import { isMac } from '../lib/keybindings';
   import { linuxShell } from '../lib/shell-platform';
   import ProjectTile from './ProjectTile.svelte';
+  import WindowResizeHandles from './WindowResizeHandles.svelte';
   import { contactsRail, contactsShown } from '../lib/contacts-rail.svelte';
 
   let { store }: { store: Store } = $props();
@@ -119,6 +120,8 @@
   let dev = $derived(store.core?.channel === 'dev');
 
 </script>
+
+<WindowResizeHandles />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <header style:--project-width={`${Math.max(0, (store.sidebarCollapsed ? 156 : store.sidebarWidth - 40) - lights)}px`} class="titlebar" class:browser={!inShell} class:mac={macShell} class:linux={linuxFrame} {onmousedown} data-testid="titlebar">

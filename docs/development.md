@@ -48,6 +48,13 @@ providers and managed installs. Tests must use fresh directories.
 
 ## The UI
 
+The Windows shell forwards its eight client-area edges and corners to Tauri's
+native resize loop. Windows 10 uses `shadow(false)` to avoid a grey frame;
+WebView2 then covers the native hit-test area. `WindowResizeHandles.svelte`
+keeps resizing available without restoring that frame. Handles disappear
+when maximized or fullscreen and are absent in browsers, Linux and macOS.
+`TitleBar.test.ts` exercises the directions and window-state transitions.
+
 ```sh
 bun run dev:ui              # Vite at http://localhost:5173
 bun run build:ui            # packages/ui/dist, served by a real core
