@@ -24,7 +24,7 @@ function assistantText(messages: Message[]): string {
   return last.parts.map((part) => (part.type === 'text' ? part.text : '')).join('');
 }
 
-live('opencode 2 acp driver, live', () => {
+live('opencode 2 native driver, live', () => {
   let harness: TestCore;
   let projectDir: string;
 
@@ -39,7 +39,7 @@ live('opencode 2 acp driver, live', () => {
   });
 
   test(
-    'turned on, a real turn answers over acp, a second one resumes the session, and plan mode reaches the agent',
+    'turned on, a real turn answers over its native API, a second one resumes the session, and plan mode reaches the agent',
     async () => {
       const client = await harness.connect();
       const logs: string[] = [];

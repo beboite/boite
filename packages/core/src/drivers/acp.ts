@@ -206,6 +206,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         },
         // Plain ACP has no input while a prompt runs; Grok adds one.
         ...(isGrok(ctx.provider) ? { steer: (text: string) => running.steer(turn, text) } : {}),
+        ...(ctx.provider.id === 'opencode-v2' ? { steer: (text, attachments, onAccepted) => running.steerOpenCode(turn, text, attachments, onAccepted) } : {}),
       };
     },
 

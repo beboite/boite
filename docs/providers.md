@@ -184,6 +184,16 @@ permissions and other providers are preserved. The key is never embedded in
 that configuration, and disabling the proxy restores the descriptor's original
 environment and native account checks.
 
+OpenCode 2 uses ACP for login and model discovery. Conversation execution uses
+an owned `serve --stdio --port 0` process on loopback, with a random Basic-auth
+password and the same isolated environment. Closing its stdin ends its lease.
+The native event stream draws tools, reasoning, permissions and usage; plain
+tool text stays output, while images and file diffs stay attached documents.
+Follow-ups use the native prompt inbox with `delivery: "steer"`, so queued
+messages and Send now join the running execution. OpenCode 2's ACP endpoint
+rejects concurrent prompts. Events received during a follow-up submission wait
+until its acceptance is journalled, keeping the user message before its reply.
+
 The picker lists OpenCode's own models first, then the gateway's as
 `douane/<gateway id>`: Gemini, Muse, the open families, and Antigravity Claude
 models whose catalog row explicitly includes `openai` in
