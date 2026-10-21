@@ -185,6 +185,11 @@ a message, which a persistent agent receives as new work. Code:
 `packages/core/src/agents/setting-cards.ts`, shared checks in
 `packages/contracts/src/agent-setting-requests.ts`.
 
+Question events from persistent agents' hidden session threads reach owner
+and paired-device clients without a thread subscription. This keeps the
+conversation's cards current when a setting changes or another client answers.
+The session transcript and ordinary thread questions remain subscription-scoped.
+
 ## Conversations and teams
 
 A group is a shared conversation without a required project. Each agent/group

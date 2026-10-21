@@ -52,6 +52,59 @@ async function setup() {
   return { h, owner, prompts, worker, notes, other, agent, run, profile, cards, drawn };
 }
 
+test('agent conversation cards reach owners without opening the hidden thread and disappear when settled', async () => {
+  const { h, owner, agent, worker, profile } = await setup();
+  await owner.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [agent.id], text: 'Hello', requestId: 'hello-card-events' });
+  await waitFor(() => h.core.workforce.records.list('work').some(work => work.status === 'done'));
+  const self = h.core.workforce.records.sessionFor(agent.id, { kind: 'agent', id: agent.id })!.threadId;
+  const viewer = await h.connect();
+  const grant = h.core.sessions.grant();
+  const phone = await connect(h.url, '', { grant: grant.grant, client: { name: 'pwa', version: '0' } });
+  const unrelated = await connect(h.url, h.core.agents.tokenFor(worker));
+  const asked: string[] = [], answered: string[] = [], messages: string[] = [];
+  const phoneAsked: string[] = [], phoneAnswered: string[] = [], unrelatedAsked: string[] = [];
+  phone.on('question.asked', question => { phoneAsked.push(question.id); });
+  phone.on('question.answered', question => { phoneAnswered.push(question.questionId); });
+  unrelated.on('question.asked', question => { unrelatedAsked.push(question.id); });
+  viewer.on('question.asked', question => { asked.push(question.id); });
+  viewer.on('question.answered', question => { answered.push(question.questionId); });
+  viewer.on('message.started', message => { messages.push(message.threadId); });
+
+  // The conversation displays the session's questions without subscribing to its transcript.
+  const card = await owner.call('agents.settings.request', { threadId: self, key: 'maxRunMinutes', value: 30, reason: 'Allow time for builds' });
+  expect(await viewer.call('questions.list', { threadId: self })).toHaveLength(1);
+  expect(asked).toEqual([card.questionId]);
+  const config = h.core.workforce.resident.config(agent.id);
+  await owner.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: profile().revision, config: { ...config, maxRunMinutes: 30 } });
+  await waitFor(() => answered.includes(card.questionId));
+  expect(await viewer.call('questions.list', { threadId: self })).toEqual([]);
+
+  const next = await owner.call('agents.settings.request', { threadId: self, key: 'maxRunMinutes', value: 40, reason: 'A longer build' });
+  await viewer.call('agents.settings.apply', { threadId: self, questionId: next.questionId });
+  await waitFor(() => answered.includes(next.questionId));
+  expect(h.core.workforce.resident.config(agent.id).maxRunMinutes).toBe(40);
+  const refused = await owner.call('agents.settings.request', { threadId: self, key: 'maxRunMinutes', value: 50, reason: 'Even longer' });
+  await viewer.call('questions.answer', { threadId: self, questionId: refused.questionId, optionIds: ['refuse'] });
+  await waitFor(() => answered.includes(refused.questionId));
+  expect(h.core.workforce.resident.config(agent.id).maxRunMinutes).toBe(40);
+
+  // Ordinary thread questions and the hidden session's transcript keep their subscription boundary.
+  await owner.call('turns.start', { threadId: worker, prompt: 'Prepare a release' });
+  await waitFor(() => h.core.journal.listTurns(worker).some(turn => turn.status === 'done'));
+  const ordinary = await owner.call('agents.settings.request', { threadId: worker, agent: agent.id, key: 'maxRunMinutes', value: 60, reason: 'A longer release' });
+  await owner.call('questions.skip', { threadId: worker, questionId: ordinary.questionId });
+  await owner.call('questions.list', {});
+  expect(asked).toEqual([card.questionId, next.questionId, refused.questionId]);
+  expect(answered).toEqual(asked);
+  await phone.call('questions.list', {});
+  await unrelated.call('agents.settings.read', { threadId: worker, agent: agent.id });
+  expect(phoneAsked).toEqual(asked);
+  expect(phoneAnswered).toEqual(answered);
+  expect(unrelatedAsked).toEqual([]);
+  expect(messages).toEqual([]);
+  phone.close(); unrelated.close();
+});
+
 test('a discussion asks to entrust projects to an agent; the owner unticks one and applies; the discussion hears what changed', async () => {
   const { h, owner, prompts, worker, notes, other, run, profile, cards, drawn } = await setup();
   // A card is drawn in the thread's last turn.
