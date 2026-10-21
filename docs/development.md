@@ -54,6 +54,9 @@ WebView2 then covers the native hit-test area. `WindowResizeHandles.svelte`
 keeps resizing available without restoring that frame. Handles disappear
 when maximized or fullscreen and are absent in browsers, Linux and macOS.
 `TitleBar.test.ts` exercises the directions and window-state transitions.
+The caption buttons retain their full hit areas: the northeast grip sits to
+their left, and the east grip starts below the title bar. `ui-polish.test.ts`
+checks caption hit targets and reachability of all eight resize directions.
 
 ```sh
 bun run dev:ui              # Vite at http://localhost:5173

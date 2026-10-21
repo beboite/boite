@@ -68,6 +68,11 @@
   .north:not(.west, .east), .south:not(.west, .east) { left: var(--window-resize-corner); right: var(--window-resize-corner); }
   .west:not(.north, .south), .east:not(.north, .south) { top: var(--window-resize-corner); bottom: var(--window-resize-corner); }
   .north.west, .north.east, .south.west, .south.east { width: var(--window-resize-corner); height: var(--window-resize-corner); }
+  /* Caption buttons keep their complete hit areas, including a throw into
+     the top-right corner to close. The northeast grip sits beside the group. */
+  .north:not(.west, .east) { right: calc(3 * var(--caption) + var(--window-resize-corner)); }
+  .north.east { right: calc(3 * var(--caption)); }
+  .east:not(.north, .south) { top: var(--titlebar); }
   .north.west, .south.east { cursor: nwse-resize; }
   .north.east, .south.west { cursor: nesw-resize; }
 </style>
