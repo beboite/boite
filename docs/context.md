@@ -168,6 +168,16 @@ Escape stops nothing: a thread waiting on a question opens with the focus there,
 and stopping the turn would throw the question away. Skip and the stop button
 still end it. A failed send preserves the input for an explicit retry.
 An unconfirmed provider submission is never retried automatically.
+
+Stopping a submitted message keeps its text and attachments in the next user
+request's context, even if Stop landed while queued or before the native session
+started. An existing native session receives stopped user messages and accepted
+follow-ups in order, until a user turn completes. This survives a core restart
+without adding messages to the timeline or starting work by itself. Native
+commands and automatic turns do not consume this context. Historical images
+beyond the native attachment limit remain available as local files. A fresh
+native session receives the conversation's journal history instead.
+
 Edits and forks with live follow-ups use the fresh-session transfer rules below.
 
 The core can open a turn by itself as the previous one ends: answers to an

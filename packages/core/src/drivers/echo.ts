@@ -98,9 +98,13 @@ const DIRECTIVE =
 
 export function parsePrompt(prompt: string): Segment[] {
   const segments: Segment[] = [];
+  // Historical directives are data: a stopped sleep or tool must not run again.
+  const history = [...prompt.matchAll(/<(conversation-history|interrupted-user-messages)>\n[\s\S]*?\n<\/\1>/g)];
   let last = 0;
   DIRECTIVE.lastIndex = 0;
   for (let match = DIRECTIVE.exec(prompt); match !== null; match = DIRECTIVE.exec(prompt)) {
+    const at = match.index;
+    if (history.some(block => at >= block.index && at < block.index + block[0].length)) continue;
     if (match.index > last) segments.push({ kind: 'text', text: prompt.slice(last, match.index) });
     const body = match[0].startsWith('[') ? match[0].slice(1, -1) : match[0];
     if (body.startsWith('sleep:')) segments.push({ kind: 'sleep', ms: Number(body.slice('sleep:'.length)) });

@@ -15,6 +15,7 @@
  * sends it when set to `never`, for the tests of a stalled startup.
  */
 import { appendFileSync } from 'node:fs';
+import { instructionsOf } from './history.ts';
 
 const DIRECTIVE =
   /\[(agents|command|approve|edit|edit-out|edit-link|thought|foreign|usage|quota|tasks|slow|steer|crash|input|auth|server-request|close-idle)\]/g;
@@ -96,6 +97,7 @@ function textOf(value: unknown): string {
 }
 
 function directivesOf(text: string): Directive[] {
+  text = instructionsOf(text);
   DIRECTIVE.lastIndex = 0;
   const found: Directive[] = [];
   for (let match = DIRECTIVE.exec(text); match !== null; match = DIRECTIVE.exec(text)) {

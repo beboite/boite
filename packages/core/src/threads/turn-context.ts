@@ -31,6 +31,7 @@ import { noteStderr } from '../drivers/stderr-tail.ts';
 import { watchProviderProcess } from './provider-process-log.ts';
 import type { ThreadStore } from '../threads.ts';
 import { nativeCommandPrompt, systemOperation } from './operations.ts';
+import { stoppedInput } from './stopped-input.ts';
 
 /**
  * The parts of a turn's prompt that building it consumes: the async answers
@@ -306,7 +307,14 @@ export class TurnContexts {
     const input = resumePrompt !== undefined ? { prompt: resumePrompt, attachments: [] } : this.lastUserInput(threadId, turn.id);
     const carry = carrier(this.core, this.files, threadId, resumePrompt !== undefined ? null : turn.id, input, provider);
     const fresh = !thread.agentSessionId && thread.sessionId === null && ((thread.sessionGeneration ?? 0) > 0 || resumePrompt !== undefined);
-    const continued = fresh ? carry() : input;
+    let continued = input;
+    if (fresh) continued = carry();
+    else if (resumePrompt === undefined && !turn.execution?.operation && !turn.execution?.automatic && !nativeCommandPrompt(input.prompt)) {
+      const interrupted = stoppedInput(this.core.journal, threadId, turn.id, input, (part, place) => this.files.of(threadId, part, place));
+      // The first stopped prompt may never have created a native session or
+      // advanced its generation. That fresh start still needs journal history.
+      continued = !thread.agentSessionId && thread.sessionId === null && interrupted !== input ? carry() : interrupted;
+    }
     const prepared = prepareAttachments(this.core.dataDir, continued, provider);
     const operation = turn.execution?.operation;
     // A compaction or a cache keepalive goes to the agent as its command alone: nothing taken rides on it.
