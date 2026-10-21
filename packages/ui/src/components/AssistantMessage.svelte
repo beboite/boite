@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot, CircleAlert, FishingHook, MessageCircleQuestionMark, Settings2 } from '@lucide/svelte';
+  import { Activity, Bot, FishingHook, MessageCircleQuestionMark, Settings2 } from '@lucide/svelte';
   import { showDockedQuestion } from '../lib/question-dock.svelte';
   import { replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import type { Account, MemoryEvent, Message } from '@boite/contracts';
@@ -24,6 +24,7 @@
   import { shownText as shownTextOf } from '../lib/timeline-rows';
   import MemoryRow from './MemoryRow.svelte';
   import KeepaliveMarker from './KeepaliveMarker.svelte';
+  import ErrorCard from './ErrorCard.svelte';
   import { keepaliveRun } from '../lib/message-order';
 
   /**
@@ -92,8 +93,6 @@
 {/if}
 {#if ping}
   {#if from === 0}<KeepaliveMarker turn={ping} count={keepaliveRun(store.openThread?.turns ?? [], ping.id)} />{/if}
-{:else if message.role === 'system' && from === 0}
-  <div class="system-attribution" data-testid="message-system">{strings.chat.system}</div>
 {/if}
 <div class="parts">
   {#each runs as run (run.kind === 'memory' ? run.key : runKey(run))}
@@ -117,9 +116,16 @@
     {#if part.type !== 'text' || shownText.trim().length > 0}
     <div class="part" data-kind={part.type}>
       {#if part.type === 'text'}
+        {#if message.role === 'system'}
+          <div class="system-event" data-testid="message-system" role="note" aria-label={strings.chat.system}>
+            <Activity size={14} strokeWidth={1.75} aria-hidden="true" />
+            <div class="system-copy"><Prose text={shownText} {store} {threadId} /></div>
+          </div>
+        {:else}
         <Prose text={shownText} live={index === caretAt && part.complete !== true} bubble={message.role === 'assistant'}
           typing={!compacting && latestInTurn && !toolRunning && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId}
           views={message.role === 'assistant' ? views : undefined} />
+        {/if}
         {#if part.omitted}<p class="omitted" data-testid="text-omitted">{fill(strings.chat.textOmitted, { count: count(part.omitted) })}</p>{/if}
 
       {:else if part.type === 'artifact' && part.view}
@@ -204,13 +210,8 @@
           <span class="event">{part.event}</span>
         </p>
       {:else if part.type === 'error'}
-        <div class="error" data-testid="error-part">
-          <span class="section-label error-head"><CircleAlert size={13} strokeWidth={2} /><span class="ui-label">{strings.chat.error}</span></span>
-          <p>{part.message}</p>
-          {#if signedOut && store.owner}
-            <button type="button" class="quiet small reconnect" data-testid="error-reconnect" onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}><span class="ui-label">{strings.connect.reconnect}</span></button>
-          {/if}
-        </div>
+        {@const account = store.owner ? signedOut : null}
+        <ErrorCard message={part.message} reconnect={account ? () => store.openConnect(account.providerId, account.id) : undefined} />
       {/if}
     </div>
     {/if}
@@ -224,7 +225,10 @@
   /* Read on demand, as a message's time and buttons are. */
   :global(.message:hover) .model-attribution, :global(.message:focus-within) .model-attribution { opacity: 1; }
   @media (hover: none) { .model-attribution { opacity: 1; } }
-  .system-attribution { width: fit-content; margin-bottom: 6px; padding: 2px 7px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-muted-foreground); background: var(--color-surface-2); font-size: var(--text-xs); font-weight: 600; }
+  .system-event { display: flex; align-items: flex-start; gap: 8px; color: var(--color-muted-foreground); }
+  .system-event > :global(svg) { flex: none; margin-top: 3px; color: var(--color-subtle); }
+  .system-copy { min-width: 0; }
+  .system-copy :global(.prose) { font-size: var(--text-sm); line-height: 1.6; }
 
   /* A 4 px rest on the left so an answer does not kiss the column's edge. */
   .parts {
@@ -263,29 +267,6 @@
 
 
   .omitted { margin-top: 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
-
-  .error {
-    padding: 8px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-  }
-
-  .error-head {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .error-head :global(svg) { color: var(--color-danger); }
-
-  .error .reconnect { margin-top: 8px; }
-
-  .error p {
-    margin-top: 4px;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
 
   /* A compaction is a divider between what the agent still holds and what it let go. */
   .compaction {

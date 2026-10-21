@@ -204,9 +204,10 @@ export function heldNear(total: number[], rows: readonly TimelineRow[], messages
   const turns = new Set<string>();
   let oldest = messages.length;
   for (let row = atOrBefore(total, rows.length, (total[rows.length] ?? 0) - reach); row < rows.length; row += 1) {
-    const message = rows[row]!.message;
-    oldest = Math.min(oldest, at.get(message.id) ?? oldest);
-    turns.add(message.turnId);
+    for (const message of rows[row]!.failures ?? [rows[row]!.message]) {
+      oldest = Math.min(oldest, at.get(message.id) ?? oldest);
+      turns.add(message.turnId);
+    }
   }
   for (const turn of turns) for (const view of views.get(turn) ?? []) oldest = Math.min(oldest, at.get(view.id) ?? oldest);
   return messages.length - oldest;

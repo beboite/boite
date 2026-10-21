@@ -203,7 +203,8 @@ test('system coordination messages show their display text outside the user bubb
   }];
   running = mount(MessageList, { target: document.body, props: { store, threadId: 't-short', messages } });
   flushSync();
-  expect(document.querySelector('[data-testid="message-system"]')?.textContent).toBe('System');
+  expect(document.querySelector('[data-testid="message-system"]')?.getAttribute('aria-label')).toBe('System');
+  expect(document.querySelector('[data-testid="message-system"]')?.textContent?.trim()).toBe('Agent coordination');
   expect(document.querySelector('[data-testid="message"]')?.textContent).toContain('Agent coordination');
   expect(document.querySelector('[data-testid="message"]')?.textContent).not.toContain('Internal delivery envelope');
   expect(document.querySelector('.bubble')).toBeNull();

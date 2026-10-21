@@ -1,5 +1,6 @@
 import type { MemoryEvent, Message, MessagePart } from '@boite/contracts';
 import { promptText, visibleAnswer } from './message-display';
+import { failedRun } from './failed-attempts';
 
 /**
  * What the timeline's window counts and measures. A message is one row, except
@@ -34,6 +35,8 @@ export interface TimelineRow {
   last: boolean;
   /** Set on a row that stands for a stretch of the thread not held yet (`lib/history-gaps.ts`). */
   gap?: { from: number; count: number };
+  /** Consecutive failed attempts, including their wake-ups, kept in one disclosure. */
+  failures?: readonly Message[];
 }
 
 /**
@@ -105,19 +108,28 @@ export class TimelineRows {
    */
   get changedFrom(): number { return this.#changedFrom; }
 
-  build(timeline: readonly Message[], memory?: ReadonlyMap<string, MemoryEvent[]>): TimelineRow[] {
+  build(timeline: readonly Message[], memory?: ReadonlyMap<string, MemoryEvent[]>, breaks?: ReadonlyMap<string, unknown>): TimelineRow[] {
     const known = new Map<string, TimelineRow>();
     const rows: TimelineRow[] = [];
     let changedFrom = -1;
-    const add = (id: string, message: Message, from: number, to: number, first: boolean, last: boolean): void => {
+    const add = (id: string, message: Message, from: number, to: number, first: boolean, last: boolean, failures?: readonly Message[]): void => {
       const before = this.#known.get(id);
-      const row = before && before.message === message && before.from === from && before.to === to && before.first === first && before.last === last
-        ? before : { id, message, from, to, first, last };
+      const sameFailures = before?.failures === failures || !!failures && before?.failures?.length === failures.length && failures.every((item, i) => before.failures?.[i] === item);
+      const row = before && before.message === message && before.from === from && before.to === to && before.first === first && before.last === last && sameFailures
+        ? before : { id, message, from, to, first, last, ...(failures ? { failures } : {}) };
       known.set(id, row);
       if (changedFrom < 0 && this.#rows[rows.length] !== row) changedFrom = rows.length;
       rows.push(row);
     };
-    for (const message of timeline) {
+    for (let index = 0; index < timeline.length; index += 1) {
+      const message = timeline[index]!;
+      const failures = failedRun(timeline, index, memory, breaks);
+      if (failures) {
+        const last = failures.at(-1)!;
+        add(message.id, last, 0, last.parts.length, true, true, failures);
+        index += failures.length - 1;
+        continue;
+      }
       const count = message.parts.length;
       const cuts = count > CUT_FROM ? rowCuts(message, anchoredParts(memory?.get(message.id))) : [];
       if (cuts.length === 0) { add(message.id, message, 0, count, true, true); continue; }
@@ -136,7 +148,7 @@ export class TimelineRows {
 
 /** The row of `messageId` that draws `part`, or its first row with no part named. -1 when the message is not listed. */
 export function rowIndexOf(rows: readonly TimelineRow[], messageId: string, part?: number): number {
-  let at = rows.findIndex(row => row.id === messageId);
+  let at = rows.findIndex(row => row.id === messageId || row.failures?.some(message => message.id === messageId));
   if (at < 0 || part === undefined) return at;
   while (rows[at + 1]?.message === rows[at]!.message && rows[at + 1]!.from <= part) at += 1;
   return at;
@@ -150,8 +162,11 @@ export function rowIndexOf(rows: readonly TimelineRow[], messageId: string, part
  * paragraph keeps, `part` between two runs of activity. Null for any other row.
  */
 export function seam(previous: TimelineRow | undefined, row: TimelineRow): 'part' | 'block' | null {
-  if (!previous || !row.first || row.message.role !== 'assistant' || previous.message.role !== 'assistant') return null;
+  if (!previous || !row.first || row.message.role !== 'assistant') return null;
   if (previous.message.turnId !== row.message.turnId || previous.message.id === row.message.id) return null;
+  // A system wake-up names the work directly below it, including a failed turn.
+  if (previous.message.role === 'system') return 'block';
+  if (previous.message.role !== 'assistant') return null;
   const shown = (part: MessagePart) => !(part.type === 'text' && part.text.trim() === '');
   const lead = row.message.parts.find(shown);
   const tail = previous.message.parts.slice(previous.from, previous.to).findLast(shown);

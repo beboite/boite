@@ -62,6 +62,14 @@ test('a finished turn reads how long it worked, when it was done and what it spe
   expect(document.querySelector('[data-testid=turn-background]')).toBeNull();
 });
 
+test('a failed turn keeps its duration and timestamps without claiming it completed successfully', () => {
+  running = mount(TurnSummary, { target: document.body, props: { turn: turn({ status: 'error' }) } });
+  flushSync();
+  expect(text('turn-elapsed')).toBe('Worked for 4m 41s');
+  expect(text('turn-finished-at')).toBe(`failed ${clockTime(STARTED + 281_000)}`);
+  expect(document.querySelector('[data-testid=turn-summary]')?.getAttribute('aria-label')).toBe('Failed');
+});
+
 test('a turn that carries on after monitoring counts from the user request, its own share on hover', () => {
   // The user's turn began 30 minutes before Boite woke the agent for this one.
   const request = STARTED - 1_800_000;
