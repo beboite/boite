@@ -318,21 +318,23 @@ test('PR links appear during work without remounting and disappear after a move 
   expect(await page.evaluate(`document.querySelector('[data-thread-id="t-trace"]').dataset.status`)).toBe('running');
   expect(await prBeforeBranch(id('sidebar'))).toBe(true);
   await capture('pr-live-desktop');
+  await showThreadView(page, 'projects');
+  await page.send('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
+  await mobileAction(page, 'mobile-conversations');
+  await page.waitFor(`Array.from(document.querySelectorAll('${id('mobile-list')} .thread')).filter(row => row.textContent.includes('shared-folder conversation')).length === 2`);
+  const phonePr = `${id('mobile-list')} [data-thread-id="t-trace"] ${id('thread-pr')}`;
+  await page.waitFor(`document.querySelector('${phonePr}')?.textContent.includes('#185')`);
+  expect(await page.evaluate(`document.querySelector('${phonePr}').getAttribute('href')`)).toBe('https://github.com/example/repo/pull/185');
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('mobile-list')} .thread')).filter(row => row.textContent.includes('shared-folder conversation')).every(row => !row.closest('.row').querySelector('${id('thread-pr')}'))`)).toBe(true);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await capture('pr-links-phone');
+  await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });
   await page.evaluate(`(() => {
     const store = globalThis.__boiteTest.workspace.active;
     store.client.call = window.__prOriginal;
     const summary = store.threads.find(thread => thread.id === 't-trace');
     summary.status = 'idle';
   })()`);
-  await showThreadView(page, 'projects');
-  await page.send('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
-  await mobileAction(page, 'mobile-conversations');
-  await page.waitFor(`Array.from(document.querySelectorAll('${id('mobile-list')} .thread')).filter(row => row.textContent.includes('shared-folder conversation')).length === 2`);
-  expect(await page.evaluate(`document.querySelector('${id('mobile-list')}').textContent.includes('#180')`)).toBe(false);
-  expect(await page.evaluate(`document.querySelector('${id('mobile-list')} ${id('thread-pr')}') === null`)).toBe(true);
-  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-  await capture('pr-links-phone');
-  await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });
   await update(`const drafts = await store.client.call('projects.drafts', {}); await store.move('t-trace', drafts.id);`);
   await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]') && !document.querySelector('.thread:has([data-thread-id="t-trace"]) ${id('thread-pr')}')`);
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.threads.find(thread => thread.id === 't-trace').branch`)).toBeNull();
@@ -340,6 +342,7 @@ test('PR links appear during work without remounting and disappear after a move 
 }, 45_000);
 
 test('hidden reasoning and protocol text leave no extra gap before tools on desktop and phone', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', {width:1300,height:850,deviceScaleFactor:1,mobile:false});
   await page.navigate(await page.evaluate<string>('location.origin + "/?fake=1&open=recent"'));
   await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]')`);
   await page.click('[data-thread-id="t-trace"]');
