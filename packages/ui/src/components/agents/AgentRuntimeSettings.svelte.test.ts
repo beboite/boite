@@ -13,14 +13,14 @@ let cleanup: (() => Promise<void>) | null = null;
 afterEach(async () => { await cleanup?.(); cleanup = null; document.body.innerHTML = ''; });
 
 /** A persistent agent on the fake core, on Opus, and its Settings card mounted. */
-async function open() {
+async function open(model = 'claude-opus-5-5') {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();
   store.attach(client);
   await store.connect();
   // Claude's models are read when first asked for, as the picker would.
   await store.probeModels('claude', 'a-claude-main');
-  await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection: { providerId: 'claude', accountId: 'a-claude-main', model: 'claude-opus-5-5', effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
+  await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection: { providerId: 'claude', accountId: 'a-claude-main', model, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
   const view = new AgentsView(store);
   await view.refresh();
   const agent = (): AgentProfile => view.snapshot!.profiles[0]!;
@@ -43,6 +43,16 @@ async function pick(model: string) {
   await idle();
 }
 const status = () => document.querySelector<HTMLElement>('[data-testid=agent-runtime] [data-testid=save-status]');
+
+test('picking a current model saves even when the agent still allows its previous unlisted model', async () => {
+  const { client, agent } = await open('previous-opus');
+  await pick('claude-opus-5-5');
+  await idle();
+  expect(status()?.dataset.state).toBe('saved');
+  const config = await client.call('agents.runtime.get', { agentId: agent().id });
+  expect(config.defaultRoute.model).toBe('claude-opus-5-5');
+  expect(config.allowedRoutes.map(route => route.model)).toEqual(['previous-opus', 'claude-opus-5-5']);
+});
 
 test('a model picked for an agent is saved without a Save button and is still there when its settings reopen', async () => {
   const { client, agent, show, hide } = await open();

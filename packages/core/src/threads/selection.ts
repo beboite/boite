@@ -1,4 +1,4 @@
-import type { AccountId, AgentProfile, ModelInfo, Protocol, ProviderDescriptor } from '@boite/contracts';
+import type { AccountId, AgentProfile, AgentSelection, ModelInfo, Protocol, ProviderDescriptor } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { probedModelsOf } from '../drivers/index.ts';
 import { refused } from '../errors.ts';
@@ -81,6 +81,18 @@ export function checkEffort(
     effort,
     expected: levels.length === 0 ? 'null: this model has no effort levels' : levels.map((level) => level.id),
   });
+}
+
+/** Keep an approved choice through catalog changes; new models and effort still need validation. */
+export function checkSavedSelection(
+  provider: ProviderDescriptor,
+  accountId: AccountId,
+  value: Pick<AgentSelection, 'model' | 'effort'>,
+  previous?: Pick<AgentSelection, 'providerId' | 'accountId' | 'model' | 'effort'>,
+): void {
+  const kept = previous?.providerId === provider.id && previous.accountId === accountId && previous.model === value.model;
+  if (!kept) checkModel(provider, accountId, value.model);
+  if (!kept || previous.effort !== value.effort) checkEffort(provider, accountId, value.model, value.effort);
 }
 
 /**
