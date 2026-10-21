@@ -93,6 +93,7 @@ export class Journal {
     this.stream = new StreamBuffer(this.db, this, this.onError);
     this.processes = new ProcessRows(this.db);
     try {
+      if ((this.db.query('PRAGMA page_count').get() as { page_count: number }).page_count === 0) this.db.exec('PRAGMA auto_vacuum = INCREMENTAL'); // Only a new file takes it: no `journal/vacuum.ts` ever.
       this.db.exec('PRAGMA journal_mode = WAL');
       this.db.exec('PRAGMA synchronous = NORMAL');
       this.db.exec('PRAGMA busy_timeout = 5000');

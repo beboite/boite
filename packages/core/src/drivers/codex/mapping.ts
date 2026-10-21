@@ -1,8 +1,10 @@
 import type { AgentTask, ImageAttachment, NativeAgentUpdate, QuestionAnswer, QuestionOption, ToolStatus, Usage } from '@boite/contracts';
 import type { SessionContext, TurnContext } from '../types.ts';
+import { stringify } from '../tool-text.ts';
 import type { CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, ToolView } from './protocol.ts';
 import { AGENT_OWN_MODEL, COMMAND_TOOL_NAME, FILE_CHANGE_TOOL_NAME, SLEEP_TOOL_NAME } from './protocol.ts';
 import { answerText } from '../../attachments.ts';
+export { questionTextOf } from '../../attachments.ts';
 
 // ---------------------------------------------------------------------------
 // Mapping helpers
@@ -12,23 +14,7 @@ export function textOf(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-export function stringify(value: unknown): string | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value) ?? null;
-  } catch {
-    return String(value);
-  }
-}
 
-/** The header and the question itself, whichever of the two the server filled. */
-export function questionTextOf(entry: CodexQuestion): string {
-  const header = textOf(entry.header).trim();
-  const body = textOf(entry.question).trim();
-  if (header.length > 0 && body.length > 0 && header !== body) return `${header}: ${body}`;
-  return body.length > 0 ? body : header;
-}
 
 /** A string option, or an object with an id and a label, becomes one card row. */
 export function optionsOf(raw: unknown): QuestionOption[] {

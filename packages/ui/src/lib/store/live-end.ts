@@ -11,10 +11,14 @@ const weighed = new WeakMap<Thread, number>();
  * gains every message its agent writes, and the core keeps them on disk. It
  * keeps the newest messages within the reading cache's bound, so a leave can
  * keep the thread, and their turns; scrolling up reads the rest again through
- * `messagesBefore`. Weighed only when a message came in, never on a delta,
- * and never while a page above or below is in flight. Returns how many left.
+ * `messagesBefore`. It never lets go of the `near()` newest messages, those the
+ * timeline draws within reach of the screen: a song an agent published weighs
+ * more than the bound on its own, and every message above it went, the answer
+ * on screen became a skeleton and its page, read again, went the same way.
+ * Weighed only when a message came in, never on a delta, and never while a
+ * page above or below is in flight. Returns how many left.
  */
-export function releaseOlder(ctx: StoreContext, threadId: ThreadId): number {
+export function releaseOlder(ctx: StoreContext, threadId: ThreadId, near: () => number = () => 1): number {
   const open = ctx.threads.openThread;
   if (!open || open.id !== threadId || ctx.threads.loadingOlder || ctx.positions.loading || (open.messagesAfter ?? null) !== null) return 0;
   const messages = open.messages;
@@ -27,7 +31,8 @@ export function releaseOlder(ctx: StoreContext, threadId: ThreadId): number {
     if (chars > READING_CACHE_BYTES) { over = true; break; }
   }
   if (!over) return 0;
-  const gone = messages.length - kept;
+  const gone = messages.length - Math.max(kept, near());
+  if (gone <= 0) return 0;
   const first = messages[gone]!;
   const turn = open.turns.findIndex((held) => held.id === first.turnId);
   open.messages = messages.slice(gone);

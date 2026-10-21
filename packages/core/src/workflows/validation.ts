@@ -2,10 +2,7 @@
 import { WorkflowPlanError } from '@boite/contracts';
 import { invalidParams } from '../errors.ts';
 
-export function text(value: unknown, field: string, max: number): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`);
-  return value;
-}
+export { requiredText as text } from '../errors.ts';
 
 export function planError<T>(run: () => T): T {
   try {

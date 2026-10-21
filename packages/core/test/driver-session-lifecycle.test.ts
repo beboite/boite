@@ -268,9 +268,10 @@ test('pi: an accepted extension command without state or settled ends with a bou
   harness = await startTestCore({ settings: { warmProcessMinutes: 5 } });
   const client = await harness.connect();
   const threadId = await providerThread(client, 'pi', stateFixture('no-settled'));
-  const result = client.next('turn.finished', turn => turn.threadId === threadId, 1000);
+  // The bound is the read deadline, named in the error; a wall-clock wait would also time the fixture's launch.
+  const result = client.next('turn.finished', turn => turn.threadId === threadId);
   await client.call('turns.start', { threadId, prompt: '/report' });
-  expect(await result).toMatchObject({ status: 'error' });
+  expect(await result).toMatchObject({ status: 'error', error: expect.stringContaining('within 0.05 s') });
   await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
   const next = client.next('turn.finished', turn => turn.threadId === threadId);
   await client.call('turns.start', { threadId, prompt: 'ordinary prompt' });
@@ -309,6 +310,8 @@ test('pi: a statistics timeout removes the request and ignores its late response
 
 for (const order of ['before-query', 'during-query'] as const) {
   test(`pi: agent_settled ${order} finishes without a state response or retained request`, async () => {
+    // Past the test timeout: a turn that waits for the unanswered state read never finishes in time.
+    setPiReadDeadlineForTests(60_000);
     harness = await startTestCore({ settings: { warmProcessMinutes: 5 } });
     const client = await harness.connect();
     const threadId = await providerThread(client, 'pi', stateFixture(order));
@@ -322,7 +325,7 @@ for (const order of ['before-query', 'during-query'] as const) {
     });
     try {
       for (const prompt of ['first settled turn', 'warm settled turn']) {
-        const result = client.next('turn.finished', turn => turn.threadId === threadId, 1000).catch(() => null);
+        const result = client.next('turn.finished', turn => turn.threadId === threadId).catch(() => null);
         await client.call('turns.start', { threadId, prompt });
         expect(await result).toMatchObject({ status: 'done' });
         expect(pending(peer!)).toBe(0);

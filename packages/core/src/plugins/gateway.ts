@@ -12,6 +12,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { freePort } from '../loopback-port.ts';
 import { join } from 'node:path';
 import { AGENT_ENV } from '@boite/contracts';
 import type { PluginGatewayState } from '@boite/contracts';
@@ -98,12 +99,6 @@ function portFree(port: number): boolean {
   } catch { return false; }
 }
 
-function freePort(): number {
-  const probe = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } });
-  const port = probe.port;
-  probe.stop(true);
-  return port;
-}
 
 interface Running {
   threadId: string;

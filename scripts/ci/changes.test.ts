@@ -103,6 +103,8 @@ test('pull requests, main pushes and forced runs pick their mode', () => {
   expect(ciMode('pull_request', false)).toBe('pr');
   expect(ciMode('pull_request', false, true)).toBe('draft');
   expect(ciMode('pull_request', true, true)).toBe('full');
+  // A merge group compares with its main base and runs what its pull requests ran.
+  expect(ciMode('merge_group', false)).toBe('pr');
   expect(ciMode('push', false, true)).toBe('warm');
   expect(ciMode('push', false)).toBe('warm');
   expect(ciMode('push', true)).toBe('full');

@@ -2,41 +2,45 @@
   import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
   import { tick, untrack } from 'svelte';
-  import { ArrowUp, Brain, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, FolderKanban, Handshake } from '@lucide/svelte';
-  import type { AgentConversationMessage, AgentScope, AgentWork, ThreadSummary } from '@boite/contracts';
+  import { Brain, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, FileText, FolderKanban, Handshake, Image } from '@lucide/svelte';
+  import type { AgentConversationMessage, AgentScope, AgentWork, Attachment, ImageMimeType, Message, MessagePart, ThreadSummary } from '@boite/contracts';
   import { chatKey, type AgentsView } from '../../lib/agents.svelte';
   import { fill, strings } from '../../lib/strings';
   import { avatarStatus } from '../../lib/thread-state';
-  import { dayClock, longDay } from '../../lib/format';
+  import { bytes, longDay } from '../../lib/format';
+  import type { ComposerTarget } from '../../lib/composer-target';
+  import type { Choice } from '../../lib/store.svelte';
+  import type { SentPrompt } from '../../lib/composer-queue';
   import Prose from '../Prose.svelte';
   import ChatFile from '../ChatFile.svelte';
+  import Composer from '../Composer.svelte';
+  import MessageActions from '../MessageActions.svelte';
+  import UserMessage from '../UserMessage.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentWorkCard from './AgentWorkCard.svelte';
   import AgentPendingQuestions from './AgentPendingQuestions.svelte';
 
   /**
    * A conversation with an agent or a group, drawn the way a thread is: the
-   * user's messages in bubbles on the right, the agents' answers in the
-   * thread's answer bubbles under their picture and name, a line while one of them works,
-   * and the thread's composer at the bottom. An agent
+   * user's messages in bubbles on the right with the thread's receipts, the
+   * agents' answers in the thread's answer bubbles under their picture and
+   * name, a line while one of them works, and the thread's own composer at
+   * the bottom (`lib/composer-target.ts`): attachments, dictation, recall,
+   * Stop and, with a single agent, its model, effort and mode chips. An agent
    * shows no code: its answers carry the pictures and files it attached, and
    * its thread opens from the page's menu, not from here. Decisions
    * an agent asked for stand in the conversation they belong to. Opening it
    * marks it read up to its newest message.
    */
-  let { view, scope, live = null, onschedule }: {
+  let { view, scope, live = null }: {
     view: AgentsView;
     scope: AgentScope;
     /** The thread an agent of this conversation works in now. */
     live?: ThreadSummary | null;
-    /** Turns what is written into a routine; only a direct conversation has one. */
-    onschedule?: (text: string) => void;
   } = $props();
-  let text = $state('');
   let recipients = $state<string[]>([]);
-  let request: { text: string; recipients: string; id: string } | null = null;
+  let request: { signature: string; id: string } | null = null;
   let scroller = $state<HTMLElement>();
-  let box = $state<HTMLTextAreaElement>();
   const labels = $derived(strings.agents);
   const group = $derived(scope.kind === 'group' ? view.snapshot?.groups.find(g => g.id === scope.id) : null);
   const agent = $derived(scope.kind === 'agent' ? view.snapshot?.profiles.find(a => a.id === scope.id) ?? null : null);
@@ -93,23 +97,115 @@
   /** The reply whose memory summary a tap opened, for a phone that has no hover. */
   let memoryOpen = $state<string | null>(null);
   const placeholder = $derived(agent ? fill(labels.messageTo, { name: agent.name }) : group ? fill(labels.messageTo, { name: group.name }) : labels.message);
-
-  async function send() {
-    if (!text.trim() || view.pending) return;
-    const recipientIds = scope.kind === 'agent' ? [scope.id] : recipients;
-    const signature = JSON.stringify(recipientIds);
+  /** The user's own messages here, newest first: what ArrowUp brings back. */
+  const sent = $derived<SentPrompt[]>(messages.filter(m => m.senderId === null && m.text).map(m => ({ id: m.id, text: m.text, attachments: [], previewReferences: [] })).reverse());
+  /** A direct conversation's agent answers on its own account's provider, which decides what goes as an image. */
+  const provider = $derived.by(() => {
+    const account = agent ? view.store.accountOf(agent.selection.accountId) : null;
+    return account ? view.store.providerOf(account.providerId) ?? null : null;
+  });
+  /** The work of this conversation under way now: what Stop cancels. */
+  const running = $derived(view.snapshot?.work.find(w => w.scope.kind === scope.kind && w.scope.id === scope.id && w.status === 'running') ?? null);
+  const target = $derived<ComposerTarget>({
+    key: `agent:${scope.kind}:${scope.id}`,
+    placeholder,
+    provider,
+    sent,
+    busy: !!running,
+    send,
+    stop: running ? () => void stopWork() : undefined,
+    chips: group ? recipientChips : undefined,
+    // The owner picks the agent's model where a thread's is picked; a group has one per member.
+    selection: agent && view.store.owner ? { choice: { ...agent.selection, model: agent.selection.model ?? defaultModel(agent.selection), speed: null }, save: saveSelection } : undefined,
+  });
+  /** An agent saved without a model runs on its account's default one, as the core resolves it: the chip names that one. */
+  function defaultModel(selection: { providerId: string; accountId: string }): string | null {
+    const models = view.store.modelsOf(selection.providerId, selection.accountId);
+    return (models.find(m => m.default) ?? models[0])?.id ?? null;
+  }
+  /**
+   * A pick from the chips, saved as the Settings tab saves the agent's model:
+   * its main route, allowed once picked, so the next piece of work runs on it.
+   * It waits in the page's save queue, so a message being sent does not drop
+   * it, and reads the agent's revision and runtime when its turn comes.
+   */
+  async function saveSelection(next: Choice): Promise<void> {
+    const agentId = agent?.id;
+    if (!agentId) return;
     try {
-      if (!request || request.text !== text || request.recipients !== signature) request = { text, recipients: signature, id: secureId() };
-      const sent = await view.call('agents.message.send', { scope, text, recipientIds, requestId: request.id });
-      if (sent) { text = ''; request = null; }
+      await view.save('agents.runtime.configure', async () => {
+        const client = view.store.client;
+        const current = view.snapshot?.profiles.find(p => p.id === agentId);
+        if (!client || !current) throw new Error(strings.connection.unavailable);
+        const config = await client.call('agents.runtime.get', { agentId });
+        const model = next.model ?? config.defaultRoute.model!;
+        const route = { providerId: next.providerId, accountId: next.accountId, model, effort: next.effort, permissionMode: next.permissionMode };
+        const allowed = config.allowedRoutes.some(r => r.providerId === route.providerId && r.accountId === route.accountId && r.model === model)
+          ? config.allowedRoutes
+          : [...config.allowedRoutes, { id: secureId(), name: view.store.modelOf(route)?.name ?? model, providerId: route.providerId, accountId: route.accountId, model, effort: route.effort }];
+        return { agentId, expectedRevision: current.revision, config: { ...config, defaultRoute: route, allowedRoutes: allowed } };
+      });
     } catch (error) { view.error = errorText(error); }
   }
-  function onkeydown(event: KeyboardEvent) {
-    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
-    event.preventDefault();
-    void send();
+
+  async function send(text: string, attachments: Attachment[]): Promise<boolean> {
+    const recipientIds = scope.kind === 'agent' ? [scope.id] : recipients;
+    // The same message sent again after a lost answer keeps its request id, so the core takes it once; other bytes are another message.
+    const signature = JSON.stringify([text, recipientIds, attachments.map(a => [a.kind, a.name, contentHash(a.data)])]);
+    try {
+      if (!request || request.signature !== signature) request = { signature, id: secureId() };
+      const sent = await view.call('agents.message.send', { scope, text, recipientIds, requestId: request.id, ...(attachments.length ? { attachments } : {}) });
+      if (sent) { request = null; return true; }
+    } catch (error) { view.error = errorText(error); }
+    return false;
+  }
+  /** FNV-1a over the base64 text: enough to tell a replaced file from a retried one. */
+  function contentHash(data: string): string {
+    let hash = 0x811c9dc5;
+    for (let at = 0; at < data.length; at++) hash = Math.imul(hash ^ data.charCodeAt(at), 0x01000193);
+    return `${data.length}:${(hash >>> 0).toString(36)}`;
+  }
+  async function stopWork() {
+    const work = running;
+    if (work) await view.call('agents.work.control', { workId: work.id, expectedRevision: work.revision, action: 'cancel' });
+  }
+  /**
+   * The user's message as a thread's prompt, for the thread's own bubble:
+   * its words, then what it was sent with where the agent's turn keeps the
+   * bytes, at the same places as in that turn's prompt. Until a turn took
+   * them it is only the words.
+   */
+  function promptOf(message: AgentConversationMessage): Message {
+    const words: MessagePart = { type: 'text', text: message.text };
+    const attachments = message.attachments ?? [];
+    const source = attachments[0]?.source;
+    const placed = source ? attachments.map((a, at) => a.source?.threadId === source.threadId && a.source.messageId === source.messageId && a.source.partIndex === at + 1) : [];
+    if (!source || !placed.every(Boolean)) return { id: message.id, threadId: '', turnId: '', role: 'user', state: 'complete', createdAt: message.createdAt, parts: [words] };
+    const parts = attachments.map((a): MessagePart => a.kind === 'image'
+      ? { type: 'image', mimeType: a.mimeType as ImageMimeType, data: '', alt: a.name, dataDeferred: true, bytes: a.bytes }
+      : { type: 'file', mimeType: a.mimeType, data: '', name: a.name, dataDeferred: true, bytes: a.bytes });
+    return { id: source.messageId, threadId: source.threadId, turnId: '', role: 'user', state: 'complete', createdAt: message.createdAt, parts: [words, ...parts] };
+  }
+  /** A user message's two ticks: the core holds it, and an agent took it into a turn. */
+  function receipts(message: AgentConversationMessage) {
+    const deliveries = view.seen.deliveries.filter(d => d.messageId === message.id);
+    return { responded: deliveries.some(d => d.status === 'included' || d.status === 'processed') || messages.some(m => m.replyTo === message.id) };
   }
 </script>
+
+{#snippet recipientChips()}
+  {#if group}
+    <div class="agent-recipients" role="group" aria-label={labels.recipients}>
+      <button type="button" class="chip" class:on={!recipients.length} aria-pressed={!recipients.length} onclick={() => { recipients = []; }}>{labels.toEveryone}</button>
+      {#each group.memberIds as id (id)}
+        {@const member = profileOf(id)}
+        <button type="button" class="chip" class:on={recipients.includes(id)} aria-pressed={recipients.includes(id)} onclick={() => { recipients = recipients.includes(id) ? recipients.filter(r => r !== id) : [...recipients, id]; }}>
+          <AgentAvatar kind="profile" {id} name={member?.name ?? id} avatar={member?.avatar} size={16} />{nameOf(id)}
+        </button>
+      {/each}
+    </div>
+  {/if}
+{/snippet}
 
 <section class="agent-chat" aria-label={labels.conversation}>
   <div class="agent-chat-scroll" bind:this={scroller}>
@@ -117,23 +213,28 @@
       {#if view.hasOlder(key, 'message')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === key} onclick={() => void view.loadOlder(key, history, messages)} data-testid="agent-messages-older">{labels.loadEarlier}</button>{/if}
       {#each messages as message, index (message.id)}
         {@const previous = messages[index - 1]}
-        {@const next = messages[index + 1]}
         {@const mine = message.senderId === null}
         {@const newDay = !previous || longDay(previous.createdAt) !== longDay(message.createdAt)}
         {@const first = newDay || previous.senderId !== message.senderId}
-        {@const lastOfRun = !next || next.senderId !== message.senderId || longDay(next.createdAt) !== longDay(message.createdAt)}
         {#if newDay}<p class="agent-day"><span>{longDay(message.createdAt)}</span></p>{/if}
         {#if mine}
           {@const failed = view.seen.deliveries.filter(d => d.messageId === message.id && (d.status === 'failed' || d.status === 'limited'))}
-          <article class="agent-message from-user" class:first>
+          {@const prompt = promptOf(message)}
+          <article class="agent-message message from-user" class:first data-testid="agent-user-message">
             <span class="agent-sr-only">{labels.user}</span>
-            <div class="bubble"><p class="user-text">{message.text}</p></div>
-            {#if lastOfRun || failed.length}
-              <footer>
-                {#if lastOfRun}<time datetime={new Date(message.createdAt).toISOString()}>{dayClock(message.createdAt)}</time>{/if}
-                {#each failed as delivery (delivery.id)}<span class="failed">{fill(labels.deliveryFailed, { name: nameOf(delivery.agentId) })}</span>{/each}
-              </footer>
+            <UserMessage store={view.store} message={prompt} turn={undefined} accepted={true} responded={receipts(message).responded} />
+            {#if prompt.parts.length === 1 && message.attachments?.length}
+              <!-- No turn took them yet: their name and size until the agent's thread holds the bytes. -->
+              <div class="agent-attachments">
+                {#each message.attachments as attachment, at (at)}
+                  <span class="agent-attachment" data-testid="agent-attachment">
+                    {#if attachment.kind === 'image'}<Image size={18} strokeWidth={1.5} />{:else}<FileText size={18} strokeWidth={1.5} />{/if}
+                    <span><span>{attachment.name ?? strings.composer.attachAlt}</span><small>{bytes(attachment.bytes)}</small></span>
+                  </span>
+                {/each}
+              </div>
             {/if}
+            {#each failed as delivery (delivery.id)}<p class="failed">{fill(labels.deliveryFailed, { name: nameOf(delivery.agentId) })}</p>{/each}
           </article>
         {:else if message.thread?.event === 'entrusted'}
           <!-- Taking a thread over is a moment of the conversation, marked across it the way a started thread is. -->
@@ -154,7 +255,7 @@
           {@const event = message.thread}
           {@const work = workOf(message)}
           {@const memory = memoryOf(work)}
-          <article class="agent-message from-agent" class:first class:labelled={!!event || work?.purpose === 'notice' || planned !== null} data-event={event?.event} data-testid={event ? 'agent-thread-event' : undefined}>
+          <article class="agent-message message from-agent" class:first class:labelled={!!event || work?.purpose === 'notice' || planned !== null} data-event={event?.event} data-testid={event ? 'agent-thread-event' : undefined}>
             {#if group && first}
               <header>
                 <AgentAvatar kind="profile" id={message.senderId!} name={sender?.name ?? ''} avatar={sender?.avatar} size={20} />
@@ -184,7 +285,7 @@
                 {#if summary && memoryOpen === message.id}<p class="memory-summary" data-testid="agent-memory-summary">{summary}</p>{/if}
               </div>
             {/if}
-            {#if lastOfRun}<footer><time datetime={new Date(message.createdAt).toISOString()}>{dayClock(message.createdAt)}</time></footer>{/if}
+            <footer><MessageActions text={message.text} at={message.createdAt} /></footer>
           </article>
         {/if}
       {:else}
@@ -210,28 +311,5 @@
     </div>
   </div>
 
-  <form class="agent-composer-wrap" onsubmit={e => { e.preventDefault(); void send(); }}>
-    <div class="agent-composer">
-      <label class="agent-sr-only" for="agent-message-input">{placeholder}</label>
-      <textarea id="agent-message-input" bind:this={box} bind:value={text} rows="1" maxlength="32000" {placeholder} {onkeydown} data-testid="agent-message-input"></textarea>
-      <div class="agent-composer-bar">
-        <div class="agent-composer-chips">
-          {#if group}
-            <div class="agent-recipients" role="group" aria-label={labels.recipients}>
-              <button type="button" class="chip" class:on={!recipients.length} aria-pressed={!recipients.length} onclick={() => { recipients = []; }}>{labels.toEveryone}</button>
-              {#each group.memberIds as id (id)}
-                {@const member = profileOf(id)}
-                <button type="button" class="chip" class:on={recipients.includes(id)} aria-pressed={recipients.includes(id)} onclick={() => { recipients = recipients.includes(id) ? recipients.filter(r => r !== id) : [...recipients, id]; }}>
-                  <AgentAvatar kind="profile" {id} name={member?.name ?? id} avatar={member?.avatar} size={16} />{nameOf(id)}
-                </button>
-              {/each}
-            </div>
-          {:else if onschedule && view.store.owner}
-            <button type="button" class="chip ghost-chip" title={labels.when.scheduleThis} onclick={() => { onschedule(text); text = ''; }} data-testid="agent-schedule-message"><CalendarClock size={14} strokeWidth={1.75} />{labels.when.scheduleShort}</button>
-          {/if}
-        </div>
-        <button class="primary icon send" aria-label={labels.send} title={labels.send} disabled={view.pending || !text.trim()} data-testid="agent-message-send"><ArrowUp size={16} strokeWidth={2.25} /></button>
-      </div>
-    </div>
-  </form>
+  <Composer store={view.store} {target} />
 </section>

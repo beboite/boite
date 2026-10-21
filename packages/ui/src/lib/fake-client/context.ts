@@ -310,7 +310,8 @@ export class FakeContext {
       queueMicrotask(() => { this.settlingAgentCards = false; settleAgentSettings(this); });
     }, {
       create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),
-      start: (threadId, prompt, agent) => { Object.assign(this.thread(threadId), agent.selection); return this.startTurn(threadId, prompt); },
+      start: (threadId, prompt, agent, attachments) => { Object.assign(this.thread(threadId), agent.selection); return this.startTurn(threadId, prompt, attachments); },
+      prompt: (threadId, turnId) => this.thread(threadId).messages.find(m => m.turnId === turnId && m.role === 'user')?.id,
       stop: threadId => { void this.stopTurn(threadId); },
       thread: threadId => this.threads.get(threadId),
       goal: (threadId, objective) => {

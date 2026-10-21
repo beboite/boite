@@ -5,7 +5,7 @@
   import { entrust } from '../lib/thread-entrust';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ChevronDown, FolderInput, GitBranch, GitPullRequest, Network, PanelRight, Search, SquareKanban, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
+  import { ChevronDown, FolderInput, GitBranch, GitPullRequest, Globe, Network, PanelRight, Search, SquareKanban, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { pendingLine } from '../lib/thread-move.svelte';
@@ -79,7 +79,7 @@
   let delegated = $derived(!!thread && (store.subagents(thread.id) !== null || store.threads.some(row => row.parentThreadId === thread!.id)
     || (store.delegation?.agents.length ?? 0) > 0 || (store.delegation?.nativeAgents?.length ?? 0) > 0));
   /**
-   * A phone's header is the title and this one menu: the panel and the
+   * A phone's title menu holds the panel and the
    * project board, ticked when open, then the thread's own actions. The
    * terminal, the coordination and what only the desktop does with a thread stay there.
    */
@@ -288,6 +288,13 @@
       <!-- A paired device opens the panel too: the Agents and Workflows surfaces are
            its to follow, and the panel's menu offers only what available() allows. -->
       {#if thread}
+        {#if mobile.current}
+          <button type="button" class="ghost phone-browser" data-testid="phone-browser-toggle"
+            aria-label={strings.rightPanel.browser} aria-pressed={store.panelOpen && store.panel.active?.kind === 'agent-browser'}
+            onclick={() => store.panel.open('agent-browser')}>
+            <Globe size={16} strokeWidth={1.75} /><span class="ui-label">{strings.rightPanel.browser}</span>
+          </button>
+        {/if}
         <button
           type="button"
           class="ghost icon in-title-menu"
@@ -350,6 +357,8 @@
   .spacer {
     flex: 1;
   }
+
+  .phone-browser { flex: none; gap: 6px; min-height: var(--touch-target); padding: 0 8px; font-size: var(--text-sm); }
 
   .path {
     flex: 0 1 auto;

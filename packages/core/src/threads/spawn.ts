@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import type { AgentProjectAdded, AgentSpawn, Message, RpcParams, ThreadId, ThreadLink, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { invalidParams, messageOf, refused } from '../errors.ts';
+import { invalidParams, messageOf, refused, requiredText } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import { saveThread, withLoad } from './records.ts';
@@ -16,10 +16,7 @@ const LEDGER = 'spawns:';
 interface Origin { origin: ThreadLink; reported: boolean }
 interface Started { at: number; requestId: string; fingerprint: string; threadId: ThreadId; turnId: string }
 
-function text(value: unknown, field: string, max: number, method = 'agent.spawn'): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${method}.${field}: expected 1 to ${max} characters`);
-  return value;
-}
+const text = (value: unknown, field: string, max: number, method = 'agent.spawn') => requiredText(value, `${method}.${field}`, max);
 
 /**
  * `agent.spawn`: an agent starts an ordinary top-level thread in a project,

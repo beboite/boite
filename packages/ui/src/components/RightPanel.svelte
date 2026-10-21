@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { ArrowRightToLine, ChevronLeft, ChevronRight, ListX, Maximize2, Minimize2, Plus, SquareX, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRightToLine, ChevronLeft, ChevronRight, ListX, Maximize2, Minimize2, Plus, SquareX, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
   import { floatingPanel, RESIZE_DIRECTIONS } from '../lib/floating-panel';
   import { browserBridge } from '../lib/browser-bridge';
   import { stripOverflows } from '../lib/strip-overflow';
@@ -48,6 +48,7 @@
   } = $props();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  const phone = $derived((innerWidth.current ?? window.innerWidth) <= 720);
   /**
    * The docked width: the one asked for, within the room the chat keeps once
    * the thread list and the contacts column take theirs. The asked width stays
@@ -166,8 +167,8 @@
 
   /** The X shuts the panel and hands the keys to the title bar's toggle that opens it again; clicked, it left them on the page. */
   function shut(): void {
-    panel.toggle();
-    document.querySelector<HTMLElement>('[data-testid="panel-toggle"]')?.focus({ preventScroll: true });
+    panel.hide();
+    if (!phone) document.querySelector<HTMLElement>('[data-testid="panel-toggle"]')?.focus({ preventScroll: true });
   }
 
   function scrollBy(direction: -1 | 1): void {
@@ -437,13 +438,17 @@
     </button>
     <button
       type="button"
-      class="ghost small icon"
-      title={strings.common.close}
-      aria-label={strings.common.close}
+      class="ghost small icon panel-close"
+      title={phone ? strings.rightPanel.backToChat : strings.common.close}
+      aria-label={phone ? strings.rightPanel.backToChat : strings.common.close}
       data-testid="panel-close"
       onclick={shut}
     >
-      <X size={14} strokeWidth={1.75} />
+      {#if phone}
+        <ArrowLeft size={16} strokeWidth={1.75} /><span class="ui-label">{strings.rightPanel.chat}</span>
+      {:else}
+        <X size={14} strokeWidth={1.75} />
+      {/if}
     </button>
   </header>
 
@@ -761,6 +766,8 @@
   }
 
   @media (max-width: 720px) {
+    .strip button.small.icon.panel-close { order: -1; width: auto; padding: 0 8px; gap: 6px; }
+
     .panel,
     .panel.maximized {
       position: fixed;

@@ -167,7 +167,7 @@ function dailyPass(journal: Journal, now: number, atKey: string, throughKey: str
 
 /**
  * Gives free pages back to the disk on a journal in incremental auto-vacuum
- * (`journal/vacuum.ts` turns it on), `pages` per tick, until the free list is
+ * (set when the journal is created, or by `journal/vacuum.ts` for an older one), `pages` per tick, until the free list is
  * back to `FREE_KEPT_BYTES`.
  */
 function freePages(journal: Journal, pages: number): Step {

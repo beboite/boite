@@ -1,6 +1,7 @@
 import type { SDKAssistantMessageError, SDKMessage, SDKResultMessage, SlashCommand } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentCommand, BackgroundTask, ToolDocument, Usage } from '@boite/contracts';
 import type { PromptCacheLife } from '../types.ts';
+import { stringify } from '../tool-text.ts';
 
 /** The JSON boundary: the SDK types these through the Anthropic API package. */
 interface ContentBlock {
@@ -91,21 +92,12 @@ export function resultText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return (content as ContentBlock[])
-      .map((block) => (block.type === 'text' ? (block.text ?? '') : stringify(block)))
+      .map((block) => (block.type === 'text' ? (block.text ?? '') : stringify(block) ?? ''))
       .join('\n');
   }
-  return stringify(content);
+  return stringify(content) ?? '';
 }
 
-function stringify(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value === null || value === undefined) return '';
-  try {
-    return JSON.stringify(value) ?? '';
-  } catch {
-    return String(value);
-  }
-}
 
 /**
  * A resumed CLI restores the running totals its transcript saved when its last
