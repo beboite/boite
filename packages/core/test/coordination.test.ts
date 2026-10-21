@@ -493,7 +493,8 @@ test('a letter wakes a thread whose last turn failed, and ends the pause a resta
   await waitFor(() => h.core.coordination.get(b).messages.find(m => m.id === restarted.id)?.status === 'delivered', 5000);
   await waitFor(() => h.core.threads.require(b).status === 'idle');
 
-  // Stop is the user's word: letters wait for his next message.
+  // Stop is the user's word, even over a restart's pause: letters wait for his next message.
+  h.core.coordination.pause(b, 'restart');
   h.core.threads.stopTurn(b);
   const held = await send(h, a, dest(h, b), 'Still there?');
   expect(h.core.coordination.get(b).config.paused).toBe(true);

@@ -213,7 +213,12 @@ export class Coordination {
    */
   pause(threadId: string, reason: 'stop' | 'restart' | 'failure' = 'stop'): void {
     const config = this.config(threadId);
-    if (config.mode === 'off' || config.paused) return;
+    if (config.mode === 'off') return;
+    if (config.paused) {
+      // Stop over a restart's or a failed wake's pause makes it Stop's; the owner's pause carries no reason and stays as it is.
+      if (reason === 'stop' && this.wakesForAgent(threadId)) this.core.journal.setSetting(`${AUTO_PAUSE_PREFIX}${threadId}`, reason);
+      return;
+    }
     this.core.journal.setSetting(`${AUTO_PAUSE_PREFIX}${threadId}`, reason);
     this.saveConfig(threadId, { ...config, paused: true });
   }
