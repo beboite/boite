@@ -269,7 +269,8 @@ export class AgentRuntime {
     });
     // Run intent is committed before any provider can execute. The turn request is idempotent.
     try {
-      const turn = this.core.threads.startTurn(thread.id, run.context.instructions, [], undefined, undefined, undefined, run.id, undefined, [], run.id);
+      const turn = this.core.threads.startTurn(thread.id, run.context.instructions, this.store.attachmentsFor(work), undefined, undefined, undefined, run.id, undefined, [], run.id);
+      this.store.markGiven(work, turn);
       const current = this.r.get('run', run.id);
       this.r.update('run', run.id, current.revision, { ...current, turnId: turn.id, actualExecution: turn.execution ?? null });
       this.store.changed();
@@ -315,6 +316,7 @@ export class AgentRuntime {
       this.store.publishReply(work, run.id, result, files);
       remember = { work, result, published: this.r.find('message', 'sourceRunId', [run.id]).length > before };
       for (const d of this.r.find('delivery', 'workId', [work.id])) this.r.update('delivery', d.id, d.revision, { ...d, status: 'processed' });
+      this.store.releaseHeld(work.messageId);
       if (work.taskId) {
         const task = this.r.get('task', work.taskId);
         if (task.generation === work.taskGeneration && task.status === 'running') this.r.update('task', task.id, task.revision, { ...task, status: 'review', result, leaseUntil: null });
@@ -333,6 +335,7 @@ export class AgentRuntime {
       if (task.generation === work.taskGeneration && ['assigned', 'running'].includes(task.status)) this.r.update('task', task.id, task.revision, { ...task, status: status === 'cancelled' ? 'cancelled' : 'waiting', leaseUntil: null });
     }
     for (const d of this.r.find('delivery', 'workId', [work.id]).filter(d => d.status !== 'processed')) this.r.update('delivery', d.id, d.revision, { ...d, status: status === 'cancelled' ? 'cancelled' : 'failed' });
+    this.store.releaseHeld(work.messageId);
     this.store.changed();
   }
   private checkRuns(): void {

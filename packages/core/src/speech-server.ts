@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
+import { freePort } from './loopback-port.ts';
 import { basename } from 'node:path';
 import type { Core } from './core.ts';
 import { refused } from './errors.ts';
@@ -142,7 +143,7 @@ export class SpeechServer {
     const [program, ...prefix] = command;
     if (!program) throw refused('speech: no whisper-server to start');
     // Free when probed; another process taking it in the next milliseconds fails this start, and the next request picks another.
-    const port = freeLoopbackPort();
+    const port = freePort();
     const path = `/${crypto.randomUUID().replaceAll('-', '')}`;
     const id = `speech:server-${crypto.randomUUID()}`;
     // A model path set by hand leaves no speech directory behind to start in.
@@ -183,12 +184,6 @@ export class SpeechServer {
   }
 }
 
-function freeLoopbackPort(): number {
-  const probe = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } });
-  const port = probe.port;
-  probe.stop(true);
-  return port;
-}
 
 async function drain(stream: ReadableStream<Uint8Array>, line: (text: string) => void): Promise<void> {
   const decoder = new TextDecoder();

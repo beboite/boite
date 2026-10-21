@@ -1,16 +1,12 @@
 import type { Message, MessagePart } from './index';
 import { imageSize } from './image-size.ts';
+import { decodedBytes } from './attachment-validation.ts';
 
 /**
  * The blur a core holds for a deferred picture, by message and part, or null.
  * It is handed the bytes, so a core that has not made the blur yet can queue it.
  */
 export type ImagePreviews = (messageId: string, partIndex: number, data: string) => string | null;
-
-/** The bytes a base64 string decodes to. */
-function base64Bytes(data: string): number {
-  return Math.floor(data.length * 3 / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
-}
 
 /** A picture a client draws in its box, and so can wait for, deferred with its size and blur. */
 const DRAWN_IMAGE = /^image\/(png|jpeg|gif|webp)$/;
@@ -42,7 +38,7 @@ export function previewFilePart(part: MessagePart, role: Message['role'], messag
   const size = picture ? imageSize(part.data) : null;
   const preview = picture ? previews?.(messageId, index, part.data) ?? null : null;
   return {
-    ...part, data: '', bytes: base64Bytes(part.data), dataDeferred: true as const,
+    ...part, data: '', bytes: decodedBytes(part.data), dataDeferred: true as const,
     ...(size === null ? {} : size), ...(preview === null ? {} : { preview }),
   };
 }
@@ -74,7 +70,7 @@ export function previewImagePart(part: MessagePart, messageId: string, index: nu
   const size = imageSize(part.data);
   const preview = previews?.(messageId, index, part.data) ?? null;
   return {
-    ...part, data: '', bytes: base64Bytes(part.data), dataDeferred: true as const,
+    ...part, data: '', bytes: decodedBytes(part.data), dataDeferred: true as const,
     ...(size === null ? {} : size), ...(preview === null ? {} : { preview }),
   };
 }

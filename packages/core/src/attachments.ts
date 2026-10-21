@@ -106,6 +106,14 @@ export function answerText(answer: QuestionAnswer): string {
   return [answer.text ?? '', answerNotes.get(answer) ?? ''].filter(part => part.length > 0).join('\n\n');
 }
 
+/** What a question asks, as Codex and Muse send it: its header before its body when the two differ. */
+export function questionTextOf(entry: { header?: string; question?: string }): string {
+  const header = typeof entry.header === 'string' ? entry.header.trim() : '';
+  const body = typeof entry.question === 'string' ? entry.question.trim() : '';
+  if (header.length > 0 && body.length > 0 && header !== body) return `${header}: ${body}`;
+  return body.length > 0 ? body : header;
+}
+
 /** The image formats Antigravity's server takes in a prompt: no GIF. */
 const ANTIGRAVITY_IMAGES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 

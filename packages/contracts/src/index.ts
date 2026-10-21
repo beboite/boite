@@ -176,7 +176,7 @@ export interface RpcEvents extends
 
 export type RpcEventName = keyof RpcEvents;
 
-export { attachmentError, answerAttachmentError } from './attachment-validation.ts';
+export { attachmentError, answerAttachmentError, decodedBytes } from './attachment-validation.ts';
 export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, CACHE_KEEPALIVE_HOURS, MODEL_FAVORITES_MAX, checkSettingsPatch, compareModelFavorites, keepLaterFavorites, type AutoCompact, type AutoCompactMoment, type CacheKeepalive, type SettingsPatchCheck } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel, newestModel } from './title-models.ts';
 export { GOAL_TRACKER_DEFAULTS, GOAL_CHECKLIST_MAX_ITEMS, GOAL_CHECKLIST_SOURCE_MAX, GOAL_CHECKLIST_TEXT_MAX, defaultTrackerModel, trackerEffort, type GoalTrackerRule } from './goal-tracker.ts';

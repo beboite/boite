@@ -317,7 +317,8 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   // Then 81 for `[--worktree]` and what it gives: a child on a branch of its own (3869 measured 2026-10-15).
   // Then 75 for `boite pr watch`: a watched PR wakes the agent, so it stops polling CI (3941 measured with both lines, 2026-10-15).
   // Then 7 for `stop|resume`: the parent continues what a stop or a restart cut (3958 measured 2026-10-17, 3951 before).
-  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3960);
+  // Then 52 for batching browser steps with `&&` or `boite browser run -`: each separate command costs a turn (4010 measured 2026-10-20).
+  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(4012);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });

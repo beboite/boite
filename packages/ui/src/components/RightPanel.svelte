@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
+  import { ArrowLeft, ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
   import { floatingPanel, RESIZE_DIRECTIONS } from '../lib/floating-panel';
   import { browserBridge } from '../lib/browser-bridge';
   import { stripOverflows } from '../lib/strip-overflow';
@@ -47,6 +47,7 @@
   } = $props();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  const phone = $derived((innerWidth.current ?? window.innerWidth) <= 720);
   /**
    * The docked width: the one asked for, within the room the chat keeps once
    * the thread list and the contacts column take theirs. The asked width stays
@@ -410,13 +411,17 @@
     </button>
     <button
       type="button"
-      class="ghost small icon"
-      title={strings.common.close}
-      aria-label={strings.common.close}
+      class="ghost small icon panel-close"
+      title={phone ? strings.rightPanel.backToChat : strings.common.close}
+      aria-label={phone ? strings.rightPanel.backToChat : strings.common.close}
       data-testid="panel-close"
-      onclick={() => panel.toggle()}
+      onclick={() => panel.hide()}
     >
-      <X size={14} strokeWidth={1.75} />
+      {#if phone}
+        <ArrowLeft size={16} strokeWidth={1.75} /><span class="ui-label">{strings.rightPanel.chat}</span>
+      {:else}
+        <X size={14} strokeWidth={1.75} />
+      {/if}
     </button>
   </header>
 
@@ -723,6 +728,8 @@
   }
 
   @media (max-width: 720px) {
+    .strip button.small.icon.panel-close { order: -1; width: auto; padding: 0 8px; gap: 6px; }
+
     .panel,
     .panel.maximized {
       position: fixed;

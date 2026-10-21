@@ -151,3 +151,98 @@ test('an idle agent runtime reads nothing until a record changes, then starts th
     await waitFor(() => r.list('run').some(run => run.status === 'done'));
   } finally { await h.stop(); }
 });
+
+test('what the user attaches to an agent message reaches its turn and stays out of the snapshot', async () => {
+  const h = await startTestCore();
+  try {
+    const client = await h.connect();
+    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+    const agent = await client.call('agents.profile.save', { value: { name: 'Looker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
+    const scope = { kind: 'agent' as const, id: agent.id };
+    const sleeper = await client.call('agents.profile.save', { value: { name: 'Sleeper', domain: '', instructions: '', avatar: '', selection: agent.selection, status: 'active', tools: ['messages'] } });
+    const sleeping = { kind: 'agent' as const, id: sleeper.id };
+    const picture = { kind: 'image' as const, mimeType: 'image/png' as const, data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', name: 'pixel.png' };
+    const notes = { kind: 'file' as const, mimeType: 'text/plain', data: Buffer.from('two lines\nof notes').toString('base64'), name: 'notes.txt' };
+    // While a turn that took them runs, a later turn of the same work (a decision's continuation) gets none.
+    const slow = await client.call('agents.message.send', { scope: sleeping, recipientIds: [], text: '[sleep:60000]', attachments: [notes], requestId: 'attach_slow' });
+    await waitFor(() => h.core.workforce.records.list('work').some(w => w.messageId === slow.id && w.status === 'running'));
+    const running = h.core.workforce.records.list('work').find(w => w.messageId === slow.id)!;
+    expect(h.core.journal.getSetting(`agents:attachments:${slow.id}`)).toBeDefined();
+    expect(h.core.workforce.attachmentsFor({ ...running, prompt: 'Decision on: which one?' })).toEqual([]);
+    const thread = h.core.workforce.records.list('run').find(r => r.workId === running.id)!.threadId;
+    const worker = await connect(h.url, h.core.agents.tokenFor(thread));
+    // An agent speaks in words: its own messages carry no attachments.
+    expect(await thrown(worker.call('agents.message.send', { threadId: thread, scope: sleeping, recipientIds: [], text: 'mine', attachments: [notes], requestId: 'attach_002' }))).toThrow(/attachments/);
+    worker.close();
+    // Cancelled, the work frees them.
+    await client.call('agents.work.control', { workId: running.id, expectedRevision: h.core.workforce.records.get('work', running.id).revision, action: 'cancel' });
+    expect(h.core.journal.getSetting(`agents:attachments:${slow.id}`)).toBeUndefined();
+
+    // Pictures alone make a message, as they make a prompt.
+    const sent = await client.call('agents.message.send', { scope, recipientIds: [], text: '', attachments: [picture, notes], requestId: 'attach_001' });
+    expect(sent.attachments).toEqual([{ kind: 'image', mimeType: 'image/png', name: 'pixel.png', bytes: 70 }, { kind: 'file', mimeType: 'text/plain', name: 'notes.txt', bytes: 18 }]);
+    expect(JSON.stringify(await client.call('agents.snapshot', {}))).not.toContain(picture.data);
+    await waitFor(() => h.core.workforce.records.list('work').some(w => w.messageId === sent.id && w.status === 'done'));
+    const run = h.core.workforce.records.list('run').find(r => r.agentId === agent.id)!;
+    const prompt = [...h.core.journal.walkTurnMessages(run.threadId, run.turnId!)].find(m => m.role === 'user')!;
+    expect(prompt.parts.filter(p => p.type === 'image').length).toBe(1);
+    expect(prompt.parts.some(p => p.type === 'file' && p.name === 'notes.txt')).toBe(true);
+    // Once every recipient took them, the bytes leave the core's settings.
+    expect(h.core.journal.getSetting(`agents:attachments:${sent.id}`)).toBeUndefined();
+    // The conversation reads them where the turn keeps them, as a thread reads its own pictures.
+    const taken = h.core.workforce.records.get('message', sent.id).attachments!;
+    expect(taken.map(a => a.source)).toEqual([0, 1].map(at => ({ threadId: run.threadId, messageId: prompt.id, partIndex: at + 1 })));
+    expect((await client.call('messages.attachment', { threadId: run.threadId, messageId: prompt.id, partIndex: 1 })).data).toBe(picture.data);
+  } finally { await h.stop(); }
+});
+
+test('attachments survive a resume before the turn, and leave once no delivery can run', async () => {
+  const h = await startTestCore();
+  try {
+    const client = await h.connect();
+    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+    const selection = { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const };
+    const agent = await client.call('agents.profile.save', { value: { name: 'Looker', domain: '', instructions: '', avatar: '', selection, status: 'active', tools: ['messages'] } });
+    const scope = { kind: 'agent' as const, id: agent.id };
+    const notes = (text: string) => ({ kind: 'file' as const, mimeType: 'text/plain', data: Buffer.from(text).toString('base64'), name: 'notes.txt' });
+    const held = (id: string) => h.core.journal.getSetting(`agents:attachments:${id}`);
+    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
+
+    // Paused and resumed before it ever ran: the resume rewrites the prompt, the file still goes.
+    const first = await client.call('agents.message.send', { scope, recipientIds: [], text: 'read this', attachments: [notes('first')], requestId: 'attach_resume' });
+    let work = h.core.workforce.records.list('work')[0]!;
+    work = await client.call('agents.work.control', { workId: work.id, expectedRevision: work.revision, action: 'pause' });
+    await client.call('agents.work.control', { workId: work.id, expectedRevision: work.revision, action: 'resume' });
+    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: false });
+    await waitFor(() => h.core.workforce.records.get('work', work.id).status === 'done').catch(e => { console.log('WORK', JSON.stringify(h.core.workforce.records.get('work', work.id))); throw e; });
+    const run = h.core.workforce.records.list('run')[0]!;
+    const prompt = [...h.core.journal.walkTurnMessages(run.threadId, run.turnId!)].find(m => m.role === 'user')!;
+    expect(prompt.parts.some(p => p.type === 'file' && p.name === 'notes.txt')).toBe(true);
+    expect(held(first.id)).toBeUndefined();
+
+    // The same request id with other bytes of the same size is another message, refused.
+    expect(await thrown(client.call('agents.message.send', { scope, recipientIds: [], text: 'read this', attachments: [notes('other')], requestId: 'attach_resume' }))).toThrow(/different input/);
+
+    // A group message nobody receives keeps no bytes.
+    const quiet = await client.call('agents.group.save', { value: { name: 'Quiet', memberIds: [agent.id], mode: 'mentions', maxTurns: 4, maxTurnsPerAgent: 2, paused: false } });
+    const unheard = await client.call('agents.message.send', { scope: { kind: 'group', id: quiet.id }, recipientIds: [], text: 'fyi', attachments: [notes('fyi')], requestId: 'attach_nobody' });
+    expect(unheard.recipientIds).toEqual([]);
+    expect(held(unheard.id)).toBeUndefined();
+
+    // A reply past the group's turn limit: every delivery is limited, so nothing will ever take them.
+    const tight = await client.call('agents.group.save', { value: { name: 'Tight', memberIds: [agent.id], mode: 'round', maxTurns: 1, maxTurnsPerAgent: 1, paused: true } });
+    const opener = await client.call('agents.message.send', { scope: { kind: 'group', id: tight.id }, recipientIds: [], text: 'one turn', requestId: 'attach_opener' });
+    const over = await client.call('agents.message.send', { scope: { kind: 'group', id: tight.id }, recipientIds: [], text: 'one more', replyTo: opener.id, attachments: [notes('over')], requestId: 'attach_limited' });
+    expect(h.core.workforce.records.find('delivery', 'messageId', [over.id]).map(d => d.status)).toEqual(['limited']);
+    expect(held(over.id)).toBeUndefined();
+
+    // An agent archived before its turn: the work is cancelled and the bytes go with it.
+    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
+    const late = await client.call('agents.message.send', { scope, recipientIds: [], text: 'later', attachments: [notes('later')], requestId: 'attach_archived' });
+    const profile = h.core.workforce.records.get('profile', agent.id);
+    await client.call('agents.profile.save', { id: profile.id, expectedRevision: profile.revision, value: { ...profile, status: 'archived' } });
+    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: false });
+    await waitFor(() => h.core.workforce.records.list('work').some(w => w.messageId === late.id && w.status === 'cancelled'));
+    expect(held(late.id)).toBeUndefined();
+  } finally { await h.stop(); }
+});

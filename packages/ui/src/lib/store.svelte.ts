@@ -563,7 +563,7 @@ export class Store {
   loadRange(from: number, limit: number, landing?: () => void, below?: MessageId) { return this.#ctx.positions.loadRange(from, limit, landing, below); }
   loadAttachments(threadId: ThreadId, message: Message) { return loadAttachments(this.#ctx, threadId, message); }
   loadOlder(...args: Parameters<Threads['loadOlder']>) { return this.#ctx.threads.loadOlder(...args); }
-  releaseOlder(threadId: ThreadId) { return releaseOlder(this.#ctx, threadId); }
+  releaseOlder(threadId: ThreadId, near?: () => number) { return releaseOlder(this.#ctx, threadId, near); }
   createThread(...args: Parameters<Threads['createThread']>) { return this.#ctx.threads.createThread(...args); }
   update(...args: Parameters<Threads['update']>) { return this.#ctx.threads.update(...args); }
   recoverTurn(...args: Parameters<Threads['recoverTurn']>) { return this.#ctx.threads.recoverTurn(...args); }

@@ -12,7 +12,7 @@ import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
 import type { TraceCapability } from '@boite/contracts';
 import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
-import { workerEntry } from './worker-entry.ts';
+import { describeWorkerError, workerEntry } from './worker-entry.ts';
 import { resolveMemoryLimits } from '../../memory-limits.ts';
 import { StartupPriority } from './startup-priority.ts';
 import {
@@ -567,13 +567,6 @@ function ensureWorker(port: number): void {
   }
 }
 
-function describeWorkerError(event: unknown): string {
-  if (event instanceof Error) return event.message;
-  if (typeof event === 'object' && event !== null && 'message' in event) {
-    return String((event as { message: unknown }).message);
-  }
-  return 'worker error';
-}
 
 function failWorker(reason: string): void {
   if (workerFailure !== null) return;
