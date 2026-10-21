@@ -10,7 +10,7 @@ import type {
   RequestPermissionResponse,
   SessionNotification,
 } from '@agentclientprotocol/sdk';
-import { isAntigravityQuestion } from '../antigravity.ts';
+import { antigravitySubagentKind, isAntigravityQuestion } from '../antigravity.ts';
 import { usdCostOf, type AcpTurn } from './turn.ts';
 
 type Update = SessionNotification['update'];
@@ -171,6 +171,7 @@ export function drawUpdate(turn: AcpTurn, update: Update): void {
         update.rawOutput,
         update.status,
         update.content,
+        turn.antigravity ? antigravitySubagentKind(update) : null,
       );
       break;
     case 'tool_call_update':
@@ -181,6 +182,7 @@ export function drawUpdate(turn: AcpTurn, update: Update): void {
         update.rawOutput,
         update.status,
         update.content,
+        turn.antigravity ? antigravitySubagentKind(update) : null,
       );
       break;
     case 'usage_update': {

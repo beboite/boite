@@ -542,7 +542,7 @@ describe('threads.move', () => {
 
   test('only Codex keeps its native session across folders', () => {
     expect(keepsSessionAcrossFolders('codex-appserver')).toBe(true);
-    for (const protocol of ['claude-sdk', 'pi', 'acp', 'agy', 'muse', 'echo'] as const) {
+    for (const protocol of ['claude-sdk', 'pi', 'acp', 'muse', 'echo'] as const) {
       expect(keepsSessionAcrossFolders(protocol)).toBe(false);
     }
   });

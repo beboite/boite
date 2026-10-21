@@ -67,10 +67,8 @@ test('a target with no brain is told so, and a login never crosses: its provider
   expect(configure.mock.calls.map(([method]) => method)).not.toContain('brain.configure');
   expect(configure.mock.calls.map(([method]) => method).filter((method) => method.startsWith('accounts.'))).toEqual([]);
   expect(report.providers.length).toBeGreaterThan(0);
-  // One row per family: the two Antigravity programs are one provider to the user.
   const ids = report.providers.map((row) => row.id);
   expect(new Set(ids).size).toBe(ids.length);
-  expect(ids).not.toContain('antigravity-cli');
 });
 
 test('a core without a brain is skipped, not failed', async () => {

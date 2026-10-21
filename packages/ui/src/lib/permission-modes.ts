@@ -10,14 +10,11 @@ const OFFERED: PermissionMode[] = ['yolo', 'bypassPermissions', 'acceptEdits', '
  * The modes worth offering for this agent. Codex gives `acceptEdits` the same
  * sandbox and approval pair as `default` (`drivers/codex.ts`, `MODE_POLICY`),
  * so a second entry would promise a difference that does not exist. YOLO also
- * disables configured hooks, which Auto retains. agy asks nothing but takes the
- * mode as a launch flag (`drivers/agy/session.ts`, `modeArgs`), where Auto and
- * YOLO are the same `--dangerously-skip-permissions`, so it keeps Auto alone.
- * Any other agent that never asks (`capabilities.approvals` false, pi today)
- * gets no choice at all: every entry would describe something it does not do.
+ * disables configured hooks, which Auto retains. An agent that never asks
+ * (`capabilities.approvals` false, pi today) gets no choice at all: every
+ * entry would describe something it does not do.
  */
 export function modesFor(provider: ProviderSummary | null | undefined): PermissionMode[] {
-  if (provider?.protocol === 'agy') return OFFERED.filter((mode) => mode !== 'yolo');
   if (provider && !provider.capabilities.approvals) return [];
   if (provider?.protocol === 'codex-appserver') return OFFERED.filter((mode) => mode !== 'acceptEdits');
   return OFFERED;
@@ -25,36 +22,31 @@ export function modesFor(provider: ProviderSummary | null | undefined): Permissi
 
 /**
  * The mode the chip shows. A choice made for another agent can hold a mode this
- * one does not offer: Codex runs `acceptEdits` as its default and agy runs YOLO
- * as Auto, so the chip says so and a menu entry stays active. A legacy mode
- * (`plan`, `dontAsk`) keeps its own label until another is picked. The stored
- * choice is left as it was.
+ * one does not offer: Codex runs `acceptEdits` as its default, so the chip says
+ * so and a menu entry stays active. A legacy mode (`plan`, `dontAsk`) keeps its
+ * own label until another is picked. The stored choice is left as it was.
  */
 export function shownMode(mode: PermissionMode, provider: ProviderSummary | null | undefined): PermissionMode {
   const offered = modesFor(provider);
   if (offered.length === 0 || offered.includes(mode) || !OFFERED.includes(mode)) return mode;
-  return mode === 'yolo' && provider?.protocol === 'agy' ? 'bypassPermissions' : 'default';
+  return 'default';
 }
 
 /** The chip's word for the mode, as this agent actually applies it. */
 export function modeLabel(mode: PermissionMode, provider: ProviderSummary | null | undefined): string {
   if (mode === 'default' && provider?.protocol === 'codex-appserver') return strings.permissionModeCodex.default;
-  if (mode === 'default' && provider?.protocol === 'agy') return strings.permissionModeAgy.default;
   return strings.permissionMode[mode];
 }
 
 /** The one sentence saying what the mode lets the agent do without asking. */
 export function modeHint(mode: PermissionMode, provider: ProviderSummary | null | undefined): string {
   if (mode === 'default' && provider?.protocol === 'codex-appserver') return strings.permissionModeCodex.defaultLong;
-  if (provider?.protocol === 'agy' && (mode === 'default' || mode === 'acceptEdits')) return strings.permissionModeAgy[`${mode}Long`];
   return strings.permissionModeLong[mode];
 }
 
 /** The draft heading's words for the mode, as this agent actually applies it. */
 export function modePhrase(mode: PermissionMode, provider: ProviderSummary | null | undefined): string {
-  const shown = shownMode(mode, provider);
-  if (shown === 'default' && provider?.protocol === 'agy') return strings.permissionModeAgy.draft;
-  return strings.thread.draftMode[shown];
+  return strings.thread.draftMode[shownMode(mode, provider)];
 }
 
 /** One icon per mode, shared by the chip and the menu row. */

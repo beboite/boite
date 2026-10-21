@@ -10,19 +10,12 @@ import { homePath } from './paths.ts';
 import { invalidParams } from './errors.ts';
 import { claudeQuotaDetails, claudeUsageAgent, codexQuotaDetails, codexQuotaWindows, quotaWindow } from './quota-details.ts';
 import { consumeClaudeReset, QuotaResetStore, type QuotaResetConsumer } from './quota-resets.ts';
-import { ANTIGRAVITY_QUOTA_ID, readExtraQuota, readsAntigravitySignIn } from './quota-readers.ts';
+import { readExtraQuota, readsAntigravitySignIn } from './quota-readers.ts';
 import type { ProbeContext } from './drivers/types.ts';
 import { activeSubscriptionProxy } from './subscription-proxy.ts';
 import { GatewayQuotas } from './subscription-proxy-quotas.ts';
 
 export { claudeUsageAgent, codexQuotaWindows } from './quota-details.ts';
-
-/**
- * The agy login's limits, read through the `antigravity-cli` provider's own
- * program. It belongs to that provider: turning the managed Antigravity server
- * off must not hide it, and it is read by default once agy is found.
- */
-const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity-cli', label: 'Antigravity CLI', isolationDir: null, status: 'unknown', identity: null, createdAt: 0 };
 
 const CACHE_MS = 60_000;
 const RETRY_MS = 300_000;
@@ -218,11 +211,9 @@ export class QuotaStore {
     const proxied = provider && activeSubscriptionProxy(this.core, provider);
     // A provider turned off is never read: its accounts stand as they would with no reader.
     const summary = this.core.providers.summary(account.providerId);
-    const cli = account.id === ANTIGRAVITY_QUOTA_ID;
-    const supported = !proxied && summary?.enabled !== false && (this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode', OPENCODE_V2].includes(account.providerId) || cli || readsAntigravitySignIn(provider));
-    // The CLI source exists on every machine: with no choice saved, it is read only where agy was found.
+    const supported = !proxied && summary?.enabled !== false && (this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode', OPENCODE_V2].includes(account.providerId) || readsAntigravitySignIn(provider));
     const stored = preferences[account.id];
-    const enabled = typeof stored === 'boolean' ? stored : cli ? summary?.available === true : true;
+    const enabled = typeof stored === 'boolean' ? stored : true;
     return { accountId: account.id, providerId: account.providerId, providerName: isOpenCode(account.providerId) ? 'OpenCode Go' : this.core.providers.get(account.providerId)?.name ?? account.providerId,
       label: account.label, enabled, status: !supported ? 'unsupported' : !enabled ? 'disabled' : 'unavailable', windows: [], checkedAt: null, error: null };
   }
@@ -269,7 +260,7 @@ export class QuotaStore {
   /** Every row as known now, the gateway's last answer included, for an update event. */
   private known(): AccountQuota[] {
     if (this.gatewayOwnsLimits()) return this.gateway.rows();
-    return [...[...this.core.accounts.list(), cliAccount].map((row) => this.snapshot(row)), ...this.gateway.rows()];
+    return [...this.core.accounts.list().map((row) => this.snapshot(row)), ...this.gateway.rows()];
   }
   /**
    * A Douane in use answers for the accounts that serve this machine's agents.
@@ -299,7 +290,7 @@ export class QuotaStore {
       if (requestId && progress) for (const quota of rows) progress(quota);
       return rows;
     }
-    const rows = [...this.core.accounts.list(), cliAccount];
+    const rows = this.core.accounts.list();
     const result = new Array<AccountQuota>(rows.length);
     const groups = new Map<string, { account: Account; index: number }[]>();
     rows.forEach((account, index) => {
@@ -368,7 +359,7 @@ export class QuotaStore {
     try { return await running; } finally { this.pending.delete(account.id); }
   }
   async configure(accountId: string, enabled: boolean): Promise<AccountQuota[]> {
-    if (accountId !== ANTIGRAVITY_QUOTA_ID) this.core.accounts.require(accountId);
+    this.core.accounts.require(accountId);
     if (typeof enabled !== 'boolean') throw invalidParams('quotas.configure enabled must be a boolean');
     const next = { ...object(this.core.journal.getSetting('quota-accounts')), [accountId]: enabled };
     this.core.journal.append({ type: 'quotas.configured', threadId: null, version: 1, payload: { accountId, enabled } }, () => this.core.journal.setSetting('quota-accounts', next));

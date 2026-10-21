@@ -10,7 +10,7 @@
   import { floating } from '../lib/floating';
   import { Closing } from '../lib/closing.svelte';
   import { fill, strings } from '../lib/strings';
-  import { FIRST_MODELS, favoriteIds, firstModels, groupModels } from '../lib/model-list';
+  import { FIRST_MODELS, favoriteIds, firstModels, groupModels, modelSource } from '../lib/model-list';
   import { pickerKeydown } from '../lib/model-picker-keys';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
@@ -104,7 +104,7 @@
 
   /** The agent owns its list, so the core only accepts a model it read from it. */
   function agentListed(protocol: string | undefined): boolean {
-    return protocol === 'claude-sdk' || protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'muse' || protocol === 'pi' || protocol === 'agy';
+    return protocol === 'claude-sdk' || protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'muse' || protocol === 'pi';
   }
 
   function pickFavorite(entry: FavoriteModel) {
@@ -195,7 +195,7 @@
 
   // An ACP agent can list hundreds of models (OpenCode answered 534 here), and a
   // plain scroll is useless at that length: group by the `provider/` prefix.
-  let grouped = $derived(shownModels.length > SEARCH_FROM);
+  let grouped = $derived(shownModels.length > SEARCH_FROM || shownModels.some(model => modelSource(model) !== ''));
   let searchable = $derived(!favoritesOpen && !needsInstall);
   let words = $derived(
     searchable ? modelQuery.toLowerCase().split(/\s+/).filter((word) => word.length > 0) : []
@@ -367,6 +367,7 @@
             role="menuitem"
             data-row
             data-model={model.id}
+            title={model.id}
             disabled={disabled || pickPending}
             onclick={() => pickModel(model)}
           >
@@ -389,8 +390,8 @@
           <div class="model-list">
           {#each favorites as entry (`${entry.providerId}:${entry.accountId}:${entry.model.id}`)}
             <div class="model-entry">
-              <button type="button" class="row model favorite-row" role="menuitem" data-row data-testid="favorite-model" disabled={disabled || pickPending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
-                <ProviderLogo providerId={entry.providerId} size={16} /><span class="name">{store.modelsOf(entry.providerId, entry.accountId).find(m => m.id === entry.model.id)?.name ?? entry.model.name}{#if favorites.some(other => other.providerId === entry.providerId && other.model.id === entry.model.id && other.accountId !== entry.accountId)}<span class="account-label">{store.accountOf(entry.accountId)?.label}</span>{/if}</span>
+              <button type="button" class="row model favorite-row" role="menuitem" data-row data-testid="favorite-model" title={entry.model.id} disabled={disabled || pickPending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
+                <ProviderLogo providerId={entry.providerId} size={16} /><span class="name">{store.modelsOf(entry.providerId, entry.accountId).find(m => m.id === entry.model.id)?.name ?? entry.model.name}{#if modelSource(entry.model)}<span class="account-label">{modelSource(entry.model)}</span>{/if}{#if favorites.some(other => other.providerId === entry.providerId && other.model.id === entry.model.id && other.accountId !== entry.accountId)}<span class="account-label">{store.accountOf(entry.accountId)?.label}</span>{/if}</span>
               </button>
               {#if store.owner}
                 <button type="button" class="favorite-button" aria-label={strings.composer.unfavorite} onclick={() => store.toggleFavorite(entry.providerId, entry.accountId, entry.model)}><Star size={14} fill="currentColor" /></button>
@@ -496,6 +497,7 @@
                     tabindex={legacyOpen ? 0 : -1}
                     data-row={legacyOpen || undefined}
                     data-model={legacyOpen ? model.id : undefined}
+                    title={model.id}
                     onclick={() => pickModel(model)}
                   >
                     <span class="mark"></span>

@@ -7,6 +7,7 @@ import { messageOf, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import { sameScope } from './validation.ts';
 import { OPEN_WORK } from './repository.ts';
+import { agentProvider } from '../threads/selection.ts';
 
 /**
  * How an agent speaks in its conversation: a person in a chat, never a coding
@@ -90,6 +91,8 @@ export class AgentRuntime {
     if (agent.status !== 'active') return false;
     // The next conversation starts from the memory the last one left.
     if (this.store.memory.holding(agent.id)) return false;
+    // A provider this Boite does not have, a retired one included, waits for another model as a revoked one does.
+    try { agentProvider(this.core, agent); } catch (error) { this.fail(work, messageOf(error), 'paused'); return false; }
     if (!this.store.resident.allowed(agent.id, agent.selection)) { this.fail(work, 'The default model or account is no longer allowed. Choose an authorized default and resume.', 'paused'); return false; }
     const used = this.r.episodeRuns(work.episodeId).filter(run => run.startedAt !== null || run.status === 'accepted');
     if (work.scope.kind === 'group') {

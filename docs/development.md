@@ -761,6 +761,11 @@ compiled worker, and uses fresh data without provider calls.
 
 ## The opt-in live tests
 
+The installed-binary compatibility check uses a local mock API, fresh homes
+and no login: `BOITE_E2E_OPENCODE2_BINARY=/absolute/path/to/opencode2 bun test packages/core/test/opencode2.compat.test.ts`
+from the repository root. It covers discovery, a read tool, cold resume, plan
+mode and cancellation beside a locked, incompatible version 1 profile.
+
 Real-provider tests use CLI logins and spend tokens. Run selected cases from
 `packages/core`, one at a time; never enable them for an ordinary fixture run.
 
@@ -774,7 +779,6 @@ Real-provider tests use CLI logins and spend tokens. Run selected cases from
 | `BOITE_E2E_GROK_PROXY=1` | `test/grok-proxy.live.test.ts`: Grok behind a Douane gateway, on an isolated account that never signed in; `BOITE_E2E_GROK_PROXY_URL` is the gateway's API URL, `BOITE_E2E_GROK_PROXY_KEY` its key |
 | `BOITE_E2E_CODEX=1` | `test/codex.live.test.ts`: app-server turn and resume |
 | `BOITE_E2E_PI=1` | `test/pi.live.test.ts`: turn and resume |
-| `BOITE_E2E_AGY=1` | `test/agy.live.test.ts`: model discovery and one cold default-account turn |
 | `BOITE_E2E_INSTALLS=1` | `test/shipped-installs.live.test.ts`: pinned Codex/OpenCode downloads and versions |
 | `BOITE_E2E_PLUGIN_INSTALL=1` | `test/plugins.install.live.test.ts`: native plugin install/version/uninstall |
 | `BOITE_E2E_ANTIGRAVITY_INSTALL=1` | `test/antigravity.install.live.test.ts`: managed archive integrity and ACP initialization, without login |
@@ -990,7 +994,8 @@ The total cannot grow without a separate upload channel: the journal keeps a
 message's attachments inline, and `threads.get` cannot page a message heavier
 than its 12 MB page. PNG, JPEG, GIF and WebP use native image input. Other
 files, including PDFs and archives, use `kind: 'file'` and host paths in the
-prompt. Provider tools decide which formats they can read. Boite neither
+prompt, and so does an image the provider's agent takes no block of: a GIF for
+Antigravity, whose server reads PNG, JPEG and WebP only. Provider tools decide which formats they can read. Boite neither
 extracts archives nor executes uploads.
 
 Before those caps, the client brings an image to 2000 px on its long edge

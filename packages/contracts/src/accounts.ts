@@ -97,9 +97,8 @@ export interface SubscriptionProxyQuotas {
 /** Provider-reported limits, never inferred from Boite's token ledger. */
 export interface AccountQuota extends QuotaReading {
   /**
-   * Account id, `quota:antigravity-cli` for the agy login's quota source (on by
-   * default once agy is found), or
-   * `proxy:<provider>:<entry>` for an entry of the subscription gateway.
+   * Account id, or `proxy:<provider>:<entry>` for an entry of the subscription
+   * gateway.
    */
   accountId: AccountId;
   providerId: ProviderId;

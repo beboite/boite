@@ -1,13 +1,13 @@
 import type { Protocol, ProviderDescriptor } from '@boite/contracts';
 import { expandDescriptor } from './expand.ts';
-import { reject, asObject, asString, asBoolean, checkKeys, checkRoots } from './validate-primitives.ts';
+import { reject, asObject, asString, asBoolean, checkKeys, checkRoots, checkStringMap } from './validate-primitives.ts';
 import { checkProfiles } from './validate-profile.ts';
 import { checkAuth, checkLogin, checkIsolation, checkSeedFiles } from './validate-auth.ts';
 import { checkShared, checkSharedKeys, checkHookSources, checkQuirks } from './validate-share.ts';
 import { checkModels, checkCapabilities } from './validate-models.ts';
 export { Rejection } from './validate-primitives.ts';
 
-const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'muse', 'pi', 'acp', 'agy', 'echo'];
+const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'muse', 'pi', 'acp', 'echo'];
 
 const DESCRIPTOR_KEYS = [
   'id',
@@ -17,6 +17,7 @@ const DESCRIPTOR_KEYS = [
   'protocol',
   'roots',
   'profiles',
+  'env',
   'auth',
   'login',
   'isolation',
@@ -56,6 +57,10 @@ export function validateDescriptor(
   }
 
   const profiles = checkProfiles(obj['profiles'], file, protocol as Protocol);
+  if (obj['env'] !== undefined) {
+    const env = checkStringMap(obj['env'], file, 'env');
+    for (const profile of Object.values(profiles)) profile.env = { ...env, ...profile.env };
+  }
 
   const auth = checkAuth(obj['auth'], file);
   const seedFiles = obj['seedFiles'] === undefined ? undefined : checkSeedFiles(obj['seedFiles'], file);

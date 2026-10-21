@@ -4,12 +4,8 @@ import type { AccountId, ProviderId, ThreadId, Timestamp } from './ids';
 // Providers: one JSON descriptor per provider, shipped or user-supplied.
 // ---------------------------------------------------------------------------
 
-/**
- * How the core talks to an agent. `agy` is the Antigravity CLI's own print
- * mode, `agy -p= --input-format stream-json --output-format stream-json`: one
- * JSON prompt per line on stdin, one JSON event per line on stdout.
- */
-export type Protocol = 'claude-sdk' | 'codex-appserver' | 'muse' | 'pi' | 'acp' | 'agy' | 'echo';
+/** How the core talks to an agent. */
+export type Protocol = 'claude-sdk' | 'codex-appserver' | 'muse' | 'pi' | 'acp' | 'echo';
 
 export type Os = 'windows' | 'linux' | 'macos';
 
@@ -378,6 +374,8 @@ export interface ProviderDescriptor {
   protocol: Protocol;
   /** Every path the engine reads or writes for this provider must fall under one of these. */
   roots: string[];
+  /** Defaults merged into every OS profile's env at load time; the profile wins. */
+  env?: Record<string, string>;
   profiles: Partial<Record<Os, OsProfile>>;
   auth: ProviderAuth;
   /** Absent when the provider has no way to log an account in from Boite. */

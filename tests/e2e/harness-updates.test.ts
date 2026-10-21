@@ -93,7 +93,7 @@ test('agent updates stay in Machines and Update and Skip target their own machin
 
 test('unknown releases run their own updater and Providers keeps only installed versions', async () => {
   await machines();
-  const cli = row(local, 'antigravity-cli');
+  const cli = row(local, 'grok');
   expect(await page.evaluate(`document.querySelector('${row(local, 'opencode')} .version').title`)).toContain('Up to date');
   expect(await page.evaluate(`document.querySelector('${cli} .version').title`)).toContain('Checks by itself');
   await page.click(`${cli} ${id('harness-update-row-blind')}`);

@@ -43,7 +43,6 @@ finite or below zero writes nothing.
 | echo | 100 plus one token per character of the prompt | 2000 | `[compact]` in the prompt draws one, 1800 to 300 tokens, and lowers the reading to 300 |
 | Codex | `tokenUsage.last.totalTokens` in `thread/tokenUsage/updated` | `tokenUsage.modelContextWindow` when reported | completed `contextCompaction` items |
 | Muse Code | `usedTokens` in `session/contextUsage` | `windowTokens` when reported | completed `compaction` items, with `tokensBefore` and `tokensAfter` |
-| Antigravity CLI | the last `agent_response` step's `usage` in the turn, input plus cache reads plus output, once at the end | not reported | none, compaction is refused |
 | pi | `contextUsage.tokens` of `get_session_stats`, read once after each turn; nothing right after a compaction, where pi reports null until its next answer | `contextUsage.contextWindow` | `compaction_end` of an automatic compaction (`threshold` or `overflow`), with `tokensBefore` and `estimatedTokensAfter`; the manual `compact` response, with the same two |
 | OpenCode, Antigravity, Grok | `used` in the last ACP `usage_update` of the turn, once at the end | `size` when above zero | none |
 
@@ -70,7 +69,6 @@ The existing Stop action cancels the maintenance turn. Paired devices may call i
 | Muse | `session/compact`; a `noop` fails with the host's reason |
 | pi | `compact` RPC, completed by its response, whose `estimatedTokensAfter` is pi's own estimate of what is left; Stop closes the process because prompt abort does not cancel this RPC |
 | ACP | `/compact` only when the session advertised that command |
-| agy | none: print mode refuses the CLI's interactive-only commands, so the core refuses the call and the control stays disabled |
 | echo | `[compact]`, a deterministic test operation; the divider it draws says `manual`, while `[compact]` inside a prompt draws an `auto` one |
 
 The control is disabled while a turn runs, before a native session exists, or
@@ -358,7 +356,7 @@ ways, and the rewind result's `session` field says which one applied:
 |---|---|
 | Claude | Exact. Each turn records `checkpoint: { sessionId, entry }`, the uuid of the last transcript entry it wrote. The next turn resumes that session with `resumeSessionAt: entry` and `forkSession: true`, so the CLI keeps the transcript up to the cut under a new session id and the original transcript is never shortened. A rewind closes the warm process first. |
 | Codex | Exact at a completed native turn boundary on the same account and session generation. A traced appserver, started without plugins or connectors, calls `thread/fork` with the retained native turn ID as an inclusive boundary and every MCP server turned off for that call only. Rewind prepares a new native session before restoring files and committing the journal cut. The source native transcript is unchanged. |
-| ACP, Muse, pi, agy and echo | Seeded. The thread drops its native session. The next turn starts a fresh one carrying the kept history as bounded excerpts, the same [context transfer](model-switching.md#context-transfer) a change of account uses. |
+| ACP, Muse, pi and echo | Seeded. The thread drops its native session. The next turn starts a fresh one carrying the kept history as bounded excerpts, the same [context transfer](model-switching.md#context-transfer) a change of account uses. |
 
 Claude falls back to the seeded path in four cases: the kept turn left no
 checkpoint (it ran before checkpoints existed, failed early, or was stopped

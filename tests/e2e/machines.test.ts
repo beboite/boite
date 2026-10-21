@@ -152,7 +152,15 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.waitFor(`document.querySelector('${id('thread-title')}')?.textContent === 'Remote project'`);
     await page.click(id('terminal-toggle'));
     // PowerShell expands Windows short paths such as RUNNER~1 in its prompt.
-    await page.waitFor(`document.querySelector('[data-testid=terminal-drawer] .xterm-rows')?.textContent.includes(${JSON.stringify(basename(second.dataDir))})`);
+    try {
+      await page.waitFor(`document.querySelector('[data-testid=terminal-drawer] .xterm-rows')?.textContent.includes(${JSON.stringify(basename(second.dataDir))})`);
+    } catch (error) {
+      const [terminal, screen] = await Promise.allSettled([
+        b.call('terminals.open', { threadId: tb.id, cols: 80, rows: 24 }).then(state => ({ output: state.output.slice(-4096), sequence: state.sequence, shell: state.shell, windowsPty: state.windowsPty })),
+        page.evaluate(`({ gpu: document.querySelector('[data-testid=terminal]')?.dataset.gpu, text: document.querySelector('[data-testid=terminal-drawer] .xterm-rows')?.textContent, terminalGpu: localStorage.getItem('boite.terminalGpu') })`)
+      ]);
+      throw new Error(`remote terminal did not draw its prompt: ${JSON.stringify({ terminal, screen })}`, { cause: error });
+    }
     await page.evaluate(`document.querySelector('${id('composer-input')}').focus()`);
     const terminalPoint = await page.evaluate<{ x: number; y: number }>(`(() => {
       const rect = document.querySelector('[data-testid=terminal-drawer] .xterm-screen').getBoundingClientRect();

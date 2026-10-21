@@ -303,6 +303,18 @@ describe('harness updates', () => {
     expect(update.message).toContain('the release server refused the download');
   });
 
+  test('an updater that cannot detect its install method reports the reason before its closing Failed line', async () => {
+    const { client } = await start('npm', 'update-unknown-method');
+    await client.call('providers.updates', { refresh: true });
+    const failed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'failed', 20000);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    const update = only(await failed);
+    expect(update.current).toBe('1.0.0');
+    expect(update.message).toContain('exited with 1');
+    expect(update.message).toContain('Could not detect the installation method. Pass --method');
+    expect(update.message).not.toEndWith('Failed');
+  });
+
   test('an updater that fails and exits with zero is failed with its own reason, not its closing line', async () => {
     const { client } = await start('npm', 'update-stuck');
     await client.call('providers.updates', { refresh: true });

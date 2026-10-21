@@ -167,22 +167,3 @@ test('an experimental provider is off until turned on and says so in both places
   expect(row('opencode-v2')?.querySelector('[data-testid="provider-experimental"]')).not.toBeNull();
 });
 
-test('a family has one switch per member inside the opened row, none for the family', async ({ ready }) => {
-  const { store } = await ready();
-  mounted = mount(AccountsPage, { target: document.body, props: { store } });
-  flushSync();
-  expect(row('antigravity')?.querySelector('[data-testid="provider-enabled"]')).toBeNull();
-  // The slot stays reserved, so the switch column does not jump at that row.
-  expect(row('antigravity')?.querySelector('.act > [data-testid="provider-switch-slot"]')).not.toBeNull();
-  row('antigravity')!.querySelector<HTMLButtonElement>('[data-testid="provider-details-toggle"]')!.click();
-  flushSync();
-  expect([...row('antigravity')!.querySelectorAll('[data-testid="provider-enabled"]')].map((input) => input.getAttribute('data-provider-id')).sort())
-    .toEqual(['antigravity', 'antigravity-cli']);
-
-  // One member off leaves the family where it was; both off move it.
-  toggle('antigravity-cli').click();
-  await vi.waitFor(() => expect(store.providerOn('antigravity-cli')).toBe(false));
-  expect(group('antigravity')).not.toBe('providers-off');
-  toggle('antigravity').click();
-  await vi.waitFor(() => expect(group('antigravity')).toBe('providers-off'));
-});

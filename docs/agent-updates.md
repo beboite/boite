@@ -6,8 +6,8 @@ Boite Nightly are described in [Desktop updates](updates.md).
 Each core checks and updates the agent executables on its own machine. Clients
 show those readings and send Update or Skip to that core.
 
-An agent with an updater but no readable latest-version source, such as the
-Antigravity CLI, shows Checks by itself and Run its updater. A successful run
+An agent with an updater but no readable latest-version source shows Checks by
+itself and Run its updater. A successful run
 records its resulting version as current until the next check. If a newer
 version was known but the installed version stays unchanged, or the command
 fails, the row retains its update action and error. Automatic updates exclude
@@ -31,7 +31,8 @@ machine at once ([update everything](updates.md#update-everything)).
   The same row in Machines and updates offers a skipped version again.
 - A failed update keeps the updater's error and Try
   again. Standard error takes priority over progress on standard output; an
-  explicit error takes priority over npm's final log-file location.
+  explicit error takes priority over npm's final log-file location. OpenCode's
+  installation-method error takes priority over its closing `Failed` line.
 - When the agent that runs is the user's own install (the `self` route), its
   update row offers no Update for a copy Boite downloaded earlier: that copy
   is not what runs, and the version shown is the one the update reads.
@@ -104,11 +105,16 @@ user can write the package's parent directory and `<prefix>/bin` (`<prefix>` on
 Windows). When it cannot, the update fails at once with the prefix and the
 directory it cannot write, without running anything.
 
+When a separate npm prefix keeps two agent versions side by side, a PATH alias
+must be a symbolic link to its package executable. A hard link hides the npm
+path and stays on the old file when npm replaces it. With a symbolic link,
+Boite can identify the package and update its own prefix directly, including on
+Windows, without asking the agent to guess its installation method.
+
 `latestNpm` and `latestArgs` exclude each other. With neither, the installed
 version is listed, no update is announced and `Run its updater` stays on the
 row. Claude, Codex, OpenCode, Grok and pi ship with a block that names its
-newest release. The Antigravity CLI ships with its updater alone, having no
-newest release Boite can read. Muse Code has no updater, so it is not listed.
+newest release. Muse Code has no updater, so it is not listed.
 
 Every run of an agent goes through the process registry under the synthetic
 thread `update:<provider id>`, so it is traced and capped like any other agent

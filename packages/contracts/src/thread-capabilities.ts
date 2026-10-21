@@ -42,7 +42,7 @@ export function deriveThreadCapabilities(s: ThreadCapabilitySnapshot): ThreadCap
   return {
     threadId: s.threadId, providerId: s.providerId, protocol: s.protocol, selectionVersion: s.selectionVersion,
     steering: capability(s.steeringSupported, s.runtimeReason ?? s.conversationReason ?? s.steeringReason),
-    compaction: capability(known && s.protocol !== 'agy', idle ?? s.compactionReason),
+    compaction: capability(known, idle ?? s.compactionReason),
     images: capability(s.providerCapabilities?.images === true, s.steeringReason === null ? s.runtimeReason ?? s.conversationReason : idle),
     plan: capability(s.providerCapabilities?.planMode === true, idle),
     approvals: capability(s.providerCapabilities?.approvals === true, s.pendingApprovals ? null : 'no-request'),

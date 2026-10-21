@@ -33,8 +33,7 @@ function remember(key: string, rows: AccountQuota[]): void {
 /**
  * A row a limits view shows: the provider reports on it, the user reads it,
  * and its account is signed in. A signed-out account or a provider nobody
- * connected has nothing to say, and the Antigravity CLI source shows once
- * someone turned it on.
+ * connected has nothing to say.
  */
 export function shownQuotas(rows: AccountQuota[], accounts?: Account[], providers?: readonly Pick<ProviderSummary, 'id' | 'enabled'>[]): AccountQuota[] {
   return namedQuotas(rows, accounts).filter((row) => {

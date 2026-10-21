@@ -4,7 +4,7 @@ import { DATA_DIR } from './shared.ts';
 /** The managed provider of the seed: a release Boite downloads, 468 MB of it. */
 export const MANAGED_ID = 'antigravity';
 
-export const MANAGED_VERSION = 'agy_acp_server_1.1.1';
+export const MANAGED_VERSION = 'agy_acp_server_1.4.1';
 
 export const MANAGED_ARCHIVE_BYTES = 468_238_392;
 

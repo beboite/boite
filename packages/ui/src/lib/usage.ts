@@ -13,7 +13,7 @@ export type UsageRange = (typeof USAGE_RANGES)[number];
  * its place whatever the range shows. Additional providers keep their own
  * series, reusing palette colours when necessary.
  */
-export const PROVIDER_ORDER = ['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi', 'antigravity-cli', 'muse'] as const;
+export const PROVIDER_ORDER = ['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi', 'muse'] as const;
 const SPARE_SLOTS = ['var(--series-7)', 'var(--series-8)'];
 export const OTHER = 'other';
 

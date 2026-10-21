@@ -52,8 +52,14 @@ live('antigravity, live', () => {
       const client = await harness.connect();
       const project = await client.call('projects.add', { path: projectDir, name: 'antigravity live' });
 
-      const installed = await client.call('providers.install', { providerId: 'antigravity' });
-      expect(installed.state).toBe('installed');
+      // The install answers at once and reports the rest as `providers.installProgress`.
+      const installStates: string[] = [];
+      client.on('providers.installProgress', (event) => {
+        if (event.providerId === 'antigravity') installStates.push(event.state);
+      });
+      await client.call('providers.install', { providerId: 'antigravity' });
+      await waitFor(() => installStates.includes('installed') || installStates.includes('failed'), INSTALL_TIMEOUT_MS);
+      expect(installStates.at(-1)).toBe('installed');
 
       // Every Antigravity account is isolated, the one the user asked for the
       // default location included: this never touches their own IDE login.

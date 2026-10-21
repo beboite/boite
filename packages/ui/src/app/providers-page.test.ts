@@ -50,16 +50,10 @@ test('Providers keeps installation details and Machines updates the managed copy
   expect(query('[data-testid=settings-tab-accounts]').textContent?.trim()).toBe('Providers');
 
   query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
-  // One Antigravity row: its CLI is signed in, so the row reads ready and the
-  // download Boite manages waits inside it.
-  const family = '[data-testid=provider-settings][data-provider-id=antigravity]';
-  await waitFor(() => document.querySelector(family) !== null);
-  expect(document.querySelectorAll(family)).toHaveLength(1);
-  expect(document.querySelector('[data-testid=provider-settings][data-provider-id=antigravity-cli]')).toBeNull();
-  expect(query(family).getAttribute('data-step')).toBe('ready');
-  await openProviderDetails('antigravity');
-  const absent = `${family} [data-testid=provider-member][data-provider-id=antigravity]`;
-  expect(document.querySelector(`${family} [data-testid=provider-member][data-provider-id=antigravity-cli]`)).not.toBeNull();
+  // One Antigravity row, the download Boite manages.
+  const absent = '[data-testid=provider-settings][data-provider-id=antigravity]';
+  await waitFor(() => document.querySelector(absent) !== null);
+  expect(document.querySelectorAll(absent)).toHaveLength(1);
 
   // Nothing on the machine: the size rides in the words, the button is one verb.
   expect(query(absent).getAttribute('data-step')).toBe('install');

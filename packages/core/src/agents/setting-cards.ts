@@ -15,7 +15,7 @@ import {
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, notFound, refused, RpcFailure } from '../errors.ts';
-import { checkEffort, checkModel, modelsFor } from '../threads/selection.ts';
+import { agentProvider, checkEffort, checkModel, modelsFor } from '../threads/selection.ts';
 import type { AgentStore } from './store.ts';
 
 export class AgentSettingCards {
@@ -55,7 +55,7 @@ export class AgentSettingCards {
   }
 
   private context(agent: AgentProfile): AgentSettingContext {
-    const provider = this.core.providers.require(agent.selection.providerId);
+    const provider = agentProvider(this.core, agent);
     const accountId = agent.selection.accountId;
     const checked = <T>(run: () => T): { ok: true; value: T } | { ok: false; message: string } => {
       try { return { ok: true, value: run() }; } catch (error) {
@@ -84,7 +84,7 @@ export class AgentSettingCards {
     this.core.threads.require(params.threadId);
     const agent = this.agentFor(params.threadId, params.agent);
     const ctx = this.context(agent);
-    const provider = this.core.providers.require(agent.selection.providerId);
+    const provider = agentProvider(this.core, agent);
     const models = modelsFor(provider, agent.selection.accountId);
     const model = models.find(m => m.id === agent.selection.model);
     const settings = AGENT_SETTING_KEYS.map((key): AgentSettingReading => {
@@ -138,7 +138,7 @@ export class AgentSettingCards {
     switch (key) {
       case 'projects': return save({ ...agent, projectIds: value as string[] });
       case 'model': {
-        const provider = this.core.providers.require(agent.selection.providerId);
+        const provider = agentProvider(this.core, agent);
         // A level the new model lacks goes back to its default rather than refusing the change.
         let effort: string | null = null;
         try { effort = checkEffort(provider, agent.selection.accountId, value as string, agent.selection.effort); } catch { /* The model's default level. */ }
