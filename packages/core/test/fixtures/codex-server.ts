@@ -25,6 +25,7 @@
  */
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { instructionsOf } from './history.ts';
 
 const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block|limits|flood)\]/g;
 const CHUNKS = 3;
@@ -239,14 +240,15 @@ function commandItem(itemId: string, status: string, output: string | null): unk
 }
 
 async function runTurn(turnId: string, text: string): Promise<void> {
+  const instructions = instructionsOf(text);
   notify('turn/started', { threadId, turn: turnRecord(turnId, 'inProgress') });
-  if (text.includes('[retry-progress]')) {
+  if (instructions.includes('[retry-progress]')) {
     notify('error', { threadId, turnId: 'previous-native-turn', error: { message: 'stale retry' }, willRetry: true });
     notify('error', { threadId, turnId, error: { message: 'provider overloaded' }, willRetry: true });
   }
   // The first `[at-capacity]` turn of a test is refused the way GPT models are when overloaded; the next one passes.
   const refusedBefore = existsSync(process.env['CODEX_FAKE_LOG'] ?? '') && readFileSync(process.env['CODEX_FAKE_LOG']!, 'utf8').includes('at-capacity refused');
-  if (text.includes('[at-capacity]') && !refusedBefore) {
+  if (instructions.includes('[at-capacity]') && !refusedBefore) {
     log('at-capacity refused');
     const error = { message: 'Selected model is at capacity. Please try a different model.', codexErrorInfo: 'serverOverloaded', additionalDetails: null };
     notify('error', { threadId, turnId, error, willRetry: false });
@@ -254,15 +256,15 @@ async function runTurn(turnId: string, text: string): Promise<void> {
     return;
   }
   // A spent five-hour window, reported the way the app-server does before the turn fails on it.
-  if (text.includes('[usage-limited]')) {
+  if (instructions.includes('[usage-limited]')) {
     notify('account/rateLimits/updated', { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: 4_102_444_800 }, secondary: { usedPercent: 40, windowDurationMins: 10080, resetsAt: 4_102_444_000 } } });
     const error = { message: 'You\'ve hit your usage limit. Try again at 3:45 PM.', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null };
     notify('turn/completed', { threadId, turn: { ...(turnRecord(turnId, 'failed') as object), error } });
     return;
   }
-  if (planEnabled && text.includes('[tasks]')) notify('turn/plan/updated', { threadId, turnId, plan: [{ step: 'Inspect source', status: 'completed' }, { step: 'Run checks', status: 'inProgress' }] });
-  const directives = directivesOf(text);
-  if (text.includes('[silent-reasoning]')) {
+  if (planEnabled && instructions.includes('[tasks]')) notify('turn/plan/updated', { threadId, turnId, plan: [{ step: 'Inspect source', status: 'completed' }, { step: 'Run checks', status: 'inProgress' }] });
+  const directives = directivesOf(instructions);
+  if (instructions.includes('[silent-reasoning]')) {
     notify('item/agentMessage/delta', { threadId, turnId, itemId: 'stored-answer', delta: 'Message already stored.' });
     notify('item/completed', { threadId, turnId, item: { type: 'agentMessage', id: 'stored-answer', text: 'Message already stored.' } });
     for (let index = 0; index < 35; index++) {

@@ -17,6 +17,7 @@
  * The framing is copied from the real mode on purpose: strict JSONL, LF only.
  */
 import { appendFileSync } from 'node:fs';
+import { instructionsOf } from './history.ts';
 
 const DIRECTIVE = /\[(agents|tool|thought|usage|slow|crash|ask|select|input|editor|retry|giveup|deaf|noclear|notify|timeout|compacted)\]/g;
 const CHUNKS = 3;
@@ -126,6 +127,7 @@ function textOf(value: unknown): string {
 }
 
 function directivesOf(text: string): Directive[] {
+  text = instructionsOf(text);
   DIRECTIVE.lastIndex = 0;
   const found: Directive[] = [];
   for (let match = DIRECTIVE.exec(text); match !== null; match = DIRECTIVE.exec(text)) {
@@ -492,6 +494,7 @@ function handle(message: Record<string, unknown>): void {
         }
       }
       const text = textOf(message['message']);
+      const instructions = instructionsOf(text);
       if (text.trimStart().startsWith('/fake-report')) {
         // An extension command: pi runs it, answers the prompt and starts no run,
         // so no event and no `agent_settled` follow.
@@ -499,7 +502,7 @@ function handle(message: Record<string, unknown>): void {
         log('extension command handled');
         return;
       }
-      if (text.includes('[preflight]')) {
+      if (instructions.includes('[preflight]')) {
         // A preflight that never ends (a before_agent_start handler, an auth
         // check on a dead network): real pi holds the prompt's answer until it
         // is over, and stays idle, so it still answers `abort` and `get_state`.
@@ -507,8 +510,8 @@ function handle(message: Record<string, unknown>): void {
         return;
       }
       streaming = true;
-      deaf = text.includes('[deaf]');
-      noClear = text.includes('[noclear]');
+      deaf = instructions.includes('[deaf]');
+      noClear = instructions.includes('[noclear]');
       send({ id, type: 'response', command: 'prompt', success: true });
       // After the response is written, never before: the real mode answers the
       // command and streams the run afterwards.

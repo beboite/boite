@@ -72,7 +72,12 @@ export async function protocolLoad(perProvider: number): Promise<void> {
           const thread = await client.call('threads.get', { threadId: turn.threadId });
           const answer = thread.messages.filter(m => m.turnId === turn.id && m.role === 'assistant')
             .flatMap(m => m.parts).filter(p => p.type === 'text').map(p => p.text).join('');
-          assert.equal(answer, `${prefix}-${turn.threadId}`, 'cross-thread or duplicated stream');
+          const marker = 'Current user request:\n';
+          const current = answer.includes(marker) ? answer.slice(answer.lastIndexOf(marker) + marker.length) : answer;
+          assert.equal(current, `${prefix}-${turn.threadId}`, 'cross-thread or duplicated stream');
+          for (const other of threads) {
+            if (other.id !== turn.threadId) assert(!answer.includes(other.id), 'history crossed threads');
+          }
         }
       }
     };

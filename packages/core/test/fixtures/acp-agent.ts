@@ -50,6 +50,7 @@
  * agent that counts each process from zero instead.
  */
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { instructionsOf } from './history.ts';
 import { Readable, Writable } from 'node:stream';
 import { agent, ndJsonStream, PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
 import type {
@@ -368,16 +369,18 @@ const app = agent({ name: 'acp-fake' })
     log('session/prompt');
     const sessionId = params.sessionId;
     const text = promptText(params.prompt);
+    // Historical test directives are context, never another request to execute.
+    const instructions = instructionsOf(text);
     for (const block of params.prompt) {
       if (block.type === 'image') log(`image ${block.mimeType} ${block.data.length}`);
     }
     const send = (update: SessionUpdate): Promise<void> => client.notify('session/update', { sessionId, update });
-    if (text.includes('[tasks]')) await send({ sessionUpdate: 'plan', entries: [{ content: 'Inspect source', priority: 'medium', status: 'completed' }, { content: 'Run checks', priority: 'medium', status: 'in_progress' }] });
+    if (instructions.includes('[tasks]')) await send({ sessionUpdate: 'plan', entries: [{ content: 'Inspect source', priority: 'medium', status: 'completed' }, { content: 'Run checks', priority: 'medium', status: 'in_progress' }] });
     const say = (chunk: string): Promise<void> =>
       send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunk } });
 
     // The agent switching on its own, before anything else it says.
-    const switched = modeSwitchIn(text);
+    const switched = modeSwitchIn(instructions);
     if (switched !== null) {
       currentModeId = switched;
       const option = configOptions.find((entry) => entry.id === 'mode');
@@ -390,7 +393,7 @@ const app = agent({ name: 'acp-fake' })
       }
     }
 
-    const directives = directivesOf(text);
+    const directives = directivesOf(instructions);
     // A real agent reasons before it answers, so the thought chunks go first.
     for (const directive of directives) {
       if (directive !== 'thought') continue;

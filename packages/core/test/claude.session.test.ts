@@ -55,7 +55,8 @@ describe('claude driver', () => {
     await client.call('threads.update', { threadId, permissionMode: 'default' });
     const next = await client.call('turns.start', { threadId, prompt: 'Next task' });
     // A control that never answers must not hold the next prompt or the finished turn.
-    await waitFor(() => calls.some(call => call.prompts.includes('Next task')));
+    await waitFor(() => calls.some(call => call.prompts.some(prompt => prompt.endsWith('Next task'))));
+    if (stop) expect(calls.at(-1)!.prompts.at(-1)).toContain('First task');
     expect(harness.core.journal.getTurn(next.id)?.status).toBe('running');
     control.resolve();
     await answered.promise;
@@ -535,7 +536,9 @@ describe('claude driver', () => {
 
     expect(await runTurn(client, threadId, 'again')).toBe('done');
     expect(queries).toHaveLength(2);
-    expect(calls[1]?.prompts).toEqual(['again']);
+    expect(calls[1]?.prompts).toHaveLength(1);
+    expect(calls[1]?.prompts[0]).toContain('take your time');
+    expect(calls[1]?.prompts[0]).toEndWith('Current user request:\nagain');
   });
 
 });
