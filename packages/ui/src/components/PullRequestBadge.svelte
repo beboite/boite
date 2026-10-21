@@ -11,7 +11,7 @@
 </a>
 
 <style>
-  .pr-link { display: inline-flex; align-items: center; flex-shrink: 0; gap: 4px; color: var(--color-success); font-size: var(--text-xs); pointer-events: auto; text-decoration: underline; text-underline-offset: 3px; }
+  .pr-link { display: inline-flex; align-items: center; flex-shrink: 0; gap: 4px; color: var(--color-live); font-size: var(--text-xs); pointer-events: auto; text-decoration: underline; text-underline-offset: 3px; }
   .pr-link.merged { color: var(--color-accent); }
   .pr-link.closed { color: var(--color-danger); }
   .pr-link:hover { text-decoration: underline; }
