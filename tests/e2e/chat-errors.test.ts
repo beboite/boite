@@ -74,7 +74,24 @@ test('failed automatic turns share one folded group and retain every wake-up, ti
   await page.evaluate(`__boiteTest.workspace.active.findOpen = true; __boiteTest.workspace.active.findRequest += 1`);
   await page.waitFor(`document.querySelector('[data-testid="find-input"]')`);
   await page.type('[data-testid="find-input"]', 'Background work finished');
-  await page.waitFor(`document.querySelector('[data-mid="failure:system-1"]')`);
+  await page.waitFor(`(() => {
+    const view = document.querySelector('[data-testid="timeline"]')?.getBoundingClientRect();
+    const entry = document.querySelector('[data-mid="failure:system-1"]');
+    if (!view || !entry) return false;
+    const walker = document.createTreeWalker(entry, NodeFilter.SHOW_TEXT);
+    const query = 'background work finished';
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const at = (node.nodeValue ?? '').toLowerCase().indexOf(query);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + query.length);
+      const rect = range.getBoundingClientRect();
+      return rect.top >= view.top && rect.bottom <= view.bottom;
+    }
+    return false;
+  })()`);
   expect(await page.evaluate(`document.querySelector('[data-testid="failed-attempts-history"]').open`)).toBe(true);
   await page.click('[data-testid="find-close"]');
   await page.click('[data-testid="failed-attempts-toggle"]');
