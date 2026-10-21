@@ -23,6 +23,11 @@ updates:
     directory: /apps/shell/src-tauri
     multi-ecosystem-group: monthly
     patterns: ['*']
+    ignore:
+      # windows-core must stay on the windows line webview2-com uses; for a 0.x
+      # crate Dependabot counts 0.62 -> 0.100 as minor, so ignore both.
+      - dependency-name: windows-core
+        update-types: [version-update:semver-major, version-update:semver-minor]
   - package-ecosystem: bun
     directory: /
     schedule:
