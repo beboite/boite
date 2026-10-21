@@ -31,6 +31,56 @@ beforeAll(async () => {
 
 afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
+test('Windows caption buttons keep their full hit areas beside the resize handles', async () => {
+  const result = await page.evaluate<{ blocked: string[]; reachable: number; captions: number }>(`(async () => {
+    const { mockIPC, mockWindows, clearMocks } = await import('/node_modules/@tauri-apps/api/mocks.js');
+    const { mount, unmount } = await import('/node_modules/svelte/src/index-client.js');
+    const { default: TitleBar } = await import('/src/components/TitleBar.svelte');
+    const { Store } = await import('/src/lib/store.svelte.ts');
+    const userAgent = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+    const platform = Object.getOwnPropertyDescriptor(navigator, 'platform');
+    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' });
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    mockWindows('main');
+    mockIPC(() => false, { shouldMockEvents: true });
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;inset:0;z-index:20000;background:var(--color-background)';
+    document.body.append(host);
+    const component = mount(TitleBar, { target: host, props: { store: new Store() } });
+    try {
+      for (let attempt = 0; attempt < 100 && host.querySelectorAll('[data-resize-direction]').length !== 8; attempt++)
+        await new Promise(resolve => setTimeout(resolve, 20));
+      const blocked = [];
+      for (const button of host.querySelectorAll('[data-testid=titlebar-controls] button')) {
+        const r = button.getBoundingClientRect();
+        for (const x of [r.left + 1, (r.left + r.right) / 2, r.right - 1]) {
+          for (const y of [r.top + 1, (r.top + r.bottom) / 2, r.bottom - 1]) {
+            if (document.elementFromPoint(x, y)?.closest('button') !== button)
+              blocked.push(button.getAttribute('aria-label') + ' at ' + x + ',' + y);
+          }
+        }
+      }
+      let reachable = 0;
+      for (const handle of host.querySelectorAll('[data-resize-direction]')) {
+        const r = handle.getBoundingClientRect();
+        if (document.elementFromPoint((r.left+r.right)/2, (r.top+r.bottom)/2) === handle) reachable++;
+      }
+      return { blocked, reachable, captions: host.querySelectorAll('[data-testid=titlebar-controls] button').length };
+    } finally {
+      await unmount(component);
+      host.remove();
+      clearMocks();
+      for (const [key, descriptor] of [['userAgent', userAgent], ['platform', platform]]) {
+        if (descriptor) Object.defineProperty(navigator, key, descriptor);
+        else delete navigator[key];
+      }
+    }
+  })()`);
+  expect(result.blocked).toEqual([]);
+  expect(result.captions).toBe(3);
+  expect(result.reachable).toBe(8);
+}, 30_000);
+
 // Each test names its budget: a cold dev server on a loaded Windows runner
 // transformed the launcher past bun's 5 s default (E2E 3/3, 2026-10-21).
 
