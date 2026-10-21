@@ -263,6 +263,14 @@ test('a thread at rest watching pull requests counts its time until their checks
   const settled = { ...watch, seen: { ...seen, checks: { total: 20, running: 0, failed: 0 } } };
   expect(threadState({ status: 'idle', unread: true, pullRequestWatches: [settled] })).toBe('done');
   expect(threadState({ status: 'idle', unread: false, pullRequestWatches: [settled] })).toBeNull();
+  // In the merge queue its checks run on the merge group: still watching until it merges or leaves the queue.
+  const queued = { ...watch, seen: { ...settled.seen, queue: { position: 2 } } };
+  expect(threadState({ status: 'idle', unread: false, pullRequestWatches: [queued] })).toBe('watching');
+  expect(threadState({ status: 'idle', unread: false, pullRequestWatches: [{ ...queued, seen: { ...queued.seen, queue: null } }] })).toBeNull();
+  unmount(running, { outro: false });
+  running = mount(ThreadState, { target: document.body, props: { thread: { ...shown, requestSince: NOW - 600_000, pullRequestWatches: [queued] }, now: NOW } });
+  flushSync();
+  expect((document.body.firstElementChild as HTMLElement).getAttribute('title')).toBe('Watching PR\n#7 (Merge queue, position 2)\n10m 00s');
   expect(projectRollup([{ status: 'idle', unread: true }, { status: 'idle', unread: false, pullRequestWatches: [watch] }])).toEqual({ kind: 'watching', count: 1 });
 });
 

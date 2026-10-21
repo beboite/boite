@@ -60,7 +60,8 @@
     }
     if (kind === 'watching') {
       const head = watches.length === 1 ? strings.sidebar.state.watching : fill(strings.sidebar.state.watchingMany, { count: String(watches.length) });
-      return `${head}\n${watches.map(watch => `#${watch.number}`).join(', ')}${spent === null ? '' : `\n${spent}`}`;
+      const queued = (watch: (typeof watches)[number]) => watch.seen?.queue ? ` (${fill(strings.tasks.watchQueued, { position: String(watch.seen.queue.position) })})` : '';
+      return `${head}\n${watches.map(watch => `#${watch.number}${queued(watch)}`).join(', ')}${spent === null ? '' : `\n${spent}`}`;
     }
     if (kind === 'interrupted' && wait?.state === 'interrupted') {
       return `${strings.sidebar.state.interrupted}\n${fill(strings.sidebar.state.interruptedBy, { what: wait.for, reason: strings.sidebar.state.interruption[wait.reason] })}`;

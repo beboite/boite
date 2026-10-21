@@ -243,6 +243,9 @@ with one message, a `pull-request` turn, when:
   rate limit, review skipped) wake nothing. A body already read, its HTML
   comments and spacing aside, never wakes twice;
 - the branch starts to conflict with its base;
+- it leaves the base branch's merge queue still open: a check of its merge
+  group failed, it conflicted there or someone took it out. A merge seen on
+  the same read is the only news;
 - someone other than that account merges or closes the pull request.
 
 The message names each change with its link. A change waits 20 seconds for
@@ -250,7 +253,7 @@ the rest of its burst and for a running turn to end, then everything waiting
 goes out together; the same state never wakes twice.
 
 Each watched PR costs one GraphQL query a minute, a fingerprint of its state,
-mergeability, head, check counts by state, comment and review counts, edits
+mergeability, head, place in the merge queue, check counts by state, comment and review counts, edits
 and `updatedAt`. Only when it moves does the core read the checks one by one
 (with whether each is required) and the comments, reviews and inline comments,
 100 a page up to 10 pages each; remarks are read again every 30 minutes
@@ -272,8 +275,12 @@ failed read is the one that asks who merged or closed it.
 
 A watch ends on merge or close, on Stop, on archive or Mark done, on removal
 and on unwatch. It survives a core restart (`pr-watches:<thread>` in the
-journal settings). A thread at rest with a watch reads as watching, not done,
-in the sidebar. The thread header carries a chip with the watched numbers;
+journal settings). A thread at rest reads as watching, not done, in the
+sidebar while a watch waits on GitHub: not read yet, checks running on the
+head, or the PR in the merge queue, whose checks run on the merge group and
+never show on the head. Its tooltip gives the queue position. Once the checks
+settled out of the queue the agent has its answer and the thread reads as
+finished, though the watch stays for reviews and conflicts. The thread header carries a chip with the watched numbers;
 its menu shows each watch's last status and stops one, on a phone too. The
 owner's Tasks panel lists them the same way. A paired phone may stop a watch,
 never start one. A delegated agent watches its own PR like a conversation:
