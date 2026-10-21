@@ -56,7 +56,7 @@ export class MergedPrArchive {
     if (!project || project.archived || project.path === thread.cwd || core.journal.getSetting(`project-auto-archive-merged-pr:${project.id}`) === false) return false;
     if (!this.quiescent(thread, busy)) return false;
     // Retained children remain history. Every visible or archived member must
-    // have completed and acknowledged its work before the parent can disappear.
+    // have completed and delivered its work before the parent can reach Done.
     const children = core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT id FROM threads WHERE parent_thread_id = ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family WHERE id <> ? AND id NOT IN (SELECT thread_id FROM thread_deletions)').all(thread.id, thread.id) as { id: string }[];
     if (children.some(({ id }) => { const child = core.journal.getThread(id); return !child || !this.quiescent(child, busy, true); })) return false;
     const repository = repositoryOf(thread.cwd);
@@ -65,7 +65,8 @@ export class MergedPrArchive {
   }
   private quiescent(thread: ThreadSummary, busy: ReadonlySet<string>, child = false): boolean {
     const core = this.core;
-    if (core.threads.isRemoving(thread.id) || thread.agentSessionId || thread.status !== 'idle' || thread.pinned || thread.unread || Date.now() - thread.updatedAt < this.settleMs || core.threads.focus.viewed(thread.id) || core.threads.focus.hasProtectedInput(thread.id)) return false;
+    // Reading or viewing completed work is not pending work. Keep unread history in Done.
+    if (core.threads.isRemoving(thread.id) || thread.agentSessionId || thread.status !== 'idle' || thread.pinned || Date.now() - thread.updatedAt < this.settleMs || core.threads.focus.hasProtectedInput(thread.id)) return false;
     if (core.threads.sideQuestions.active(thread.id) || core.threads.runner.handles.has(thread.id) || core.threads.runner.steering.has(thread.id) || core.threads.agentState.background.get(thread.id)?.length || core.threads.moves.pendingOf(thread.id)) return false;
     if (busy.has(thread.id)) return false;
     if (core.procs.liveCount(thread.id) || core.terminals.threadProcesses(thread.id) || core.threads.cards.listPermissions(thread.id).length || [...core.threads.cards.questions.values()].some(entry => entry.request.threadId === thread.id) || [...core.threads.cards.asyncCards.values()].some(entry => entry.threadId === thread.id)) return false;
@@ -107,7 +108,7 @@ export class MergedPrArchive {
     const rows = this.core.journal.db.query(`SELECT rowid, id,
       archived = 0 AND parent_thread_id IS NULL AND agent_session_id IS NULL
       AND project_id IS NOT NULL AND branch IS NOT NULL AND branch NOT IN ('', 'HEAD')
-      AND COALESCE(branch_naming_pending, 0) = 0 AND status = 'idle' AND pinned = 0 AND unread = 0
+      AND COALESCE(branch_naming_pending, 0) = 0 AND status = 'idle' AND pinned = 0
       AND updated_at <= ? AND NOT EXISTS (SELECT 1 FROM thread_deletions WHERE thread_id = threads.id) AS candidate
       FROM threads WHERE rowid > ? AND rowid <= ? ORDER BY rowid LIMIT ?`)
       .all(Date.now() - this.settleMs, this.cursor, this.scanEnd, ARCHIVE_SCAN_ROWS) as { rowid: number; id: string; candidate: number | null }[];

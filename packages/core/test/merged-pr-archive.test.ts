@@ -249,6 +249,34 @@ test('a PR merging outside Boite is archived on the next minute without a thread
   finally { clock.mockRestore(); }
 });
 
+test.each(['unread', 'viewed'] as const)('a merged PR puts its %s conversation in Done without manual acknowledgement', async state => {
+  const f = await fixture();
+  if (state === 'unread') {
+    harness.core.journal.putThread({ ...harness.core.threads.require(f.threadId), unread: true });
+  } else {
+    await f.client.call('threads.focus', { threadId: f.threadId, protectedThreadIds: [] });
+  }
+  expect(await service.sweep()).toBe(1);
+  const saved = await f.client.call('threads.get', { threadId: f.threadId });
+  expect(saved).toMatchObject({ archived: true, unread: state === 'unread', archiveReason: { type: 'pr-merged', number: 7 } });
+  expect(saved.doneAt).toBeTypeOf('number');
+  expect(existsSync(join(f.checkout, '.git'))).toBe(true);
+});
+
+test('a delivered merged family reaches Done with unread history and a viewed child', async () => {
+  const f = await completedFamily();
+  for (const thread of [harness.core.threads.require(f.threadId), ...f.children]) {
+    harness.core.journal.putThread({ ...thread, unread: true });
+  }
+  const child = harness.core.threads.require(f.children[0]!.id);
+  const history = harness.core.journal.listTurns(child.id);
+  await f.client.call('threads.focus', { threadId: child.id, protectedThreadIds: [] });
+  expect(await service.sweep()).toBe(1);
+  expect(harness.core.threads.require(f.threadId)).toMatchObject({ archived: true, unread: true, doneAt: expect.any(Number) });
+  expect(harness.core.threads.require(child.id)).toEqual(child);
+  expect(harness.core.journal.listTurns(child.id)).toEqual(history);
+});
+
 test('root mutations during archive selection yields are observed before proof admission', async () => {
   const f = await fixture();
   const journal = harness.core.journal;
@@ -297,10 +325,10 @@ test('a completed delivered workflow and delegation family archives with histori
   } finally { stale.close(); }
 });
 
-test('retained child activity, unread results, protected input and undelivered family results prevent archive', async () => {
+test('retained child activity, protected input and undelivered family results prevent archive', async () => {
   const f = await completedFamily();
   const child = harness.core.threads.require(f.children[0]!.id);
-  for (const patch of [{ status: 'running' as const }, { unread: true }, { pinned: true }, { agentSessionId: 'retained-session' }]) {
+  for (const patch of [{ status: 'running' as const }, { pinned: true }, { agentSessionId: 'retained-session' }]) {
     harness.core.journal.putThread({ ...child, ...patch });
     expect(await service.sweep()).toBe(0);
   }
@@ -310,9 +338,9 @@ test('retained child activity, unread results, protected input and undelivered f
   finally { harness.core.procs.killTree(child.id); await childProcess.exited; }
   await f.client.call('threads.focus', { threadId: null, protectedThreadIds: [child.id] });
   expect(await service.sweep()).toBe(0);
-  await f.client.call('threads.focus', { threadId: child.id, protectedThreadIds: [] });
+  await f.client.call('threads.focus', { threadId: child.id, protectedThreadIds: [child.id] });
   expect(await service.sweep()).toBe(0);
-  await f.client.call('threads.focus', { threadId: null });
+  await f.client.call('threads.focus', { threadId: null, protectedThreadIds: [] });
   harness.core.journal.db.query("UPDATE workflow_runs SET data = json_set(data, '$.delivered', 0) WHERE id = ?").run(f.runId);
   expect(await service.sweep()).toBe(0);
   harness.core.journal.db.query("UPDATE workflow_runs SET data = json_set(data, '$.delivered', 1) WHERE id = ?").run(f.runId);
@@ -320,11 +348,10 @@ test('retained child activity, unread results, protected input and undelivered f
   harness.core.journal.db.query("UPDATE delegation_messages SET status = 'uncertain' WHERE id = ?").run(letter.id);
   expect(await service.sweep()).toBe(0);
   harness.core.journal.db.query("UPDATE delegation_messages SET status = 'delivered' WHERE id = ?").run(letter.id);
-  // Archiving a completed child does not discard its retained unread/input/result guards.
+  // An unread archived child's history survives its parent's move to Done.
   harness.core.journal.putThread({ ...child, archived: true, unread: true });
-  expect(await service.sweep()).toBe(0);
-  harness.core.journal.putThread({ ...child, archived: true });
   expect(await service.sweep()).toBe(1);
+  expect(harness.core.threads.require(child.id).unread).toBe(true);
 });
 
 test('pending and retained side answers on a root or retained descendant keep the merged family visible', async () => {
@@ -576,16 +603,16 @@ test('a linked PR pushed under another branch name archives the conversation', a
   expect(archiveState(harness.core.journal, f.threadId).reason).toMatchObject({ type: 'pr-merged', number: 7, url: pushed.url });
 });
 
-test('busy, viewed, paused workflow, child and stale opt-out or restore leave the root visible', async () => {
+test('busy, protected input, paused workflow, child and stale opt-out or restore leave the root visible', async () => {
   const f = await fixture();
   const original = harness.core.threads.require(f.threadId);
-  for (const patch of [{ status: 'waiting' as const }, { unread: true }, { pinned: true }]) {
+  for (const patch of [{ status: 'waiting' as const }, { pinned: true }]) {
     harness.core.journal.putThread({ ...original, ...patch }); expect(await service.sweep()).toBe(0);
   }
   harness.core.journal.putThread(original);
-  harness.core.threads.focus.set('fixture-viewer', f.threadId, [], false);
+  harness.core.threads.focus.set('fixture-viewer', f.threadId, [f.threadId], false);
   expect(await service.sweep()).toBe(0);
-  harness.core.threads.focus.set('fixture-viewer', null);
+  harness.core.threads.focus.set('fixture-viewer', null, []);
   harness.core.journal.db.query("INSERT INTO workflow_runs (id,root_id,status,created_at,updated_at,data) VALUES ('paused',?,'paused',0,0,'{}')").run(f.threadId);
   expect(await service.sweep()).toBe(0);
   harness.core.journal.db.query("DELETE FROM workflow_runs WHERE id='paused'").run();
