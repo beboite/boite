@@ -416,12 +416,13 @@ archives and permits hiding them again when the policy is enabled.
 A shared checkout, reused branch history, ambiguous root holder, dirty tree or
 failed Git/GitHub read leaves the conversation visible.
 
-Viewed, pinned or unread threads remain visible, as do threads with protected
-client input, live processes or terminals, queued turns, background work, pending
-cards or messages, unfinished goals or loops, and active, paused or undelivered
+Merged conversations move to Done even while viewed or unread; their unread
+flags and retained history stay intact. Pinned threads remain visible, as do
+threads with protected client input, live processes or terminals, queued turns,
+background work, pending cards or messages, unfinished goals or loops, and active, paused or undelivered
 workflows. Completed workflow and delegated children can remain as history:
 every retained child, including an archived child, must be idle with a completed
-turn, read, and free of the same activity and input protections. Undelivered or
+turn and be free of the same activity and input protections. Undelivered or
 uncertain family results keep the parent visible. Fresh repository and family
 state checks precede the archive transaction. A late child turn or wake cannot
 start under an archived parent; Restore admits new work again without changing
