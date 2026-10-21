@@ -32,7 +32,13 @@ test('mission artifacts retry after completion, review waits for execution and t
   const h = await startTestCore();
   try {
     const { client, agent, mission, task, project } = await fixture(h);
+    const ensure = h.core.worktrees.ensure.bind(h.core.worktrees);
+    let preparation: ReturnType<typeof ensure> | undefined;
+    h.core.worktrees.ensure = (...args) => preparation = ensure(...args);
     const assigned = await client.call('agents.task.acquire', { taskId: task.id, agentId: agent.id, expectedRevision: task.revision });
+    // Git preparation belongs to the test's overall budget, not the short scheduler wait.
+    await waitFor(() => preparation !== undefined);
+    await preparation;
     await waitFor(() => h.core.workforce.records.list('run').some(r => r.status === 'running'));
     const run = h.core.workforce.records.list('run')[0]!;
     const thread = h.core.threads.require(run.threadId);
@@ -70,10 +76,11 @@ test('shutdown and a storage change during workspace preparation retain its reco
     const ensure = h.core.worktrees.ensure.bind(h.core.worktrees);
     let release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });
-    let prepared: { path: string; branch: string } | undefined;
-    h.core.worktrees.ensure = async (...args) => { prepared = await ensure(...args); await held; return prepared; };
+    let preparation: ReturnType<typeof ensure> | undefined;
+    h.core.worktrees.ensure = async (...args) => { preparation = ensure(...args); const prepared = await preparation; await held; return prepared; };
     await client.call('agents.task.acquire', { taskId: task.id, agentId: agent.id, expectedRevision: task.revision });
-    await waitFor(() => !!prepared);
+    await waitFor(() => preparation !== undefined);
+    const prepared = (await preparation)!;
     await client.call('settings.set', { worktreeStorage: { mode: 'shared', directory: join(h.dataDir, 'new-storage') } });
     const closing = h.core.agentRuntime.close();
     release(); await closing;
@@ -82,8 +89,8 @@ test('shutdown and a storage change during workspace preparation retain its reco
     next = new Core({ dataDir: h.dataDir, token: h.token });
     await waitFor(() => next!.workforce.records.list('run').some(r => r.status === 'running'));
     const session = next.workforce.records.list('session')[0]!;
-    expect(next.threads.require(session.threadId).cwd).toBe(prepared!.path);
-    expect(next.threads.require(session.threadId).branch).toBe(prepared!.branch);
+    expect(next.threads.require(session.threadId).cwd).toBe(prepared.path);
+    expect(next.threads.require(session.threadId).branch).toBe(prepared.branch);
     expect(next.workforce.records.list('run')).toHaveLength(1);
   } finally {
     if (next) { await next.close(); await removeDir(h.dataDir); }
