@@ -265,6 +265,8 @@ interface FakeGitHub {
   head: string;
   /** Its place in the merge queue, null out of it. */
   queue: number | null;
+  /** The state only the detail read gives, as when GitHub merges between the fingerprint and the detail. */
+  detailState?: 'MERGED' | 'CLOSED';
   runs: Run[];
   comments: unknown[];
   reviews: unknown[];
@@ -299,11 +301,12 @@ async function answer(github: FakeGitHub, args: string[]): Promise<string> {
     github.closerFailure = null;
     if (failure) throw new Error(failure);
     const by = { login: github.closedBy };
-    return JSON.stringify({ data: { viewer: { login: 'meetsu' }, repository: { pullRequest: { state: github.state, mergedBy: github.state === 'MERGED' ? by : null,
-      timelineItems: { nodes: github.state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
+    const state = github.detailState ?? github.state;
+    return JSON.stringify({ data: { viewer: { login: 'meetsu' }, repository: { pullRequest: { state, mergedBy: state === 'MERGED' ? by : null,
+      timelineItems: { nodes: state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
   }
   const mergeQueueEntry = github.queue === null ? null : { position: github.queue };
-  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.state, mergeable: github.mergeable, headRefOid: github.head, mergeQueueEntry });
+  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.detailState ?? github.state, mergeable: github.mergeable, headRefOid: github.head, mergeQueueEntry });
   if (query) {
     const counts = new Map<string, number>();
     for (const run of github.runs) { const key = run.status && run.status !== 'COMPLETED' ? run.status : run.conclusion ?? 'SUCCESS'; counts.set(key, (counts.get(key) ?? 0) + 1); }
@@ -567,14 +570,18 @@ test('a pull request in the merge queue keeps its watch waiting, and leaving the
   expect(wakes(threadId)).toHaveLength(1);
   expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('It left the merge queue of main without merging');
   expect(summary().requestSince).toBeNull();
-  // Queued again and merged: the agent's own merge ends the watch with no wake about the queue.
+  // Queued again and merged between the fingerprint, still open, and the detail read: the merge is the news, not the queue.
   github.queue = 1;
   await drive();
   github.queue = null;
-  github.state = 'MERGED';
+  github.detailState = 'MERGED';
+  github.closedBy = 'maintainer';
   await drive();
   await settled(threadId);
-  expect(wakes(threadId)).toHaveLength(1);
+  expect(wakes(threadId)).toHaveLength(2);
+  const text = wakeText(threadId, wakes(threadId)[1]!.id);
+  expect(text).toContain('maintainer merged the pull request; its watch ended.');
+  expect(text).not.toContain('merge queue');
   expect(watches.of(threadId)).toEqual([]);
 });
 

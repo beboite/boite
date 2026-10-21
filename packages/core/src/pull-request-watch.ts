@@ -243,6 +243,11 @@ export class PullRequestWatches {
       }
       // Rules alone expired: the checks already read are judged against them, with no detail read.
       const read = statusMoved || remarksDue || !kept ? await this.#shared(memo, `detail ${record.url}`, () => this.#graphql(threadId, record, DETAIL_QUERY).then(parseDetail)) : kept;
+      // Merged or closed between the two reads: that is the news, not leaving the queue.
+      if (read.state !== 'OPEN') {
+        if (!baseline) await this.#end(threadId, record, runtime, memo, read.state);
+        return read.state;
+      }
       const detail = withRequired(read, await this.#requiredOf(threadId, record, read.base));
       const remarks = remarksDue ? await this.#shared(memo, `remarks ${record.url}`, () => this.#remarks(threadId, record)) : null;
       // A stop or an unwatch that landed during the reads wins.
