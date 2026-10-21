@@ -1,8 +1,9 @@
 <script lang="ts">
   import { ChevronRight, CircleAlert } from '@lucide/svelte';
   import { strings } from '../lib/strings';
+  import type { Snippet } from 'svelte';
 
-  let { message, reconnect }: { message: string; reconnect?: () => void } = $props();
+  let { message, reconnect, history }: { message: string; reconnect?: () => void; history?: Snippet } = $props();
 
   // Prefer the specific refusal over the provider's generic server-error prefix.
   const kind = $derived(/\bno available subscription\b/i.test(message) ? 'subscription'
@@ -24,7 +25,9 @@
     {#if reconnect}
       <button type="button" class="quiet small reconnect" data-testid="error-reconnect" onclick={reconnect}><span class="ui-label">{strings.connect.reconnect}</span></button>
     {/if}
-    {#if detailed}
+    {#if history}
+      {@render history()}
+    {:else if detailed}
       <details>
         <summary><ChevronRight size={13} strokeWidth={1.75} /><span class="ui-label">{strings.chat.errorDetails}</span></summary>
         <pre data-testid="error-diagnostic">{message}</pre>

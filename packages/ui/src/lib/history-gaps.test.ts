@@ -118,6 +118,9 @@ describe('history gaps', () => {
     const total = rows.map((_, at) => at * ESTIMATE).concat(rows.length * ESTIMATE);
     expect(heldNear(total, rows, messages, 2 * ESTIMATE, new Map())).toBe(2);
     expect(heldNear(total, rows, messages, 2 * ESTIMATE, new Map([['turn', [view]]]))).toBe(messages.length);
+    // A folded row still needs every original message when old pages are released.
+    const folded = [{ ...rows.at(-1)!, failures: messages.slice(-8) }];
+    expect(heldNear([0, ESTIMATE], folded, messages, ESTIMATE, new Map())).toBe(8);
   });
 
   test('a page landing above the reader moves the view by what the row drifted on screen, and only then', async () => {

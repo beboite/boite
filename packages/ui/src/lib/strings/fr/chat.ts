@@ -181,6 +181,7 @@ export const fr: Translation = {
     errorSubscriptionHint: 'Connectez un compte ou attendez la réinitialisation de son quota.',
     errorServerTitle: 'Le fournisseur est indisponible',
     errorServerHint: 'Réessayez dans un instant.',
-    errorDetails: 'Détails techniques'
+    errorDetails: 'Détails techniques',
+    failedAttempts: '{count} tentatives en échec'
   }
 };

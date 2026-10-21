@@ -17,6 +17,7 @@
   import Deferred, { parts } from './Deferred.svelte';
   import { provideViewerHost, type Gallery } from '../lib/media-gallery';
   import AssistantMessage from './AssistantMessage.svelte';
+  import FailedAttempts from './FailedAttempts.svelte';
   import MoveMarker from './MoveMarker.svelte';
   import SpawnMarker from './SpawnMarker.svelte';
   import MemoryRow from './MemoryRow.svelte';
@@ -41,7 +42,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { MessageReveal } from '../lib/message-reveal.svelte';
   import { placeViews, turnViews, viewPart } from '../lib/inline-view';
-  import { filesLast, publishedFile, quietKeepalives } from '../lib/message-order';
+  import { filesLast, firstAssistantByTurn, publishedFile, quietKeepalives } from '../lib/message-order';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -114,7 +115,7 @@
   const placement = $derived(store.openThread?.id === threadId ? store.messagePlacement?.(threadId, messages) ?? null : null);
   const positional = $derived((placement?.first ?? null) !== null);
   const gapped = $derived.by(() => {
-    const placed = gapRows.place(cut.build(timeline, memoryPlacement.inline), messages, placement?.gaps ?? NO_GAPS);
+    const placed = gapRows.place(cut.build(timeline, memoryPlacement.inline, placement?.gaps), messages, placement?.gaps ?? NO_GAPS);
     // A row that grew or was cut weighs something else until it is measured.
     if (placed.at(cut.changedFrom) < slots.dirty) slots.dirty = placed.at(cut.changedFrom);
     return placed;
@@ -187,6 +188,7 @@
   });
   let viewHeight = $state(savedReading?.height ?? 0);
   let navigationTarget = $state<string | null>(null);
+  let failureTarget = $state<{ id: string } | null>(null);
   let promptTarget = $state<string | null>(savedReading?.followPrompt ?? null);
   let reservePrompt = $state<string | null>(savedReading?.reservePrompt ?? null);
   let lifting = $state(false);
@@ -220,6 +222,7 @@
     const box = viewport;
     const index = rowIndexOf(rows, id, part);
     if (!box || index < 0) return;
+    failureTarget = { id };
     navigationTarget = rows[index]!.id;
     pinned = false;
     behind = true;
@@ -583,6 +586,10 @@
    *  "Jump to latest" starts, whose scroll events neither unpin the list nor bring the button back. */
   const hold = new PointerHold(), glide = new BottomGlide(), edge = new BottomEdge();
   function press(event: PointerEvent | TouchEvent) { releaseNavigation(); hold.press(event); }
+  function inspectFailures(opening: boolean) {
+    if (opening) { releaseNavigation(); pinned = false; leftBottom = true; rememberAnchor(); }
+    else if (viewport && viewport.scrollHeight <= viewport.clientHeight + 1) { pinned = true; leftBottom = false; behind = false; }
+  }
   /** The turn whose answer is under the pointer: its summary shows from any of its messages (`pointedTurn`). */
   let pointed = $state<string | null>(null);
   /** Whether the list keeps to the bottom right now: pinned, and nobody is moving it. */
@@ -701,14 +708,7 @@
   // Finished and streaming messages are derived apart, so a delta never rescans the thread.
   const progress = new TurnProgress(() => messages);
   /** One model attribution per turn, independent of the rendered window and streamed parts. */
-  const firstAssistantInTurn = $derived.by(() => {
-    const result = new Map<string, string>();
-    for (const message of messages) {
-      // A view or a published file is drawn after the answer, wherever it was published: the answer's first message carries the model.
-      if (message.role === 'assistant' && !result.has(message.turnId) && !viewPart(message) && !publishedFile(message)) result.set(message.turnId, message.id);
-    }
-    return result;
-  });
+  const firstAssistantInTurn = $derived(firstAssistantByTurn(messages));
   /** The last row of each turn: a later message of the same turn replaces an earlier one. */
   const lastInTurn = $derived(new Map(timeline.map((message): [string, string] => [message.turnId, message.id])));
   /** Each turn's answers, rebuilt when a message comes or goes, never on a part or a delta. */
@@ -728,10 +728,7 @@
    * persistent agent's session refuses, and only on a thread at rest: a turn
    * still running is stopped first (Escape).
    */
-  const branchable = $derived.by(() => {
-    const thread = store.openThread;
-    return thread !== null && thread.id === threadId && !thread.agentSessionId && thread.projectId !== null;
-  });
+  const branchable = $derived(store.openThread?.id === threadId && !store.openThread.agentSessionId && store.openThread.projectId !== null);
   // A prompt still waiting in the queue would run after the edit, on the rewound thread, as would an edit started under a prompt still on its way to the core.
   const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0 && !store.composerStates[threadId]?.sending);
 
@@ -750,7 +747,7 @@
 <div class="timeline-wrap" style:--dock-room="{dockRoom.height}px" style:--dock-clearance="{dockRoom.clearance}px">
   {#if store.findOpen && FindBar}
     <FindBar {messages} {viewport} request={store.findRequest} jump={(id, part) => jumpToMessage(id, part)}
-      rowOf={(id, part) => rows[rowIndexOf(rows, id, part)] ?? { id, from: 0 }} onclose={() => (store.findOpen = false)} />
+      rowOf={(id, part) => { const row = rows[rowIndexOf(rows, id, part)]; return row?.failures ? { id: `failure:${id}`, from: 0 } : row ?? { id, from: 0 }; }} onclose={() => (store.findOpen = false)} />
   {/if}
   {#if !narrow.current}<MessageOutline {messages} active={activePrompt} jump={id => void jumpToMessage(id)}
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = rows[0]?.gap ? Math.max(0, (totals(rows)[1] ?? 0) - viewport.clientHeight) : 0; pinned = false; loadAbove(viewport); } }} />{/if}
@@ -780,7 +777,9 @@
           data-testid={row.first ? 'message' : 'message-rest'}
           data-role={group ? 'agent-mail' : message.role} data-turn={message.turnId}
         >
-          {#if launches.has(message.id)}
+          {#if row.failures}
+            <FailedAttempts {store} {threadId} messages={row.failures} turns={shownTurns} {signedOut} canFork={!narrow.current && branchable && !store.openThread?.incognito} reveal={failureTarget} oninspect={inspectFailures} />
+          {:else if launches.has(message.id)}
             <DelegationActivity {store} agents={launches.get(message.id)!.agents} />
           {:else if workflowRows.has(message.id)}
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />

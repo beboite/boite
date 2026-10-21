@@ -214,6 +214,7 @@ export const strings = {
     errorSubscriptionHint: 'Connect an account or wait for its quota to reset.',
     errorServerTitle: 'The provider is unavailable',
     errorServerHint: 'Try again in a moment.',
-    errorDetails: 'Technical details'
+    errorDetails: 'Technical details',
+    failedAttempts: '{count} failed attempts'
   }
 } as const;

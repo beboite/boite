@@ -31,7 +31,7 @@ beforeAll(async () => {
       ];
     });
   })()`);
-  await page.waitFor(`document.querySelectorAll('[data-testid="error-part"]').length === 4`);
+  await page.waitFor(`document.querySelector('[data-testid="failed-attempts"]')`);
 }, 90000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 30000);
 
@@ -40,41 +40,60 @@ async function capture(name: string) {
   await page.screenshot(join(import.meta.dir, '.artifacts', `chat-errors-${name}.png`));
 }
 
-test('failed automatic turns show the cause and keep the full diagnostic accessible at desktop and phone widths', async () => {
+test('failed automatic turns share one folded group and retain every wake-up, timestamp and diagnostic', async () => {
   if (process.env.BOITE_CAPTURE_BEFORE === '1') await capture('before');
   for (const width of [1280, 390]) {
     await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: width < 720 });
     await page.evaluate(`document.querySelector('[data-testid="timeline"]').scrollTop = 0`);
-    expect(await page.evaluate(`document.querySelectorAll('[data-testid="message-system"]').length`)).toBe(4);
+    expect(await page.evaluate(`document.querySelectorAll('[data-testid="failed-attempts"]').length`)).toBe(1);
+    expect(await page.evaluate(`document.querySelectorAll('[data-testid="error-part"]').length`)).toBe(1);
+    expect(await page.evaluate(`document.querySelectorAll('[data-testid="error-diagnostic"]').length`)).toBe(0);
+    expect(await page.evaluate(`document.querySelector('[data-testid="failed-attempts-toggle"]').textContent`)).toContain('4 failed attempts');
     expect(await page.evaluate(`document.querySelector('[data-testid="error-title"]')?.textContent`)).toBe('No subscription available');
     expect(await page.evaluate(`document.querySelector('[data-testid="error-description"]')?.textContent`)).toBe('Connect an account or wait for its quota to reset.');
-    expect(await page.evaluate(`document.querySelector('[data-testid="error-part"] details').open`)).toBe(false);
+    expect(await page.evaluate(`document.querySelector('[data-testid="failed-attempts-history"]').open`)).toBe(false);
     expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="turn-finished-at"]')).every(node => node.textContent.startsWith('failed '))`)).toBe(true);
     const name = width < 720 ? 'phone' : 'desktop';
     await capture(name);
-    await page.click('[data-testid="error-part"] summary');
-    await page.waitFor(`document.querySelector('[data-testid="error-part"] details').open`);
-    expect(await page.evaluate(`document.querySelector('[data-testid="error-diagnostic"]').textContent`)).toBe(diagnostic);
+    const toggleTop = await page.evaluate<number>(`document.querySelector('[data-testid="failed-attempts-toggle"]').getBoundingClientRect().top`);
+    await page.click('[data-testid="failed-attempts-toggle"]');
+    await page.waitFor(`document.querySelectorAll('[data-testid="error-diagnostic"]').length === 4`);
+    await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    expect(await page.evaluate<number>(`document.querySelector('[data-testid="failed-attempts-toggle"]').getBoundingClientRect().top`)).toBeCloseTo(toggleTop, 0);
+    expect(await page.evaluate(`document.querySelectorAll('[data-testid="failed-attempt-entry"]').length`)).toBe(8);
+    expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="error-diagnostic"]')).map(node => node.textContent)`)).toEqual(Array(4).fill(diagnostic));
     expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="error-part"]')).every(node => {
       const rect = node.getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth && node.scrollWidth <= node.clientWidth;
     })`)).toBe(true);
     await capture(`${name}-expanded`);
-    await page.click('[data-testid="error-part"] summary');
+    await page.click('[data-testid="failed-attempts-toggle"]');
+    await page.waitFor(`document.querySelectorAll('[data-testid="failed-attempt-entry"]').length === 0`);
+    await page.waitFor(`document.querySelector('[data-testid="jump-to-latest"]') === null`);
   }
+  // Finding a wake-up opens the folded history and targets that original message.
+  await page.evaluate(`__boiteTest.workspace.active.findOpen = true; __boiteTest.workspace.active.findRequest += 1`);
+  await page.waitFor(`document.querySelector('[data-testid="find-input"]')`);
+  await page.type('[data-testid="find-input"]', 'Background work finished');
+  await page.waitFor(`document.querySelector('[data-mid="failure:system-1"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="failed-attempts-history"]').open`)).toBe(true);
+  await page.click('[data-testid="find-close"]');
+  await page.click('[data-testid="failed-attempts-toggle"]');
   // An unfamiliar error remains literal and complete, including long unbroken paths and HTML-like diagnostics.
   const unknown = 'Build failed: <script>not executable</script>\n' + 'x'.repeat(1000);
-  await page.evaluate(`__boiteTest.workspace.active.openThread.messages[1].parts[0].message = ${JSON.stringify(unknown)}`);
+  await page.evaluate(`__boiteTest.workspace.active.openThread.messages.at(-1).parts[0].message = ${JSON.stringify(unknown)}`);
   await page.waitFor(`document.querySelector('[data-testid="error-title"]')?.textContent === "The agent couldn't continue"`);
-  await page.click('[data-testid="error-part"] summary');
-  expect(await page.evaluate(`document.querySelector('[data-testid="error-diagnostic"]').textContent`)).toBe(unknown);
+  await page.click('[data-testid="failed-attempts-toggle"]');
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="error-diagnostic"]')).at(-1).textContent`)).toBe(unknown);
   expect(await page.evaluate(`document.querySelector('[data-testid="error-part"] script') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-testid="error-part"]').scrollWidth <= document.querySelector('[data-testid="error-part"]').clientWidth`)).toBe(true);
-  await page.evaluate(`__boiteTest.workspace.active.openThread.messages[1].parts[0].message = 'HTTP 502 upstream unavailable'`);
+  await page.evaluate(`__boiteTest.workspace.active.openThread.messages.at(-1).parts[0].message = 'HTTP 502 upstream unavailable'`);
   await page.waitFor(`document.querySelector('[data-testid="error-title"]')?.textContent === 'The provider is unavailable'`);
   await page.evaluate(`(async () => { const { setLocaleSetting } = await import('/src/lib/i18n.svelte.ts'); await setLocaleSetting('fr'); })()`);
   await page.waitFor(`document.querySelector('[data-testid="error-title"]')?.textContent === 'Le fournisseur est indisponible'`);
-  expect(await page.evaluate(`document.querySelector('[data-testid="error-diagnostic"]').textContent`)).toBe('HTTP 502 upstream unavailable');
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="error-diagnostic"]')).at(-1).textContent`)).toBe('HTTP 502 upstream unavailable');
   expect(await page.evaluate(`document.querySelector('[data-testid="turn-finished-at"]').textContent`)).toMatch(/^échec à /);
+  await page.click('[data-testid="failed-attempts-toggle"]');
+  expect(await page.evaluate(`document.querySelector('[data-testid="failed-attempts-toggle"]').textContent`)).toContain('4 tentatives en échec');
   await page.evaluate(`__boiteTest.setTheme('light'); document.querySelector('[data-testid="timeline"]').scrollTop = 0`);
   await capture('phone-light-fr');
 }, 30000);

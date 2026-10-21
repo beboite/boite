@@ -16,6 +16,15 @@ export function publishedFile(message: Message): boolean {
     (part?.type === 'file' || (part?.type === 'artifact' && !part.view));
 }
 
+/** One model attribution per turn; views and published files draw after the answer. */
+export function firstAssistantByTurn(messages: readonly Message[]): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role === 'assistant' && !result.has(message.turnId) && !viewPart(message) && !publishedFile(message)) result.set(message.turnId, message.id);
+  }
+  return result;
+}
+
 /**
  * `timeline` with each finished turn's published files moved after its last
  * other message, in the order they were published. Views are left for
