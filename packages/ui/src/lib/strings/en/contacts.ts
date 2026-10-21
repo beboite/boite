@@ -11,7 +11,7 @@ export const strings = {
     /** The column's button and its empty row. */
     add: 'Add a contact',
     /** The title bar's button that folds the column on the right. */
-    rail: { show: 'Show contacts', hide: 'Hide contacts' },
+    rail: { show: 'Show contacts', hide: 'Hide contacts', home: 'Contacts home' },
     waiting: '{count} waiting',
     link: { connected: 'Connected', connecting: 'Connecting', offline: 'Offline' },
     lastSeen: 'Seen {time}',
@@ -64,13 +64,19 @@ export const strings = {
     invite: {
       title: 'Invite someone',
       tip: 'A one-time link, valid 24 hours. Whoever holds it can join, so send it like a password.',
-      create: 'Copy an invitation link',
-      again: 'New link',
+      pick: 'Copies a link. Where is the person?',
+      /** Already reaches this machine on Tailscale: the link goes alone. */
+      tailnet: 'Already on my Tailscale',
+      tailnetTip: 'On your tailnet, or this machine is already shared with them: the link alone, no share.',
+      /** Elsewhere: the link also shares this machine through Tailscale. */
+      create: 'Not on my Tailscale',
+      createTip: 'The link also shares this machine with them through Tailscale.',
       link: 'Invitation link',
       copy: 'Copy',
       copied: 'Link copied',
       expires: 'Works once, until {time}',
       shared: 'Tailscale share created',
+      noShare: 'No share: for someone already on your Tailscale',
       manual: 'Share this machine by hand',
       openConsole: 'Tailscale admin console'
     },

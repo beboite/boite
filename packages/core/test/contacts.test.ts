@@ -461,6 +461,22 @@ test('joins in flight hold their contact slots: two joins at the last slot keep 
   expect(guest.core.contacts.list().map(contact => contact.coreId).sort()).toEqual([b, c].map(side => side.core.coordination.card().coreId).sort());
 }, 30000);
 
+test('an invitation for someone already on this Tailscale carries no share, asks for none, and joins', async () => {
+  const host = await startTestCore();
+  const guest = await startTestCore();
+  cores.push(host, guest);
+  host.core.contacts.selfUrl = async () => host.url;
+  const hostClient = await host.connect();
+  const guestClient = await guest.connect();
+  const invite = await hostClient.call('contacts.invite', { share: false });
+  expect(invite.share).toEqual({ status: 'none' });
+  expect(decodeInvite(invite.link).share).toBeNull();
+  expect((await guestClient.call('contacts.join', { link: invite.link })).coreId).toBe(host.core.coordination.card().coreId);
+  // Without the flag the owner is told to share the machine, as before.
+  expect((await hostClient.call('contacts.invite', {})).share.status).toBe('manual');
+  expect(await thrown(hostClient.call('contacts.invite', { share: 'no' as never }))).toThrow('share: expected true or false');
+}, 30000);
+
 test('the tailnet listener opens for an invitation and closes once the last one expires', async () => {
   const harness = await startTestCore();
   cores.push(harness);

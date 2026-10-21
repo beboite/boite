@@ -645,7 +645,8 @@
         {/key}
       {/if}
       {/if}
-      {#if contacts.ContactsRail && contactsShown(store) && !narrow.current}{#key store}<contacts.ContactsRail {store} />{/key}{/if}
+      <!-- Not keyed on the machine: the column lists every machine's contacts, and a new one would slide in again. -->
+      {#if contacts.ContactsRail && contactsShown(store) && !narrow.current}<contacts.ContactsRail {store} />{/if}
     {/if}
   </div>
 

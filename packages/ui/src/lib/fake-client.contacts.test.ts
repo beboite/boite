@@ -3,7 +3,7 @@ import { defaultCoordinationConfig, RpcErrorCode } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 import { FAKE_CONTACT_INVITE } from './fake-client/contacts';
 import { RpcFailure } from './client';
-import { encodeInvite, readInvite } from './contact-link';
+import { encodeInvite, inviteShare, readInvite } from './contact-link';
 
 /*
  * The in-memory core's contacts: the seed `?fake=1` draws, the event every
@@ -96,6 +96,10 @@ test('an invitation shares the machine only with a key; join refuses this core\'
   const shared = await client.call('contacts.invite', {});
   expect(shared.link.startsWith('boite://contact#')).toBe(true);
   expect(shared.share.status).toBe('created');
+  // Someone already on this owner's Tailscale gets the link alone, key or not.
+  const alone = await client.call('contacts.invite', { share: false });
+  expect([alone.share, inviteShare(alone.link)]).toEqual([{ status: 'none' }, null]);
+  expect(await refusal(client.call('contacts.invite', { share: 'no' as never }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'share' });
   // The core's fix: an `acls` rule naming this machine, never a grant to `autogroup:self`.
   const { policyFix } = (await client.call('contacts.get', {})).tailscale;
   expect(policyFix).toContain('"acls"');

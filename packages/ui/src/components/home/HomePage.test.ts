@@ -215,6 +215,14 @@ test('Invite makes a link with its share; a joined link shows the eight words; C
   const link = one<HTMLInputElement>('contact-invite-link')!.value;
   expect(link.startsWith('boite://contact#')).toBe(true);
   expect(one('contact-invite-share')!.dataset.status).toBe('created');
+  expect(inviteShare(link)).not.toBeNull();
+
+  // Someone already on this Tailscale: the link alone, no share made or asked for.
+  one<HTMLButtonElement>('contact-invite-tailnet')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-share')!.dataset.status).toBe('none'); });
+  const alone = one<HTMLInputElement>('contact-invite-link')!.value;
+  expect([alone === link, inviteShare(alone)]).toEqual([false, null]);
+  expect(one('contact-invite')!.textContent).not.toContain(strings.contacts.invite.manual);
 
   // A core refuses its own link: the join takes another owner's.
   type(one<HTMLInputElement>('contact-join-link')!, FAKE_CONTACT_INVITE);

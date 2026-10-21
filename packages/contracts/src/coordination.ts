@@ -221,8 +221,12 @@ export interface ContactInvite {
   /** `boite://contact#...`: this core's identity, its tailnet URL and the Tailscale share link. */
   link: string;
   expiresAt: Timestamp;
-  /** The Tailscale share of this machine, made through the owner's API key, or the reason it was not. */
-  share: { status: 'created'; url: string } | { status: 'manual'; reason: string };
+  /**
+   * The Tailscale share of this machine, made through the owner's API key, or
+   * the reason it was not. `none`: the invitee already reaches this machine on
+   * Tailscale (same tailnet, or shared before), so nothing was shared.
+   */
+  share: { status: 'created'; url: string } | { status: 'manual'; reason: string } | { status: 'none' };
 }
 /**
  * A contact asks for an agent on a project of this core ("a project like X"),
@@ -332,8 +336,12 @@ export interface CoordinationRpcMethods {
   'collaboration.bridge.reply': { params: { requestId: string; response: CoordinationBridgeResponse }; result: { ok: true } };
   /** Contacts, requests, settings and the Tailscale state. Owner only. */
   'contacts.get': { params: Record<string, never>; result: ContactsState };
-  /** A one-time invitation, valid 24 hours. Creates the Tailscale share when an API key is stored. Owner only. */
-  'contacts.invite': { params: Record<string, never>; result: ContactInvite };
+  /**
+   * A one-time invitation, valid 24 hours. Creates the Tailscale share when an
+   * API key is stored, unless `share` is false: the invitee already reaches
+   * this machine on Tailscale. Owner only.
+   */
+  'contacts.invite': { params: { share?: boolean }; result: ContactInvite };
   /** Joins with an invitation: this core dials the host, checks its key and keeps the link open. Owner only. */
   'contacts.join': { params: { link: string }; result: Contact };
   /** Rename a contact or mark it trusted. Owner only. */
