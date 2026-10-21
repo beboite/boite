@@ -352,9 +352,8 @@
   .device { flex: 1; min-height: 0; height: 100%; display: flex; flex-direction: column; }
   .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; flex-wrap: wrap; }
   .tabs, .actions, .keys { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  /* A desktop panel's controls are its size; a finger gets the touch target. */
+  /* A desktop panel's controls are its size; a finger gets the touch target (the rule at the end of this block). */
   .chip { min-height: var(--control); min-width: var(--control); justify-content: center; }
-  @media (pointer: coarse) { .chip { min-height: var(--touch-target); min-width: var(--touch-target); } .card button, input { min-height: var(--touch-target); } }
   .tabs [aria-selected=true], .chip[aria-pressed=true] { color: var(--color-accent); border-color: var(--color-accent); }
   .dot { width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--color-muted-foreground); flex: none; }
   .dot.ready { background: var(--color-accent); } .dot.failed { background: var(--color-danger); }
@@ -377,4 +376,6 @@
   footer { padding: 10px 16px max(12px, env(safe-area-inset-bottom)); display: grid; gap: 8px; }
   form { display: flex; gap: 8px; } input { min-width: 0; flex: 1; font-size: 16px; min-height: var(--control); }
   @media (max-width: 720px) { footer small { display: none; } .toolbar, footer, .picker { padding-inline: 12px; } }
+  /* Last, so it outranks the desktop sizes of the same weight above. */
+  @media (pointer: coarse) { .chip { min-height: var(--touch-target); min-width: var(--touch-target); } .card button, input { min-height: var(--touch-target); } }
 </style>

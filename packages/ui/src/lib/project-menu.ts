@@ -34,7 +34,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
   up: boolean;
   down: boolean;
   move: (direction: -1 | 1) => void;
-}) {
+}, opened?: () => void) {
   const client = owner.client;
   const clientGeneration = owner.clientGeneration;
   const management: MenuItem[] = [
@@ -83,7 +83,8 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
       if (action === 'back') return contextMenu.follow(main, pick);
       if (action === 'move-up' || action === 'move-down') reorder?.move(action === 'move-up' ? -1 : 1);
       // A new thread is a new draft: one already written there stays in the list.
-      if (action === 'new') await workspace.select(owner, undefined, project.id, { fresh: true });
+      // `opened`: a phone's list makes way for the draft's composer.
+      if (action === 'new') { await workspace.select(owner, undefined, project.id, { fresh: true }); opened?.(); }
       if (action === 'copy') await owner.copy(project.path);
       if (action === 'archived') {
         if (workspace.active !== owner) await workspace.select(owner);
