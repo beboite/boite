@@ -3,7 +3,7 @@ import type { Core } from '../core.ts';
 
 export function registerContactMethods(core: Core): void {
   core.router.register('contacts.get', () => core.contacts.state());
-  core.router.register('contacts.invite', () => core.contacts.invite());
+  core.router.register('contacts.invite', p => core.contacts.invite(p.share));
   core.router.register('contacts.join', p => core.contacts.join(p.link));
   core.router.register('contacts.update', p => core.contacts.update(p));
   core.router.register('contacts.grant', p => core.contacts.grant(p));

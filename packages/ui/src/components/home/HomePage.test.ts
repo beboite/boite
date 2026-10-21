@@ -215,6 +215,31 @@ test('Invite makes a link with its share; a joined link shows the eight words; C
   const link = one<HTMLInputElement>('contact-invite-link')!.value;
   expect(link.startsWith('boite://contact#')).toBe(true);
   expect(one('contact-invite-share')!.dataset.status).toBe('created');
+  expect(inviteShare(link)).not.toBeNull();
+
+  // Someone already on this Tailscale: the link alone, no share made or asked for.
+  one<HTMLButtonElement>('contact-invite-tailnet')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-share')!.dataset.status).toBe('none'); });
+  const alone = one<HTMLInputElement>('contact-invite-link')!.value;
+  expect([alone === link, inviteShare(alone)]).toEqual([false, null]);
+  expect(one('contact-invite')!.textContent).not.toContain(strings.contacts.invite.manual);
+
+  // A refused invitation copies nothing: the link on screen was made for someone else.
+  const writeText = vi.fn(async (_text: string) => {});
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  one<HTMLButtonElement>('contact-invite-create')!.click();
+  await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+  const shown = one<HTMLInputElement>('contact-invite-link')!.value;
+  const call = store.client!.call.bind(store.client!);
+  const refused = vi.spyOn(store.client!, 'call').mockImplementation(((method: string, params: unknown) =>
+    method === 'contacts.invite' ? Promise.reject(new Error('at most 16 open invitations')) : call(method as never, params as never)) as typeof call);
+  one<HTMLButtonElement>('contact-invite-tailnet')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('home-error')?.textContent).toContain('at most 16 open invitations'); });
+  expect(writeText).toHaveBeenCalledTimes(1);
+  expect(one<HTMLInputElement>('contact-invite-link')!.value).toBe(shown);
+  refused.mockRestore();
+  delete (navigator as { clipboard?: unknown }).clipboard;
+  one<HTMLButtonElement>('home-error')?.querySelector('button')?.click();
 
   // A core refuses its own link: the join takes another owner's.
   type(one<HTMLInputElement>('contact-join-link')!, FAKE_CONTACT_INVITE);

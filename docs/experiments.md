@@ -57,11 +57,13 @@ of a client's experiments.
 
 The contacts column and the Contacts page ([contacts](contacts.md)). On a
 desktop window the contacts stand in a column on the right edge, the thread
-list keeping the left one: one row per contact with its link and what it asks,
-and Add beside the title. A row opens that contact's page in the chat's card,
-between the two lists. The Contacts button at the right end of the title bar
-folds the column, remembered on the device, and shows a dot while a folded
-column hides a request. The right panel leaves the column its width. A phone
+list keeping the left one: one row per contact with its link and what it asks.
+Its title, with a house, opens the Contacts page with no contact picked, and
+Add beside it the same page. A row opens that contact's page in the chat's
+card, between the two lists. The column starts folded: the Contacts button at
+the right end of the title bar unfolds and folds it, remembered on the device,
+and shows a dot while a folded column hides a request. It slides in when
+unfolded, not when the app starts or another machine is picked. The right panel leaves the column its width. A phone
 has no right edge: its list shows the contacts as a section under the
 projects, and the menu entry opens the page with no contact picked.
 

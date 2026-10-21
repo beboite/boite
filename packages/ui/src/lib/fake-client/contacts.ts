@@ -1,5 +1,5 @@
 /** Contacts: another owner's Boite, linked for agent work on the projects each side opens. Seeded with Chris. */
-import { RpcErrorCode, type Contact, type ContactRequest, type ContactsState, type ContactTailscale, type ModelTier } from '@boite/contracts';
+import { RpcErrorCode, type Contact, type ContactInvite, type ContactRequest, type ContactsState, type ContactTailscale, type ModelTier } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { encodeInvite, INVITE_PREFIX, inviteShare, readInvite } from '../contact-link';
 import type { FakeContext, FakeMethods } from './context';
@@ -148,12 +148,14 @@ export function contactMethods(ctx: FakeContext) {
   };
   return {
     'contacts.get': async () => structuredClone(stateOf(ctx)),
-    'contacts.invite': async () => {
+    'contacts.invite': async (params) => {
+      if (params?.share !== undefined && typeof params.share !== 'boolean') throw invalid('share: expected true or false', 'share');
       const state = stateOf(ctx);
       const token = `fake-contact-${++ctx.seq}`;
-      const share = state.tailscale.apiKey
-        ? { status: 'created' as const, url: `https://login.tailscale.com/admin/invite/${token}` }
-        : { status: 'manual' as const, reason: 'No Tailscale API key is stored: share this machine from the admin console.' };
+      // Like the core: an invitee already on Tailscale gets the link alone.
+      const share: ContactInvite['share'] = params?.share === false ? { status: 'none' }
+        : state.tailscale.apiKey ? { status: 'created', url: `https://login.tailscale.com/admin/invite/${token}` }
+        : { status: 'manual', reason: 'No Tailscale API key is stored: share this machine from the admin console.' };
       const url = `http://${state.tailscale.fqdn ?? 'boite-pc'}:8777`;
       return {
         link: encodeInvite({ v: 1, c: state.self.coreId, m: state.self.machine, u: url, t: token, e: ctx.now() + INVITE_TTL, s: share.status === 'created' ? share.url : null }),

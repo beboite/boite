@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, tick, untrack } from 'svelte';
-  import { Check, Copy, ExternalLink, Link2, TriangleAlert } from '@lucide/svelte';
+  import { Check, Copy, ExternalLink, Link2, Share2, TriangleAlert } from '@lucide/svelte';
   import { inviteShare } from '../../lib/contact-link';
   import { copyText, type ContactsView } from '../../lib/contacts.svelte';
   import { clockTime } from '../../lib/format';
@@ -10,8 +10,9 @@
 
   /**
    * The two ways a contact starts, as two Settings rows. Invite makes a
-   * one-time link and copies it at once; its expiry and how the Tailscale
-   * share went show under the row. Join takes the link another owner sent and
+   * one-time link and copies it at once, for someone already on the owner's
+   * Tailscale (the link alone) or not (the link and a share of this machine);
+   * its expiry and how the Tailscale share went show under the row. Join takes the link another owner sent and
    * then shows the eight words to compare with them. A link that shares the
    * inviter through Tailscale, pasted where no API key can accept it, first
    * offers the share to accept by hand.
@@ -30,8 +31,9 @@
     clearTimeout(timer);
     timer = setTimeout(() => { copied = false; }, 1500);
   }
-  async function invite() {
-    await view.createInvite();
+  async function invite(share: boolean) {
+    // A failed call leaves the last link shown, made for another kind of invitee: never copied in its place.
+    if (!(await view.createInvite(share))) return;
     await tick();
     await copy();
   }
@@ -50,10 +52,16 @@
 <div class="switch-row">
   <span class="text">
     <span class="ui-label-box"><span class="ui-label">{labels.invite.title}</span><InfoTip topic={labels.invite.title} text={labels.invite.tip} /></span>
+    <span class="hint">{labels.invite.pick}</span>
   </span>
-  <button type="button" class:primary={!view.invite} disabled={view.isBusy('invite')} onclick={() => void invite()} data-testid="contact-invite-create">
-    <Link2 size={14} /><span class="ui-label">{view.invite ? labels.invite.again : labels.invite.create}</span>
-  </button>
+  <span class="invite-actions">
+    <button type="button" disabled={view.isBusy('invite')} title={labels.invite.tailnetTip} onclick={() => void invite(false)} data-testid="contact-invite-tailnet">
+      <Link2 size={14} /><span class="ui-label">{labels.invite.tailnet}</span>
+    </button>
+    <button type="button" disabled={view.isBusy('invite')} title={labels.invite.createTip} onclick={() => void invite(true)} data-testid="contact-invite-create">
+      <Share2 size={14} /><span class="ui-label">{labels.invite.create}</span>
+    </button>
+  </span>
 </div>
 {#if view.invite}
   {@const made = view.invite}
@@ -69,9 +77,11 @@
       {fill(labels.invite.expires, { time: clockTime(made.expiresAt) })}
       {#if made.share.status === 'created'}
         · <a class="share ok" href={made.share.url} target="_blank" rel="noreferrer" data-testid="contact-invite-share" data-status="created"><Check size={12} strokeWidth={2.25} />{labels.invite.shared}</a>
+      {:else if made.share.status === 'none'}
+        · <span data-testid="contact-invite-share" data-status="none">{labels.invite.noShare}</span>
       {/if}
     </p>
-    {#if made.share.status !== 'created'}
+    {#if made.share.status === 'manual'}
       <p class="manual" data-testid="contact-invite-share" data-status="manual">
         <TriangleAlert size={14} strokeWidth={2} /><span><strong>{labels.invite.manual}</strong> {made.share.reason}
         <a href={ADMIN} target="_blank" rel="noreferrer">{labels.invite.openConsole}<ExternalLink size={12} /></a></span>
@@ -113,6 +123,7 @@
   /* What a row made sits under it, before the next row's rule. */
   .under { display: grid; gap: 8px; padding-bottom: 16px; min-width: 0; animation: rise var(--dur-3) var(--ease-out-quint); }
   .join-row { border-top: 1px solid var(--color-border); }
+  .invite-actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
   .line { display: flex; gap: 8px; min-width: 0; }
   .link { flex: 1; min-width: 0; font-size: var(--text-xs); }
   .hint { margin: 0; }
@@ -131,7 +142,7 @@
   :global(html[data-motion='reduced']) .under { animation: none; }
   @media (max-width: 720px) {
     :global(.settings .page) .switch-row { flex-direction: column; align-items: stretch; gap: 12px; }
-    .join { flex: none; flex-direction: column; }
-    .switch-row > button, .join button, .join input, .line button { min-height: var(--touch-target); }
+    .join, .invite-actions { flex: none; flex-direction: column; }
+    .invite-actions button, .join button, .join input, .line button { min-height: var(--touch-target); }
   }
 </style>

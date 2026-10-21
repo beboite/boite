@@ -26,7 +26,11 @@ but opens none, and the invitee exposes nothing.
    (`contacts.tailscaleKey`), the core creates the share itself
    (`POST /api/v2/device/{id}/device-invites`, single use); without one the
    invitation says so and the owner shares the machine from the Tailscale
-   admin console.
+   admin console. The page offers two buttons: **Not on my Tailscale** does
+   the above, **Already on my Tailscale** (`contacts.invite` with
+   `share: false`) is for an invitee on the same tailnet, or one this
+   machine is already shared with: no share is made or asked for, the link
+   carries none and the invitee's Join card offers no share to accept.
 2. The invitee pastes the link (`contacts.join`). Its core accepts the
    Tailscale share with its own API key when it has one
    (`POST /api/v2/device-invites/-/accept`). Without a key, the Join card

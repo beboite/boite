@@ -316,14 +316,16 @@ export class ContactStore {
     return Object.entries((this.core.journal.getSetting(INVITES) as Record<string, { expiresAt: number }> | undefined) ?? {}).filter(([, invite]) => invite.expiresAt > now);
   }
 
-  async invite(): Promise<ContactInvite> {
+  /** `share` false: the invitee already reaches this machine on Tailscale, so no share is made or asked for. */
+  async invite(share: unknown = true): Promise<ContactInvite> {
+    if (typeof share !== 'boolean') throw invalidParams('share: expected true or false', { field: 'share' });
     const room = (): void => {
       if (this.list().length >= MAX_CONTACTS) throw refused(`at most ${MAX_CONTACTS} contacts; remove one first`);
       if (this.liveInvites().length >= MAX_INVITES) throw refused(`at most ${MAX_INVITES} open invitations; wait for one to be used or to expire`);
     };
     room();
     const url = await this.selfUrl();
-    const share = await this.share();
+    const shared: ContactInvite['share'] = share ? await this.share() : { status: 'none' };
     // Read again after the awaits: another invitation may have been made meanwhile.
     room();
     const token = newToken();
@@ -332,8 +334,8 @@ export class ContactStore {
     // Dialled from now on: the tailnet listener opens before the link leaves this machine.
     this.relisten();
     this.arm();
-    const link = encodeInvite({ ...this.card(), url, token, share: share.status === 'created' ? share.url : null, expiresAt });
-    return { link, expiresAt, share };
+    const link = encodeInvite({ ...this.card(), url, token, share: shared.status === 'created' ? shared.url : null, expiresAt });
+    return { link, expiresAt, share: shared };
   }
 
   /** The Tailscale share of this machine, made with the owner's key, or why the owner shares it by hand. */
