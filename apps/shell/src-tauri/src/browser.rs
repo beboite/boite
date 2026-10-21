@@ -587,9 +587,7 @@ pub async fn browser_create(
     if let Some(directory) = crate::window::webview_profile() {
         builder = builder.data_directory(directory);
     }
-    if let Some(args) = crate::window::test_browser_args() {
-        builder = builder.additional_browser_args(&args);
-    }
+    builder = builder.additional_browser_args(&crate::window::browser_args());
     match &profile {
         Profile::Default => {}
         Profile::Private => builder = builder.incognito(true),

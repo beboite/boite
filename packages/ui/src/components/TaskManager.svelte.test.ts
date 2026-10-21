@@ -207,3 +207,12 @@ test('an old machine stop cannot clear a newer machine pending stop', async ({ r
   finishes[1]!(); await settle();
   expect(element('.actions button').hasAttribute('disabled')).toBe(false);
 });
+
+test('the subtitle sits under the title in one block, like the other settings pages', async ({ store }) => {
+  mounted = mount(TaskManager, { target: document.body, props: { store } });
+  await settle();
+  // The page header spreads its children apart: a title and a subtitle side by side end up on opposite edges.
+  const header = element('[data-testid="task-manager"] > header');
+  expect(header.children).toHaveLength(1);
+  expect([...header.firstElementChild!.children].map((child) => child.tagName)).toEqual(['H1', 'P']);
+});

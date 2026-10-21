@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { ArrowLeft, ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRightToLine, ChevronLeft, ChevronRight, ListX, Maximize2, Minimize2, Plus, SquareX, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
   import { floatingPanel, RESIZE_DIRECTIONS } from '../lib/floating-panel';
   import { browserBridge } from '../lib/browser-bridge';
   import { stripOverflows } from '../lib/strip-overflow';
@@ -27,6 +27,7 @@
   import Menu from './Menu.svelte';
   import PanelResizeHandle from './PanelResizeHandle.svelte';
   import SurfaceIcon from './SurfaceIcon.svelte';
+  import { surfaceGlyph } from '../lib/surface-glyphs';
   import SurfaceLauncher from './SurfaceLauncher.svelte';
   import TasksSurface from './TasksSurface.svelte';
   import TraceSurface from './TraceSurface.svelte';
@@ -118,6 +119,17 @@
     const gap = parseFloat(getComputedStyle(node.parentElement ?? node).columnGap) || 0;
     const room = [...(node.parentElement?.querySelectorAll<HTMLElement>(':scope > .chev') ?? [])].reduce((sum, chevron) => sum + chevron.offsetWidth + gap, 0);
     overflowing = stripOverflows(node.scrollWidth, node.clientWidth, room, untrack(() => overflowing));
+    readEdges();
+  }
+
+  /** Which ends of the strip hide a tab: that end fades instead of cutting a label in half, and its chevron rests. */
+  let hiddenStart = $state(false);
+  let hiddenEnd = $state(false);
+  function readEdges(): void {
+    const node = tabs;
+    if (!node) return;
+    hiddenStart = node.scrollLeft > 1;
+    hiddenEnd = node.scrollLeft < node.scrollWidth - node.clientWidth - 1;
   }
 
   $effect(() => {
@@ -142,14 +154,22 @@
     };
   });
 
-  // The tab that is showing is always the one in view.
+  // The tab that is showing is always the one in view, also once the chevrons
+  // that an overflow brings have narrowed the strip under it.
   $effect(() => {
     const id = panel.activeSurfaceId;
+    void overflowing;
     if (!id || !tabs) return;
     const tab = tabs.querySelector<HTMLElement>(`[data-surface-id="${CSS.escape(id)}"]`);
     // jsdom has no layout, so it has no `scrollIntoView` either.
     tab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   });
+
+  /** The X shuts the panel and hands the keys to the title bar's toggle that opens it again; clicked, it left them on the page. */
+  function shut(): void {
+    panel.hide();
+    if (!phone) document.querySelector<HTMLElement>('[data-testid="panel-toggle"]')?.focus({ preventScroll: true });
+  }
 
   function scrollBy(direction: -1 | 1): void {
     const node = tabs;
@@ -170,15 +190,16 @@
     contextMenu.open(
       event,
       [
-        { id: 'close', label: strings.common.close },
-        { id: 'others', label: strings.rightPanel.closeOthers, disabled: surfaces.length < 2 },
+        { id: 'close', label: strings.common.close, glyph: X },
+        { id: 'others', label: strings.rightPanel.closeOthers, glyph: ListX, disabled: surfaces.length < 2 },
         {
           id: 'right',
           label: strings.rightPanel.closeToRight,
+          glyph: ArrowRightToLine,
           disabled: index < 0 || index === surfaces.length - 1
         },
         separator(),
-        { id: 'all', label: strings.rightPanel.closeAll }
+        { id: 'all', label: strings.rightPanel.closeAll, glyph: SquareX }
       ],
       (action) => {
         if (action === 'close' || action === 'others' || action === 'right' || action === 'all') {
@@ -245,6 +266,7 @@
     ...offeredCards().map((card) => ({
       id: card.kind,
       label: kindName(card.kind),
+      glyph: surfaceGlyph(card.kind),
       disabled: !available(card.kind),
       ...(available(card.kind) ? {} : { hint: unavailable() })
     })),
@@ -305,6 +327,7 @@
         class="ghost small icon chev"
         title={strings.rightPanel.scrollLeft}
         aria-label={strings.rightPanel.scrollLeft}
+        disabled={!hiddenStart}
         onclick={() => scrollBy(-1)}
       >
         <ChevronLeft size={14} strokeWidth={1.75} />
@@ -313,10 +336,13 @@
 
     <div
       class="tabs"
+      class:hidden-start={overflowing && hiddenStart}
+      class:hidden-end={overflowing && hiddenEnd}
       role="tablist"
       tabindex="-1"
       bind:this={tabs}
       {onwheel}
+      onscroll={readEdges}
       onkeydown={onTabsKey}
       data-testid="panel-tabs"
     >
@@ -364,6 +390,7 @@
         class="ghost small icon chev"
         title={strings.rightPanel.scrollRight}
         aria-label={strings.rightPanel.scrollRight}
+        disabled={!hiddenEnd}
         onclick={() => scrollBy(1)}
       >
         <ChevronRight size={14} strokeWidth={1.75} />
@@ -415,7 +442,7 @@
       title={phone ? strings.rightPanel.backToChat : strings.common.close}
       aria-label={phone ? strings.rightPanel.backToChat : strings.common.close}
       data-testid="panel-close"
-      onclick={() => panel.hide()}
+      onclick={shut}
     >
       {#if phone}
         <ArrowLeft size={16} strokeWidth={1.75} /><span class="ui-label">{strings.rightPanel.chat}</span>
@@ -546,11 +573,17 @@
     overflow-y: hidden;
     scrollbar-width: none;
     scroll-behavior: smooth;
+    /* A tab brought into view clears the end fade too, not only the edge. */
+    scroll-padding-inline: 28px;
   }
 
   .tabs::-webkit-scrollbar {
     display: none;
   }
+
+  .tabs.hidden-start { mask-image: linear-gradient(to right, transparent, black 24px); }
+  .tabs.hidden-end { mask-image: linear-gradient(to left, transparent, black 24px); }
+  .tabs.hidden-start.hidden-end { mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent); }
 
   .tab {
     display: flex;
@@ -623,6 +656,11 @@
 
   .cross {
     display: none;
+  }
+
+  /* Flex, not inline: an inline span set the icon on the text's baseline, 2.5 px above the label's centre. */
+  .glyph {
+    display: inline-flex;
   }
 
   .glyph,

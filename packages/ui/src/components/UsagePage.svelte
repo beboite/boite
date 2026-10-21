@@ -237,7 +237,10 @@
 
 <div class="page usage" data-testid="usage-page">
   <header>
-    <div><h1 class="ui-label-box"><span class="ui-label">{strings.usage.heading}</span><InfoTip topic={strings.usage.heading} text={`${strings.usage.intro} ${strings.usage.note}`} /></h1></div>
+    <h1 class="ui-label-box"><span class="ui-label">{strings.usage.heading}</span><InfoTip topic={strings.usage.heading} text={`${strings.usage.intro} ${strings.usage.note}`} /></h1>
+    <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="usage-refresh" onclick={refresh}>
+      <RefreshCw size={15} strokeWidth={1.75} class={loading ? 'spinning' : ''} />
+    </button>
   </header>
 
   <div class="filters">
@@ -263,9 +266,6 @@
     <Menu items={providerItems} label={strings.usage.provider} placement="bottom" testid="usage-provider-filter" onpick={(id) => { provider = id || null; }}>
       <span class="filter-name ui-label">{provider === null ? strings.usage.allProviders : providerName(provider)}</span><ChevronDown size={13} />
     </Menu>
-    <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="usage-refresh" onclick={refresh}>
-      <RefreshCw size={15} strokeWidth={1.75} class={loading ? 'spinning' : ''} />
-    </button>
   </div>
 
   {#each failures as failure (failure)}
@@ -283,15 +283,15 @@
         <div class="hero">
           <span class="section-label">{fill(strings.usage.totalOf[metric], { days: String(range) })}</span>
           <strong data-testid="usage-total">{valueOf(view.total)}</strong>
-          <small>{fill(view.total.turns > 0 && view.total.reported === 0 ? strings.usage.summaryMissing : view.total.priced === 0 ? strings.usage.summaryNoPrice : strings.usage.summary, {
+          <small>{@render pairs(fill(view.total.turns > 0 && view.total.reported === 0 ? strings.usage.summaryMissing : view.total.priced === 0 ? strings.usage.summaryNoPrice : strings.usage.summary, {
             turns: formatMetric('turns', view.total.turns),
             tokens: formatMetric('tokens', totalTokens(view.total.usage)),
             cost: money(view.total)
-          })}</small>
+          }))}</small>
           {#if view.total.turns > 0}
-            <small class="coverage" data-testid="usage-coverage">{fill(strings.usage.coverage, {
+            <small class="coverage" data-testid="usage-coverage">{@render pairs(fill(strings.usage.coverage, {
               reported: formatMetric('turns', view.total.reported), priced: formatMetric('turns', view.total.priced), turns: formatMetric('turns', view.total.turns)
-            })}</small>
+            }))}</small>
           {/if}
         </div>
         {#if view.series.length > 0}
@@ -301,7 +301,7 @@
               {@const share = view.total.value > 0 ? totals.value / view.total.value : 0}
               <li data-provider={serie.key}>
                 <span class="swatch" style:background={serie.color}></span>
-                <span class="provider"><ProviderLogo providerId={serie.key} size={14} /><span>{providerName(serie.key)}{#if totals.turns > 0}<small>{fill(strings.usage.coverage, { reported: formatMetric('turns', totals.reported), priced: formatMetric('turns', totals.priced), turns: formatMetric('turns', totals.turns) })}</small>{/if}</span></span>
+                <span class="provider"><ProviderLogo providerId={serie.key} size={14} /><span>{providerName(serie.key)}{#if totals.turns > 0}<small>{@render pairs(fill(strings.usage.coverage, { reported: formatMetric('turns', totals.reported), priced: formatMetric('turns', totals.priced), turns: formatMetric('turns', totals.turns) }))}</small>{/if}</span></span>
                 <span class="value" class:muted={totals.turns === 0}>{totals.turns === 0 ? strings.usage.noActivity : valueOf(totals)}</span>
                 <span class="share" title={fill(strings.usage.share, { percent: percent.format(share) })}>{totals.turns > 0 && (metric === 'turns' || (metric === 'tokens' ? totals.reported : totals.priced) > 0) ? percent.format(share) : ''}</span>
                 <span class="bar"><span style:width="{share * 100}%" style:background={serie.color}></span></span>
@@ -408,6 +408,12 @@
   </div>
 </div>
 
+<!-- A line break falls between the pieces a dot separates, never inside one: "Cost" stays beside its count. -->
+{#snippet pairs(text: string)}
+  {@const parts = text.split(' · ')}
+  {#each parts as part, index (index)}{#if index > 0}{' '}{/if}<span class="pair">{part}{index < parts.length - 1 ? ' ·' : ''}</span>{/each}
+{/snippet}
+
 {#snippet threadRow(thread: (typeof threads)[number])}
   <ProviderLogo providerId={thread.providerId} size={16} />
   <span class="title">
@@ -424,6 +430,8 @@
 {/snippet}
 
 <style>
+  /* The refresh sits on the title's line, as on Limits. */
+  .usage > header { align-items: center; gap: 8px; max-width: var(--settings-width); }
   .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: var(--settings-width); margin-bottom: 20px; }
   .refresh { margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
   .filter-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
@@ -441,6 +449,7 @@
   .hero { display: grid; gap: 4px; }
   .hero strong { font-size: calc(var(--text-lg) * 1.6); line-height: 1.1; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
   .hero small, .aside, .muted { color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  .pair { white-space: nowrap; }
   .aside { margin: 10px 0 0; line-height: 1.5; }
 
   .providers { display: grid; gap: 8px; margin: 16px 0 0; padding: 14px 0 0; list-style: none; border-top: 1px solid var(--color-border); }
@@ -489,6 +498,9 @@
   .amount .bar { width: 100%; }
 
   @media (max-width: 720px) {
+    /* Each group of options takes the row, its options sharing it evenly, as on Appearance. */
+    .filters .segmented { flex: 1 1 100%; }
+    .segmented button { flex: 1; min-width: 0; }
     .hero strong { font-size: calc(var(--text-lg) * 1.4); }
     .providers li { grid-template-columns: 10px minmax(0, 1fr) auto 40px; }
     .providers .bar { grid-column: 2 / -1; }

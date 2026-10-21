@@ -196,6 +196,12 @@ test('a translation only carries sentences English has, with the same kind and t
   walk(en, fr, []);
 });
 
+test('French names the brain page in French and words one action one way on Machines and updates', () => {
+  expect(fr.brain?.heading).toBe('Cerveau');
+  // The page's header, the server card and the agent updates card all check for updates.
+  expect(fr.providerSettings?.checkUpdates).toBe(fr.appUpdate?.check);
+});
+
 test('a sentence a translation has not got is the English one, and the rest stay translated', () => {
   const block = fr.common as unknown as Record<string, string>;
   const kept = block['yes'];

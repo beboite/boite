@@ -734,6 +734,22 @@ test('Escape stops the running turn and sends pending input next', async ({ app:
   expect(store.openThread!.turns.some((turn) => turn.status === 'stopped')).toBe(true);
 });
 
+test('Escape in the box that answers a question keeps the question and its turn', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  await type('one question please');
+  press('Enter');
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null, TYPING_PAUSE_MS);
+  const stop = vi.spyOn(store, 'stop');
+  input().focus();
+  press('Escape');
+  // It stopped the turn, and the question went with it: "No longer waiting for an answer".
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(stop).not.toHaveBeenCalled();
+  expect(store.busy).toBe(true);
+  expect(document.querySelector('[data-testid=question-card][data-state=pending]')).not.toBeNull();
+});
+
 test('a thread of a machine that dropped still opens and queues its prompts until the machine is back', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);

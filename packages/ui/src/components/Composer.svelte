@@ -690,7 +690,10 @@
       if (older()) event.preventDefault();
     } else if (event.key === 'ArrowDown' && !event.shiftKey) {
       if (newer()) event.preventDefault();
-    } else if (event.key === 'Escape' && (target ? target.busy && !!target.stop : store.busy || thread?.activity?.goal?.status === 'active' || thread?.activity?.loop?.status === 'active')) {
+    } else if (event.key === 'Escape' && !reply && (target ? target.busy && !!target.stop : store.busy || thread?.activity?.goal?.status === 'active' || thread?.activity?.loop?.status === 'active')) {
+      // Not while the box answers a question: a thread waiting on one opens
+      // with the focus there, and an Escape pressed out of habit threw the
+      // question away with the turn. Skip and the stop button still end it.
       event.preventDefault();
       if (target) target.stop?.(); else void store.stop();
     } else if (event.key === 'Escape' && composer?.editing) {
@@ -835,6 +838,8 @@
     border: 1px solid var(--color-border);
     border-top-color: var(--color-edge);
     border-radius: var(--radius-xl);
+    /* The bar's chips read the composer's own width: the side panel narrows it on a wide window. */
+    container: composer / inline-size;
     --composer-rest: var(--shadow-composer);
     box-shadow: var(--composer-rest);
     transition: border-color var(--dur-3) var(--ease-out-quint), box-shadow var(--dur-3) var(--ease-out-quint);

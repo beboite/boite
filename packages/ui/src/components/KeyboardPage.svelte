@@ -374,11 +374,11 @@
     gap: 4px;
   }
 
-  /* The caps are the button: a click on the chord is the way to change it. */
+  /* The caps are the button: a click on the chord is the way to change it.
+     Its height is fixed, so a row with caps is as tall as one that reads "Not set". */
   .chord {
-    height: auto;
-    min-height: var(--control-sm);
-    padding: 3px 6px;
+    height: var(--control-sm);
+    padding: 0 6px;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     background: transparent;

@@ -33,6 +33,44 @@ test('a failed first read says so and offers a retry instead of asking to connec
   expect(document.querySelectorAll('[data-testid="quota-provider"]')).toHaveLength(1);
 });
 
+test('Escape closes the glance and gives the focus back to its trigger', async () => {
+  const store = { client: { call: async () => [quota], on: () => () => {} }, owner: true, endpointUrl: 'glance-escape-core', accounts: [] } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store } });
+  const trigger = document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!;
+  trigger.focus();
+  trigger.click();
+  await settle();
+  expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
+
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  document.activeElement!.dispatchEvent(escape);
+  await settle();
+  expect(escape.defaultPrevented).toBe(true);
+  expect(document.querySelector('[data-testid="limits-glance"]')).toBeNull();
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(trigger);
+});
+
+test('an Escape in a dialog opened over the glance is that dialog\'s, and the glance stays', async () => {
+  const store = { client: { call: async () => [quota], on: () => () => {} }, owner: true, endpointUrl: 'glance-palette-core', accounts: [] } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store } });
+  const trigger = document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!;
+  trigger.focus();
+  trigger.click();
+  await settle();
+  // The command palette, opened with Ctrl+K while the glance is up, holds the focus in its field.
+  const palette = document.body.appendChild(Object.assign(document.createElement('div'), { role: 'dialog' }));
+  palette.setAttribute('aria-modal', 'true');
+  const field = palette.appendChild(document.createElement('input'));
+  field.focus();
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  field.dispatchEvent(escape);
+  await settle();
+  expect(escape.defaultPrevented).toBe(false);
+  expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
+  palette.remove();
+});
+
 test('a failed refresh keeps the rows already read on screen under the error', async () => {
   let fail = false;
   const call = vi.fn(async () => { if (fail) throw new Error('timed out'); return [quota]; });

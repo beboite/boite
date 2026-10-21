@@ -376,6 +376,7 @@ import { workspace } from '../lib/workspace.svelte';
 
 
   .back {
+    flex: none;
     justify-content: flex-start;
     margin-bottom: 10px;
   }

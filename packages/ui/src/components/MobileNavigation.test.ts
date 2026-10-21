@@ -162,3 +162,23 @@ test("a contact's page opened from the list leaves for the board on the chat scr
   document.querySelector<HTMLButtonElement>('[data-testid=mobile-back]')!.click(); await settle();
   expect(document.querySelector('.mobile-list')).not.toBeNull();
 });
+
+test("a project header's menu starts a thread there and leaves the list for its composer", async () => {
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: true, onchange: null, addListener() {}, removeListener() {}
+  }));
+  client = new FakeClient({ delayMs: 0 });
+  store = new Store(); store.attach(client); await store.connect();
+  workspace.machines = [{ id: 'local', label: 'Local', store }]; workspace.active = store;
+  workspace.setView('projects');
+  mounted = mount(MobileNavigation, { target: document.body, props: { store, screen: 'threads' } });
+  await settle();
+  const group = document.querySelector<HTMLElement>('[data-testid=mobile-project-group][data-project-id=p-boite]')!;
+  group.querySelector<HTMLButtonElement>('[data-testid=mobile-project-menu]')!.click(); await settle();
+  const { contextMenu } = await import('../lib/context-menu.svelte');
+  expect(contextMenu.current?.items.map(item => item.id)).toContain('new');
+  contextMenu.current!.onpick('new'); await settle();
+  // The draft was made, yet the list stayed over it.
+  expect(store.draft?.projectId).toBe('p-boite');
+  expect(document.querySelector('.mobile-list')).toBeNull();
+});

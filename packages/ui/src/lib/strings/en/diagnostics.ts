@@ -15,7 +15,8 @@ export const strings = {
     problemsHint: 'Warnings and errors of the last 24 hours, grouped by kind, errors first.',
     problemsEmpty: 'No warning or error in the last 24 hours.',
     times: '{count}×',
-    lastSeen: 'last {time}',
+    /** `{time}` is a relative time that already says "ago". */
+    lastSeen: 'last seen {time}',
     latest: 'Latest message',
     threads: 'Threads it touched',
     missingThread: 'not on this machine',

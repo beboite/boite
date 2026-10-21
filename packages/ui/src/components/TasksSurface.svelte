@@ -265,7 +265,7 @@
           />
           <button
             type="submit"
-            class="small icon"
+            class="icon add"
             title={strings.tasks.add}
             aria-label={strings.tasks.add}
             data-testid="todo-add"
@@ -325,6 +325,9 @@
               >
                 <CircleCheck size={13} strokeWidth={1.75} />
               </button>
+            {:else}
+              <!-- A done todo keeps the Done button's place, so the row's buttons stay in their columns. -->
+              <span class="slot" aria-hidden="true"></span>
             {/if}
             <button
               type="button"
@@ -642,6 +645,18 @@
     min-width: 0;
     height: var(--input);
     font-size: var(--text-sm);
+  }
+
+  /* As tall as its field: the small button looked disabled beside it. */
+  .composer .add {
+    flex: none;
+    width: var(--input);
+    height: var(--input);
+  }
+
+  .slot {
+    flex: none;
+    width: var(--control-sm);
   }
 
   .todo .ghost {
