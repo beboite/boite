@@ -165,7 +165,10 @@ the next delivery. A changed model or account keeps input for its next turn.
 Escape stops the current turn. An Escape that closes something first (a popover, a menu, a
 confirmation, the command palette, a rename field) only closes it, and the focus
 goes back to where it was, or to the composer when that is gone, so a second
-Escape is needed to stop. A failed send preserves the input for an explicit retry.
+Escape is needed to stop. In the composer while it answers an agent's question,
+Escape stops nothing: a thread waiting on a question opens with the focus there,
+and stopping the turn would throw the question away. Skip and the stop button
+still end it. A failed send preserves the input for an explicit retry.
 An unconfirmed provider submission is never retried automatically.
 Edits and forks with live follow-ups use the fresh-session transfer rules below.
 

@@ -35,6 +35,22 @@ test('a failed initial read stops loading, can be retried and distinguishes miss
   expect(document.querySelector('[data-testid=usage-total]')?.textContent).toBe('No price');
 });
 
+test('a coverage line breaks only between its pieces, each label staying beside its count', async () => {
+  mounted = mount(UsagePage, { target: document.body, props: { store: store(vi.fn(async (_method: string, params: { edges: number[] }) => history(params.edges, 'claude'))) } });
+  await settle();
+  const pieces = (selector: string) => [...document.querySelectorAll(`${selector} .pair`)].map((piece) => piece.textContent);
+  expect(pieces('[data-testid=usage-coverage]')).toEqual(['Tokens 0/2 turns ·', 'Cost 0/2']);
+  expect(pieces('[data-provider=claude] .provider small')).toEqual(['Tokens 0/2 turns ·', 'Cost 0/2']);
+  expect(document.querySelector('[data-testid=usage-coverage]')!.textContent).toBe('Tokens 0/2 turns · Cost 0/2');
+});
+
+test('the refresh sits on the title line, not on a row of its own under the filters', async () => {
+  mounted = mount(UsagePage, { target: document.body, props: { store: store(vi.fn(async (_method: string, params: { edges: number[] }) => history(params.edges, 'claude'))) } });
+  await settle();
+  expect(document.querySelector('[data-testid=usage-page] > header [data-testid=usage-refresh]')).not.toBeNull();
+  expect(document.querySelector('.filters [data-testid=usage-refresh]')).toBeNull();
+});
+
 test('changing the range invalidates an older read before it can overwrite the latest history', async () => {
   const pending: { edges: number[]; resolve: (result: UsageHistory) => void }[] = [];
   const call = vi.fn(async (_method: string, params: { edges: number[] }) => new Promise<UsageHistory>((resolve) => pending.push({ edges: params.edges, resolve })));

@@ -172,6 +172,8 @@ test('a family has one switch per member inside the opened row, none for the fam
   mounted = mount(AccountsPage, { target: document.body, props: { store } });
   flushSync();
   expect(row('antigravity')?.querySelector('[data-testid="provider-enabled"]')).toBeNull();
+  // The slot stays reserved, so the switch column does not jump at that row.
+  expect(row('antigravity')?.querySelector('.act > [data-testid="provider-switch-slot"]')).not.toBeNull();
   row('antigravity')!.querySelector<HTMLButtonElement>('[data-testid="provider-details-toggle"]')!.click();
   flushSync();
   expect([...row('antigravity')!.querySelectorAll('[data-testid="provider-enabled"]')].map((input) => input.getAttribute('data-provider-id')).sort())

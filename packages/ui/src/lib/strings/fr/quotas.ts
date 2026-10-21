@@ -41,6 +41,7 @@ export const fr: Translation = {
     heading: 'Quotas des fournisseurs',
     intro: "Limites d'abonnement communiquées par vos fournisseurs. C'est distinct des jetons dépensés dans Boite.",
     remaining: '{percent} % restants',
+    remainingUnit: ' % restants',
     resets: 'Repart {time}',
     windowHours: '{hours} heures',
     windowWeekly: 'Hebdomadaire',

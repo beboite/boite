@@ -25,6 +25,10 @@ export interface MenuItem {
   danger?: boolean;
   disabled?: boolean;
   separator?: boolean;
+  /** Opens another list in the same menu: ArrowRight picks it, as Enter does. */
+  submenu?: boolean;
+  /** Goes back to the list a submenu came from: ArrowLeft picks it from anywhere in that submenu. */
+  back?: boolean;
 }
 
 export function separator(id = 'sep'): MenuItem {

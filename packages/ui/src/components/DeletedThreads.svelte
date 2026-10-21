@@ -109,7 +109,8 @@
 <style>
   ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
   .retention { margin-bottom: 16px; }
-  .retention label { display: block; font-size: var(--text-sm); margin-bottom: 6px; }
+  /* As DoneRetentionSetting's label: the "i" stays beside the text instead of dropping under it. */
+  .retention label { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); margin-bottom: 6px; }
   .retention-actions { display: flex; gap: 8px; align-items: center; }
   .retention input { width: 100px; }
   .retention p { margin: 6px 0 0; }

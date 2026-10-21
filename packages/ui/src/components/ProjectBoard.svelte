@@ -276,15 +276,19 @@
 
   .count { margin-left: auto; font-variant-numeric: tabular-nums; }
 
+  /* A column longer than the drawer fades its last card out instead of cutting
+     it through a line. The fade is the bottom padding, so at rest it covers
+     nothing (the same mask as the sidebar's rows). */
   .cards {
     list-style: none;
     margin: 0;
-    padding: 0;
+    padding: 0 0 10px;
     display: flex;
     flex-direction: column;
     gap: 6px;
     min-height: 0;
     overflow-y: auto;
+    mask-image: linear-gradient(to bottom, black calc(100% - 10px), transparent);
   }
 
   .card {

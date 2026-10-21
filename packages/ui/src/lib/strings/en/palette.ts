@@ -10,6 +10,7 @@ export const strings = {
     commands: 'Commands',
     empty: 'Nothing matches.',
     hint: 'Enter to open, Esc to close',
+    hintEmpty: 'Esc to close',
     newThread: 'New thread',
     addProject: 'Add a project',
     importSession: 'Import a Claude Code session',

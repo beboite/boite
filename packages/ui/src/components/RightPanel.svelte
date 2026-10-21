@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
+  import { ArrowRightToLine, ChevronLeft, ChevronRight, ListX, Maximize2, Minimize2, Plus, SquareX, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
   import { floatingPanel, RESIZE_DIRECTIONS } from '../lib/floating-panel';
   import { browserBridge } from '../lib/browser-bridge';
   import { stripOverflows } from '../lib/strip-overflow';
@@ -27,6 +27,7 @@
   import Menu from './Menu.svelte';
   import PanelResizeHandle from './PanelResizeHandle.svelte';
   import SurfaceIcon from './SurfaceIcon.svelte';
+  import { surfaceGlyph } from '../lib/surface-glyphs';
   import SurfaceLauncher from './SurfaceLauncher.svelte';
   import TasksSurface from './TasksSurface.svelte';
   import TraceSurface from './TraceSurface.svelte';
@@ -152,14 +153,22 @@
     };
   });
 
-  // The tab that is showing is always the one in view.
+  // The tab that is showing is always the one in view, also once the chevrons
+  // that an overflow brings have narrowed the strip under it.
   $effect(() => {
     const id = panel.activeSurfaceId;
+    void overflowing;
     if (!id || !tabs) return;
     const tab = tabs.querySelector<HTMLElement>(`[data-surface-id="${CSS.escape(id)}"]`);
     // jsdom has no layout, so it has no `scrollIntoView` either.
     tab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   });
+
+  /** The X shuts the panel and hands the keys to the title bar's toggle that opens it again; clicked, it left them on the page. */
+  function shut(): void {
+    panel.toggle();
+    document.querySelector<HTMLElement>('[data-testid="panel-toggle"]')?.focus({ preventScroll: true });
+  }
 
   function scrollBy(direction: -1 | 1): void {
     const node = tabs;
@@ -180,15 +189,16 @@
     contextMenu.open(
       event,
       [
-        { id: 'close', label: strings.common.close },
-        { id: 'others', label: strings.rightPanel.closeOthers, disabled: surfaces.length < 2 },
+        { id: 'close', label: strings.common.close, glyph: X },
+        { id: 'others', label: strings.rightPanel.closeOthers, glyph: ListX, disabled: surfaces.length < 2 },
         {
           id: 'right',
           label: strings.rightPanel.closeToRight,
+          glyph: ArrowRightToLine,
           disabled: index < 0 || index === surfaces.length - 1
         },
         separator(),
-        { id: 'all', label: strings.rightPanel.closeAll }
+        { id: 'all', label: strings.rightPanel.closeAll, glyph: SquareX }
       ],
       (action) => {
         if (action === 'close' || action === 'others' || action === 'right' || action === 'all') {
@@ -255,6 +265,7 @@
     ...offeredCards().map((card) => ({
       id: card.kind,
       label: kindName(card.kind),
+      glyph: surfaceGlyph(card.kind),
       disabled: !available(card.kind),
       ...(available(card.kind) ? {} : { hint: unavailable() })
     })),
@@ -430,7 +441,7 @@
       title={strings.common.close}
       aria-label={strings.common.close}
       data-testid="panel-close"
-      onclick={() => panel.toggle()}
+      onclick={shut}
     >
       <X size={14} strokeWidth={1.75} />
     </button>
@@ -557,6 +568,8 @@
     overflow-y: hidden;
     scrollbar-width: none;
     scroll-behavior: smooth;
+    /* A tab brought into view clears the end fade too, not only the edge. */
+    scroll-padding-inline: 28px;
   }
 
   .tabs::-webkit-scrollbar {

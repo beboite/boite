@@ -33,6 +33,24 @@ test('a failed first read says so and offers a retry instead of asking to connec
   expect(document.querySelectorAll('[data-testid="quota-provider"]')).toHaveLength(1);
 });
 
+test('Escape closes the glance and gives the focus back to its trigger', async () => {
+  const store = { client: { call: async () => [quota], on: () => () => {} }, owner: true, endpointUrl: 'glance-escape-core', accounts: [] } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store } });
+  const trigger = document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!;
+  trigger.focus();
+  trigger.click();
+  await settle();
+  expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
+
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  document.activeElement!.dispatchEvent(escape);
+  await settle();
+  expect(escape.defaultPrevented).toBe(true);
+  expect(document.querySelector('[data-testid="limits-glance"]')).toBeNull();
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(trigger);
+});
+
 test('a failed refresh keeps the rows already read on screen under the error', async () => {
   let fail = false;
   const call = vi.fn(async () => { if (fail) throw new Error('timed out'); return [quota]; });

@@ -17,7 +17,7 @@ export const fr: Translation = {
     problemsHint: 'Avertissements et erreurs des dernières 24 heures, regroupés par type, erreurs en premier.',
     problemsEmpty: 'Aucun avertissement ni erreur ces dernières 24 heures.',
     times: '{count}×',
-    lastSeen: 'dernier {time}',
+    lastSeen: 'vu en dernier {time}',
     latest: 'Dernier message',
     threads: 'Conversations touchées',
     missingThread: 'absente de cette machine',

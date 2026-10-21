@@ -106,7 +106,7 @@
     bind:value={query}
     {onkeydown}
     placeholder={strings.chat.findPlaceholder}
-    aria-label={strings.keyboard.commands.find}
+    aria-label={strings.palette.find}
     spellcheck="false"
     data-testid="find-input"
   />

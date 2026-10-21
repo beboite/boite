@@ -88,6 +88,7 @@
   <div class="surface framed">
     <header>
       <DrawerTabs {store} current="board" />
+      <span class="divider" aria-hidden="true"></span>
       <span class="project ui-label" title={project}>{project}</span>
       <span class="spacer"></span>
       <button
@@ -108,6 +109,15 @@
 </section>
 
 <style>
+  /* Between the tabs and the project, as the terminal's drawer has it. */
+  .divider {
+    flex: none;
+    width: 1px;
+    height: 14px;
+    margin: 0 2px;
+    background: var(--color-border);
+  }
+
   .drawer {
     position: relative;
     flex: none;

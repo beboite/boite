@@ -102,7 +102,7 @@
 </script>
 
 <div class="page task-manager" data-testid="task-manager">
-  <header><h1>{strings.taskManager.title}</h1><p class="hint">{strings.taskManager.scope}</p></header>
+  <header><div><h1>{strings.taskManager.title}</h1><p class="hint">{strings.taskManager.scope}</p></div></header>
   <div class="overview card" data-testid="task-manager-overview">
     <div><span>{strings.taskManager.agents}</span><strong>{snapshot ? count(snapshot.agents.length) : strings.resources.unknown}</strong></div>
     <div><span>{strings.trace.cpu}{#if snapshot && total.cpuCount > 0 && total.cpuCount < snapshot.agents.length}<InfoTip topic={strings.trace.cpu} text={strings.taskManager.partialHint} />{/if}</span><strong>{snapshot && (total.cpuCount || !snapshot.agents.length) ? cpu(total.cpu) : strings.resources.unknown}</strong></div>
@@ -174,7 +174,8 @@
   .title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   .title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 20px 0 0; }
-  dt { display: flex; align-items: center; gap: 6px; }
+  /* As tall as the info tip Disk and Network carry, so all four labels and values share a line. */
+  dt { display: flex; align-items: center; gap: 6px; min-height: 18px; }
   dd { margin: 6px 0 0; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
   .transfer dd { display: grid; gap: 4px; }
   .transfer dd > span { display: flex; align-items: center; gap: 4px; }

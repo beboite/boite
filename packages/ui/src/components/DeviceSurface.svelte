@@ -352,7 +352,9 @@
   .device { flex: 1; min-height: 0; height: 100%; display: flex; flex-direction: column; }
   .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; flex-wrap: wrap; }
   .tabs, .actions, .keys { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  .chip { min-height: 44px; min-width: 44px; justify-content: center; }
+  /* A desktop panel's controls are its size; a finger gets the touch target. */
+  .chip { min-height: var(--control); min-width: var(--control); justify-content: center; }
+  @media (pointer: coarse) { .chip { min-height: var(--touch-target); min-width: var(--touch-target); } .card button, input { min-height: var(--touch-target); } }
   .tabs [aria-selected=true], .chip[aria-pressed=true] { color: var(--color-accent); border-color: var(--color-accent); }
   .dot { width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--color-muted-foreground); flex: none; }
   .dot.ready { background: var(--color-accent); } .dot.failed { background: var(--color-danger); }
@@ -367,12 +369,12 @@
   .viewer { position: relative; flex: 1; min-height: 80px; display: flex; overflow: hidden; background: var(--color-background); }
   .cover { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }
   .card { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 360px; width: 100%; padding: 20px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-2); box-shadow: var(--shadow-e2); }
-  .card p { margin: 0; overflow-wrap: anywhere; } .card .heading { font-weight: 600; } .card button { min-height: 44px; min-width: 120px; justify-content: center; }
+  .card p { margin: 0; overflow-wrap: anywhere; } .card .heading { font-weight: 600; } .card button { min-height: var(--control); min-width: 120px; justify-content: center; }
   .center { margin: auto; padding: 24px; text-align: center; } .center .error { padding: 0; } .detail { margin: 8px 0 0; overflow-wrap: anywhere; }
   .screen { position: relative; flex: 1; height: auto; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; touch-action: none; cursor: crosshair; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
   .screen:disabled { opacity: 1; } .screen.view-only { cursor: default; } .screen.stale { opacity: .55; }
   img { position: absolute; inset: 8px; width: calc(100% - 16px); height: calc(100% - 16px); object-fit: contain; pointer-events: none; -webkit-user-select: none; user-select: none; }
   footer { padding: 10px 16px max(12px, env(safe-area-inset-bottom)); display: grid; gap: 8px; }
-  form { display: flex; gap: 8px; } input { min-width: 0; flex: 1; font-size: 16px; min-height: 44px; }
+  form { display: flex; gap: 8px; } input { min-width: 0; flex: 1; font-size: 16px; min-height: var(--control); }
   @media (max-width: 720px) { footer small { display: none; } .toolbar, footer, .picker { padding-inline: 12px; } }
 </style>

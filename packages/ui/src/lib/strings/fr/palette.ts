@@ -12,6 +12,7 @@ export const fr: Translation = {
     commands: 'Commandes',
     empty: 'Rien ne correspond.',
     hint: 'Entrée pour ouvrir, Échap pour fermer',
+    hintEmpty: 'Échap pour fermer',
     newThread: 'Nouvelle conversation',
     addProject: 'Ajouter un projet',
     importSession: 'Importer une session Claude Code',

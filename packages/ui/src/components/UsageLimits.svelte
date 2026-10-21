@@ -50,7 +50,7 @@
           <div class="primary" data-tone={quotaTone(limit.usedPercent)} data-testid="usage-limit-primary" data-window-id={limit.id}>
             <div class="primary-line">
               <span class="primary-name ui-label">{quotaWindowName(limit.label)}</span>
-              <span class="primary-left">{tenth(left)}<span class="unit">%</span></span>
+              <span class="primary-left">{tenth(left)}<span class="unit">{strings.quotas.remainingUnit}</span></span>
             </div>
             <div class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={left} aria-label="{name} {quotaWindowName(limit.label)}: {fill(strings.quotas.remaining, { percent: tenth(left) })}">
               <div class="fill" style:width="{left}%"></div>

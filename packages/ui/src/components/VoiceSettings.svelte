@@ -371,5 +371,7 @@
     .status-line { flex-wrap: wrap; }
     .status-line > button { flex-basis: 100%; min-height: var(--touch-target); }
   }
+  /* VoiceInputSettings stacks its microphone row here; the page's own row rule would centre it. */
+  @media (max-width: 480px) { .page :global(.switch-row.microphone-row) { align-items: stretch; } }
   @media (prefers-reduced-motion: reduce) { .model :global(.spinner) { animation: none; } }
 </style>

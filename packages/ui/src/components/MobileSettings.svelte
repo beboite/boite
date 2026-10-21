@@ -203,12 +203,15 @@
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
   /* The bar above already names the page, so its own title steps aside. */
-  .detail :global(.page:not(.machines-page):not(.limits-page) > header),
+  .detail :global(.page:not(.machines-page):not(.limits-page):not(.usage) > header),
   .detail :global(.machines-page .head h1),
-  .detail :global(.limits-page > header h1) { display: none; }
-  /* Its refresh joins the bar, at the right end: alone on a row it pushed the cards down. */
-  .detail :global(.limits-page > header) { position: absolute; top: 8px; right: 12px; margin: 0; }
-  .detail :global(.limits-page > header .refresh) { width: 44px; height: 44px; }
+  .detail :global(.limits-page > header h1),
+  .detail :global(.usage > header h1) { display: none; }
+  /* Their refresh joins the bar, at the right end: alone on a row it pushed the cards down. */
+  .detail :global(.limits-page > header),
+  .detail :global(.usage > header) { position: absolute; top: 8px; right: 12px; margin: 0; }
+  .detail :global(.limits-page > header .refresh),
+  .detail :global(.usage > header .refresh) { width: 44px; height: 44px; }
   .detail :global(.switch-row) { flex-wrap: wrap; gap: 12px; }
   /* The bar names the page and the line above says what it holds: the card's own heading and tip step aside. */
   .archived-page :global(#settings-archived > h2) { display: none; }

@@ -65,9 +65,12 @@ test('a composer the side panel narrows keeps its send button on the row of the 
 
 test('a panel tab centres its icon on its label, and the strip fades the end that hides a tab', async () => {
   await size(1180, 800);
-  await onStore(`store.panel.closeAll(); for (const kind of ['agents', 'messages', 'files', 'changes', 'tasks', 'trace']) store.panel.open(kind);`);
-  await page.waitFor(`document.querySelectorAll('${id('panel-tab')}').length === 6`);
+  await onStore(`store.panel.closeAll(); for (const kind of ['agents', 'messages', 'files', 'changes', 'tasks']) store.panel.open(kind);`);
+  await page.waitFor(`document.querySelectorAll('${id('panel-tab')}').length === 5`);
   await page.settleAnimations();
+  // One more on a strip that already overflows, the way the "+" menu adds them.
+  await onStore(`store.panel.open('trace');`);
+  await page.waitFor(`document.querySelectorAll('${id('panel-tab')}').length === 6`);
   const offsets = await page.evaluate<number[]>(`[...document.querySelectorAll('${id('panel-tab')}')].map((tab) => {
     const icon = tab.querySelector('.glyph svg').getBoundingClientRect();
     const name = tab.querySelector('.name').getBoundingClientRect();
@@ -75,6 +78,14 @@ test('a panel tab centres its icon on its label, and the strip fades the end tha
   })`);
   // An inline span set the icon on the text's baseline, 2.5 px above the label's centre.
   for (const offset of offsets) expect(Math.abs(offset)).toBeLessThanOrEqual(1);
+  // The tab just opened is the active one, and once the strip's smooth scroll
+  // ends no fade lies over it: it stood 6 px short of the end, under the fade.
+  await page.waitFor(`(() => {
+    const tabs = document.querySelector('${id('panel-tabs')}');
+    const strip = tabs.getBoundingClientRect();
+    const active = document.querySelector('${id('panel-tab')}[aria-selected="true"]').getBoundingClientRect();
+    return active.right <= strip.right + 0.5 && (!tabs.classList.contains('hidden-end') || strip.right - active.right >= 24);
+  })()`, 3_000);
 
   const edges = async () => page.evaluate<{ start: boolean; end: boolean; mask: string; left: boolean; right: boolean }>(`(() => {
     const tabs = document.querySelector('${id('panel-tabs')}');
@@ -96,23 +107,28 @@ test('a panel tab centres its icon on its label, and the strip fades the end tha
   await page.waitFor(`document.querySelector('${id('panel-tabs')}').classList.contains('hidden-start')`);
   expect(await edges()).toMatchObject({ start: true, end: false, left: true, right: false });
   await capture('polish-panel-tabs.png');
+
+  // Closed by its X, the panel hands the keys to the toggle that opens it again, not to the page.
+  await page.click(id('panel-close'));
+  await page.waitFor(`document.activeElement?.dataset?.testid === 'panel-toggle'`);
 });
 
 test('the launcher letters are whole keycaps', async () => {
   await onStore(`store.panel.closeAll(); store.panel.open('files'); store.panel.closeAll();`);
   await page.waitFor(`document.querySelector('${id('launch-files')}')`);
-  const keys = await page.evaluate<{ height: number; inside: boolean }[]>(`[...document.querySelectorAll('[data-testid^="launch-"] .kbd')].map((key) => {
-    const box = key.getBoundingClientRect();
-    const range = document.createRange();
-    range.selectNodeContents(key);
-    const ink = range.getBoundingClientRect();
-    return { height: box.height, inside: ink.top >= box.top - 0.5 && ink.bottom <= box.bottom + 0.5 };
+  const keys = await page.evaluate<{ height: number; offset: number }[]>(`[...document.querySelectorAll('[data-testid^="launch-"] .kbd')].map((key) => {
+    const box = key.getBoundingClientRect(), style = getComputedStyle(key);
+    const face = (box.top + parseFloat(style.borderTopWidth) + box.bottom - parseFloat(style.borderBottomWidth)) / 2;
+    // The label's own box less its padding is the trimmed cap height of its letters.
+    const label = key.querySelector('.ui-label'), lb = label.getBoundingClientRect(), ls = getComputedStyle(label);
+    const caps = (lb.top + parseFloat(ls.paddingTop) + lb.bottom - parseFloat(ls.paddingBottom)) / 2;
+    return { height: box.height, offset: caps - face };
   })`);
   expect(keys.length).toBeGreaterThan(0);
-  // As a trimmed label the cap was 11 px high and its letter stood out of it.
+  // As a trimmed label the cap was 11 px high; as an inline block its letter sat 3 px above the middle.
   for (const key of keys) {
     expect(key.height).toBeGreaterThanOrEqual(18);
-    expect(key.inside).toBe(true);
+    expect(Math.abs(key.offset)).toBeLessThanOrEqual(1);
   }
 });
 

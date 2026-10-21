@@ -606,8 +606,8 @@
         {#if !off}
           {@render stepAction(lead, step, main)}
         {/if}
-        <!-- A family's switches are its members', inside the opened row. -->
-        {#if alone}{@render enabledSwitch(lead)}{/if}
+        <!-- A family's switches are its members', inside the opened row: its own slot stays empty, so the column of switches stays straight. -->
+        {#if alone}{@render enabledSwitch(lead)}{:else}<span class="switch-slot" aria-hidden="true" data-testid="provider-switch-slot"></span>{/if}
       </div>
     </div>
     {#if !off}{@render progress(lead, step)}{/if}
@@ -692,11 +692,12 @@
 
 
   /* One card, one row per provider: the page reads top to bottom as a checklist. */
-  .provider { padding: 12px 16px; display: grid; gap: 10px; }
+  /* The cards' inset, so the switches here end where the cards' switches below do. */
+  .provider { padding: 12px var(--settings-padding); display: grid; gap: 10px; }
   .provider + .provider { border-top: 1px solid var(--color-border); }
 
   /* Providers still to add: lower, smaller, quieter, so the connected list leads. */
-  .provider.secondary { padding: 8px 16px; gap: 8px; }
+  .provider.secondary { padding: 8px var(--settings-padding); gap: 8px; }
   .secondary .name { font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); }
   .secondary .summary:hover .name { color: var(--color-foreground); }
   .secondary-list { background: transparent; }
@@ -755,6 +756,7 @@
   .dot.live { background: var(--color-live); }
 
   .act { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+  .switch-slot { flex: 0 0 var(--switch-width, 40px); }
 
 
   /* A link that does a button's job: leaving for a sign-in page or an installer. */

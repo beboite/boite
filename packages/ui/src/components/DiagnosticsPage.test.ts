@@ -74,3 +74,17 @@ test('a core older than the anonymized log names its machine and turns off the e
   expect(document.body.textContent).not.toContain('unknown method');
   expect(call.mock.calls.map(([method]) => method)).not.toContain('diagnostics.export');
 });
+
+test('a problem says when it was last seen in one sentence, the relative time carrying its own "ago"', async () => {
+  const problem = { origin: 'core', source: 'test', event: 'test.failed', level: 'error', count: 1, firstAt: Date.now() - 2_400_000, lastAt: Date.now() - 2_400_000, message: 'failed', threadIds: [] };
+  const call = vi.fn(async (method: string) => {
+    if (method === 'diagnostics.summary') return { problems: [problem] };
+    if (method === 'core.logs') return [];
+    return new Promise(() => {});
+  });
+  const store = { client: { call }, owner: true, connection: 'ready', threads: [], settings: null } as unknown as Store;
+  running = mount(DiagnosticsPage, { target: document.body, props: { store } });
+  await settle();
+  const when = document.querySelector('[data-testid=diagnostics-problem] .when')!.textContent!;
+  expect(when).toMatch(/^last seen 40 min\.? ago$/);
+});

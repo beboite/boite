@@ -321,8 +321,10 @@
     flex: 1;
     min-width: 0;
   }
+  /* As tall as the field it submits. */
   .field button {
     flex: none;
+    height: var(--input);
   }
 
   .members {

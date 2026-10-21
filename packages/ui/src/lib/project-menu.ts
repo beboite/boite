@@ -38,7 +38,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
   const client = owner.client;
   const clientGeneration = owner.clientGeneration;
   const management: MenuItem[] = [
-    { id: 'back', label: strings.sidebar.backToProjectMenu, glyph: ArrowLeft },
+    { id: 'back', label: strings.sidebar.backToProjectMenu, glyph: ArrowLeft, back: true },
     separator('back-sep'),
     ...(reorder ? [
       { id: 'move-up', label: strings.sidebar.moveProjectUp, glyph: ArrowUp, disabled: !reorder.up },
@@ -72,7 +72,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
     { id: 'copy', label: strings.sidebar.copyPath, title: project.path, glyph: Copy },
     { id: 'archived', label: strings.sidebar.viewArchivedThreads, glyph: History },
     ...(owner.owner || project.kind !== 'drafts' || reorder
-      ? [separator(), { id: 'manage', label: strings.sidebar.manageProject, glyph: Settings, hint: '›' }]
+      ? [separator(), { id: 'manage', label: strings.sidebar.manageProject, glyph: Settings, hint: '›', submenu: true }]
       : [])
   ];
   contextMenu.open(

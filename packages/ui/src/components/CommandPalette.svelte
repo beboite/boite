@@ -291,7 +291,8 @@
           <p class="empty subtle">{strings.palette.empty}</p>
         {/if}
       </div>
-      <div class="foot subtle">{strings.palette.hint}</div>
+      <!-- With nothing to open, Enter does nothing: the foot names only the way out. -->
+      <div class="foot subtle">{rows.length === 0 ? strings.palette.hintEmpty : strings.palette.hint}</div>
     </div>
   </div>
 {/if}

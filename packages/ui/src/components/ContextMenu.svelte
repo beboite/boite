@@ -83,6 +83,16 @@
       contextMenu.close();
       return;
     }
+    // Into a submenu from its row, back out of it from any row.
+    if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+      const focused = (document.activeElement as HTMLElement | null)?.dataset['value'];
+      const items = contextMenu.current.items;
+      const target = event.key === 'ArrowRight' ? items.find((item) => item.submenu && item.id === focused) : items.find((item) => item.back);
+      if (!target || target.disabled) return;
+      event.preventDefault();
+      pick(target);
+      return;
+    }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') return;
     const list = rows();
     if (list.length === 0) return;

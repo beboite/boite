@@ -40,6 +40,8 @@ export const strings = {
     heading: 'Provider quotas',
     intro: 'Subscription limits reported by your providers. Separate from tokens used in Boite.',
     remaining: '{percent}% left',
+    /** After the large figure of a card's primary window, in a smaller type: the same reading as `remaining`. */
+    remainingUnit: '% left',
     resets: 'Resets {time}',
     /** The limit windows the core names in English: `5 hours`, `Weekly`, `Monthly`, `Credits`, alone or on one side of ` · `. */
     windowHours: '{hours} hours',

@@ -68,7 +68,7 @@
     if (!thread) return [];
     return [
       // A phone has no Ctrl+F: this sheet is its way to the find bar.
-      { id: 'find', label: strings.keyboard.commands.find, glyph: Search },
+      { id: 'find', label: strings.palette.find, glyph: Search },
       { id: 'agents', label: strings.delegation.heading, glyph: UsersRound, active: agentsOn },
       ...(!thread.agentSessionId ? [{ id: 'coordination', label: strings.coordination.heading, glyph: Network }] : [])
     ];
@@ -90,7 +90,7 @@
       ...(store.boardAvailable() ? [{ id: 'board', label: strings.board.open, glyph: SquareKanban, active: store.boardShown }] : []),
       separator('sep-panel'),
       ...threadMenuItems(store, thread, { phone: true, tools: [
-        { id: 'find', label: strings.keyboard.commands.find, glyph: Search },
+        { id: 'find', label: strings.palette.find, glyph: Search },
         ...(delegated || agentsOn ? [{ id: 'agents', label: strings.delegation.heading, glyph: UsersRound, active: agentsOn }] : [])
       ] })
     ];
@@ -330,9 +330,11 @@
     font-weight: 500;
   }
 
+  /* The field's 1 px border and 10 px padding stand left of its text, so the text starts where the title's did. */
   .rename {
     height: var(--control);
     width: min(420px, 50%);
+    margin-left: -11px;
     font-weight: 600;
   }
 
