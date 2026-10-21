@@ -150,8 +150,11 @@ export function rowIndexOf(rows: readonly TimelineRow[], messageId: string, part
  * paragraph keeps, `part` between two runs of activity. Null for any other row.
  */
 export function seam(previous: TimelineRow | undefined, row: TimelineRow): 'part' | 'block' | null {
-  if (!previous || !row.first || row.message.role !== 'assistant' || previous.message.role !== 'assistant') return null;
+  if (!previous || !row.first || row.message.role !== 'assistant') return null;
   if (previous.message.turnId !== row.message.turnId || previous.message.id === row.message.id) return null;
+  // A system wake-up names the work directly below it, including a failed turn.
+  if (previous.message.role === 'system') return 'block';
+  if (previous.message.role !== 'assistant') return null;
   const shown = (part: MessagePart) => !(part.type === 'text' && part.text.trim() === '');
   const lead = row.message.parts.find(shown);
   const tail = previous.message.parts.slice(previous.from, previous.to).findLast(shown);

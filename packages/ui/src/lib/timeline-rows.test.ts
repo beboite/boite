@@ -149,6 +149,10 @@ test('an assistant message that carries on the turn above joins it at the gap of
   // Another turn, a prompt, a cut row and the first row keep the gap between messages.
   expect(seam(whole(inTurn(message('e', [tool('5')]), 'other')), running)).toBeNull();
   expect(seam(whole(inTurn(message('f', [text('Go on')], 'user'), 'turn')), running)).toBeNull();
+  // A system wake-up stays close to its answer, including an error, without joining another turn.
+  const wake = whole(inTurn(message('wake', [text('Resumed after an error')], 'system'), 'turn'));
+  expect(seam(wake, running)).toBe('block');
+  expect(seam({ ...wake, message: { ...wake.message, turnId: 'other' } }, running)).toBeNull();
   expect(seam(tools, { ...running, first: false })).toBeNull();
   expect(seam(undefined, running)).toBeNull();
 });

@@ -30,6 +30,7 @@ export const strings = {
     findPrevious: 'Previous match (Shift+Enter)',
     findNext: 'Next match (Enter)',
     finishedAt: 'done {time}',
+    failedAt: 'failed {time}',
     /** `{what}` is a list of `backgroundOne` and `backgroundMany` joined by `backgroundJoin`. */
     backgroundRunning: '{what} still running',
     forkOrigin: 'Forked from', forkReturn: 'Send conclusions back', forkSummary: 'Conclusions for the original conversation',
@@ -207,6 +208,12 @@ export const strings = {
     forkWorktree: 'Fork into a new worktree',
     /** A prompt's exact time, under its bubble: `Sent Tue 28 Sep 2026, 10:31:05`. */
     sentAt: 'Sent {time}',
-    error: 'Error'
+    error: 'Error',
+    errorTitle: "The agent couldn't continue",
+    errorSubscriptionTitle: 'No subscription available',
+    errorSubscriptionHint: 'Connect an account or wait for its quota to reset.',
+    errorServerTitle: 'The provider is unavailable',
+    errorServerHint: 'Try again in a moment.',
+    errorDetails: 'Technical details'
   }
 } as const;

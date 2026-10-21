@@ -30,6 +30,7 @@ export const fr: Translation = {
     findPrevious: 'Résultat précédent (Maj+Entrée)',
     findNext: 'Résultat suivant (Entrée)',
     finishedAt: 'fini à {time}',
+    failedAt: 'échec à {time}',
     backgroundRunning: '{what} encore en cours',
     forkOrigin: 'Dérivé de', forkReturn: 'Renvoyer les conclusions', forkSummary: "Conclusions pour la conversation d'origine",
     forkReturned: "Conclusions envoyées à la conversation d'origine", forkSourceUnavailable: "Conversation d'origine indisponible",
@@ -174,6 +175,12 @@ export const fr: Translation = {
     forkHere: 'Bifurquer dans une nouvelle conversation',
     forkWorktree: 'Bifurquer dans un nouveau worktree',
     sentAt: 'Envoyé {time}',
-    error: 'Erreur'
+    error: 'Erreur',
+    errorTitle: "L'agent n'a pas pu continuer",
+    errorSubscriptionTitle: 'Aucun abonnement disponible',
+    errorSubscriptionHint: 'Connectez un compte ou attendez la réinitialisation de son quota.',
+    errorServerTitle: 'Le fournisseur est indisponible',
+    errorServerHint: 'Réessayez dans un instant.',
+    errorDetails: 'Détails techniques'
   }
 };

@@ -103,7 +103,7 @@
       {/if}
     {/if}
     {#if turn.finishedAt !== null}
-      {@render metric('turn-finished-at', fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) }), exactTime(turn.finishedAt))}
+      {@render metric('turn-finished-at', fill(turn.status === 'error' ? strings.chat.failedAt : strings.chat.finishedAt, { time: clockTime(turn.finishedAt) }), exactTime(turn.finishedAt))}
     {/if}
     {#if total > 0}
       {@render metric('turn-tokens', `${formatTokens(total)} ${strings.units.tokens}`, breakdown)}
@@ -133,7 +133,7 @@
   /* Pointed from another message of the turn, its buttons show with it. */
   .summary.settled.pointed :global(.act) { opacity: 1; }
   @media (hover: none) { .summary.settled { opacity: 1; } }
-  .summary[data-status='error'] { color: var(--color-danger); }
+  .summary[data-status='error'] > :global(svg) { color: var(--color-danger); }
   .summary.compacting { align-self: flex-start; align-items: flex-start; flex-wrap: nowrap; gap: 10px; max-width: 520px; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); }
   .compaction-copy { min-width: 0; }
   .compaction-title { display: block; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 500; }
