@@ -64,8 +64,9 @@ ${CONTROL_HELP}
   pr list|refresh                this conversation's linked pull requests
   pr link|unlink <url>           attach or remove a PR link; does not change GitHub
   pr watch [<url|number>]        wake this thread when the PR's checks fail or
-                                 pass, a review or comment lands or it starts
-                                 to conflict; end your turn instead of polling
+                                 pass, a review or comment lands, it starts
+                                 to conflict or leaves the merge queue
+                                 unmerged; end your turn instead of polling
   pr unwatch [<url|number>]      stop one watch, or all of this thread's
   view <file.html>               draw an HTML page in your answer, where a
                                  line ![title](file.html) places it
@@ -751,7 +752,8 @@ export function watchStatus(watch: import('@boite/contracts').PullRequestWatch):
   if (!seen) return paused ?? 'not read yet';
   const { total, running, failed } = seen.checks;
   const checks = total === 0 ? 'no checks' : `${total} checks, ${running} running, ${failed} failed`;
-  return [`head ${seen.head}`, checks, seen.conflicting ? `conflicts with ${seen.base}` : null, paused].filter(Boolean).join('; ');
+  const queue = seen.queue ? `merge queue position ${seen.queue.position}` : null;
+  return [`head ${seen.head}`, checks, seen.conflicting ? `conflicts with ${seen.base}` : null, queue, paused].filter(Boolean).join('; ');
 }
 
 /**

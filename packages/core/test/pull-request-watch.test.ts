@@ -253,6 +253,8 @@ test('a burst folds into one set of changes, and failures of an older head drop 
     { kind: 'remarks', remarks: [expect.objectContaining({ id: 'a', body: '2' }), expect.objectContaining({ id: 'b' })] },
     { kind: 'passed', head: 'new', count: 3, required: true },
   ]);
+  // Out of the queue a moment before GitHub shows the merge: the merge is the news.
+  expect(mergeChanges([{ kind: 'dequeued', base: 'main' }], [{ kind: 'closed', state: 'MERGED', by: 'maintainer' }])).toEqual([{ kind: 'closed', state: 'MERGED', by: 'maintainer' }]);
 });
 
 // --- The loop, against a scripted gh ----------------------------------------
@@ -261,6 +263,10 @@ interface FakeGitHub {
   state: 'OPEN' | 'CLOSED' | 'MERGED';
   mergeable: string;
   head: string;
+  /** Its place in the merge queue, null out of it. */
+  queue: number | null;
+  /** The state only the detail read gives, as when GitHub merges between the fingerprint and the detail. */
+  detailState?: 'MERGED' | 'CLOSED';
   runs: Run[];
   comments: unknown[];
   reviews: unknown[];
@@ -281,7 +287,7 @@ interface FakeGitHub {
 }
 
 function fakeGitHub(): FakeGitHub {
-  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', closedBy: 'meetsu', failure: null, closerFailure: null, rules: [], protection: [], rulesFailure: null, calls: [] };
+  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), queue: null, runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', closedBy: 'meetsu', failure: null, closerFailure: null, rules: [], protection: [], rulesFailure: null, calls: [] };
 }
 
 /** What `gh` prints for each call a watch makes. */
@@ -295,14 +301,16 @@ async function answer(github: FakeGitHub, args: string[]): Promise<string> {
     github.closerFailure = null;
     if (failure) throw new Error(failure);
     const by = { login: github.closedBy };
-    return JSON.stringify({ data: { viewer: { login: 'meetsu' }, repository: { pullRequest: { state: github.state, mergedBy: github.state === 'MERGED' ? by : null,
-      timelineItems: { nodes: github.state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
+    const state = github.detailState ?? github.state;
+    return JSON.stringify({ data: { viewer: { login: 'meetsu' }, repository: { pullRequest: { state, mergedBy: state === 'MERGED' ? by : null,
+      timelineItems: { nodes: state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
   }
-  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.state, mergeable: github.mergeable, headRefOid: github.head });
+  const mergeQueueEntry = github.queue === null ? null : { position: github.queue };
+  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.detailState ?? github.state, mergeable: github.mergeable, headRefOid: github.head, mergeQueueEntry });
   if (query) {
     const counts = new Map<string, number>();
     for (const run of github.runs) { const key = run.status && run.status !== 'COMPLETED' ? run.status : run.conclusion ?? 'SUCCESS'; counts.set(key, (counts.get(key) ?? 0) + 1); }
-    return JSON.stringify({ data: { repository: { pullRequest: { state: github.state, mergeable: github.mergeable, headRefOid: github.head, updatedAt: github.updatedAt,
+    return JSON.stringify({ data: { repository: { pullRequest: { state: github.state, mergeable: github.mergeable, headRefOid: github.head, updatedAt: github.updatedAt, mergeQueueEntry,
       comments: { totalCount: github.comments.length, nodes: [] }, reviews: { totalCount: github.reviews.length, nodes: [] }, reviewThreads: { totalCount: 0 },
       commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { checkRunCountsByState: [...counts].map(([state, count]) => ({ state, count })), statusContextCountsByState: [] } } } }] } } } } });
   }
@@ -536,6 +544,46 @@ test('a merge or a close by someone else is told with what still waited, a faile
   expect(watches.of(threadId)).toEqual([]);
   expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toBeUndefined();
   expect(harness!.core.linkedPullRequests.saved(threadId)[0]?.state).toBe('MERGED');
+});
+
+test('a pull request in the merge queue keeps its watch waiting, and leaving the queue unmerged wakes the agent', async () => {
+  const { owner, threadId, github, watches, drive } = await watchedThread();
+  await owner.call('turns.start', { threadId, prompt: 'merge it when green' });
+  await settled(threadId);
+  github.runs = [{ name: 'test' }];
+  await owner.call('threads.watchPullRequest', { threadId });
+  const summary = () => harness!.core.threads.list({}).find(thread => thread.id === threadId)!;
+  // Its head checks passed: nothing left to wait on.
+  expect(summary().requestSince).toBeNull();
+  // Queued: its merge group's checks run where the head's do not show them, so the agent still waits.
+  github.queue = 2;
+  await drive();
+  expect(watches.of(threadId)[0]!.seen?.queue).toEqual({ position: 2 });
+  expect(summary().requestSince).toBeNumber();
+  github.queue = 1;
+  await drive();
+  expect(watches.of(threadId)[0]!.seen?.queue).toEqual({ position: 1 });
+  expect(wakes(threadId)).toHaveLength(0);
+  // Its merge group failed: out of the queue, still open.
+  github.queue = null;
+  await drive();
+  await settled(threadId);
+  expect(wakes(threadId)).toHaveLength(1);
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('It left the merge queue of main without merging');
+  expect(summary().requestSince).toBeNull();
+  // Queued again and merged between the fingerprint, still open, and the detail read: the merge is the news, not the queue.
+  github.queue = 1;
+  await drive();
+  github.queue = null;
+  github.detailState = 'MERGED';
+  github.closedBy = 'maintainer';
+  await drive();
+  await settled(threadId);
+  expect(wakes(threadId)).toHaveLength(2);
+  const text = wakeText(threadId, wakes(threadId)[1]!.id);
+  expect(text).toContain('maintainer merged the pull request; its watch ended.');
+  expect(text).not.toContain('merge queue');
+  expect(watches.of(threadId)).toEqual([]);
 });
 
 test('changes while the agent works wait for the turn to end and go out as one message', async () => {

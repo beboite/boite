@@ -19,6 +19,25 @@ afterEach(async () => {
   vi.restoreAllMocks(); document.body.innerHTML = ''; localStorage.clear();
 });
 
+test('phone rows show linked PRs without a branch, using their owning machine', async () => {
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: true, onchange: null, addListener() {}, removeListener() {}
+  }));
+  client = new FakeClient({ delayMs: 0 });
+  store = new Store(); store.attach(client); await store.connect();
+  const thread = store.threads.find(t => !t.parentThreadId && !t.archived && t.projectId !== null)!;
+  thread.branch = null;
+  const url = 'https://github.com/example/repo/pull/9951';
+  await client.call('threads.linkPullRequest', { threadId: thread.id, url });
+  workspace.machines = [{ id: 'local', label: 'Local', store }]; workspace.active = store;
+  mounted = mount(MobileNavigation, { target: document.body, props: { store, screen: 'threads' } });
+  await settle();
+  const badge = document.querySelector<HTMLAnchorElement>(`[data-thread-id="${thread.id}"] [data-testid=thread-pr]`);
+  expect(badge?.href).toBe(url);
+  expect(badge?.textContent).toContain('#9951');
+  expect(badge?.closest('button')).toBeNull();
+});
+
 test('selecting a conversation beyond the first mobile window finishes loading its history', async () => {
   vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
     media, matches: true, onchange: null, addListener() {}, removeListener() {}
@@ -161,24 +180,4 @@ test("a contact's page opened from the list leaves for the board on the chat scr
   expect(document.querySelector('.mobile-list')).toBeNull();
   document.querySelector<HTMLButtonElement>('[data-testid=mobile-back]')!.click(); await settle();
   expect(document.querySelector('.mobile-list')).not.toBeNull();
-});
-
-
-test('phone rows show linked PRs without a branch, using their owning machine', async () => {
-  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
-    media, matches: true, onchange: null, addListener() {}, removeListener() {}
-  }));
-  client = new FakeClient({ delayMs: 0 });
-  store = new Store(); store.attach(client); await store.connect();
-  const thread = store.threads.find(t => !t.parentThreadId && !t.archived && t.projectId !== null)!;
-  thread.branch = null;
-  const url = 'https://github.com/example/repo/pull/9951';
-  await client.call('threads.linkPullRequest', { threadId: thread.id, url });
-  workspace.machines = [{ id: 'local', label: 'Local', store }]; workspace.active = store;
-  mounted = mount(MobileNavigation, { target: document.body, props: { store, screen: 'threads' } });
-  await settle();
-  const badge = document.querySelector<HTMLAnchorElement>(`[data-thread-id="${thread.id}"] [data-testid=thread-pr]`);
-  expect(badge?.href).toBe(url);
-  expect(badge?.textContent).toContain('#9951');
-  expect(badge?.closest('button')).toBeNull();
 });

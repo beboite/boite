@@ -14,5 +14,6 @@ export function watchStatus(watch: PullRequestWatch): string {
     ...(failed > 0 ? [fill(strings.tasks.watchFailed, { count: String(failed) })] : []),
   ];
   if (seen.conflicting) parts.push(fill(strings.tasks.watchConflict, { base: seen.base }));
+  if (seen.queue) parts.push(fill(strings.tasks.watchQueued, { position: String(seen.queue.position) }));
   return parts.join(' · ');
 }

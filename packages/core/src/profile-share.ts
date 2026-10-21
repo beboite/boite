@@ -19,7 +19,8 @@ import { currentOs, homePath } from './paths.ts';
 /**
  * What an isolation variable means when it is not set, as segments under the
  * home directory. A descriptor that isolates an account through one of them
- * (OpenCode uses the XDG pair, Codex `CODEX_HOME`, pi `PI_CODING_AGENT_DIR`)
+ * (OpenCode uses the XDG pair, Codex `CODEX_HOME`, pi `PI_CODING_AGENT_DIR`,
+ * Antigravity `GEMINI_HOME`)
  * puts its session file under that same variable, so the provider's own location
  * is the variable's own default, never `~/.<id>`.
  */
@@ -32,6 +33,7 @@ export const ISOLATION_DEFAULTS: Record<string, string[]> = {
   CLAUDE_CONFIG_DIR: ['.claude'],
   GROK_HOME: ['.grok'],
   PI_CODING_AGENT_DIR: ['.pi', 'agent'],
+  GEMINI_HOME: ['.gemini'],
 };
 
 /** The file at the root of an account's directory that says what Boite linked and copied there. */
@@ -52,9 +54,9 @@ interface Marker {
   keys: Record<string, string>;
 }
 
-/** The provider's own directory behind an isolation variable: the environment's value, else its default. */
-export function variableHome(variable: string): string | null {
-  const value = process.env[variable];
+/** The provider's configured home, then its inherited environment, then the variable's default. */
+export function variableHome(variable: string, profile?: Pick<OsProfile, 'env'>): string | null {
+  const value = profile?.env?.[variable] ?? process.env[variable];
   if (value !== undefined && value.length > 0) return value;
   const fallback = ISOLATION_DEFAULTS[variable];
   return fallback === undefined ? null : join(homePath(), ...fallback);
@@ -76,7 +78,7 @@ export function shareProfile(isolationDir: string, profile: OsProfile, shares: r
   for (const share of shares) {
     const template = profile.isolation[share.variable];
     if (template === undefined) continue;
-    const from = variableHome(share.variable);
+    const from = variableHome(share.variable, profile);
     if (from === null) {
       for (const path of share.paths) {
         problems.push({ path, message: `Boite does not know where ${share.variable} points when it is not set` });

@@ -1,9 +1,24 @@
-import type { AccountId, ModelInfo, Protocol, ProviderDescriptor } from '@boite/contracts';
+import type { AccountId, AgentProfile, ModelInfo, Protocol, ProviderDescriptor } from '@boite/contracts';
+import type { Core } from '../core.ts';
 import { probedModelsOf } from '../drivers/index.ts';
 import { refused } from '../errors.ts';
 
 /** The protocols whose models come from the agent, not from the descriptor. */
-export const PROBED_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'];
+export const PROBED_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi'];
+
+/**
+ * The provider a persistent agent runs on. A profile saved on a provider this
+ * Boite does not have, one retired since (`providers/retired.ts`) or a user
+ * descriptor removed, still loads; whatever would start it refuses here and
+ * asks for another model, which `agents.profile.save` checks as any choice.
+ */
+export function agentProvider(core: Core, agent: Pick<AgentProfile, 'name' | 'selection'>): ProviderDescriptor {
+  const provider = core.providers.get(agent.selection.providerId);
+  if (provider !== undefined) return provider;
+  throw refused(`selection.providerId: ${agent.name} runs on ${agent.selection.providerId}, which is not installed here; choose another model for this agent`, {
+    field: 'selection.providerId', providerId: agent.selection.providerId, expected: 'an installed provider',
+  });
+}
 
 /**
  * What this account may run: the descriptor's models, plus the ones the last

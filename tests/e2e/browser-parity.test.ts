@@ -104,12 +104,22 @@ test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, th
         functionDeclaration: `function(base64, mime) { return new Promise((resolve, reject) => {
           const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
           const video = document.createElement('video'), url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-          const cleanup = () => { video.remove(); URL.revokeObjectURL(url); };
+          const events = [];
+          for (const name of ['loadedmetadata', 'loadeddata', 'seeking', 'seeked', 'stalled', 'suspend', 'error']) video.addEventListener(name, () => events.push(name));
+          const timer = setTimeout(() => {
+            const state = { events, ready: video.readyState, network: video.networkState, duration: video.duration, at: video.currentTime, seeking: video.seeking, error: video.error?.message };
+            cleanup(); reject(new Error('recording decode timed out: ' + JSON.stringify(state)));
+          }, 15000);
+          const cleanup = () => { clearTimeout(timer); video.remove(); URL.revokeObjectURL(url); };
           video.onloadeddata = () => {
             video.onseeked = () => { resolve({ width: video.videoWidth, height: video.videoHeight, duration: video.duration, seeked: video.currentTime }); cleanup(); };
             video.currentTime = video.duration / 2;
           };
-          video.onerror = () => { cleanup(); reject(new Error('recording cannot play')); };
+          video.onerror = () => { const message = video.error?.message; cleanup(); reject(new Error('recording cannot play: ' + message)); };
+          // Keep the paused decoder in the document through load and seek.
+          video.muted = true; video.preload = 'auto';
+          video.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none';
+          document.body.append(video);
           video.src = url; video.load();
         }); }`,
         arguments: [{ value: bytes.toString('base64') }, { value: recorded.mime }],

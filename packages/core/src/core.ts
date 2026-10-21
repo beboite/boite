@@ -48,6 +48,7 @@ import { AgentBrowser, BROWSER_SCOPE } from './browser.ts';
 import { MobileDevices } from './devices/control.ts';
 import { LazyMcp } from './mcp/lazy.ts';
 import { QuotaStore } from './quotas.ts';
+import { dropRetiredAccounts } from './account-retirement.ts';
 import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
 import { ActivityStore } from './activity.ts';
@@ -398,6 +399,7 @@ export class Core {
       return { ok: true as const };
     });
     this.procs.applySettings(this.settings.get());
+    dropRetiredAccounts(this);
     this.accounts.ensureDefaults();
     this.accounts.recheckSignedOut();
     this.#stopDeletionRetention = scheduleThreadDeletionRetention(this, options.retentionPassMs);

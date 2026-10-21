@@ -19,7 +19,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   await waitFor(() => shownModels().length === 3);
   // One tile per provider an account answers for, in the core's order: the
   // one still to download or sign into is Settings' business, one tile away.
-  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'codex', 'pi', 'grok', 'muse', 'antigravity-cli', 'more']);
+  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'codex', 'pi', 'grok', 'muse', 'more']);
   // Claude is the shown one and has two logins, so they sit beside its name.
   expect(seats()).toEqual(['claude::a-claude-main', 'claude::a-claude-side']);
   expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5']);

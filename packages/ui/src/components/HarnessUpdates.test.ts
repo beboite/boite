@@ -67,7 +67,7 @@ test('failed updates retain their reason and retry and unknown releases keep the
   await showMachines();
   expect(row('local', 'claude').textContent).toContain('the disk is full');
   expect(row('local', 'claude').querySelector('[data-testid="harness-update-row-run"]')!.textContent).toContain('Try again');
-  const blind = row('local', 'antigravity-cli');
+  const blind = row('local', 'grok');
   expect(blind.querySelector('.version')?.getAttribute('title')).toContain('Checks by itself');
   blind.querySelector<HTMLButtonElement>('[data-testid="harness-update-row-blind"]')!.click();
   await settle(); await vi.advanceTimersByTimeAsync(1500); await settle();

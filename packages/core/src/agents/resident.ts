@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import type { AgentAccountGrant, AgentBrain, AgentBrainRoot, AgentProfile, AgentRuntimeConfig, AgentScope, AgentSelection, AgentWork, RpcParams } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
-import { checkEffort, checkModel } from '../threads/selection.ts';
+import { agentProvider, checkEffort, checkModel } from '../threads/selection.ts';
 import { ids, integer, object, text } from './validation.ts';
 import { OPEN_WORK } from './repository.ts';
 import { withLoad } from '../threads/records.ts';
@@ -29,7 +29,7 @@ export class ResidentAgents {
     const agent = this.records.get('profile',agentId);
     const saved = this.core.journal.getSetting(`agents:runtime:${agentId}`) as AgentRuntimeConfig | undefined;
     if (saved) return { ...saved, defaultRoute: agent.selection };
-    const model = agent.selection.model ?? this.core.providers.require(agent.selection.providerId).models.find(m => m.default)?.id ?? this.core.providers.require(agent.selection.providerId).models[0]?.id;
+    const model = agent.selection.model ?? agentProvider(this.core, agent).models.find(m => m.default)?.id ?? agentProvider(this.core, agent).models[0]?.id;
     if (!model) throw refused('default model: choose a model for this agent');
     // Subagents are on by default: an agent splits its work the way a thread does, on any granted model.
     return { defaultRoute:{...agent.selection,model}, allowedRoutes:[{...agent.selection,model,id:'default',name:'Default'}], subagents:{enabled:true,paused:false,profiles:[],anyModel:true}, compactAfterTurns:12,maxRunMinutes:10,autoMemory:true };

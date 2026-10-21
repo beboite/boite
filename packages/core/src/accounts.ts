@@ -6,13 +6,14 @@ import { newId } from './ids.ts';
 import { stripAnsi } from './ansi.ts';
 import { invalidParams, messageOf, notFound, refused, unavailable } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
+import { antigravityCertificates } from './drivers/antigravity.ts';
 import { loginFolders, publishLoginCatalog } from './account-login.ts';
 import { probeThreadId } from './providers/probe.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
 import { agentEnv, hostAgentsEnabled, profileFor, resolveExecutable, resolveLaunch } from './providers/resolve.ts';
 import { sqliteHasRows } from './providers/sqlite-login.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
-import { ISOLATION_DEFAULTS, shareKeys, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
+import { variableHome, shareKeys, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
 import { logAccountStatus, logLoginState } from './account-log.ts';
 
@@ -93,8 +94,6 @@ function announcedCallback(loginUrl: string | null): URL | null {
  * directory: an isolation variable, or a login Boite runs there. A provider
  * with neither would take the directory and then read the user's own login
  * anyway, so the second account would be the first one under another name.
- * The Antigravity CLI is that case: nothing moves `~/.gemini/antigravity-cli`
- * and its token sits in the system keyring.
  */
 function refuseUnisolable(provider: ProviderDescriptor): void {
   const profile = profileFor(provider);
@@ -336,6 +335,7 @@ export class AccountStore {
     for (const [key, value] of Object.entries(env)) {
       env[key] = isolationDir === null ? value : value.split('{isolationDir}').join(isolationDir);
     }
+    if (provider.quirks?.includes('antigravity') === true) Object.assign(env, antigravityCertificates(currentOs(), process.env, existsSync));
     return { ...env, ...subscriptionProxyEnv(this.core, provider) };
   }
 
@@ -830,18 +830,16 @@ export class AccountStore {
   }
 
   /**
-   * The provider's own login directory: its isolation variable if the environment
-   * carries one, that variable's own default when Boite knows it, else
+   * The provider's own login directory: its configured isolation variable,
+   * the inherited variable, that variable's default when Boite knows it, else
    * `~/.<id>`.
    */
   defaultLocation(provider: ProviderDescriptor): string | null {
     const profile = profileFor(provider);
     if (profile !== undefined) {
       for (const key of Object.keys(profile.isolation)) {
-        const value = process.env[key];
-        if (value !== undefined && value.length > 0) return value;
-        const fallback = ISOLATION_DEFAULTS[key];
-        if (fallback !== undefined) return join(homePath(), ...fallback);
+        const value = variableHome(key, profile);
+        if (value !== null) return value;
       }
     }
     return join(homePath(), `.${provider.id}`);

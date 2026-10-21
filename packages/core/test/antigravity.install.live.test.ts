@@ -1,6 +1,6 @@
 /**
  * The real Antigravity release, downloaded and started once. Opt-in behind
- * `BOITE_E2E_ANTIGRAVITY_INSTALL=1`, because it pulls 468 MB from Google and
+ * `BOITE_E2E_ANTIGRAVITY_INSTALL=1`, because it pulls 110 to 340 MB from Google and
  * takes about a minute.
  *
  *   $env:BOITE_E2E_ANTIGRAVITY_INSTALL='1'; bun test test/antigravity.install.live.test.ts

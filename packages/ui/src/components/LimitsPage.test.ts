@@ -48,7 +48,7 @@ test('the last reading stays up while the next one loads, and only signed-in acc
   const rows: AccountQuota[] = [
     { ...quota('Claude'), accountId: 'signed-in' },
     { ...quota('Claude'), accountId: 'signed-out' },
-    { ...quota('Antigravity'), accountId: 'quota:antigravity-cli', providerId: 'antigravity', enabled: false, status: 'disabled', windows: [] },
+    { ...quota('Antigravity'), accountId: 'antigravity', providerId: 'antigravity', enabled: false, status: 'disabled', windows: [] },
     { ...quota('Pi'), accountId: 'pi', providerId: 'pi', status: 'unsupported', windows: [] },
   ];
   const accounts = [{ id: 'signed-in', status: 'ok' }, { id: 'signed-out', status: 'unauthenticated' }];
@@ -59,9 +59,9 @@ test('the last reading stays up while the next one loads, and only signed-in acc
   await settle();
   expect(document.querySelectorAll('[data-testid="usage-limit-account"]')).toHaveLength(1);
   expect(document.querySelector('[data-testid="usage-limits"]')!.textContent).not.toContain('Antigravity');
-  // The switches: the signed-in account on, the CLI source off, nothing for a signed-out account or a provider with no limits.
+  // The switches: the signed-in account on, the one the user stopped reading off, nothing for a signed-out account or a provider with no limits.
   const switches = [...document.querySelectorAll<HTMLInputElement>('[data-testid="quota-monitor"]')];
-  expect(switches.map((input) => [input.dataset.accountId, input.checked])).toEqual([['signed-in', true], ['quota:antigravity-cli', false]]);
+  expect(switches.map((input) => [input.dataset.accountId, input.checked])).toEqual([['signed-in', true], ['antigravity', false]]);
   await unmount(mounted);
 
   // Opened again, the page draws the reading it had while a new one is on its way.
@@ -120,7 +120,7 @@ test('the read waits for the socket, a failure shows with a retry, and a kept re
   document.querySelector<HTMLButtonElement>('[data-testid="limits-retry"]')!.click();
   await settle();
   const stale = { ...quota('Claude'), accountId: 'claude', status: 'unavailable', checkedAt: Date.UTC(2026, 8, 30, 9), error: 'Claude quota requests are rate limited. Retrying in five minutes.' } satisfies AccountQuota;
-  const agy = { ...quota('Antigravity'), accountId: 'quota:antigravity-cli', providerId: 'antigravity', status: 'unavailable', windows: [] } satisfies AccountQuota;
+  const agy = { ...quota('Antigravity'), accountId: 'antigravity', providerId: 'antigravity', status: 'unavailable', windows: [] } satisfies AccountQuota;
   pending[1]!.resolve([stale, agy]);
   await settle();
   // A retry is a refresh: its answer shows once the refresh's minimum is over.
@@ -137,7 +137,6 @@ test('the read waits for the socket, a failure shows with a retry, and a kept re
   document.querySelector<HTMLButtonElement>('[data-testid="limits-refresh"]')!.click();
   await settle();
   expect(agyCard!.textContent).toContain(strings.quotas.loading);
-  expect(agyCard!.textContent).toContain(strings.quotas.slowHint);
   expect(agyCard!.textContent).not.toContain(strings.quotas.unavailable);
 
   // A reconnect reads again.

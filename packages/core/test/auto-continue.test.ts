@@ -221,6 +221,8 @@ test('background work that ends without waking its agent resumes the thread; a S
     const { threadId } = await echoThread(h, client);
     await client.call('turns.start', { threadId, prompt: 'build the release' });
     await waitFor(() => turns(h, threadId)[0]?.status === 'done' && h.core.threads.require(threadId).status === 'idle');
+    // This scenario ends the task after the turn, even when both callbacks run in one millisecond.
+    setSystemTime(new Date(turns(h, threadId)[0]!.finishedAt! + 1));
     agent!.backgroundFinished?.('bg-1', 'error');
     // The agent had its moment to wake on the failure and did not take it.
     setSystemTime(new Date(Date.now() + 31_000));

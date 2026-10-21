@@ -307,7 +307,7 @@ export class TurnContexts {
     const carry = carrier(this.core, this.files, threadId, resumePrompt !== undefined ? null : turn.id, input, provider);
     const fresh = !thread.agentSessionId && thread.sessionId === null && ((thread.sessionGeneration ?? 0) > 0 || resumePrompt !== undefined);
     const continued = fresh ? carry() : input;
-    const prepared = prepareAttachments(this.core.dataDir, continued);
+    const prepared = prepareAttachments(this.core.dataDir, continued, provider);
     const operation = turn.execution?.operation;
     // A compaction or a cache keepalive goes to the agent as its command alone: nothing taken rides on it.
     const bare = operation === 'compact' || operation === 'keepalive';
@@ -355,7 +355,7 @@ export class TurnContexts {
       turn,
       prompt: compose(preparedPrompt, thread.sessionId),
       systemGuide,
-      continuation: freshStart(this.core.dataDir, carry, compose),
+      continuation: freshStart(this.core.dataDir, carry, compose, provider),
       // A keepalive takes nothing while it runs: a result or a note waits for the turn after it.
       coordination: () => operation === 'keepalive' ? null : this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id)
         ?? this.threads.deferred.takeForRunningTurn(threadId),
@@ -532,9 +532,9 @@ function carrier(core: Core, files: FileReferences, threadId: ThreadId, turnId: 
 }
 
 /** `TurnContext.continuation`, built here for the same reason as `carrier`. */
-function freshStart(dataDir: string, carry: () => { prompt: string; attachments: Attachment[] }, compose: (body: string, sessionId: string | null) => string): NonNullable<TurnContext['continuation']> {
+function freshStart(dataDir: string, carry: () => { prompt: string; attachments: Attachment[] }, compose: (body: string, sessionId: string | null) => string, provider: ProviderDescriptor): NonNullable<TurnContext['continuation']> {
   return () => {
-    const fresh = prepareAttachments(dataDir, carry());
+    const fresh = prepareAttachments(dataDir, carry(), provider);
     return { prompt: compose(fresh.prompt, null), attachments: fresh.attachments };
   };
 }

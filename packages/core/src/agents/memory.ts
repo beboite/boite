@@ -19,7 +19,7 @@ import type { Core } from '../core.ts';
 import type { ChildRoute } from '../delegation/routes.ts';
 import { assertDriverRunnable } from '../drivers/index.ts';
 import { messageOf } from '../errors.ts';
-import { modelsFor } from '../threads/selection.ts';
+import { agentProvider, modelsFor } from '../threads/selection.ts';
 import type { AgentStore } from './store.ts';
 
 const KEEPER = 'agents:keeper:';
@@ -114,7 +114,9 @@ export class MemoryKeeper {
 
   /** The route a pass runs on: the provider's small model when the agent's policy allows it, else its own. */
   private route(agent: AgentProfile): ChildRoute | null {
-    const provider = this.core.providers.require(agent.selection.providerId);
+    const provider = this.core.providers.get(agent.selection.providerId);
+    // Not installed: the agent could not run either, and says so when it next starts (`agentProvider`).
+    if (provider === undefined) return null;
     const small = defaultTitleModel(provider, modelsFor(provider, agent.selection.accountId));
     const base = { id: 'memory', name: 'Memory', providerId: provider.id, accountId: agent.selection.accountId, effort: null };
     for (const model of [small, agent.selection.model]) {
