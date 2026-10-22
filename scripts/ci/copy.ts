@@ -3,7 +3,10 @@ import { CATALOGUE_DIR, loadCatalogues } from './translations.ts';
 /** Authored UI copy only: never rewrite messages, code or provider output. */
 export function copyViolations(value: unknown, path = ''): string[] {
   // Catalogue formatters contain authored copy too; inspect them without invoking them.
-  if (typeof value === 'function') value = Function.prototype.toString.call(value).replace(/\\u(?:2014|\{0*2014\})/gi, '\u2014');
+  if (typeof value === 'function') {
+    value = Function.prototype.toString.call(value).replace(/(\\+)u(?:2014|\{0*2014\})/gi,
+      (escape, slashes: string) => slashes.length % 2 ? `${slashes.slice(1)}\u2014` : escape);
+  }
   if (typeof value === 'string') {
     return value.includes('\u2014') ? [`${path}: no-em-dash-copy: replace U+2014 with a comma, colon or separate sentence`] : [];
   }

@@ -20,6 +20,19 @@ test('copy-producing functions are checked without calling them', () => {
   ]);
 });
 
+test('formatter escapes respect backslash parity instead of flagging literal Unicode notation', () => {
+  expect(copyViolations({
+    literal: () => '\\u2014',
+    braced: () => '\\u{2014}',
+    pairs: () => '\\\\u2014',
+    plain: '\\u2014',
+  })).toEqual([]);
+  // A pair of escaped backslashes before a real Unicode escape still produces a dash.
+  expect(copyViolations({ odd: () => '\\\u2014' })).toEqual([
+    'odd: no-em-dash-copy: replace U+2014 with a comma, colon or separate sentence',
+  ]);
+});
+
 test('the CLI checks English and every translation, including escaped copy in an imported part', () => {
   const root = mkdtempSync(join(tmpdir(), 'boite-copy-'));
   const dir = join(root, 'packages/ui/src/lib');
