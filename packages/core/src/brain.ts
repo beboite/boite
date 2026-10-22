@@ -107,7 +107,12 @@ function inventory(given: string): Inventory {
         if (kind === 'skill' && data['disable-model-invocation'] !== undefined) {
           if (typeof data['disable-model-invocation'] !== 'boolean') throw new Error(`${entry.path}: disable-model-invocation must be a boolean`);
           entry.disableModelInvocation = data['disable-model-invocation'];
-          if (entry.disableModelInvocation) texts.set(entry.path, text.replace(FRONTMATTER, ''));
+          if (entry.disableModelInvocation) {
+            entry.name = data.name.trim().replace(/^\//, '');
+            if (!entry.name || /\s/.test(entry.name)) throw new Error(`${entry.path}: manual skill name must be a nonempty command token without whitespace`);
+            entry.name = entry.name.slice(0, 200);
+            texts.set(entry.path, text.replace(FRONTMATTER, ''));
+          }
         }
       }
     } catch (cause) { entry.error = messageOf(cause); }
@@ -319,7 +324,8 @@ export class BrainStore {
     try { scan = this.current(path); } catch { return prompt; }
     const { entries, texts } = scan;
     const entry = entries.find(entry => entry.kind === 'skill' && !entry.error && entry.disableModelInvocation && entry.name === name);
-    return entry ? (texts.get(entry.path) ?? '') + prompt.slice(name.length + 1) : prompt;
+    const body = entry && texts.get(entry.path);
+    return body?.trim() ? body + prompt.slice(name.length + 1) : prompt;
   }
 
   /**

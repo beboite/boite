@@ -10,10 +10,10 @@ let h: TestCore;
 let root: string;
 let restore: (() => void) | undefined;
 const body = 'Work through one task at a time.';
-function skill(name: string, marker = '', content = body) {
+function skill(name: string, marker = '', content = body, givenName = name) {
   const path = join(root, 'skills', name);
   mkdirSync(path, { recursive: true });
-  writeFileSync(join(path, 'SKILL.md'), `---\nname: ${name}\ndescription: ${name} description\n${marker}---\n${content}`);
+  writeFileSync(join(path, 'SKILL.md'), `---\nname: ${JSON.stringify(givenName)}\ndescription: ${name} description\n${marker}---\n${content}`);
 }
 beforeEach(async () => {
   h = await startTestCore();
@@ -109,6 +109,26 @@ test('a malformed manual marker is reported and cannot invoke the skill', async 
   expect(h.core.brain.expandPrompt('/invalid')).toBe('/invalid');
 });
 
+test('manual names are normalized before listing and expansion, and invalid tokens are diagnosed', async () => {
+  skill('padded', 'disable-model-invocation: true\n', body, ' /custom ');
+  skill('words', 'disable-model-invocation: true\n', body, 'my skill');
+  skill('slash', 'disable-model-invocation: true\n', body, '/');
+  expect(h.core.brain.commands().map(command => command.name).sort()).toEqual(['custom', 'focus']);
+  expect(h.core.brain.expandPrompt('/custom hello')).toBe(`${body} hello`);
+  expect(h.core.brain.expandPrompt('/my skill')).toBe('/my skill');
+  const status = await h.core.brain.status();
+  expect(status.entries.find(entry => entry.path === 'skills/padded/SKILL.md')?.name).toBe('custom');
+  for (const folder of ['words', 'slash']) {
+    expect(status.entries.find(entry => entry.path === `skills/${folder}/SKILL.md`)?.error).toContain('command token');
+  }
+});
+
+test('an empty manual body keeps the original command and following text', () => {
+  skill('empty', 'disable-model-invocation: true\n', '');
+  expect(h.core.brain.expandPrompt('/empty')).toBe('/empty');
+  expect(h.core.brain.expandPrompt('/empty hello')).toBe('/empty hello');
+});
+
 test('an accepted command retry keeps the original expansion after the skill changes', async () => {
   const owner = await h.connect();
   const { threadId } = await echoThread(h, owner);
@@ -127,7 +147,18 @@ test('a brain folder that disappears leaves the menu empty and the prompt untouc
 
 test('live user steering expands manual skills before delivery and persistence', async () => {
   let received = '';
-  restore = setDriver('echo', { protocol: 'echo', startTurn() {
+  const trackerPrompts: string[] = [];
+  restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    if (h.core.activity.ownsTracker(ctx.thread.id)) {
+      trackerPrompts.push(ctx.prompt);
+      const id = ctx.emit.startMessage('assistant');
+      const result = trackerPrompts.length === 1
+        ? { items: [{ text: 'Initial task', source: 'Initial task' }] }
+        : { add: [{ text: 'Follow-up task', source: 'next' }] };
+      ctx.emit.part(id, 0, { type: 'text', text: JSON.stringify(result) });
+      ctx.emit.complete(id, 'complete');
+      return { done: Promise.resolve({ status: 'done', sessionId: null, usage: null }), stop() {} };
+    }
     let finish!: (result: import('../src/drivers/types.ts').TurnResult) => void;
     return { done: new Promise(resolve => { finish = resolve; }),
       stop() { finish({ status: 'stopped', sessionId: null, usage: null }); },
@@ -137,7 +168,12 @@ test('live user steering expands manual skills before delivery and persistence',
   const { threadId } = await echoThread(h, owner);
   const turn = await owner.call('turns.start', { threadId, prompt: 'Start work' });
   await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'running');
+  h.core.activity.set({ threadId, goal: { objective: 'Initial task', review: true } });
+  await waitFor(() => h.core.activity.get(threadId).goal?.checklist?.items.length === 1);
   expect(await owner.call('turns.steer', { threadId, turnId: turn.id, prompt: '/focus next', clientRequestId: 'manual-live-steer' })).toEqual({ accepted: true });
   expect(received).toBe(`${body} next`);
   expect(h.core.journal.lastUserMessage(threadId, turn.id)?.parts).toEqual([{ type: 'text', text: `${body} next` }]);
+  await waitFor(() => h.core.activity.get(threadId).goal?.checklist?.items.length === 2);
+  expect(trackerPrompts[1]).toContain(JSON.stringify(`${body} next`));
+  expect(trackerPrompts[1]).not.toContain('/focus next');
 });

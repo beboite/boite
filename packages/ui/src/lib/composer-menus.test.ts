@@ -8,3 +8,8 @@ test('manual skill rows keep their descriptions and defer name collisions to dri
   expect(rows).toEqual([{ id: 'skill:focus', kind: 'command', label: '/focus', description: 'Focus on one task.' }]);
   expect(slashCompletion(rows[0]!)).toBe('/focus ');
 });
+
+test('manual skill rows omit Boite prompt commands and names that cannot form a token', () => {
+  const skills = ['goal', 'goal2', 'loop', 'btw', '', 'my skill', 'focus'].map(name => ({ name, description: null, hint: null }));
+  expect(skillSlashItems(skills, []).map(row => row.label)).toEqual(['/focus']);
+});
