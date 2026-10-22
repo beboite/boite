@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { ContactRequest } from '@boite/contracts';
 import { conciergePrompt, parseConciergeVerdict } from '../src/contacts/concierge.ts';
 import { checkNormalizedRemote, gitRemoteOf, normalizeRemote, remoteFromConfig } from '../src/contacts/git-remote.ts';
-import { decodeInvite, encodeInvite, INVITE_PREFIX, type Invitation } from '../src/contacts/invite.ts';
+import { checkTailnetName, decodeInvite, encodeInvite, INVITE_PREFIX, type Invitation } from '../src/contacts/invite.ts';
 import { evaluatePolicy, TailscaleClient } from '../src/contacts/tailscale.ts';
 import { attestedTier, modelTier } from '../src/contacts/tier.ts';
 import { fingerprintWords, WORDS } from '../src/contacts/words.ts';
@@ -101,11 +101,28 @@ test('an invitation link round-trips, and every bad field is refused by name', (
     [wire({ ...raw, e: Date.now() - 1 }), 'this invitation expired'],
     [wire({ ...raw, s: 'https://evil.example/invite' }), 'link.share: expected a https://login.tailscale.com share link'],
     [wire({ ...raw, u: 'http://192.168.1.20:4317' }), 'link.url: expected https, or http to a tailnet name'],
+    [wire({ ...raw, u: 'http://[2001:db8::1]:4317' }), 'link.url: expected https, or http to a tailnet name'],
     [wire({ ...raw, u: 'https://studio.example/path' }), 'link.url: expected an origin without credentials, path'],
   ];
   for (const [value, message] of cases) expect(() => decodeInvite(value)).toThrow(message);
   // A tailnet address and loopback may be plain HTTP: WireGuard or the machine itself carries it.
   expect(decodeInvite(wire({ ...raw, u: 'http://100.101.102.103:4317' })).url).toBe('http://100.101.102.103:4317');
+  expect(decodeInvite(wire({ ...raw, u: 'http://[fd7a:115c:a1e0::7]:4317' })).url).toBe('http://[fd7a:115c:a1e0::7]:4317');
+});
+
+test('plain HTTP to a Headscale name joins only when the name resolves inside the tailnet', async () => {
+  const raw = JSON.parse(Buffer.from(encodeInvite(invitation()).slice(INVITE_PREFIX.length), 'base64url').toString('utf8')) as Record<string, unknown>;
+  // The link a Headscale tailnet's inviter makes: its MagicDNS base domain is the owner's own.
+  const url = decodeInvite(wire({ ...raw, u: 'http://boite.net.tasbem.ch:3773' })).url;
+  expect(url).toBe('http://boite.net.tasbem.ch:3773');
+  const answers = (...addresses: string[]) => async () => addresses;
+  await checkTailnetName(url, 'link.url', answers('100.64.0.7', 'fd7a:115c:a1e0::7'));
+  expect(await thrown(checkTailnetName(url, 'link.url', answers('100.64.0.7', '203.0.113.9')))).toThrow('link.url: boite.net.tasbem.ch resolves to 100.64.0.7, 203.0.113.9, outside the tailnet');
+  expect(await thrown(checkTailnetName(url, 'link.url', async () => { throw new Error('ENOTFOUND'); }))).toThrow('link.url: boite.net.tasbem.ch does not resolve');
+  // A *.ts.net name and HTTPS are never resolved: a shared machine's name may answer only after its share is accepted.
+  const never = async (): Promise<string[]> => { throw new Error('resolved'); };
+  await checkTailnetName('http://studio.tail1234.ts.net:4317', 'link.url', never);
+  await checkTailnetName('https://studio.example', 'link.url', never);
 });
 
 test('the tailnet policy: restricted when shared users reach only Boite\'s port, open otherwise, with the rule to paste', () => {

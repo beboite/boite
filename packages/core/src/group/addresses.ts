@@ -36,7 +36,7 @@ export function isTailnetAddress(address: string): boolean {
 }
 
 /** fd7a:115c:a1e0::/48, the range Tailscale hands its IPv6 addresses from. */
-function isTailnetV6(address: string): boolean {
+export function isTailnetV6(address: string): boolean {
   return /^fd7a:115c:a1e0:/i.test(address);
 }
 
