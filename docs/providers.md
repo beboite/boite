@@ -976,16 +976,18 @@ Every list an account answers is also saved in the journal
 (`providers/saved-catalogs.ts`), under a hash of the descriptor, the resolved
 executable, the account's gateway settings and its status, identity and
 isolation folder. When the account has not answered since the core started, or
-since a reload or an account change dropped its list, a plain probe returns the
-saved list at once if that hash still matches, and a `refresh` read starts
-behind it; its answer reaches clients as `providers.probed`. Until that read
-settles the saved list answers model checks, as a refreshed one does. Starting
+since a reload or an account change dropped its list, a probe with no `refresh`
+and no `model`, on a provider turned on, returns the saved list at once if that
+hash still matches, and a `refresh` read starts behind it; its answer reaches
+clients as `providers.probed`. Until that read answers the saved list answers
+model checks, and a read that fails leaves it in place, as a refreshed one does. Starting
 the agent is what costs: on 2026-10-22 an Antigravity probe took 12.3 s on the
 desktop, an OpenCode 2 probe 3 to 5 s on the server, and the picker showed
 nothing until it answered. A list a driver already holds, from a sign-in's or
-a turn's own session, answers instead and starts nothing. A plain probe that
-arrives while a refresh reads gets the saved list too, held for model checks
-the same way. Any change to the account (`accounts.updated`, a sign-in under
+a turn's own session, answers instead and starts nothing. While nothing has
+been read yet, every such probe gets the saved list, a second one while the
+first refresh still reads and one after it failed included, held for model
+checks the same way. Any change to the account (`accounts.updated`, a sign-in under
 the same identity included) and its removal delete its saved list.
 A model picked from a list the core gave on this connection lands at once, and
 a draft created on it is not read again, except an ACP effort that list carries

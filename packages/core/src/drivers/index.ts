@@ -122,14 +122,23 @@ export function rememberExternalModels(protocol: Protocol, providerId: ProviderI
   externalModels.set(JSON.stringify([protocol, providerId, accountId]), { providerId, accountId, models });
 }
 
+/**
+ * What the account's agent itself listed, a gateway's list included, without
+ * a list held for it during a refresh. Null when nothing was read.
+ */
+export function readModelsOf(protocol: Protocol, providerId: ProviderId, accountId: AccountId): ModelInfo[] | null {
+  return externalModels.get(JSON.stringify([protocol, providerId, accountId]))?.models
+    ?? DRIVERS.get(protocol)?.probedModels?.(providerId, accountId)
+    ?? null;
+}
+
 /** The models a probe already read for this account, or null if none ever ran. */
 export function probedModelsOf(
   protocol: Protocol,
   providerId: ProviderId,
   accountId: AccountId,
 ): ModelInfo[] | null {
-  return externalModels.get(JSON.stringify([protocol, providerId, accountId]))?.models
-    ?? DRIVERS.get(protocol)?.probedModels?.(providerId, accountId)
+  return readModelsOf(protocol, providerId, accountId)
     ?? refreshing.get(refreshKey(providerId, accountId))?.models
     ?? null;
 }

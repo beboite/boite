@@ -42,18 +42,19 @@ function contextOf(core: Core, providerId: ProviderId, accountId: AccountId): st
 
 /** The saved list when it was read under what stands now, else null. */
 export function readSavedCatalog(core: Core, providerId: ProviderId, accountId: AccountId): SavedCatalog | null {
-  const stored = core.journal.getSetting(keyOf(providerId, accountId)) as Stored | undefined;
-  if (stored === undefined || !Array.isArray(stored.models) || typeof stored.probedAt !== 'number') return null;
+  // A row that does not parse costs the instant list, never the probe.
+  let stored: Partial<Stored> | null | undefined;
+  try { stored = core.journal.getSetting(keyOf(providerId, accountId)) as Partial<Stored> | null | undefined; }
+  catch { return null; }
+  if (stored === null || typeof stored !== 'object' || !Array.isArray(stored.models) || !Number.isFinite(stored.probedAt)) return null;
   if (stored.context !== contextOf(core, providerId, accountId)) return null;
-  return { models: stored.models, probedAt: stored.probedAt };
+  return { models: stored.models, probedAt: stored.probedAt as number };
 }
 
 export function saveCatalog(core: Core, providerId: ProviderId, accountId: AccountId, catalog: SavedCatalog): void {
   const context = contextOf(core, providerId, accountId);
   if (context === null) return;
-  const stored = core.journal.getSetting(keyOf(providerId, accountId)) as Stored | undefined;
-  // One account can be probed for each model it lands on: an unchanged list writes nothing.
-  if (stored?.context === context && JSON.stringify(stored.models) === JSON.stringify(catalog.models)) return;
+  // Written on every read, so the list a restart answers carries when it was read.
   core.journal.setSetting(keyOf(providerId, accountId), { context, models: catalog.models, probedAt: catalog.probedAt } satisfies Stored);
 }
 

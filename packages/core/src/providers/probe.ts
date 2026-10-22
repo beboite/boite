@@ -4,7 +4,7 @@ import { removeDir } from '../fs-retry.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Core } from '../core.ts';
-import { forgetProbes, holdModels, probedModelsOf, probeModels, refreshProbes, rememberExternalModels, settleRefresh } from '../drivers/index.ts';
+import { forgetProbes, holdModels, probedModelsOf, probeModels, readModelsOf, refreshProbes, rememberExternalModels, settleRefresh } from '../drivers/index.ts';
 import { launchTemp, type LaunchTemp } from '../drivers/launch-temp.ts';
 import { mergeProxyModels, readSubscriptionProxyModels } from '../subscription-proxy.ts';
 import { invalidParams, refused, unavailable } from '../errors.ts';
@@ -205,9 +205,10 @@ export function registerProbeMethods(core: Core): ProviderProbe {
     // list: the one saved under the same descriptor, program, gateway and
     // login answers now, and a fresh read replaces it once the agent answers.
     // A list a driver already holds, from a sign-in's own session or a turn, is
-    // fresher and starts no process: the plain path below answers it.
+    // fresher and starts no process: the plain path below answers it. A list
+    // only held for a refresh, the saved one included, does not count.
     if (!params.refresh && params.model === undefined && known === undefined && core.providers.enabled(params.providerId)
-      && probedModelsOf(core.providers.require(params.providerId).protocol, params.providerId, params.accountId) === null) {
+      && readModelsOf(core.providers.require(params.providerId).protocol, params.providerId, params.accountId) === null) {
       const saved = readSavedCatalog(core, params.providerId, params.accountId);
       if (saved !== null) {
         // Model checks accept the list on screen until the fresh read settles,

@@ -71,6 +71,9 @@ test('a restarted core answers the saved model list at once and reads a fresh on
   const saved = await answered(client.call('providers.probe', { providerId: 'echo', accountId }), 2000);
   expect(saved?.models).toEqual(before);
   expect(reads()).toBe(1);
+  // A second look while the agent still starts gets the same list, and no second agent.
+  expect((await answered(client.call('providers.probe', { providerId: 'echo', accountId }), 2000))?.models).toEqual(before);
+  expect(reads()).toBe(1);
   // A send in the meantime may name a model of the list on screen.
   expect(probedModelsOf('echo', 'echo', accountId)).toEqual(before);
   answer();
@@ -96,6 +99,30 @@ test('a list the driver already holds after a restart wins over the saved one an
   expect((await answered(probe, 2000))?.models).toEqual(session);
   expect(reads()).toBe(0);
 }, [{ id: 'session', name: 'From the sign-in', default: true }]));
+
+test('a refresh that fails after a restart leaves the saved model list answering at once', () => restarted(async ({ client, accountId }) => {
+  const failed = Promise.withResolvers<void>();
+  setDriver('echo', { ...getDriver('echo'), probe: async () => { failed.resolve(); throw new Error('the agent did not start'); }, probedModels: () => null });
+  expect((await answered(client.call('providers.probe', { providerId: 'echo', accountId }), 2000))?.models).toEqual(before);
+  await failed.promise;
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect((await answered(client.call('providers.probe', { providerId: 'echo', accountId }), 2000))?.models).toEqual(before);
+  expect(probedModelsOf('echo', 'echo', accountId)).toEqual(before);
+}));
+
+test('a saved model list row that does not parse is read again from the agent', async () => {
+  const restore = setDriver('echo', { ...getDriver('echo'), probe: async () => ({ models: after, probedAt: 1 }) });
+  const harness = await startTestCore();
+  try {
+    const client = await harness.connect();
+    const account = await client.call('accounts.add', { providerId: 'echo', label: 'Broken row' });
+    harness.core.journal.db.query('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(`model-catalog:${JSON.stringify(['echo', account.id])}`, '{not json');
+    expect((await client.call('providers.probe', { providerId: 'echo', accountId: account.id })).models).toEqual(after);
+  } finally {
+    restore();
+    await harness.stop();
+  }
+});
 
 test.each(['descriptor', 'sign-in'] as const)('a saved model list read before a %s change waits for the agent', async change => {
   const agent = Promise.withResolvers<void>();
