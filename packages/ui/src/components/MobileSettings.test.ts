@@ -13,6 +13,8 @@ const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async (_url: string) => {
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl }));
 
 let running: Record<string, unknown> | null = null;
+// jsdom has no scrolling: a page opened on a card scrolls to it.
+Element.prototype.scrollIntoView ??= vi.fn();
 
 afterEach(() => {
   vi.unstubAllGlobals();

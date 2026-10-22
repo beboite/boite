@@ -37,8 +37,7 @@
    * desktop, gets a page of its own; a jump to the desktop's card (the palette,
    * the project menu) lands on it too.
    */
-  let archived = $state(false);
-  let archivePage = $derived(archived || (store.settingsTab === 'general' && store.settingsSection?.id === 'archived'));
+  let archivePage = $derived(store.settingsTab === 'general' && store.settingsSection?.id === 'archived');
   let worktreesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'worktrees');
   /** The one card of the desktop's Advanced page that is about conversations, not about the machine. */
   let compactPage = $derived(store.owner && store.settingsTab === 'advanced' && store.settingsSection?.id === 'auto-compact');
@@ -66,7 +65,7 @@
   $effect(() => {
     if (page === 'phone' && store.connection === 'ready') void store.loadSessions();
   });
-  function back() { phone = false; privacy = false; archived = false; store.showSettings(); }
+  function back() { phone = false; privacy = false; store.showSettings(); }
   /** Usage and Limits are one screen on a phone, two tabs of it. */
   let quota = $derived(page === 'usage' || page === 'limits');
 
@@ -111,7 +110,7 @@
           <button class="ghost row" data-testid="settings-tab-voice" onclick={() => store.showSettings('voice')}>
             <Mic size={20} /><span class="ui-label">{strings.speech.heading}</span><ChevronRight size={18} />
           </button>
-          <button class="ghost row" data-testid="mobile-settings-archived" onclick={() => { archived = true; }}>
+          <button class="ghost row" data-testid="mobile-settings-archived" onclick={() => store.showSettings('general', 'archived')}>
             <ArchiveRestore size={20} /><span class="ui-label">{strings.settings.archived.heading}</span><ChevronRight size={18} />
           </button>
         </div>

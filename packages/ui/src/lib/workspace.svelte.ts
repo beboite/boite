@@ -115,7 +115,7 @@ export class Workspace {
   error = $state<string | null>(null);
   /** Selections still landing: until they have, the screen is on its way somewhere (`view-history.svelte.ts`). */
   selecting = $state(0);
-  readonly settingsSync = new AutoSettingsSync(() => this.machines);
+  readonly settingsSync = new AutoSettingsSync(() => this.machines, machineName);
   /** Connects the other machines of a group and drops the ones that left it. */
   readonly groups = new GroupLinks(this);
   /** The store of the core this page booted on: never removed, whatever a group says. */

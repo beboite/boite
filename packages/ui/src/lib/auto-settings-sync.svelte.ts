@@ -24,7 +24,8 @@ export class AutoSettingsSync {
   /** The copy each target follows now, to run again on demand. */
   private runs = new Map<string, () => void>();
 
-  constructor(private machines: () => Machine[]) {}
+  /** `nameOf` is the name a machine goes by on screen (`machineName`), given by the workspace that imports this file. */
+  constructor(private machines: () => Machine[], private nameOf: (machine: Machine) => string = (machine) => machine.label) {}
 
   /**
    * The id of the member `target` takes its settings from, as its own core
@@ -47,7 +48,8 @@ export class AutoSettingsSync {
   sourceName(target: Machine): string | undefined {
     const home = this.homeId(target);
     if (home === undefined) return undefined;
-    return this.source(target)?.label ?? target.store.group?.cores.find((core) => core.coreId === home)?.name;
+    const source = this.source(target);
+    return source ? this.nameOf(source) : target.store.group?.cores.find((core) => core.coreId === home)?.name;
   }
 
   /** A copy now, after `target` gave a setting back to its home. */

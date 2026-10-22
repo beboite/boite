@@ -79,6 +79,7 @@ export class CoreSettings {
 
   /** Marks what a change made elsewhere than `settings.set` keeps here: a chord, a brain switch. */
   async keep(keys: readonly SyncKey[]): Promise<void> {
+    if (keys.length === 0 || this.settingsHome === null) return;
     await this.#save({}, (kept) => adding(kept, keys));
   }
 
@@ -99,7 +100,7 @@ export class CoreSettings {
   #save(patch: Partial<Settings>, change: ((kept: string[]) => string[] | null) | null, always = false): Promise<boolean> {
     const client = this.ctx.client;
     if (!client) return Promise.resolve(false);
-    if (change === null || (!always && this.settingsHome === null)) return this.#send(client, patch);
+    if (change === null || (!always && this.settingsHome === null)) return Object.keys(patch).length === 0 ? Promise.resolve(true) : this.#send(client, patch);
     const turn = this.#keeping.then(async () => {
       let next: string[] | null;
       try {
@@ -175,8 +176,10 @@ export class CoreSettings {
   async resetKeybindings(): Promise<string | null> {
     const client = this.ctx.client;
     if (!client) return strings.connection.unavailable;
-    const changed = Object.keys(this.keybindings?.bindings ?? {}) as KeybindingCommand[];
+    let changed: KeybindingCommand[] = [];
     try {
+      // What the reset changes is what the file names now, read from the core: this store may not have read it yet.
+      if (this.settingsHome !== null) changed = Object.keys((await client.call('keybindings.get', {})).bindings) as KeybindingCommand[];
       this.keybindings = await client.call('keybindings.reset', {});
     } catch (error) {
       return errorText(error);

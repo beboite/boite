@@ -130,3 +130,19 @@ test('two changes on a follower before either save answers both stay kept', asyn
     expect((await call('settings.get', {})).syncOverrides).toEqual(['shortAnswers', 'muteAgents']);
   } finally { release(); spy.mockRestore(); }
 });
+
+test('resetting the keys on a follower keeps what the core named, read or not, and a machine that follows nothing writes nothing for it', async () => {
+  const { source, target, home } = await fixture();
+  await target.store.client!.call('keybindings.set', { command: 'panel', chord: 'mod+alt+p' });
+  // Unrelated to the follow: a machine that follows nothing marks nothing and sends no empty save.
+  const sends = vi.spyOn(source.store.client!, 'call');
+  await source.store.keep(['keybinding:panel']);
+  expect(sends.mock.calls.filter(([method]) => method === 'settings.set' || method === 'settings.get')).toEqual([]);
+  sends.mockRestore();
+  home('source');
+  const named = Object.keys((await target.store.client!.call('keybindings.get', {})).bindings).map((command) => `keybinding:${command}`);
+  expect(named).toContain('keybinding:panel');
+  target.store.keybindings = null;
+  expect(await target.store.resetKeybindings()).toBeNull();
+  expect((await target.store.client!.call('settings.get', {})).syncOverrides).toEqual(named);
+});
