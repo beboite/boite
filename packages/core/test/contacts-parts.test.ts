@@ -101,11 +101,13 @@ test('an invitation link round-trips, and every bad field is refused by name', (
     [wire({ ...raw, e: Date.now() - 1 }), 'this invitation expired'],
     [wire({ ...raw, s: 'https://evil.example/invite' }), 'link.share: expected a https://login.tailscale.com share link'],
     [wire({ ...raw, u: 'http://192.168.1.20:4317' }), 'link.url: expected https, or http to a tailnet name'],
+    [wire({ ...raw, u: 'http://[2001:db8::1]:4317' }), 'link.url: expected https, or http to a tailnet name'],
     [wire({ ...raw, u: 'https://studio.example/path' }), 'link.url: expected an origin without credentials, path'],
   ];
   for (const [value, message] of cases) expect(() => decodeInvite(value)).toThrow(message);
   // A tailnet address and loopback may be plain HTTP: WireGuard or the machine itself carries it.
   expect(decodeInvite(wire({ ...raw, u: 'http://100.101.102.103:4317' })).url).toBe('http://100.101.102.103:4317');
+  expect(decodeInvite(wire({ ...raw, u: 'http://[fd7a:115c:a1e0::7]:4317' })).url).toBe('http://[fd7a:115c:a1e0::7]:4317');
 });
 
 test('plain HTTP to a Headscale name joins only when the name resolves inside the tailnet', async () => {
