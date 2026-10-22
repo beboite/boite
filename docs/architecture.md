@@ -360,6 +360,8 @@ child that starts its own session. The capability report exposes those limits.
 
 ## Drivers, one interface
 
+Brain skills marked `disable-model-invocation: true` stay out of the model catalog; the core expands a leading `/<name>` into their body before recording and delivering user input, unless the driver advertises that command.
+
 `Driver.startTurn(ctx)` returns a `TurnHandle`. A driver maps its protocol to
 contract message parts, questions, approvals, usage and session lifecycle.
 Drivers load lazily. Stop uses the native cancel operation where available; the

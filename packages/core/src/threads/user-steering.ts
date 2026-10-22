@@ -49,9 +49,15 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
   const handle = runner.handles.get(threadId);
   const submit = handle?.steerUser?.bind(handle) ?? handle?.steer?.bind(handle);
   if (userSteeringUnavailable(core, threads, threadId, turn) !== null || !submit) return { accepted: false };
-  const prepared = prepareAttachments(core.dataDir, { prompt: previewPrompt(prompt, references), attachments });
+  const expanded = core.brain.expandPrompt(prompt, threads.agentState.commands.get(threadId));
+  const offset = expanded.length - prompt.length;
+  const expandedReferences = references.map(reference => reference.mention ? {
+    ...reference, mention: { start: reference.mention.start + offset, end: reference.mention.end + offset },
+  } : reference);
+  const text = previewPrompt(expanded, expandedReferences);
+  const prepared = prepareAttachments(core.dataDir, { prompt: text, attachments });
   const message: Message = { id: newId('msg_'), threadId, turnId, role: 'user', state: 'complete', createdAt: Date.now(), parts: [
-    { type: 'text', text: previewPrompt(prompt, references), ...(references.length ? { displayText: prompt, previewReferences: structuredClone(references) } : {}) },
+    { type: 'text', text, ...(references.length ? { displayText: expanded, previewReferences: structuredClone(expandedReferences) } : {}) },
     ...attachments.map((attachment): MessagePart => attachment.kind === 'file'
       ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name }
       : { type: 'image', mimeType: attachment.mimeType, data: attachment.data, alt: attachment.name }),

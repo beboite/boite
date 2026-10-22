@@ -2,8 +2,8 @@
   import { tick, untrack } from 'svelte';
   import { supportsSideQuestions, type Attachment, type PreviewReference } from '@boite/contracts';
   import { restorePreviewMentions } from '../lib/preview-mentions';
-  import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
-  import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
+  import { runCommand } from '../lib/commands.svelte';
+  import { agentSlashItems, boiteSlashItems, skillSlashItems, slashCompletion, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles, receiveDroppedFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { fitHeight, selfSizing } from '../lib/composer-size';
@@ -187,15 +187,20 @@
   $effect(() => mentions.follow(mentionQuery, mentionProject, store.client));
 
   let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(thread?.commands ?? []));
+  let skillItems = $derived(skillSlashItems(store.brainCommands, thread?.commands ?? []));
+
+  $effect(() => {
+    if (slashOpen) void store.loadBrainCommands();
+  });
 
   /** Boite's prompt controls follow the agent's own commands. */
   let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(CHIP_COMMANDS, !!thread && !!provider && supportsSideQuestions(provider.protocol)));
 
   /** Agent commands first, so a tie goes to the agent's own. */
-  let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
+  let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...skillItems, ...boiteItems]));
   let commandToken = $derived.by(() => {
     const token = target ? undefined : /^\/[^\s]+/.exec(text)?.[0];
-    return token && [...agentItems, ...boiteItems].some(item => item.label === token) ? token : '';
+    return token && [...agentItems, ...skillItems, ...boiteItems].some(item => item.label === token) ? token : '';
   });
   let keywords = $derived(claudeKeywords(provider?.protocol, choice?.model));
   let segments = $derived(promptSegments(text, commandToken || undefined, keywords));
@@ -607,13 +612,9 @@
 
   /** Prompt commands complete the box; other commands execute and close the menu. */
   function pickSlash(item: PaletteItem) {
-    if (item.id === 'goal' || item.id === 'goal2' || item.id === 'loop' || item.id === 'btw') {
-      put(`/${item.id} `);
-      box?.focus({ preventScroll: true });
-      return;
-    }
-    if (isAgentCommand(item)) {
-      put(`/${item.id.slice(AGENT_PREFIX.length)} `);
+    const completion = slashCompletion(item);
+    if (completion !== null) {
+      put(completion);
       box?.focus({ preventScroll: true });
       return;
     }

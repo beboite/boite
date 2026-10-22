@@ -1,4 +1,6 @@
 import { errorText } from '../errors';
+import { RpcErrorCode, type AgentCommand } from '@boite/contracts';
+import { RpcFailure } from '../client';
 import type {
   KeybindingCommand,
   Keybindings,
@@ -14,6 +16,24 @@ import type { StoreContext } from './context';
 
 /** What the core keeps for the whole machine: its settings, the scheduler, the keybindings file and telemetry. */
 export class CoreSettings {
+  brainCommands = $state.raw<AgentCommand[]>([]);
+  #brainRead = 0;
+
+  /** Read when the slash menu opens, so edits on the host appear without a poll. */
+  async loadBrainCommands(): Promise<void> {
+    const client = this.ctx.client, generation = this.ctx.clientGeneration;
+    const read = ++this.#brainRead;
+    if (!client) return;
+    try {
+      const commands = await client.call('brain.commands', {});
+      if (this.ctx.client === client && this.ctx.clientGeneration === generation && this.#brainRead === read) this.brainCommands = commands;
+    } catch (error) {
+      if (this.ctx.client !== client || this.ctx.clientGeneration !== generation || this.#brainRead !== read) return;
+      this.brainCommands = [];
+      if (!(error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound)) this.ctx.fail(error);
+    }
+  }
+
   scheduler = $state<SchedulerState | null>(null);
   #settings = $state<Settings | null>(null);
   get settings(): Settings | null { return this.#settings; }
