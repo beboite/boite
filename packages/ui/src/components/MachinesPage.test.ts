@@ -210,3 +210,11 @@ test('existing separate groups keep their own actions and removing their row lea
   expect(target.store.group).toBeNull();
   expect(source.store.group?.name).toBe('Home');
 });
+
+test('a link minted on another machine of the group, by the Tailscale switch on its Advanced page, is the one the group card shows', async () => {
+  const { target } = await setup();
+  expect(document.querySelector('[data-testid="add-device"]')).toBeNull();
+  target.store.deviceInvite = { url: 'https://target.tail.ts.net/?grant=g#join=j', expiresAt: Date.now() + 60_000 };
+  flushSync();
+  await vi.waitFor(() => { flushSync(); expect(query('[data-testid="add-device"]').dataset.link).toBe('https://target.tail.ts.net/?grant=g#join=j'); });
+});

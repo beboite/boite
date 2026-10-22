@@ -109,7 +109,10 @@
     ],
     brain: [{ id: 'brain-folder', label: strings.brain.folder }, { id: 'hooks', label: strings.hooks.heading }],
     // The page's order: connected providers first, then the ones still to add.
-    accounts: [...providerList.connected, ...providerList.rest, ...providerList.off].map((row) => ({ id: `provider-${row.id}`, label: row.name })),
+    accounts: [
+      ...[...providerList.connected, ...providerList.rest, ...providerList.off].map((row) => ({ id: `provider-${row.id}`, label: row.name })),
+      { id: 'agent-updates', label: strings.harnessUpdates.heading }
+    ],
     usage: [
       { id: 'usage-overview', label: strings.usage.overview },
       { id: 'usage-chart', label: strings.usage.chart },

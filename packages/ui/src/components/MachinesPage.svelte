@@ -34,7 +34,8 @@
     for (const store of [groupStore, ...workspace.machines.map(machine => machine.store)]) {
       if (!store.group) continue;
       const previous = groups.get(store.group.id);
-      if (!previous || !previous.owner && store.owner) groups.set(store.group.id, store);
+      // The card draws the device link of the store it is given: one that just minted a link (Tailscale on Advanced) shows it.
+      if (!previous || !previous.owner && store.owner || store.owner && store.deviceInvite !== null && previous.deviceInvite === null) groups.set(store.group.id, store);
     }
     return groups.size ? [...groups.values()] : [groupStore];
   });

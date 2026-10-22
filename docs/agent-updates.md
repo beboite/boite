@@ -41,8 +41,9 @@ machine at once ([update everything](updates.md#update-everything)).
 itself, pausing running turns the same way and also waiting for the work
 agents left running in the background ([Background work](#background-work)).
 It is off by default. `Check for updates` reads its versions again.
-Providers keeps sign-ins and installation controls and names no version: an
-agent's version is on its machine's card and nowhere else.
+A provider's own row keeps its sign-ins and installation controls and names no
+version: the agent's version, Update and Skip sit in the Agent updates card
+lower on the same Providers page.
 
 ## Two routes
 
@@ -255,8 +256,9 @@ on the next core like any turn it cut.
 ## Remote machines
 
 A multi-machine client keeps separate update lists and routes each action to
-the owning core ([machines](machines.md)). Each agent row stays under its own
-machine's card, including when provider IDs match on different machines.
+the owning core ([machines](machines.md)). The Agent updates card shows the
+agents of the machine picked above the Providers page, including when provider
+IDs match on different machines.
 
 With `autoUpdateHarnesses` enabled, a headless core checks ten minutes after
 startup and every six hours, postponing checks while work is active, and
