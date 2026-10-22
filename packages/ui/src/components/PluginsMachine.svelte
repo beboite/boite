@@ -12,13 +12,12 @@
   import { relativeTime } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import QuotaList from './QuotaList.svelte';
-  import type { Snippet } from 'svelte';
 
   /**
    * One machine's plugins. The page mounts a fresh one per machine, so an
    * answer still on its way from the previous core lands in a discarded page.
    */
-  let { store, machineMenu }: { store: Store; machineMenu?: Snippet } = $props();
+  let { store }: { store: Store } = $props();
   const t = strings.plugins;
 
   let plugins = $state<PluginState[]>([]);
@@ -459,7 +458,6 @@
 <div class="page" data-testid="plugins-page">
   <header>
     <div><h1 class="ui-label-box"><span class="ui-label">{t.heading}</span><InfoTip topic={t.heading} text={t.intro} /></h1></div>
-    {@render machineMenu?.()}
   </header>
   {#if error}<p class="bad" role="alert">{error}</p>{/if}
 

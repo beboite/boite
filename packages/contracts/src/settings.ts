@@ -150,6 +150,12 @@ export interface Settings {
    * short continue prompt (docs/usage.md). Missing reads as off.
    */
   autoResumeLimitedThreads?: boolean;
+  /**
+   * While this machine follows its group's settings home, what it keeps for
+   * itself (`SyncKey`): each entry was changed here and the copy skips it.
+   * Missing or empty: everything synced follows. Read only by clients.
+   */
+  syncOverrides?: string[];
 }
 
 /** One starred model. Accounts are named by label: an id means nothing on another machine. */

@@ -181,6 +181,8 @@ export class GroupStore {
       // Who else is in the group is the owner's to read; a device sees itself.
       devices: principal === 'owner' ? devices : devices.filter((entry) => entry.id === device),
       ...(device === undefined ? {} : { device }),
+      // A home that left the group is no home: the others keep their own settings.
+      ...(typeof roster.settingsHome === 'string' && liveCores(roster).some((core) => core.coreId === roster.settingsHome) ? { settingsHome: roster.settingsHome } : {}),
     };
   }
   // -- What the rest of the core reads off the roster.
@@ -672,6 +674,20 @@ export class GroupStore {
     if (roster.name !== checked) {
       if ((roster.nameRev ?? 0) >= Number.MAX_SAFE_INTEGER) throw refused('name: the group name revision has reached its limit', { field: 'name' });
       this.commit({ ...roster, name: checked, nameRev: (roster.nameRev ?? 0) + 1 });
+    }
+    return this.view('owner')!;
+  }
+
+  /** The member every other one copies its settings from, or null for none. The copy is the clients' to make. */
+  settingsHome(coreId: unknown): Group {
+    const roster = this.require();
+    if (coreId !== null && (typeof coreId !== 'string' || !liveCores(roster).some((core) => core.coreId === coreId))) {
+      throw invalidParams('coreId: expected the id of a machine of this group, or null', { field: 'coreId' });
+    }
+    if ((roster.settingsHome ?? null) !== coreId) {
+      const rev = roster.settingsHomeRev ?? 0;
+      if (rev >= Number.MAX_SAFE_INTEGER) throw refused('coreId: the settings home revision has reached its limit', { field: 'coreId' });
+      this.commit({ ...roster, settingsHome: coreId, settingsHomeRev: rev + 1 });
     }
     return this.view('owner')!;
   }

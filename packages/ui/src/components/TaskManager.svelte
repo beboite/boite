@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { workspace } from '../lib/workspace.svelte';
   import { errorText } from '../lib/errors';
   import { ArrowDown, ArrowUp, ChevronDown, Cpu, HardDrive, MemoryStick, Network, Search } from '@lucide/svelte';
   import type { AgentResourceSnapshot, AgentResourceUsage, ResourceByteUsage } from '@boite/contracts';
@@ -127,7 +128,7 @@
     <section class="card agent" data-testid="task-manager-agent" data-thread-id={entry.threadId}>
       <div class="identity">
         <ProviderLogo providerId={entry.providerId} size={20} />
-        <button class="quiet title" onclick={() => { const owner = store; onopenthread?.(); void owner.open(entry.threadId); }}><span class="ui-label">{entry.title}</span><small>{store.providers.find(row => row.id === entry.providerId)?.name ?? entry.providerId}{entry.model ? ` · ${entry.model}` : ''}</small></button>
+        <button class="quiet title" onclick={() => { const owner = store; onopenthread?.(); void workspace.select(owner, entry.threadId); }}><span class="ui-label">{entry.title}</span><small>{store.providers.find(row => row.id === entry.providerId)?.name ?? entry.providerId}{entry.model ? ` · ${entry.model}` : ''}</small></button>
         <StatusMark {...threadTone(entry.status)} />
         <span class="status ui-label">{strings.threadStatus[entry.status]}</span>
       </div>

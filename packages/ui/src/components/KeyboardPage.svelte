@@ -2,6 +2,7 @@
   import { errorText } from '../lib/errors';
   import { parseChord, type KeybindingCommand } from '@boite/contracts';
   import { RotateCcw, Search, X } from '@lucide/svelte';
+  import SyncMark from './SyncMark.svelte';
   import InfoTip from './InfoTip.svelte';
   import { commandLabel } from '../lib/commands.svelte';
   import { openOwnFile } from '../lib/links';
@@ -199,6 +200,7 @@
             <div class="what">
               <span class="label" title={row.id}>{row.label}</span>
               {#if row.custom}<span class="tag">{strings.keyboard.custom}</span>{/if}
+              <SyncMark {store} key={`keybinding:${row.id}`} />
             </div>
             <div class="keys">
               {#if recording === row.id}

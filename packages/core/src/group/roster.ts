@@ -68,6 +68,13 @@ export interface Roster {
   deviceKeys?: DeviceKeyEntry[];
   /** Where each member says its page is served, besides its addresses: the origins its members let open a socket. */
   origins?: Record<string, ServedOrigins>;
+  /**
+   * The member whose settings the others follow; null once the owner cleared it,
+   * so the clearing outranks an older choice. Read only with its revision.
+   */
+  settingsHome?: string | null;
+  /** Omitted by older cores. Concurrent choices converge by revision, then id. */
+  settingsHomeRev?: number;
 }
 
 /** Machines a group lists over its life, removed ones included: past it, no new machine is admitted. */
@@ -182,6 +189,7 @@ export function checkRoster(value: unknown): Roster {
     id: text(raw['id'], 'roster.id', 64),
     name: text(raw['name'], 'roster.name', 80),
     ...(raw['nameRev'] === undefined ? {} : { nameRev: positive(raw['nameRev'], 'roster.nameRev') }),
+    ...(raw['settingsHomeRev'] === undefined ? {} : { settingsHome: checkSettingsHome(raw['settingsHome']), settingsHomeRev: positive(raw['settingsHomeRev'], 'roster.settingsHomeRev') }),
     founder: raw['founder'],
     cores: raw['cores'].map((core) => checkCore(core, 'roster.cores')),
     devices: raw['devices'].map((device) => checkDevice(device, 'roster.devices')),
@@ -215,6 +223,12 @@ export function checkRoster(value: unknown): Roster {
     }
   }
   return sorted(roster);
+}
+
+function checkSettingsHome(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) throw invalidParams('roster.settingsHome: expected a machine id or null', { field: 'roster.settingsHome' });
+  return value;
 }
 
 /**
@@ -280,6 +294,7 @@ function sorted(roster: Roster): Roster {
     id: roster.id,
     name: roster.name,
     ...(roster.nameRev === undefined ? {} : { nameRev: roster.nameRev }),
+    ...(roster.settingsHomeRev === undefined ? {} : { settingsHome: roster.settingsHome ?? null, settingsHomeRev: roster.settingsHomeRev }),
     founder: roster.founder,
     cores: [...roster.cores].sort((a, b) => a.coreId.localeCompare(b.coreId)),
     devices: [...roster.devices].sort((a, b) => a.id.localeCompare(b.id)),
@@ -351,10 +366,15 @@ export function mergeRosters(local: Roster, remote: Roster): Roster {
   const localRev = local.nameRev ?? 0;
   const remoteRev = remote.nameRev ?? 0;
   const named = remoteRev > localRev || (remoteRev === localRev && remoteRev > 0 && remote.name > local.name) ? remote : local;
+  // An older core drops both fields and reads as revision 0, so it never undoes a choice.
+  const localHomeRev = local.settingsHomeRev ?? 0;
+  const remoteHomeRev = remote.settingsHomeRev ?? 0;
+  const homed = remoteHomeRev > localHomeRev || (remoteHomeRev === localHomeRev && remoteHomeRev > 0 && (remote.settingsHome ?? '') > (local.settingsHome ?? '')) ? remote : local;
   return sorted({
     id: local.id,
     name: named.name,
     ...(named.nameRev === undefined ? {} : { nameRev: named.nameRev }),
+    ...(homed.settingsHomeRev === undefined ? {} : { settingsHome: homed.settingsHome ?? null, settingsHomeRev: homed.settingsHomeRev }),
     founder: local.founder,
     cores: mergeCores(local.cores, remote.cores),
     devices: mergeDevices(local.devices, remote.devices),

@@ -17,7 +17,7 @@ import {
   type MainMachine,
   opens
 } from './endpoint';
-import { strings } from './strings';
+import { fill, strings } from './strings';
 import { threadAddress } from './chat-links';
 import { onReveal, reveal } from './reveal';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
@@ -43,6 +43,19 @@ export function isThisPC(machine: Machine): boolean {
   if (machine.store.localCore) return true;
   try { return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(machine.store.endpointUrl ?? machine.id).hostname); }
   catch { return false; }
+}
+
+/**
+ * A machine's name on screen. This computer under the default name goes by
+ * its own: in a group every PC is "this PC" to itself, which tells nobody apart.
+ */
+export function machineName(machine: Machine): string {
+  return isThisPC(machine) && machine.label === strings.machines.local && machine.store.core?.hostname ? machine.store.core.hostname : machine.label;
+}
+
+/** A machine in a list of machines: this computer by its name and "(you)". */
+export function listedName(machine: Machine): string {
+  return isThisPC(machine) ? fill(strings.machines.you, { machine: machineName(machine) }) : machine.label;
 }
 
 /**
@@ -102,7 +115,7 @@ export class Workspace {
   error = $state<string | null>(null);
   /** Selections still landing: until they have, the screen is on its way somewhere (`view-history.svelte.ts`). */
   selecting = $state(0);
-  readonly settingsSync = new AutoSettingsSync(() => this.machines, profileKey);
+  readonly settingsSync = new AutoSettingsSync(() => this.machines);
   /** Connects the other machines of a group and drops the ones that left it. */
   readonly groups = new GroupLinks(this);
   /** The store of the core this page booted on: never removed, whatever a group says. */

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { workspace } from '../lib/workspace.svelte';
   import { untrack } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
   import { subscriptionProxyName, type AccountQuota } from '@boite/contracts';
@@ -150,7 +151,7 @@
     <!-- A failed read never passes for "no provider connected". -->
     {#if !reader.error}<div class="card empty" data-testid="limits-empty">
       <p>{strings.quotas.empty}</p>
-      {#if store.owner}<button type="button" onclick={() => store.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
+      {#if store.owner}<button type="button" onclick={() => workspace.active.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
     </div>{/if}
   {:else}
     {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.busy} completed={reader.landed} />{/if}

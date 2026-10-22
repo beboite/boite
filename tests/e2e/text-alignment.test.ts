@@ -62,17 +62,20 @@ test('text and icons share a vertical centre across reading fonts, menus and pho
       expect(Math.abs(result.offset), `${font}: heading information icon`).toBeLessThanOrEqual(0.8);
     }
     await page.evaluate(`__boiteTest.workspace.active.showSettings('machines')`);
-    await page.waitFor(`document.querySelector('[data-testid="harness-updates-card"] h4 .info-tip')`);
-    // The agents sit under each machine's row: measured once the row is open.
-    await page.evaluate(`document.querySelectorAll('[data-testid="machine-details-toggle"][aria-expanded="false"]').forEach((toggle) => toggle.click())`);
-    await page.waitFor(`document.querySelector('[data-testid="machine-details-toggle"][aria-expanded="false"]') === null`);
+    await page.waitFor(`document.querySelector('[data-testid="updates-check-all"] .ui-label') && document.querySelector('[data-testid="group-add-device"] .ui-label')`);
     for (const result of await labelOffsets(page, [
       ['[data-testid="machines-page"] h1 .info-tip', '[data-testid="machines-page"] h1 .ui-label'],
       ['[data-testid="updates-check-all"] svg', '[data-testid="updates-check-all"] .ui-label'],
-      ['[data-testid="machine-settings-open"] svg', '[data-testid="machine-settings-open"] .ui-label'],
-      ['[data-testid="harness-updates-card"] h4 .info-tip', '[data-testid="harness-updates-card"] h4 .ui-label'],
-      ['[data-testid="harness-updates-check"]', '[data-testid="harness-updates-check"] .ui-label'],
+      ['[data-testid="updates-run-all"] svg', '[data-testid="updates-run-all"] .ui-label'],
+      ['[data-testid="group-add-device"] svg', '[data-testid="group-add-device"] .ui-label'],
     ])) expect(Math.abs(result.offset), `${font}: machine updates`).toBeLessThanOrEqual(0.8);
+    // The agents and their versions are on Providers, under a title of the page's own level.
+    await page.evaluate(`__boiteTest.workspace.active.showSettings('accounts')`);
+    await page.waitFor(`document.querySelector('[data-testid="harness-updates-card"] h2 .info-tip')`);
+    for (const result of await labelOffsets(page, [
+      ['[data-testid="harness-updates-card"] h2 .info-tip', '[data-testid="harness-updates-card"] h2 .ui-label'],
+      ['[data-testid="harness-updates-check"] svg', '[data-testid="harness-updates-check"] .ui-label'],
+    ])) expect(Math.abs(result.offset), `${font}: agent updates`).toBeLessThanOrEqual(0.8);
     await page.evaluate(`__boiteTest.workspace.active.showSettings('voice')`);
     await page.waitFor(`document.querySelector('[data-testid="voice-models"] [data-testid^="voice-model-download-"] .ui-label')`);
     for (const result of await labelOffsets(page, [

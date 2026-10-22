@@ -154,29 +154,33 @@ when renaming.
 
 ## The machines page
 
-Settings, Machines and updates shows each machine on one row: its icon, its
-name, whether it is connected and one word about its updates. The row's chevron
-opens its details: its address, Boite's version on that machine with its
-update (on another Windows PC, its desktop app as its window reports it,
-[updated from here](updates.md#the-desktop-app-of-another-pc)), its agents
-with theirs and the automatic update switch, Settings for
-this machine and Remove machine. A machine alone on its list shows its details
-without a click. Before this, a machine appeared twice, once as an updates
-card listing every agent version and once as a connection.
+Settings, Machines and updates folds nothing. Its first card is Boite's
+updates: the version this desktop app runs, the release found with its
+changelog, the channel (Nightly or Release; Release stays disabled until a
+stable release is published), Check for updates and Update. Check reads
+everything again: the app, Boite on every machine connected with full control,
+another Windows PC's desktop app as its window reports it
+([updated from here](updates.md#the-desktop-app-of-another-pc)), and the agents
+there. Under it, every other pending update is listed by machine, and Update
+starts all of them ([update everything](updates.md#update-everything)); a
+server still downloading or waiting can be cancelled from its line. Once the
+app's own release is downloaded and nothing else waits, the button restarts
+into it after its confirmation. A browser has no app updater: the card shows
+the version of the machine the page is on.
 
-One Check for updates button at the top reads everything again: the desktop
-app, Boite on every machine connected with full control, and the agents there.
-Update all beside it, shown while something can update, installs all of it
-([update everything](updates.md#update-everything)).
-The row's word is the most pressing of what it finds: a failed update, then
-one in progress, then one available, then a check in progress, then Up to
-date. A row says nothing until something has answered.
-
-The group card lists the machines, then the phones and browsers of the group,
-and has one button, **Add a device**, which draws the QR code and offers the
-link ([groups](groups.md#using-it)). Phone app keeps the Tailscale HTTPS switch and
-Reachable on the local network in view, and folds the address of a reverse
-proxy of one's own under Use another HTTPS address.
+The group card lists each machine on one row, then the phones and browsers:
+its icon, its name, whether it is connected, its Boite version and one word
+about its updates. The row's word is the most pressing of what it finds: a
+failed update, then one in progress, then one available, then a check in
+progress, then Up to date. A row says nothing until something has answered. A
+Docker, hand-made or too old server says how it updates in a tip on its row.
+This computer goes by its host name followed by "(you)" while it keeps the
+default name; renaming it keeps the new name. **Add a device**, in the card's
+header, draws the QR code and offers the link ([groups](groups.md#using-it)).
+Agent versions and their automatic update switch are on each machine's
+Providers page. How a phone reaches this machine without a server of the
+group (Tailscale HTTPS, the local network, a reverse proxy of one's own) is the
+Phone app card under Advanced.
 
 ## Agent links
 
@@ -192,23 +196,23 @@ of pairwise links.
 
 ## Automatic settings synchronization
 
-The group card has one checkbox to keep its machines
-synchronized with the named source. Checking it copies settings
-immediately, then copies changes while this client is open, including when
-Settings is closed. The source stays the one chosen when checking the box;
-switching the visible machine does not reverse the direction. Cyclic links are
-refused.
+The group card's **Default machine** picks one member whose settings every
+other member follows, or None. The choice is the group's (`group.settingsHome`,
+kept in the roster beside its name and merged the same way: the latest choice
+wins), so every member and every window shows the same one, and a member that
+leaves the group stops being the default. A core before `features.settingsHome`
+reports no choice and keeps its own settings; the card names it.
 
-The preference is saved on this client using each core's host, data directory
-and channel. Both machines need full control and a live connection. A reconnect
-or a client reload copies the latest values again. Unchecking stops future
-copies, including a pending copy that has not started writing. The remote core
-persists what it receives and keeps executing independently when the source or
-this client is offline.
+A window that owns both machines makes the copy: at once, then after each
+change on the default machine and after each reconnect, while that window is
+open, Settings closed or not. The remote core persists what it receives and
+keeps executing independently when the default machine or this window is
+offline. Copies saved per window by earlier versions are dropped.
 
-The client copies:
+The client copies (`SYNCED_SETTINGS` in the contracts):
 
-- deleted-history retention, process guards and question mode;
+- deleted-history retention, process guards, question mode, short answers,
+  tool summaries, automatic compaction and the cache keepalive;
 - keybindings where the two differ, including unbound commands and restored
   defaults. A failed or canceled copy attempts to restore entries already changed;
 - the brain's Use with agents, instructions, guide and automatic pull switches
@@ -216,18 +220,29 @@ The client copies:
 
 Resource limits, memory protection, process retention, automatic agent updates,
 worktree storage, network access, public URLs, browser origins and provider
-sign-ins stay on their own machine. Each owner machine card has a Settings for
-this machine button beside its synchronization control. It opens resource and
-execution settings for that core without changing the active conversation.
-Agent update checks, versions and the automatic update switch sit under that
-machine's details ([the machines page](#the-machines-page)).
-Checking synchronization leaves the machine list open. The button is available
-on desktop and phone; offline machines cannot be edited. The report names
-providers that still need signing in on the target
-and opens that machine's Providers page. Methods absent on an older core are
-skipped for that part. Automatic brain changes require the source core's
-`brain.configured` event. A failure names its stage; earlier changes stay copied,
-and the next source change or reconnect tries again.
+sign-ins stay on their own machine.
+
+A synced setting changed on a following machine stays there: the change also
+adds it to that machine's `syncOverrides` (a setting's key,
+`keybinding:<command>` or `brain:<switch>`), which the copy skips. The page
+shows it with a star in the accent colour; clicking the star gives it back and
+copies the default machine's value at once. Only a change made on that machine
+marks it; the copy itself never does.
+
+Every settings page that belongs to one machine (General, Keyboard, Voice,
+Providers, Plugins, Brain, Limits, Task manager, Protection, Advanced and
+Diagnostics) has a machine picker above it. Picking another machine shows and
+changes that machine's settings without moving the window or its open
+conversation; Plugins opens on this PC, the others on the window's machine.
+On a machine that follows the default one, a note under the picker says so;
+the default machine says it is the default. Appearance and Experiments belong
+to the window, Machines to the group, and Usage keeps its own machine filter,
+which can read every machine at once.
+
+Methods absent on an older core are skipped for that part. Automatic brain
+changes require the default machine's `brain.configured` event. A failure names
+its stage; earlier changes stay copied, and the next change or reconnect tries
+again.
 
 ## Remote terminals
 

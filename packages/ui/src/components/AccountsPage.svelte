@@ -1,5 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
@@ -681,6 +682,7 @@
       {#each groups.off as row (row.id)}{@render providerRow(row, true)}{/each}
     </div>
   {/if}
+  {#if store.owner}<HarnessUpdatesCard {store} />{/if}
   {#if store.owner}<SubscriptionProxySettings {store} />{/if}
 </div>
 

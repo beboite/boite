@@ -134,12 +134,11 @@ no real provider call and uses no existing login directory.
 ## Updating from the app
 
 Open Settings, Machines and updates. A remote server whose row says Update
-available has a signed release waiting: open its details, where the server
-shows its installed version, a Check for updates action and Update. The
-desktop app's own manual check and channel choices sit in the card above the
-list. Cards show the installed and offered versions together. The card's own
-Details expands the idle wait, backup and recovery behavior without adding it
-to the confirmation.
+available has a signed release waiting: the updates card at the top lists it
+under the app's own, with its installed and offered versions, and its Update
+button installs it with everything else waiting. While that server downloads
+or waits for its agents, its line offers Cancel. A Docker or hand-made server
+says on its row how it updates.
 
 The sidebar's update card lists that release too, and its Update all
 installs it after the machine's agents

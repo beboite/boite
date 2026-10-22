@@ -21,10 +21,14 @@
   import WorktreesCard from './WorktreesCard.svelte';
   import AutoCompactSettings from './AutoCompactSettings.svelte';
   import InfoTip from './InfoTip.svelte';
-  import { tick } from 'svelte';
+  import { tick, type Snippet } from 'svelte';
   import { revealSettingsCard } from '../lib/settings-flash';
 
-  let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
+  /**
+   * `target` is the machine the settings bar picked, `store` this window's:
+   * the pages of one machine show the target, under the bar.
+   */
+  let { store, target = store, bar, onopenthread }: { store: Store; target?: Store; bar?: Snippet; onopenthread?: () => void } = $props();
   let phone = $state(false);
   /** The analytics switches, on a screen of their own beside the notifications. */
   let privacy = $state(false);
@@ -116,17 +120,19 @@
   {:else}
     <header class:limits={page === 'limits'}>
       <button class="ghost icon" data-testid="mobile-settings-back" aria-label={strings.mobile.settingsBack} onclick={back}><ArrowLeft size={20} /></button>
-      <h1>{#if page === 'limits'}<QuotaMachineScope {store} fallback={title} />{:else}{title}{/if}{#if info}<InfoTip topic={title} text={info} testid="mobile-settings-info" />{/if}</h1>
+      <h1>{#if page === 'limits'}<QuotaMachineScope store={target} fallback={title} />{:else}{title}{/if}{#if info}<InfoTip topic={title} text={info} testid="mobile-settings-info" />{/if}</h1>
     </header>
     <div class="detail" data-testid="mobile-settings-detail">
+      {#if bar && ['brain', 'voice', 'limits', 'task-manager', 'resources', 'diagnostics', 'worktrees', 'auto-compact', 'archived'].includes(page)}<div class="bar">{@render bar()}</div>{/if}
+      {#key target}
       {#if quota}
         <div class="tabs" role="tablist" aria-label={strings.usage.heading} data-testid="mobile-usage-tabs">
           <button type="button" role="tab" class="tab" class:on={page === 'usage'} aria-selected={page === 'usage'} data-testid="mobile-usage-tab-usage" onclick={() => store.showSettings('usage')}><Coins size={15} /><span class="ui-label">{strings.usage.heading}</span></button>
           <button type="button" role="tab" class="tab" class:on={page === 'limits'} aria-selected={page === 'limits'} data-testid="mobile-usage-tab-limits" onclick={() => store.showSettings('limits')}><Gauge size={15} /><span class="ui-label">{strings.usage.limits}</span></button>
         </div>
       {/if}
-      {#if page === 'brain' && store.owner}
-        <BrainPage {store} />
+      {#if page === 'brain' && target.owner}
+        <BrainPage store={target} />
       {:else if page === 'phone'}
         <div class="page phone-page">
           <!-- Which machine these apply to, once there is a choice, and the connection when it is not working. -->
@@ -138,32 +144,33 @@
       {:else if page === 'privacy'}
         <div class="page phone-page privacy-page"><TelemetrySettings {store} /></div>
       {:else if page === 'voice'}
-        <VoiceSettings {store} readOnly />
+        <VoiceSettings store={target} readOnly />
       {:else if page === 'appearance'}
         <AppearancePage {store} phone />
       {:else if page === 'usage'}
         <UsagePage {store} />
       {:else if page === 'limits'}
-        <LimitsPage {store} showTitle={false} />
+        <LimitsPage store={target} showTitle={false} />
       {:else if page === 'task-manager'}
-        <TaskManagerLoader {store} {onopenthread} />
-      {:else if page === 'resources' && store.owner}
-        <ResourcesPage {store} />
+        <TaskManagerLoader store={target} {onopenthread} />
+      {:else if page === 'resources' && target.owner}
+        <ResourcesPage store={target} />
       {:else if page === 'experiments'}
         <ExperimentsPage {store} />
-      {:else if page === 'diagnostics' && store.owner}
-        <DiagnosticsPage {store} {onopenthread} />
+      {:else if page === 'diagnostics' && target.owner}
+        <DiagnosticsPage store={target} {onopenthread} />
       {:else if page === 'worktrees'}
-        <div class="page"><WorktreesCard {store} /></div>
+        <div class="page"><WorktreesCard store={target} /></div>
       {:else if page === 'auto-compact'}
-        <div class="page"><AutoCompactSettings {store} /></div>
+        <div class="page"><AutoCompactSettings store={target} /></div>
       {:else if page === 'archived'}
         <div class="page archived-page">
-          <ArchivedThreads {store} eager />
+          <ArchivedThreads store={target} eager />
         </div>
       {:else}
         <MachinesPage mobile {onopenthread} />
       {/if}
+      {/key}
     </div>
   {/if}
   {/key}
@@ -202,6 +209,8 @@
   .scope { overflow-wrap: anywhere; margin-top: 0; }
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
+  .bar { padding: 16px 16px 0; }
+  .bar + :global(.page) { padding-top: 12px; }
   /* The bar above already names the page, so its own title steps aside. */
   .detail :global(.page:not(.machines-page):not(.limits-page):not(.usage) > header),
   .detail :global(.machines-page .head h1),
