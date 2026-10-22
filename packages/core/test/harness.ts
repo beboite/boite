@@ -28,6 +28,8 @@ export interface TestCoreOptions {
   onShutdown?: () => void;
   retentionPassMs?: number;
   pullRequestWatches?: CoreOptions['pullRequestWatches'];
+  /** A data directory an earlier test core used: the restart a test wants to see. The test removes it. */
+  dataDir?: string;
 }
 
 const HOST_AGENT_OPT_INS = [
@@ -63,7 +65,7 @@ export function scriptedClaude(harness: TestCore): void {
 }
 
 export async function startTestCore(options: TestCoreOptions = {}): Promise<TestCore> {
-  const dataDir = mkdtempSync(join(tmpdir(), 'boite-core-'));
+  const dataDir = options.dataDir ?? mkdtempSync(join(tmpdir(), 'boite-core-'));
   process.env.BOITE_DATA_DIR = dataDir;
   // Drafts land in the test's own directory, never in the user's Documents.
   process.env.BOITE_DRAFTS_DIR = join(dataDir, 'Documents', 'Boite');
@@ -125,7 +127,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
       await server.stop();
       await core.close();
       delete process.env.BOITE_DATA_DIR;
-      await removeDir(dataDir);
+      if (options.dataDir === undefined) await removeDir(dataDir);
     },
   };
 }

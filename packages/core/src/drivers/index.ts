@@ -169,6 +169,15 @@ export function refreshProbes(protocol: Protocol, providerId: ProviderId, accoun
 }
 
 /**
+ * A list saved by an earlier core stands for the account until the read that
+ * replaces it settles, as a refreshed one does. A list already read wins.
+ */
+export function holdModels(providerId: ProviderId, accountId: AccountId, models: ModelInfo[]): void {
+  const key = refreshKey(providerId, accountId);
+  if (!refreshing.has(key)) refreshing.set(key, { providerId, accountId, models });
+}
+
+/**
  * The fresh read answered: the driver's own cache is the catalog again. A read
  * that failed leaves the held one, as the picker keeps showing it.
  */

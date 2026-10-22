@@ -971,6 +971,18 @@ Cleanup starts the registry's bounded stop before waiting for process pipes to
 close. A missing close event gets one additional second, then a
 `provider.probeCleanup` warning. The original models or discovery error still
 reach the caller, and the next request for that account can proceed.
+
+Every list an account answers is also saved in the journal
+(`providers/saved-catalogs.ts`), under a hash of the descriptor, the resolved
+executable, the account's gateway settings and its status, identity and
+isolation folder. When the account has not answered since the core started, or
+since a reload or an account change dropped its list, a plain probe returns the
+saved list at once if that hash still matches, and a `refresh` read starts
+behind it; its answer reaches clients as `providers.probed`. Until that read
+settles the saved list answers model checks, as a refreshed one does. Starting
+the agent is what costs: on 2026-10-22 an Antigravity probe took 12.3 s on the
+desktop, an OpenCode 2 probe 3 to 5 s on the server, and the picker showed
+nothing until it answered. Removing the account removes its saved list.
 A model picked from a list the core gave on this connection lands at once, and
 a draft created on it is not read again, except an ACP effort that list carries
 no scale for. A list restored from browser storage, or one the core has not

@@ -451,7 +451,9 @@ environment, workspace and context mode. Missing ACP effort metadata uses an
 isolated probe rather than changing a prepared session's selection.
 Concurrent reads share an operation; caches belong to a provider and
 account. Changed descriptors or account state invalidate them, and a stale
-completion cannot replace a newer cache entry. Disposable processes close on
+completion cannot replace a newer cache entry. The last list of each account is
+also saved in the journal and answers at once, while a fresh read runs, when the
+descriptor, executable, gateway and login it was read under still stand. Disposable processes close on
 every path. Background failures retain display fallbacks; explicit refreshes report
 their reason. See [provider discovery](providers.md#the-models-probe).
 
