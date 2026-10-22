@@ -127,6 +127,22 @@ test('an invitation shares the machine only with a key; join refuses this core\'
   expect((await client.call('contacts.get', {})).contacts.map(contact => contact.name)).toEqual(['Chris']);
 });
 
+test('a cancelled invitation joins no other core, and a joined one counts no more at the inviter', async () => {
+  const host = new FakeClient({ delayMs: 0, coreId: 'core-host', coreName: 'host-pc' });
+  const guest = new FakeClient({ delayMs: 0, coreId: 'core-guest', coreName: 'guest-pc' });
+  clients.push(host, guest);
+  await Promise.all([host.connect(), guest.connect()]);
+  const kept = await host.call('contacts.invite', { share: false });
+  const dropped = await host.call('contacts.invite', { share: false });
+  expect((await guest.call('contacts.join', { link: kept.link })).coreId).toBe('core-host');
+  expect((await host.call('contacts.get', {})).invitations).toBe(1);
+  await guest.call('contacts.remove', { coreId: 'core-host' });
+  expect(await host.call('contacts.cancelInvites', {})).toEqual({ cancelled: 1 });
+  expect(await refusal(guest.call('contacts.join', { link: dropped.link }))).toEqual({ code: RpcErrorCode.Refused, field: undefined });
+  expect(await refusal(guest.call('contacts.join', { link: kept.link }))).toEqual({ code: RpcErrorCode.Refused, field: undefined });
+  expect((await guest.call('contacts.get', {})).contacts.map(contact => contact.coreId)).toEqual(['core-chris']);
+});
+
 test('the tier takes 1, 2 or 3; an agent asks a contact by name and lists what each opened, unless its thread stays on this machine', async () => {
   const { client } = await fake();
   // `t-trace` runs echo, tier 2: the seeded minimum of 1 refuses it.
