@@ -65,7 +65,8 @@ A pull request whose selection includes desktop also runs [Bundle growth](#bundl
 
 The changes job always installs frozen dependencies, runs `bun audit`, local
 link checks, `bun test scripts/ci ./bench ./apps/shell/scripts`, architecture
-checks and their tests, and translation validation. Changes to workflows,
+checks and their tests, translation validation and the no-em-dash UI copy
+rule (`bun run check:copy`). Changes to workflows,
 composite actions or `scripts/ci/` also run checksum-verified actionlint 1.7.12.
 
 Architecture checks reject runtime dependency cycles, forbidden package imports
