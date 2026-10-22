@@ -298,7 +298,10 @@ export class BrainStore {
     const { path, enabled } = this.config();
     if (!enabled || !path) return [];
     const commands = new Map<string, AgentCommand>();
-    for (const entry of this.current(path).entries) {
+    let entries: BrainEntry[];
+    // An unreadable brain folder leaves the menu empty instead of failing it.
+    try { entries = this.current(path).entries; } catch { return []; }
+    for (const entry of entries) {
       if (entry.kind !== 'skill' || entry.error || !entry.disableModelInvocation || commands.has(entry.name)) continue;
       commands.set(entry.name, { name: entry.name, description: entry.description, hint: null });
     }
@@ -311,7 +314,10 @@ export class BrainStore {
     if (!name || commands.some(command => command.name === name)) return prompt;
     const { path, enabled } = this.config();
     if (!enabled || !path) return prompt;
-    const { entries, texts } = this.current(path);
+    let scan: Inventory;
+    // An unreadable brain folder leaves the prompt as the user wrote it.
+    try { scan = this.current(path); } catch { return prompt; }
+    const { entries, texts } = scan;
     const entry = entries.find(entry => entry.kind === 'skill' && !entry.error && entry.disableModelInvocation && entry.name === name);
     return entry ? (texts.get(entry.path) ?? '') + prompt.slice(name.length + 1) : prompt;
   }

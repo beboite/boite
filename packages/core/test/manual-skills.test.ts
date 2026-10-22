@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RpcErrorCode } from '@boite/contracts';
 import { connect } from '../src/client.ts';
@@ -117,6 +117,12 @@ test('an accepted command retry keeps the original expansion after the skill cha
   skill('focus', 'disable-model-invocation: true\n', 'Changed after acceptance');
   expect((await owner.call('turns.start', params)).id).toBe(turn.id);
   expect(h.core.journal.lastUserMessage(threadId, turn.id)?.parts).toEqual([{ type: 'text', text: body }]);
+});
+
+test('a brain folder that disappears leaves the menu empty and the prompt untouched', () => {
+  rmSync(root, { recursive: true, force: true });
+  expect(h.core.brain.commands()).toEqual([]);
+  expect(h.core.brain.expandPrompt('/focus hello')).toBe('/focus hello');
 });
 
 test('live user steering expands manual skills before delivery and persistence', async () => {
