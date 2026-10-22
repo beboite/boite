@@ -58,6 +58,8 @@ function input(selector: string, value: string) {
 }
 
 test('the default machine is one choice for the whole group: the others follow it, the window stays where it was', async () => {
+  // A copy an earlier version kept for this window alone: the choice in the group replaces it.
+  localStorage.setItem('boite.settings-sync', JSON.stringify({ target: 'source' }));
   const { source, target } = await setup();
   expect(query('[data-testid="machines-page"] h1').textContent).toContain(strings.settings.tabs.machines);
   // Nothing to unfold: each machine is one row, its details on the settings pages the bar above them picks.

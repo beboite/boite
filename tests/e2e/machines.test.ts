@@ -140,9 +140,10 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.click(`${id('group-home-pick-menu')} [data-value="${home}"]`);
     await page.waitFor(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === ${JSON.stringify(second.url)})?.store.settings?.asyncQuestions === false`);
     expect((await a.call('group.get', {}))?.settingsHome).toBe(home);
+    // The second core hears of the choice by the roster exchange: wait for it, as for the rename below.
+    for (let attempt = 0; attempt < 50 && (await b.call('group.get', {}))?.settingsHome !== home; attempt++) await Bun.sleep(100);
     expect((await b.call('group.get', {}))?.settingsHome).toBe(home);
-    expect(await page.evaluate(`document.querySelector('[data-core-id="${home}"] ${id('machine-home')}') !== null`)).toBe(true);
-    expect(await page.evaluate(`document.querySelectorAll('${id('machine-home')}').length`)).toBe(1);
+    await page.waitFor(`document.querySelector('[data-core-id="${home}"] ${id('machine-home')}') !== null && document.querySelectorAll('${id('machine-home')}').length === 1`);
     expect(await b.call('settings.get', {})).toMatchObject({ asyncQuestions: false, warmProcessMinutes: 2, agentCpuCapPercent: 35 });
     // Protection changes the machine its bar picks, here the second one, while the window stays on the first.
     await page.click(id('settings-tab-resources'));
