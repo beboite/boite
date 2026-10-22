@@ -518,6 +518,16 @@ fn profile_of(id: &str, raw: Option<&str>) -> Result<Profile, String> {
     }
 }
 
+/// The WebView2 profile a surface opens in, by name; `None` is the default
+/// one, the profile the main webview runs on.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn webview2_profile(profile: &Profile) -> Option<&str> {
+    match profile {
+        Profile::Default | Profile::Private => None,
+        Profile::Named(name) => Some(name),
+    }
+}
+
 /// macOS keys a data store by 16 bytes. A profile id maps to the same ones on
 /// every run, so its store persists.
 #[cfg(target_os = "macos")]
@@ -952,7 +962,7 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{checked_url, label_of, profile_of, read_selection, Placement, Profile, SurfaceRect, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+    use super::{checked_url, label_of, profile_of, read_selection, webview2_profile, Placement, Profile, SurfaceRect, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
 
     #[test]
     fn an_agent_surface_out_of_sight_stays_shown_off_screen_at_its_last_size() {
@@ -1023,6 +1033,18 @@ mod tests {
             let error = profile_of("a", Some(bad)).unwrap_err();
             assert!(error.contains("lowercase letters"), "{bad:?}: {error}");
         }
+    }
+
+    #[test]
+    fn a_private_surface_runs_in_a_webview2_profile_of_its_own() {
+        // InPrivate on the default profile shared its browser state with the
+        // user's sign-ins: opening a private tab signed Gmail out of the default tab (2026-10-22).
+        let private = webview2_profile(&Profile::Private).expect("a private surface names its own WebView2 profile");
+        assert_ne!(Some(private), webview2_profile(&Profile::Default));
+        // No profile id the UI or an agent can make is that name.
+        assert!(profile_of("a", Some(private)).is_err(), "{private:?} is a valid profile id");
+        assert_eq!(webview2_profile(&Profile::Default), None);
+        assert_eq!(webview2_profile(&Profile::Named("p-1a2b".into())), Some("p-1a2b"));
     }
 
     #[test]
