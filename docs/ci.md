@@ -498,9 +498,13 @@ enables them. An already published commit skips every build. An unpublished or
 failed build is eligible next time.
 
 The nightly does not run CI again. Its `CI passed` job (`scripts/ci/commit-ci.ts`)
-waits for the `ci` run that pushing this commit to main started. It reruns that
-run's failed jobs once and fails unless the run ends green; a commit with no
-such run after ten minutes fails. A main run is only cancelled while pending,
+accepts a green `ci` run for this exact commit, whether the push to main started
+it or the merge queue that landed it, manual runs on main included: a
+merge-queue merge's push run can be dropped or fail to start, and the queue's own
+run covers the same tree. A green candidate passes at once, an unfinished one is
+waited for, and the newest completed one has its failed jobs rerun once before
+the gate fails; a commit with no such run after ten minutes fails. A
+main run is only cancelled while pending,
 when a newer push replaces it, so a cancelled run has no verdict: the job then
 follows the newest main run that was not cancelled, normally the one that
 replaced it, and waits for that commit instead. With no newer run it takes the
