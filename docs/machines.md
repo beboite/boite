@@ -224,7 +224,10 @@ sign-ins stay on their own machine.
 
 A synced setting changed on a following machine stays there: the change also
 adds it to that machine's `syncOverrides` (a setting's key,
-`keybinding:<command>` or `brain:<switch>`), which the copy skips. The page
+`keybinding:<command>` or `brain:<switch>`), which the copy skips. The settings
+part of the copy goes through `settings.follow`, which leaves out what the
+follower keeps at the moment it writes, so a change saved there from another
+window meanwhile stays. The page
 shows it with a star in the accent colour; clicking the star gives it back and
 copies the default machine's value at once when that machine is connected in
 this window, at its next connection otherwise. Only a change made on that machine

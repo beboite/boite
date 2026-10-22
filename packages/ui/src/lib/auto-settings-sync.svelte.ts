@@ -41,7 +41,10 @@ export class AutoSettingsSync {
   /** The home `target` follows, when this window is connected to it. */
   source(target: Machine): Machine | undefined {
     const home = this.homeId(target);
-    return home === undefined ? undefined : this.machines().find((machine) => machine !== target && GroupLinks.coreOf(machine) === home);
+    if (home === undefined) return undefined;
+    // The same machine may be listed twice (an address and a relay): the one that answers carries the copy.
+    const listed = this.machines().filter((machine) => machine !== target && GroupLinks.coreOf(machine) === home);
+    return listed.find((machine) => machine.store.connection === 'ready') ?? listed[0];
   }
 
   /** The home's name for `target`, connected here or not. */

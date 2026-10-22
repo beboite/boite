@@ -217,6 +217,13 @@ export interface SettingsRpcMethods {
   'settings.get': { params: Record<string, never>; result: Settings };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /**
+   * The copy from the group's settings home (`Group.settingsHome`): only the
+   * synced settings this machine does not keep (`syncOverrides`) at the moment
+   * it writes, so a change saved here meanwhile from another window stays.
+   * Comes with `features.settingsHome`. Owner only.
+   */
+  'settings.follow': { params: { patch: Partial<Settings> }; result: Settings };
+  /**
    * The app says its language, the experiments it has on and the names it
    * gives settings, after each hello and on every change. Agents read them
    * from the app the user last used (`agent.settings`), and a card about an

@@ -66,6 +66,13 @@ export function isSyncKey(value: unknown): value is SyncKey {
   return typeof value === 'string' && KNOWN.has(value);
 }
 
+/** What of `patch` a follower takes: the synced settings it does not keep for itself. */
+export function followedPatch(settings: Settings, patch: unknown): Partial<Settings> {
+  if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) return {};
+  const kept = new Set(settings.syncOverrides ?? []);
+  return Object.fromEntries(Object.entries(patch).filter(([key]) => (SYNCED_SETTINGS as readonly string[]).includes(key) && !kept.has(key))) as Partial<Settings>;
+}
+
 /** Entries one machine may keep: room for every key a later version adds. */
 export const SYNC_OVERRIDES_MAX = 256;
 

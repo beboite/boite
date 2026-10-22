@@ -19,6 +19,8 @@
   let editing = $state(false);
   let selected = $state<'instructions' | 'skill' | 'plugin'>('instructions');
   let revision = 0;
+  /** Folder reads started by changes made elsewhere: only the last one lands. */
+  let folderRead = 0;
   const t = strings.brain;
   const kinds = ['instructions', 'skill', 'plugin'] as const;
   const icons = { instructions: FileText, skill: Sparkles, plugin: Puzzle };
@@ -50,9 +52,10 @@
       if (!editing) path = config.path ?? '';
       // Another folder holds other entries, problems and history: read them, not only the switches.
       if (config.path !== status.config.path) {
-        const current = revision;
-        void client.call('brain.status', {}).then((next) => { if (current === revision) status = next; })
-          .catch((cause) => { if (current === revision) error = failure(cause); });
+        const current = revision, read = ++folderRead;
+        const latest = () => current === revision && read === folderRead;
+        void client.call('brain.status', {}).then((next) => { if (latest()) status = next; })
+          .catch((cause) => { if (latest()) error = failure(cause); });
         return;
       }
       status = { ...status, config };

@@ -134,12 +134,10 @@ export async function syncSettings(source: SyncEnd, target: SyncEnd, signal?: Ab
     const changed = differs(toSettings).length;
     signal?.throwIfAborted();
     if (!changed) return { settings: toSettings, changed };
-    // Read again just before writing: a setting kept on the target since the first read stays its own.
-    const latest = await target.client.call('settings.get', {});
-    kept = new Set(latest.syncOverrides ?? []);
-    signal?.throwIfAborted();
-    const patch = Object.fromEntries(differs(latest)) as Partial<Settings>;
-    return { settings: Object.keys(patch).length ? await target.client.call('settings.set', patch) : latest, changed };
+    // The target leaves out what it keeps at the moment it writes: a save from another window meanwhile stays its own.
+    const patch = Object.fromEntries(differs(toSettings)) as Partial<Settings>;
+    const written = await optional(target.client.call('settings.follow', { patch }));
+    return { settings: written ?? await target.client.call('settings.set', patch), changed };
   });
 
   signal?.throwIfAborted();

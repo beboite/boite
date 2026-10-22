@@ -25,7 +25,7 @@ async function fixture() {
   const sync = new AutoSettingsSync(() => machines);
   stop = sync.start();
   const [source, target] = machines as [Machine, Machine];
-  return { sync, source, target, home: (id: 'source' | 'target' | null) => grouped(machines, id) };
+  return { sync, source, target, machines, home: (id: 'source' | 'target' | null) => grouped(machines, id) };
 }
 
 /** Both machines in one group, as each core reports it, with `home` as the default machine. */
@@ -69,7 +69,7 @@ test('a home cleared during module loading or a slow read prevents the pending c
     home(null);
     release();
     await vi.waitFor(() => expect(sync.busy.target).toBe(false));
-    expect(spy.mock.calls.some(([method]) => method === 'settings.set')).toBe(false);
+    expect(spy.mock.calls.some(([method]) => method === 'settings.set' || method === 'settings.follow')).toBe(false);
     expect((await call('settings.get', {})).asyncQuestions).not.toBe(false);
   } finally { releaseModule(); release(); vi.doUnmock('./settings-sync'); spy.mockRestore(); }
 });
@@ -78,7 +78,7 @@ test('a failed copy reports its stage and the next change retries, and the home 
   const { sync, source, target, home } = await fixture();
   await source.store.client!.call('settings.set', { asyncQuestions: false });
   const client = target.store.client!, call = client.call.bind(client);
-  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => method === 'settings.set'
+  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => method === 'settings.set' || method === 'settings.follow'
     ? Promise.reject(new Error('target unavailable')) : call<RpcMethodName>(method, params));
   home('source');
   await vi.waitFor(() => expect(target.store.error).toContain('target unavailable'));
@@ -145,4 +145,16 @@ test('resetting the keys on a follower keeps what the core named, read or not, a
   target.store.keybindings = null;
   expect(await target.store.resetKeybindings()).toBeNull();
   expect((await target.store.client!.call('settings.get', {})).syncOverrides).toEqual(named);
+});
+
+test('a home listed twice copies through the entry that answers', async () => {
+  const { sync, source, target, machines, home } = await fixture();
+  home('source');
+  // The same core under a second address that does not answer, listed first.
+  const away = new Store();
+  stores.push(away);
+  away.group = { ...source.store.group! };
+  machines.unshift({ id: 'source-relay', label: 'source', store: away });
+  expect(away.connection).not.toBe('ready');
+  expect(sync.source(target)).toBe(source);
 });

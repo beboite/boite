@@ -20,3 +20,16 @@ test('a machine that follows its group keeps what it changed: known keys, and th
     owner.close();
   } finally { await h.stop(); }
 });
+
+test('the copy from the home leaves out what the follower keeps at the moment it writes, and only synced settings come this way', async () => {
+  const h = await startTestCore();
+  try {
+    const owner = await h.connect();
+    await owner.call('settings.set', { shortAnswers: false, syncOverrides: ['shortAnswers'] });
+    const after = await owner.call('settings.follow', { patch: { shortAnswers: true, muteAgents: false, warmProcessMinutes: 9 } as never });
+    expect(after).toMatchObject({ shortAnswers: false, muteAgents: false });
+    expect(after.warmProcessMinutes).not.toBe(9);
+    expect(await owner.call('settings.follow', { patch: 'all' } as never).catch((error: Error) => error.message)).toContain('patch');
+    owner.close();
+  } finally { await h.stop(); }
+});

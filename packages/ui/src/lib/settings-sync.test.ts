@@ -199,3 +199,17 @@ test('a setting the home never wrote follows as its default, so one given back t
   expect(report.changed).toBe(2);
   expect(await to.call('settings.get', {})).toMatchObject({ shortAnswers: true, autoCompact: null });
 });
+
+test('a setting another window keeps on the target while the copy is on its way stays as that window saved it', async () => {
+  const from = await machine();
+  const to = await machine();
+  await from.call('settings.set', { shortAnswers: false, muteAgents: false });
+  const call = to.call.bind(to) as Client['call'];
+  const racing = older(to, (method, params) => method === 'settings.follow'
+    // The other window's save lands between the copy's read and its write.
+    ? call('settings.set', { shortAnswers: true, syncOverrides: ['shortAnswers'] }).then(() => call('settings.follow', params as never)) as Promise<never> : null);
+  const spy = vi.spyOn(racing, 'call');
+  await syncSettings(await end(from), await end(racing));
+  expect(spy.mock.calls.some(([method]) => method === 'settings.follow')).toBe(true);
+  expect(await to.call('settings.get', {})).toMatchObject({ shortAnswers: true, muteAgents: false, syncOverrides: ['shortAnswers'] });
+});
