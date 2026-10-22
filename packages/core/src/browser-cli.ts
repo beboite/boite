@@ -28,6 +28,9 @@ Targets: @e3 (a ref from the last snapshot), a CSS selector matching one element
   back | forward | reload | close
   tab [list] | tab new <url> [--profile <name>] | tab <id> | tab close [<id>]
   profiles                        this machine's browser profiles and the default one
+  profiles add <name>             a profile kept like the default one, with its own cookies: sign a
+                                  second account in there, then open --profile <name>; private
+                                  keeps nothing once its tabs or Boite close
   screenshot [path]               save a PNG (default: unique name in cwd)
   set viewport <width> <height>   also resize; reset-viewport restores the default size
   set media light|dark|system     emulate the color scheme (also appearance)
@@ -121,6 +124,14 @@ function parseNoInput(context: BrowserParseContext): BrowserAction {
   const { command, none } = context;
   const kind = command as 'status' | 'profiles' | 'close' | 'reset-viewport' | 'recording-stop' | 'downloads';
   none(); const action: BrowserAction = { kind }; return action;
+}
+
+function parseProfiles(context: BrowserParseContext): BrowserAction {
+  const { rest, need, none } = context;
+  if (rest[0] !== 'add') return parseNoInput(context);
+  need(1, 'a profile name');
+  const name = rest.splice(0).slice(1).join(' ');
+  const action: BrowserAction = { kind: 'profile-add', name }; return action;
 }
 
 function parseOpenUrl(context: BrowserParseContext): BrowserAction {
@@ -263,7 +274,7 @@ function parseRecordingStart(context: BrowserParseContext): BrowserAction {
 
 const PARSERS: Record<string, (context: BrowserParseContext) => BrowserAction> = {
   'status': parseNoInput,
-  'profiles': parseNoInput,
+  'profiles': parseProfiles,
   'close': parseNoInput,
   'reset-viewport': parseNoInput,
   'recording-stop': parseNoInput,
@@ -375,6 +386,10 @@ const LINES: Partial<Record<BrowserAction['kind'], (action: BrowserAction, resul
   get: valueLines,
   status: statusLines,
   profiles: profileLines,
+  'profile-add': (_action, result) => {
+    const profile = result.value as { id: string; name: string; created: boolean };
+    return [`✓ ${profile.created ? 'Added' : 'Already listed:'} browser profile ${profile.name} (${profile.id}); open --profile ${JSON.stringify(profile.name)} signs in there`];
+  },
   close: (_action, result) => [`✓ Closed ${result.tabId ?? 'the tab'}`],
   diagnostics: replyLines,
   'recording-start': replyLines,

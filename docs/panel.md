@@ -139,7 +139,11 @@ tabs open in. The profile button in the address bar names the tab's profile
 (only its icon on a narrow bar). Its menu, like the panel's **+** menu, opens a
 new tab in another profile, or a private tab. A private tab is chosen per tab,
 never as the default. Private tabs share one session that keeps nothing once
-the last of them closes.
+the last of them closes. On Windows that session belongs to a WebView2 profile
+of its own, `boite_private`, rather than to InPrivate on the default profile,
+so it shares nothing with the default profile's sign-ins: on 2026-10-22 a
+Gmail tab of the default profile was found signed out right after a private
+tab opened beside it.
 
 The profiles belong to the desktop that shows the browser: they are stored in
 the settings of the core its shell started, and a phone has no Browser surface

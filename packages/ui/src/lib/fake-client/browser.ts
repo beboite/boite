@@ -1,4 +1,4 @@
-import { browserActionError, browserCookiesError, browserProfileIdError, browserProfilesOf, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
+import { browserActionError, browserCookiesError, browserProfileIdError, browserProfilesOf, BROWSER_PROFILES_MAX, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
 import { refusal } from './shared';
 import { FAKE_SELECT, fakeBrowserScreen, type FakePage } from './browser-screen';
 import type { FakeContext, FakeMethods } from './context';
@@ -77,6 +77,18 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     if (action.kind === 'profiles') {
       const { profiles, defaultId } = browserProfilesOf(ctx.settings);
       return { value: { default: defaultId, profiles: [{ id: DEFAULT_BROWSER_PROFILE, name: 'Default', kept: true }, ...profiles.map(profile => ({ id: profile.id, name: profile.name, kept: true })), { id: PRIVATE_BROWSER_PROFILE, name: 'Private', kept: false }] } };
+    }
+    if (action.kind === 'profile-add') {
+      // As the core adds one: a listed name answers that profile.
+      const { profiles } = browserProfilesOf(ctx.settings);
+      const name = action.name.trim();
+      const known = profiles.find(profile => profile.name.toLowerCase() === name.toLowerCase());
+      if (known) return { value: { ...known, created: false } };
+      if (profiles.length >= BROWSER_PROFILES_MAX) throw refusal(`this machine already has ${BROWSER_PROFILES_MAX} browser profiles; the owner removes one in Settings`);
+      const profile = { id: `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`, name };
+      ctx.settings = { ...ctx.settings, browserProfiles: [...profiles, profile] };
+      ctx.emit('settings.updated', { ...ctx.settings });
+      return { value: { ...profile, created: true } };
     }
     const current = browser?.tabs.find(one => one.tabId === browser.active);
     if (action.kind === 'open' && action.reuse && action.profile === undefined && browser && current) {

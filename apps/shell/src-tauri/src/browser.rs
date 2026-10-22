@@ -487,8 +487,9 @@ fn checked_url(id: &str, raw: &str) -> Result<Url, String> {
 
 /// Where a surface keeps its cookies and storage. `Default` is the profile the
 /// main webview runs on, the one every surface used before profiles existed,
-/// so the sign-ins made there stay. `Private` is WebView2's InPrivate session,
-/// which forgets everything once its last surface closes.
+/// so the sign-ins made there stay. `Private` is an InPrivate session, which
+/// forgets everything once its last surface closes; on Windows it is the
+/// session of a profile of its own (`webview2_profile`).
 #[derive(Debug, PartialEq)]
 enum Profile {
     Default,
@@ -518,12 +519,21 @@ fn profile_of(id: &str, raw: Option<&str>) -> Result<Profile, String> {
     }
 }
 
+/// The WebView2 profile private surfaces open in. The underscore keeps it
+/// out of the profile ids `profile_of` accepts.
+const PRIVATE_WEBVIEW2_PROFILE: &str = "boite_private";
+
 /// The WebView2 profile a surface opens in, by name; `None` is the default
-/// one, the profile the main webview runs on.
+/// one, the profile the main webview runs on. A private surface gets one of
+/// its own, so it shares nothing with the default profile: InPrivate on the
+/// default profile is that profile's off-the-record session, and a Gmail tab
+/// of the default profile was found signed out right after a private tab
+/// opened beside it (2026-10-22).
 #[cfg_attr(not(windows), allow(dead_code))]
 fn webview2_profile(profile: &Profile) -> Option<&str> {
     match profile {
-        Profile::Default | Profile::Private => None,
+        Profile::Default => None,
+        Profile::Private => Some(PRIVATE_WEBVIEW2_PROFILE),
         Profile::Named(name) => Some(name),
     }
 }
@@ -598,14 +608,18 @@ pub async fn browser_create(
         builder = builder.data_directory(directory);
     }
     builder = builder.additional_browser_args(&crate::window::browser_args());
+    // On Windows a named profile and the private session each open under a
+    // WebView2 profile name of their own, through the main webview's environment.
+    #[cfg(windows)]
+    if let Some(name) = webview2_profile(&profile) {
+        let environment = crate::platform::webview_profiles::environment(&app, name).await?;
+        builder = builder.with_environment(environment.0);
+    }
     match &profile {
         Profile::Default => {}
         Profile::Private => builder = builder.incognito(true),
         #[cfg(windows)]
-        Profile::Named(name) => {
-            let environment = crate::platform::webview_profiles::environment(&app, name).await?;
-            builder = builder.with_environment(environment.0);
-        }
+        Profile::Named(_) => {}
         #[cfg(target_os = "macos")]
         Profile::Named(name) => builder = builder.data_store_identifier(data_store_of(name)),
         #[cfg(not(any(windows, target_os = "macos")))]
@@ -1037,8 +1051,8 @@ mod tests {
 
     #[test]
     fn a_private_surface_runs_in_a_webview2_profile_of_its_own() {
-        // InPrivate on the default profile shared its browser state with the
-        // user's sign-ins: opening a private tab signed Gmail out of the default tab (2026-10-22).
+        // A Gmail tab of the default profile was found signed out right after
+        // a private tab, InPrivate on that same profile, opened beside it (2026-10-22).
         let private = webview2_profile(&Profile::Private).expect("a private surface names its own WebView2 profile");
         assert_ne!(Some(private), webview2_profile(&Profile::Default));
         // No profile id the UI or an agent can make is that name.

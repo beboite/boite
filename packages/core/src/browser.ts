@@ -14,6 +14,7 @@ import {
   browserProfileIdError,
   browserPresetSize,
   browserProfilesOf,
+  BROWSER_PROFILES_MAX,
   DEFAULT_BROWSER_PROFILE,
   DEFAULT_BROWSER_RECORDING_CODEC,
   DEFAULT_BROWSER_RECORDING_FRAME_RATE,
@@ -395,6 +396,7 @@ export class AgentBrowser {
         const { profiles, defaultId } = browserProfilesOf(this.#core.settings.get());
         return { value: { machine: this.#machine, default: defaultId, profiles: [DEFAULT_BROWSER_PROFILE, ...profiles.map(profile => profile.id), PRIVATE_BROWSER_PROFILE].map(id => ({ id, name: this.#profileName(id), kept: id !== PRIVATE_BROWSER_PROFILE })) } };
       }
+      case 'profile-add': return { value: this.#addProfile(action.name) };
       case 'open': {
         // agent-browser's `open` drives the current tab; a named profile opens a tab of its own.
         const current = action.reuse && action.profile === undefined ? this.#threads.get(threadId)?.active : null;
@@ -421,6 +423,24 @@ export class AgentBrowser {
     if (id === DEFAULT_BROWSER_PROFILE) return 'Default';
     if (id === PRIVATE_BROWSER_PROFILE) return 'Private';
     return browserProfilesOf(this.#core.settings.get()).profiles.find(profile => profile.id === id)?.name ?? id;
+  }
+
+  /**
+   * An agent signing in a second account needs a profile that outlives its
+   * tabs and the core, which `private` never does. It may add one, never
+   * remove or rename one: that stays in Settings, with the owner. A name
+   * already listed answers that profile, so a repeated command is harmless.
+   */
+  #addProfile(wanted: string): { id: string; name: string; created: boolean } {
+    const name = wanted.trim();
+    const { profiles } = browserProfilesOf(this.#core.settings.get());
+    const known = profiles.find(profile => profile.name.toLowerCase() === name.toLowerCase());
+    if (known) return { ...known, created: false };
+    if (profiles.length >= BROWSER_PROFILES_MAX) throw refused(`this machine already has ${BROWSER_PROFILES_MAX} browser profiles; the owner removes one in Settings`);
+    // The id the Settings card makes: `p-` and 12 random hexadecimal digits.
+    const id = `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    this.#core.settings.set({ browserProfiles: [...profiles, { id, name }] });
+    return { id, name, created: true };
   }
 
   async #open(threadId: ThreadId, action: Extract<BrowserAction, { kind: 'open' }>): Promise<BrowserReply> {
