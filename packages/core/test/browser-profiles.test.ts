@@ -111,6 +111,14 @@ test('an agent adds a kept profile for a second account, once per name', async (
       expect((await run(args)).code).not.toBe(0);
     }
     expect(browserProfilesOf(harness.core.settings.get()).profiles).toEqual([made!]);
+    // A name that is another profile's id would open that profile through --profile.
+    expect((await run(['profiles', 'add', made!.id])).error).toContain('already uses');
+    // At the cap a listed name still answers its profile, and a new one is refused by name.
+    const full = [made!, ...Array.from({ length: 31 }, (_, i) => ({ id: `p-fill${i}`, name: `Fill ${i}` }))];
+    await owner.call('settings.set', { browserProfiles: full });
+    expect((await run(['profiles', 'add', 'Compte B'])).out).toContain('Already listed');
+    expect((await run(['profiles', 'add', 'Compte C'])).error).toContain('already has 32 browser profiles');
+    expect(browserProfilesOf(harness.core.settings.get()).profiles).toHaveLength(32);
     expect((await run(['help'])).out).toContain('profiles add <name>');
   } finally { owner.close(); await harness.stop(); }
 });

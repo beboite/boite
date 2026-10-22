@@ -84,6 +84,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       const name = action.name.trim();
       const known = profiles.find(profile => profile.name.toLowerCase() === name.toLowerCase());
       if (known) return { value: { ...known, created: false } };
+      if (findBrowserProfile(profiles, name) !== null) throw refusal(`a browser profile already uses ${name} as its id; pick another name`);
       if (profiles.length >= BROWSER_PROFILES_MAX) throw refusal(`this machine already has ${BROWSER_PROFILES_MAX} browser profiles; the owner removes one in Settings`);
       const profile = { id: `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`, name };
       ctx.settings = { ...ctx.settings, browserProfiles: [...profiles, profile] };

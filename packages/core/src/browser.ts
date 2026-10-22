@@ -436,6 +436,8 @@ export class AgentBrowser {
     const { profiles } = browserProfilesOf(this.#core.settings.get());
     const known = profiles.find(profile => profile.name.toLowerCase() === name.toLowerCase());
     if (known) return { ...known, created: false };
+    // `--profile` tries ids before names: a name that is another profile's id would open that one.
+    if (findBrowserProfile(profiles, name) !== null) throw refused(`a browser profile already uses ${name} as its id; pick another name`);
     if (profiles.length >= BROWSER_PROFILES_MAX) throw refused(`this machine already has ${BROWSER_PROFILES_MAX} browser profiles; the owner removes one in Settings`);
     // The id the Settings card makes: `p-` and 12 random hexadecimal digits.
     const id = `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
