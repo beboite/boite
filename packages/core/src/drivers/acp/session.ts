@@ -1,5 +1,6 @@
 import { logMessageOf } from '../../log-errors.ts';
 import { Readable, Writable } from 'node:stream';
+import { randomBytes } from 'node:crypto';
 import type {
   ClientConnection,
   ClientContext,
@@ -28,6 +29,7 @@ import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
 import { answerPermission, drawUpdate, sessionNotificationOf } from './updates.ts';
 import { errorCodeOf, noteReady } from '../driver-log.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { OpenCodeConnection } from './opencode-connection.ts';
 
 /** A glog line at info severity: `I0921 09:51:32.917720 10292 main.py:80] ...`. */
 const GLOG_INFO = /^I\d{4} \d{2}:\d{2}:\d{2}\.\d+\s/;
@@ -70,7 +72,7 @@ export interface AcpMemory {
 export class AcpSession {
   private child: SpawnedChild | null = null;
   private killTree: (() => void) | null = null;
-  private connection: ClientConnection | null = null;
+  private connection: ClientConnection | OpenCodeConnection | null = null;
   private agent: ClientContext | null = null;
   private starting: Promise<void> | null = null;
   /**
@@ -256,6 +258,11 @@ export class AcpSession {
       turn.ctx.log('warn', `acp: ${turn.ctx.provider.id} refused _x.ai/interject, answers wait for the turn's end: ${rpcReason(error)}`);
       return false;
     }
+  }
+
+  async steerOpenCode(turn: AcpTurn, text: string, attachments: import('@boite/contracts').ImageAttachment[] = [], onAccepted?: () => void): Promise<boolean> {
+    if (this.current !== turn || turn.isStopped || !(this.connection instanceof OpenCodeConnection)) return false;
+    return this.connection.steer([{ type: 'text', text }, ...imageBlocksOf(attachments)], onAccepted);
   }
 
   private cancel(): void {
@@ -480,10 +487,16 @@ export class AcpSession {
 
     const temp = launchTemp(ctx.provider, ctx.account.isolationDir);
     let child: SpawnedChild;
+    const native = ctx.provider.id === 'opencode-v2';
+    const password = native ? randomBytes(32).toString('base64url') : null;
+    const args = launchArgs(profile, launch.prefix, ctx.provider, ctx.thread.permissionMode);
+    // Preserve executable wrappers and fixture prefixes, replace only the ACP
+    // subcommand. The native server's stdin is its ownership lease.
+    const nativeArgs = [...launch.prefix, ...(profile?.launch?.args ?? ['acp']).filter(arg => arg !== 'acp'), 'serve', '--stdio', '--port', '0'];
     try {
-      child = ctx.spawnChild(launch.executable, launchArgs(profile, launch.prefix, ctx.provider, ctx.thread.permissionMode), {
+      child = ctx.spawnChild(launch.executable, native ? nativeArgs : args, {
         cwd: ctx.thread.cwd,
-        env: agentEnv(ctx.provider, temp === null ? ctx.accountEnv : { ...ctx.accountEnv, ...temp.env }),
+        env: { ...agentEnv(ctx.provider, temp === null ? ctx.accountEnv : { ...ctx.accountEnv, ...temp.env }), ...(password === null ? {} : { OPENCODE_PASSWORD: password }) },
       });
     } catch (error) {
       void temp?.dispose();
@@ -499,13 +512,15 @@ export class AcpSession {
     this.killTree = ctx.killTree ?? null;
     this.watch(child, ctx);
 
-    const stream = sdk.ndJsonStream(
+    const stream = native ? null : sdk.ndJsonStream(
       Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
       jsonLinesOnly(Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>, (line) => {
         ctx.log('warn', `acp agent: ${line.slice(0, STDERR_MAX)}`, { kind: 'provider-output', event: 'provider.output' });
       }),
     );
-    const connection = sdk
+    const connection = native
+      ? await OpenCodeConnection.open(child, password!, ctx.thread.cwd, params => this.onUpdate(params), () => this.current)
+      : sdk
       .client({ name: CLIENT_NAME })
       // Checked by hand rather than by the SDK's schema, which also parses
       // every update once more on its own (see `sessionNotificationOf`).
@@ -513,7 +528,7 @@ export class AcpSession {
         if (params !== null) this.onUpdate(params);
       })
       .onRequest('session/request_permission', ({ params }) => answerPermission(this.current, params))
-      .connect(stream);
+      .connect(stream!);
     this.connection = connection;
     this.agent = connection.agent;
 

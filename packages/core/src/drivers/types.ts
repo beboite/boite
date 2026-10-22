@@ -306,7 +306,7 @@ export interface TurnHandle {
    */
   steer?(message: string, attachments?: ImageAttachment[], onAccepted?: () => void): Promise<boolean>;
   /** Native user input, when system coordination uses a separate tool-boundary hook. */
-  steerUser?(message: string, attachments?: ImageAttachment[]): Promise<boolean>;
+  steerUser?(message: string, attachments?: ImageAttachment[], onAccepted?: () => void): Promise<boolean>;
 }
 
 /**

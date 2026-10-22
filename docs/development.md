@@ -783,8 +783,11 @@ compiled worker, and uses fresh data without provider calls.
 
 The installed-binary compatibility check uses a local mock API, fresh homes
 and no login: `BOITE_E2E_OPENCODE2_BINARY=/absolute/path/to/opencode2 bun test packages/core/test/opencode2.compat.test.ts`
-from the repository root. It covers discovery, a read tool, cold resume, plan
-mode and cancellation beside a locked, incompatible version 1 profile.
+from the repository root. It covers discovery, a read tool, queued and immediate
+follow-ups in one execution, cold resume, plan mode and cancellation beside a
+locked, incompatible version 1 profile. `tests/e2e/opencode2-steering.test.ts`
+checks the queued bubbles, Send now and compact tools on desktop and phone
+against a scripted native server, without an installed provider.
 
 Real-provider tests use CLI logins and spend tokens. Run selected cases from
 `packages/core`, one at a time; never enable them for an ordinary fixture run.
@@ -793,7 +796,7 @@ Real-provider tests use CLI logins and spend tokens. Run selected cases from
 | --- | --- |
 | `BOITE_E2E_CLAUDE=1` | `test/claude.live.test.ts`: turn, resume, native import and warm process |
 | `BOITE_E2E_OPENCODE=1` | `test/opencode.live.test.ts`: ACP turn and cold resume |
-| `BOITE_E2E_OPENCODE2=1` | `test/opencode2.live.test.ts`: OpenCode 2 turned on, ACP turn, cold resume and plan mode; `BOITE_E2E_OPENCODE2_MODEL` names the model |
+| `BOITE_E2E_OPENCODE2=1` | `test/opencode2.live.test.ts`: OpenCode 2 turned on, native API turn, cold resume and plan mode; `BOITE_E2E_OPENCODE2_MODEL` names the model |
 | `BOITE_E2E_GROK=1` | `test/grok.live.test.ts`: default login, model/effort and cold resume; empty isolated homes can open sign-in |
 | `BOITE_E2E_GROK_QUOTA=1` | `test/grok-quota.live.test.ts`: quota for the existing default login |
 | `BOITE_E2E_GROK_PROXY=1` | `test/grok-proxy.live.test.ts`: Grok behind a Douane gateway, on an isolated account that never signed in; `BOITE_E2E_GROK_PROXY_URL` is the gateway's API URL, `BOITE_E2E_GROK_PROXY_KEY` its key |

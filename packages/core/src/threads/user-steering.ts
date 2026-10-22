@@ -57,13 +57,9 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
       : { type: 'image', mimeType: attachment.mimeType, data: attachment.data, alt: attachment.name }),
   ] };
   runner.steering.add(threadId);
-  try {
-    // Reserve before crossing the native boundary. A lost acknowledgement or crash cannot cause duplicate work.
-    core.journal.putTurnRequest(threadId, clientRequestId, `steer:pending:${fingerprint}`, turnId);
-    if (!await submit(prepared.prompt, prepared.attachments)) {
-      core.journal.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND request_id = ?').run(threadId, clientRequestId);
-      return { accepted: false };
-    }
+  let published = false;
+  const publish = (): void => {
+    if (published) return;
     core.bus.afterCommit(() => core.journal.db.transaction(() => {
       core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => {
         core.journal.putMessage(message);
@@ -76,6 +72,16 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
     })());
     // A `/goal2`'s checklist reads what the user adds, drops or changes.
     core.activity.userMessage(threadId, prompt);
+    published = true;
+  };
+  try {
+    // Reserve before crossing the native boundary. A lost acknowledgement or crash cannot cause duplicate work.
+    core.journal.putTurnRequest(threadId, clientRequestId, `steer:pending:${fingerprint}`, turnId);
+    if (!await submit(prepared.prompt, prepared.attachments, publish) && !published) {
+      core.journal.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND request_id = ?').run(threadId, clientRequestId);
+      return { accepted: false };
+    }
+    publish();
     return { accepted: true };
   } catch (error) {
     throw refused(`delivery of this message is unconfirmed: ${messageOf(error)}`, { reason: 'delivery-uncertain', threadId });
