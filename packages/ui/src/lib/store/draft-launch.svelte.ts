@@ -133,9 +133,11 @@ export class DraftLaunch {
       }
       if (input.queued[0] === head) {
         // A refusal made nothing, so the start may be taken back or asked again differently; one about its
-        // request id says the core holds a conversation under it, and keeps what was asked.
+        // request id says the core holds a conversation under it, and keeps what was asked, unless that
+        // conversation was deleted since: then nothing holds it and only new words under a new id can go.
         const { start: asked, ...rest } = request;
-        const held = error instanceof RpcFailure && (error.data as { field?: unknown } | undefined)?.field === 'clientRequestId';
+        const data = error instanceof RpcFailure ? error.data as { field?: unknown; reason?: unknown } | undefined : undefined;
+        const held = data?.field === 'clientRequestId' && data.reason !== 'deleted';
         head.request = { ...rest, ...(held && asked ? { start: asked } : {}), failed: this.ctx.reason(error) };
       }
       this.ctx.drafts.persist(); void this.ctx.drafts.flush();

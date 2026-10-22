@@ -357,7 +357,11 @@ asked, a start the core did not refuse is retried until it lands and is no
 longer taken back or removed from the queue, only deleted with its draft: the
 same words sent again under a new id could make a second conversation. A
 refusal made nothing, so a refused start can be taken back, edited or sent
-again, and its next ask reads the draft afresh. A start
+again, and its next ask reads the draft afresh. The exception is a refusal
+about the request id itself (`field: 'clientRequestId'`): the core holds a
+conversation under that id, so the start keeps what it asked and stays locked.
+When that conversation was deleted since (`reason: 'deleted'`), nothing holds
+the id any more and the start can be taken back and sent under a new one. A start
 that gets no answer on a live link, or finds no drafts project, is tried again
 15 seconds later rather than at once. A start taken back before it was ever
 asked, then sent again, goes at once under its new id. An incognito draft is never kept on the

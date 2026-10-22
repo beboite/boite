@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { droppedFailure, unansweredFailure } from './client';
+import { RpcErrorCode } from '@boite/contracts';
+import { RpcFailure, droppedFailure, unansweredFailure } from './client';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
 import { readDraftJournal, writeDraftJournal } from './draft-journal';
@@ -281,4 +282,45 @@ test('a start asked once and then refused may be taken back: the core made nothi
   expect(next.store.draftEntries[0]).not.toHaveProperty('asked');
   next.store.cancelQueuedDraft(row!.id);
   expect(next.store.composerStates.draft).toMatchObject({ text: 'Asked, then refused', queued: [] });
+});
+
+test('a start whose conversation was deleted since unlocks: taken back, its words go again under a new id', async () => {
+  const first = await machine('one');
+  await first.store.connect();
+  const project = first.store.projects.find(entry => entry.kind !== 'drafts')!;
+  first.store.startDraft(project.id, { fresh: true });
+  first.client.drop();
+  sendAway(first.store, 'Deleted meanwhile');
+  vi.mocked(first.client.call).mockImplementation(async (method, params) => {
+    if (method === 'threads.create') { first.creates.push(params as { title?: string; clientRequestId?: string }); throw unansweredFailure('threads.create'); }
+    return first.original(method, params);
+  });
+  await first.client.restore();
+  await vi.waitFor(() => expect(first.creates).toHaveLength(1), { timeout: 5000 });
+  const [row] = first.store.draftEntries;
+  expect(row).toMatchObject({ asked: true });
+  first.store.client?.close(); first.store.detach();
+
+  const next = await machine('one');
+  let deleted = true;
+  vi.mocked(next.client.call).mockImplementation(async (method, params) => {
+    if (method === 'threads.create') {
+      next.creates.push(params as { title?: string; clientRequestId?: string });
+      if (deleted) {
+        deleted = false;
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the conversation this request started was deleted since', data: { field: 'clientRequestId', reason: 'deleted' } });
+      }
+    }
+    return next.original(method, params);
+  });
+  await next.store.connect();
+  next.store.startDraft(undefined, { draftId: row!.id });
+  await vi.waitFor(() => expect(next.store.draftEntries[0]?.queued).toEqual({ failed: expect.stringContaining('deleted since') }), { timeout: 5000 });
+  expect(next.store.draftEntries[0]).not.toHaveProperty('asked');
+  next.store.cancelQueuedDraft(row!.id);
+  expect(next.store.composerStates.draft).toMatchObject({ text: 'Deleted meanwhile', queued: [] });
+  sendAway(next.store, 'Deleted meanwhile');
+  next.store.composerStates.draft!.text = '';
+  await vi.waitFor(() => expect(next.creates).toHaveLength(2), { timeout: 5000 });
+  expect(next.creates[1]!.clientRequestId).not.toBe(next.creates[0]!.clientRequestId);
 });
