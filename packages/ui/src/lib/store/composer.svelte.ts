@@ -16,6 +16,7 @@ import { secureId } from '../secure-id';
 import type { Choice, Draft } from '../store.svelte';
 import type { StoreContext } from './context';
 import { draftKey } from './drafts.svelte';
+import { DraftLaunch } from './draft-launch.svelte';
 
 /**
  * A prompt written while its machine could not be reached: the outbox. It goes
@@ -26,7 +27,11 @@ import { draftKey } from './drafts.svelte';
  * edits it or removes it. `sent` marks one that went out at least once: only
  * such a prompt may already have been taken by the core.
  */
-export type OutboxRequest = { id: string; choice: Choice | null; queuedAt: number; failed?: string; sent?: true };
+export type OutboxRequest = {
+  id: string; choice: Choice | null; queuedAt: number; failed?: string; sent?: true;
+  /** A draft's start as first asked of the core, so a retry under the same id asks for the same conversation. */
+  start?: { projectId: string; worktree: boolean; incognito: boolean };
+};
 
 /** A prompt waiting behind a running turn or for its machine, with what it was written with. */
 export type QueuedPrompt = { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[]; afterBoundary?: string; request?: OutboxRequest };
@@ -87,6 +92,7 @@ export class Composer {
   private steerRequests = new Map<string, { content: string; id: string; generation: number }>();
   /** Outbox prompts already asked about while their thread ran, on this connection. */
   private probed = new Set<string>();
+  private readonly launcher: DraftLaunch;
 
   previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
   composerInsertions = new Map<string, (start: number, end: number, text: string) => void>();
@@ -100,7 +106,7 @@ export class Composer {
   /** The local row a landed message took the place of: the timeline keeps its height and does not replay its rise. */
   readonly landings = new Map<string, string>();
 
-  constructor(private readonly ctx: StoreContext) {}
+  constructor(private readonly ctx: StoreContext) { this.launcher = new DraftLaunch(ctx); }
 
   /** Queued input follows its machine and thread even when their composer is off screen. */
   watchQueues(): () => void {
@@ -131,8 +137,11 @@ export class Composer {
           } else untrack(() => void drainQueue(s, threadId, state));
         }
       });
+      // A draft written while its machine was away becomes its conversation once the machine is back.
+      this.launcher.watch();
     });
   }
+
 
 
   private blocked(threadId: string): boolean {
@@ -533,7 +542,8 @@ export class Composer {
    */
   restoreQueued(threadId: string, at: number): QueuedPrompt | undefined {
     const state = this.composerStates[threadId];
-    if (!state || state.sending) return undefined;
+    // A draft's start asked once is retried, not taken back (`Drafts.unqueue`).
+    if (!state || state.sending || state.queued[at]?.request?.start) return undefined;
     const [entry] = state.queued.splice(at, 1);
     if (entry?.request) {
       const s = this.ctx.store;
@@ -547,7 +557,7 @@ export class Composer {
   /** Takes a pending prompt out of the queue, unless it is the one going out right now. */
   removeQueued(threadId: string, at: number): void {
     const state = this.composerStates[threadId];
-    if (!state || at < (state.outgoing ?? 0)) return;
+    if (!state || at < (state.outgoing ?? 0) || state.queued[at]?.request?.start) return;
     state.queued.splice(at, 1);
   }
 

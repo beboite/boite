@@ -11,6 +11,7 @@ import { agentShape } from './agent-shape.ts';
 import { steerUser } from './user-steering.ts';
 import { readToolOutput, readToolPart } from './records.ts';
 import { readMessageAttachment } from './attachment-read.ts';
+import { CreationRequests } from './creation-requests.ts';
 
 /**
  * A turn in a folder that is gone is refused by that folder. An archived
@@ -64,6 +65,7 @@ async function watchTarget(linked: LinkedPullRequests, threadId: ThreadId, input
 }
 
 export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
+  const creations = new CreationRequests();
   async function discover(providerId: ProviderId, accountId: AccountId, model: string | null, effort: string | null, speed: string | null): Promise<void> {
     const provider = core.providers.require(providerId);
     const account = core.accounts.require(accountId);
@@ -130,13 +132,15 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     return { ok: true };
   });
   core.router.register('threads.create', async (params, ctx) => {
-    // A thread made in a folder that is gone could never run a turn: refused here, by the folder.
-    const project = core.projects.require(params.projectId);
-    await core.projects.requireFolder(project.id);
-    const provider = core.providers.require(params.providerId);
-    await discover(provider.id, params.accountId, params.model ?? defaultModel(provider), params.effort ?? null, params.speed ?? null);
-    const adopted = await core.drafts.claim(ctx.connection.id, params);
-    const thread = adopted ?? (params.worktree === undefined ? core.threads.create(params) : await core.threads.createInWorktree(params));
+    const thread = await creations.once(params, async () => {
+      // A thread made in a folder that is gone could never run a turn: refused here, by the folder.
+      const project = core.projects.require(params.projectId);
+      await core.projects.requireFolder(project.id);
+      const provider = core.providers.require(params.providerId);
+      await discover(provider.id, params.accountId, params.model ?? defaultModel(provider), params.effort ?? null, params.speed ?? null);
+      const adopted = await core.drafts.claim(ctx.connection.id, params);
+      return adopted ?? (params.worktree === undefined ? core.threads.create(params) : await core.threads.createInWorktree(params));
+    }, threadId => core.journal.getThread(threadId));
     if (params.subscribe === true) ctx.connection.subscriptions.add(thread.id);
     return thread;
   });

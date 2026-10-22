@@ -8,7 +8,7 @@ import { readDraftJournal, writeDraftJournal } from '../draft-journal';
 import { unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
 import { secureId } from '../secure-id';
 
-type Input = Composer['composerStates'][string];
+export type Input = Composer['composerStates'][string];
 /**
  * `parked` orders the drafts a project resumes: the most recently set aside
  * wins. It is a time from `created`, so the order survives a reload.
@@ -18,6 +18,12 @@ type Journal = { updatedAt?: number; inputs?: Record<string, unknown>; drafts?: 
 type Source = { section: 'inputs' | 'drafts'; id: string; input: Input; draft?: Draft; parked?: number };
 type CachedEntry = { section: Source['section']; id: string; value: unknown; serialized: string; updatedAt: number; backedUp: boolean };
 const entryKey = (section: Source['section'], id: string) => JSON.stringify([section, id]);
+/** A draft's row: its words, and whether it was sent while its machine was away and waits for it, or was refused. */
+export type DraftEntry = {
+  id: string; projectId: string | null; text: string; active: boolean; queued: 'waiting' | 'starting' | { failed: string } | null;
+  /** Its start reached the core once: it may hold the conversation, so the start is retried, never taken back. */
+  asked?: true;
+};
 const empty = (): Input => ({ text: '', attachments: [], queued: [], sending: false, paused: false });
 const hasText = (input: Input | undefined) => !!(input?.text || input?.queued.length);
 const hasContent = (input: Input | undefined) => hasText(input) || !!(input?.attachments.length || input?.previewReferences?.length);
@@ -297,9 +303,35 @@ export class Drafts {
     for (const [id, entry] of Object.entries(this.saved)) if (entry.draft.projectId === projectId) delete this.saved[id];
   }
 
-  /** Drops a draft. The open one empties and stays open, in the same project. */
-  discard(id: string): void {
+  /**
+   * Takes back the prompts a draft queued while its machine was away: the
+   * conversation will not start by itself. Their words return to the box,
+   * after what it holds, so nothing typed is lost. A start already on its way,
+   * or asked once (`start`), is not taken back: sent again under a new id, the
+   * same words could make a second conversation beside one the core made.
+   */
+  unqueue(id: string): void {
     const s = this.ctx.store;
+    const input = s.draft && draftKey(s.draft) === id ? this.ctx.composer.composerStates.draft : this.saved[id]?.input;
+    if (!input || input.sending || !input.queued.length || input.queued.some(entry => entry.request?.start)) return;
+    const taken = input.queued.splice(0);
+    input.text = [input.text, ...taken.map(entry => entry.text)].filter(text => text.length > 0).join('\n\n');
+    input.attachments = [...input.attachments, ...taken.flatMap(entry => entry.attachments)];
+    const references = [...(input.previewReferences ?? []), ...taken.flatMap(entry => entry.previewReferences ?? [])];
+    if (references.length) input.previewReferences = references;
+    input.paused = false;
+    this.persist();
+  }
+
+  /**
+   * Drops a draft. The open one empties and stays open, in the same project.
+   * One whose conversation is being started stays: the core may already hold
+   * it, and its prompt goes there (`started` is that start handing it over).
+   */
+  discard(id: string, options: { started?: boolean } = {}): void {
+    const s = this.ctx.store;
+    const input = s.draft && draftKey(s.draft) === id ? this.ctx.composer.composerStates.draft : this.saved[id]?.input;
+    if (!options.started && input?.sending && input.queued[0]?.request) return;
     delete this.saved[id];
     if (s.draft && draftKey(s.draft) === id) {
       this.ctx.composer.composerStates.draft = empty();
@@ -319,20 +351,28 @@ export class Drafts {
   /**
    * Every draft with something in it, newest first by creation, so typing
    * never reorders the list. A draft with no project names the drafts project
-   * once it exists; before that its project is null.
+   * once it exists; before that its project is null. A draft sent while its
+   * machine was away says so (`queued`) and shows that prompt until its box
+   * holds text of its own.
    */
-  get entries(): { id: string; projectId: string | null; text: string; active: boolean }[] {
+  get entries(): DraftEntry[] {
     const s = this.ctx.store;
-    const rows = new Map<string, { id: string; projectId: string | null; text: string; active: boolean; createdAt: number }>();
+    const rows = new Map<string, DraftEntry & { createdAt: number }>();
+    const row = (id: string, projectId: string | null, input: Input, active: boolean, createdAt: number) => {
+      const head = input.queued[0]?.request ? input.queued[0] : undefined;
+      return { id, projectId, text: input.text || head?.text || '', active, createdAt,
+        queued: head?.request?.failed !== undefined ? { failed: head.request.failed } : head && input.sending ? 'starting' as const : head ? 'waiting' as const : null,
+        ...(head?.request?.start ? { asked: true as const } : {}) };
+    };
     for (const [id, entry] of Object.entries(this.saved)) {
-      if (hasContent(entry.input)) rows.set(id, { id, projectId: entry.draft.projectId, text: entry.input.text, active: false, createdAt: entry.draft.createdAt ?? 0 });
+      if (hasContent(entry.input)) rows.set(id, row(id, entry.draft.projectId, entry.input, false, entry.draft.createdAt ?? 0));
     }
     if (s.draft) {
       // The open draft gets a row only once it holds something: an empty one is just the composer.
       const id = draftKey(s.draft);
       const input = this.ctx.composer.composerStates.draft;
-      if (!hasContent(input)) rows.delete(id);
-      else rows.set(id, { id, projectId: s.draft.projectId, text: input?.text ?? '', active: true, createdAt: s.draft.createdAt ?? 0 });
+      if (!input || !hasContent(input)) rows.delete(id);
+      else rows.set(id, row(id, s.draft.projectId, input, true, s.draft.createdAt ?? 0));
     }
     // A draft with no project is sent to the drafts, so it is listed there once they exist.
     const drafts = s.draftsProject?.id ?? null;
@@ -539,7 +579,11 @@ function outboxRequest(value: unknown): OutboxRequest | undefined {
   const raw = value as Partial<OutboxRequest>;
   if (typeof raw.id !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(raw.id)) return undefined;
   const choice = raw.choice && typeof raw.choice === 'object' && typeof raw.choice.providerId === 'string' && typeof raw.choice.accountId === 'string' ? raw.choice : null;
-  return { id: raw.id, choice, queuedAt: typeof raw.queuedAt === 'number' ? raw.queuedAt : 0, ...(typeof raw.failed === 'string' ? { failed: raw.failed } : {}), ...(raw.sent === true ? { sent: true as const } : {}) };
+  const start = raw.start && typeof raw.start === 'object' && typeof raw.start.projectId === 'string' && raw.start.projectId.length > 0
+    && typeof raw.start.worktree === 'boolean' && typeof raw.start.incognito === 'boolean'
+    ? { projectId: raw.start.projectId, worktree: raw.start.worktree, incognito: raw.start.incognito } : null;
+  return { id: raw.id, choice, queuedAt: typeof raw.queuedAt === 'number' ? raw.queuedAt : 0, ...(typeof raw.failed === 'string' ? { failed: raw.failed } : {}),
+    ...(raw.sent === true ? { sent: true as const } : {}), ...(start ? { start } : {}) };
 }
 
 function references(value: unknown): PreviewReference[] {

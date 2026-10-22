@@ -1,7 +1,7 @@
 import { startDiagnosticsReport } from './diagnostics-report';
 import { RpcErrorCode, type AgentShape, type Message, type MessageId, type PermissionMode, type ProjectId, type ProviderId, type ThreadId } from '@boite/contracts';
 import type { Client } from './client';
-import { RpcFailure, wasClosed } from './rpc-error';
+import { RpcFailure, wasClosed, wasDropped } from './rpc-error';
 import { readModelDefaults } from './model-defaults';
 import { modelFavorites } from './model-favorites.svelte';
 import { readLayout, readPrefs } from './prefs';
@@ -115,9 +115,14 @@ export class Store {
     this.errorThreadId = null;
   }
 
-  /** Only explicitly minor action failures expire; unknown failures remain visible. */
+  /**
+   * Only explicitly minor action failures expire; unknown failures remain
+   * visible. A call that failed because its machine is gone says only what the
+   * machine's offline state already shows, so it is minor too.
+   */
   reportError(error: unknown, severity: 'minor' | 'major' = 'major'): void {
-    this.#error = { message: this.#ctx.reason(error), severity, offline: wasClosed(error) };
+    const offline = wasClosed(error) || (wasDropped(error) && this.connection !== 'ready');
+    this.#error = { message: this.#ctx.reason(error), severity: offline ? 'minor' : severity, offline };
     this.errorThreadId = null;
   }
 
@@ -603,6 +608,7 @@ export class Store {
   get composerStates() { return this.#ctx.composer.composerStates; }
   get draftEntries() { return this.#ctx.drafts.entries; }
   discardDraft(id: string) { return this.#ctx.drafts.discard(id); }
+  cancelQueuedDraft(id: string) { return this.#ctx.drafts.unqueue(id); }
   get draftsReadable() { return this.#ctx.drafts.readable; }
   flushDrafts() { return this.#ctx.drafts.flush(); }
   set composerStates(value) { this.#ctx.composer.composerStates = value; }

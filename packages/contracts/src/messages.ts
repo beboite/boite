@@ -326,7 +326,7 @@ export interface MessagesRpcMethods {
   'push.test': { params: Record<string, never>; result: { ok: true } };
   /** Reserve the final workspace and initialize a native session without publishing a conversation or sending text. */
   'drafts.prepare': {
-    params: Omit<RpcMethods['threads.create']['params'], 'title' | 'preparationId' | 'subscribe'> & { preparationId: string };
+    params: Omit<RpcMethods['threads.create']['params'], 'title' | 'preparationId' | 'subscribe' | 'clientRequestId'> & { preparationId: string };
     result: { preparationId: string; threadId: ThreadId };
   };
   /** Release only the named reservation owned by this connection, including preparation still in flight. */

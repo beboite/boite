@@ -137,6 +137,10 @@ export const fr: Translation = {
     undo: 'Annuler',
     undoHint: 'Annuler (Ctrl+Z)',
     draft: 'Nouvelle conversation',
-    deleteDraft: 'Supprimer le brouillon'
+    deleteDraft: 'Supprimer le brouillon',
+    draftQueued: 'Démarre au retour de {machine}',
+    draftStarting: 'Démarrage sur {machine}',
+    draftQueueFailed: 'Non démarrée : {reason}',
+    cancelQueuedDraft: 'Annuler le démarrage'
   }
 };

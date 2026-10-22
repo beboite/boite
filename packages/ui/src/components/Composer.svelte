@@ -116,11 +116,11 @@
     }
   });
   /**
-   * A thread whose machine dropped still takes prompts: they wait in its queue,
-   * which the store keeps on the device and sends once the machine is back.
-   * A new thread needs the core to exist, so a draft waits for the machine.
+   * A thread whose machine dropped still takes prompts: they wait in its queue on the device and go out
+   * once the machine is back. A draft's queue starts its conversation then (`launchQueuedDrafts`); an
+   * incognito draft is never kept on the device, so it waits for the machine.
    */
-  let offline = $derived(store.connection !== 'ready' && thread !== null && !store.draft);
+  let offline = $derived(!target && store.connection !== 'ready' && (thread !== null ? !store.draft : !!store.draft && !store.draft.incognito));
   let machineLabel = $derived(workspace.machines.find((machine) => machine.store === store)?.label ?? strings.machines.local);
   /**
    * A question waiting for a written answer makes the box its free field: Send
@@ -148,7 +148,7 @@
       : reply
       ? strings.composer.replyPlaceholder
       : offline
-      ? fill(strings.composer.placeholderOffline, { machine: machineLabel })
+      ? fill(thread ? strings.composer.placeholderOffline : strings.composer.placeholderOfflineDraft, { machine: machineLabel })
       : !thread && store.draft
       ? strings.composer.placeholderNew
       : store.openProject && provider
@@ -719,7 +719,7 @@
     {#if composer && composer.queued.length > 0}
       <ComposerQueue queued={composer.queued}
         disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
-        paused={composer.paused} sending={composer.sending} outgoing={composer.outgoing ?? 0} connected={store.connection === 'ready'} machine={machineLabel}
+        paused={composer.paused} sending={composer.sending} outgoing={composer.outgoing ?? 0} connected={store.connection === 'ready'} machine={machineLabel} starts={!thread}
         {sendNow}
         onrestore={restoreQueued} onremove={(at) => store.removeQueued(key, at)} onretry={(at) => store.retryQueued(key, at)}
         onsendnow={sendQueuedNow} />

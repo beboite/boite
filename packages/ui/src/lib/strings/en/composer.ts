@@ -27,6 +27,7 @@ export const strings = {
     /** A new conversation, before anything is sent. */
     placeholderNew: 'What do you want to do?',
     placeholderOffline: '{machine} is offline: messages wait here and go out when it reconnects',
+    placeholderOfflineDraft: '{machine} is offline: the conversation starts when it reconnects',
     send: 'Send',
     stop: 'Stop',
     queued: 'Sent after the next tool, or when the turn ends',
@@ -40,6 +41,7 @@ export const strings = {
     retryQueuedHint: 'Sends all pending messages together again. Enter in the empty composer does the same.',
     /** The outbox: messages written while the machine was away, kept on this device. */
     outboxKept: 'Kept on this device and sent in order, once each',
+    outboxStarts: 'Kept on this device: the conversation starts once {machine} is back',
     outboxWaiting: 'Waiting for {machine}',
     outboxNext: 'Goes out when the thread is free',
     outboxSending: 'Sending…',
