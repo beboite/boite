@@ -508,9 +508,16 @@ test('the tailnet listener opens for an invitation and closes once the last one 
   (harness.core.group as unknown as { tailnet: { ip: string; name: string | null } }).tailnet = { ip: '100.64.0.7', name: null };
   await harness.core.contacts.invite();
   expect(heard.at(-1)).toBe('100.64.0.7');
+  // Let a tick see the invitation open before it expires.
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  const updates: number[] = [];
+  const off = harness.core.bus.onAny(name => { if (name === 'contacts.updated') updates.push(harness.core.contacts.liveInvites().length); });
   const invites = harness.core.journal.getSetting('contacts:invites') as Record<string, { expiresAt: number }>;
   harness.core.journal.setSetting('contacts:invites', Object.fromEntries(Object.keys(invites).map(hash => [hash, { expiresAt: Date.now() - 1 }])));
   await waitFor(() => heard.at(-1) === null, 5000);
+  // The open count the clients show drops with the expiry, not at the next unrelated change.
+  await waitFor(() => updates.includes(0), 5000);
+  off();
   expect(harness.core.contacts.wantsTailnet()).toBe(false);
   // Told on a change only.
   const told = heard.length;

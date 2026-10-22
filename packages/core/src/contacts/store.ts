@@ -102,6 +102,8 @@ export class ContactStore {
   /** What `wantsTailnet` last told the group's listener. */
   private listening: boolean | null = null;
   private ticks = 0;
+  /** Open invitations at the last tick: one that expires tells the clients. */
+  private openSeen = 0;
   private started = false;
   private closed = false;
 
@@ -393,6 +395,8 @@ export class ContactStore {
     if (!(hash in invites)) return false;
     delete invites[hash];
     this.core.journal.setSetting(INVITES, invites);
+    // The join may still be refused after this: the count changes either way.
+    this.changed();
     return true;
   }
 
@@ -856,7 +860,10 @@ export class ContactStore {
     const contacts = this.list();
     // An invitation that expired may have been the last reason to listen on the tailnet.
     this.relisten();
-    if (contacts.length === 0 && this.liveInvites().length === 0) {
+    const open = this.liveInvites().length;
+    if (open < this.openSeen) this.changed();
+    this.openSeen = open;
+    if (contacts.length === 0 && open === 0) {
       if (this.timer !== null) clearInterval(this.timer);
       this.timer = null;
       return;

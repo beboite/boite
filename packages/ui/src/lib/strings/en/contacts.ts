@@ -82,7 +82,7 @@ export const strings = {
       /** How many links sent from this machine can still join it. */
       open: 'Open invitations: {count}',
       cancel: 'Cancel them',
-      cancelTip: 'Every link not used yet stops working, a leaked one included. Contacts already joined stay.'
+      cancelTip: 'Every link not used yet stops working, a leaked one included. Contacts already joined stay. A Tailscale share a link carried stays too: remove it in the Tailscale admin console.'
     },
     join: {
       title: 'Join a contact',

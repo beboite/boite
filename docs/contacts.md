@@ -33,9 +33,10 @@ but opens none, and the invitee exposes nothing.
    carries none and the invitee's Join card offers no share to accept.
    While invitations are open the page counts them beside **Cancel them**
    (`contacts.cancelInvites`), which spends every one unused: a link sent
-   too widely, or one that leaked, joins nothing any more, and the tailnet
-   listener closes when no hosted contact needs it. Contacts already joined
-   stay.
+   too widely, or one that leaked, creates no contact any more, and the
+   tailnet listener closes when no hosted contact needs it. Contacts already
+   joined stay. The Tailscale share a link carries is not revoked: remove it
+   in the admin console, as when removing a contact.
 2. The invitee pastes the link (`contacts.join`). Its core accepts the
    Tailscale share with its own API key when it has one
    (`POST /api/v2/device-invites/-/accept`). Without a key, the Join card
