@@ -19,15 +19,16 @@
 import { appendFileSync } from 'node:fs';
 
 export type CiRun = {
-  id: number; head_sha: string; head_branch: string; event: string;
+  id: number; head_sha: string; head_branch: string | null; event: string;
   status: string; conclusion: string | null; run_attempt: number; html_url: string;
 };
 export type Options = { sha: string; dryRun: boolean; follow?: boolean };
 /**
- * `sha` is the commit followed after a cancelled run, `retriedAttempt` the
- * attempt the gate reran; `elapsedMs` counts from the gate's start.
+ * `sha` is the commit followed after a cancelled run, `retriedRunId` and
+ * `retriedAttempt` identify the run and attempt the gate reran; `elapsedMs`
+ * counts from the gate's start.
  */
-export type State = { sha?: string; retriedAttempt?: number; elapsedMs: number };
+export type State = { sha?: string; retriedRunId?: number; retriedAttempt?: number; elapsedMs: number };
 export type Decision = { action: 'wait' | 'pass' | 'rerun' | 'follow' | 'fail'; run?: CiRun; message: string };
 
 /** A dispatch right after a merge can start before GitHub creates the push's run. */
@@ -40,7 +41,7 @@ export const DEADLINE_MS = 120 * 60_000;
 const POLL_MS = 30_000;
 
 const onMain = (run: CiRun) => run.event === 'push' && run.head_branch === 'main';
-const onMainOrQueue = (run: CiRun) => run.head_branch === 'main' || run.head_branch.startsWith('gh-readonly-queue/main/');
+const onMainOrQueue = (run: CiRun) => run.head_branch === 'main' || run.head_branch?.startsWith('gh-readonly-queue/main/');
 const cancelled = (run: CiRun) => run.status === 'completed' && run.conclusion === 'cancelled';
 
 /** The main run that answers for a cancelled one: the newest newer run not cancelled, else the newest older green one. */
@@ -64,7 +65,7 @@ export function decide(runs: CiRun[], { sha: started, dryRun, follow = false }: 
       ? { action: 'wait', message: `${sha} has no ci run yet` }
       : { action: 'fail', message: `${sha} has no ci run${dryRun ? '' : ' on main or its merge queue'} after ${NO_RUN_GRACE_MS / 60_000} minutes: ${rule}` };
   }
-  if (state.retriedAttempt !== undefined && run.run_attempt <= state.retriedAttempt) {
+  if (state.retriedRunId === run.id && state.retriedAttempt !== undefined && run.run_attempt <= state.retriedAttempt) {
     return { action: 'wait', run, message: `${run.html_url}: waiting for the rerun of attempt ${state.retriedAttempt} to start` };
   }
   if (run.conclusion === 'failure' && !dryRun && state.retriedAttempt === undefined) {
@@ -124,10 +125,12 @@ if (import.meta.main) {
     last = decision.message;
     if (decision.action === 'rerun') {
       await api(`/repos/${repo}/actions/runs/${decision.run!.id}/rerun-failed-jobs`, { method: 'POST' });
+      state.retriedRunId = decision.run!.id;
       state.retriedAttempt = decision.run!.run_attempt;
     }
     if (decision.action === 'follow') {
       state.sha = decision.run!.head_sha;
+      state.retriedRunId = undefined;
       state.retriedAttempt = undefined;
       continue;
     }

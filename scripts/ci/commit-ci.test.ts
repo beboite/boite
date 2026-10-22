@@ -16,7 +16,8 @@ function run(fields: Partial<CiRun> = {}): CiRun {
 }
 
 test('a green push run of the commit lets the nightly publish', () => {
-  expect(decide([run()], options, fresh)).toMatchObject({ action: 'pass' });
+  expect(decide([run({ head_branch: null }), run()], options, fresh)).toMatchObject({ action: 'pass' });
+  expect(decide([run({ head_branch: null })], options, fresh)).toMatchObject({ action: 'wait' });
 });
 
 test('the nightly waits for a run in progress, and for one GitHub has not created yet', () => {
@@ -34,13 +35,16 @@ test('only main or its merge queue on this exact commit counts', () => {
 
 test('a failed run gets its failed jobs rerun once, then decides', () => {
   const failed = run({ conclusion: 'failure' });
+  const retried = { elapsedMs: 0, retriedAttempt: 1, retriedRunId: failed.id };
   expect(decide([failed], options, fresh)).toMatchObject({ action: 'rerun', run: failed });
   // Until GitHub starts the new attempt, the old failure is not the answer.
-  expect(decide([failed], options, { elapsedMs: 0, retriedAttempt: 1 })).toMatchObject({ action: 'wait' });
-  expect(decide([run({ run_attempt: 2, status: 'queued', conclusion: null })], options, { elapsedMs: 0, retriedAttempt: 1 })).toMatchObject({ action: 'wait' });
-  expect(decide([run({ run_attempt: 2 })], options, { elapsedMs: 0, retriedAttempt: 1 })).toMatchObject({ action: 'pass' });
-  expect(decide([run({ run_attempt: 2, conclusion: 'failure' })], options, { elapsedMs: 0, retriedAttempt: 1 }))
+  expect(decide([failed], options, retried)).toMatchObject({ action: 'wait' });
+  expect(decide([run({ run_attempt: 2, status: 'queued', conclusion: null })], options, retried)).toMatchObject({ action: 'wait' });
+  expect(decide([run({ run_attempt: 2 })], options, retried)).toMatchObject({ action: 'pass' });
+  expect(decide([run({ run_attempt: 2, conclusion: 'failure' })], options, retried))
     .toMatchObject({ action: 'fail', message: expect.stringContaining('ended failure (attempt 2)') });
+  const manual = run({ id: 11, event: 'workflow_dispatch', conclusion: 'failure' });
+  expect(decide([failed, manual], options, retried)).toMatchObject({ action: 'fail', run: manual });
 });
 
 test('a cancelled run, or any failure in a dry run, fails without a rerun', () => {
@@ -80,8 +84,8 @@ test('both push and merge_group failed reruns the newest once then fails', () =>
   const queue = run({ id: 11, event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-723', conclusion: 'failure' });
   const push = run({ conclusion: 'failure' });
   expect(decide([push, queue], options, fresh)).toMatchObject({ action: 'rerun', run: queue });
-  expect(decide([push, queue], options, { elapsedMs: 0, retriedAttempt: 1 })).toMatchObject({ action: 'wait' });
-  expect(decide([push, { ...queue, run_attempt: 2 }], options, { elapsedMs: 0, retriedAttempt: 1 })).toMatchObject({ action: 'fail', run: { id: 11 } });
+  expect(decide([push, queue], options, { elapsedMs: 0, retriedAttempt: 1, retriedRunId: queue.id })).toMatchObject({ action: 'wait' });
+  expect(decide([push, { ...queue, run_attempt: 2 }], options, { elapsedMs: 0, retriedAttempt: 1, retriedRunId: queue.id })).toMatchObject({ action: 'fail', run: { id: 11 } });
 });
 
 test('an older success passes even while a newer run is pending or waiting to rerun', () => {
@@ -157,7 +161,7 @@ async function gate(runs: CiRun[], started: string) {
 }
 
 test('the gate hands the nightly the commit it passed, its own or the one it followed', async () => {
-  expect(await gate([run()], sha)).toMatchObject({ code: 0, output: `sha=${sha}
+  expect(await gate([run({ head_branch: null }), run()], sha)).toMatchObject({ code: 0, output: `sha=${sha}
 ` });
   const passed = nightRuns.map((each) => each.head_sha === green ? { ...each, status: 'completed', conclusion: 'success' } : each);
   expect(await gate(passed, night)).toMatchObject({ code: 0, output: `sha=${green}
