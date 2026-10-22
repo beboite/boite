@@ -108,7 +108,7 @@ function inventory(given: string): Inventory {
           if (typeof data['disable-model-invocation'] !== 'boolean') throw new Error(`${entry.path}: disable-model-invocation must be a boolean`);
           entry.disableModelInvocation = data['disable-model-invocation'];
           if (entry.disableModelInvocation) {
-            entry.name = data.name.trim().replace(/^\//, '');
+            entry.name = data.name.trim().replace(/^\/+/, '');
             if (!entry.name || /\s/.test(entry.name)) throw new Error(`${entry.path}: manual skill name must be a nonempty command token without whitespace`);
             entry.name = entry.name.slice(0, 200);
             texts.set(entry.path, text.replace(FRONTMATTER, ''));

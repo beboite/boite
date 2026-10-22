@@ -13,3 +13,8 @@ test('manual skill rows omit Boite prompt commands and names that cannot form a 
   const skills = ['goal', 'goal2', 'loop', 'btw', '', 'my skill', 'focus'].map(name => ({ name, description: null, hint: null }));
   expect(skillSlashItems(skills, []).map(row => row.label)).toEqual(['/focus']);
 });
+
+test('manual skill rows omit the chip commands the composer runs itself', () => {
+  const skills = ['model', 'effort', 'mode', 'focus'].map(name => ({ name, description: null, hint: null }));
+  expect(skillSlashItems(skills, [], ['model', 'effort', 'mode']).map(row => row.label)).toEqual(['/focus']);
+});

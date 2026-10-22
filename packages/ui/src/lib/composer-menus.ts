@@ -24,8 +24,8 @@ export function slashCompletion(item: PaletteItem): string | null {
 }
 
 /** Global manual skills are prompt text, with native and Boite commands taking name collisions. */
-export function skillSlashItems(skills: AgentCommand[], commands: AgentCommand[]): PaletteItem[] {
-  const seen = new Set([...commands.map(command => command.name), ...PROMPT_COMMANDS]);
+export function skillSlashItems(skills: AgentCommand[], commands: AgentCommand[], reserved: readonly string[] = []): PaletteItem[] {
+  const seen = new Set([...commands.map(command => command.name), ...PROMPT_COMMANDS, ...reserved]);
   return skills.filter(skill => {
     if (!skill.name || /\s/.test(skill.name) || seen.has(skill.name)) return false;
     seen.add(skill.name);

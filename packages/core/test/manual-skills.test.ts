@@ -111,13 +111,16 @@ test('a malformed manual marker is reported and cannot invoke the skill', async 
 
 test('manual names are normalized before listing and expansion, and invalid tokens are diagnosed', async () => {
   skill('padded', 'disable-model-invocation: true\n', body, ' /custom ');
+  skill('slashes', 'disable-model-invocation: true\n', body, '//custom2');
   skill('words', 'disable-model-invocation: true\n', body, 'my skill');
   skill('slash', 'disable-model-invocation: true\n', body, '/');
-  expect(h.core.brain.commands().map(command => command.name).sort()).toEqual(['custom', 'focus']);
+  expect(h.core.brain.commands().map(command => command.name).sort()).toEqual(['custom', 'custom2', 'focus']);
   expect(h.core.brain.expandPrompt('/custom hello')).toBe(`${body} hello`);
+  expect(h.core.brain.expandPrompt('/custom2 hello')).toBe(`${body} hello`);
   expect(h.core.brain.expandPrompt('/my skill')).toBe('/my skill');
   const status = await h.core.brain.status();
   expect(status.entries.find(entry => entry.path === 'skills/padded/SKILL.md')?.name).toBe('custom');
+  expect(status.entries.find(entry => entry.path === 'skills/slashes/SKILL.md')?.name).toBe('custom2');
   for (const folder of ['words', 'slash']) {
     expect(status.entries.find(entry => entry.path === `skills/${folder}/SKILL.md`)?.error).toContain('command token');
   }
