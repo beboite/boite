@@ -86,6 +86,8 @@ test('real RPC discovers gateway models, separates the key and restores native a
   } });
   harness = await startTestCore();
   const owner = await harness.connect();
+  // A switch with nothing behind it would route agents to an empty address.
+  expect(await thrown(owner.call('subscriptionProxy.setEnabled', { enabled: true }))).toThrow('no subscription proxy is configured');
   const claude = await owner.call('accounts.add', { providerId: 'claude', label: 'Proxy Claude' });
   const codex = await owner.call('accounts.add', { providerId: 'codex', label: 'Proxy Codex' });
   // Native login detection differs by platform; disabling restores the original status.
@@ -126,12 +128,17 @@ test('real RPC discovers gateway models, separates the key and restores native a
     expect(await thrown(phone.call('subscriptionProxy.key', { key: null }))).toThrow('owner');
     expect(await thrown(phone.call('subscriptionProxy.configure', { subscriptionProxy: proxy, key: null }))).toThrow('owner');
     expect((await phone.call('providers.probe', { providerId: 'codex', accountId: codex.id })).models).toEqual(b.models);
+    // The phone switches the owner's gateway off, and only that: the address and key stay.
+    expect(await thrown(phone.call('subscriptionProxy.setEnabled', { enabled: 'no' as unknown as boolean }))).toThrow('boolean');
+    expect((await phone.call('subscriptionProxy.setEnabled', { enabled: false })).subscriptionProxy).toEqual({ ...proxy, enabled: false });
   } finally { phone.close(); }
-  await owner.call('settings.set', { subscriptionProxy: { ...proxy, enabled: false } });
   expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('codex'))).toEqual({});
   expect(probedModelsOf('codex-appserver', 'codex', codex.id)).toBeNull();
   expect(harness.core.accounts.require(claude.id).status).toBe(nativeClaudeStatus);
   expect((await owner.call('quotas.list', {})).some(row => row.accountId === claude.id)).toBe(true);
+  // Back on with the key the owner saved.
+  await owner.call('subscriptionProxy.setEnabled', { enabled: true });
+  expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('claude')).ANTHROPIC_AUTH_TOKEN).toBe(key);
 });
 
 test('a gateway that translates every model keeps proprietary models in their own harness', async () => {

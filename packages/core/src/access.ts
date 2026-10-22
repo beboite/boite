@@ -5,7 +5,8 @@
  * anything that can read `core.json`. A paired device holds a session token it
  * got through a pairing link, and it is a guest: it reads the threads and their
  * working trees (never writing a file), answers what an agent asks and sends
- * prompts, and that is all.
+ * prompts. The one route it changes is the owner's saved subscription
+ * gateway, which it may turn on or off and never reconfigure.
  *
  * An agent holds the per-thread token the core put in the environment of a
  * process its thread launched. It is the narrowest of the three: it reaches
@@ -30,6 +31,8 @@
  * quotas.list and subscriptionProxy.quotas let a phone draw the same limit bars
  * as the owner without a dashboard embed; a forced refresh reaches the
  * providers and stays the owner's, as do monitoring switches and resets.
+ * subscriptionProxy.setEnabled lets a phone turn the owner's configured gateway
+ * on or off; its kind, URLs and key stay owner-only (subscriptionProxy.configure).
  * push.kinds lets a paired device choose which kinds of notification its own
  * subscription receives; it reaches no other device's destination.
  */

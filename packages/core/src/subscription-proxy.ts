@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { MODEL_ROUTE_FAMILIES, nativeModelId, subscriptionProxyName, subscriptionProxyOf, type ModelFamily, type ModelInfo, type ProviderDescriptor, type ProviderId, type SubscriptionProxy } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { invalidParams, unavailable, RpcFailure } from './errors.ts';
+import { invalidParams, refused, unavailable, RpcFailure } from './errors.ts';
 import { isOpenCode, OPENCODE_V2 } from './providers/opencode.ts';
 import { profileFor } from './providers/resolve.ts';
 
@@ -347,5 +347,12 @@ export function registerSubscriptionProxy(core: Core): void {
     // A new key can change the answer even when the settings did not.
     if (key !== undefined) core.quotas.gateway.reset();
     return settings;
+  });
+  core.router.register('subscriptionProxy.setEnabled', ({ enabled }) => {
+    if (typeof enabled !== 'boolean') throw invalidParams('subscriptionProxy.setEnabled enabled must be a boolean', { field: 'enabled' });
+    const proxy = core.settings.get().subscriptionProxy;
+    if (!proxy?.baseUrl) throw refused('no subscription proxy is configured: the owner sets one up in Settings > Accounts', { field: 'subscriptionProxy' });
+    if (proxy.enabled === enabled) return core.settings.get();
+    return core.settings.set({ subscriptionProxy: { ...proxy, enabled } });
   });
 }

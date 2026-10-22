@@ -13,6 +13,7 @@
   import SubscriptionProxyDashboard from './SubscriptionProxyDashboard.svelte';
   import GatewayOpenButton from './GatewayOpenButton.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
+  import GatewaySwitch from './GatewaySwitch.svelte';
 
   /**
    * The subscription windows of every signed-in provider. The last reading
@@ -26,6 +27,8 @@
   const proxy = $derived(store.settings?.subscriptionProxy);
   const proxyEnabled = $derived(proxy?.enabled === true);
   const proxyName = $derived(proxy ? subscriptionProxyName(proxy.kind) : '');
+  /** Who answers for the limits: the gateway's kind, or this machine's own logins. */
+  const route = $derived(proxyEnabled ? proxy!.kind : 'native');
 
   let reader = $derived(quotaReader(store.endpointUrl ?? 'here', store.core));
   let gateway = $derived(gatewayReader(store.endpointUrl ?? 'here'));
@@ -58,6 +61,8 @@
     const current = reader;
     // A call before the socket is up is refused at once: read when it becomes
     // ready, and again after a reconnect. A failure shows on `reader.error`.
+    // The switch above can hand the limits to the gateway or back: read again then too.
+    void route;
     if (!client || store.connection !== 'ready' || dashboard) return;
     const off = client.on('quotas.updated', (value) => current.accept(value));
     untrack(() => void current.read(client).catch(() => {}));
@@ -104,6 +109,7 @@
       </button>
     {/if}
   </header>
+  <GatewaySwitch {store} />
   {#if proxyEnabled}<div class="actions proxy-switch">
     {#if !gatewayNative}<button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button>{/if}
     <GatewayOpenButton {store} />

@@ -208,6 +208,37 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   expect(page.errors()).toEqual([]);
 }, 30_000);
 
+test('a paired phone switches the gateway the owner saved, on and off, from Limits', async () => {
+  const phone = await BrowserPage.launch({ url: `${origin}/?fake=1&principal=session&open=recent&gateway=douane`, windowSize: { width: 390, height: 844 } });
+  const shot = async (name: string) => {
+    await phone.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+    await phone.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), name));
+  };
+  const input = '[data-testid=mobile-settings-detail] [data-testid=gateway-switch-input]';
+  try {
+    await phone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await phone.waitFor('document.querySelector("[data-testid=mobile-header]")');
+    await mobileAction(phone, 'mobile-settings');
+    await openLimitsTab(phone);
+    await phone.waitFor(`document.querySelector(${JSON.stringify(input)})?.checked === false`);
+    expect(await phone.text('[data-testid=gateway-switch]')).toContain('Use Douane');
+    expect(await phone.text('[data-testid=gateway-switch]')).toContain('https://gateway.example.test');
+    // The owner's form stays on the desktop.
+    expect(await phone.evaluate('document.querySelector("[data-testid=subscription-proxy-settings]") === null')).toBe(true);
+    await shot('boite-gateway-switch-off-phone.png');
+    await phone.click(input);
+    await phone.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 3');
+    expect(await phone.evaluate(`document.querySelector(${JSON.stringify(input)}).checked`)).toBe(true);
+    expect(await phone.evaluate('document.querySelector("[data-testid=gateway-switch-error]") === null')).toBe(true);
+    expect(await phone.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await shot('boite-gateway-switch-on-phone.png');
+    await phone.click(input);
+    await phone.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 0');
+    expect(await phone.evaluate(`document.querySelector(${JSON.stringify(input)}).checked`)).toBe(false);
+    expect(phone.errors()).toEqual([]);
+  } finally { await phone.close(); }
+}, 45_000);
+
 test('the Douane plugin: its row in Plugins and the proxy card pointing at it, at desktop and phone widths', async () => {
   const local = await BrowserPage.launch({ url: `${origin}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
   const shot = async (name: string) => {

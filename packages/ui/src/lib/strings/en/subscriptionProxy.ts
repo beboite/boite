@@ -12,6 +12,9 @@ export const strings = {
     signInHint: 'Sign in with Open {name}, then reload here. If the page stays blank, this dashboard may block embedded views.',
     mixedContent: 'This page uses HTTPS. Set an HTTPS dashboard URL to view it here, or open the HTTP dashboard separately.',
     enabledHint: 'When on, the accounts signed in on this machine are no longer used for Claude and Codex, nor for Grok behind Douane.',
+    /** Limits' switch, which a phone reaches too. */
+    use: 'Use {name}',
+    switchFailed: 'Could not switch {name}: {error}',
     /** The single account a proxied provider shows. */
     account: 'Requests go through {name} at {origin}. This machine\'s own sign-ins are not used.',
     via: 'via {name}',

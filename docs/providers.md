@@ -65,6 +65,19 @@ cross-site cookies; those dashboards remain available through that button.
 Show account limits opens the native limits and monitoring switches for agents
 that keep their own configuration; Show proxy dashboard returns to the gateway.
 
+### Switching the gateway from Limits
+
+Once a gateway is saved, Limits starts with a switch, Use Douane or Use
+CLIProxyAPI, beside its address (or Douane on this machine in local mode). It
+saves as it flips, through `subscriptionProxy.setEnabled`, and changes only
+`enabled`: the kind, the URLs and the key stay as the owner saved them. A
+paired phone reaches it too, which is the one way a phone changes the gateway
+([phone](phone.md)); configuring one stays owner-only. Before anything is
+saved there is no switch, and the method refuses with `no subscription proxy
+is configured`. Off restores native authentication as a saved Use a
+subscription proxy does. `?fake=1&gateway=douane` (or `cliproxyapi`) starts
+the in-memory client with a saved gateway that is off.
+
 ### Douane on this machine
 
 The proxy card's first choice is where the gateway runs: Remote gateway (the
