@@ -35,6 +35,7 @@ export function settingsMethods(ctx: FakeContext) {
       if (proxy.enabled === enabled) return { ...ctx.settings };
       ctx.settings = { ...ctx.settings, subscriptionProxy: { ...proxy, enabled } };
       ctx.emit('settings.updated', { ...ctx.settings });
+      ctx.emit('subscriptionProxy.quotasUpdated', gatewayQuotas(ctx));
       return { ...ctx.settings };
     },
     'scheduler.get': async (params) => {
