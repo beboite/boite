@@ -47,8 +47,14 @@
     if (!client) return;
     return client.on('brain.configured', (config) => {
       if (!status) return;
-      status = { ...status, config };
       if (!editing) path = config.path ?? '';
+      // Another folder holds other entries, problems and history: read them, not only the switches.
+      if (config.path !== status.config.path) {
+        const current = revision;
+        void client.call('brain.status', {}).then((next) => { if (current === revision) status = next; }).catch(() => undefined);
+        return;
+      }
+      status = { ...status, config };
     });
   });
 

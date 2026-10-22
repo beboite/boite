@@ -4,7 +4,7 @@
   import { GroupLinks } from '../lib/group-links.svelte';
   import InfoTip from './InfoTip.svelte';
   import { ArrowUpRight, RefreshCw, Trash2, ScanLine } from '@lucide/svelte';
-  import { isThisPC, machineHealth, machineName, workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
+  import { listedName, machineHealth, machineName, workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { fill, strings } from '../lib/strings';
@@ -165,12 +165,12 @@
               <span class="title">
                 <input class="machine-name" data-testid="machine-rename" aria-label={strings.machines.label} value={machineName(machine)} maxlength="80" size={Math.max(4, machineName(machine).length)}
                   onchange={(event) => { workspace.customize(machine.id, event.currentTarget.value, machine.icon); event.currentTarget.value = machineName(machine); }} />
-                {#if isThisPC(machine)}<span class="you" data-testid="machine-you">{strings.machines.youTag}</span>{/if}
+                {#if listedName(machine) !== machineName(machine)}<span class="you" data-testid="machine-you">{strings.machines.youTag}</span>{/if}
                 {#if home}<span class="badge" data-testid="machine-home">{strings.machines.homeBadge}</span>{/if}
               </span>
-              <span class="meta" title={machine.store.localCore ? undefined : carrier !== undefined ? fill(strings.group.through, { machine: carrier.label }) : machine.id}>
+              <span class="meta" title={machine.store.localCore ? undefined : carrier !== undefined ? fill(strings.group.through, { machine: machineName(carrier) }) : machine.id}>
                 <span class="dot" class:ready={machine.store.connection === 'ready'} aria-hidden="true"></span>
-                <span class="status ui-label" class:ready={machine.store.connection === 'ready'} data-testid="machine-card-status">{machine.store.pairingRequired ? strings.mobile.pairingRequired : gone ? strings.connection.offline : carrier !== undefined && machine.store.connection === 'ready' ? fill(strings.group.relayed, { machine: carrier.label }) : strings.connection[machine.store.connection]}</span>
+                <span class="status ui-label" class:ready={machine.store.connection === 'ready'} data-testid="machine-card-status">{machine.store.pairingRequired ? strings.mobile.pairingRequired : gone ? strings.connection.offline : carrier !== undefined && machine.store.connection === 'ready' ? fill(strings.group.relayed, { machine: machineName(carrier) }) : strings.connection[machine.store.connection]}</span>
                 {#if machine.store.connection === 'ready' && machine.store.core?.version}<span class="version" data-testid="machine-version">{machine.store.core.version}</span>{/if}
                 {#if state}<span class="updates ui-label" data-testid="machine-updates-state" data-state={state}>{updateLabels[state]}</span>{/if}
                 {#if manual}<InfoTip topic={strings.serverUpdate.manualTitle} text={manual} />{/if}

@@ -154,6 +154,8 @@ export function groupMethods(ctx: FakeContext) {
       const removed = fakeCore(coreId);
       roster.cores = roster.cores.filter((core) => core.coreId !== coreId);
       roster.devices = roster.devices.filter((device) => !device.id.startsWith(`${coreId}:`));
+      // A default machine that leaves is no default when it comes back.
+      if (roster.settingsHome === coreId) delete roster.settingsHome;
       if (removed !== undefined && removed.roster === roster) removed.roster = null;
       announce(roster, removed === undefined ? [] : [removed]);
       return view(ctx)!;

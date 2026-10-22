@@ -86,8 +86,9 @@
   /** A core before the choice cannot store one: its options stay shut, and the hint below says to update it. */
   let homeReady = $derived(store.core?.features?.settingsHome === true);
   let homeItems = $derived([
-    { id: NONE, label: strings.machines.homeNone, active: home === null, disabled: !homeReady },
-    ...members.map((core) => ({ id: core.coreId, label: memberName(core), active: core.coreId === home, disabled: !homeReady }))
+    // Shut while another change of the card is on its way: `run` would drop the pick, the menu having closed already.
+    { id: NONE, label: strings.machines.homeNone, active: home === null, disabled: !homeReady || busy !== null },
+    ...members.map((core) => ({ id: core.coreId, label: memberName(core), active: core.coreId === home, disabled: !homeReady || busy !== null }))
   ]);
   let homeCore = $derived(members.find((core) => core.coreId === home));
   /** Members connected here whose Boite predates the choice: they keep their own settings until updated. */

@@ -50,12 +50,22 @@ export function isThisPC(machine: Machine): boolean {
  * its own: in a group every PC is "this PC" to itself, which tells nobody apart.
  */
 export function machineName(machine: Machine): string {
-  return isThisPC(machine) && machine.label === strings.machines.local && machine.store.core?.hostname ? machine.store.core.hostname : machine.label;
+  return isThisPC(machine) && localDefault(machine.label) && machine.store.core?.hostname ? machine.store.core.hostname : machine.label;
 }
 
-/** A machine in a list of machines: this computer by its name and "(you)". */
+/**
+ * The default name of this computer, as saved in any language the app spoke
+ * then (English, French), or by an older version. The French one is written
+ * out rather than read: its catalogue loads only once the app speaks French.
+ */
+function localDefault(label: string): boolean {
+  return label === strings.machines.local || ['This PC', 'Ce PC', 'My computer', 'This computer'].includes(label);
+}
+
+/** A machine in a list of machines: this computer by its name and "(you)", once it has a name of its own. */
 export function listedName(machine: Machine): string {
-  return isThisPC(machine) ? fill(strings.machines.you, { machine: machineName(machine) }) : machine.label;
+  const name = machineName(machine);
+  return isThisPC(machine) && !localDefault(name) ? fill(strings.machines.you, { machine: name }) : name;
 }
 
 /**

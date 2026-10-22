@@ -383,6 +383,14 @@ export function mergeRosters(local: Roster, remote: Roster): Roster {
   });
 }
 
+/**
+ * A settings home that leaves the group stops being one for good: cleared at a
+ * new revision, so the machine coming back later is not the default again.
+ */
+export function homeGone(roster: Roster, coreId: string): Pick<Roster, 'settingsHome' | 'settingsHomeRev'> | Record<string, never> {
+  return roster.settingsHome === coreId ? { settingsHome: null, settingsHomeRev: (roster.settingsHomeRev ?? 0) + 1 } : {};
+}
+
 /** A member as agent coordination addresses it: the first address listed, the others are tried by the caller. */
 export function peerOf(entry: CoreEntry): CoordinationPeer {
   return { coreId: entry.coreId, name: entry.name, url: entry.addresses[0] ?? '', publicKey: entry.publicKey };

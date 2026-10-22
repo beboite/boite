@@ -512,8 +512,9 @@ test('a removed machine is told, leaves, and its keys die on the members that st
   expect(a.core.group.remove(id(b)).cores.map((core) => core.coreId).sort()).toEqual([id(a), id(c)].sort());
   expect(() => a.core.group.remove(id(b))).toThrow('not a machine of this group');
   expect(() => a.core.group.remove(id(a))).toThrow('group.leave');
-  // A home that left reads as none, and cannot be chosen again.
+  // A home that left reads as none, and cannot be chosen again; the roster forgets it, so b coming back is no home either.
   expect(a.core.group.view('owner')?.settingsHome).toBeUndefined();
+  expect([a.core.group.roster?.settingsHome, a.core.group.roster?.settingsHomeRev]).toEqual([null, 2]);
   expect(() => a.core.group.settingsHome(id(b))).toThrow('coreId: expected the id of a machine of this group');
   expect(a.core.sessions.list(null)).toEqual([]);
   await waitFor(() => b.core.group.view('owner') === null && members(c).length === 2);

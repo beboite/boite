@@ -18,9 +18,9 @@
 
   /**
    * One row per provider, one next step per row: install what is missing, sign
-   * in when nothing is signed in, nothing once it is ready. Versions and updates
-   * are on Machines and updates, one list per machine, and are not repeated here.
-   * Connected providers come first; the rest wait below as the ways to
+   * in when nothing is signed in, nothing once it is ready. A row names no
+   * version: this machine's agents and their updates are one card lower on the
+   * page (`HarnessUpdatesCard.svelte`). Connected providers come first; the rest wait below as the ways to
    * add one, and the ones turned off close the page, dimmed, with only their
    * switch to act on. Accounts, the default model and the uninstall sit behind
    * the row's chevron. A family (Antigravity and its CLI) is one row, each way
@@ -602,7 +602,7 @@
         </div>
       {/if}
       <div class="act">
-        <!-- A provider still to add shows its one way in. Versions and updates are on Machines and updates, not here. -->
+        <!-- A provider still to add shows its one way in. Its version and update are in the agent card lower on the page. -->
         <!-- Off, nothing of it is offered: no install, no sign-in, only the way back on. -->
         {#if !off}
           {@render stepAction(lead, step, main)}

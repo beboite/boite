@@ -92,3 +92,20 @@ test('a change made elsewhere shows at once, and the next switch writes the conf
   document.querySelector<HTMLInputElement>('[data-testid="brain-guide"]')!.click();
   await vi.waitFor(() => expect(call).toHaveBeenCalledWith('brain.configure', expect.objectContaining({ globalInstructions: true, boiteGuide: false })));
 });
+
+test('another folder chosen elsewhere reads that folder again, not only its switches', async () => {
+  let configured: ((config: unknown) => void) | undefined;
+  const first = { config: { path: '/work/brain', enabled: true }, entries: [{ kind: 'instructions', name: 'OLD-AGENTS.md', path: 'OLD-AGENTS.md', description: '', error: null }], problems: [], git: null, lastSync: null };
+  const second = { config: { path: '/other/brain', enabled: true }, entries: [], problems: [], git: null, lastSync: null };
+  let current: unknown = first;
+  const call = vi.fn(async () => current);
+  const store = {
+    client: { ...client(call as never), on: (event: string, handler: (config: unknown) => void) => { if (event === 'brain.configured') configured = handler; return () => {}; } },
+    owner: true, connection: 'ready', keep: vi.fn(async () => undefined)
+  } as unknown as Store;
+  mounted = mount(BrainPage, { target: document.body, props: { store } });
+  await vi.waitFor(() => { flushSync(); expect(document.body.textContent).toContain('OLD-AGENTS.md'); });
+  current = second;
+  configured!(second.config);
+  await vi.waitFor(() => { flushSync(); expect(document.body.textContent).not.toContain('OLD-AGENTS.md'); });
+});
