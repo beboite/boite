@@ -31,6 +31,11 @@ but opens none, and the invitee exposes nothing.
    `share: false`) is for an invitee on the same tailnet, or one this
    machine is already shared with: no share is made or asked for, the link
    carries none and the invitee's Join card offers no share to accept.
+   While invitations are open the page counts them beside **Cancel them**
+   (`contacts.cancelInvites`), which spends every one unused: a link sent
+   too widely, or one that leaked, joins nothing any more, and the tailnet
+   listener closes when no hosted contact needs it. Contacts already joined
+   stay.
 2. The invitee pastes the link (`contacts.join`). Its core accepts the
    Tailscale share with its own API key when it has one
    (`POST /api/v2/device-invites/-/accept`). Without a key, the Join card

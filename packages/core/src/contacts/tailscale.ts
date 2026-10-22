@@ -9,8 +9,8 @@
  */
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ContactTailscale } from '@boite/contracts';
-import { invalidParams } from '../errors.ts';
+import type { ContactInvite, ContactTailscale } from '@boite/contracts';
+import { invalidParams, messageOf } from '../errors.ts';
 
 const API = 'https://api.tailscale.com/api/v2';
 const KEY_FILE = 'contacts-tailscale-key';
@@ -97,6 +97,17 @@ export class TailscaleClient {
     const first = (Array.isArray(answer) ? answer[0] : null) as { inviteUrl?: unknown } | null;
     if (typeof first?.inviteUrl !== 'string' || !first.inviteUrl.startsWith('https://login.tailscale.com/')) throw new TailscaleFailure('Tailscale API gave no share link');
     return first.inviteUrl;
+  }
+
+  /** The share of the machine at `ip` an invitation carries, made with the stored key, or why the owner shares it by hand. */
+  async shareFor(ip: string | null): Promise<ContactInvite['share']> {
+    if (!this.hasKey()) return { status: 'manual', reason: 'No Tailscale API key is stored: share this machine with the invitee from the Tailscale admin console.' };
+    if (ip === null) return { status: 'manual', reason: 'This machine is not on a tailnet.' };
+    try {
+      return { status: 'created', url: await this.createShare((await this.device(ip)).id) };
+    } catch (error) {
+      return { status: 'manual', reason: `The share could not be created (${messageOf(error)}): share this machine from the Tailscale admin console.` };
+    }
   }
 
   /** Accepts a share made by another tailnet, so that machine becomes reachable from this one. */

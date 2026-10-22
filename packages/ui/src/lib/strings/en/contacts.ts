@@ -78,7 +78,11 @@ export const strings = {
       shared: 'Tailscale share created',
       noShare: 'No share: for someone already on your Tailscale',
       manual: 'Share this machine by hand',
-      openConsole: 'Tailscale admin console'
+      openConsole: 'Tailscale admin console',
+      /** How many links sent from this machine can still join it. */
+      open: 'Open invitations: {count}',
+      cancel: 'Cancel them',
+      cancelTip: 'Every link not used yet stops working, a leaked one included. Contacts already joined stay.'
     },
     join: {
       title: 'Join a contact',

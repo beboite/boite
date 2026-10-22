@@ -75,7 +75,10 @@ export const fr: Translation = {
       shared: 'Partage Tailscale créé',
       noShare: 'Sans partage : pour quelqu\'un déjà sur votre Tailscale',
       manual: 'Partagez cette machine à la main',
-      openConsole: 'Console d\'administration Tailscale'
+      openConsole: 'Console d\'administration Tailscale',
+      open: 'Invitations valides : {count}',
+      cancel: 'Les annuler',
+      cancelTip: 'Tous les liens inutilisés cessent de fonctionner, y compris ceux qui ont fuité. Les contacts déjà ajoutés restent.'
     },
     join: {
       title: 'Rejoindre un contact',

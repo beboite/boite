@@ -157,6 +157,14 @@ export class ContactsView {
     return invite !== null;
   }
 
+  /** Every link not used yet stops working, the one shown included. */
+  async cancelInvites(): Promise<void> {
+    const done = await this.#run('cancel-invites', () => this.#connected().call('contacts.cancelInvites', {}));
+    if (!done) return;
+    this.invite = null;
+    if (this.state) this.state.invitations = 0;
+  }
+
   async join(link: string): Promise<Contact | null> {
     const contact = await this.#run('join', () => this.#connected().call('contacts.join', { link }));
     if (contact) {

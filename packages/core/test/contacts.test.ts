@@ -340,7 +340,7 @@ test('the link refuses a replayed or stale hello, a contact\'s readable request,
 
   // The guest forgets the host and tries the same link again: the host spent its token at the first join.
   await guestClient.call('contacts.remove', { coreId: hostId });
-  expect(await thrown(guestClient.call('contacts.join', { link: invite.link }))).toThrow('already used or expired');
+  expect(await thrown(guestClient.call('contacts.join', { link: invite.link }))).toThrow('already used, cancelled or expired');
   expect(host.core.contacts.list()).toHaveLength(1);
 }, 30000);
 
@@ -475,6 +475,28 @@ test('an invitation for someone already on this Tailscale carries no share, asks
   // Without the flag the owner is told to share the machine, as before.
   expect((await hostClient.call('contacts.invite', {})).share.status).toBe('manual');
   expect(await thrown(hostClient.call('contacts.invite', { share: 'no' as never }))).toThrow('share: expected true or false');
+}, 30000);
+
+test('cancelled invitations join nothing, and the tailnet listener closes with the last one', async () => {
+  const host = await startTestCore();
+  const guest = await startTestCore();
+  cores.push(host, guest);
+  host.core.contacts.selfUrl = async () => host.url;
+  const heard: (string | null)[] = [];
+  host.core.network = { also: address => { heard.push(address); return address !== null; } };
+  (host.core.group as unknown as { tailnet: { ip: string; name: string | null } }).tailnet = { ip: '100.64.0.7', name: null };
+  const hostClient = await host.connect();
+  const guestClient = await guest.connect();
+  const sent = await hostClient.call('contacts.invite', { share: false });
+  await hostClient.call('contacts.invite', { share: false });
+  expect((await hostClient.call('contacts.get', {})).invitations).toBe(2);
+  expect(heard.at(-1)).toBe('100.64.0.7');
+  expect(await hostClient.call('contacts.cancelInvites', {})).toEqual({ cancelled: 2 });
+  expect((await hostClient.call('contacts.get', {})).invitations).toBe(0);
+  expect(heard.at(-1)).toBeNull();
+  expect(await thrown(guestClient.call('contacts.join', { link: sent.link }))).toThrow('already used, cancelled or expired');
+  expect(guest.core.contacts.list()).toHaveLength(0);
+  expect(host.core.contacts.list()).toHaveLength(0);
 }, 30000);
 
 test('the tailnet listener opens for an invitation and closes once the last one expires', async () => {

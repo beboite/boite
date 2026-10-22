@@ -301,6 +301,7 @@ export class ContactStore {
       requests: [...pending, ...decided],
       settings: this.settings(),
       tailscale: await this.tailscaleState(),
+      invitations: this.liveInvites().length,
     };
   }
 
@@ -321,11 +322,11 @@ export class ContactStore {
     if (typeof share !== 'boolean') throw invalidParams('share: expected true or false', { field: 'share' });
     const room = (): void => {
       if (this.list().length >= MAX_CONTACTS) throw refused(`at most ${MAX_CONTACTS} contacts; remove one first`);
-      if (this.liveInvites().length >= MAX_INVITES) throw refused(`at most ${MAX_INVITES} open invitations; wait for one to be used or to expire`);
+      if (this.liveInvites().length >= MAX_INVITES) throw refused(`at most ${MAX_INVITES} open invitations; cancel them or wait for one to be used or to expire`);
     };
     room();
     const url = await this.selfUrl();
-    const shared: ContactInvite['share'] = share ? await this.share() : { status: 'none' };
+    const shared: ContactInvite['share'] = share ? await this.tailscale.shareFor(tailnetAddress()) : { status: 'none' };
     // Read again after the awaits: another invitation may have been made meanwhile.
     room();
     const token = newToken();
@@ -335,20 +336,17 @@ export class ContactStore {
     this.relisten();
     this.arm();
     const link = encodeInvite({ ...this.card(), url, token, share: shared.status === 'created' ? shared.url : null, expiresAt });
+    this.changed();
     return { link, expiresAt, share: shared };
   }
 
-  /** The Tailscale share of this machine, made with the owner's key, or why the owner shares it by hand. */
-  private async share(): Promise<ContactInvite['share']> {
-    if (!this.tailscale.hasKey()) return { status: 'manual', reason: 'No Tailscale API key is stored: share this machine with the invitee from the Tailscale admin console.' };
-    const ip = tailnetAddress();
-    if (ip === null) return { status: 'manual', reason: 'This machine is not on a tailnet.' };
-    try {
-      const device = await this.tailscale.device(ip);
-      return { status: 'created', url: await this.tailscale.createShare(device.id) };
-    } catch (error) {
-      return { status: 'manual', reason: `The share could not be created (${messageOf(error)}): share this machine from the Tailscale admin console.` };
-    }
+  /** Every open invitation spent unused: a join with one is refused like a used one. The listener closes when nothing else needs it. */
+  cancelInvites(): { cancelled: number } {
+    const cancelled = this.liveInvites().length;
+    this.core.journal.setSetting(INVITES, {});
+    this.relisten();
+    this.changed();
+    return { cancelled };
   }
 
   private async tailnetUrl(): Promise<string> {
