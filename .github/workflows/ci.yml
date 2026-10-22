@@ -134,6 +134,7 @@ jobs:
       - run: bun test scripts/ci scripts/migrate ./bench ./apps/shell/scripts
       # Missing sentences are warnings here and in the nightly; release.yml refuses them.
       - run: bun scripts/ci/translations.ts
+      - run: bun run check:copy
       - run: bun run check:architecture
       - run: bun test scripts/architecture
       - name: Validate workflows
