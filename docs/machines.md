@@ -174,8 +174,8 @@ about its updates. The row's word is the most pressing of what it finds: a
 failed update, then one in progress, then one available, then a check in
 progress, then Up to date. A row says nothing until something has answered. A
 Docker, hand-made or too old server says how it updates in a tip on its row.
-This computer goes by its host name followed by "(you)" while it keeps the
-default name; renaming it keeps the new name. **Add a device**, in the card's
+This computer goes by its host name while it keeps the default name, and by
+the name it was given once renamed; either way lists add "(you)" after it. **Add a device**, in the card's
 header, draws the QR code and offers the link ([groups](groups.md#using-it)).
 Agent versions and their automatic update switch are on each machine's
 Providers page. How a phone reaches this machine without a server of the
@@ -226,12 +226,14 @@ A synced setting changed on a following machine stays there: the change also
 adds it to that machine's `syncOverrides` (a setting's key,
 `keybinding:<command>` or `brain:<switch>`), which the copy skips. The page
 shows it with a star in the accent colour; clicking the star gives it back and
-copies the default machine's value at once. Only a change made on that machine
+copies the default machine's value at once when that machine is connected in
+this window, at its next connection otherwise. Only a change made on that machine
 marks it; the copy itself never does.
 
 Every settings page that belongs to one machine (General, Keyboard, Voice,
 Providers, Plugins, Brain, Limits, Task manager, Protection, Advanced and
-Diagnostics) has a machine picker above it. Picking another machine shows and
+Diagnostics) has a machine picker above it once this window has more than one
+machine to pick. Picking another machine shows and
 changes that machine's settings without moving the window or its open
 conversation; Plugins opens on this PC, the others on the window's machine.
 On a machine that follows the default one, a note under the picker says so;

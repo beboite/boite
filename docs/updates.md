@@ -85,7 +85,7 @@ its core:
    the group, a phone, a browser tab or a plugin is refused by field. The core
    keeps the last report until that window's socket closes, and relays it to
    owner connections (`core.desktopUpdateChanged`, `core.desktopUpdateStatus`).
-2. Update all, or Update on the block, sends `core.updateEverything` with
+2. Update all, or Update on the Machines updates card, sends `core.updateEverything` with
    `app`, the version the report offered. The core starts the agents named,
    waits until none of them is updating, then sends `ui.appUpdate` to that
    window alone. Meanwhile the row reads Waits for work to finish.

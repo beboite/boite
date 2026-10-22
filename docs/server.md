@@ -155,8 +155,8 @@ The default service name is `boite.service`; set `BOITE_SERVER_SERVICE` in the
 service environment for another name. Its `ExecStart` must name that core
 directly, and `Restart` must be `on-failure` or `no`. Desktop sidecars, source
 runs, symlinked installs and containers keep their own installation method.
-Docker cards show the Compose update command; other unmanaged or older cores
-link to this guide. A core predating this feature needs one manual update first.
+A Docker core's row has a tip with the Compose update command; another
+unmanaged core's tip points to this guide. A core predating this feature needs one manual update first.
 
 The server checks eight seconds after startup, then every six hours. It follows
 its installed stable or nightly channel, downloads an immutable release's
