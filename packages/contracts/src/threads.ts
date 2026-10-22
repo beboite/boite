@@ -589,6 +589,15 @@ export interface ThreadsRpcMethods {
       preparationId?: string;
       /** Subscribe this connection before returning the newly created conversation. */
       subscribe?: boolean;
+      /**
+       * The client's id for this creation, 1 to 128 characters. Asked again
+       * under the same id within an hour, with the same project, provider,
+       * account and title, the core answers with the conversation the first
+       * call made instead of making another; with other ones it refuses. A
+       * conversation queued while its machine was away is started this way.
+       * Kept in memory: a core restart forgets it. An older core ignores it.
+       */
+      clientRequestId?: string;
     };
     result: ThreadSummary;
   };

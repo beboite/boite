@@ -19,6 +19,7 @@
     outgoing = 0,
     connected = true,
     machine = '',
+    starts = false,
     sendNow,
     onrestore,
     onremove,
@@ -37,6 +38,8 @@
     /** The machine answers: an outbox prompt waits for the thread, not for it. */
     connected?: boolean;
     machine?: string;
+    /** A draft's queue: its first prompt starts the conversation once the machine is back. */
+    starts?: boolean;
     /** What Send now would do: steer the turn, resume the held queue, or nothing. */
     sendNow: 'steer' | 'resume' | null;
     onrestore: (at: number) => void;
@@ -84,7 +87,7 @@
     </div>
   {/each}
   <div class="queued-foot">
-    <span class="ui-label">{outbox ? strings.composer.outboxKept : paused ? strings.composer.queuedPaused : strings.composer.queued}</span>
+    <span class="ui-label">{outbox && starts ? fill(strings.composer.outboxStarts, { machine }) : outbox ? strings.composer.outboxKept : paused ? strings.composer.queuedPaused : strings.composer.queued}</span>
     {#if sendNow}
       <button type="button" class="ghost small" data-testid="composer-send-now"
         title={sendNow === 'steer' ? strings.composer.sendNowHint : strings.composer.retryQueuedHint}

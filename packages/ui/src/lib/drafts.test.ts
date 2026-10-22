@@ -556,8 +556,8 @@ test('a project holds several drafts: each reopens by id and a new Store restore
   const two = store.draft!.id!;
   expect(two).not.toBe(one);
   expect(store.draftEntries).toEqual([
-    { id: two, projectId: a!.id, text: 'Two', active: true },
-    { id: one, projectId: a!.id, text: 'One', active: false }
+    { id: two, projectId: a!.id, text: 'Two', active: true, queued: null },
+    { id: one, projectId: a!.id, text: 'One', active: false, queued: null }
   ]);
   store.startDraft(undefined, { draftId: one });
   expect(store.draft?.id).toBe(one);
@@ -634,7 +634,7 @@ test('a journal entry keyed by its project restores with that key as its id and 
     '"p-boite"': { draft: { projectId: 'p-boite', worktree: false }, input: { text: 'Legacy draft', attachments: [], queued: [] } }
   } });
   const store = await ready('legacy-key');
-  expect(store.draftEntries).toEqual([{ id: '"p-boite"', projectId: 'p-boite', text: 'Legacy draft', active: expect.any(Boolean) }]);
+  expect(store.draftEntries).toEqual([{ id: '"p-boite"', projectId: 'p-boite', text: 'Legacy draft', active: expect.any(Boolean), queued: null }]);
   store.startDraft('p-boite');
   expect(store.draft?.id).toBe('"p-boite"');
   store.editComposerText('draft', 'Legacy draft, edited');

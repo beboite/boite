@@ -161,6 +161,11 @@ export const strings = {
     undoHint: 'Undo (Ctrl+Z)',
     draft: 'New thread',
     /** A draft row's menu: what is typed there and not sent goes. */
-    deleteDraft: 'Delete draft'
+    deleteDraft: 'Delete draft',
+    /** A draft sent while its machine was away: its conversation starts once the machine is back. */
+    draftQueued: 'Starts when {machine} is back',
+    draftQueueFailed: 'Not started: {reason}',
+    /** Its menu takes the queued prompt back into the draft, which then waits to be sent again. */
+    cancelQueuedDraft: 'Cancel the start'
   }
 } as const;

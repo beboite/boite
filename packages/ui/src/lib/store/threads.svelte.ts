@@ -23,7 +23,8 @@ import { rightPanel } from '../right-panel.svelte';
 import { workingChildren, type WorkingChildren, lastIndexById, mergeResumed, patchFields, patchRow, reconcileThread, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
 import { RpcErrorCode, threadActive } from '@boite/contracts';
-import { RpcFailure } from '../client';
+import { RpcFailure, wasDropped } from '../client';
+import { wasClosed } from '../rpc-error';
 import { strings } from '../strings';
 import { archiveWhile, keepArchived, pinWhile } from './optimistic';
 
@@ -419,7 +420,8 @@ export class Threads {
           this.readingThreads.delete(threadId);
           this.readingPositions.delete(threadId);
         }
-        this.ctx.fail(error);
+        // The machine went while the thread opened: it shows offline, and the reconnect opens it again.
+        if (!((wasDropped(error) || wasClosed(error)) && s.connection !== 'ready')) this.ctx.fail(error);
       }
       await retire();
     } finally {

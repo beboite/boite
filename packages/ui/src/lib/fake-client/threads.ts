@@ -277,6 +277,7 @@ export async function deleteExpiredDoneThreads(ctx: FakeContext, remove: (id: st
 }
 
 export function threadMethods(ctx: FakeContext) {
+  const creations = new Map<string, { key: string; created: Promise<string> }>();
   const removing = new Set<string>();
   return {
     ...sideQuestionMethods(ctx, (source, messages) => writeFakeFork(ctx, source, messages)),
@@ -286,7 +287,26 @@ export function threadMethods(ctx: FakeContext) {
         .filter((t) => (params.includeArchived ? true : !t.archived))
         .map((t) => structuredClone(toSummary(t)));
     },
-    'threads.create': async (params) => publishFakeThread(ctx, await createFakeThread(ctx, params), params.subscribe),
+    'threads.create': async (params) => {
+      // The core's creation receipts: asked again under its request id, a creation answers with the conversation it made.
+      const id = params.clientRequestId;
+      const key = JSON.stringify([params.projectId, params.providerId, params.accountId, params.title ?? null]);
+      const previous = id === undefined ? undefined : creations.get(id);
+      if (previous) {
+        if (previous.key !== key) throw refusal('clientRequestId was already used for another conversation', { field: 'clientRequestId', expected: 'a new id for a different conversation' });
+        const made = ctx.threads.get(await previous.created);
+        if (!made) throw refusal('the conversation this request started was deleted since', { field: 'clientRequestId', reason: 'deleted' });
+        if (params.subscribe) ctx.bus.subscribed.add(made.id);
+        return structuredClone(toSummary(made));
+      }
+      const creating = createFakeThread(ctx, params).then(thread => publishFakeThread(ctx, thread, params.subscribe));
+      if (id !== undefined) {
+        const receipt = { key, created: creating.then(thread => thread.id) };
+        creations.set(id, receipt);
+        receipt.created.catch(() => { if (creations.get(id) === receipt) creations.delete(id); });
+      }
+      return creating;
+    },
     'threads.get': async (params) => {
       const thread = ctx.thread(params.threadId);
       const problem = snapshotOptionsProblem(params) ?? pageBytesProblem(params.maxBytes);

@@ -11,7 +11,7 @@ import type { CallOptions, ClientState, EventHandler, ObservableClient, Session,
 import { RpcFailure, closedFailure, droppedFailure, transportFailure, unansweredFailure } from './rpc-error';
 import { receiveFrame, type Pending } from './ws-client-frames';
 import {
-  IDLE_PROBE_MS, PROBE_DEADLINE_MS, RESUME_PROBE_MS, MESSAGE_TOO_BIG,
+  IDLE_PROBE_MS, PROBE_DEADLINE_MS, QUIET_CALL_MS, RESUME_PROBE_MS, MESSAGE_TOO_BIG,
   browserSocket, defaultBackoff, frameBytes, isLoopbackUrl, megabytes, openDeadline, pageHidden, rpcUrl
 } from './ws-client-utils';
 
@@ -222,8 +222,11 @@ export class WsClient implements ObservableClient {
     params: RpcParams<M>,
     onProgress?: (received: number, total: number) => void
   ): Promise<RpcResult<M>> {
-    // Asking for progress is what makes the core slice a long answer.
-    const frame = JSON.stringify({ jsonrpc: '2.0', id: this.#nextId, method, params, ...(onProgress ? { progress: true } : {}) });
+    // Asking for progress is what makes the core slice a long answer. A remote socket asks it of
+    // every call: slices keep frames arriving while a long answer downloads, so silence there means
+    // a dead link and the liveness probe may ask whatever waits.
+    const sliced = onProgress !== undefined || (this.#remote && method !== 'hello');
+    const frame = JSON.stringify({ jsonrpc: '2.0', id: this.#nextId, method, params, ...(sliced ? { progress: true } : {}) });
     const size = frameBytes(frame);
     if (size > RPC_MAX_FRAME_BYTES) {
       // The core would close the socket on it before reading a byte, and every
@@ -235,7 +238,14 @@ export class WsClient implements ObservableClient {
       }));
     }
     const id = this.#nextId++;
+    const sentAt = Date.now();
     return new Promise<RpcResult<M>>((resolve, reject) => {
+      // A call that hears nothing at all on a remote socket asks whether the machine is still there,
+      // so a click on a conversation of a machine whose link died gets its offline state within the
+      // probe's deadline rather than once the call's two minutes are spent.
+      const watch = this.#remote && method !== 'hello' && this.#sliced()
+        ? setTimeout(() => { if (this.#lastFrameAt < sentAt) this.#suspect(socket); }, QUIET_CALL_MS)
+        : null;
       const expire = () => {
         this.#pending.delete(id);
         reject(unansweredFailure(method));
@@ -247,8 +257,8 @@ export class WsClient implements ObservableClient {
       let timer = setTimeout(expire, wait);
       const pending: Pending = {
         method,
-        resolve: (value) => { clearTimeout(timer); resolve(value as RpcResult<M>); },
-        reject: (error) => { clearTimeout(timer); reject(error); },
+        resolve: (value) => { clearTimeout(timer); if (watch !== null) clearTimeout(watch); resolve(value as RpcResult<M>); },
+        reject: (error) => { clearTimeout(timer); if (watch !== null) clearTimeout(watch); reject(error); },
         touch: () => { clearTimeout(timer); timer = setTimeout(expire, wait); },
         ...(onProgress ? { onProgress } : {})
       };
@@ -486,9 +496,9 @@ export class WsClient implements ObservableClient {
       if (pageHidden()) { this.#armLiveness(IDLE_PROBE_MS); return; }
       const quiet = Date.now() - this.#lastFrameAt;
       if (quiet < IDLE_PROBE_MS) { this.#armLiveness(IDLE_PROBE_MS - quiet); return; }
-      // Silence while a call waits may be its answer still arriving: that
-      // call's timeout asks the socket instead.
-      if (this.#awaitingAnswer()) { this.#armLiveness(IDLE_PROBE_MS); return; }
+      // A core that answers in one frame may still be downloading the answer a call waits for:
+      // that call's own timeout asks the socket instead.
+      if (!this.#sliced() && this.#awaitingAnswer()) { this.#armLiveness(IDLE_PROBE_MS); return; }
       void this.#probeSocket(socket, PROBE_DEADLINE_MS).then((alive) => {
         if (alive) this.#armLiveness(IDLE_PROBE_MS);
         else this.#lost(socket);
@@ -500,6 +510,11 @@ export class WsClient implements ObservableClient {
   #awaitingAnswer(): boolean {
     for (const pending of this.#pending.values()) if (pending.method !== 'hello') return true;
     return false;
+  }
+
+  /** The core slices every long answer this client asks for (`features.chunkedAnswers`): silence is a dead link, never a frame still downloading. */
+  #sliced(): boolean {
+    return this.#core?.features?.chunkedAnswers === true;
   }
 
   #stopLiveness(): void {

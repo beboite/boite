@@ -82,17 +82,25 @@ handshake does not finish within twelve seconds can be retried from Machines.
 Once the machine has said hello, loading its lists is waited for however long
 it takes on a slow link; the connection is never dropped for it.
 
-The client detects silent remote sockets (`packages/ui/src/lib/client.ts`).
-On a remote host, 25 seconds without any
-frame while no call waits for its answer sends a `hello`, which the core
+The client detects silent remote sockets (`packages/ui/src/lib/ws-client.ts`).
+On a remote host, 25 seconds without any frame sends a `hello`, which the core
 answers on an open connection with its info and nothing else. That `hello`
 carries no token and no device signature, since the core reads none of its
-params once the socket is authenticated. If no frame of
-any kind arrives within 15 seconds, the socket is replaced and the calls it
-carried fail with "connection lost; check the conversation before resending".
-While a call waits, silence may be its answer still downloading, one frame of
-up to 16 MB behind which the probe's answer would queue, so only that call's
-own 120 second timeout starts the check, on any host. Returning to the page, an `online` event or
+params once the socket is authenticated. A call that hears no frame at all for
+3 seconds sends the same `hello`, so a click on a conversation of a machine
+whose link died shows that machine offline within 13 seconds. If no frame of
+any kind arrives within 10 seconds of a `hello`, the socket is replaced and the
+calls it carried fail as dropped. A remote client asks the core to slice every
+answer (`progress`, `features.chunkedAnswers`): each 64 KiB slice is a frame,
+so a long answer on a slow link keeps the socket alive while a dead link stays
+silent. A core without sliced answers may still be sending one frame of up to
+16 MB: there, while a call waits, only that call's own 120 second timeout
+starts the check. Until 2026-10-22 that rule held on every core, and a VPN
+that dropped under an open conversation left the machine reading as connected
+for over two minutes while every call made there waited. A failure that only
+says the machine went away is not shown in red: the machine's status, its
+greyed rows and the composer already say it, and a conversation opened as the
+link went shows offline until the reconnect opens it again. Returning to the page, an `online` event or
 a page restored from the back/forward cache also send the `hello` first, and
 replace the socket only if it stays silent for 4 seconds, so a tab switch no
 longer drops a healthy connection or reloads the lists. An `offline` event asks
@@ -314,9 +322,28 @@ its reason and holds the entries written after it; Send again retries it under
 the same id, and the cross removes it. A tap takes it back into the box, and
 sending it from there draws a new id. A thread that moved to another model
 meanwhile is put back on the written one first; a choice for another agent or
-account is ignored. A new thread needs the core, so a
-draft keeps its text until the machine returns. A machine offline since the app
+account is ignored. A machine offline since the app
 started has no cards to open: the client keeps no copy of the thread list.
+
+A new conversation waits the same way. Send on a draft of a machine that is
+offline puts the prompt in the draft's own queue with a request id and the
+chips' choice, and the box says the conversation starts when the machine
+reconnects. The draft's row in the sidebar shows a clock and the prompt, and
+its tooltip names the machine it waits for. Its menu has **Cancel the start**,
+which puts the words back in the box, where they wait as an ordinary draft;
+the cross on the queued prompt removes it. The queue is kept on the device
+like an outbox, so it survives closing the app. When the machine is back, the
+client starts each queued draft in the order it was sent: `threads.create`
+under the prompt's request id (`clientRequestId`), then the draft's queue
+becomes the new conversation's outbox, which sends it under the same ids. The
+core answers a creation it already made under that id with the conversation
+it made (`packages/core/src/threads/creation-requests.ts`, kept for an hour in
+memory), so a creation whose answer the link lost is not made twice. The draft
+goes unless its box holds new text, and a draft on screen gives way to its
+conversation. A refusal stays on the queued prompt with its reason and Send
+again. An incognito draft is never kept on the device, so it still waits for
+its machine before it can be sent (`store/composer.svelte.ts`,
+`launchQueuedDrafts`).
 
 Archiving or restoring a project of a machine that is offline still works: the
 project moves at once and the choice is kept on this device, per core, in

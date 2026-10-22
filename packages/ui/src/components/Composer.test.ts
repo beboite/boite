@@ -676,7 +676,7 @@ test('a refused turn keeps the prompt for Enter and Ctrl+Enter', async ({ app: _
   }
 });
 
-test('reconnecting queues a send instead of sending it, and a new thread waits for the machine', async ({ app: _app }) => {
+test('reconnecting queues a send instead of sending it, and a new thread queues to start with the machine', async ({ app: _app }) => {
   await store.open('t-trace');
   const submit = vi.spyOn(store, 'submit');
   store.connection = 'connecting';
@@ -685,17 +685,18 @@ test('reconnecting queues a send instead of sending it, and a new thread waits f
   press('Enter');
   await waitFor(() => input().value === '' && store.composerStates['t-trace']?.queued.length === 1);
   expect(submit).not.toHaveBeenCalled();
-  // A draft has no thread to queue behind: its text stays and nothing goes out.
+  // A draft queues too: its conversation starts once the machine is back, under the prompt's request id.
   store.connection = 'ready';
   await openDraft();
   store.connection = 'connecting';
   await type('a new thread');
-  expect(query<HTMLButtonElement>('[data-testid=composer-send]').disabled).toBe(true);
+  expect(input().placeholder).toContain('the conversation starts when it reconnects');
+  expect(query<HTMLButtonElement>('[data-testid=composer-send]').disabled).toBe(false);
   press('Enter');
-  press('Enter', { ctrlKey: true });
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await waitFor(() => input().value === '' && store.composerStates.draft?.queued.length === 1);
+  expect(store.composerStates.draft!.queued[0]).toMatchObject({ text: 'a new thread', request: { id: expect.any(String), choice: expect.objectContaining({ providerId: expect.any(String) }) } });
   expect(submit).not.toHaveBeenCalled();
-  expect(input().value).toBe('a new thread');
+  expect(store.draftEntries.find(entry => entry.active)).toMatchObject({ text: 'a new thread', queued: 'waiting' });
 });
 
 test('ArrowUp removes the latest queued prompt and restores its images for editing', async ({ app: _app }) => {

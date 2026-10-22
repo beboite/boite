@@ -757,7 +757,8 @@ devices you intend to give that control.
   journal is on the core. Prompts
   written in a thread that was open before the connection went wait in the
   device's outbox (`docs/machines.md`), and go out once it is back, even after
-  the PWA was closed in between; a new thread still needs the core.
+  the PWA was closed in between. A new conversation sent from a draft waits
+  there too, and starts once the core is back.
 - A phone is added with a QR code or a link somebody shows it, within ten
   minutes. There is no discovery on the network. Adding it
   once is enough for every machine of its [group](groups.md).
