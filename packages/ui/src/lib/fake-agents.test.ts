@@ -70,12 +70,18 @@ test('the fake denies persistent configuration and engine shutdown to paired dev
   } finally { client.close(); }
 });
 
-test('the fake bounds its snapshot and pages older memories by cursor, like the core', () => {
+test('the fake bounds snapshot bodies, counts all unread replies and pages older memories', () => {
   const fake = new FakeAgents(() => {});
-  const save = (fake as unknown as { save: (kind: 'memory', p: { value: object }) => AgentRecord }).save.bind(fake);
+  const save = (fake as unknown as { save: (kind: 'memory' | 'message', p: { value: object }) => AgentRecord }).save.bind(fake);
   const scope = { kind: 'agent' as const, id: 'agent_1' };
-  for (let i = 0; i < AGENT_HISTORY_PAGE + 25; i++) save('memory', { value: { scope, title: `Memory ${i}`, text: 'kept', sourceScopes: [scope], sourceRunId: null, expiresAt: null } });
-  const snapshot = fake.snapshot();
+  for (let i = 0; i < AGENT_HISTORY_PAGE + 25; i++) {
+    save('memory', { value: { scope, title: `Memory ${i}`, text: 'kept', sourceScopes: [scope], sourceRunId: null, expiresAt: null } });
+    save('message', { value: { scope, senderId: 'agent_1', text: 'A reply', recipientIds: [], replyTo: null, episodeId: 'history', sourceRunId: null } });
+  }
+  const snapshot = fake.snapshot([]);
+  expect(snapshot.messages).toHaveLength(AGENT_HISTORY_PAGE);
+  expect(snapshot.unread).toEqual([{ scope, at: 0, count: AGENT_HISTORY_PAGE + 25 }]);
+  expect(fake.snapshot([{ scope, at: Date.now() }]).unread).toEqual([]);
   expect(snapshot.memories).toHaveLength(AGENT_HISTORY_PAGE);
   expect(snapshot.more.memory).toBe(true);
   const seen = new Set(snapshot.memories.map(m => m.id));

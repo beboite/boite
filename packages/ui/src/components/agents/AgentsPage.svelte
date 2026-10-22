@@ -3,7 +3,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { ArrowLeft, Bot, Brain, CalendarClock, Ellipsis, History, MessageSquare, Settings2, SquareArrowOutUpRight, Target, Users } from '@lucide/svelte';
   import type { AgentScope } from '@boite/contracts';
-  import { AgentsView, agentsFilter, chatKey, chatsOf, missionHome, missionPreset, missionsOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentSelection } from '../../lib/agents.svelte';
+  import { AgentsView, agentsFilter, chatKey, chatsOf, missionHome, missionPreset, missionsOf, waitingForUser, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentSelection } from '../../lib/agents.svelte';
   import { mobileOverlay } from '../../lib/mobile-history';
   import type { Store } from '../../lib/store.svelte';
   import { fill, strings } from '../../lib/strings';
@@ -128,7 +128,7 @@
   const current = $derived(pane && panes.includes(pane) ? pane : panes[0]!);
   const status = $derived.by<{ text: string; tone?: 'running' | 'waiting' }>(() => {
     if (mission) return { text: labels[mission.status], tone: mission.status === 'active' ? 'running' : mission.status === 'review' || mission.status === 'waiting' ? 'waiting' : undefined };
-    if (liveHere?.status === 'waiting' || chat?.status === 'waiting') return { text: strings.sidebar.state.waiting, tone: 'waiting' };
+    if (waitingForUser(snapshot, chat?.scope ?? null, liveHere)) return { text: strings.sidebar.state.waiting, tone: 'waiting' };
     if (liveHere || chat?.status === 'running') return { text: labels.running, tone: 'running' };
     if (profile?.status === 'archived') return { text: labels.archived };
     if (profile?.status === 'paused' || chat?.status === 'paused') return { text: labels.paused };

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AgentDraft, AgentEntities, AgentEntityKind, AgentHistoryCursor, AgentScope } from '@boite/contracts';
+import type { AgentDraft, AgentEntities, AgentEntityKind, AgentHistoryCursor, AgentScope, AgentReadMark, AgentUnread } from '@boite/contracts';
 import { invalidParams, notFound, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { Journal } from '../journal.ts';
@@ -117,6 +117,25 @@ export class AgentsRepository {
     if (before) { clauses.push('(updated_at, id) < (?, ?)'); params.push(before.updatedAt, before.id); }
     const items = this.rows<K>(`SELECT data FROM agent_entities INDEXED BY ${index} WHERE ${clauses.join(' AND ')} ORDER BY updated_at DESC, id DESC LIMIT ?`, ...params, limit + 1);
     return { items: items.slice(0, limit), more: items.length > limit };
+  }
+
+  /** Count retained incoming messages without sending their bodies to the client. */
+  unread(marks: AgentReadMark[], target?: AgentScope): AgentUnread[] {
+    const positions = Object.fromEntries(marks.map(m => [`${m.scope.kind}:${m.scope.id}`, m.at]));
+    const rows = this.journal.db.query(`
+      WITH positions AS MATERIALIZED (SELECT key, value FROM json_each(?))
+      SELECT json_extract(e.data, '$.scope.kind') AS scopeKind,
+        json_extract(e.data, '$.scope.id') AS scopeId,
+        coalesce(mark.value, 0) AS at, count(*) AS count
+      FROM agent_entities e INDEXED BY agent_recent
+      LEFT JOIN positions mark ON mark.key = json_extract(e.data, '$.scope.kind') || ':' || json_extract(e.data, '$.scope.id')
+      WHERE e.kind = 'message' AND json_extract(e.data, '$.senderId') IS NOT NULL
+        AND json_extract(e.data, '$.scope.kind') IN ('agent', 'group')
+        AND e.created_at > coalesce(mark.value, 0)
+        ${target ? "AND json_extract(e.data, '$.scope.kind') = ? AND json_extract(e.data, '$.scope.id') = ?" : ''}
+      GROUP BY scopeKind, scopeId, at
+    `).all(JSON.stringify(positions), ...(target ? [target.kind, target.id] : [])) as { scopeKind: 'agent' | 'group'; scopeId: string; at: number; count: number }[];
+    return rows.map(r => ({ scope: { kind: r.scopeKind, id: r.scopeId }, at: r.at, count: r.count }));
   }
 
   create<K extends AgentEntityKind>(kind: K, value: AgentDraft<AgentEntities[K]>): AgentEntities[K] {

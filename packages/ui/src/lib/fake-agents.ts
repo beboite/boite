@@ -296,7 +296,7 @@ export class FakeAgents {
       decisions: this.all('decision').filter(d => workIds.has(d.workId)),
     };
   }
-  snapshot(): AgentsSnapshot {
+  snapshot(readAt?: RpcParams<'agents.snapshot'>['readAt']): AgentsSnapshot {
     const messages = this.newest('message', undefined, undefined, null, AGENT_HISTORY_PAGE);
     const recent = this.newest('work', undefined, undefined, null, AGENT_HISTORY_PAGE);
     const ids = new Set(recent.items.map(w => w.id));
@@ -305,7 +305,19 @@ export class FakeAgents {
     return { revision: this.revision, routines: this.all('routine'), accountGrants: structuredClone(this.grants), limits: { ...this.limits }, profiles: this.all('profile'), groups: this.all('group'), teams: this.all('team'), missions: this.all('mission'), tasks: this.all('task'), sessions: this.all('session'), messages: messages.items, work, memories: memories.items, ...this.related(messages.items, work), resources: this.all('resource'), artifacts: this.all('artifact'), more: { message: messages.more, work: recent.more, memory: memories.more },
       // The core drops an entrustment when its thread is archived or removed.
       entrusted: this.entrusted.filter(e => { const thread = this.runner?.thread?.(e.threadId); return thread && !thread.archived; }).map(e => ({ ...e })),
-      brainRoot: this.brainRoot() };
+      brainRoot: this.brainRoot(), ...(readAt ? { unread: this.unread(readAt) } : {}) };
+  }
+  private unread(marks: NonNullable<RpcParams<'agents.snapshot'>['readAt']>): NonNullable<AgentsSnapshot['unread']> {
+    const counts = new Map<string, NonNullable<AgentsSnapshot['unread']>[number]>();
+    for (const m of this.all('message')) {
+      if (m.senderId === null || !['agent', 'group'].includes(m.scope.kind)) continue;
+      const at = marks.find(mark => mark.scope.kind === m.scope.kind && mark.scope.id === m.scope.id)?.at ?? 0;
+      if (m.createdAt <= at) continue;
+      const key = `${m.scope.kind}:${m.scope.id}`;
+      const held = counts.get(key) ?? { scope: m.scope, at, count: 0 };
+      held.count++; counts.set(key, held);
+    }
+    return [...counts.values()];
   }
   private history(p: RpcParams<'agents.history'>): AgentsHistoryPage {
     const kind = HISTORY_KIND[p.kind];
@@ -332,7 +344,7 @@ export class FakeAgents {
     'agents.routine.save': p => this.saveRoutine(p),
     'agents.routine.run': p => this.runRoutine(p),
     'agents.context.compact': p => this.compactContext(p),
-    'agents.snapshot': () => this.snapshot(),
+    'agents.snapshot': p => this.snapshot(p.readAt),
     'agents.history': p => this.history(p),
     'agents.profile.save': p => this.saveProfile(p),
     'agents.group.save': p => this.saveGroup(p),

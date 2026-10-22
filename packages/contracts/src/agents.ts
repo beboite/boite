@@ -302,6 +302,9 @@ export interface AgentsHistoryPage {
 }
 export const AGENT_HISTORY_PAGE = 50;
 export const AGENT_HISTORY_MAX_PAGE = 200;
+/** Device-local reading positions. Only incoming conversation messages count. */
+export interface AgentReadMark { scope: AgentScope; at: number }
+export interface AgentUnread extends AgentReadMark { count: number }
 export interface AgentsSnapshot {
   routines: AgentRoutine[];
   accountGrants: AgentAccountGrant[];
@@ -314,6 +317,8 @@ export interface AgentsSnapshot {
   sessions: AgentSession[];
   /** The newest `AGENT_HISTORY_PAGE` messages. */
   messages: AgentConversationMessage[];
+  /** Counts across all retained messages, when read marks were requested. */
+  unread?: AgentUnread[];
   deliveries: AgentDelivery[];
   /** Every unfinished work item, then the newest `AGENT_HISTORY_PAGE` of any status. */
   work: AgentWork[];
@@ -352,7 +357,7 @@ export interface AgentsRpcMethods {
   'agents.routine.save': { params: AgentSave<AgentRoutine> & { threadId?: string }; result: AgentRoutine };
   'agents.routine.run': { params: { routineId: string; requestId: string }; result: AgentWork };
   'agents.context.compact': { params: { sessionId: string; requestId: string }; result: AgentWork };
-  'agents.snapshot': { params: { threadId?: string }; result: AgentsSnapshot };
+  'agents.snapshot': { params: { threadId?: string; readAt?: AgentReadMark[] }; result: AgentsSnapshot };
   /**
    * Older records of one kind, newest first, strictly before `before`. `scopes`
    * and `agentId` narrow the page; an agent session is held to its own context.

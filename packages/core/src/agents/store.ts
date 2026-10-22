@@ -549,7 +549,12 @@ export class AgentStore {
    * Bounded by configuration, not by history: the newest page of each growing
    * kind, every unfinished work item, and what those records point to.
    */
-  snapshot(threadId?: string): AgentsSnapshot {
+  snapshot(threadId?: string, readAt?: RpcParams<'agents.snapshot'>['readAt']): AgentsSnapshot {
+    if (readAt !== undefined && !Array.isArray(readAt)) throw invalidParams('readAt: expected an array of scope and at');
+    const marks = readAt?.map((mark, i) => {
+      object(mark, `readAt[${i}]`);
+      return { scope: scope(mark.scope), at: integer(mark.at, `readAt[${i}].at`, 0, Number.MAX_SAFE_INTEGER) };
+    });
     const r = this.records;
     const session = threadId ? this.session(threadId) : null;
     const allowed = (target: AgentScope) => !session || this.canRead(session.agentId, target, session.scope);
@@ -568,6 +573,7 @@ export class AgentStore {
       tasks: r.list('task').filter(t => missions.some(m => m.id === t.missionId)),
       sessions: session ? [session] : r.list('session'),
       messages: messages.items.sort(byCreation), work, memories: memories.items.sort(byCreation),
+      ...(marks ? { unread: r.unread(marks, session?.scope) } : {}),
       ...this.related(session, messages.items, work),
       resources: r.list('resource').filter(resource => allowed(resource.scope)),
       artifacts: r.list('artifact').filter(a => missions.some(m => m.id === a.missionId)),
@@ -616,7 +622,7 @@ export function registerPersistentAgents(core: Core): void {
   core.router.register('agents.routine.save', p => store.routines.save(p));
   core.router.register('agents.routine.run', p => store.routines.run(p));
   core.router.register('agents.context.compact', p => store.resident.compact(p.sessionId, p.requestId));
-  core.router.register('agents.snapshot', p => store.snapshot(p.threadId));
+  core.router.register('agents.snapshot', p => store.snapshot(p.threadId, p.readAt));
   core.router.register('agents.history', p => store.history(p));
   core.router.register('agents.profile.save', p => store.saveProfile(p));
   core.router.register('agents.group.save', p => store.saveGroup(p));

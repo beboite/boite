@@ -1,28 +1,20 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import type { ThreadSummary } from '@boite/contracts';
   import { fill, strings } from '../../lib/strings';
+  import { ago, exactTime } from '../../lib/format';
   import type { Machine } from '../../lib/workspace.svelte';
   import MachineIcon from '../MachineIcon.svelte';
-  import ThreadState from '../ThreadState.svelte';
 
   /**
-   * One row of the agents list, cut like a thread's row in the thread list:
-   * the picture where the provider's logo goes, the name, the state on the
-   * right (the same words and colours as a thread: working with its time,
-   * needs you, or when it last moved), and one muted line under it.
+   * A conversation's picture, name, unread count and last message preview.
    */
-  let { title, open = false, unread = 0, live = null, waiting = false, away = false, at, now, detail = '', machine, testid, onclick, picture, aside }: {
+  let { title, open = false, unread = 0, away = false, at, now, detail = '', machine, testid, onclick, picture, aside }: {
     title: string;
     open?: boolean;
     unread?: number;
-    /** The thread its agent works in now, whose state the row reads. */
-    live?: ThreadSummary | null;
-    /** Something waits on the user here even with no turn running: a decision, a result to review. */
-    waiting?: boolean;
-    /** Its machine is not connected: a turn it last saw running reads as unreachable. */
+    /** Its machine is not connected: the machine icon shows its connection state. */
     away?: boolean;
-    /** The row's last activity, read when nothing runs. */
+    /** The row's last activity, shown when no messages are unread. */
     at: number;
     now: number;
     detail?: string;
@@ -35,15 +27,7 @@
     aside?: Snippet;
   } = $props();
 
-  const shown = $derived({
-    status: waiting ? ('waiting' as const) : (live?.status ?? ('idle' as const)),
-    unread: false,
-    runningSince: live?.runningSince ?? null,
-    requestSince: live?.requestSince ?? null,
-    backgroundWork: null,
-    lastUserMessageAt: at,
-    createdAt: at
-  });
+  const missed = $derived(fill(unread === 1 ? strings.agents.missedOne : strings.agents.missedMany, { count: String(unread) }));
 </script>
 
 <div class="agent-row" class:open class:unread={unread > 0} class:meta={!!detail} class:on-machine={!!machine} data-machine-id={machine?.id}>
@@ -56,8 +40,8 @@
       <span class="title">{title}</span>
       {#if aside}{@render aside()}
       {:else}
-        {#if unread > 0 && !waiting && !live}<span class="unread-count" role="img" aria-label={fill(strings.agents.unread, { count: String(unread) })}>{unread}</span>{/if}
-        <ThreadState thread={shown} {now} {away} />
+        {#if unread > 0}<span class="unread-count" title={missed} aria-label={missed} data-testid="agent-unread-count">{unread}</span>
+        {:else if at > 0}<time class="when" datetime={new Date(at).toISOString()} title={exactTime(at)}>{ago(at, now)}</time>{/if}
       {/if}
     </span>
     {#if detail}<span class="detail">{detail}</span>{/if}
@@ -78,6 +62,7 @@
   .title { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); font-weight: 400; }
   .unread .title { font-weight: 600; }
   .unread-count { flex: none; min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; border-radius: 999px; background: var(--color-accent); color: var(--color-accent-ink); font-size: var(--text-xs); font-weight: 600; }
+  .when { flex: none; color: var(--color-subtle); font-size: var(--text-xs); }
   .detail { padding-left: 30px; text-align: left; font-size: var(--text-xs); color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* The machine's icon and its gap before the picture: the line still starts under the name. */
   .on-machine .detail { padding-left: 51px; }

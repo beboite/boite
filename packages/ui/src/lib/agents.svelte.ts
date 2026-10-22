@@ -33,7 +33,7 @@ export interface AgentChat {
   last: AgentConversationMessage | null;
   /** The newest activity: a message, a change in its work, or an edit. */
   at: number;
-  /** Agent messages newer than the last time this conversation was open. */
+  /** Incoming messages newer than the reading position on this device. */
   unread: number;
   /** Decisions, interruptions, failures and results waiting on the user. */
   attention: number;
@@ -41,6 +41,12 @@ export interface AgentChat {
 type Attention = ReturnType<typeof attentionOf>;
 
 export const chatKey = (kind: AgentChatKind, id: string) => `${kind}:${id}`;
+
+/** A current question or decision, rather than a past failure or interruption. */
+export function waitingForUser(snapshot: AgentsSnapshot | null, scope: AgentScope | null, live: ThreadSummary | null): boolean {
+  if (live?.status === 'waiting') return true;
+  return !!scope && !!snapshot?.decisions.some(d => d.status === 'pending' && snapshot.work.some(w => w.id === d.workId && w.scope.kind === scope.kind && w.scope.id === scope.id));
+}
 
 /** The team each group carries: the oldest team naming it as its discussion. */
 export function teamsByGroup(snapshot: AgentsSnapshot): Map<string, AgentTeam> {
@@ -118,6 +124,12 @@ export function agentChats(snapshot: AgentsSnapshot, messages: AgentConversation
     if (!chat.last || m.createdAt >= chat.last.createdAt) chat.last = m;
     chat.at = Math.max(chat.at, m.createdAt);
     if (m.senderId !== null && m.createdAt > (readAt[where!] ?? 0)) chat.unread++;
+  }
+  if (snapshot.unread) for (const [key, chat] of chats) {
+    const total = snapshot.unread.find(row => row.scope.kind === chat.scope?.kind && row.scope.id === chat.id);
+    const read = readAt[key] ?? 0;
+    const readSince = total ? messages.filter(m => m.scope.kind === total.scope.kind && m.scope.id === total.scope.id && m.senderId !== null && m.createdAt > total.at && m.createdAt <= read).length : 0;
+    chat.unread = Math.max(0, (total?.count ?? 0) - readSince);
   }
   for (const w of attention.work) { const where = home(w.scope); const chat = where ? chats.get(where) : undefined; if (chat) chat.attention++; }
   for (const t of attention.review) { const where = missions.get(t.missionId); const chat = where ? chats.get(where) : undefined; if (chat) chat.attention++; }
@@ -317,7 +329,12 @@ export class AgentsView {
       while (this.dirty && !this.disposed) {
         this.dirty = false;
         const client = this.client;
-        const snapshot = await client?.call('agents.snapshot', {});
+        const readAt = Object.entries(this.readMarks()).flatMap(([key, at]) => {
+          const colon = key.indexOf(':');
+          const kind = key.slice(0, colon);
+          return (kind === 'profile' || kind === 'group') && Number.isSafeInteger(at) && at >= 0 ? [{ scope: { kind: kind === 'profile' ? 'agent' as const : 'group' as const, id: key.slice(colon + 1) }, at }] : [];
+        });
+        const snapshot = await client?.call('agents.snapshot', { readAt });
         if (snapshot && !this.disposed && client === this.store.client) { this.accept(snapshot); this.loadError = ''; }
       }
     } catch (error) { if (!this.disposed) this.loadError = errorText(error); }
@@ -348,8 +365,9 @@ export class AgentsView {
   }
   /** The read marks of the core this view shows, loaded once per core. */
   private readMarks(): Record<string, number> {
-    const core = this.store.core?.dataDir ?? '';
-    if (this.readCore !== core) { this.readCore = core; this.readAt = readStored()[core] ?? {}; }
+    const info = this.store.core;
+    const core = info?.coreId ?? info?.dataDir ?? '';
+    if (this.readCore !== core) { this.readCore = core; const stored = readStored(); this.readAt = stored[core] ?? stored[info?.dataDir ?? ''] ?? {}; }
     return this.readAt;
   }
   /** Marks a conversation read up to `at`, the newest message it shows. */

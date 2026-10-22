@@ -1,15 +1,14 @@
 <script lang="ts">
   import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
-  import { tick, untrack } from 'svelte';
-  import { Brain, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, FileText, FolderKanban, Handshake, Image } from '@lucide/svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
+  import { ArrowDown, Brain, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, FileText, FolderKanban, Handshake, Image } from '@lucide/svelte';
   import type { AgentConversationMessage, AgentScope, AgentWork, Attachment, ImageMimeType, Message, MessagePart, ThreadSummary } from '@boite/contracts';
   import { chatKey, type AgentsView } from '../../lib/agents.svelte';
   import { fill, strings } from '../../lib/strings';
   import { avatarStatus } from '../../lib/thread-state';
   import { bytes, longDay } from '../../lib/format';
   import type { ComposerTarget } from '../../lib/composer-target';
-  import type { Choice } from '../../lib/store.svelte';
   import type { SentPrompt } from '../../lib/composer-queue';
   import Prose from '../Prose.svelte';
   import ChatFile from '../ChatFile.svelte';
@@ -26,11 +25,11 @@
    * agents' answers in the thread's answer bubbles under their picture and
    * name, a line while one of them works, and the thread's own composer at
    * the bottom (`lib/composer-target.ts`): attachments, dictation, recall,
-   * Stop and, with a single agent, its model, effort and mode chips. An agent
+   * Stop. Engine choices stay in Settings. An agent
    * shows no code: its answers carry the pictures and files it attached, and
    * its thread opens from the page's menu, not from here. Decisions
    * an agent asked for stand in the conversation they belong to. Opening it
-   * marks it read up to its newest message.
+   * starts at its first missed message and marks visible messages read.
    */
   let { view, scope, live = null }: {
     view: AgentsView;
@@ -41,6 +40,8 @@
   let recipients = $state<string[]>([]);
   let request: { signature: string; id: string } | null = null;
   let scroller = $state<HTMLElement>();
+  let disposed = false;
+  onDestroy(() => { disposed = true; });
   const labels = $derived(strings.agents);
   const group = $derived(scope.kind === 'group' ? view.snapshot?.groups.find(g => g.id === scope.id) : null);
   const agent = $derived(scope.kind === 'agent' ? view.snapshot?.profiles.find(a => a.id === scope.id) ?? null : null);
@@ -48,27 +49,91 @@
   const key = $derived(`message:${scope.kind}:${scope.id}`);
   const history = $derived({ kind: 'message' as const, scopes: [scope] });
   const newest = $derived(messages.at(-1));
+  const readKey = $derived(chatKey(scope.kind === 'agent' ? 'profile' : 'group', scope.id));
+  let entry = $state<{ key: string; at: number } | null>(null);
+  let ready = $state(false);
+  let awayFromBottom = $state(false);
+  const firstMissed = $derived(messages.find(m => m.senderId !== null && m.createdAt > (entry?.at ?? 0)));
+  const missedAtEntry = $derived(messages.filter(m => m.senderId !== null && m.createdAt > (entry?.at ?? 0)).length);
+  const unread = $derived(messages.filter(m => m.senderId !== null && m.createdAt > (view.readAt?.[readKey] ?? 0)));
+  const missedLabel = (count: number) => fill(count === 1 ? labels.missedOne : labels.missedMany, { count: String(count) });
+  let divider = $state<HTMLElement>();
   /** Work of this conversation that waits on the user: a decision, an interruption, a failure. */
   const pending = $derived(view.snapshot?.work.filter(w => w.scope.kind === scope.kind && w.scope.id === scope.id && (['waiting', 'interrupted', 'error'].includes(w.status) || view.seen.decisions.some(d => d.workId === w.id && d.status === 'pending'))) ?? []);
   const worker = $derived(live ? view.snapshot?.profiles.find(a => view.snapshot?.sessions.some(s => s.threadId === live.id && s.agentId === a.id)) ?? null : null);
-  $effect(() => { view.fill(key, history, messages); });
+  $effect.pre(() => {
+    if (entry?.key === key) return;
+    entry = { key, at: untrack(() => view.readAt?.[readKey] ?? 0) };
+    ready = false;
+  });
+  // Page back to the saved reading position before choosing the first missed
+  // message. A snapshot is global and may hold none of this conversation.
   $effect(() => {
-    const at = newest?.createdAt;
-    if (at) untrack(() => view.markRead(chatKey(scope.kind === 'agent' ? 'profile' : 'group', scope.id), at));
+    if (ready || !entry || !scroller || !view.snapshot || view.loadingOlder || view.error) return;
+    if (view.hasOlder(key, 'message') && (!messages.length || messages[0]!.createdAt > entry.at)) {
+      void view.loadOlder(key, history, messages);
+      return;
+    }
+    const opening = key;
+    void tick().then(() => {
+      if (disposed || opening !== key || !scroller) return;
+      if (firstMissed && divider) scroller.scrollTop += divider.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      else scroller.scrollTop = scroller.scrollHeight;
+      followed = newest?.id ?? '';
+      ready = true;
+      readVisible();
+    });
   });
   /**
-   * The first render and the user's own message scroll to the bottom. An agent's
+   * A user's own new message scrolls to the bottom. An agent's
    * message does only for a reader already there, measured before it is drawn;
    * someone reading older messages stays where they are.
    */
   const NEAR_BOTTOM = 80;
   let followed = '';
   $effect.pre(() => {
-    if (!newest?.id || !scroller) return;
+    if (!ready || !newest?.id || !scroller) return;
     const box = scroller;
-    const follow = followed !== key || newest.senderId === null || box.scrollHeight - box.scrollTop - box.clientHeight < NEAR_BOTTOM;
-    followed = key;
-    if (follow) void tick().then(() => { box.scrollTop = box.scrollHeight; });
+    const follow = newest.senderId === null || box.scrollHeight - box.scrollTop - box.clientHeight < NEAR_BOTTOM;
+    if (followed === newest.id) return;
+    followed = newest.id;
+    if (follow) void tick().then(() => { if (!disposed && box === scroller && ready) { box.scrollTop = box.scrollHeight; readVisible(); } });
+  });
+  /** Reading elsewhere or in a hidden tab leaves incoming messages unread. */
+  function readVisible() {
+    if (disposed) return;
+    const box = scroller;
+    if (!ready || !box || !box.clientHeight || document.hidden) return;
+    awayFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight >= NEAR_BOTTOM;
+    const bounds = box.getBoundingClientRect();
+    let at = view.readAt?.[readKey] ?? 0;
+    for (const row of box.querySelectorAll<HTMLElement>('[data-message-id]')) {
+      const rect = row.getBoundingClientRect();
+      if (rect.top < bounds.top + box.clientHeight && rect.bottom > bounds.top) at = Math.max(at, Number(row.dataset.messageAt));
+    }
+    if (at > 0) untrack(() => view.markRead(readKey, at));
+  }
+  function jumpToUnread() {
+    const box = scroller;
+    if (!box) return;
+    const first = unread[0];
+    const row = first ? [...box.querySelectorAll<HTMLElement>('[data-message-id]')].find(row => row.dataset.messageId === first.id) : null;
+    if (row) box.scrollTop += row.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    else box.scrollTop = box.scrollHeight;
+    readVisible();
+  }
+  // Attached pictures and the composer can resize after the initial layout.
+  $effect(() => {
+    const box = scroller;
+    const column = box?.firstElementChild;
+    if (!box || !column) return;
+    const observer = new ResizeObserver(() => {
+      if (disposed || !untrack(() => ready)) return;
+      if (!untrack(() => awayFromBottom)) box.scrollTop = box.scrollHeight;
+      readVisible();
+    });
+    observer.observe(box); observer.observe(column);
+    return () => observer.disconnect();
   });
   const profileOf = (id: string) => view.snapshot?.profiles.find(a => a.id === id);
   const nameOf = (id: string) => profileOf(id)?.name ?? id;
@@ -115,38 +180,7 @@
     send,
     stop: running ? () => void stopWork() : undefined,
     chips: group ? recipientChips : undefined,
-    // The owner picks the agent's model where a thread's is picked; a group has one per member.
-    selection: agent && view.store.owner ? { choice: { ...agent.selection, model: agent.selection.model ?? defaultModel(agent.selection), speed: null }, save: saveSelection } : undefined,
   });
-  /** An agent saved without a model runs on its account's default one, as the core resolves it: the chip names that one. */
-  function defaultModel(selection: { providerId: string; accountId: string }): string | null {
-    const models = view.store.modelsOf(selection.providerId, selection.accountId);
-    return (models.find(m => m.default) ?? models[0])?.id ?? null;
-  }
-  /**
-   * A pick from the chips, saved as the Settings tab saves the agent's model:
-   * its main route, allowed once picked, so the next piece of work runs on it.
-   * It waits in the page's save queue, so a message being sent does not drop
-   * it, and reads the agent's revision and runtime when its turn comes.
-   */
-  async function saveSelection(next: Choice): Promise<void> {
-    const agentId = agent?.id;
-    if (!agentId) return;
-    try {
-      await view.save('agents.runtime.configure', async () => {
-        const client = view.store.client;
-        const current = view.snapshot?.profiles.find(p => p.id === agentId);
-        if (!client || !current) throw new Error(strings.connection.unavailable);
-        const config = await client.call('agents.runtime.get', { agentId });
-        const model = next.model ?? config.defaultRoute.model!;
-        const route = { providerId: next.providerId, accountId: next.accountId, model, effort: next.effort, permissionMode: next.permissionMode };
-        const allowed = config.allowedRoutes.some(r => r.providerId === route.providerId && r.accountId === route.accountId && r.model === model)
-          ? config.allowedRoutes
-          : [...config.allowedRoutes, { id: secureId(), name: view.store.modelOf(route)?.name ?? model, providerId: route.providerId, accountId: route.accountId, model, effort: route.effort }];
-        return { agentId, expectedRevision: current.revision, config: { ...config, defaultRoute: route, allowedRoutes: allowed } };
-      });
-    } catch (error) { view.error = errorText(error); }
-  }
 
   async function send(text: string, attachments: Attachment[]): Promise<boolean> {
     const recipientIds = scope.kind === 'agent' ? [scope.id] : recipients;
@@ -193,6 +227,8 @@
   }
 </script>
 
+<svelte:document onvisibilitychange={readVisible} />
+
 {#snippet recipientChips()}
   {#if group}
     <div class="agent-recipients" role="group" aria-label={labels.recipients}>
@@ -208,19 +244,21 @@
 {/snippet}
 
 <section class="agent-chat" aria-label={labels.conversation}>
-  <div class="agent-chat-scroll" bind:this={scroller}>
+  <div class="agent-chat-scroll" bind:this={scroller} onscroll={readVisible}>
     <div class="agent-chat-column" data-testid="agent-transcript">
+      {#if !ready}<p class="agent-reading-status" role="status">{labels.loadingMissed}</p>{/if}
       {#if view.hasOlder(key, 'message')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === key} onclick={() => void view.loadOlder(key, history, messages)} data-testid="agent-messages-older">{labels.loadEarlier}</button>{/if}
       {#each messages as message, index (message.id)}
         {@const previous = messages[index - 1]}
         {@const mine = message.senderId === null}
         {@const newDay = !previous || longDay(previous.createdAt) !== longDay(message.createdAt)}
-        {@const first = newDay || previous.senderId !== message.senderId}
+        {@const first = newDay || previous.senderId !== message.senderId || message.id === firstMissed?.id}
         {#if newDay}<p class="agent-day"><span>{longDay(message.createdAt)}</span></p>{/if}
+        {#if message.id === firstMissed?.id}<p class="agent-unread-divider" bind:this={divider} data-testid="agent-unread-divider"><span>{missedLabel(missedAtEntry)}</span></p>{/if}
         {#if mine}
           {@const failed = view.seen.deliveries.filter(d => d.messageId === message.id && (d.status === 'failed' || d.status === 'limited'))}
           {@const prompt = promptOf(message)}
-          <article class="agent-message message from-user" class:first data-testid="agent-user-message">
+          <article class="agent-message message from-user" class:first data-message-id={message.id} data-message-at={message.createdAt} data-testid="agent-user-message">
             <span class="agent-sr-only">{labels.user}</span>
             <UserMessage store={view.store} message={prompt} turn={undefined} accepted={true} responded={receipts(message).responded} />
             {#if prompt.parts.length === 1 && message.attachments?.length}
@@ -255,7 +293,7 @@
           {@const event = message.thread}
           {@const work = workOf(message)}
           {@const memory = memoryOf(work)}
-          <article class="agent-message message from-agent" class:first class:labelled={!!event || work?.purpose === 'notice' || planned !== null} data-event={event?.event} data-testid={event ? 'agent-thread-event' : undefined}>
+          <article class="agent-message message from-agent" class:first class:labelled={!!event || work?.purpose === 'notice' || planned !== null} data-message-id={message.id} data-message-at={message.createdAt} data-event={event?.event} data-testid={event ? 'agent-thread-event' : undefined}>
             {#if group && first}
               <header>
                 <AgentAvatar kind="profile" id={message.senderId!} name={sender?.name ?? ''} avatar={sender?.avatar} size={20} />
@@ -310,6 +348,10 @@
       {/if}
     </div>
   </div>
+
+  {#if ready && awayFromBottom}
+    <div class="agent-jump"><button type="button" class="chip" onclick={jumpToUnread} data-testid="agent-jump-unread"><ArrowDown size={14} /><span>{unread.length ? missedLabel(unread.length) : labels.latestMessages}</span></button></div>
+  {/if}
 
   <Composer store={view.store} {target} />
 </section>

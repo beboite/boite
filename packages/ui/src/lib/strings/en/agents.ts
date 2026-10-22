@@ -70,6 +70,7 @@ export const strings = {
     stopEngine: 'Stop this core', stopEngineBody: 'Stops all work on this core and disconnects its clients. Started work will need review before resuming. Reopen Boite on the host to start the core again.',
     createAgent: 'Create an agent', noAgents: 'No agents yet', noAgentsOn: 'No agents on {machine} yet', more: 'More', noMatch: 'Nothing matches',
     noMessagesYet: 'No messages yet', noMissions: 'No missions yet', previewFrom: '{name}: {text}', unread: '{count} unread',
+    missedOne: '1 missed message', missedMany: '{count} missed messages', latestMessages: 'Latest messages', loadingMissed: 'Loading missed messages',
     backToChat: 'Back to the conversation', backTo: 'Back to {name}', editRoles: 'Edit roles', startChat: 'Start the conversation',
     asks: '{name} asks you',
     planned: 'Planned tasks', plannedResult: 'Planned task',

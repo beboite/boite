@@ -14,6 +14,24 @@ import { thrown } from './settle.ts';
 
 const HISTORY = AGENT_HISTORY_PAGE * 3 + 7;
 
+test('unread counts include incoming messages outside the snapshot window and respect each conversation read mark', async () => {
+  const h = await startTestCore();
+  try {
+    const c = await h.connect();
+    const agent = await agentOf(h, c);
+    const target: AgentScope = { kind: 'agent', id: agent.id };
+    const records = h.core.workforce.records;
+    for (let i = 0; i < HISTORY; i++) records.create('message', { scope: target, senderId: agent.id, text: `reply ${i}`, recipientIds: [], replyTo: null, episodeId: 'unread', sourceRunId: null });
+    records.create('message', { scope: target, senderId: null, text: 'my message', recipientIds: [], replyTo: null, episodeId: 'unread', sourceRunId: null });
+    const snapshot = await c.call('agents.snapshot', { readAt: [] });
+    expect(snapshot.messages).toHaveLength(AGENT_HISTORY_PAGE);
+    expect(snapshot.unread).toEqual([{ scope: target, at: 0, count: HISTORY }]);
+    const read = await c.call('agents.snapshot', { readAt: [{ scope: target, at: Date.now() }] });
+    expect(read.unread).toEqual([]);
+    expect(await thrown(c.call('agents.snapshot', { readAt: [{ scope: target, at: -1 }] }))).toThrow('readAt[0].at');
+  } finally { await h.stop(); }
+});
+
 async function agentOf(h: TestCore, c: CoreClient, name = 'Historian'): Promise<AgentProfile> {
   const account = (await c.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
   return c.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory'] } });
@@ -143,6 +161,9 @@ test('an agent session pages only its own context and provenance', async () => {
       const group = await scoped.call('agents.history', { threadId: thread.id, kind: 'memory', scopes: [shared] });
       expect(group.memories).toEqual([]);
       expect(group.more).toBe(false);
+      for (const scope of [own, shared]) r.create('message', { scope, senderId: agent.id, text: 'Private reply', recipientIds: [], replyTo: null, episodeId: 'private-count', sourceRunId: null });
+      const unread = await scoped.call('agents.snapshot', { threadId: thread.id, readAt: [] });
+      expect(unread.unread).toEqual([{ scope: own, at: 0, count: 1 }]);
     } finally { scoped.close(); }
   } finally { await h.stop(); }
 }, 30000);

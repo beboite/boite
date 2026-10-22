@@ -41,7 +41,7 @@ test('an agent message follows a reader at the bottom and leaves one reading old
   const view = $state({
     seen: { messages: [message('m1', 'a-ada')], deliveries: [], decisions: [] },
     snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
-    store: useStore(),
+    store: useStore(), readAt: { 'profile:a-ada': at },
     pending: false,
     loadingOlder: null,
     fill() {},
@@ -84,6 +84,34 @@ test('an agent message follows a reader at the bottom and leaves one reading old
   view.seen.messages = [...view.seen.messages, message('m4', null)];
   await settle();
   expect(top).toBe(1200);
+});
+
+test('opening unread messages starts at the first missed one and reads only the visible messages', async () => {
+  const items = [message('read', 'a-ada'), message('first-missed', 'a-ada'), message('still-missed', 'a-ada')];
+  const markRead = vi.fn();
+  const view = $state({
+    seen: { messages: items, deliveries: [], decisions: [] },
+    snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
+    store: useStore(), readAt: { 'profile:a-ada': items[0]!.createdAt }, markRead,
+    pending: false, loadingOlder: null, fill() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
+  });
+  mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
+  const box = document.querySelector<HTMLElement>('.agent-chat-scroll')!;
+  let top = 0;
+  Object.defineProperties(box, { clientHeight: { value: 200 }, scrollHeight: { value: 600 }, scrollTop: { get: () => top, set: value => { top = value; } } });
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const index = items.findIndex(m => m.id === this.getAttribute('data-message-id'));
+    const y = this === box ? 0 : this.matches('[data-testid="agent-unread-divider"]') ? 200 - top : index * 200 - top;
+    return { top: y, bottom: y + 200, height: 200 } as DOMRect;
+  });
+  await settle();
+  expect(document.querySelector('[data-testid="agent-unread-divider"]')?.textContent).toContain('2 missed messages');
+  expect(top).toBe(200);
+  expect(markRead).toHaveBeenLastCalledWith('profile:a-ada', items[1]!.createdAt);
+  expect(markRead).not.toHaveBeenCalledWith('profile:a-ada', items[2]!.createdAt);
+  top = 400; box.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(markRead).toHaveBeenLastCalledWith('profile:a-ada', items[2]!.createdAt);
 });
 
 test('HTTP agent sending keeps its secure request id for an uncertain retry', async () => {
@@ -202,7 +230,7 @@ test('a question the agent asked in its hidden session thread stands in its conv
   expect(answerQuestion).toHaveBeenCalledOnce();
 });
 
-test('the conversation types into the thread composer: attach, dictation and the agent\'s model chips stay, the worktree and plan chips go', async () => {
+test('the conversation keeps attachments and dictation with engine controls in settings', async () => {
   const call = vi.fn().mockResolvedValue({ id: 'm-sent' });
   const view = {
     seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
@@ -216,9 +244,7 @@ test('the conversation types into the thread composer: attach, dictation and the
   expect(composer.querySelector('[data-testid="composer-attach"]')).not.toBeNull();
   // The microphone, or its stand-in while its chunk loads.
   expect(composer.querySelector(`[data-testid="dictation"], button[aria-label="${strings.speech.start}"]`)).not.toBeNull();
-  // The agent's model and mode, where a thread's are; a thread's worktree and the old Plan chip stay out.
-  for (const shown of ['composer-picker', 'composer-mode']) expect(composer.querySelector(`[data-testid="${shown}"]`)).not.toBeNull();
-  for (const gone of ['agent-schedule-message', 'composer-worktree']) expect(composer.querySelector(`[data-testid="${gone}"]`)).toBeNull();
+  for (const gone of ['composer-picker', 'composer-mode', 'agent-schedule-message', 'composer-worktree']) expect(composer.querySelector(`[data-testid="${gone}"]`)).toBeNull();
   expect(document.querySelector('[data-testid="agent-message-input"]')).toBeNull();
   // A picture goes with the words to the agent.
   const picture = { kind: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=', name: 'shot.png' } as const;
@@ -254,46 +280,6 @@ test('a retry keeps its request id only for the same bytes: another file of the 
   expect(ids[1]).toBe(ids[0]);
   expect(ids[2]).not.toBe(ids[0]);
   delete realStore.composerStates['agent:agent:a-ada'];
-});
-
-test('the chips pick the agent\'s own mode, saved as its Settings tab saves it, even while a message is being sent; a paired device sees none', async () => {
-  const selection = { providerId: 'claude', accountId: 'acc-ada', model: 'opus', effort: null, permissionMode: 'default' };
-  const config = { defaultRoute: selection, allowedRoutes: [{ ...selection, id: 'default', name: 'Default' }], subagents: { enabled: true, paused: false, profiles: [], anyModel: true }, compactAfterTurns: 12, maxRunMinutes: 10, autoMemory: true };
-  const call = vi.fn(async (method: string, _params?: unknown) => method === 'agents.runtime.get' ? structuredClone(config) : { id: 'a-ada' });
-  const view = (owner: boolean) => {
-    // As the page: saves wait in one queue, and each refreshes the snapshot, the agent's revision with it.
-    let saves = Promise.resolve();
-    const v = {
-      seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', revision: 7, selection }], groups: [], work: [], sessions: [] },
-      store: useStore({ owner, client: { call } }), pending: true, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {},
-      // A message is on its way: the page's one-shot calls are refused until it lands.
-      call: vi.fn(async () => null),
-      save(method: string, params: () => Promise<unknown>) {
-        const run = saves.then(async () => { const result = await call(method, await params()); v.snapshot.profiles[0]!.revision++; return result; });
-        saves = run.then(() => undefined, () => undefined);
-        return run;
-      },
-    };
-    return v as unknown as AgentsView;
-  };
-  mounted = mount(AgentConversation, { target: document.body, props: { view: view(true), scope } });
-  await settle();
-  const pickMode = async (mode: string) => {
-    document.querySelector<HTMLButtonElement>('[data-testid="composer-mode"]')!.click();
-    await settle();
-    document.querySelector<HTMLButtonElement>(`[data-testid="composer-mode-menu"] [data-value="${mode}"]`)!.click();
-    await settle();
-  };
-  await pickMode('acceptEdits');
-  expect(call).toHaveBeenCalledWith('agents.runtime.get', { agentId: 'a-ada' });
-  expect(call).toHaveBeenLastCalledWith('agents.runtime.configure', { agentId: 'a-ada', expectedRevision: 7, config: { ...config, defaultRoute: { ...selection, permissionMode: 'acceptEdits' } } });
-  // The next pick reads the revision the first save left, not the one the chips were drawn with.
-  await pickMode('bypassPermissions');
-  expect(call).toHaveBeenLastCalledWith('agents.runtime.configure', expect.objectContaining({ expectedRevision: 8 }));
-  await unmount(mounted);
-  mounted = mount(AgentConversation, { target: document.body, props: { view: view(false), scope } });
-  await settle();
-  for (const gone of ['composer-picker', 'composer-mode']) expect(document.querySelector(`[data-testid="${gone}"]`)).toBeNull();
 });
 
 test('a picture the user sent shows as a thread\'s does once the agent\'s turn holds it, and opens its original', async () => {
