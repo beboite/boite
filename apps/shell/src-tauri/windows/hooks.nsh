@@ -148,6 +148,19 @@
     boite_core_writable:
     FileClose $1
   boite_core_free:
+  ; An agent's `boite` command (boite.exe) that outlived its core holds that
+  ; file the same way: it moves aside too, whatever the admission.
+  ClearErrors
+  IfFileExists "$INSTDIR\boite.exe" 0 boite_cli_free
+    FileOpen $1 "$INSTDIR\boite.exe" a
+    IfErrors 0 boite_cli_writable
+      Delete "$INSTDIR\boite.exe.old"
+      Rename "$INSTDIR\boite.exe" "$INSTDIR\boite.exe.old"
+      Delete /REBOOTOK "$INSTDIR\boite.exe.old"
+      Goto boite_cli_free
+    boite_cli_writable:
+    FileClose $1
+  boite_cli_free:
   ClearErrors
   Pop $2
   Pop $1

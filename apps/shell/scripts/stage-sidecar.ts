@@ -63,6 +63,24 @@ const WORKERS = ['jobs-worker.js', 'guard-worker.js', 'artifact-retention-worker
 const SHIMS = ['boite', 'boite.cmd'];
 const shims = join(repo, 'packages', 'core', 'shims');
 
+/**
+ * Windows only: `boite.exe`, which Windows finds before `boite.cmd` and which
+ * hands each argument to the core without cmd.exe splitting it at an `&`
+ * (`apps/shell/launcher`). Built here, a few hundred kilobytes, in a second.
+ */
+function buildLauncher(): string | null {
+  if (suffix !== '.exe') return null;
+  const manifest = join(shell, 'launcher', 'Cargo.toml');
+  const targetArgs = cross ? ['--target', triple] : [];
+  const built = Bun.spawnSync(['cargo', 'build', '--release', '--locked', '--manifest-path', manifest, ...targetArgs], { stdout: 'inherit', stderr: 'inherit', windowsHide: true });
+  if (built.exitCode !== 0) refuse(`the Windows launcher did not build: cargo build --release --manifest-path ${manifest}`);
+  const metadata = Bun.spawnSync(['cargo', 'metadata', '--no-deps', '--format-version', '1', '--manifest-path', manifest], { stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+  if (metadata.exitCode !== 0) refuse(`cargo metadata failed for ${manifest}: ${metadata.stderr.toString()}`);
+  const targetDir = JSON.parse(metadata.stdout.toString()).target_directory as string;
+  return join(targetDir, ...(cross ? [triple] : []), 'release', 'boite.exe');
+}
+const launcher = buildLauncher();
+
 /** Windows only: the sidecar is the runtime, and the bundle it runs goes in this directory beside it. */
 const RUNTIME_SIDECAR = process.platform === 'win32';
 const BUNDLE_DIR = 'core';
@@ -152,7 +170,8 @@ function stageBundle(targetDir: string): void {
 /**
  * The one copy both destinations share: the sidecar under `exeName`,
  * every Worker beside it under its own name, which is the only name the core
- * looks for, and the two `boite` shims the core puts on an agent's PATH.
+ * looks for, and the `boite` shims the core puts on an agent's PATH, with
+ * `boite.exe` on Windows.
  */
 export function stageCore(targetDir: string, exeName: string): void {
   const exeSource = sidecar;
@@ -185,6 +204,11 @@ export function stageCore(targetDir: string, exeName: string): void {
     copyFileSync(source, target);
     if (process.platform !== 'win32' && name === 'boite') chmodSync(target, 0o755);
     console.log(`stage-sidecar: ${target} (${bytes} bytes)`);
+  }
+  if (launcher) {
+    const bytes = sizeOf(launcher, `${launcher} does not exist after its build`);
+    copyFileSync(launcher, join(targetDir, 'boite.exe'));
+    console.log(`stage-sidecar: ${join(targetDir, 'boite.exe')} (${bytes} bytes)`);
   }
 }
 

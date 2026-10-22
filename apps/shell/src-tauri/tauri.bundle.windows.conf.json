@@ -2,7 +2,8 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "resources": {
-      "binaries/core": "core"
+      "binaries/core": "core",
+      "binaries/boite.exe": "boite.exe"
     },
     "windows": {
       "nsis": {
