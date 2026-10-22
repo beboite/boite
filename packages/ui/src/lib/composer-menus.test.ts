@@ -1,0 +1,10 @@
+import { expect, test } from 'vitest';
+import { skillSlashItems, slashCompletion } from './composer-menus';
+
+test('manual skill rows keep their descriptions and defer name collisions to driver commands', () => {
+  const focus = { name: 'focus', description: 'Focus on one task.', hint: null };
+  const native = { name: 'native', description: 'Native command.', hint: '<text>' };
+  const rows = skillSlashItems([focus, focus, native], [native]);
+  expect(rows).toEqual([{ id: 'skill:focus', kind: 'command', label: '/focus', description: 'Focus on one task.' }]);
+  expect(slashCompletion(rows[0]!)).toBe('/focus ');
+});

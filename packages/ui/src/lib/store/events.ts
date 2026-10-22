@@ -316,6 +316,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     s.logins = rest;
     models.dropProbes(accountId);
   });
+  on('brain.configured', () => { void s.loadBrainCommands(); });
   on('settings.updated', (settings) => {
     ctx.metadataRevision.settings++;
     if (JSON.stringify(s.settings?.subscriptionProxy) !== JSON.stringify(settings.subscriptionProxy)) {

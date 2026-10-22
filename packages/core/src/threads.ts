@@ -627,6 +627,17 @@ export class ThreadStore {
     checkStoredSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
 
+    if (!operation && !activity && !startedBy) {
+      const expanded = this.core.brain.expandPrompt(prompt, this.agentState.commands.get(threadId));
+      const offset = expanded.length - prompt.length;
+      if (expanded !== prompt) {
+        previewReferences = previewReferences.map(reference => reference.mention ? {
+          ...reference, mention: { start: reference.mention.start + offset, end: reference.mention.end + offset },
+        } : reference);
+        prompt = expanded;
+      }
+    }
+
     // A compaction with a label is the core's own (`threads/auto-compact.ts`): Boite speaks, not the user.
     // So is every keepalive (`threads/cache-keepalive.ts`).
     const automatic = (operation === 'compact' && displayText !== undefined) || operation === 'keepalive';

@@ -174,6 +174,7 @@ export class Store {
   detach(): void {
     const ctx = this.#ctx;
     ctx.clientGeneration++;
+    ctx.settings.brainCommands = [];
     ctx.models.flushModels();
     void ctx.threads.unsubscribe();
     ctx.threads.loadingThreadId = null;
@@ -330,6 +331,8 @@ export class Store {
 
   get scheduler() { return this.#ctx.settings.scheduler; }
   set scheduler(value) { this.#ctx.settings.scheduler = value; }
+  get brainCommands() { return this.#ctx.settings.brainCommands; }
+  loadBrainCommands() { return this.#ctx.settings.loadBrainCommands(); }
   get settings() { return this.#ctx.settings.settings; }
   set settings(value) { this.#ctx.settings.settings = value; }
   get keybindings() { return this.#ctx.settings.keybindings; }

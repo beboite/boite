@@ -48,6 +48,8 @@ providers and managed installs. Tests must use fresh directories.
 
 ## The UI
 
+The composer's slash menu reads global manual skills from `brain.commands`, including on drafts and drivers without commands; `disable-model-invocation: true` hides them from model catalogs and enables core expansion on explicit invocation.
+
 The Windows shell forwards its eight client-area edges and corners to Tauri's
 native resize loop. Windows 10 uses `shadow(false)` to avoid a grey frame;
 WebView2 then covers the native hit-test area. `WindowResizeHandles.svelte`

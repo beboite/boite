@@ -1,3 +1,5 @@
+import type { AgentCommand } from './threads.ts';
+
 /** A brain lives on the core's machine. Detected plugins are not installed by Boite. */
 export interface BrainConfig {
   path: string | null;
@@ -23,6 +25,8 @@ export interface BrainEntry {
   name: string;
   description: string;
   error: string | null;
+  /** A skill that only a user slash command can invoke, excluded from model catalogs. */
+  disableModelInvocation?: boolean;
 }
 
 export interface BrainStatus {
@@ -35,6 +39,8 @@ export interface BrainStatus {
 }
 
 export interface BrainRpcMethods {
+  /** Manual skill names and descriptions for the composer, without paths or bodies. */
+  'brain.commands': { params: Record<string, never>; result: AgentCommand[] };
   'brain.status': { params: Record<string, never>; result: BrainStatus };
   'brain.configure': { params: BrainConfig; result: BrainStatus };
   /** Fetch, fast-forward and push existing commits. Never stage, stash, reset or force. */

@@ -1636,6 +1636,25 @@ test('a slash lists the agent commands first, filters, and completes the box', a
   expect(answer).toBe('HELLO');
 });
 
+test('global manual skills appear with descriptions and complete on a draft without driver commands', async ({ app: _app }) => {
+  await store.client!.call('brain.configure', { path: '/shared/brain', enabled: true });
+  store.startDraft();
+  await waitFor(() => store.draft !== null);
+  await type('/');
+  await waitFor(() => slashRows().includes('focus'));
+  expect(slashRows()).not.toContain('code-review');
+  expect(slashMenu()?.textContent).toContain('Work through one task at a time.');
+  expect(slashMenu()?.textContent).toContain('Skills');
+  expect(slashRows()).not.toContain('shout');
+  query('[data-testid=slash-row][data-name=focus]').click();
+  await waitFor(() => input().value === '/focus ');
+  await waitFor(() => slashMenu() === null);
+  await store.client!.call('brain.configure', { path: '/shared/brain', enabled: false });
+  await type('/');
+  await waitFor(() => slashMenu() !== null && store.brainCommands.length === 0);
+  expect(slashRows()).not.toContain('focus');
+});
+
 test('a composer command opens its control without sending a prompt', async ({ app: _app }) => {
   await waitFor(() => store.openThread !== null && !store.busy);
 

@@ -55,6 +55,7 @@ export function registerModules(core: Core): void {
   core.router.register('core.desktopUpdateStatus', () => core.desktopUpdates.snapshot());
   registerPersistentAgents(core);
   core.router.register('brain.status', () => core.brain.status());
+  core.router.register('brain.commands', () => core.brain.commands());
   core.router.register('brain.configure', params => core.brain.configure(params));
   core.router.register('brain.sync', () => core.brain.sync());
   registerHookMethods(core);

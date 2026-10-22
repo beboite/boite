@@ -57,6 +57,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // The logo the list announces: a bounded image already stored in the journal, no path and no disk read.
   'projects.icon',
   'projects.files',
+  'brain.commands', // Paired phones draw the same manual skill menu, with no paths or skill bodies.
   // A phone starts a draft like the desktop: the core picks the folder, the device names no path.
   'projects.drafts',
   // Putting a project away only hides it from the sidebar, like archiving a thread; nothing on disk moves.

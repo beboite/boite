@@ -6,13 +6,31 @@
  * pure pieces it derives from.
  */
 import type { AgentCommand, PreviewReference } from '@boite/contracts';
-import { AGENT_PREFIX } from './commands.svelte';
+import { AGENT_PREFIX, isAgentCommand } from './commands.svelte';
 import { experimentOn } from './experiments.svelte';
 import type { PaletteItem } from './palette';
 import { strings } from './strings';
 
 /** A command the composer runs itself: the testid of the chip whose menu it opens, and its line. */
 export type ChipCommand = { testid: string; description: string };
+export const SKILL_PREFIX = 'skill:';
+
+/** Prompt rows insert their token; control rows return null to open their picker. */
+export function slashCompletion(item: PaletteItem): string | null {
+  if (item.id.startsWith(SKILL_PREFIX)) return `${item.label} `;
+  if (isAgentCommand(item)) return `/${item.id.slice(AGENT_PREFIX.length)} `;
+  return ['goal', 'goal2', 'loop', 'btw'].includes(item.id) ? `/${item.id} ` : null;
+}
+
+/** Global manual skills are prompt text, with native commands taking name collisions. */
+export function skillSlashItems(skills: AgentCommand[], commands: AgentCommand[]): PaletteItem[] {
+  const seen = new Set(commands.map(command => command.name));
+  return skills.filter(skill => {
+    if (seen.has(skill.name)) return false;
+    seen.add(skill.name);
+    return true;
+  }).map(skill => ({ id: `${SKILL_PREFIX}${skill.name}`, kind: 'command', label: `/${skill.name}`, description: skill.description ?? undefined }));
+}
 
 /** What was typed after the slash, or null while the box is not a bare `/word`. */
 export function slashQueryOf(text: string): string | null {
