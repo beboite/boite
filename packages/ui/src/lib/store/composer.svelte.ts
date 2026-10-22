@@ -27,7 +27,11 @@ import { DraftLaunch } from './draft-launch.svelte';
  * edits it or removes it. `sent` marks one that went out at least once: only
  * such a prompt may already have been taken by the core.
  */
-export type OutboxRequest = { id: string; choice: Choice | null; queuedAt: number; failed?: string; sent?: true };
+export type OutboxRequest = {
+  id: string; choice: Choice | null; queuedAt: number; failed?: string; sent?: true;
+  /** A draft's start as first asked of the core, so a retry under the same id asks for the same conversation. */
+  start?: { projectId: string; worktree: boolean; incognito: boolean };
+};
 
 /** A prompt waiting behind a running turn or for its machine, with what it was written with. */
 export type QueuedPrompt = { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[]; afterBoundary?: string; request?: OutboxRequest };

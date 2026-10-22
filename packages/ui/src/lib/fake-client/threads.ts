@@ -290,12 +290,18 @@ export function threadMethods(ctx: FakeContext) {
     'threads.create': async (params) => {
       // The core's creation receipts: asked again under its request id, a creation answers with the conversation it made.
       const id = params.clientRequestId;
-      const key = JSON.stringify([params.projectId, params.providerId, params.accountId, params.title ?? null]);
+      if (id !== undefined && (typeof id !== 'string' || id.length === 0 || id.length > 128)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'clientRequestId must be a string of 1 to 128 characters', data: { field: 'clientRequestId', expected: '1 to 128 characters' } });
+      }
+      const key = JSON.stringify([params.projectId, params.providerId, params.accountId, params.title ?? null, params.cwd ?? null,
+        params.model ?? null, params.effort ?? null, params.speed ?? null, params.permissionMode ?? null, params.worktree ?? null,
+        params.incognito === true, params.context ?? null]);
       const previous = id === undefined ? undefined : creations.get(id);
       if (previous) {
         if (previous.key !== key) throw refusal('clientRequestId was already used for another conversation', { field: 'clientRequestId', expected: 'a new id for a different conversation' });
-        const made = ctx.threads.get(await previous.created);
-        if (!made) throw refusal('the conversation this request started was deleted since', { field: 'clientRequestId', reason: 'deleted' });
+        const threadId = await previous.created;
+        const made = ctx.threads.get(threadId);
+        if (!made) throw refusal('the conversation this request started was deleted since', { field: 'clientRequestId', threadId, reason: 'deleted' });
         if (params.subscribe) ctx.bus.subscribed.add(made.id);
         return structuredClone(toSummary(made));
       }

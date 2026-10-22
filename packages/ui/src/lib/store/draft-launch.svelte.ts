@@ -5,6 +5,7 @@ import { titleFrom } from '../format';
 import { DRAFT_STASH_KEY } from '../prefs';
 import { wasClosed } from '../rpc-error';
 import type { Choice, Draft } from '../store.svelte';
+import type { OutboxRequest } from './composer.svelte';
 import type { StoreContext } from './context';
 import { draftKey, type Input } from './drafts.svelte';
 
@@ -18,8 +19,8 @@ const DRAFT_RETRY_MS = 15_000;
 export class DraftLaunch {
   /** The queued drafts are being started, one after the other; `again` asks for one more pass. */
   private launches: { again: boolean } | null = null;
-  /** Drafts whose start got nowhere for a reason that may pass (no answer, no drafts project): left alone for a while. */
-  private stalled = new Set<string>();
+  /** Drafts whose start got nowhere for a reason that may pass (no answer, no drafts project): left alone for a while, by the request that stalled. */
+  private stalled = new Map<string, string>();
   /** Bumped when a stalled draft may be tried again. */
   private tick = $state(0);
 
@@ -47,13 +48,14 @@ export class DraftLaunch {
   private queuedDrafts(): string[] {
     const s = this.ctx.store;
     const waiting = (input: Input | undefined): input is Input => !!input && !input.sending && !!input.queued[0]?.request && input.queued[0].request.failed === undefined;
-    const ready = (key: string) => !this.stalled.has(key);
+    // Only the request that stalled waits: one sent again after a cancel goes at once.
+    const ready = (key: string, input: Input) => this.stalled.get(key) !== input.queued[0]?.request?.id;
     const keys: { key: string; at: number }[] = [];
     const open = s.draft ? draftKey(s.draft) : null;
     const input = this.ctx.composer.composerStates[DRAFT_STASH_KEY];
-    if (open !== null && ready(open) && waiting(input)) keys.push({ key: open, at: input.queued[0]!.request!.queuedAt });
+    if (open !== null && waiting(input) && ready(open, input)) keys.push({ key: open, at: input.queued[0]!.request!.queuedAt });
     for (const [key, saved] of Object.entries(this.ctx.drafts.saved)) {
-      if (key !== open && ready(key) && waiting(saved.input)) keys.push({ key, at: saved.input.queued[0]!.request!.queuedAt });
+      if (key !== open && waiting(saved.input) && ready(key, saved.input)) keys.push({ key, at: saved.input.queued[0]!.request!.queuedAt });
     }
     return keys.sort((a, b) => a.at - b.at).map(entry => entry.key);
   }
@@ -92,17 +94,22 @@ export class DraftLaunch {
     const request = head.request;
     // The composer queues with the chips' choice; a draft saved without one starts on the machine's default.
     const choice = request.choice ?? source.choice ?? s.defaultChoice();
-    if (!choice) { this.stall(key); return; }
+    if (!choice) { this.stall(key, request.id); return; }
     input.sending = true;
     input.outgoing = 1;
     try {
       await this.ctx.connection.reloading?.essential;
       if (!this.ctx.currentClient(client, generation) || s.connection !== 'ready' || input.queued[0] !== head) return;
-      const projectId = draft.projectId ?? await this.ctx.projects.ensureDrafts();
+      // A start asked once is asked again the same way, whatever the draft became since: the core holds the id to it.
+      const start = request.start ?? await this.startOf(draft);
       if (!this.ctx.currentClient(client, generation)) return;
-      if (projectId === null) { this.stall(key); return; }
+      if (start === null) { this.stall(key, request.id); return; }
+      if (!request.start && input.queued[0] === head) {
+        head.request = { ...request, start };
+        this.ctx.drafts.persist(); void this.ctx.drafts.flush();
+      }
       const created = await client.call('threads.create', {
-        projectId,
+        projectId: start.projectId,
         providerId: choice.providerId,
         accountId: choice.accountId,
         permissionMode: choice.permissionMode,
@@ -110,7 +117,8 @@ export class DraftLaunch {
         effort: choice.effort,
         speed: choice.speed ?? null,
         ...(choice.model ? { model: choice.model } : {}),
-        ...(draft.worktree ? { worktree: {} } : {}),
+        ...(start.worktree ? { worktree: {} } : {}),
+        ...(start.incognito ? { incognito: true } : {}),
         clientRequestId: request.id
       });
       if (!this.ctx.currentClient(client, generation)) return;
@@ -120,7 +128,7 @@ export class DraftLaunch {
       if (!this.ctx.currentClient(client, generation)) return;
       // Lost with the link: the next connection asks again under the same id. Unanswered on a live one: a little later.
       if (wasDropped(error) || wasClosed(error) || wasUnanswered(error) || s.connection !== 'ready') {
-        if (s.connection === 'ready') this.stall(key);
+        if (s.connection === 'ready') this.stall(key, request.id);
         return;
       }
       if (input.queued[0] === head) head.request = { ...request, failed: this.ctx.reason(error) };
@@ -132,9 +140,21 @@ export class DraftLaunch {
   }
 
   /** A start that got nowhere is not tried again at once, which would loop on the same answer. */
-  private stall(key: string): void {
-    this.stalled.add(key);
-    setTimeout(() => { this.stalled.delete(key); this.tick++; }, DRAFT_RETRY_MS);
+  private stall(key: string, requestId: string): void {
+    this.stalled.set(key, requestId);
+    setTimeout(() => { if (this.stalled.get(key) === requestId) this.stalled.delete(key); this.tick++; }, DRAFT_RETRY_MS);
+  }
+
+  /**
+   * Where the draft starts: its project, or the drafts project, which a
+   * background start looks up without a notification, and the worktree and
+   * incognito switches as the draft's own send would read them.
+   */
+  private async startOf(draft: Draft): Promise<NonNullable<OutboxRequest['start']> | null> {
+    const s = this.ctx.store;
+    const projectId = draft.projectId ?? await this.ctx.projects.ensureDrafts({ quiet: true });
+    if (projectId === null) return null;
+    return { projectId, worktree: draft.worktree, incognito: !!draft.incognito && projectId === s.draftsProject?.id };
   }
 
   /**
@@ -145,7 +165,13 @@ export class DraftLaunch {
     const s = this.ctx.store;
     const state = (this.ctx.composer.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false });
     // A draft started again after a crash finds its prompts there already: the same ids, once.
-    const moved = input.queued.splice(0).filter(entry => !state.queued.some(queued => queued.request && queued.request.id === entry.request?.id));
+    const moved = input.queued.splice(0)
+      .filter(entry => !state.queued.some(queued => queued.request && queued.request.id === entry.request?.id))
+      .map(entry => {
+        if (!entry.request?.start) return entry;
+        const { start: _start, ...request } = entry.request;
+        return { ...entry, request };
+      });
     state.queued.push(...moved);
     // The thread's outbox is written before the draft goes: a crash between the two leaves the
     // prompt in both, which the core takes once under its ids, never in neither.

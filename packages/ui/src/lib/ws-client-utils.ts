@@ -45,17 +45,20 @@ export const IDLE_PROBE_MS = 25_000;
  */
 export const PROBE_DEADLINE_MS = 10_000;
 /**
- * A call on a remote socket that hears no frame at all for this long sends a
- * probe: the click on a conversation of a machine whose link died shows the
- * machine offline within this and the probe's deadline. A socket that answers,
- * or carries any event meanwhile, is not asked.
+ * A call on a remote socket to a core that slices its answers
+ * (`chunkedAnswers`) that hears no frame at all for this long sends a probe:
+ * the click on a conversation of a machine whose link died shows the machine
+ * offline within this and the probe's deadline. A socket that answers, or
+ * carries any event meanwhile, is not asked. Older cores keep the call's own
+ * 120 s timeout.
  */
 export const QUIET_CALL_MS = 3_000;
 /**
  * The slowest upload a probe still waits for: its `hello` queues behind the
  * bytes this client sent since the last frame came back, past the first 64 KiB,
  * so 2 MiB of pictures give it 62 s more. Answers need no such allowance: they come in 64 KiB
- * slices, so a download as slow as 5 KiB/s still lands one within a deadline.
+ * slices, so a download faster than about 6.4 KiB/s lands one within the 10 s
+ * deadline.
  */
 export const UPLOAD_FLOOR_BYTES_PER_S = 32 * 1024;
 /** How long `resume()` gives the socket it already has before replacing it. */

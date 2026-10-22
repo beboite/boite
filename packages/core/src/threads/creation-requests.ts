@@ -25,7 +25,10 @@ export class CreationRequests {
     if (typeof id !== 'string' || id.length === 0 || id.length > REQUEST_ID_MAX) {
       throw invalidParams(`clientRequestId must be a string of 1 to ${REQUEST_ID_MAX} characters`, { field: 'clientRequestId', expected: `1 to ${REQUEST_ID_MAX} characters` });
     }
-    const key = JSON.stringify([params.projectId, params.providerId, params.accountId, params.title ?? null]);
+    // Everything that shapes the conversation: a repeat that differs is another request, refused.
+    const key = JSON.stringify([params.projectId, params.providerId, params.accountId, params.title ?? null, params.cwd ?? null,
+      params.model ?? null, params.effort ?? null, params.speed ?? null, params.permissionMode ?? null, params.worktree ?? null,
+      params.incognito === true, params.context ?? null]);
     const now = Date.now();
     for (const [stale, receipt] of this.receipts) if (receipt.expiresAt <= now) this.receipts.delete(stale);
     const previous = this.receipts.get(id);

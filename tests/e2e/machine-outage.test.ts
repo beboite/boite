@@ -106,8 +106,16 @@ test('a machine whose link goes silent reads offline within seconds, and a conve
     await page.waitFor(`${server}.connection !== 'ready'`, 16_000);
     expect(Date.now() - clicked).toBeLessThan(16_000);
     await page.waitFor(`document.querySelector('${id('composer-input')}')?.getAttribute('placeholder')?.startsWith('Server is offline')`);
-    // Its status says it: no red error stays over the window.
-    await page.waitFor(`!document.querySelector('${id('error-toast')}')`, 7_000);
+    // Its status says it: no error shows over the window, now or in the seconds after.
+    await page.evaluate(`(() => {
+      globalThis.__toasts = [];
+      const seen = () => { const toast = document.querySelector('${id('error-toast')}'); if (toast) globalThis.__toasts.push(toast.textContent); };
+      seen();
+      globalThis.__toastWatch = new MutationObserver(seen);
+      globalThis.__toastWatch.observe(document.body, { childList: true, subtree: true });
+    })()`);
+    await Bun.sleep(6_000);
+    expect(await page.evaluate<string[]>(`(() => { globalThis.__toastWatch.disconnect(); return globalThis.__toasts; })()`)).toEqual([]);
     await capture('outage-offline-thread-desktop.png');
 
     // The other machine is untouched.

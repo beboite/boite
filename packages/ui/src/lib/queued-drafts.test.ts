@@ -55,8 +55,8 @@ test('a draft sent while its machine is away waits on its row, survives closing 
   first.store.startDraft(project.id, { fresh: true });
   first.client.drop();
   sendAway(first.store, 'Start the migration');
-  // The box empties; the row says the conversation waits for the machine.
-  expect(first.store.composerStates.draft!.text).toBe('');
+  // The prompt waits in the draft's own queue, under a request id; the row says the conversation waits for the machine.
+  expect(first.store.composerStates.draft!.queued).toMatchObject([{ text: 'Start the migration', request: { id: expect.any(String) } }]);
   const [row] = first.store.draftEntries;
   expect(row).toMatchObject({ projectId: project.id, text: 'Start the migration', queued: 'waiting', active: true });
   expect(first.creates).toHaveLength(0);
@@ -99,10 +99,14 @@ test('a start whose answer the link lost is asked again under its id and makes o
   expect(starts).toHaveLength(0);
   await vi.waitFor(() => expect(store.connection).toBe('connecting'));
   expect(store.draftEntries[0]).toMatchObject({ queued: 'waiting' });
+  // Moved to another project meanwhile: the retry still asks for what the core may already hold.
+  const other = store.projects.find(entry => entry.kind !== 'drafts' && entry.id !== project.id);
+  store.draft!.projectId = other!.id;
   await client.restore();
   await vi.waitFor(() => expect(starts).toHaveLength(1), { timeout: 5000 });
   expect(creates).toHaveLength(2);
   expect(creates[1]!.clientRequestId).toBe(creates[0]!.clientRequestId);
+  expect(creates[1]).toEqual(creates[0]);
   expect(await titled(client, 'Only once please')).toHaveLength(1);
 });
 
@@ -118,7 +122,9 @@ test('cancelling a queued start brings its words back into the draft, which no l
   expect(store.composerStates.draft).toMatchObject({ text: 'Never mind', queued: [] });
   expect(store.draftEntries[0]).toMatchObject({ text: 'Never mind', queued: null });
   await client.restore();
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await vi.waitFor(() => expect(store.connection).toBe('ready'));
+  // Long enough for a start to have gone out: a queued draft starts within a tick of the machine's lists.
+  await new Promise(resolve => setTimeout(resolve, 500));
   expect(creates).toHaveLength(0);
 });
 
@@ -210,4 +216,29 @@ test('a draft whose start is on its way is not deleted: its prompt reaches the c
   await vi.waitFor(() => expect(starts).toHaveLength(1), { timeout: 5000 });
   expect(starts[0]!.prompt).toBe('Already on its way');
   expect(store.draftEntries).toHaveLength(0);
+});
+
+test('a draft whose start stalled, taken back and sent again, starts at once under its new id', async () => {
+  const { store, client, creates, original } = await machine('one');
+  await store.connect();
+  const project = store.projects.find(entry => entry.kind !== 'drafts')!;
+  store.startDraft(project.id, { fresh: true });
+  client.drop();
+  sendAway(store, 'Second try');
+  let silent = true;
+  vi.mocked(client.call).mockImplementation(async (method, params) => {
+    if (method === 'threads.create') {
+      creates.push(params as { title?: string; clientRequestId?: string });
+      if (silent) { silent = false; throw unansweredFailure('threads.create'); }
+    }
+    return original(method, params);
+  });
+  await client.restore();
+  await vi.waitFor(() => expect(creates).toHaveLength(1), { timeout: 5000 });
+  const [row] = store.draftEntries;
+  store.cancelQueuedDraft(row!.id);
+  sendAway(store, store.composerStates.draft!.text);
+  store.composerStates.draft!.text = '';
+  await vi.waitFor(() => expect(creates).toHaveLength(2), { timeout: 2000 });
+  expect(creates[1]!.clientRequestId).not.toBe(creates[0]!.clientRequestId);
 });

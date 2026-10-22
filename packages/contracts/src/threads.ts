@@ -591,9 +591,11 @@ export interface ThreadsRpcMethods {
       subscribe?: boolean;
       /**
        * The client's id for this creation, 1 to 128 characters. Asked again
-       * under the same id within an hour, with the same project, provider,
-       * account and title, the core answers with the conversation the first
-       * call made instead of making another; with other ones it refuses. A
+       * under the same id within an hour, with the same parameters (project,
+       * provider, account, title, folder, model, effort, speed, mode,
+       * worktree, incognito, context), the core answers with the conversation
+       * the first call made instead of making another; with other ones it
+       * refuses. A
        * conversation queued while its machine was away is started this way.
        * Kept in memory: a core restart forgets it. An older core ignores it.
        */

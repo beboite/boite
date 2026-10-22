@@ -48,6 +48,11 @@ test('a request id names one conversation: reused for another it is refused, and
   await client.call('threads.create', { ...choice, clientRequestId: 'req_once' });
   const reused = await rejection(client.call('threads.create', { ...choice, title: 'Something else', clientRequestId: 'req_once' }));
   expect((reused.reason as { rpc: unknown }).rpc).toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'clientRequestId' } });
+  // Every parameter names the conversation, the mode and the effort included.
+  const otherMode = await rejection(client.call('threads.create', { ...choice, permissionMode: 'bypassPermissions', clientRequestId: 'req_once' }));
+  expect((otherMode.reason as { rpc: unknown }).rpc).toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'clientRequestId' } });
+  const otherEffort = await rejection(client.call('threads.create', { ...choice, effort: 'low', clientRequestId: 'req_once' }));
+  expect((otherEffort.reason as { rpc: unknown }).rpc).toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'clientRequestId' } });
 
   const missing = await rejection(client.call('threads.create', { ...choice, accountId: 'acc_missing', clientRequestId: 'req_retry' }));
   expect(missing.reason).toBeDefined();

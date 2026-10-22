@@ -184,7 +184,8 @@ export class Projects {
    * The drafts project, asked of the core on the first send into it. The core
    * makes the folder then, and the thread the send creates goes in it.
    */
-  async ensureDrafts(): Promise<ProjectId | null> {
+  /** `quiet`: a background start that tries again later, so a failure is not the user's to read. */
+  async ensureDrafts(options: { quiet?: boolean } = {}): Promise<ProjectId | null> {
     const known = this.ctx.store.draftsProject;
     if (known) return known.id;
     const client = this.ctx.client;
@@ -197,7 +198,7 @@ export class Projects {
       return project.id;
     } catch (error) {
       // A switched machine closed the old client: its rejection is not this machine's error.
-      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration) && !options.quiet) this.ctx.fail(error);
       return null;
     }
   }

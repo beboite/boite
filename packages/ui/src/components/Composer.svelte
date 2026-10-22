@@ -120,7 +120,7 @@
    * once the machine is back. A draft's queue starts its conversation then (`launchQueuedDrafts`); an
    * incognito draft is never kept on the device, so it waits for the machine.
    */
-  let offline = $derived(store.connection !== 'ready' && (thread !== null ? !store.draft : !!store.draft && !store.draft.incognito));
+  let offline = $derived(!target && store.connection !== 'ready' && (thread !== null ? !store.draft : !!store.draft && !store.draft.incognito));
   let machineLabel = $derived(workspace.machines.find((machine) => machine.store === store)?.label ?? strings.machines.local);
   /**
    * A question waiting for a written answer makes the box its free field: Send
