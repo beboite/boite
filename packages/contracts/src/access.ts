@@ -10,8 +10,10 @@ import type { RpcEventName, RpcMethodName } from './index.ts';
  * What a paired device reaches. Read this as the phone's screen: the sidebar,
  * a thread, the composer, the cards an agent raises, and the settings it only
  * displays. Model discovery may start the configured agent without a prompt.
- * Nothing here changes what the core trusts; the only paths a device names are
- * read-only, inside a thread's working tree.
+ * Nothing here changes what the core trusts, with one routing exception: it
+ * may turn the owner's saved subscription gateway on or off, never its kind,
+ * URLs or key. The only paths a device names are read-only, inside a thread's
+ * working tree.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   // A paired phone follows persistent work, talks to agents and answers its owner's decisions.

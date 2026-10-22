@@ -351,7 +351,7 @@ export function registerSubscriptionProxy(core: Core): void {
   core.router.register('subscriptionProxy.setEnabled', ({ enabled }) => {
     if (typeof enabled !== 'boolean') throw invalidParams('subscriptionProxy.setEnabled enabled must be a boolean', { field: 'enabled' });
     const proxy = core.settings.get().subscriptionProxy;
-    if (!proxy?.baseUrl) throw refused('no subscription proxy is configured: set one up in Settings > Accounts on the desktop', { field: 'subscriptionProxy' });
+    if (!proxy?.baseUrl) throw refused('no subscription proxy is configured: the owner sets one up in Settings > Accounts', { field: 'subscriptionProxy' });
     if (proxy.enabled === enabled) return core.settings.get();
     return core.settings.set({ subscriptionProxy: { ...proxy, enabled } });
   });

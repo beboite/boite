@@ -72,7 +72,7 @@ CLIProxyAPI, beside its address (or Douane on this machine in local mode). It
 saves as it flips, through `subscriptionProxy.setEnabled`, and changes only
 `enabled`: the kind, the URLs and the key stay as the owner saved them. A
 paired phone reaches it too, which is the one way a phone changes the gateway
-([phone](phone.md)); configuring one stays on the desktop. Before anything is
+([phone](phone.md)); configuring one stays owner-only. Before anything is
 saved there is no switch, and the method refuses with `no subscription proxy
 is configured`. Off restores native authentication as a saved Use a
 subscription proxy does. `?fake=1&gateway=douane` (or `cliproxyapi`) starts
