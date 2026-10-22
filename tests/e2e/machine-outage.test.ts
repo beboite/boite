@@ -10,6 +10,7 @@ let server: { close(): Promise<void> };
 let page: BrowserPage;
 let url: string;
 const cores: RunningCore[] = [];
+const DESKTOP_VIEWPORT = { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false };
 const id = (name: string) => `[data-testid="${name}"]`;
 async function capture(name: string) {
   await page.settleAnimations();
@@ -61,7 +62,10 @@ beforeAll(async () => {
   const port = await freePort();
   server = await startUi(port);
   url = `http://127.0.0.1:${port}`;
-  page = await BrowserPage.launch({ url: `${url}/?fake=1`, args: [`--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost, EXCLUDE ${REMOTE_HOST}`] });
+  // Windows can clamp the native headless window below the desktop breakpoint.
+  // Keep it narrow on every platform so viewport restoration exercises that case.
+  page = await BrowserPage.launch({ url: `${url}/?fake=1`, windowSize: { width: 390, height: 844 }, args: [`--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost, EXCLUDE ${REMOTE_HOST}`] });
+  await page.send('Emulation.setDeviceMetricsOverride', DESKTOP_VIEWPORT);
 }, 30_000);
 afterAll(async () => {
   await page?.close();
@@ -139,7 +143,8 @@ test('a machine whose link goes silent reads offline within seconds, and a conve
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await capture('outage-queued-draft-phone.png');
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-    await page.send('Emulation.clearDeviceMetricsOverride', {});
+    await page.send('Emulation.setDeviceMetricsOverride', DESKTOP_VIEWPORT);
+    await page.waitFor(`innerWidth === ${DESKTOP_VIEWPORT.width} && document.querySelector('${row}')`);
 
     // Its row's menu takes the start back: the words return to the box and nothing waits any more.
     await page.evaluate(`document.querySelector('${row}').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 180 }))`);
