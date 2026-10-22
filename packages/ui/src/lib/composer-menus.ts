@@ -14,19 +14,20 @@ import { strings } from './strings';
 /** A command the composer runs itself: the testid of the chip whose menu it opens, and its line. */
 export type ChipCommand = { testid: string; description: string };
 export const SKILL_PREFIX = 'skill:';
+const PROMPT_COMMANDS = ['goal', 'goal2', 'loop', 'btw'];
 
 /** Prompt rows insert their token; control rows return null to open their picker. */
 export function slashCompletion(item: PaletteItem): string | null {
   if (item.id.startsWith(SKILL_PREFIX)) return `${item.label} `;
   if (isAgentCommand(item)) return `/${item.id.slice(AGENT_PREFIX.length)} `;
-  return ['goal', 'goal2', 'loop', 'btw'].includes(item.id) ? `/${item.id} ` : null;
+  return PROMPT_COMMANDS.includes(item.id) ? `/${item.id} ` : null;
 }
 
-/** Global manual skills are prompt text, with native commands taking name collisions. */
-export function skillSlashItems(skills: AgentCommand[], commands: AgentCommand[]): PaletteItem[] {
-  const seen = new Set(commands.map(command => command.name));
+/** Global manual skills are prompt text, with native and Boite commands taking name collisions. */
+export function skillSlashItems(skills: AgentCommand[], commands: AgentCommand[], reserved: readonly string[] = []): PaletteItem[] {
+  const seen = new Set([...commands.map(command => command.name), ...PROMPT_COMMANDS, ...reserved]);
   return skills.filter(skill => {
-    if (seen.has(skill.name)) return false;
+    if (!skill.name || /\s/.test(skill.name) || seen.has(skill.name)) return false;
     seen.add(skill.name);
     return true;
   }).map(skill => ({ id: `${SKILL_PREFIX}${skill.name}`, kind: 'command', label: `/${skill.name}`, description: skill.description ?? undefined }));
@@ -47,7 +48,7 @@ export function mentionQueryOf(text: string, caret: number, previewReferences: P
 
 /** The agent's own, in the order it reported them. Never on a draft: there is no agent yet. */
 export function agentSlashItems(commands: AgentCommand[]): PaletteItem[] {
-  return commands.filter((command) => !['goal', 'goal2', 'loop', 'btw'].includes(command.name)).map((command) => ({
+  return commands.filter((command) => !PROMPT_COMMANDS.includes(command.name)).map((command) => ({
     id: `${AGENT_PREFIX}${command.name}`,
     kind: 'command' as const,
     label: `/${command.name}`,

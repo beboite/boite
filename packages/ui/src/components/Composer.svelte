@@ -187,7 +187,7 @@
   $effect(() => mentions.follow(mentionQuery, mentionProject, store.client));
 
   let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(thread?.commands ?? []));
-  let skillItems = $derived(skillSlashItems(store.brainCommands, thread?.commands ?? []));
+  let skillItems = $derived(skillSlashItems(store.brainCommands, thread?.commands ?? [], Object.keys(CHIP_COMMANDS)));
 
   $effect(() => {
     if (slashOpen) void store.loadBrainCommands();

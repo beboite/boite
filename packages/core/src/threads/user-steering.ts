@@ -77,7 +77,7 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
       saveThread(core, threads.require(threadId), 'thread.userInput');
     })());
     // A `/goal2`'s checklist reads what the user adds, drops or changes.
-    core.activity.userMessage(threadId, prompt);
+    core.activity.userMessage(threadId, expanded);
     published = true;
   };
   try {
