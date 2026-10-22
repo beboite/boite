@@ -470,7 +470,9 @@ export interface ProvidersRpcMethods {
    * Claude, ACP, Codex and pi list models through a temporary agent process.
    * Results are kept until refresh, a `providers.reload` that changes a
    * descriptor, or an account whose status or login changes: an unchanged
-   * reload or `accounts.check` keeps them.
+   * reload or `accounts.check` keeps them. An account with no list read since
+   * then gets the one saved under the same descriptor, executable, gateway and
+   * login at once, and the fresh read arrives as `providers.probed`.
    * For any other protocol they are the descriptor's models, with `probedAt`
    * the moment of the call.
    */

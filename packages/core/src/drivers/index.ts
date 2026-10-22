@@ -122,14 +122,23 @@ export function rememberExternalModels(protocol: Protocol, providerId: ProviderI
   externalModels.set(JSON.stringify([protocol, providerId, accountId]), { providerId, accountId, models });
 }
 
+/**
+ * What the account's agent itself listed, a gateway's list included, without
+ * a list held for it during a refresh. Null when nothing was read.
+ */
+export function readModelsOf(protocol: Protocol, providerId: ProviderId, accountId: AccountId): ModelInfo[] | null {
+  return externalModels.get(JSON.stringify([protocol, providerId, accountId]))?.models
+    ?? DRIVERS.get(protocol)?.probedModels?.(providerId, accountId)
+    ?? null;
+}
+
 /** The models a probe already read for this account, or null if none ever ran. */
 export function probedModelsOf(
   protocol: Protocol,
   providerId: ProviderId,
   accountId: AccountId,
 ): ModelInfo[] | null {
-  return externalModels.get(JSON.stringify([protocol, providerId, accountId]))?.models
-    ?? DRIVERS.get(protocol)?.probedModels?.(providerId, accountId)
+  return readModelsOf(protocol, providerId, accountId)
     ?? refreshing.get(refreshKey(providerId, accountId))?.models
     ?? null;
 }
@@ -166,6 +175,15 @@ export function refreshProbes(protocol: Protocol, providerId: ProviderId, accoun
   externalModels.delete(JSON.stringify([protocol, providerId, accountId]));
   for (const driver of DRIVERS.values()) driver.forgetProbes?.({ providerId, accountId, refresh: true });
   if (current !== null) refreshing.set(refreshKey(providerId, accountId), { providerId, accountId, models: current });
+}
+
+/**
+ * A list saved by an earlier core stands for the account until the read that
+ * replaces it settles, as a refreshed one does. A list already read wins.
+ */
+export function holdModels(providerId: ProviderId, accountId: AccountId, models: ModelInfo[]): void {
+  const key = refreshKey(providerId, accountId);
+  if (!refreshing.has(key)) refreshing.set(key, { providerId, accountId, models });
 }
 
 /**

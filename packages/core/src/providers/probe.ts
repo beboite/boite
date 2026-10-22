@@ -4,11 +4,12 @@ import { removeDir } from '../fs-retry.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Core } from '../core.ts';
-import { forgetProbes, probedModelsOf, probeModels, refreshProbes, rememberExternalModels, settleRefresh } from '../drivers/index.ts';
+import { forgetProbes, holdModels, probedModelsOf, probeModels, readModelsOf, refreshProbes, rememberExternalModels, settleRefresh } from '../drivers/index.ts';
 import { launchTemp, type LaunchTemp } from '../drivers/launch-temp.ts';
 import { mergeProxyModels, readSubscriptionProxyModels } from '../subscription-proxy.ts';
 import { invalidParams, refused, unavailable } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
+import { forgetSavedCatalog, readSavedCatalog, saveCatalog } from './saved-catalogs.ts';
 
 /** After owned processes stop, a missing pipe-close event must not hold the account's probe lane. */
 const PROBE_CLOSE_GRACE_MS = 1000;
@@ -200,6 +201,23 @@ export function registerProbeMethods(core: Core): ProviderProbe {
       if (models !== null) return Promise.resolve({ models, probedAt: known });
     }
     const key = JSON.stringify([params.providerId, params.accountId, params.model ?? null]);
+    // Nothing read since this core started, or since a change that dropped the
+    // list: the one saved under the same descriptor, program, gateway and
+    // login answers now, and a fresh read replaces it once the agent answers.
+    // A list a driver already holds, from a sign-in's own session or a turn, is
+    // fresher and starts no process: the plain path below answers it. A list
+    // only held for a refresh, the saved one included, does not count.
+    if (!params.refresh && params.model === undefined && known === undefined && core.providers.enabled(params.providerId)
+      && readModelsOf(core.providers.require(params.providerId).protocol, params.providerId, params.accountId) === null) {
+      const saved = readSavedCatalog(core, params.providerId, params.accountId);
+      if (saved !== null) {
+        // Model checks accept the list on screen until the fresh read settles,
+        // whether this call starts that read or a refresh already runs.
+        holdModels(params.providerId, params.accountId, saved.models);
+        if (!pending.has(key)) void probe({ providerId: params.providerId, accountId: params.accountId, refresh: true }).catch(() => undefined);
+        return Promise.resolve(saved);
+      }
+    }
     const existing = pending.get(key);
     if (existing) return existing;
     // One probe at a time per account: they share a synthetic thread, so the
@@ -230,6 +248,13 @@ export function registerProbeMethods(core: Core): ProviderProbe {
   core.router.register('providers.probe', probe);
 
   core.bus.onAny((name, payload) => {
+    if (name === 'providers.probed') {
+      const { providerId, accountId, models, probedAt } = payload as RpcEvents['providers.probed'];
+      // A failed write costs the next start its instant list, never this answer.
+      try { saveCatalog(core, providerId, accountId, { models, probedAt }); }
+      catch (error) { core.log('warn', `saving the ${providerId} model list: ${logMessageOf(error)}`); }
+      return;
+    }
     if (name === 'settings.updated') {
       const nextProxy = JSON.stringify((payload as RpcEvents['settings.updated']).subscriptionProxy);
       if (nextProxy === proxyConfig) return;
@@ -253,6 +278,9 @@ export function registerProbeMethods(core: Core): ProviderProbe {
       bumpAccount(account.id);
       forgetProbes({ providerId: account.providerId, accountId: account.id });
       forgetAnswered(account.id);
+      // A sign-in can reach another account under the same identity, or none
+      // the core can read: only a list read after it stands for the next start.
+      forgetSavedCatalog(core, account.id);
       return;
     }
     if (name === 'accounts.removed') {
@@ -260,6 +288,7 @@ export function registerProbeMethods(core: Core): ProviderProbe {
       bumpAccount(accountId);
       forgetProbes({ accountId });
       forgetAnswered(accountId);
+      forgetSavedCatalog(core, accountId);
     }
   });
   return probe;
