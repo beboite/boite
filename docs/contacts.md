@@ -43,7 +43,8 @@ but opens none, and the invitee exposes nothing.
    tailnet. A Headscale tailnet gives names under its own base domain
    (`boite.net.example.com`): the link carries that name, and the invitee's
    core dials it over plain HTTP only when every address it resolves to is a
-   tailnet address (100.64.0.0/10, fd7a:115c:a1e0::/48) or loopback; any
+   tailnet address (100.64.0.0/10, fd7a:115c:a1e0::/48) or loopback, and checks
+   the name again before each later request and each redial of the link; any
    other plain HTTP origin is refused. The body is sealed to the inviter's sealing key and carries the
    token and the invitee's card, signed by its key. The inviter looks the
    token up before it checks the signature or keeps the nonce, spends it

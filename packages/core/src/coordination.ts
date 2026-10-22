@@ -10,6 +10,7 @@ import { dropGroupRead, groupPeers, migrateGroupPeer } from './coordination-grou
 import { address, coordinationGuide, coordinationUrl, LETTER_TTL_MS, letterPrompt, RESIDENT_LETTER_TTL_MS, same, text } from './coordination-letter.ts';
 import { senderContext, withRelations } from './coordination-relation.ts';
 import { boundedBody, firstAnswer, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer, type Envelope, type Operation } from './coordination-wire.ts';
+import { checkTailnetName } from './contacts/invite.ts';
 import { pack, SEALED } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
@@ -821,7 +822,11 @@ export class Coordination {
       if (contact && sealing === null) throw new Error('no longer a contact');
       const wire = sealing === null ? body : sealing.body;
       const signature = sealing === null ? signed : SEALED;
-      if (url !== null) return post(url, this.coreId, peer.publicKey, wire, signature, nonce, sealing);
+      if (url !== null) {
+        // A contact's name is checked again at each request: its DNS answer may have left the tailnet since the join.
+        if (contact) await checkTailnetName(url, 'contact.url');
+        return post(url, this.coreId, peer.publicKey, wire, signature, nonce, sealing);
+      }
       const response = await this.bridge.request(peer.coreId, { fromCoreId: this.coreId, toCoreId: peer.coreId, body: wire, signature });
       return settle(null, peer.publicKey, nonce, response.status, response.body, response.signature, sealing);
     };
