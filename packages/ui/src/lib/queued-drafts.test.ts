@@ -284,7 +284,7 @@ test('a start asked once and then refused may be taken back: the core made nothi
   expect(next.store.composerStates.draft).toMatchObject({ text: 'Asked, then refused', queued: [] });
 });
 
-test('a start whose conversation was deleted since unlocks: taken back, its words go again under a new id', async () => {
+test('a start whose conversation was deleted since unlocks, and Send again goes under a fresh id', async () => {
   const first = await machine('one');
   await first.store.connect();
   const project = first.store.projects.find(entry => entry.kind !== 'drafts')!;
@@ -317,10 +317,9 @@ test('a start whose conversation was deleted since unlocks: taken back, its word
   next.store.startDraft(undefined, { draftId: row!.id });
   await vi.waitFor(() => expect(next.store.draftEntries[0]?.queued).toEqual({ failed: expect.stringContaining('deleted since') }), { timeout: 5000 });
   expect(next.store.draftEntries[0]).not.toHaveProperty('asked');
-  next.store.cancelQueuedDraft(row!.id);
-  expect(next.store.composerStates.draft).toMatchObject({ text: 'Deleted meanwhile', queued: [] });
-  sendAway(next.store, 'Deleted meanwhile');
-  next.store.composerStates.draft!.text = '';
+  // Send again goes under a fresh id: the deleted conversation burned the first one.
+  next.store.retryQueued('draft', 0);
   await vi.waitFor(() => expect(next.creates).toHaveLength(2), { timeout: 5000 });
   expect(next.creates[1]!.clientRequestId).not.toBe(next.creates[0]!.clientRequestId);
+  await vi.waitFor(() => expect(next.store.openThread?.title).toBe('Deleted meanwhile'), { timeout: 5000 });
 });

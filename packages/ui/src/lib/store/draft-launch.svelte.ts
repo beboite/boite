@@ -2,6 +2,7 @@ import { untrack } from 'svelte';
 import type { ThreadId } from '@boite/contracts';
 import { RpcFailure, wasDropped, wasUnanswered } from '../client';
 import { titleFrom } from '../format';
+import { secureId } from '../secure-id';
 import { DRAFT_STASH_KEY } from '../prefs';
 import { wasClosed } from '../rpc-error';
 import type { Choice, Draft } from '../store.svelte';
@@ -138,7 +139,9 @@ export class DraftLaunch {
         const { start: asked, ...rest } = request;
         const data = error instanceof RpcFailure ? error.data as { field?: unknown; reason?: unknown } | undefined : undefined;
         const held = data?.field === 'clientRequestId' && data.reason !== 'deleted';
-        head.request = { ...rest, ...(held && asked ? { start: asked } : {}), failed: this.ctx.reason(error) };
+        // A deleted conversation burned its id: Send again goes under a fresh one.
+        const burned = data?.field === 'clientRequestId' && data.reason === 'deleted';
+        head.request = { ...rest, ...(burned ? { id: secureId() } : {}), ...(held && asked ? { start: asked } : {}), failed: this.ctx.reason(error) };
       }
       this.ctx.drafts.persist(); void this.ctx.drafts.flush();
     } finally {
