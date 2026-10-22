@@ -370,7 +370,7 @@ export function mergeRosters(local: Roster, remote: Roster): Roster {
   const localHomeRev = local.settingsHomeRev ?? 0;
   const remoteHomeRev = remote.settingsHomeRev ?? 0;
   const homed = remoteHomeRev > localHomeRev || (remoteHomeRev === localHomeRev && remoteHomeRev > 0 && (remote.settingsHome ?? '') > (local.settingsHome ?? '')) ? remote : local;
-  return sorted({
+  const merged: Roster = {
     id: local.id,
     name: named.name,
     ...(named.nameRev === undefined ? {} : { nameRev: named.nameRev }),
@@ -380,7 +380,10 @@ export function mergeRosters(local: Roster, remote: Roster): Roster {
     devices: mergeDevices(local.devices, remote.devices),
     deviceKeys: mergeDeviceKeys(local.deviceKeys ?? [], remote.deviceKeys ?? []),
     origins: mergeServedOrigins(local.origins ?? {}, remote.origins ?? {}),
-  });
+  };
+  // A home chosen on one member while another removed it meets its removal here: every member clears it the same way.
+  const home = merged.settingsHome;
+  return sorted(typeof home === 'string' && !liveCores(merged).some((core) => core.coreId === home) ? { ...merged, ...homeGone(merged, home) } : merged);
 }
 
 /**

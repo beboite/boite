@@ -142,6 +142,7 @@ export function groupMethods(ctx: FakeContext) {
       const roster = required(ctx);
       roster.cores = roster.cores.filter((core) => core.coreId !== ctx.identity.coreId);
       roster.devices = roster.devices.filter((device) => !device.id.startsWith(`${ctx.identity.coreId}:`));
+      if (roster.settingsHome === ctx.identity.coreId) delete roster.settingsHome;
       ctx.roster = null;
       announce(roster, [ctx]);
       return { ok: true };

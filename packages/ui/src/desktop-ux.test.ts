@@ -600,12 +600,13 @@ test('the settings bar picks the machine a page changes without moving the windo
   await waitFor(() => workspace.machines.length === 2 && workspace.machines.every((machine) => machine.store.connection === 'ready'));
   const remote = workspace.machines.find((machine) => machine.store !== store)!;
   store.localCore = true;
+  store.core = { ...store.core!, hostname: 'DESK-PC' };
   await workspace.select(remote.store);
   const thread = remote.store.openThread;
   // Plugins run where they were installed: the page opens on this PC, not on the machine the chat is on.
   remote.store.showSettings('plugins');
   await waitFor(() => document.querySelector('[data-testid=settings-machine]') !== null && document.querySelector('[data-testid=plugins-page]') !== null);
-  expect(query('[data-testid=settings-machine]').textContent).toContain(strings.machines.youTag);
+  expect(query('[data-testid=settings-machine]').textContent).toContain('DESK-PC (you)');
   // Every other page opens on the window's machine.
   remote.store.showSettings('resources');
   await waitFor(() => query('[data-testid=settings-machine]').textContent?.includes(remote.label) === true);

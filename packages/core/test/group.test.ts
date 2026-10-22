@@ -133,7 +133,7 @@ test('group names converge after concurrent renames and a stale roster cannot un
 
 test('the settings home converges by revision then id, and a roster without it keeps the local choice', () => {
   const [x, y] = ['1'.repeat(64), '2'.repeat(64)];
-  const base: Roster = { id: 'grp', name: 'Home', founder: 'a', cores: [entry('a', 1)], devices: [] };
+  const base: Roster = { id: 'grp', name: 'Home', founder: 'a', cores: [entry('a', 1), entry(x, 1), entry(y, 1)], devices: [] };
   const chosen: Roster = { ...base, settingsHome: x, settingsHomeRev: 1 };
   const home = (roster: Roster) => [roster.settingsHome, roster.settingsHomeRev];
   // An older core sends neither field: the choice stays, both ways.
@@ -150,6 +150,14 @@ test('the settings home converges by revision then id, and a roster without it k
   const tie: Roster = { ...base, settingsHome: null, settingsHomeRev: 1 };
   expect(home(mergeRosters(tie, chosen))).toEqual([x, 1]);
   expect(digestOf(mergeRosters(tie, chosen))).toBe(digestOf(mergeRosters(chosen, tie)));
+  // A member removed x before it heard x was chosen: the merge meets both and clears the home on every side.
+  const removed: Roster = { ...base, cores: [entry('a', 1), entry(x, 3, { removed: true }), entry(y, 1)] };
+  expect(home(mergeRosters(removed, chosen))).toEqual([null, 2]);
+  expect(home(mergeRosters(chosen, removed))).toEqual([null, 2]);
+  expect(digestOf(mergeRosters(removed, chosen))).toBe(digestOf(mergeRosters(chosen, removed)));
+  // x admitted again later is no home: the cleared revision outranks the stale choice.
+  const back: Roster = { ...mergeRosters(removed, chosen), cores: [entry('a', 1), entry(x, 4, { epoch: 2 }), entry(y, 1)] };
+  expect(home(mergeRosters(chosen, back))).toEqual([null, 2]);
 });
 
 test('the owner renames a group on either member, and the name survives synchronization and restart', async () => {

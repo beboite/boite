@@ -51,7 +51,8 @@
       // Another folder holds other entries, problems and history: read them, not only the switches.
       if (config.path !== status.config.path) {
         const current = revision;
-        void client.call('brain.status', {}).then((next) => { if (current === revision) status = next; }).catch(() => undefined);
+        void client.call('brain.status', {}).then((next) => { if (current === revision) status = next; })
+          .catch((cause) => { if (current === revision) error = failure(cause); });
         return;
       }
       status = { ...status, config };
