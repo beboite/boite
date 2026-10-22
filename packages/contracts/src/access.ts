@@ -169,6 +169,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // spending a reset stay the owner's (core access.ts).
   'quotas.list',
   'subscriptionProxy.quotas',
+  // Switching the gateway the owner configured on or off, from the Limits tab. The kind,
+  // URLs and key stay the owner's: a phone only picks between two routes the owner set up.
+  'subscriptionProxy.setEnabled',
   'settings.get',
   'keybindings.get',
 ]);

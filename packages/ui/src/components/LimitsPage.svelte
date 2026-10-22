@@ -13,6 +13,7 @@
   import SubscriptionProxyDashboard from './SubscriptionProxyDashboard.svelte';
   import GatewayOpenButton from './GatewayOpenButton.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
+  import GatewaySwitch from './GatewaySwitch.svelte';
 
   /**
    * The subscription windows of every signed-in provider. The last reading
@@ -104,6 +105,7 @@
       </button>
     {/if}
   </header>
+  <GatewaySwitch {store} />
   {#if proxyEnabled}<div class="actions proxy-switch">
     {#if !gatewayNative}<button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button>{/if}
     <GatewayOpenButton {store} />

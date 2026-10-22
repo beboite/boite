@@ -28,6 +28,15 @@ export function settingsMethods(ctx: FakeContext) {
       ctx.emit('subscriptionProxy.quotasUpdated', gatewayQuotas(ctx));
       return { ...ctx.settings };
     },
+    'subscriptionProxy.setEnabled': async ({ enabled }) => {
+      if (typeof enabled !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'subscriptionProxy.setEnabled enabled must be a boolean', data: { field: 'enabled' } });
+      const proxy = ctx.settings.subscriptionProxy;
+      if (!proxy?.baseUrl) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'no subscription proxy is configured: set one up in Settings > Accounts on the desktop', data: { field: 'subscriptionProxy' } });
+      if (proxy.enabled === enabled) return { ...ctx.settings };
+      ctx.settings = { ...ctx.settings, subscriptionProxy: { ...proxy, enabled } };
+      ctx.emit('settings.updated', { ...ctx.settings });
+      return { ...ctx.settings };
+    },
     'scheduler.get': async (params) => {
       return structuredClone(ctx.scheduler);
     },

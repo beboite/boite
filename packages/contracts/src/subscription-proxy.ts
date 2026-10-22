@@ -149,6 +149,11 @@ export interface SubscriptionProxyRpcMethods {
   'subscriptionProxy.key': { params: { key: string | null }; result: { configured: boolean } };
   /** Owner-only, atomic configuration and optional private-key update; an omitted key keeps it. */
   'subscriptionProxy.configure': { params: { subscriptionProxy: SubscriptionProxy; key?: string | null }; result: Settings };
+  /**
+   * Turns the configured gateway on or off and nothing else: its kind, URLs
+   * and key stay as the owner saved them. A paired phone may call it.
+   */
+  'subscriptionProxy.setEnabled': { params: { enabled: boolean }; result: Settings };
   /** Owner-only. The core reads the gateway's quotas route itself; `quotas.list` carries the same entries. */
   'subscriptionProxy.quotas': { params: { refresh?: boolean }; result: SubscriptionProxyQuotas };
   /** Owner-only. The logins and OpenCode keys of this machine's accounts Douane could take, without their values. */

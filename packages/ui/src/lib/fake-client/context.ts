@@ -386,6 +386,12 @@ export class FakeContext {
       reapOrphans: true,
       autoUpdateHarnesses: false
     };
+    // `?gateway=douane` or `cliproxyapi`: a gateway the owner saved and turned off, for a paired phone to switch on.
+    const gateway = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('gateway');
+    if (gateway === 'douane' || gateway === 'cliproxyapi') {
+      this.settings.subscriptionProxy = { enabled: false, kind: gateway, baseUrl: 'https://gateway.example.test/v1',
+        dashboardUrl: gateway === 'douane' ? 'https://gateway.example.test/admin/#quotas' : 'https://gateway.example.test/management.html#/quota' };
+    }
     this.core = {
       version: '2.0.0-beta.1',
       coreId,

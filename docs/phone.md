@@ -47,7 +47,9 @@ Voice shows the connected core's dictation readiness. Engine installation and
 API credentials stay in desktop Voice settings, including for owner sessions.
 Usage has two tabs: Usage shows the connected core's tokens and API cost per
 day, provider and model; Limits draws the core's subscription bars, read-only
-([usage.md](usage.md)).
+([usage.md](usage.md)), under the switch that turns the owner's saved Douane or
+CLIProxyAPI gateway on or off
+([providers](providers.md#switching-the-gateway-from-limits)).
 
 Provider accounts, keyboard shortcuts, plugins, resource limits, the brain, the
 task manager, worktrees, automatic compaction, diagnostics, experiments, the
