@@ -53,6 +53,13 @@
   <span class="text">
     <span class="ui-label-box"><span class="ui-label">{labels.invite.title}</span><InfoTip topic={labels.invite.title} text={labels.invite.tip} /></span>
     <span class="hint">{labels.invite.pick}</span>
+    {#if (view.state?.invitations ?? 0) > 0}
+      <span class="open hint" data-testid="contact-invites-open">
+        {fill(labels.invite.open, { count: String(view.state?.invitations) })}
+        <button type="button" class="ghost small danger" title={labels.invite.cancelTip} disabled={view.isBusy('cancel-invites')}
+          onclick={() => void view.cancelInvites()} data-testid="contact-invites-cancel">{labels.invite.cancel}</button>
+      </span>
+    {/if}
   </span>
   <span class="invite-actions">
     <button type="button" disabled={view.isBusy('invite')} title={labels.invite.tailnetTip} onclick={() => void invite(false)} data-testid="contact-invite-tailnet">
@@ -127,6 +134,7 @@
   .line { display: flex; gap: 8px; min-width: 0; }
   .link { flex: 1; min-width: 0; font-size: var(--text-xs); }
   .hint { margin: 0; }
+  .open { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
   .share { display: inline-flex; align-items: center; gap: 4px; color: var(--color-success); text-decoration: none; }
   .manual { display: flex; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid color-mix(in oklch, var(--color-live) 35%, transparent); border-radius: var(--radius-md); background: color-mix(in oklch, var(--color-live) 10%, transparent); color: var(--color-muted-foreground); font-size: var(--text-sm); overflow-wrap: anywhere; }
   .manual :global(svg) { flex: none; margin-top: 2px; color: var(--color-live); }

@@ -111,11 +111,11 @@ export async function joinRequest(store: ContactStore, core: Core, request: Requ
     if (card.coreId !== guest) throw invalidParams('card.coreId: expected the core named by x-boite-peer');
     // A live invitation first: a caller without one leaves no nonce behind.
     const hash = typeof body.token === 'string' && /^[0-9a-f]{64}$/.test(body.token) ? tokenHash(body.token) : '';
-    if (!store.liveInvites().some(([live]) => live === hash)) throw refused('token: this invitation was already used or expired; ask for a new one');
+    if (!store.liveInvites().some(([live]) => live === hash)) throw refused('token: this invitation was already used, cancelled or expired; ask for a new one');
     if (!verify(null, Buffer.from(`${JOIN_INPUT}${raw}`), card.publicKey, Buffer.from(signature, 'base64'))) throw invalidParams('signature: expected the card\'s key to sign the join');
     store.fresh(guest, nonce, body.at);
     // Spent before anything else changes: a second join with the same link finds nothing.
-    if (!store.spendInvite(hash)) throw refused('token: this invitation was already used or expired; ask for a new one');
+    if (!store.spendInvite(hash)) throw refused('token: this invitation was already used, cancelled or expired; ask for a new one');
     if (card.coreId === core.coordination.card().coreId) throw refused('card: this is the inviting core itself');
     const existing = store.find(card.coreId);
     if (existing?.role === 'host') throw refused('card: already a contact of this core');

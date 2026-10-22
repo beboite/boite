@@ -6,7 +6,7 @@ import { inviteShare } from '../../lib/contact-link';
 import { FakeClient } from '../../lib/fake-client';
 import { FAKE_CONTACT_INVITE } from '../../lib/fake-client/contacts';
 import { Store, store as primary } from '../../lib/store.svelte';
-import { strings } from '../../lib/strings';
+import { fill, strings } from '../../lib/strings';
 import { workspace } from '../../lib/workspace.svelte';
 import HomePage from './HomePage.svelte';
 import SidebarContacts from './SidebarContacts.svelte';
@@ -240,6 +240,13 @@ test('Invite makes a link with its share; a joined link shows the eight words; C
   refused.mockRestore();
   delete (navigator as { clipboard?: unknown }).clipboard;
   one<HTMLButtonElement>('home-error')?.querySelector('button')?.click();
+
+  // A link sent too widely: Cancel them spends every open invitation, the one shown included.
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invites-open')?.textContent).toContain(fill(strings.contacts.invite.open, { count: '3' })); });
+  one<HTMLButtonElement>('contact-invites-cancel')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invites-open')).toBeNull(); });
+  expect(one('contact-invite')).toBeNull();
+  expect((await contacts(store)).invitations).toBe(0);
 
   // A core refuses its own link: the join takes another owner's.
   type(one<HTMLInputElement>('contact-join-link')!, FAKE_CONTACT_INVITE);

@@ -3,7 +3,7 @@ import { RpcErrorCode, type Contact, type ContactInvite, type ContactRequest, ty
 import { RpcFailure } from '../client';
 import { encodeInvite, INVITE_PREFIX, inviteShare, readInvite } from '../contact-link';
 import type { FakeContext, FakeMethods } from './context';
-import { coordinationConfig, trusts } from './coordination';
+import { coordinationConfig, fakeCore, trusts } from './coordination';
 
 const DAY = 24 * 60 * 60_000;
 const WORDS = ['amber', 'orbit', 'lantern', 'meadow', 'falcon', 'cobalt', 'harbor', 'velvet', 'thistle', 'glacier', 'ember', 'quartz'];
@@ -50,6 +50,17 @@ function modelTier(providerId: string, model: string | null | undefined): ModelT
 const states = new WeakMap<FakeContext, ContactsState>();
 /** Shares an invitee without a key was sent to: the next join with the link goes through, as once the owner accepted it. */
 const opened = new WeakMap<FakeContext, Set<string>>();
+/** Each core's open invitation tokens: a join spends one, cancelling spends them all. */
+const tokens = new WeakMap<FakeContext, Set<string>>();
+
+function tokensOf(ctx: FakeContext): Set<string> {
+  let live = tokens.get(ctx);
+  if (!live) {
+    live = new Set();
+    tokens.set(ctx, live);
+  }
+  return live;
+}
 
 function tailscale(apiKey: boolean): ContactTailscale {
   return apiKey
@@ -106,7 +117,8 @@ function seed(ctx: FakeContext): ContactsState {
     contacts: [chris],
     requests,
     settings: { minTier: 1 },
-    tailscale: tailscale(true)
+    tailscale: tailscale(true),
+    invitations: 0
   };
 }
 
@@ -157,11 +169,22 @@ export function contactMethods(ctx: FakeContext) {
         : state.tailscale.apiKey ? { status: 'created', url: `https://login.tailscale.com/admin/invite/${token}` }
         : { status: 'manual', reason: 'No Tailscale API key is stored: share this machine from the admin console.' };
       const url = `http://${state.tailscale.fqdn ?? 'boite-pc'}:8777`;
+      tokensOf(ctx).add(token);
+      state.invitations = tokensOf(ctx).size;
+      changed();
       return {
         link: encodeInvite({ v: 1, c: state.self.coreId, m: state.self.machine, u: url, t: token, e: ctx.now() + INVITE_TTL, s: share.status === 'created' ? share.url : null }),
         expiresAt: ctx.now() + DAY,
         share
       };
+    },
+    'contacts.cancelInvites': async () => {
+      const state = stateOf(ctx);
+      const cancelled = tokensOf(ctx).size;
+      tokensOf(ctx).clear();
+      state.invitations = 0;
+      changed();
+      return { cancelled };
     },
     'contacts.join': async (params) => {
       const link = typeof params?.link === 'string' ? params.link.trim() : '';
@@ -183,6 +206,13 @@ export function contactMethods(ctx: FakeContext) {
       if (share !== null && !state.tailscale.apiKey && !seen.has(share)) {
         seen.add(share);
         throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `could not reach ${machine} at ${String(card.u)}: accept its Tailscale share, then join again` });
+      }
+      // Like the core: an inviter on this page spends the token, or refuses one used, cancelled or expired.
+      const inviter = fakeCore(coreId);
+      if (inviter) {
+        if (!tokensOf(inviter).delete(String(card.t))) throw refuse('token: this invitation was already used, cancelled or expired; ask for a new one');
+        stateOf(inviter).invitations = tokensOf(inviter).size;
+        inviter.emit('contacts.updated', {});
       }
       const seq = ++ctx.seq;
       // Like the core: a name another contact has gets a number.

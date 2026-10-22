@@ -340,7 +340,7 @@ test('the link refuses a replayed or stale hello, a contact\'s readable request,
 
   // The guest forgets the host and tries the same link again: the host spent its token at the first join.
   await guestClient.call('contacts.remove', { coreId: hostId });
-  expect(await thrown(guestClient.call('contacts.join', { link: invite.link }))).toThrow('already used or expired');
+  expect(await thrown(guestClient.call('contacts.join', { link: invite.link }))).toThrow('already used, cancelled or expired');
   expect(host.core.contacts.list()).toHaveLength(1);
 }, 30000);
 
@@ -477,6 +477,28 @@ test('an invitation for someone already on this Tailscale carries no share, asks
   expect(await thrown(hostClient.call('contacts.invite', { share: 'no' as never }))).toThrow('share: expected true or false');
 }, 30000);
 
+test('cancelled invitations join nothing, and the tailnet listener closes with the last one', async () => {
+  const host = await startTestCore();
+  const guest = await startTestCore();
+  cores.push(host, guest);
+  host.core.contacts.selfUrl = async () => host.url;
+  const heard: (string | null)[] = [];
+  host.core.network = { also: address => { heard.push(address); return address !== null; } };
+  (host.core.group as unknown as { tailnet: { ip: string; name: string | null } }).tailnet = { ip: '100.64.0.7', name: null };
+  const hostClient = await host.connect();
+  const guestClient = await guest.connect();
+  const sent = await hostClient.call('contacts.invite', { share: false });
+  await hostClient.call('contacts.invite', { share: false });
+  expect((await hostClient.call('contacts.get', {})).invitations).toBe(2);
+  expect(heard.at(-1)).toBe('100.64.0.7');
+  expect(await hostClient.call('contacts.cancelInvites', {})).toEqual({ cancelled: 2 });
+  expect((await hostClient.call('contacts.get', {})).invitations).toBe(0);
+  expect(heard.at(-1)).toBeNull();
+  expect(await thrown(guestClient.call('contacts.join', { link: sent.link }))).toThrow('already used, cancelled or expired');
+  expect(guest.core.contacts.list()).toHaveLength(0);
+  expect(host.core.contacts.list()).toHaveLength(0);
+}, 30000);
+
 test('the tailnet listener opens for an invitation and closes once the last one expires', async () => {
   const harness = await startTestCore();
   cores.push(harness);
@@ -486,9 +508,16 @@ test('the tailnet listener opens for an invitation and closes once the last one 
   (harness.core.group as unknown as { tailnet: { ip: string; name: string | null } }).tailnet = { ip: '100.64.0.7', name: null };
   await harness.core.contacts.invite();
   expect(heard.at(-1)).toBe('100.64.0.7');
+  // Let a tick see the invitation open before it expires.
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  const updates: number[] = [];
+  const off = harness.core.bus.onAny(name => { if (name === 'contacts.updated') updates.push(harness.core.contacts.liveInvites().length); });
   const invites = harness.core.journal.getSetting('contacts:invites') as Record<string, { expiresAt: number }>;
   harness.core.journal.setSetting('contacts:invites', Object.fromEntries(Object.keys(invites).map(hash => [hash, { expiresAt: Date.now() - 1 }])));
   await waitFor(() => heard.at(-1) === null, 5000);
+  // The open count the clients show drops with the expiry, not at the next unrelated change.
+  await waitFor(() => updates.includes(0), 5000);
+  off();
   expect(harness.core.contacts.wantsTailnet()).toBe(false);
   // Told on a change only.
   const told = heard.length;

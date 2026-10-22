@@ -278,6 +278,8 @@ export interface ContactsState {
   requests: ContactRequest[];
   settings: ContactSettings;
   tailscale: ContactTailscale;
+  /** Invitations neither used nor expired. Absent from older cores. */
+  invitations?: number;
 }
 export interface CoordinationView {
   self: AgentAddress;
@@ -342,6 +344,11 @@ export interface CoordinationRpcMethods {
    * this machine on Tailscale. Owner only.
    */
   'contacts.invite': { params: { share?: boolean }; result: ContactInvite };
+  /**
+   * Spends every open invitation unused: a link already sent, or one that
+   * leaked, joins nothing any more. Contacts already joined stay. Owner only.
+   */
+  'contacts.cancelInvites': { params: Record<string, never>; result: { cancelled: number } };
   /** Joins with an invitation: this core dials the host, checks its key and keeps the link open. Owner only. */
   'contacts.join': { params: { link: string }; result: Contact };
   /** Rename a contact or mark it trusted. Owner only. */
