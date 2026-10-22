@@ -1,6 +1,6 @@
 import { untrack } from 'svelte';
 import type { ThreadId } from '@boite/contracts';
-import { wasDropped, wasUnanswered } from '../client';
+import { RpcFailure, wasDropped, wasUnanswered } from '../client';
 import { titleFrom } from '../format';
 import { DRAFT_STASH_KEY } from '../prefs';
 import { wasClosed } from '../rpc-error';
@@ -131,7 +131,13 @@ export class DraftLaunch {
         if (s.connection === 'ready') this.stall(key, request.id);
         return;
       }
-      if (input.queued[0] === head) head.request = { ...request, failed: this.ctx.reason(error) };
+      if (input.queued[0] === head) {
+        // A refusal made nothing, so the start may be taken back or asked again differently; one about its
+        // request id says the core holds a conversation under it, and keeps what was asked.
+        const { start: asked, ...rest } = request;
+        const held = error instanceof RpcFailure && (error.data as { field?: unknown } | undefined)?.field === 'clientRequestId';
+        head.request = { ...rest, ...(held && asked ? { start: asked } : {}), failed: this.ctx.reason(error) };
+      }
       this.ctx.drafts.persist(); void this.ctx.drafts.flush();
     } finally {
       input.sending = false;

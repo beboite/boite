@@ -353,9 +353,11 @@ in both, which the core takes once under its ids, never in neither. The first
 start writes down the project and the worktree and incognito switches it asked
 for, and a retry asks for exactly that, since the core answers a request id
 that may already hold its conversation only when the parameters match. Once
-asked, a start is retried until it lands and is no longer taken back or
-removed from the queue, only deleted with its draft: the same words sent again
-under a new id could make a second conversation. A start
+asked, a start the core did not refuse is retried until it lands and is no
+longer taken back or removed from the queue, only deleted with its draft: the
+same words sent again under a new id could make a second conversation. A
+refusal made nothing, so a refused start can be taken back, edited or sent
+again, and its next ask reads the draft afresh. A start
 that gets no answer on a live link, or finds no drafts project, is tried again
 15 seconds later rather than at once. A start taken back before it was ever
 asked, then sent again, goes at once under its new id. An incognito draft is never kept on the

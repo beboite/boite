@@ -146,6 +146,9 @@ test('a refused start keeps its reason on the draft, and Send again starts it', 
   await client.restore();
   await vi.waitFor(() => expect(store.draftEntries[0]?.queued).toEqual({ failed: expect.stringContaining('signed out') }), { timeout: 5000 });
   expect(creates).toHaveLength(1);
+  // The core made nothing: the start is no longer held as asked, so it could be taken back or edited.
+  expect(store.draftEntries[0]).not.toHaveProperty('asked');
+  expect(store.composerStates.draft!.queued[0]!.request).not.toHaveProperty('start');
   store.retryQueued('draft', 0);
   await vi.waitFor(() => expect(store.openThread?.title).toBe('Signed out meanwhile'), { timeout: 5000 });
   expect(creates).toHaveLength(2);
@@ -246,8 +249,36 @@ test('a start asked once is retried as it was asked, across a restart, and is no
   await next.store.connect();
   next.store.startDraft(undefined, { draftId: row!.id });
   await vi.waitFor(() => expect(next.creates).toHaveLength(1), { timeout: 5000 });
-  const { title: _a, ...asked } = first.creates[0]!;
-  const { title: _b, ...retried } = next.creates[0]!;
-  expect(retried).toEqual(asked);
+  expect(next.creates[0]).toEqual(first.creates[0]);
   expect((next.creates[0] as { projectId?: string }).projectId).toBe(project.id);
+});
+
+test('a start asked once and then refused may be taken back: the core made nothing', async () => {
+  const first = await machine('one');
+  await first.store.connect();
+  const project = first.store.projects.find(entry => entry.kind !== 'drafts')!;
+  first.store.startDraft(project.id, { fresh: true });
+  first.client.drop();
+  sendAway(first.store, 'Asked, then refused');
+  vi.mocked(first.client.call).mockImplementation(async (method, params) => {
+    if (method === 'threads.create') { first.creates.push(params as { title?: string; clientRequestId?: string }); throw unansweredFailure('threads.create'); }
+    return first.original(method, params);
+  });
+  await first.client.restore();
+  await vi.waitFor(() => expect(first.creates).toHaveLength(1), { timeout: 5000 });
+  const [row] = first.store.draftEntries;
+  expect(row).toMatchObject({ asked: true });
+  first.store.client?.close(); first.store.detach();
+
+  const next = await machine('one');
+  vi.mocked(next.client.call).mockImplementation(async (method, params) => {
+    if (method === 'threads.create') { next.creates.push(params as { title?: string; clientRequestId?: string }); throw new Error('The account is signed out'); }
+    return next.original(method, params);
+  });
+  await next.store.connect();
+  next.store.startDraft(undefined, { draftId: row!.id });
+  await vi.waitFor(() => expect(next.store.draftEntries[0]?.queued).toEqual({ failed: expect.stringContaining('signed out') }), { timeout: 5000 });
+  expect(next.store.draftEntries[0]).not.toHaveProperty('asked');
+  next.store.cancelQueuedDraft(row!.id);
+  expect(next.store.composerStates.draft).toMatchObject({ text: 'Asked, then refused', queued: [] });
 });
