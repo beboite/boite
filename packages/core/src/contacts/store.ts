@@ -21,7 +21,7 @@ import type { BridgeRoute } from '../coordination-bridge.ts';
 import { PeerRefusal } from '../coordination-wire.ts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from '../errors.ts';
-import { magicName, tailnetAddress } from '../group/addresses.ts';
+import { tailnetAddress } from '../group/addresses.ts';
 import { SyncBackoff } from '../group/backoff.ts';
 import { seal, type Sealing } from '../group/seal.ts';
 import { newId, newToken } from '../ids.ts';
@@ -29,7 +29,7 @@ import { Concierge } from './concierge.ts';
 import { checkNormalizedRemote, gitRemoteOf } from './git-remote.ts';
 import { checkTailnetName, encodeInvite, INVITE_TTL_MS, tokenHash, type ContactCard } from './invite.ts';
 import { joinContact, joinRequest } from './join.ts';
-import { evaluatePolicy, TailscaleClient } from './tailscale.ts';
+import { TailscaleClient } from './tailscale.ts';
 import { attestedTier, checkTier, modelTier, tierAllowed } from './tier.ts';
 import { fingerprintWords } from './words.ts';
 import { TextSocket } from '../ws-client.ts';
@@ -360,21 +360,7 @@ export class ContactStore {
   async tailscaleState(fresh = false): Promise<ContactTailscale> {
     const now = Date.now();
     if (!fresh && this.tailscaleCache !== null && now - this.tailscaleCache.at < TAILSCALE_CACHE_MS) return this.tailscaleCache.value;
-    const apiKey = this.tailscale.hasKey();
-    const ip = tailnetAddress();
-    let value: ContactTailscale = { fqdn: null, apiKey, policy: 'unknown' };
-    if (ip !== null) {
-      if (apiKey) {
-        try {
-          const device = await this.tailscale.device(ip);
-          const policy = evaluatePolicy(await this.tailscale.policy(), device, this.core.boundEndpoint().port);
-          value = { fqdn: device.name, apiKey, ...policy };
-        } catch (error) {
-          this.core.log('warn', `contacts: the Tailscale API could not be read: ${messageOf(error)}`, { source: 'contacts' });
-        }
-      }
-      if (value.fqdn === null) value = { ...value, fqdn: await magicName(ip) };
-    }
+    const value = await this.tailscale.state(tailnetAddress(), this.core.boundEndpoint().port, message => this.core.log('warn', message, { source: 'contacts' }));
     this.tailscaleCache = { at: now, value };
     return value;
   }

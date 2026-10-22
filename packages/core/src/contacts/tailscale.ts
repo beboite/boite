@@ -11,6 +11,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContactInvite, ContactTailscale } from '@boite/contracts';
 import { invalidParams, messageOf } from '../errors.ts';
+import { magicName } from '../group/addresses.ts';
 
 const API = 'https://api.tailscale.com/api/v2';
 const KEY_FILE = 'contacts-tailscale-key';
@@ -108,6 +109,26 @@ export class TailscaleClient {
     } catch (error) {
       return { status: 'manual', reason: `The share could not be created (${messageOf(error)}): share this machine from the Tailscale admin console.` };
     }
+  }
+
+  /**
+   * This machine on Tailscale, at tailnet address `ip`: its name and, with the
+   * stored key, the policy toward shared users of Boite's `port`. Without the
+   * API, the name comes from MagicDNS.
+   */
+  async state(ip: string | null, port: number, warn: (message: string) => void): Promise<ContactTailscale> {
+    const apiKey = this.hasKey();
+    let value: ContactTailscale = { fqdn: null, apiKey, policy: 'unknown' };
+    if (ip === null) return value;
+    if (apiKey) {
+      try {
+        const device = await this.device(ip);
+        value = { fqdn: device.name, apiKey, ...evaluatePolicy(await this.policy(), device, port) };
+      } catch (error) {
+        warn(`contacts: the Tailscale API could not be read: ${messageOf(error)}`);
+      }
+    }
+    return value.fqdn === null ? { ...value, fqdn: await magicName(ip) } : value;
   }
 
   /** Accepts a share made by another tailnet, so that machine becomes reachable from this one. */
