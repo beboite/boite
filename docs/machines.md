@@ -351,11 +351,14 @@ core may already hold the conversation. The thread's outbox is written to the
 device before the draft leaves it, so a crash between the two leaves the prompt
 in both, which the core takes once under its ids, never in neither. The first
 start writes down the project and the worktree and incognito switches it asked
-for, and a retry asks for exactly that, since the core refuses a request id
-repeated with other parameters. A start
+for, and a retry asks for exactly that, since the core answers a request id
+that may already hold its conversation only when the parameters match. Once
+asked, a start is retried until it lands and is no longer taken back or
+removed from the queue, only deleted with its draft: the same words sent again
+under a new id could make a second conversation. A start
 that gets no answer on a live link, or finds no drafts project, is tried again
-15 seconds later rather than at once; the same words taken back and sent again
-go at once, under a new id. An incognito draft is never kept on the
+15 seconds later rather than at once. A start taken back before it was ever
+asked, then sent again, goes at once under its new id. An incognito draft is never kept on the
 device, so it still waits for its machine before it can be sent
 (`packages/ui/src/lib/store/draft-launch.svelte.ts`).
 

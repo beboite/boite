@@ -33,7 +33,7 @@
     const starting = entry.queued === 'starting';
     contextMenu.open(event, [
       { id: 'open', label: strings.common.open },
-      ...(entry.queued && !starting ? [{ id: 'unqueue', label: strings.sidebar.cancelQueuedDraft }] : []),
+      ...(entry.queued && !starting && !entry.asked ? [{ id: 'unqueue', label: strings.sidebar.cancelQueuedDraft }] : []),
       ...(starting ? [] : [separator(), { id: 'delete', label: strings.sidebar.deleteDraft, danger: true }])
     ], action => {
       if (action === 'open') void open();

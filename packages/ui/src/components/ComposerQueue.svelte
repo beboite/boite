@@ -56,7 +56,7 @@
     <div class="queued-item" class:failed={entry.request?.failed !== undefined} data-testid="composer-queued-item">
       <button type="button" class="queued-bubble"
         title={strings.composer.editQueued}
-        {disabled}
+        disabled={disabled || !!entry.request?.start}
         onclick={() => onrestore(at)}>
         <span class="queued-text">{entry.text || strings.composer.attachAlt}</span>
         {#if entry.attachments.length || entry.previewReferences?.length}
@@ -80,7 +80,7 @@
           {#if onremove}
             <button type="button" class="ghost small icon" data-testid="composer-queued-remove"
               title={strings.composer.removeQueued} aria-label={strings.composer.removeQueued}
-              disabled={at < outgoing} onclick={() => onremove(at)}><X size={14} /></button>
+              disabled={at < outgoing || !!entry.request?.start} onclick={() => onremove(at)}><X size={14} /></button>
           {/if}
         </div>
       {/if}

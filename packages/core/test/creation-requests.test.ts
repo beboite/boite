@@ -27,6 +27,9 @@ test('a creation asked again under its request id, on a new connection, answers 
   const again = await second.call('threads.create', { ...choice, clientRequestId: 'req_queued_1' });
   expect(again.id).toBe(made.id);
   expect(await titled(second, 'Queued while away')).toHaveLength(1);
+  // No mode is the default mode, as the core stores it.
+  const explicit = await second.call('threads.create', { ...choice, permissionMode: 'default', clientRequestId: 'req_queued_1' });
+  expect(explicit.id).toBe(made.id);
 
   // Asked twice at once, it is still one conversation.
   const [a, b] = await Promise.all([

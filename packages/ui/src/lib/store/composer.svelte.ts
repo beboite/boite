@@ -542,7 +542,8 @@ export class Composer {
    */
   restoreQueued(threadId: string, at: number): QueuedPrompt | undefined {
     const state = this.composerStates[threadId];
-    if (!state || state.sending) return undefined;
+    // A draft's start asked once is retried, not taken back (`Drafts.unqueue`).
+    if (!state || state.sending || state.queued[at]?.request?.start) return undefined;
     const [entry] = state.queued.splice(at, 1);
     if (entry?.request) {
       const s = this.ctx.store;
@@ -556,7 +557,7 @@ export class Composer {
   /** Takes a pending prompt out of the queue, unless it is the one going out right now. */
   removeQueued(threadId: string, at: number): void {
     const state = this.composerStates[threadId];
-    if (!state || at < (state.outgoing ?? 0)) return;
+    if (!state || at < (state.outgoing ?? 0) || state.queued[at]?.request?.start) return;
     state.queued.splice(at, 1);
   }
 

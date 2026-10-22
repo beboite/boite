@@ -294,7 +294,7 @@ export function threadMethods(ctx: FakeContext) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'clientRequestId must be a string of 1 to 128 characters', data: { field: 'clientRequestId', expected: '1 to 128 characters' } });
       }
       const key = JSON.stringify([params.projectId, params.providerId, params.accountId, params.title ?? null, params.cwd ?? null,
-        params.model ?? null, params.effort ?? null, params.speed ?? null, params.permissionMode ?? null, params.worktree ?? null,
+        params.model ?? null, params.effort ?? null, params.speed ?? null, params.permissionMode ?? 'default', params.worktree ?? null,
         params.incognito === true, params.context ?? null]);
       const previous = id === undefined ? undefined : creations.get(id);
       if (previous) {

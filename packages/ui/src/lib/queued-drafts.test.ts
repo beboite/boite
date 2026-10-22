@@ -218,27 +218,36 @@ test('a draft whose start is on its way is not deleted: its prompt reaches the c
   expect(store.draftEntries).toHaveLength(0);
 });
 
-test('a draft whose start stalled, taken back and sent again, starts at once under its new id', async () => {
-  const { store, client, creates, original } = await machine('one');
-  await store.connect();
-  const project = store.projects.find(entry => entry.kind !== 'drafts')!;
-  store.startDraft(project.id, { fresh: true });
-  client.drop();
-  sendAway(store, 'Second try');
-  let silent = true;
-  vi.mocked(client.call).mockImplementation(async (method, params) => {
-    if (method === 'threads.create') {
-      creates.push(params as { title?: string; clientRequestId?: string });
-      if (silent) { silent = false; throw unansweredFailure('threads.create'); }
-    }
-    return original(method, params);
+test('a start asked once is retried as it was asked, across a restart, and is not taken back meanwhile', async () => {
+  const first = await machine('one');
+  await first.store.connect();
+  const project = first.store.projects.find(entry => entry.kind !== 'drafts')!;
+  first.store.startDraft(project.id, { fresh: true });
+  first.client.drop();
+  sendAway(first.store, 'Asked once');
+  vi.mocked(first.client.call).mockImplementation(async (method, params) => {
+    if (method === 'threads.create') { first.creates.push(params as { title?: string; clientRequestId?: string }); throw unansweredFailure('threads.create'); }
+    return first.original(method, params);
   });
-  await client.restore();
-  await vi.waitFor(() => expect(creates).toHaveLength(1), { timeout: 5000 });
-  const [row] = store.draftEntries;
-  store.cancelQueuedDraft(row!.id);
-  sendAway(store, store.composerStates.draft!.text);
-  store.composerStates.draft!.text = '';
-  await vi.waitFor(() => expect(creates).toHaveLength(2), { timeout: 2000 });
-  expect(creates[1]!.clientRequestId).not.toBe(creates[0]!.clientRequestId);
+  await first.client.restore();
+  await vi.waitFor(() => expect(first.creates).toHaveLength(1), { timeout: 5000 });
+  const [row] = first.store.draftEntries;
+  expect(row).toMatchObject({ queued: 'waiting', asked: true });
+  // The core may hold it: neither the row's menu, the cross nor a tap takes it back.
+  first.store.cancelQueuedDraft(row!.id);
+  first.store.removeQueued('draft', 0);
+  expect(first.store.restoreQueued('draft', 0)).toBeUndefined();
+  expect(first.store.composerStates.draft!.queued).toHaveLength(1);
+  // Moved to another project before the app closes.
+  first.store.draft!.projectId = first.store.projects.find(entry => entry.kind !== 'drafts' && entry.id !== project.id)!.id;
+  first.store.client?.close(); first.store.detach();
+
+  const next = await machine('one');
+  await next.store.connect();
+  next.store.startDraft(undefined, { draftId: row!.id });
+  await vi.waitFor(() => expect(next.creates).toHaveLength(1), { timeout: 5000 });
+  const { title: _a, ...asked } = first.creates[0]!;
+  const { title: _b, ...retried } = next.creates[0]!;
+  expect(retried).toEqual(asked);
+  expect((next.creates[0] as { projectId?: string }).projectId).toBe(project.id);
 });

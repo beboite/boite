@@ -27,7 +27,7 @@ export class CreationRequests {
     }
     // Everything that shapes the conversation: a repeat that differs is another request, refused.
     const key = JSON.stringify([params.projectId, params.providerId, params.accountId, params.title ?? null, params.cwd ?? null,
-      params.model ?? null, params.effort ?? null, params.speed ?? null, params.permissionMode ?? null, params.worktree ?? null,
+      params.model ?? null, params.effort ?? null, params.speed ?? null, params.permissionMode ?? 'default', params.worktree ?? null,
       params.incognito === true, params.context ?? null]);
     const now = Date.now();
     for (const [stale, receipt] of this.receipts) if (receipt.expiresAt <= now) this.receipts.delete(stale);
