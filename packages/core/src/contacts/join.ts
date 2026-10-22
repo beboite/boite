@@ -12,7 +12,7 @@ import { boundedBody } from '../coordination-wire.ts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from '../errors.ts';
 import { openResponse, pack, seal, SEALED, sealResponse, unpack, type Sealing } from '../group/seal.ts';
-import { checkCard, decodeInvite, tokenHash, type ContactCard, type Invitation } from './invite.ts';
+import { checkCard, checkTailnetName, decodeInvite, tokenHash, type ContactCard, type Invitation } from './invite.ts';
 import type { ContactStore } from './store.ts';
 
 export const CONTACT_JOIN_ROUTE = '/contacts/join';
@@ -42,6 +42,7 @@ async function spendInvite(store: ContactStore, core: Core, invite: Invitation, 
       core.log('warn', `contacts: the Tailscale share of ${invite.machine} was not accepted: ${messageOf(error)}`, { source: 'contacts' });
     }
   }
+  await checkTailnetName(invite.url, 'link.url');
   const nonce = randomUUID();
   const body = JSON.stringify({ nonce, at: Date.now(), token: invite.token, card: self });
   const signature = core.coordination.signature(Buffer.from(`${JOIN_INPUT}${body}`)).toString('base64');

@@ -27,7 +27,7 @@ import { seal, type Sealing } from '../group/seal.ts';
 import { newId, newToken } from '../ids.ts';
 import { Concierge } from './concierge.ts';
 import { checkNormalizedRemote, gitRemoteOf } from './git-remote.ts';
-import { encodeInvite, INVITE_TTL_MS, tokenHash, type ContactCard } from './invite.ts';
+import { checkTailnetName, encodeInvite, INVITE_TTL_MS, tokenHash, type ContactCard } from './invite.ts';
 import { joinContact, joinRequest } from './join.ts';
 import { evaluatePolicy, TailscaleClient } from './tailscale.ts';
 import { attestedTier, checkTier, modelTier, tierAllowed } from './tier.ts';
@@ -801,8 +801,10 @@ export class ContactStore {
       this.backoff.failed(coreId, 'link', this.backoff.mark());
       if (!this.closed) this.changed();
     };
-    // The hello rides in the upgrade's headers, before any frame.
-    TextSocket.connect(`${contact.url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, LINK_DIAL_MS, { headers }).then(socket => {
+    // The hello rides in the upgrade's headers, before any frame. The name is checked
+    // again at each dial: its DNS answer may have left the tailnet since the join.
+    const url = contact.url;
+    checkTailnetName(url, 'contact.url').then(() => TextSocket.connect(`${url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, LINK_DIAL_MS, { headers })).then(socket => {
       if (this.closed || this.dialed.get(coreId) !== link) { socket.close(1000); return; }
       link.socket = socket;
       link.state = 'connected';
