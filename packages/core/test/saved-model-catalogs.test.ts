@@ -5,6 +5,7 @@ import { expect, test } from 'bun:test';
 import type { ModelInfo } from '@boite/contracts';
 import { getDriver, probedModelsOf, setDriver } from '../src/drivers/index.ts';
 import { removeDir } from '../src/fs-retry.ts';
+import type { CoreClient } from '../src/client.ts';
 import { startTestCore } from './harness.ts';
 
 const before: ModelInfo[] = [{ id: 'saved', name: 'Saved', default: true }];
@@ -20,7 +21,12 @@ async function answered<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   }
 }
 
-test('a restarted core answers the saved model list at once and reads a fresh one behind it', async () => {
+/**
+ * A core that probed once, stopped, then a second core on the same data
+ * directory whose agent answers when the test says. `held` is what its driver
+ * already holds, as a sign-in's or a turn's own session leaves it.
+ */
+async function restarted(run: (ctx: { client: CoreClient; accountId: string; reads: () => number; answer: () => void }) => Promise<void>, held: ModelInfo[] | null = null): Promise<void> {
   const dataDir = mkdtempSync(join(tmpdir(), 'boite-core-'));
   const restore = setDriver('echo', { ...getDriver('echo'), probe: async () => ({ models: before, probedAt: 1 }) });
   try {
@@ -31,30 +37,25 @@ test('a restarted core answers the saved model list at once and reads a fresh on
     } finally {
       await first.stop();
     }
-
-    // The agent of the restarted core takes as long as the test says.
     const agent = Promise.withResolvers<void>();
     let reads = 0;
-    let read: ModelInfo[] | null = null;
+    let read = held;
     // Kept the way every agent's driver keeps what it read.
     setDriver('echo', {
       ...getDriver('echo'),
-      probe: async () => { reads++; await agent.promise; read = after; return { models: after, probedAt: 2 }; },
+      probe: async () => {
+        if (read !== null) return { models: read, probedAt: 2 };
+        reads++;
+        await agent.promise;
+        read = after;
+        return { models: after, probedAt: 2 };
+      },
       probedModels: () => read,
+      forgetProbes: () => { read = null; },
     });
     const second = await startTestCore({ dataDir });
     try {
-      const client = await second.connect();
-      const fresh = client.next('providers.probed', event => event.accountId === account.id, 5000);
-      const saved = await answered(client.call('providers.probe', { providerId: 'echo', accountId: account.id }), 2000);
-      expect(saved?.models).toEqual(before);
-      expect(reads).toBe(1);
-      // A send in the meantime may name a model of the list on screen.
-      expect(probedModelsOf('echo', 'echo', account.id)).toEqual(before);
-      agent.resolve();
-      expect((await fresh).models).toEqual(after);
-      expect((await client.call('providers.probe', { providerId: 'echo', accountId: account.id })).models).toEqual(after);
-      expect(reads).toBe(1);
+      await run({ client: await second.connect(), accountId: account.id, reads: () => reads, answer: () => agent.resolve() });
     } finally {
       agent.resolve();
       await second.stop();
@@ -63,9 +64,40 @@ test('a restarted core answers the saved model list at once and reads a fresh on
     restore();
     await removeDir(dataDir);
   }
-});
+}
 
-test('a saved model list read under another descriptor waits for the agent', async () => {
+test('a restarted core answers the saved model list at once and reads a fresh one behind it', () => restarted(async ({ client, accountId, reads, answer }) => {
+  const fresh = client.next('providers.probed', event => event.accountId === accountId, 5000);
+  const saved = await answered(client.call('providers.probe', { providerId: 'echo', accountId }), 2000);
+  expect(saved?.models).toEqual(before);
+  expect(reads()).toBe(1);
+  // A send in the meantime may name a model of the list on screen.
+  expect(probedModelsOf('echo', 'echo', accountId)).toEqual(before);
+  answer();
+  expect((await fresh).models).toEqual(after);
+  expect((await client.call('providers.probe', { providerId: 'echo', accountId })).models).toEqual(after);
+  expect(reads()).toBe(1);
+}));
+
+test('a saved model list shown while a refresh reads is the one model checks accept', () => restarted(async ({ client, accountId, reads, answer }) => {
+  // A client with rows of its own asks for a fresh list as the picker opens.
+  const refresh = client.call('providers.probe', { providerId: 'echo', accountId, refresh: true });
+  const saved = await answered(client.call('providers.probe', { providerId: 'echo', accountId }), 2000);
+  expect(saved?.models).toEqual(before);
+  expect(probedModelsOf('echo', 'echo', accountId)).toEqual(before);
+  answer();
+  expect((await refresh).models).toEqual(after);
+  expect(reads()).toBe(1);
+}));
+
+test('a list the driver already holds after a restart wins over the saved one and starts no agent', () => restarted(async ({ client, accountId, reads }) => {
+  const session: ModelInfo[] = [{ id: 'session', name: 'From the sign-in', default: true }];
+  const probe = client.call('providers.probe', { providerId: 'echo', accountId });
+  expect((await answered(probe, 2000))?.models).toEqual(session);
+  expect(reads()).toBe(0);
+}, [{ id: 'session', name: 'From the sign-in', default: true }]));
+
+test.each(['descriptor', 'sign-in'] as const)('a saved model list read before a %s change waits for the agent', async change => {
   const agent = Promise.withResolvers<void>();
   let reads = 0;
   const restore = setDriver('echo', {
@@ -77,9 +109,14 @@ test('a saved model list read under another descriptor waits for the agent', asy
     const client = await harness.connect();
     const account = await client.call('accounts.add', { providerId: 'echo', label: 'Changed descriptor' });
     expect((await client.call('providers.probe', { providerId: 'echo', accountId: account.id })).models).toEqual(before);
-    // A descriptor change drops every list, the saved one no longer matches.
-    harness.core.providers.require('echo').models = [...harness.core.providers.require('echo').models, { id: 'added', name: 'Added' }];
-    harness.core.bus.emit('providers.updated', harness.core.providers.list());
+    if (change === 'descriptor') {
+      // A descriptor change drops every list, the saved one no longer matches.
+      harness.core.providers.require('echo').models = [...harness.core.providers.require('echo').models, { id: 'added', name: 'Added' }];
+      harness.core.bus.emit('providers.updated', harness.core.providers.list());
+    } else {
+      // A sign-in under the same identity may still be another account.
+      harness.core.accounts.check(account.id, true);
+    }
     const probe = client.call('providers.probe', { providerId: 'echo', accountId: account.id });
     expect(await answered(probe, 300)).toBeNull();
     agent.resolve();

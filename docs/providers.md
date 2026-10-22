@@ -982,7 +982,11 @@ behind it; its answer reaches clients as `providers.probed`. Until that read
 settles the saved list answers model checks, as a refreshed one does. Starting
 the agent is what costs: on 2026-10-22 an Antigravity probe took 12.3 s on the
 desktop, an OpenCode 2 probe 3 to 5 s on the server, and the picker showed
-nothing until it answered. Removing the account removes its saved list.
+nothing until it answered. A list a driver already holds, from a sign-in's or
+a turn's own session, answers instead and starts nothing. A plain probe that
+arrives while a refresh reads gets the saved list too, held for model checks
+the same way. Any change to the account (`accounts.updated`, a sign-in under
+the same identity included) and its removal delete its saved list.
 A model picked from a list the core gave on this connection lands at once, and
 a draft created on it is not read again, except an ACP effort that list carries
 no scale for. A list restored from browser storage, or one the core has not

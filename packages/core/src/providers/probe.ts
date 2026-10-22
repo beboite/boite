@@ -204,14 +204,16 @@ export function registerProbeMethods(core: Core): ProviderProbe {
     // Nothing read since this core started, or since a change that dropped the
     // list: the one saved under the same descriptor, program, gateway and
     // login answers now, and a fresh read replaces it once the agent answers.
-    if (!params.refresh && params.model === undefined && known === undefined && core.providers.enabled(params.providerId)) {
+    // A list a driver already holds, from a sign-in's own session or a turn, is
+    // fresher and starts no process: the plain path below answers it.
+    if (!params.refresh && params.model === undefined && known === undefined && core.providers.enabled(params.providerId)
+      && probedModelsOf(core.providers.require(params.providerId).protocol, params.providerId, params.accountId) === null) {
       const saved = readSavedCatalog(core, params.providerId, params.accountId);
       if (saved !== null) {
-        if (!pending.has(key)) {
-          // Model checks accept the saved list until the fresh read settles.
-          holdModels(params.providerId, params.accountId, saved.models);
-          void probe({ providerId: params.providerId, accountId: params.accountId, refresh: true }).catch(() => undefined);
-        }
+        // Model checks accept the list on screen until the fresh read settles,
+        // whether this call starts that read or a refresh already runs.
+        holdModels(params.providerId, params.accountId, saved.models);
+        if (!pending.has(key)) void probe({ providerId: params.providerId, accountId: params.accountId, refresh: true }).catch(() => undefined);
         return Promise.resolve(saved);
       }
     }
@@ -275,6 +277,9 @@ export function registerProbeMethods(core: Core): ProviderProbe {
       bumpAccount(account.id);
       forgetProbes({ providerId: account.providerId, accountId: account.id });
       forgetAnswered(account.id);
+      // A sign-in can reach another account under the same identity, or none
+      // the core can read: only a list read after it stands for the next start.
+      forgetSavedCatalog(core, account.id);
       return;
     }
     if (name === 'accounts.removed') {
