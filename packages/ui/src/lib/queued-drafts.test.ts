@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { droppedFailure } from './client';
+import { droppedFailure, unansweredFailure } from './client';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
 import { readDraftJournal, writeDraftJournal } from './draft-journal';
@@ -143,4 +143,71 @@ test('a refused start keeps its reason on the draft, and Send again starts it', 
   store.retryQueued('draft', 0);
   await vi.waitFor(() => expect(store.openThread?.title).toBe('Signed out meanwhile'), { timeout: 5000 });
   expect(creates).toHaveLength(2);
+});
+
+test('a start the core never answered, on a link still up, is not asked again in a loop', async () => {
+  const { store, client, creates, original } = await machine('one');
+  await store.connect();
+  const project = store.projects.find(entry => entry.kind !== 'drafts')!;
+  store.startDraft(project.id, { fresh: true });
+  client.drop();
+  sendAway(store, 'Slow core');
+  vi.mocked(client.call).mockImplementation(async (method, params) => {
+    if (method === 'threads.create') { creates.push(params as { title?: string; clientRequestId?: string }); throw unansweredFailure('threads.create'); }
+    return original(method, params);
+  });
+  await client.restore();
+  await vi.waitFor(() => expect(creates).toHaveLength(1), { timeout: 5000 });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  // Asked once, then left alone for a while under the same id; the draft still waits.
+  expect(creates).toHaveLength(1);
+  expect(store.draftEntries[0]).toMatchObject({ queued: 'waiting' });
+});
+
+test('at every write on its way to the conversation the queued prompt is kept somewhere on the device', async () => {
+  const { store, client, starts } = await machine('one');
+  await store.connect();
+  const project = store.projects.find(entry => entry.kind !== 'drafts')!;
+  store.startDraft(project.id, { fresh: true });
+  client.drop();
+  sendAway(store, 'Never lost');
+  const id = store.composerStates.draft!.queued[0]!.request!.id;
+  const kept = () => Object.keys(localStorage).some(name => name.includes(':entry:') && localStorage.getItem(name)!.includes(id));
+  expect(kept()).toBe(true);
+  // A crash may come after any one write: until the core has the prompt, one of them must still hold it.
+  const lost: string[] = [];
+  const watch = (name: string) => { if (starts.length === 0 && !kept()) lost.push(name); };
+  const set = Storage.prototype.setItem, remove = Storage.prototype.removeItem;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, name: string, value: string) { set.call(this, name, value); watch(name); });
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, name: string) { remove.call(this, name); watch(name); });
+  await client.restore();
+  await vi.waitFor(() => expect(starts).toHaveLength(1), { timeout: 5000 });
+  expect(lost).toEqual([]);
+});
+
+test('a draft whose start is on its way is not deleted: its prompt reaches the conversation the core made', async () => {
+  const { store, client, creates, starts, original } = await machine('one');
+  await store.connect();
+  const project = store.projects.find(entry => entry.kind !== 'drafts')!;
+  store.startDraft(project.id, { fresh: true });
+  client.drop();
+  sendAway(store, 'Already on its way');
+  let release: () => void = () => undefined;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(client.call).mockImplementation(async (method, params) => {
+    if (method === 'threads.create') { creates.push(params as { title?: string; clientRequestId?: string }); await held; }
+    if (method === 'turns.start') starts.push(params as { threadId: string; prompt: string; clientRequestId: string });
+    return original(method, params);
+  });
+  await client.restore();
+  await vi.waitFor(() => expect(creates).toHaveLength(1), { timeout: 5000 });
+  const [row] = store.draftEntries;
+  expect(row).toMatchObject({ queued: 'starting' });
+  store.discardDraft(row!.id);
+  store.cancelQueuedDraft(row!.id);
+  expect(store.draftEntries[0]).toMatchObject({ id: row!.id, queued: 'starting' });
+  release();
+  await vi.waitFor(() => expect(starts).toHaveLength(1), { timeout: 5000 });
+  expect(starts[0]!.prompt).toBe('Already on its way');
+  expect(store.draftEntries).toHaveLength(0);
 });

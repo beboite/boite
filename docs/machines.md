@@ -88,12 +88,17 @@ answers on an open connection with its info and nothing else. That `hello`
 carries no token and no device signature, since the core reads none of its
 params once the socket is authenticated. A call that hears no frame at all for
 3 seconds sends the same `hello`, so a click on a conversation of a machine
-whose link died shows that machine offline within 13 seconds. If no frame of
-any kind arrives within 10 seconds of a `hello`, the socket is replaced and the
-calls it carried fail as dropped. A remote client asks the core to slice every
-answer (`progress`, `features.chunkedAnswers`): each 64 KiB slice is a frame,
-so a long answer on a slow link keeps the socket alive while a dead link stays
-silent. A core without sliced answers may still be sending one frame of up to
+whose link died shows that machine offline within 13 seconds. The call counts
+frames rather than reading the clock, since a frame and a call can share a
+millisecond. If no frame of any kind arrives within 10 seconds of a `hello`,
+the socket is replaced and the calls it carried fail as dropped. A remote
+client asks the core to slice every answer (`progress`,
+`features.chunkedAnswers`): each 64 KiB slice is a frame, so a long answer on a
+slow link keeps the socket alive while a dead link stays silent. Requests are
+not sliced, and the `hello` queues behind what the client still uploads: past
+the first 64 KiB sent since the last frame arrived, the deadline grows by the
+time those bytes take at 32 KiB/s, so a prompt with 2 MiB of pictures gets 62
+seconds more. A core without sliced answers may still be sending one frame of up to
 16 MB: there, while a call waits, only that call's own 120 second timeout
 starts the check. Until 2026-10-22 that rule held on every core, and a VPN
 that dropped under an open conversation left the machine reading as connected
@@ -341,9 +346,14 @@ it made (`packages/core/src/threads/creation-requests.ts`, kept for an hour in
 memory), so a creation whose answer the link lost is not made twice. The draft
 goes unless its box holds new text, and a draft on screen gives way to its
 conversation. A refusal stays on the queued prompt with its reason and Send
-again. An incognito draft is never kept on the device, so it still waits for
-its machine before it can be sent (`store/composer.svelte.ts`,
-`launchQueuedDrafts`).
+again. A start on its way can be neither deleted nor taken back, since the
+core may already hold the conversation. The thread's outbox is written to the
+device before the draft leaves it, so a crash between the two leaves the prompt
+in both, which the core takes once under its ids, never in neither. A start
+that gets no answer on a live link, or finds no drafts project, is tried again
+15 seconds later rather than at once. An incognito draft is never kept on the
+device, so it still waits for its machine before it can be sent
+(`packages/ui/src/lib/store/draft-launch.svelte.ts`).
 
 Archiving or restoring a project of a machine that is offline still works: the
 project moves at once and the choice is kept on this device, per core, in

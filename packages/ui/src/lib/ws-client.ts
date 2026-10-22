@@ -3,7 +3,7 @@ import { secureId } from './secure-id';
 import { RELEASE_VERSION } from './release';
 import { signedUngrouped, type DeviceKey } from './device-key';
 import {
-  PROTOCOL_VERSION, RPC_MAX_FRAME_BYTES, RpcCloseCode, RpcErrorCode,
+  PROTOCOL_VERSION, RPC_CHUNK_BYTES, RPC_MAX_FRAME_BYTES, RpcCloseCode, RpcErrorCode,
   type ClientName, type CoreInfo, type DeviceHello, type Principal, type UngroupedData,
   type RpcEventName, type RpcMethodName, type RpcParams, type RpcResult, type ThreadId
 } from '@boite/contracts';
@@ -11,7 +11,7 @@ import type { CallOptions, ClientState, EventHandler, ObservableClient, Session,
 import { RpcFailure, closedFailure, droppedFailure, transportFailure, unansweredFailure } from './rpc-error';
 import { receiveFrame, type Pending } from './ws-client-frames';
 import {
-  IDLE_PROBE_MS, PROBE_DEADLINE_MS, QUIET_CALL_MS, RESUME_PROBE_MS, MESSAGE_TOO_BIG,
+  IDLE_PROBE_MS, PROBE_DEADLINE_MS, QUIET_CALL_MS, RESUME_PROBE_MS, MESSAGE_TOO_BIG, UPLOAD_FLOOR_BYTES_PER_S,
   browserSocket, defaultBackoff, frameBytes, isLoopbackUrl, megabytes, openDeadline, pageHidden, rpcUrl
 } from './ws-client-utils';
 
@@ -57,6 +57,10 @@ export class WsClient implements ObservableClient {
   /** Remote sockets are probed when silent; a loopback one never goes half-open. */
   #remote: boolean;
   #lastFrameAt = 0;
+  /** Frames received on this client: a call compares it with the count it was sent at, two of which may share a millisecond. */
+  #framesReceived = 0;
+  /** Bytes sent since the last frame arrived: the core answers nothing before it has read them. */
+  #sentSinceFrame = 0;
   #liveness: ReturnType<typeof setTimeout> | null = null;
   /** The one probe in flight: settled true by any frame, false by its deadline or a teardown. */
   #probe: { socket: SocketLike; result: Promise<boolean>; settle: (alive: boolean) => void } | null = null;
@@ -238,13 +242,13 @@ export class WsClient implements ObservableClient {
       }));
     }
     const id = this.#nextId++;
-    const sentAt = Date.now();
+    const heard = this.#framesReceived;
     return new Promise<RpcResult<M>>((resolve, reject) => {
       // A call that hears nothing at all on a remote socket asks whether the machine is still there,
       // so a click on a conversation of a machine whose link died gets its offline state within the
       // probe's deadline rather than once the call's two minutes are spent.
       const watch = this.#remote && method !== 'hello' && this.#sliced()
-        ? setTimeout(() => { if (this.#lastFrameAt < sentAt) this.#suspect(socket); }, QUIET_CALL_MS)
+        ? setTimeout(() => { if (this.#framesReceived === heard) this.#suspect(socket); }, QUIET_CALL_MS)
         : null;
       const expire = () => {
         this.#pending.delete(id);
@@ -263,7 +267,7 @@ export class WsClient implements ObservableClient {
         ...(onProgress ? { onProgress } : {})
       };
       this.#pending.set(id, pending);
-      try { socket.send(frame); }
+      try { socket.send(frame); this.#sentSinceFrame += size; }
       catch (error) {
         this.#pending.delete(id);
         pending.reject(error instanceof Error ? error : transportFailure(String(error)));
@@ -273,6 +277,7 @@ export class WsClient implements ObservableClient {
 
   #open(): Promise<CoreInfo> {
     this.#setState('connecting');
+    this.#sentSinceFrame = 0;
     const socket = this.#options.socketFactory(rpcUrl(this.#options.url));
     this.#socket = socket;
 
@@ -452,8 +457,11 @@ export class WsClient implements ObservableClient {
   #probeSocket(socket: SocketLike, deadlineMs: number): Promise<boolean> {
     if (this.#probe?.socket === socket) return this.#probe.result;
     let settle: (alive: boolean) => void = () => undefined;
+    // The hello waits behind what this client still uploads, a picture in a prompt on a slow uplink:
+    // the deadline grows by the time those bytes take at the slowest rate a link is still trusted with.
+    const behind = Math.ceil((Math.max(0, this.#sentSinceFrame - RPC_CHUNK_BYTES) / UPLOAD_FLOOR_BYTES_PER_S) * 1000);
     const result = new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => settle(false), deadlineMs);
+      const timer = setTimeout(() => settle(false), deadlineMs + behind);
       settle = (alive) => {
         clearTimeout(timer);
         if (this.#probe?.socket === socket) this.#probe = null;
@@ -569,6 +577,8 @@ export class WsClient implements ObservableClient {
 
   #receive(raw: unknown): void {
     this.#lastFrameAt = Date.now();
+    this.#framesReceived += 1;
+    this.#sentSinceFrame = 0;
     this.#probe?.settle(true);
     receiveFrame(raw, this.#pending, this.#handlers, (whole) => this.#receive(whole));
   }

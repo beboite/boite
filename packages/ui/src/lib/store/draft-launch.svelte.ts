@@ -1,0 +1,159 @@
+import { untrack } from 'svelte';
+import type { ThreadId } from '@boite/contracts';
+import { wasDropped, wasUnanswered } from '../client';
+import { titleFrom } from '../format';
+import { DRAFT_STASH_KEY } from '../prefs';
+import { wasClosed } from '../rpc-error';
+import type { Choice, Draft } from '../store.svelte';
+import type { StoreContext } from './context';
+import { draftKey, type Input } from './drafts.svelte';
+
+/** How long a queued draft whose start got nowhere waits before it is tried again. */
+const DRAFT_RETRY_MS = 15_000;
+
+/**
+ * The drafts sent while their machine was away: each becomes its conversation
+ * once the machine is back, in the order they were sent (`docs/machines.md`).
+ */
+export class DraftLaunch {
+  /** The queued drafts are being started, one after the other; `again` asks for one more pass. */
+  private launches: { again: boolean } | null = null;
+  /** Drafts whose start got nowhere for a reason that may pass (no answer, no drafts project): left alone for a while. */
+  private stalled = new Set<string>();
+  /** Bumped when a stalled draft may be tried again. */
+  private tick = $state(0);
+
+  constructor(private readonly ctx: StoreContext) {}
+
+  /** Runs inside the composer's effect root: a ready machine starts what its drafts queued. */
+  watch(): void {
+    $effect(() => {
+      void this.tick;
+      if (this.ctx.store.connection !== 'ready' || this.queuedDrafts().length === 0) return;
+      untrack(() => void this.launchQueuedDrafts());
+    });
+  }
+
+  /** The open draft, else a saved one, under its key, with what it was written with. */
+  private draftAt(key: string): { draft: Draft; input: Input; choice: Choice | null } | null {
+    const s = this.ctx.store;
+    const input = this.ctx.composer.composerStates[DRAFT_STASH_KEY];
+    if (s.draft && draftKey(s.draft) === key) return input ? { draft: s.draft, input, choice: s.draftChoice } : null;
+    const saved = this.ctx.drafts.saved[key];
+    return saved ? { draft: saved.draft, input: saved.input, choice: saved.choice } : null;
+  }
+
+  /** The drafts whose first prompt waits to start their conversation, oldest queue first. */
+  private queuedDrafts(): string[] {
+    const s = this.ctx.store;
+    const waiting = (input: Input | undefined): input is Input => !!input && !input.sending && !!input.queued[0]?.request && input.queued[0].request.failed === undefined;
+    const ready = (key: string) => !this.stalled.has(key);
+    const keys: { key: string; at: number }[] = [];
+    const open = s.draft ? draftKey(s.draft) : null;
+    const input = this.ctx.composer.composerStates[DRAFT_STASH_KEY];
+    if (open !== null && ready(open) && waiting(input)) keys.push({ key: open, at: input.queued[0]!.request!.queuedAt });
+    for (const [key, saved] of Object.entries(this.ctx.drafts.saved)) {
+      if (key !== open && ready(key) && waiting(saved.input)) keys.push({ key, at: saved.input.queued[0]!.request!.queuedAt });
+    }
+    return keys.sort((a, b) => a.at - b.at).map(entry => entry.key);
+  }
+
+  /** One pass at a time, in the order the drafts were queued, so their conversations start in that order. */
+  private async launchQueuedDrafts(): Promise<void> {
+    if (this.launches) { this.launches.again = true; return; }
+    const pass = { again: true };
+    this.launches = pass;
+    try {
+      while (pass.again) {
+        pass.again = false;
+        for (const key of this.queuedDrafts()) {
+          if (this.ctx.store.connection !== 'ready') return;
+          await this.launchDraft(key);
+        }
+      }
+    } finally { this.launches = null; }
+  }
+
+  /**
+   * Starts the conversation of a draft whose first prompt was written while its
+   * machine was away. The core makes it under that prompt's request id, so a
+   * creation whose answer the link lost is not made twice, and the draft's queue
+   * moves to the new thread's outbox, which sends it in order under the same ids.
+   * A refusal stays on the prompt with its reason and Send again.
+   */
+  private async launchDraft(key: string): Promise<void> {
+    const s = this.ctx.store;
+    const client = this.ctx.client;
+    const generation = this.ctx.clientGeneration;
+    const source = this.draftAt(key);
+    const head = source?.input.queued[0];
+    if (!client || !source || !head?.request || head.request.failed !== undefined || source.input.sending) return;
+    const { draft, input } = source;
+    const request = head.request;
+    // The composer queues with the chips' choice; a draft saved without one starts on the machine's default.
+    const choice = request.choice ?? source.choice ?? s.defaultChoice();
+    if (!choice) { this.stall(key); return; }
+    input.sending = true;
+    input.outgoing = 1;
+    try {
+      await this.ctx.connection.reloading?.essential;
+      if (!this.ctx.currentClient(client, generation) || s.connection !== 'ready' || input.queued[0] !== head) return;
+      const projectId = draft.projectId ?? await this.ctx.projects.ensureDrafts();
+      if (!this.ctx.currentClient(client, generation)) return;
+      if (projectId === null) { this.stall(key); return; }
+      const created = await client.call('threads.create', {
+        projectId,
+        providerId: choice.providerId,
+        accountId: choice.accountId,
+        permissionMode: choice.permissionMode,
+        title: titleFrom(head.text) || undefined,
+        effort: choice.effort,
+        speed: choice.speed ?? null,
+        ...(choice.model ? { model: choice.model } : {}),
+        ...(draft.worktree ? { worktree: {} } : {}),
+        clientRequestId: request.id
+      });
+      if (!this.ctx.currentClient(client, generation)) return;
+      this.ctx.threads.upsertThread(created);
+      this.adoptLaunched(key, input, created.id);
+    } catch (error) {
+      if (!this.ctx.currentClient(client, generation)) return;
+      // Lost with the link: the next connection asks again under the same id. Unanswered on a live one: a little later.
+      if (wasDropped(error) || wasClosed(error) || wasUnanswered(error) || s.connection !== 'ready') {
+        if (s.connection === 'ready') this.stall(key);
+        return;
+      }
+      if (input.queued[0] === head) head.request = { ...request, failed: this.ctx.reason(error) };
+      this.ctx.drafts.persist(); void this.ctx.drafts.flush();
+    } finally {
+      input.sending = false;
+      input.outgoing = 0;
+    }
+  }
+
+  /** A start that got nowhere is not tried again at once, which would loop on the same answer. */
+  private stall(key: string): void {
+    this.stalled.add(key);
+    setTimeout(() => { this.stalled.delete(key); this.tick++; }, DRAFT_RETRY_MS);
+  }
+
+  /**
+   * The new conversation takes the draft's queue as its outbox. The draft goes
+   * unless text waits in its box; the one on screen gives way to the conversation.
+   */
+  private adoptLaunched(key: string, input: Input, threadId: ThreadId): void {
+    const s = this.ctx.store;
+    const state = (this.ctx.composer.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false });
+    // A draft started again after a crash finds its prompts there already: the same ids, once.
+    const moved = input.queued.splice(0).filter(entry => !state.queued.some(queued => queued.request && queued.request.id === entry.request?.id));
+    state.queued.push(...moved);
+    // The thread's outbox is written before the draft goes: a crash between the two leaves the
+    // prompt in both, which the core takes once under its ids, never in neither.
+    this.ctx.drafts.persist(threadId);
+    const viewing = !!s.draft && draftKey(s.draft) === key && !s.openThread;
+    const kept = !!(input.text || input.attachments.length || input.previewReferences?.length);
+    if (!kept) this.ctx.drafts.discard(key, { started: true });
+    this.ctx.drafts.persist(); void this.ctx.drafts.flush();
+    if (viewing && !kept) void s.open(threadId);
+  }
+}

@@ -146,8 +146,8 @@ test('a machine whose link goes silent reads offline within seconds, and a conve
 
     // The machine returns: the conversation starts there once, with its prompt, and takes the draft's place.
     hole.thaw();
-    // The echo agent may retitle it from the prompt ("Echo: ..."), which still names it.
-    await page.waitFor(`document.querySelector('${id('thread-title')}')?.textContent.includes('Start this when the server is back')`, 30_000);
+    // The echo agent may retitle it from the start of the prompt ("Echo: Start this when the server").
+    await page.waitFor(`document.querySelector('${id('thread-title')}')?.textContent.includes('Start this when the server')`, 30_000);
     await page.waitFor(`document.querySelector('${id('chat')}')?.textContent.includes('Start this when the server is back') && !document.querySelector('${id('composer-queued')}')`);
     expect(await page.evaluate(`document.querySelector('[data-testid="draft-row"]')`)).toBe(null);
     const started = (await b.call('threads.list', {})).filter(thread => thread.projectId === tb.projectId && thread.id !== tb.id);

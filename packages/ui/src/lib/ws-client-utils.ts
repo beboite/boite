@@ -51,6 +51,13 @@ export const PROBE_DEADLINE_MS = 10_000;
  * or carries any event meanwhile, is not asked.
  */
 export const QUIET_CALL_MS = 3_000;
+/**
+ * The slowest upload a probe still waits for: its `hello` queues behind the
+ * bytes this client sent since the last frame came back, past the first 64 KiB,
+ * so 2 MiB of pictures give it 62 s more. Answers need no such allowance: they come in 64 KiB
+ * slices, so a download as slow as 5 KiB/s still lands one within a deadline.
+ */
+export const UPLOAD_FLOOR_BYTES_PER_S = 32 * 1024;
 /** How long `resume()` gives the socket it already has before replacing it. */
 export const RESUME_PROBE_MS = 4_000;
 

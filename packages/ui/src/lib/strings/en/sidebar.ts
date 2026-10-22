@@ -164,6 +164,7 @@ export const strings = {
     deleteDraft: 'Delete draft',
     /** A draft sent while its machine was away: its conversation starts once the machine is back. */
     draftQueued: 'Starts when {machine} is back',
+    draftStarting: 'Starting on {machine}',
     draftQueueFailed: 'Not started: {reason}',
     /** Its menu takes the queued prompt back into the draft, which then waits to be sent again. */
     cancelQueuedDraft: 'Cancel the start'

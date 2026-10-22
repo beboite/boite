@@ -19,7 +19,7 @@ type Source = { section: 'inputs' | 'drafts'; id: string; input: Input; draft?: 
 type CachedEntry = { section: Source['section']; id: string; value: unknown; serialized: string; updatedAt: number; backedUp: boolean };
 const entryKey = (section: Source['section'], id: string) => JSON.stringify([section, id]);
 /** A draft's row: its words, and whether it was sent while its machine was away and waits for it, or was refused. */
-export type DraftEntry = { id: string; projectId: string | null; text: string; active: boolean; queued: 'waiting' | { failed: string } | null };
+export type DraftEntry = { id: string; projectId: string | null; text: string; active: boolean; queued: 'waiting' | 'starting' | { failed: string } | null };
 const empty = (): Input => ({ text: '', attachments: [], queued: [], sending: false, paused: false });
 const hasText = (input: Input | undefined) => !!(input?.text || input?.queued.length);
 const hasContent = (input: Input | undefined) => hasText(input) || !!(input?.attachments.length || input?.previewReferences?.length);
@@ -318,9 +318,15 @@ export class Drafts {
     this.persist();
   }
 
-  /** Drops a draft. The open one empties and stays open, in the same project. */
-  discard(id: string): void {
+  /**
+   * Drops a draft. The open one empties and stays open, in the same project.
+   * One whose conversation is being started stays: the core may already hold
+   * it, and its prompt goes there (`started` is that start handing it over).
+   */
+  discard(id: string, options: { started?: boolean } = {}): void {
     const s = this.ctx.store;
+    const input = s.draft && draftKey(s.draft) === id ? this.ctx.composer.composerStates.draft : this.saved[id]?.input;
+    if (!options.started && input?.sending && input.queued[0]?.request) return;
     delete this.saved[id];
     if (s.draft && draftKey(s.draft) === id) {
       this.ctx.composer.composerStates.draft = empty();
@@ -350,7 +356,7 @@ export class Drafts {
     const row = (id: string, projectId: string | null, input: Input, active: boolean, createdAt: number) => {
       const head = input.queued[0]?.request ? input.queued[0] : undefined;
       return { id, projectId, text: input.text || head?.text || '', active, createdAt,
-        queued: head?.request?.failed !== undefined ? { failed: head.request.failed } : head ? 'waiting' as const : null };
+        queued: head?.request?.failed !== undefined ? { failed: head.request.failed } : head && input.sending ? 'starting' as const : head ? 'waiting' as const : null };
     };
     for (const [id, entry] of Object.entries(this.saved)) {
       if (hasContent(entry.input)) rows.set(id, row(id, entry.draft.projectId, entry.input, false, entry.draft.createdAt ?? 0));

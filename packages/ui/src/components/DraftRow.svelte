@@ -19,6 +19,7 @@
   let machine = $derived(workspace.machines.find(item => item.store === owner)?.label ?? strings.machines.local);
   let tooltip = $derived(
     entry.queued === 'waiting' ? `${entry.text}\n${fill(strings.sidebar.draftQueued, { machine })}`
+      : entry.queued === 'starting' ? `${entry.text}\n${fill(strings.sidebar.draftStarting, { machine })}`
       : entry.queued ? `${entry.text}\n${fill(strings.sidebar.draftQueueFailed, { reason: entry.queued.failed })}`
       : entry.text || strings.sidebar.draft
   );
@@ -28,11 +29,12 @@
     onopen?.();
   }
   function menu(event: MouseEvent) {
+    // A start on its way is not taken back: the core may already hold the conversation.
+    const starting = entry.queued === 'starting';
     contextMenu.open(event, [
       { id: 'open', label: strings.common.open },
-      ...(entry.queued ? [{ id: 'unqueue', label: strings.sidebar.cancelQueuedDraft }] : []),
-      separator(),
-      { id: 'delete', label: strings.sidebar.deleteDraft, danger: true }
+      ...(entry.queued && !starting ? [{ id: 'unqueue', label: strings.sidebar.cancelQueuedDraft }] : []),
+      ...(starting ? [] : [separator(), { id: 'delete', label: strings.sidebar.deleteDraft, danger: true }])
     ], action => {
       if (action === 'open') void open();
       if (action === 'unqueue') owner.cancelQueuedDraft(entry.id);
@@ -41,10 +43,10 @@
   }
 </script>
 
-<button class="ghost draft" class:active class:failed={entry.queued !== null && entry.queued !== 'waiting'} data-testid="draft-row" data-project-id={entry.projectId ?? ''} data-draft-id={entry.id}
-  data-queued={entry.queued === null ? undefined : entry.queued === 'waiting' ? 'waiting' : 'failed'}
+<button class="ghost draft" class:active class:failed={entry.queued !== null && typeof entry.queued !== 'string'} data-testid="draft-row" data-project-id={entry.projectId ?? ''} data-draft-id={entry.id}
+  data-queued={entry.queued === null ? undefined : typeof entry.queued === 'string' ? entry.queued : 'failed'}
   aria-current={active ? 'page' : undefined} title={tooltip} onclick={open} oncontextmenu={menu} use:longPress>
-  {#if entry.queued === 'waiting'}<Clock size={14} aria-hidden="true" />
+  {#if entry.queued === 'waiting' || entry.queued === 'starting'}<Clock size={14} aria-hidden="true" />
   {:else if entry.queued}<CircleAlert size={14} aria-hidden="true" />
   {:else if entry.text}<PencilLine size={14} aria-hidden="true" />{:else}<span class="mark" aria-hidden="true"></span>{/if}
   <span class="title ui-label">{entry.text || strings.sidebar.draft}</span>
@@ -55,6 +57,7 @@
   .draft.active { background: var(--color-active); }
   .draft :global(svg) { flex: none; color: var(--color-accent); }
   .draft[data-queued='waiting'] :global(svg) { color: var(--color-muted-foreground); }
+  .draft[data-queued='starting'] :global(svg) { color: var(--color-accent); }
   .draft.failed :global(svg) { color: var(--color-danger); }
   .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
   .mark { width: 8px; height: 8px; flex: none; border-radius: 50%; border: 1.5px dashed var(--color-muted-foreground); }
