@@ -135,7 +135,7 @@ export class DraftLaunch {
       if (input.queued[0] === head) {
         // A refusal made nothing, so the start may be taken back or asked again differently; one about its
         // request id says the core holds a conversation under it, and keeps what was asked, unless that
-        // conversation was deleted since: then nothing holds it and only new words under a new id can go.
+        // conversation was deleted since: then nothing holds it, the start unlocks and Send again goes under a fresh id.
         const { start: asked, ...rest } = request;
         const data = error instanceof RpcFailure ? error.data as { field?: unknown; reason?: unknown } | undefined : undefined;
         const held = data?.field === 'clientRequestId' && data.reason !== 'deleted';
