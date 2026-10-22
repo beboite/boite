@@ -27,17 +27,18 @@ test.skipIf(process.platform !== 'win32' || (!required && !existsSync(launcher))
     // Windows names it `Path`; a second `PATH` beside it would not be the one read.
     const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PATH'));
     env.Path = `${directory};${process.env.Path ?? process.env.PATH ?? ''}`;
+    // Verbatim, so cmd.exe reads the line as typed rather than with escaped quotes.
     const run = (command: string[]) => {
-      const result = Bun.spawnSync(command, { cwd: directory, env, stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+      const result = Bun.spawnSync(command, { cwd: directory, env, stdout: 'pipe', stderr: 'pipe', windowsHide: true, windowsVerbatimArguments: true });
       return { code: result.exitCode, out: result.stdout.toString().trim(), err: result.stderr.toString().trim() };
     };
     const expected = JSON.stringify(['cli', 'browser', 'open', 'https://a.test/?a=1&b=2', '--profile', 'private']);
-    expect(run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', "boite browser open 'https://a.test/?a=1&b=2' --profile private"]))
+    expect(run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', `"boite browser open 'https://a.test/?a=1&b=2' --profile private"`]))
       .toEqual({ code: 0, out: expected, err: '' });
     expect(run(['cmd.exe', '/d', '/c', 'boite browser open "https://a.test/?a=1&b=2" --profile private']))
       .toEqual({ code: 0, out: expected, err: '' });
     // A space and an exit code come through too.
-    expect(run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', "boite panel 'a file.txt'"]).out).toBe(JSON.stringify(['cli', 'panel', 'a file.txt']));
+    expect(run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', `"boite panel 'a file.txt'"`]).out).toBe(JSON.stringify(['cli', 'panel', 'a file.txt']));
     writeFileSync(join(directory, 'core', 'main.js'), 'process.exit(7);\n');
     expect(run(['cmd.exe', '/d', '/c', 'boite status']).code).toBe(7);
   } finally {
