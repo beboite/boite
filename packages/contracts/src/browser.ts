@@ -418,7 +418,17 @@ export const DEFAULT_BROWSER_PROFILE = 'default';
 export const PRIVATE_BROWSER_PROFILE = 'private';
 export const BROWSER_PROFILES_MAX = 32;
 export const BROWSER_PROFILE_NAME_MAX = 40;
-export interface BrowserProfile { id: string; name: string }
+export interface BrowserUserAgent { mode: 'suffix' | 'replace'; value: string }
+export interface BrowserProfile { id: string; name: string; userAgent?: BrowserUserAgent }
+
+/** User-Agent is one printable ASCII HTTP field value, never an injected header. */
+export function browserUserAgentError(value: unknown): string | null {
+  if (value === undefined) return null;
+  const setting = value as Partial<BrowserUserAgent> | null;
+  return !setting || !['suffix', 'replace'].includes(setting.mode as string)
+    || typeof setting.value !== 'string' || setting.value.length > 8192 || /[^\x20-\x7e]/.test(setting.value)
+    ? 'User-Agent needs suffix or replace mode and at most 8192 printable ASCII characters' : null;
+}
 
 /** The shell checks the same rule before it opens a profile folder. */
 export function browserProfileIdError(id: unknown): string | null {

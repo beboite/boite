@@ -3,6 +3,7 @@
   import { BROWSER_PROFILES_MAX, checkSettingsPatch, DEFAULT_BROWSER_PROFILE, type BrowserProfile } from '@boite/contracts';
   import { tick } from 'svelte';
   import InfoTip from './InfoTip.svelte';
+  import BrowserUserAgent from './BrowserUserAgent.svelte';
   import Menu from './Menu.svelte';
   import { canCopySignIns, copySignIns } from '../lib/browser-cookies';
   import { workspace } from '../lib/workspace.svelte';
@@ -62,15 +63,15 @@
     return result.patch.browserProfiles ?? profiles;
   }
 
-  async function save(profiles: BrowserProfile[], defaultId?: string): Promise<boolean> {
+  async function save(change: (profiles: BrowserProfile[]) => BrowserProfile[] | null, defaultId?: string): Promise<boolean> {
     busy = true;
-    try { return await browserProfiles.save(profiles, defaultId); } finally { busy = false; }
+    try { return await browserProfiles.save(change, defaultId); } finally { busy = false; }
   }
 
   async function add(event: Event): Promise<void> {
     event.preventDefault();
-    const next = checked([...browserProfiles.list, { id: newProfileId(), name: draft }]);
-    if (next && (await save(next))) draft = '';
+    const profile = { id: newProfileId(), name: draft };
+    if (await save(profiles => checked([...profiles, profile]))) draft = '';
   }
 
   async function startRename(profile: BrowserProfile): Promise<void> {
@@ -84,8 +85,8 @@
   async function rename(event: Event): Promise<void> {
     event.preventDefault();
     const id = renaming;
-    const next = checked(browserProfiles.list.map((profile) => (profile.id === id ? { ...profile, name: renamed } : profile)));
-    if (next && (await save(next))) renaming = null;
+    const name = renamed;
+    if (await save(profiles => checked(profiles.map(profile => profile.id === id ? { ...profile, name } : profile)))) renaming = null;
   }
 
   function renameKey(event: KeyboardEvent): void {
@@ -97,10 +98,12 @@
 
   /**
    * Its tabs close first, then the shell erases what the profile kept, then the
-   * list forgets it. A profile the shell could not erase is still removed from
-   * the list, and the reason is shown.
+   * list forgets it. If erasure is unavailable or fails, the entry stays and
+   * the reason is shown.
    */
   async function remove(profile: BrowserProfile): Promise<void> {
+    const erase = browserBridge.deleteProfile?.bind(browserBridge);
+    if (!erase) { problem = s.deleteUnavailable; return; }
     const sure = await confirm.ask({
       title: fill(s.deleteTitle, { name: profile.name }),
       body: s.deleteBody,
@@ -112,10 +115,12 @@
     busy = true;
     problem = '';
     rightPanel.closeProfile(profile.id);
-    let failure = '';
-    try { await browserBridge.deleteProfile?.(profile.id); } catch (error) { failure = errorText(error); }
-    const saved = await save(browserProfiles.list.filter((one) => one.id !== profile.id));
-    if (saved && failure) problem = fill(s.deleteFailed, { reason: failure });
+    try {
+      await erase(profile.id);
+      await save(profiles => profiles.filter(one => one.id !== profile.id));
+    } catch (error) {
+      problem = fill(s.deleteFailed, { reason: errorText(error) });
+    } finally { busy = false; }
   }
 </script>
 
@@ -141,11 +146,12 @@
             <Menu items={targets.map((machine) => ({ id: machine.id, label: machine.label }))} onpick={(id) => void copy(profile, id)} label={fill(s.copySignInsHint, { name: profile.name })} variant="ghost" testid="browser-profile-copy"><span class="ui-label">{s.copySignIns}</span></Menu>
           {/if}
           {#if !isDefault}
-            <button type="button" class="small ghost" data-testid="browser-profile-make-default" disabled={busy || !ready} onclick={() => void save(browserProfiles.list, profile.id)}>{s.makeDefault}</button>
+            <button type="button" class="small ghost" data-testid="browser-profile-make-default" disabled={busy || !ready} onclick={() => void save(profiles => profiles, profile.id)}>{s.makeDefault}</button>
           {/if}
           {#if !builtIn}
             <button type="button" class="small ghost" data-testid="browser-profile-rename" disabled={busy || !ready} onclick={() => void startRename(profile)}>{strings.common.rename}</button>
             <button type="button" class="small ghost danger" data-testid="browser-profile-delete" disabled={busy || !ready} onclick={() => void remove(profile)}>{strings.common.delete}</button>
+            <BrowserUserAgent {profile} disabled={busy || !ready} />
           {/if}
         {/if}
       </li>

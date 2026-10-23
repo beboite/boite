@@ -75,6 +75,28 @@ flag adds and that took 56 pixels of the page, and `--screen-info={1920x1080}`.
 A browser whose identity cannot be read starts as it is, with a warning in the
 log. A page check of `boite view` skips the read.
 
+Settings > General > Browser profiles has a User-Agent editor on each custom
+profile. Leave it empty for the unchanged browser identity, append a suffix
+such as a bug bounty program marker, or replace the complete value. The
+setting is stored as `browserProfiles[].userAgent` (`mode: suffix | replace`,
+`value`) and applies when that profile's agent browser next starts. Close its
+agent tabs and wait for the idle process to end, or restart the core, to apply
+a change to an already running profile. Default and private profiles keep the
+browser identity; create a named profile to customize it.
+
+A profile keeps its current engine until it closes, including when the desktop
+app attaches or the User-Agent setting changes. Its next engine starts after
+the previous engine finishes saving cookies, so two engines never overwrite
+the same profile's saved cookie snapshot.
+
+A customized profile starts a separate Chromium process even while the desktop
+app hosts other agent tabs: webviews cannot set per-profile process flags for
+workers and popups. The panel displays its remote view. The process receives
+the complete value through `--user-agent`; tab overrides use that same value
+with the real browser's client hints. Replacing the value does not impersonate
+another engine or OS in client hints. If the native identity cannot be read,
+a customized profile refuses to start rather than omit its program marker.
+
 This brings it level with the same Chrome running with a window on the same
 network, not past it. Etsy, SeLoger and Reddit still asked for a captcha on
 2026-10-09, and so did Chrome with a window under Xvfb on that address. The
@@ -94,6 +116,10 @@ tool process of `system:browser`, so [the trace](trace.md) shows it. It closes
 Settings closes its tabs and removes its folder; a folder whose browser had
 already closed goes at the next settings change or the first use of the agent
 browser after a restart. A folder that cannot be removed is logged.
+
+The profile entry is removed only after the desktop app confirms that it erased
+its local data. Web and phone clients keep the entry and explain that deletion
+needs the desktop app. A failed erase also leaves the entry available to retry.
 
 The browser downloads no components (`--disable-component-update`) and keeps
 at most 64 MiB of HTTP cache (`--disk-cache-size`). Before a profile's first
@@ -261,8 +287,9 @@ another site shows as a note.
 
 ## The desktop app hosts the tabs
 
-On Windows, the desktop app connected to the core it started hosts that core's
-agent browser: each new agent tab is a webview of the app (WebView2), in the
+On Windows, the desktop app connected to the core it started hosts new agent
+browser sessions once a profile's previous engine has closed. Each hosted
+agent tab is a webview of the app (WebView2), in the
 same profiles as the user's own Browser tabs, so a site signed in there is
 signed in for the agent too. The panel shows that webview itself, parked over
 its slot: it scrolls, types and paints natively, and nothing is captured or

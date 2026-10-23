@@ -229,6 +229,45 @@ real('a site sees the browser a person runs with a window, not headless Chrome',
   expect(seen.screen[1]).toBeGreaterThanOrEqual(seen.window[1]);
 }, 150_000);
 
+real('custom profile User-Agents cover pages, workers, popups and requests even with a desktop host', async () => {
+  const { owner, agent, threadId } = browserFixture;
+  const host = await browserFixture.fakeHost();
+  try {
+    await host.app.call('browser.hostAttach', {});
+    await owner.call('settings.set', { browserProfiles: [
+      { id: 'p-suffix', name: 'Suffix', userAgent: { mode: 'suffix', value: 'Bounty/1' } },
+      { id: 'p-replace', name: 'Replace', userAgent: { mode: 'replace', value: 'Research/1' } },
+    ] });
+    for (const profile of ['p-suffix', 'p-replace']) {
+      const opened = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url(), profile } });
+      // A custom profile must not use webviews: only a process flag reaches workers and popup requests.
+      const status = async () => (await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: Array<{ tabId: string; url: string; view?: string }> };
+      expect((await status()).tabs.find(tab => tab.tabId === opened.tabId)?.view).toBeUndefined();
+      const seen = await evaluate(`(async () => {
+        const worker = await new Promise(resolve => { const w = new Worker(URL.createObjectURL(new Blob(['postMessage(navigator.userAgent)']))); w.onmessage = e => { w.terminate(); resolve(e.data); }; });
+        await fetch('/ua-request');
+        return { page: navigator.userAgent, worker,
+          versions: (await navigator.userAgentData.getHighEntropyValues(['fullVersionList'])).fullVersionList.length };
+      })()`, opened.tabId) as { page: string; worker: string; versions: number };
+      await agent.call('browser.command', { threadId, tabId: opened.tabId, action: { kind: 'click', selector: '#pop' } });
+      let popup: { tabId: string; url: string } | undefined;
+      for (let i = 0; i < 100; i++) {
+        popup = (await status()).tabs.find(tab => tab.url === url('/popup'));
+        if (popup) break;
+        await Bun.sleep(50);
+      }
+      expect(popup).toBeDefined();
+      const popupAgent = await evaluate('navigator.userAgent', popup!.tabId);
+      expect(seen.page).toMatch(profile === 'p-suffix' ? / Chrome\/.* Bounty\/1$/ : /^Research\/1$/);
+      expect([seen.worker, popupAgent, browserFixture.agents.get('/'), browserFixture.agents.get('/popup'), browserFixture.agents.get('/ua-request')])
+        .toEqual(Array(5).fill(seen.page));
+      expect(seen.versions).toBeGreaterThan(1);
+      await agent.call('browser.command', { threadId, tabId: popup!.tabId, action: { kind: 'close' } });
+      await agent.call('browser.command', { threadId, tabId: opened.tabId, action: { kind: 'close' } });
+    }
+  } finally { await host.close(); }
+}, 150_000);
+
 real('a click right after the viewport changes size lands on its element, and what the page then logs is kept', async () => {
   const { agent, threadId } = browserFixture;
   const fixture = readFileSync(join(import.meta.dir, '../../../tests/e2e/fixtures/browser-parity.html'), 'utf8');
