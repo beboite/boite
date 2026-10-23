@@ -115,7 +115,7 @@ export async function checkTailnetName(origin: string, field: string, lookup: Lo
   if (url.protocol !== 'http:' || !isName(host) || host.endsWith('.ts.net')) return;
   let addresses: string[];
   try { addresses = await lookup(host); } catch {
-    throw unavailable(`${field}: ${host} does not resolve; connect this machine to the inviter's tailnet with MagicDNS on, then join again`);
+    throw unavailable(`${field}: ${host} does not resolve, so this machine is not on the inviter's tailnet; join that tailnet with MagicDNS on, or ask the inviter for an invitation for another network`);
   }
   if (addresses.length === 0 || !addresses.every(carried)) {
     throw invalidParams(`${field}: ${host} resolves to ${addresses.join(', ') || 'nothing'}, outside the tailnet; ${PLAIN_HTTP}`, { field });

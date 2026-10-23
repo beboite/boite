@@ -160,6 +160,20 @@ export function isLoopbackAddress(address: string | null): boolean {
 }
 
 /**
+ * Who a stranger's request to a peer route is counted under, or null for one
+ * never counted. Tailscale Funnel hands what it receives from the internet
+ * over from loopback, marked `Tailscale-Funnel-Request` and with the sender in
+ * `X-Forwarded-For`, both set by tailscaled whatever the sender wrote
+ * (`contacts/funnel.ts`): those count under the sender. Other loopback
+ * requests are this machine's own.
+ */
+export function strangerAddress(address: string | null, headers: Pick<Headers, 'get'>): string | null {
+  if (address === null || !isLoopbackAddress(address)) return address;
+  if (headers.get('tailscale-funnel-request') !== '?1') return null;
+  return headers.get('x-forwarded-for')?.split(',').pop()?.trim() || 'funnel';
+}
+
+/**
  * What a socket waiting for hello is counted under: null for the owner's own
  * machine, which is never counted, else the peer address. The address comes
  * from the TCP connection and cannot be forged; a local tunnel or proxy
@@ -473,8 +487,8 @@ export function startServer(options: ServerOptions): RunningServer {
       if (url.pathname === '/agent-messages' || url.pathname === JOIN_ROUTE || url.pathname === CONTACT_JOIN_ROUTE) {
         if (core.stopping) return new Response('core stopping', { status: 503 });
         // A stranger's requests are counted against its address from the moment they arrive, before any body is read.
-        const address = self.requestIP(request)?.address ?? null;
-        const answered = address === null || isLoopbackAddress(address) ? () => undefined : refusals.begin(address);
+        const address = strangerAddress(self.requestIP(request)?.address ?? null, request.headers);
+        const answered = address === null ? () => undefined : refusals.begin(address);
         if (answered === null) return new Response('too many refused requests from this address', { status: 429 });
         const named = request.headers.get('x-boite-peer') ?? '';
         const response = (url.pathname === JOIN_ROUTE ? core.group.http(request) : url.pathname === CONTACT_JOIN_ROUTE ? core.contacts.http(request) : core.coordination.http(request)).then((answer) => {
@@ -493,8 +507,8 @@ export function startServer(options: ServerOptions): RunningServer {
       // A contact's core keeps this socket open: this core's requests to it go down it (contacts/store.ts).
       if (url.pathname === CONTACT_LINK_ROUTE) {
         if (core.stopping) return new Response('core stopping', { status: 503 });
-        const address = self.requestIP(request)?.address ?? null;
-        const answered = address === null || isLoopbackAddress(address) ? () => undefined : refusals.begin(address);
+        const address = strangerAddress(self.requestIP(request)?.address ?? null, request.headers);
+        const answered = address === null ? () => undefined : refusals.begin(address);
         if (answered === null) return new Response('too many refused requests from this address', { status: 429 });
         const verdict = core.contacts.hello(request);
         if (verdict instanceof Response) {

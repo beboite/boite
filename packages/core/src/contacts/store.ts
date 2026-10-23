@@ -2,12 +2,14 @@
  * Contacts: other owners' Boites, linked so their agents and this core's work
  * together on the projects each side opens to the other, and on nothing else.
  *
- * The inviting core (`host`) shares its machine through Tailscale and hands
- * out a one-time link. The invitee (`guest`) spends it on the host's join
- * route, each side keeps the other's signing and sealing keys, and the guest
- * keeps a WebSocket open to the host: a shared machine answers connections
- * but opens none, so the host's requests to the guest go down that link as a
- * coordination bridge route. Every request between contacts is signed and
+ * The inviting core (`host`) shares its machine through Tailscale, or opens
+ * its contact routes to the internet through Tailscale Funnel for an invitee
+ * on another network (`funnel.ts`), and hands out a one-time link. The
+ * invitee (`guest`) spends it on the host's join route, each side keeps the
+ * other's signing and sealing keys, and the guest keeps a WebSocket open to
+ * the host: a shared machine answers connections but opens none, so the
+ * host's requests to the guest go down that link as a coordination bridge
+ * route. Every request between contacts is signed and
  * sealed (`group/seal.ts`), whichever way it travels.
  *
  * What a contact reaches is decided here, on the core that answers: the
@@ -18,17 +20,19 @@ import { randomUUID, verify } from 'node:crypto';
 import type { AgentContact, Contact, ContactGrant, ContactInvite, ContactOffer, ContactRequest, ContactSettings, ContactsState, ContactTailscale, CoordinationBridgeResponse, CoordinationPeer, ModelTier, RpcEvents, RpcParams, RpcResult } from '@boite/contracts';
 import { text } from '../coordination-letter.ts';
 import type { BridgeRoute } from '../coordination-bridge.ts';
-import { PeerRefusal } from '../coordination-wire.ts';
+import { PeerRefusal, ROUTE } from '../coordination-wire.ts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from '../errors.ts';
 import { tailnetAddress } from '../group/addresses.ts';
 import { SyncBackoff } from '../group/backoff.ts';
 import { seal, type Sealing } from '../group/seal.ts';
-import { newId, newToken } from '../ids.ts';
+import { newId } from '../ids.ts';
 import { Concierge } from './concierge.ts';
+import { ContactFunnel } from './funnel.ts';
 import { checkNormalizedRemote, gitRemoteOf } from './git-remote.ts';
-import { checkTailnetName, encodeInvite, INVITE_TTL_MS, tokenHash, type ContactCard } from './invite.ts';
-import { joinContact, joinRequest } from './join.ts';
+import { checkTailnetName, type ContactCard } from './invite.ts';
+import { createInvite, INVITES, liveInvites, tailnetOrigin } from './invitations.ts';
+import { CONTACT_JOIN_ROUTE, joinContact, joinRequest } from './join.ts';
 import { TailscaleClient } from './tailscale.ts';
 import { attestedTier, checkTier, modelTier, tierAllowed } from './tier.ts';
 import { fingerprintWords } from './words.ts';
@@ -40,10 +44,8 @@ export const CONTACT_LINK_ROUTE = '/coordination/contact/link';
 const CONTACTS = 'contacts';
 const SETTINGS = 'contacts:settings';
 const REQUESTS = 'contacts:requests';
-const INVITES = 'contacts:invites';
 const RECENT = 'contacts:recent';
 const MAX_CONTACTS = 32;
-const MAX_INVITES = 16;
 /** Requests waiting at once, per contact and direction. */
 const MAX_PENDING = 32;
 const DECIDED_KEPT = 50;
@@ -81,9 +83,12 @@ interface LinkSocket { send(data: string): unknown; close(code?: number, reason?
 export class ContactStore {
   readonly tailscale: TailscaleClient;
   readonly concierge: Concierge;
+  readonly funnel: ContactFunnel;
   readonly maxContacts = MAX_CONTACTS;
   /** The origin an invitation gives: this machine's tailnet name. Tests point it at loopback. */
-  selfUrl: () => Promise<string> = () => this.tailnetUrl();
+  selfUrl: (share: boolean) => Promise<string> = share => tailnetOrigin(this, this.core, share);
+  /** The origin an invitation for another network gives: the contact routes on Tailscale Funnel. Tests point it at loopback. */
+  internetUrl: () => Promise<string> = () => this.funnel.open();
   /** Guest side: the link this core keeps to each host. */
   private readonly dialed = new Map<string, { socket: TextSocket | null; state: 'connecting' | 'connected' }>();
   /** Host side: the link each guest keeps to this core, by the guest's id. */
@@ -110,6 +115,7 @@ export class ContactStore {
   constructor(private readonly core: Core) {
     this.tailscale = new TailscaleClient(core.dataDir);
     this.concierge = new Concierge(core);
+    this.funnel = new ContactFunnel(core, [CONTACT_JOIN_ROUTE, CONTACT_LINK_ROUTE, ROUTE]);
   }
 
   // -- Storage.
@@ -166,7 +172,7 @@ export class ContactStore {
     return { minTier: saved?.minTier === 2 || saved?.minTier === 3 ? saved.minTier : 1 };
   }
 
-  private changed(): void { this.core.bus.emit('contacts.updated', {}); }
+  changed(): void { this.core.bus.emit('contacts.updated', {}); }
 
   private background(job: Promise<unknown>): void {
     this.pending.add(job);
@@ -304,6 +310,7 @@ export class ContactStore {
       settings: this.settings(),
       tailscale: await this.tailscaleState(),
       invitations: this.liveInvites().length,
+      internet: true,
     };
   }
 
@@ -314,33 +321,10 @@ export class ContactStore {
     return { coreId, publicKey, box: this.core.group.boxPublic(), machine: this.machine() };
   }
 
-  liveInvites(): [string, { expiresAt: number }][] {
-    const now = Date.now();
-    return Object.entries((this.core.journal.getSetting(INVITES) as Record<string, { expiresAt: number }> | undefined) ?? {}).filter(([, invite]) => invite.expiresAt > now);
-  }
+  liveInvites(): [string, { expiresAt: number }][] { return liveInvites(this.core); }
 
-  /** `share` false: the invitee already reaches this machine on Tailscale, so no share is made or asked for. */
-  async invite(share: unknown = true): Promise<ContactInvite> {
-    if (typeof share !== 'boolean') throw invalidParams('share: expected true or false', { field: 'share' });
-    const room = (): void => {
-      if (this.list().length >= MAX_CONTACTS) throw refused(`at most ${MAX_CONTACTS} contacts; remove one first`);
-      if (this.liveInvites().length >= MAX_INVITES) throw refused(`at most ${MAX_INVITES} open invitations; cancel them or wait for one to be used or to expire`);
-    };
-    room();
-    const url = await this.selfUrl();
-    const shared: ContactInvite['share'] = share ? await this.tailscale.shareFor(tailnetAddress()) : { status: 'none' };
-    // Read again after the awaits: another invitation may have been made meanwhile.
-    room();
-    const token = newToken();
-    const expiresAt = Date.now() + INVITE_TTL_MS;
-    this.core.journal.setSetting(INVITES, Object.fromEntries([...this.liveInvites(), [tokenHash(token), { expiresAt }]]));
-    // Dialled from now on: the tailnet listener opens before the link leaves this machine.
-    this.relisten();
-    this.arm();
-    const link = encodeInvite({ ...this.card(), url, token, share: shared.status === 'created' ? shared.url : null, expiresAt });
-    this.changed();
-    return { link, expiresAt, share: shared };
-  }
+  /** `share` false: the invitee is on this Tailscale already; `internet`: on another network, reached through Funnel (`invitations.ts`). */
+  invite(share: unknown = true, internet: unknown = false): Promise<ContactInvite> { return createInvite(this, this.core, share, internet); }
 
   /** Every open invitation spent unused: a join with one is refused like a used one. The listener closes when nothing else needs it. */
   cancelInvites(): { cancelled: number } {
@@ -349,12 +333,6 @@ export class ContactStore {
     this.relisten();
     this.changed();
     return { cancelled };
-  }
-
-  private async tailnetUrl(): Promise<string> {
-    const { fqdn } = await this.tailscaleState(true);
-    if (fqdn === null) throw unavailable('contacts.invite: this machine has no tailnet name; connect it to Tailscale with MagicDNS on');
-    return `http://${fqdn}:${this.core.boundEndpoint().port}`;
   }
 
   async tailscaleState(fresh = false): Promise<ContactTailscale> {
@@ -833,6 +811,7 @@ export class ContactStore {
     if (this.closed) return;
     this.started = true;
     this.listening = this.wantsTailnet();
+    this.funnel.start(this.listening);
     if (this.list().length > 0 || this.liveInvites().length > 0) this.arm();
   }
 
@@ -861,9 +840,10 @@ export class ContactStore {
     if (this.ticks % FLUSH_TICKS === 0) for (const contact of contacts) this.flush(contact.coreId);
   }
 
-  /** Opens or closes the tailnet listener when `wantsTailnet` changed. */
+  /** Opens or closes the tailnet listener when `wantsTailnet` changed, and takes Funnel down once nothing needs it. */
   relisten(): void {
     const wants = this.wantsTailnet();
+    if (!wants && !this.closed) this.funnel.release();
     if (wants === this.listening) return;
     this.listening = wants;
     this.core.group.relisten();
@@ -883,6 +863,6 @@ export class ContactStore {
 
   async close(): Promise<void> {
     this.beginClose();
-    await Promise.allSettled([...this.pending]);
+    await Promise.allSettled([...this.pending, this.funnel.settled()]);
   }
 }

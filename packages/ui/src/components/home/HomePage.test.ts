@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { confirm } from '../../lib/confirm.svelte';
 import { setExperiment } from '../../lib/experiments';
-import { inviteShare } from '../../lib/contact-link';
+import { inviteShare, readInvite } from '../../lib/contact-link';
 import { FakeClient } from '../../lib/fake-client';
 import { FAKE_CONTACT_INVITE } from '../../lib/fake-client/contacts';
 import { Store, store as primary } from '../../lib/store.svelte';
@@ -206,6 +206,45 @@ test('accept shares the project picked in the menu; refuse waits for a reason; r
   await vi.waitFor(() => { flushSync(); expect(one('home-add')).not.toBeNull(); });
   expect(store.contact).toBeNull();
   expect((await contacts(store)).contacts).toEqual([]);
+});
+
+test('Elsewhere makes a link to this machine on Funnel, without a share; a tailnet outside tailscale.com invites only someone already on it', async () => {
+  await draw();
+  expect(one('contact-invite-self-hosted')).toBeNull();
+  one<HTMLButtonElement>('contact-invite-internet')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-share')?.dataset.status).toBe('funnel'); });
+  const link = readInvite(one<HTMLInputElement>('contact-invite-link')!.value)!;
+  expect([link.u, link.s]).toEqual(['https://boite-pc.tail4f2a.ts.net:8443', null]);
+  expect(one('contact-invite')!.textContent).toContain(strings.contacts.invite.funnel);
+  for (const component of components.splice(0)) unmount(component);
+  document.body.innerHTML = '';
+
+  // On Headscale neither a share nor Funnel reaches another network: the page says who invites whom.
+  const store = await connect();
+  const call = store.client!.call.bind(store.client!);
+  vi.spyOn(store.client!, 'call').mockImplementation(((method: string, params: unknown) => method === 'contacts.get'
+    ? call('contacts.get', {}).then(state => ({ ...state, tailscale: { ...state.tailscale, fqdn: 'boite.net.example.com' } }))
+    : call(method as never, params as never)) as typeof call);
+  store.showHome(null);
+  components.push(mount(HomePage, { target: document.body, props: { store } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-self-hosted')?.textContent).toBe(strings.contacts.invite.selfHosted); });
+  expect(['contact-invite-tailnet', 'contact-invite-create', 'contact-invite-internet'].map(id => one<HTMLButtonElement>(id)!.disabled)).toEqual([false, true, true]);
+  for (const component of components.splice(0)) unmount(component);
+  document.body.innerHTML = '';
+
+  // An older core reads only `share` and would share the machine: Elsewhere is not offered there.
+  const older = await connect();
+  const olderCall = older.client!.call.bind(older.client!);
+  const sent: unknown[] = [];
+  vi.spyOn(older.client!, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method === 'contacts.invite') sent.push(params);
+    return method === 'contacts.get' ? olderCall('contacts.get', {}).then(({ internet: _internet, ...state }) => state) : olderCall(method as never, params as never);
+  }) as typeof olderCall);
+  older.showHome(null);
+  components.push(mount(HomePage, { target: document.body, props: { store: older } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-create')).not.toBeNull(); });
+  expect(one('contact-invite-internet')).toBeNull();
+  expect(sent).toEqual([]);
 });
 
 test('Invite makes a link with its share; a joined link shows the eight words; Configure unfolds the key, the policy and the tier', async () => {

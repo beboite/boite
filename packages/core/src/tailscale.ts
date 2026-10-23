@@ -27,7 +27,7 @@ const HTTPS_PORT = '443';
 /** Where the owner turns on MagicDNS and HTTPS certificates. */
 export const TAILSCALE_DNS_ADMIN = 'https://login.tailscale.com/admin/dns';
 
-interface Run {
+export interface Run {
   code: number | null;
   stdout: string;
   stderr: string;
@@ -91,7 +91,7 @@ export interface TailscaleOptions {
   cli?: () => string[] | null;
 }
 
-function defaultCli(): string[] | null {
+export function defaultCli(): string[] | null {
   const override = process.env['BOITE_TAILSCALE_CLI'];
   if (override) return /\.[cm]?[jt]s$/.test(override) ? [process.execPath, override] : [override];
   const found = processPlatform.tailscaleCli?.() ?? null;
@@ -205,25 +205,30 @@ export class TailscaleAccess {
     return { ...status, detail: run.timedOut ? 'timeout' : classifyFailure(output) };
   }
 
-  private async run(cli: string[], args: string[], timeoutMs: number): Promise<Run> {
-    const [command, ...prefix] = cli;
-    let child: ReturnType<Core['procs']['spawn']>;
-    try {
-      child = this.core.procs.spawn('system:tailscale', command!, [...prefix, ...args], { agentRoot: false });
-    } catch (error) {
-      return { code: null, stdout: '', stderr: error instanceof Error ? error.message : String(error), timedOut: false };
-    }
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.proc.kill();
-    }, timeoutMs);
-    try {
-      const [stdout, stderr, code] = await Promise.all([new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text(), child.exited]);
-      return { code, stdout, stderr, timedOut };
-    } finally {
-      clearTimeout(timer);
-    }
+  private run(cli: string[], args: string[], timeoutMs: number): Promise<Run> {
+    return runCli(this.core, cli, args, timeoutMs);
+  }
+}
+
+/** One tailscale command, killed after `timeoutMs`. Its output stays on the core. */
+export async function runCli(core: Core, cli: string[], args: string[], timeoutMs: number): Promise<Run> {
+  const [command, ...prefix] = cli;
+  let child: ReturnType<Core['procs']['spawn']>;
+  try {
+    child = core.procs.spawn('system:tailscale', command!, [...prefix, ...args], { agentRoot: false });
+  } catch (error) {
+    return { code: null, stdout: '', stderr: error instanceof Error ? error.message : String(error), timedOut: false };
+  }
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.proc.kill();
+  }, timeoutMs);
+  try {
+    const [stdout, stderr, code] = await Promise.all([new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text(), child.exited]);
+    return { code, stdout, stderr, timedOut };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

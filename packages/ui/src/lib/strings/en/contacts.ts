@@ -68,15 +68,22 @@ export const strings = {
       /** Already reaches this machine on Tailscale: the link goes alone. */
       tailnet: 'Already on my Tailscale',
       tailnetTip: 'On your tailnet, or this machine is already shared with them: the link alone, no share.',
-      /** Elsewhere: the link also shares this machine through Tailscale. */
-      create: 'Not on my Tailscale',
-      createTip: 'The link also shares this machine with them through Tailscale.',
+      /** On their own tailscale.com tailnet: the link also shares this machine through Tailscale. */
+      create: 'On another Tailscale',
+      createTip: 'On their own tailscale.com tailnet: the link also shares this machine with them.',
+      /** Headscale, another network or no Tailscale: the link reaches this machine through Tailscale Funnel. */
+      internet: 'Elsewhere',
+      internetTip: 'Headscale, another network or no Tailscale: the link reaches this machine over the internet through Tailscale Funnel, on Boite\'s contact routes only.',
+      internetOld: 'This Boite is too old to invite someone on another network: update it first.',
+      /** Under the buttons when this machine's tailnet is not a tailscale.com one. */
+      selfHosted: 'Your tailnet is not on tailscale.com, so it can neither share this machine nor open Funnel. For someone on another network, they invite you.',
       link: 'Invitation link',
       copy: 'Copy',
       copied: 'Link copied',
       expires: 'Works once, until {time}',
       shared: 'Tailscale share created',
       noShare: 'No share: for someone already on your Tailscale',
+      funnel: 'Reachable over the internet through Tailscale Funnel while a contact or an invitation needs it',
       manual: 'Share this machine by hand',
       openConsole: 'Tailscale admin console',
       /** How many links sent from this machine can still join it. */
