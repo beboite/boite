@@ -56,6 +56,7 @@
   import { startViewHistory } from './lib/view-history.svelte';
   import { agentAutoLink } from './lib/agent-links.svelte';
   import ThreadPreparation from './components/ThreadPreparation.svelte';
+  import AgentsLayout from './components/agents/AgentsLayout.svelte';
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
@@ -172,13 +173,6 @@
   });
   hostLocalAgentBrowser();
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
-  let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
-  let agentsLoadError = $state('');
-  $effect(() => {
-    if (store.page !== 'agents' || !experimentOn('resident-agents') || AgentsPage) return;
-    void import('./components/agents/AgentsPage.svelte').then(module => { AgentsPage = module.default; })
-      .catch(() => { agentsLoadError = strings.agents.offline; });
-  });
   // Switched off with the page open: every machine goes back to its chat, so
   // switching it on again does not reopen a page nobody navigated to.
   $effect(() => {
@@ -591,14 +585,7 @@
         </div>
       {/if}
     {:else if store.page === 'agents' && experimentOn('resident-agents')}
-      <!-- The chat's layout with the agents list for its column: an agent's conversation is its thread, and the panel beside it that thread's. -->
-      {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
-      {#if panelSlot.shown && panelThread && deferred.RightPanel}
-        {@const RightPanel = deferred.RightPanel}
-        {#key store}
-          <RightPanel {store} panel={store.panel} closing={panelSlot.closing} attach={panelSlot.attach} onexit={panelSlot.end} />
-        {/key}
-      {/if}
+      <AgentsLayout {store} panel={panelSlot} showPanel={panelSlot.shown && panelThread !== null} RightPanel={deferred.RightPanel} />
     {:else if store.page === 'settings'}
       {#if SettingsShell}<SettingsShell {store} onopenthread={() => { mobileScreen = 'chat'; }} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}
