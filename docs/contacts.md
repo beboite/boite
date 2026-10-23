@@ -42,8 +42,9 @@ invites. A Headscale inviter can only invite someone on its own tailnet.
    **Elsewhere** (`internet: true`) is for an invitee on another network:
    the link names `https://<machine>.<tailnet>.ts.net:8443`, Boite's contact
    routes on Tailscale Funnel, and carries no share. On a tailnet whose names
-   are not under `ts.net` (Headscale) the last two buttons are off, a line
-   says the other owner invites, and the core refuses both with that reason.
+   are not under `ts.net` (Headscale) **On another Tailscale** and
+   **Elsewhere** are off, a line says the other owner invites, and the core
+   refuses both with that reason.
    While invitations are open the page counts them beside **Cancel them**
    (`contacts.cancelInvites`), which spends every one unused: a link sent
    too widely, or one that leaked, creates no contact any more, and the
@@ -130,7 +131,7 @@ them down. Once no contact is hosted and no invitation is out, `serve
 record is cleared after every removal succeeded, else the next release or
 start tries again. A core that comes back on another port moves the mounts a
 hosted contact still dials to its new port, on the same public origin, and
-removes the old ones when nothing needs them. A client shows **Elsewhere**
+removes old ones left anywhere else, or all of them when nothing needs them. A client shows **Elsewhere**
 only when `contacts.get` answers `internet: true`: an older core reads only
 `share` and would share the machine instead.
 

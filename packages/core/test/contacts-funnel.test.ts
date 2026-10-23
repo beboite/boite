@@ -73,6 +73,9 @@ test('a port serving something else is left alone: the mounts take 10000, and wi
 test('a tailnet outside tailscale.com, a node without Funnel or without HTTPS is refused with what to do, and the CLI text never shows', async () => {
   writeState({ status: running('boite.net.example.com') });
   expect(await thrown(funnel().open())).toThrow('needs a tailscale.com tailnet');
+  // No name at all is MagicDNS off, not another tailnet.
+  writeState({ status: { ...running(), Self: {} } });
+  expect(await thrown(funnel().open())).toThrow('turn MagicDNS on');
   writeState({ funnelConsent: 'https://login.tailscale.com/f/funnel?node=abc' });
   const { reason } = await rejection(funnel().open());
   expect(reason).toMatchObject({ data: { actionUrl: 'https://login.tailscale.com/f/funnel?node=abc' } });
@@ -142,4 +145,19 @@ test('a core back on another port moves the mounts a contact dials, and takes do
   await subject.settled();
   expect(readServe().Web?.[`${DNS}:8443`]).toBeUndefined();
   expect(recorded()).toBeNull();
+});
+
+test('mounts to an older target left on a port this core no longer uses come down once the routes are up elsewhere', async () => {
+  const old = 'http://127.0.0.1:3773';
+  const foreign = { Proxy: 'http://127.0.0.1:3000' };
+  // 8443 now also serves something else: the routes go to 10000 and the old ones must not stay on 8443.
+  const handlers = { ...Object.fromEntries(PATHS.map(path => [path, { Proxy: `${old}${path}` }])), '/other': foreign };
+  writeState({ serve: { TCP: { '8443': { HTTPS: true } }, Web: { [`${DNS}:8443`]: { Handlers: handlers } }, AllowFunnel: { [`${DNS}:8443`]: true } } });
+  harness.core.journal.setSetting('contacts:funnel', { targets: [old] });
+  const subject = funnel();
+  subject.start(true);
+  await subject.settled();
+  expect(Object.values(readServe().Web![`${DNS}:10000`]!.Handlers).map(handler => handler.Proxy).sort()).toEqual(PATHS.map(path => `${target()}${path}`).sort());
+  expect(readServe().Web![`${DNS}:8443`]!.Handlers).toEqual({ '/other': foreign });
+  expect(recorded()).toEqual({ targets: [target()] });
 });

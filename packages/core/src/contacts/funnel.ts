@@ -96,7 +96,15 @@ export class ContactFunnel {
     await this.closing;
     this.core.journal.setSetting(FUNNEL, { targets: [...new Set([this.target(), ...this.recorded()])] });
     const url = await open();
-    this.core.journal.setSetting(FUNNEL, { targets: [this.target()] });
+    // Mounts still proxying to an older target (left on a port this core no longer uses) come down now;
+    // the record keeps those targets until they did, so the next release tries again.
+    const current = this.target();
+    try {
+      await this.remove(this.recorded().filter(target => target !== current));
+      this.core.journal.setSetting(FUNNEL, { targets: [current] });
+    } catch (error) {
+      this.core.log('warn', `contacts: Tailscale Funnel mounts to an older port could not be removed: ${messageOf(error)}`, { source: 'contacts' });
+    }
     return url;
   }
 
@@ -145,7 +153,8 @@ export class ContactFunnel {
     }
     if (parsed.BackendState !== 'Running') throw unavailable('contacts.invite: Tailscale is not connected on this machine; sign in, then invite again');
     const dnsName = normalizeDnsName(parsed.Self?.DNSName);
-    if (dnsName === null || !dnsName.endsWith('.ts.net')) {
+    if (dnsName === null) throw unavailable('contacts.invite: Tailscale gave this machine no name; turn MagicDNS on for the tailnet, then invite again');
+    if (!dnsName.endsWith('.ts.net')) {
       throw unavailable('contacts.invite: Tailscale Funnel needs a tailscale.com tailnet, and this machine is on another one (Headscale has no Funnel); ask the other owner to invite you, or invite them onto your tailnet');
     }
     if (!(parsed.CertDomains ?? []).some(domain => normalizeDnsName(domain) === dnsName)) {
@@ -189,10 +198,15 @@ export class ContactFunnel {
   }
 
   /** Takes down the mounts this module made, to this core or an older target; anything else Tailscale serves stays. Throws when a removal is not confirmed. */
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    return this.remove([this.target(), ...this.recorded()]);
+  }
+
+  /** Removes the mounts of these routes that proxy to one of `targets`, on the Funnel ports. */
+  private async remove(targets: readonly string[]): Promise<void> {
+    if (targets.length === 0) return;
     const cli = this.cli();
     if (cli === null) throw new Error('the tailscale command was not found');
-    const targets = [this.target(), ...this.recorded()];
     const serve = await runCli(this.core, cli, ['serve', 'status', '--json'], STATUS_TIMEOUT_MS);
     if (serve.code !== 0 || serve.timedOut) throw new Error(`tailscale serve status failed${serve.timedOut ? ' (no answer)' : ''}`);
     let config: ServeConfig;
