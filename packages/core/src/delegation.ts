@@ -283,7 +283,6 @@ export class Delegation {
   }
 
   spawn(params: RpcParams<'delegation.spawn'>): DelegatedAgent {
-    if (this.core.workforce.resident.isCompacting(params.threadId)) throw refused('compaction cannot start subagents');
     const parent = this.core.threads.require(params.threadId);
     if (parent.parentThreadId) throw refused('delegation supports one level; ask the parent to delegate another task');
     const requestId = text(params.requestId, 'requestId', 128);
@@ -569,17 +568,6 @@ export class Delegation {
           if (!this.closed) for (const letter of letters) this.update(letter, 'uncertain', messageOf(error));
         }
       } else {
-        if (thread.agentSessionId) {
-          const session = this.core.workforce.session(threadId);
-          this.core.workforce.records.transaction(() => {
-            this.reserveTurn(threadId, 'delegation');
-            const episodeId = this.core.journal.getSetting(`delegation-episode:${threadId}`) as string | undefined;
-            const work = this.core.workforce.resident.enqueue(session.agentId, prompt, session.scope, episodeId);
-            for (const letter of letters) this.update(letter, 'delivered', `Durably queued as work ${work.id}`);
-          });
-          this.core.workforce.changed();
-          return;
-        }
         const turn = this.core.threads.startTurn(threadId, prompt, [], undefined, 'delegation');
         // The scheduler may have started it synchronously before startTurn returns.
         for (const letter of letters) this.update(letter, 'uncertain', `${turn.status === 'queued' && this.core.journal.getTurn(turn.id)?.status === 'queued' ? 'Queued for' : 'Awaiting'} provider turn ${turn.id}`);

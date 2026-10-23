@@ -259,12 +259,12 @@ export class AutoContinues {
   }
 
   /**
-   * Conversations of the user's only: a delegated agent answers its parent,
-   * which hears of its failure, and a persistent agent its runtime. A
-   * compaction, a coordination wake or a cache ping is not worth repeating.
+   * Conversations of the user's, a persistent agent's among them: a delegated
+   * agent answers its parent, which hears of its failure. A compaction, a
+   * coordination wake or a cache ping is not worth repeating.
    */
   private eligible(thread: ThreadSummary, turn: Turn): boolean {
-    if (thread.archived || thread.parentThreadId || thread.agentSessionId) return false;
+    if (thread.archived || thread.parentThreadId) return false;
     const operation = turn.execution?.operation;
     return operation !== 'compact' && operation !== 'coordination' && operation !== 'keepalive';
   }
@@ -411,7 +411,7 @@ export class AutoContinues {
     this.watches.delete(threadId);
     if (this.closed || this.core.stopping || this.core.journal.isClosed()) return;
     const thread = this.core.journal.getThread(threadId);
-    if (thread === null || thread.archived || thread.parentThreadId || thread.agentSessionId) return;
+    if (thread === null || thread.archived || thread.parentThreadId) return;
     const live = this.threads.agentState.background.get(threadId) ?? [];
     const wait = backgroundWaitOf(this.core, thread, live);
     if (wait?.state === 'waiting' && wait.until !== null) {

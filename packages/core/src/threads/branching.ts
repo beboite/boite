@@ -47,9 +47,6 @@ export class ThreadBranching {
 
   async rewind(threadId: ThreadId, messageId: MessageId): Promise<ThreadRewind> {
     const thread = this.threads.require(threadId);
-    if (thread.agentSessionId) {
-      throw refused('a persistent agent session takes its work through Agents and cannot be rewound', { threadId, field: 'threadId', expected: 'a conversation thread' });
-    }
     if (thread.archived) throw refused('cannot rewind an archived thread', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
     if (threadActive(thread.status) || this.threads.runner.handles.has(threadId)) {
       throw refused('this thread has a turn running or queued; stop it before editing a message', {
@@ -183,7 +180,7 @@ export class ThreadBranching {
   async fork(threadId: ThreadId, messageId: MessageId, worktree: boolean): Promise<ThreadSummary> {
     const source = this.threads.require(threadId);
     if (source.agentSessionId || source.projectId === null) {
-      throw refused('a persistent agent session takes its work through Agents and cannot be forked', { threadId, field: 'threadId', expected: 'a conversation thread' });
+      throw refused('a persistent agent\'s thread has no project to fork into', { threadId, field: 'threadId', expected: 'a conversation thread' });
     }
     if (source.incognito) {
       throw refused('an incognito conversation cannot be forked: a copy would outlive it', { threadId, field: 'threadId', expected: 'a conversation that is not incognito' });

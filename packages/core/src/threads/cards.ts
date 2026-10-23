@@ -358,7 +358,6 @@ export class ThreadCards {
     input: unknown,
     description: string | null,
   ): PermissionTicket {
-    if (this.core.workforce.resident.isCompacting(thread.id)) return Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_'), withdraw: () => undefined });
     const request: PermissionRequest = {
       id: newId('req_'),
       threadId: thread.id,

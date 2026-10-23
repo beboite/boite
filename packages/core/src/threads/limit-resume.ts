@@ -113,8 +113,8 @@ export class LimitResumes {
    */
   turnFailed(thread: ThreadSummary, turn: Turn, resetsAt: number | null): void {
     if (this.core.settings.get().autoResumeLimitedThreads !== true) return;
-    // Sub-threads and persistent agents answer to their parent and the agent runtime; a compaction or a wake is not worth repeating.
-    if (thread.parentThreadId || thread.agentSessionId) return;
+    // Sub-threads answer to their parent; a compaction or a wake is not worth repeating.
+    if (thread.parentThreadId) return;
     const operation = turn.execution?.operation;
     if (operation !== undefined && operation !== 'resume') return;
     const accountId = turn.execution?.accountId ?? thread.accountId;

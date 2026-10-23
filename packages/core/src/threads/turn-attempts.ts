@@ -437,10 +437,10 @@ export class TurnAttempts {
    * so it goes, and the generation moves on as an account switch does: the
    * next start is fresh and carries the journal's history. Returns the turn's
    * thread snapshot for that fresh start, or null when the thread moved on
-   * meanwhile (archived, switched account, or a resident agent's session).
+   * meanwhile (archived or switched account).
    */
   private dropLostSession(thread: ThreadSummary, result: TurnResult): ThreadSummary | null {
-    if (thread.agentSessionId || thread.sessionId === null) return null;
+    if (thread.sessionId === null) return null;
     const current = this.core.journal.getThread(thread.id);
     if (current === null || current.archived) return null;
     if ((current.sessionGeneration ?? 0) !== (thread.sessionGeneration ?? 0) || current.sessionId !== thread.sessionId) return null;

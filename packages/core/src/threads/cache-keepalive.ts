@@ -130,8 +130,8 @@ export class CacheKeepalive {
     const setting = this.core.settings.get().cacheKeepalive;
     if (!setting) return 'the setting is off';
     if (thread.archived) return 'the thread is archived';
-    // A resident agent and a delegated one answer someone else, who has the cache that matters.
-    if (thread.agentSessionId || thread.parentThreadId) return 'not a conversation of the user';
+    // A delegated agent answers its parent, who has the cache that matters.
+    if (thread.parentThreadId) return 'not a conversation of the user';
     if (thread.sessionId === null) return 'the thread has no session to resume';
     const waiting = this.waiting(thread.id);
     if (waiting !== true) return waiting;

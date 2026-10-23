@@ -1,8 +1,7 @@
-import type { AgentConversationMessage, AgentEntrustment, AgentProfile, RpcParams } from '@boite/contracts';
+import type { AgentEntrustment, AgentProfile, RpcParams } from '@boite/contracts';
 import type { GoalOutcome } from '../activity.ts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
-import { newId } from '../ids.ts';
 import type { AgentStore } from './store.ts';
 import { object, text } from './validation.ts';
 
@@ -14,9 +13,9 @@ const EVENTS = { complete: 'done', blocked: 'blocked', stopped: 'stopped' } as c
 
 /**
  * Ordinary threads the owner handed to a persistent agent. The thread keeps
- * its model and session; a goal keeps it working, the agent's instructions
- * join its turns, and the agent tells its direct conversation when it takes
- * the thread over and when the goal ends.
+ * its model and session; a goal keeps it working and the agent's instructions
+ * join its turns. It goes on the agent's desk, a line in the agent's thread
+ * says so, and the goal's end wakes the agent with an event.
  */
 export class AgentEntrustments {
   private held: AgentEntrustment[] | null = null;
@@ -61,7 +60,8 @@ export class AgentEntrustments {
     this.core.activity.set({ threadId, goal: { objective } });
     const entry: AgentEntrustment = { threadId, agentId, objective, at: Date.now() };
     this.write([...this.list().filter(other => other.threadId !== threadId), entry]);
-    this.post(agentId, threadId, thread.title, 'entrusted', `I am taking over "${thread.title}".`);
+    this.store.projects.follow(agentId, threadId, 'entrusted');
+    this.core.agentRuntime.line(agentId, `The user entrusted "${thread.title}" (${threadId}) to you: ${objective}`);
     this.store.changed();
     return { ...entry };
   }
@@ -83,22 +83,20 @@ export class AgentEntrustments {
     this.store.changed();
   }
 
-  /** One message per goal outcome. A met goal ends the entrustment; a blocker or a stop keeps it for the resume. */
+  /**
+   * A goal outcome. A met goal ends the entrustment; a blocker or a stop keeps
+   * it for the resume. Done and blocked wake the agent with an event; a stop is
+   * the user's own doing and only leaves a line.
+   */
   private ended(event: GoalOutcome): void {
     const entry = this.of(event.threadId);
     if (!entry) return;
     const thread = this.core.journal.getThread(event.threadId);
     if (event.outcome === 'complete') this.write(this.list().filter(other => other.threadId !== entry.threadId));
-    this.post(entry.agentId, entry.threadId, thread?.title ?? '', EVENTS[event.outcome], event.text.slice(0, ANSWER_LIMIT));
+    const what = `Entrusted thread "${thread?.title ?? ''}" (${entry.threadId}): goal ${EVENTS[event.outcome]}.`;
+    if (event.outcome === 'stopped') this.core.agentRuntime.line(entry.agentId, what);
+    else this.core.agentRuntime.fact(entry.agentId, { key: `goal:${entry.threadId}:${event.outcome}:${Date.now()}`, text: `${what}\n${event.text.slice(0, ANSWER_LIMIT)}` });
     this.store.changed();
-  }
-
-  /** Posted in the agent's direct conversation; nothing is delivered, so no work is enqueued. */
-  private post(agentId: string, threadId: string, title: string, event: NonNullable<AgentConversationMessage['thread']>['event'], body: string): void {
-    this.store.records.create('message', {
-      scope: { kind: 'agent', id: agentId }, senderId: agentId, text: body, recipientIds: [], replyTo: null,
-      episodeId: newId('episode_'), sourceRunId: null, thread: { id: threadId, title, event },
-    });
   }
 
   private profile(agentId: string): AgentProfile | null {

@@ -13,7 +13,6 @@ export function userSteeringUnavailable(core: Core, threads: ThreadStore, thread
   const thread = threads.require(threadId);
   if (core.stopping) return 'stopping';
   if (thread.archived) return 'archived';
-  if (thread.agentSessionId) return 'agent-session';
   const handle = threads.runner.handles.get(threadId);
   if (thread.status !== 'running' || !turn || turn.threadId !== threadId || turn.status !== 'running') return 'not-running';
   if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive' || threads.runner.steering.has(threadId)) return 'busy';
@@ -27,7 +26,7 @@ export function userSteeringUnavailable(core: Core, threads: ThreadStore, thread
 export async function steerUser(core: Core, threads: ThreadStore, params: RpcParams<'turns.steer'>): Promise<{ accepted: boolean }> {
   const { threadId, turnId, prompt, clientRequestId, expectedSelectionVersion } = params;
   const thread = threads.require(threadId);
-  if (core.stopping || thread.archived || thread.agentSessionId) throw refused('user steering requires an active, unarchived conversation');
+  if (core.stopping || thread.archived) throw refused('user steering requires an active, unarchived conversation');
   if (typeof prompt !== 'string') throw refused('prompt must be a string', { field: 'prompt', expected: 'a string' });
   if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');
   const attachments = params.attachments ?? [];

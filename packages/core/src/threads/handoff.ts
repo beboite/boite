@@ -258,15 +258,15 @@ export class RestartHandoff {
   }
 
   /**
-   * Sub-threads and persistent agent sessions belong to delegation, workflows
-   * and the agent runtime, which carry their own work across a handoff
-   * (`Delegation.resumeAfterRestart`, `Workflows.resumeAfterRestart`) and
+   * Sub-threads belong to delegation and workflows, which carry their own
+   * work across a handoff (`Delegation.resumeAfterRestart`,
+   * `Workflows.resumeAfterRestart`) and
    * pause after a crash. A compaction or a coordination wake is not worth repeating.
    */
   private resumable(turnId: TurnId, threadId: ThreadId, was: Entry['was']): boolean {
     const turn = this.core.journal.getTurn(turnId);
     const thread: ThreadSummary | null = this.core.journal.getThread(threadId);
-    if (turn === null || thread === null || thread.archived || thread.agentSessionId || thread.parentThreadId) return false;
+    if (turn === null || thread === null || thread.archived || thread.parentThreadId) return false;
     const operation = turn.execution?.operation;
     return operation === undefined || operation === 'resume' || (was === 'running' && operation === 'background');
   }

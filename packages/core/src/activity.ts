@@ -136,7 +136,6 @@ export class ActivityStore {
 
   set(params: RpcParams<'threads.activity.set'>): ThreadActivity {
     const thread = this.core.journal.getThread(params.threadId);
-    if (thread?.agentSessionId) throw refused('persistent agent sessions are scheduled through Agents, not thread goals or loops');
     if (!thread || thread.archived) throw refused('activity requires an existing, unarchived thread');
     const attachments = params.attachments ?? [];
     checkAttachmentArray(attachments);

@@ -4,6 +4,7 @@ import type { TurnResult } from '../drivers/types.ts';
 import { logMessageOf } from '../log-errors.ts';
 import { promptCacheOf } from '../prompt-cache.ts';
 import { setThreadStatus } from './records.ts';
+import { quietTurn } from '../agents/runtime.ts';
 
 interface Settlement {
   queued: Turn;
@@ -75,12 +76,14 @@ function finishThread(core: Core, { thread, finished, result }: Settlement): Com
   const sessionId = sameSession ? result.sessionId ?? current.sessionId : current.sessionId;
   // A keepalive is the core's housekeeping: it says nothing new, so it leaves the thread as read as it was,
   // and a failed one leaves it idle, where the result it waits for can still come in (`threads/cache-keepalive.ts`).
+  // A quiet wake of a persistent agent had nothing to say either.
   const keepalive = finished.execution?.operation === 'keepalive';
+  const quiet = finished.quiet === true;
   const next: ThreadSummary = {
     ...current, sessionId,
     sessionResumeAt: !sameSession ? current.sessionResumeAt : current.sessionResumeAt && sessionId === current.sessionId && sessionId === thread.sessionId ? current.sessionResumeAt : null,
     status: result.status === 'error' && !keepalive ? 'error' : 'idle',
-    unread: keepalive ? current.unread : current.unread || !core.subscribers.hasSubscribers(thread.id),
+    unread: keepalive || quiet ? current.unread : current.unread || !core.subscribers.hasSubscribers(thread.id),
     promptCache: sameSession ? promptCacheOf(result, thread, finished.finishedAt ?? Date.now(), current.promptCache ?? null) ?? current.promptCache ?? null : current.promptCache ?? null,
     updatedAt: Date.now(),
   };
@@ -118,6 +121,8 @@ export async function settleTurn(core: Core, state: Settlement): Promise<Complet
           return null;
         }
         const toolsClosed = state.result.status !== 'done' ? closeTools(core, running.threadId, running.id) : 0;
+        // Read once the answer is written: the flag rides on the turn every listener of `turn.finished` gets.
+        if (quietTurn(core, finished)) finished.quiet = true;
         if (toolsClosed > 0) notes.push(() => core.logs.info(`${toolsClosed} tool calls still running were marked failed because the turn ended ${state.result.status}`, { source: 'turns', event: 'turn.tools-closed', threadId: running.threadId, turnId: running.id, data: { tools: toolsClosed, status: state.result.status } }));
         core.journal.append({ type: 'turn.finished', threadId: running.threadId, version: 1, payload: finished }, () => core.journal.putTurn(finished));
         const completion = finishThread(core, state);

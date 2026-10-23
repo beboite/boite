@@ -1,4 +1,3 @@
-import type { AgentScope } from '@boite/contracts';
 import { invalidParams } from '../errors.ts';
 
 export function object(value: unknown, field: string): asserts value is Record<string, unknown> {
@@ -26,8 +25,3 @@ export function ids(value: unknown, field: string, max = 100): string[] {
   if (new Set(found).size !== found.length) throw invalidParams(`${field}: duplicate entries are not allowed`);
   return found;
 }
-export function scope(value: unknown): AgentScope {
-  object(value, 'scope');
-  return { kind: oneOf(value['kind'], 'scope.kind', ['agent', 'group', 'team', 'mission', 'project']), id: text(value['id'], 'scope.id', 160) };
-}
-export function sameScope(a: AgentScope, b: AgentScope): boolean { return a.kind === b.kind && a.id === b.id; }

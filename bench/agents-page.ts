@@ -26,7 +26,7 @@ for (let run = 0; run < runs; run++) {
     const client = await connect(core.url, core.token);
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     for (let i = 0; i < 12; i++) {
-      await client.call('agents.profile.save', { value: { name: `Agent ${i}`, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory'] } });
+      await client.call('agents.profile.save', { value: { name: `Agent ${i}`, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active' } });
     }
     client.close();
     page = await BrowserPage.launch({ url: pairingUrlOf(core), experiments: ['resident-agents'], windowSize: { width: 1440, height: 900 } });

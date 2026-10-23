@@ -1,40 +1,42 @@
 /**
- * The memory pass: after an agent finishes a piece of work in its direct
- * conversation, a small subagent of that conversation's thread reads its
- * MEMORY.md with what was asked and answered, and returns the file rewritten.
- * The core writes it, so the subagent needs no file access and a provider
- * without an approval channel cannot leave it waiting on one.
+ * The memory pass: after a turn of an agent's thread whose answer the user
+ * sees, a small subagent of that thread reads MEMORY.md with what was asked
+ * and answered, and returns the file rewritten. The core writes it, so the
+ * subagent needs no file access and a provider without an approval channel
+ * cannot leave it waiting on one.
  *
  * The subagent is a delegated child the core owns, like a goal reviewer: its
- * answer goes to the memory, never to the agent as mail. The agent's next work
- * waits for it, so the next conversation starts from the updated file. A pass
- * runs on the provider's small model (the one that writes thread titles) when
- * the agent's policy allows it, else on the agent's own model.
+ * answer goes to the memory, never to the agent as mail. The agent's next turn
+ * never waits for it. One pass runs per agent at a time; a turn that ends while
+ * one runs is remembered and passed on once it ends. A pass runs on the
+ * provider's small model (the one that writes thread titles) when the agent's
+ * policy allows it, else on the agent's own model.
  */
-import { renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { defaultTitleModel } from '@boite/contracts';
-import type { AgentMemoryPass, AgentProfile, AgentWork, Turn } from '@boite/contracts';
+import { AGENT_MEMORY_MAX, defaultTitleModel } from '@boite/contracts';
+import type { AgentBrain, AgentProfile, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import type { ChildRoute } from '../delegation/routes.ts';
 import { assertDriverRunnable } from '../drivers/index.ts';
-import { messageOf } from '../errors.ts';
-import { agentProvider, modelsFor } from '../threads/selection.ts';
+import { messageOf, refused } from '../errors.ts';
+import { modelsFor } from '../threads/selection.ts';
 import type { AgentStore } from './store.ts';
+import { text as checkedText } from './validation.ts';
 
 const KEEPER = 'agents:keeper:';
-/** The agent's next work waits this long for a pass at most. */
-export const MEMORY_HOLD_MS = 5 * 60_000;
 /** A pass still running after this is stopped and recorded as failed. */
 export const MEMORY_PASS_MAX_MS = 10 * 60_000;
 const ASKED_MAX = 6_000;
 const ANSWERED_MAX = 8_000;
-const MEMORY_MAX = 64_000;
+/** What one `boite agent remember` line may hold. */
+export const NOTE_MAX = 1_000;
 /** A rewrite that keeps less than this share of a file past `SHRINK_FLOOR` characters is refused as a loss, not a summary. */
 const SHRINK_KEEP = 0.3;
 const SHRINK_FLOOR = 1_500;
 
-interface Keeper { agentId: string; workId: string; memory: string; startedAt: number }
+interface Keeper { agentId: string; turnId: string; memory: string; startedAt: number }
+interface Exchange { turnId: string; asked: string; answered: string }
 
 export function memoryPrompt(agent: Pick<AgentProfile, 'name'>, memory: string, asked: string, answered: string, today: string): string {
   return [
@@ -43,7 +45,7 @@ export function memoryPrompt(agent: Pick<AgentProfile, 'name'>, memory: string, 
 - keep durable facts: who the user is, their preferences and corrections, the people, accounts and projects they named and where each stands, decisions taken, promises and follow-ups still open, each with the date it was learned (YYYY-MM-DD);
 - correct or remove lines this exchange made wrong or finished, and merge duplicates;
 - leave out passing details, tool output, code, and anything secret (passwords, tokens, keys);
-- keep the file's structure and language; a new file uses the language the user writes in; short lines under a few headings, at most 150 lines.`,
+- keep the file's structure and language; a new file uses the language the user writes in; short lines under a few headings, at most ${AGENT_MEMORY_MAX} characters in all.`,
     `Do not use tools. Answer in exactly this shape:
 SUMMARY: <one short line saying what you changed>
 <memory>
@@ -71,8 +73,16 @@ export function parseMemoryAnswer(answer: string): { summary: string | null; mem
   return { summary, memory: `${memory}\n` };
 }
 
+function writeMemory(brain: Pick<AgentBrain, 'path'>, memory: string): void {
+  const target = join(brain.path, 'MEMORY.md');
+  writeFileSync(`${target}.tmp`, memory);
+  renameSync(`${target}.tmp`, target);
+}
+
 export class MemoryKeeper {
   private readonly keepers = new Map<string, Keeper>();
+  /** The last exchange of an agent whose pass was still running when its turn ended. */
+  private readonly waiting = new Map<string, Exchange>();
   private readonly off: () => void;
   private closed = false;
 
@@ -97,13 +107,12 @@ export class MemoryKeeper {
   /** A memory pass child: delegation delivers its answer nowhere and lets it run while the team rests. */
   owns(threadId: string): boolean { return this.keepers.has(threadId); }
   busy(): boolean { return this.keepers.size > 0; }
-  /** Whether the agent's next work waits for its memory pass. */
-  holding(agentId: string): boolean {
-    for (const keeper of this.keepers.values()) if (keeper.agentId === agentId && keeper.startedAt > Date.now() - MEMORY_HOLD_MS) return true;
+  private running(agentId: string): boolean {
+    for (const keeper of this.keepers.values()) if (keeper.agentId === agentId) return true;
     return false;
   }
 
-  /** Stop passes past their limit. Called on the agent scheduler's tick. */
+  /** Stop passes past their limit. Called on the agent runtime's tick. */
   tick(): void {
     for (const [threadId, keeper] of this.keepers) {
       if (keeper.startedAt > Date.now() - MEMORY_PASS_MAX_MS) continue;
@@ -115,7 +124,7 @@ export class MemoryKeeper {
   /** The route a pass runs on: the provider's small model when the agent's policy allows it, else its own. */
   private route(agent: AgentProfile): ChildRoute | null {
     const provider = this.core.providers.get(agent.selection.providerId);
-    // Not installed: the agent could not run either, and says so when it next starts (`agentProvider`).
+    // Not installed: the agent could not run either, and its status says so.
     if (provider === undefined) return null;
     const small = defaultTitleModel(provider, modelsFor(provider, agent.selection.accountId));
     const base = { id: 'memory', name: 'Memory', providerId: provider.id, accountId: agent.selection.accountId, effort: null };
@@ -125,36 +134,43 @@ export class MemoryKeeper {
     return null;
   }
 
-  /**
-   * After a finished piece of work in a direct conversation: start the pass,
-   * unless the owner turned it off or the work was a quiet notice.
-   */
-  after(work: AgentWork, answered: string, published: boolean): void {
-    if (this.closed || work.scope.kind !== 'agent' || work.purpose === 'compaction' || !published) return;
-    const agent = this.store.records.get('profile', work.agentId);
-    if (agent.status !== 'active' || this.store.resident.config(agent.id).autoMemory === false) return;
-    const session = this.store.records.sessionFor(agent.id, work.scope);
-    const parent = session ? this.core.journal.getThread(session.threadId) : null;
+  /** What a turn was asked: the user's message, or the prompt of a routine or an event. */
+  private exchange(turn: Turn): Exchange {
+    const messages = [...this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })];
+    const texts = (role: string) => messages.filter(m => m.role === role).flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n');
+    return { turnId: turn.id, asked: texts('user') || texts('system'), answered: texts('assistant') };
+  }
+
+  /** After a turn whose answer the user sees: start the pass, unless the owner turned it off. */
+  after(agent: AgentProfile, turn: Turn): void {
+    if (this.closed || agent.status === 'archived' || this.store.resident.config(agent.id).autoMemory === false) return;
+    const exchange = this.exchange(turn);
+    if (!exchange.answered.trim()) return;
+    if (this.running(agent.id)) { this.waiting.set(agent.id, exchange); return; }
+    this.begin(agent, exchange);
+  }
+
+  private begin(agent: AgentProfile, exchange: Exchange): void {
+    const threadId = this.store.sessionOf(agent.id)?.threadId;
+    const parent = threadId ? this.core.journal.getThread(threadId) : null;
     if (!parent || parent.archived) return;
-    const asked = work.messageId ? this.store.records.get('message', work.messageId).text : work.prompt;
-    const brain = this.store.resident.brain(agent.id);
     const route = this.route(agent);
-    if (!route) { this.mark(work, { threadId: '', status: 'error', summary: 'No model the agent may use for subagents can run the memory pass.', at: Date.now() }); return; }
-    let threadId: string | null = null;
+    if (!route) { this.core.log('warn', `memory pass for agent ${agent.id}: no model the agent may use for subagents can run it`); return; }
+    const brain = this.store.resident.brain(agent.id);
+    let child: string | null = null;
     try {
       const provider = this.core.providers.require(route.providerId);
       assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(route.accountId), () => this.core.providers.launcherScriptOnly(provider.id));
-      const keeper: Keeper = { agentId: agent.id, workId: work.id, memory: brain.memory, startedAt: Date.now() };
-      threadId = this.core.delegation.createChild(parent, route, `Memory · ${agent.name}`, id => {
+      const keeper: Keeper = { agentId: agent.id, turnId: exchange.turnId, memory: brain.memory, startedAt: Date.now() };
+      child = this.core.delegation.createChild(parent, route, `Memory · ${agent.name}`, id => {
         this.keepers.set(id, keeper);
         this.core.journal.setSetting(`${KEEPER}${id}`, keeper);
       });
-      this.mark(work, { threadId, status: 'running', summary: null, at: keeper.startedAt });
       const today = new Date().toISOString().slice(0, 10);
-      this.core.threads.startTurn(threadId, memoryPrompt(agent, brain.memory.slice(0, MEMORY_MAX), asked.slice(0, ASKED_MAX), answered.slice(0, ANSWERED_MAX), today), [], undefined, 'delegation', undefined, undefined, `Update ${agent.name}'s memory`);
+      this.core.threads.startTurn(child, memoryPrompt(agent, brain.memory.slice(0, 64_000), exchange.asked.slice(0, ASKED_MAX), exchange.answered.slice(0, ANSWERED_MAX), today), [], undefined, 'delegation', undefined, undefined, `Update ${agent.name}'s memory`);
     } catch (error) {
-      if (threadId) this.end(threadId, this.keepers.get(threadId)!, 'error', `The memory pass could not start: ${messageOf(error)}`);
-      else this.mark(work, { threadId: '', status: 'error', summary: `The memory pass could not start: ${messageOf(error)}`, at: Date.now() });
+      if (child) this.end(child, this.keepers.get(child)!, 'error', `The memory pass could not start: ${messageOf(error)}`);
+      else this.core.log('warn', `memory pass for agent ${agent.id} could not start: ${messageOf(error)}`);
     }
   }
 
@@ -164,12 +180,13 @@ export class MemoryKeeper {
     if (memory === null) { this.end(turn.threadId, keeper, 'unchanged', null); return; }
     const brain = this.store.resident.brain(keeper.agentId);
     if (brain.memory !== keeper.memory) { this.end(turn.threadId, keeper, 'error', 'MEMORY.md changed during the pass; it was kept as it is.'); return; }
-    if (memory.length > MEMORY_MAX) { this.end(turn.threadId, keeper, 'error', 'The rewritten memory was too long; it was kept as it is.'); return; }
-    if (keeper.memory.length > SHRINK_FLOOR && memory.length < keeper.memory.length * SHRINK_KEEP) { this.end(turn.threadId, keeper, 'error', 'The rewrite dropped most of the memory; it was kept as it is.'); return; }
-    const target = join(brain.path, 'MEMORY.md');
-    writeFileSync(`${target}.tmp`, memory);
-    renameSync(`${target}.tmp`, target);
+    if (memory.length > AGENT_MEMORY_MAX) { this.end(turn.threadId, keeper, 'error', `The rewritten memory ran past ${AGENT_MEMORY_MAX} characters; it was kept as it is.`); return; }
+    // A file longer than the cap may come back shorter than its share: the floor counts from the cap.
+    const kept = Math.min(keeper.memory.length, AGENT_MEMORY_MAX);
+    if (kept > SHRINK_FLOOR && memory.length < kept * SHRINK_KEEP) { this.end(turn.threadId, keeper, 'error', 'The rewrite dropped most of the memory; it was kept as it is.'); return; }
+    writeMemory(brain, memory);
     this.end(turn.threadId, keeper, 'done', summary ?? 'Memory updated.');
+    this.store.changed();
   }
 
   /** The whole answer of the pass's turn: `delegation.result` cuts at 4,000 characters, a memory file runs longer. */
@@ -178,7 +195,7 @@ export class MemoryKeeper {
       .flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n');
   }
 
-  private end(threadId: string, keeper: Keeper, status: AgentMemoryPass['status'], summary: string | null): void {
+  private end(threadId: string, keeper: Keeper, status: 'done' | 'unchanged' | 'error', summary: string | null): void {
     this.keepers.delete(threadId);
     this.core.journal.deleteSetting(`${KEEPER}${threadId}`);
     const thread = this.core.journal.getThread(threadId);
@@ -190,15 +207,32 @@ export class MemoryKeeper {
       this.core.journal.putThread(archived);
       this.core.bus.emit('thread.updated', archived);
     }
-    let work: AgentWork | null = null;
-    try { work = this.store.records.get('work', keeper.workId); } catch { /* The work is gone; the pass has nothing left to report on. */ }
-    if (work) this.mark(work, { threadId, status, summary, at: Date.now() });
     if (status === 'error') this.core.log('warn', `memory pass ${threadId} for agent ${keeper.agentId}: ${summary}`);
+    else this.core.log('info', `memory pass ${threadId} for agent ${keeper.agentId}: ${status === 'done' ? summary : 'no change'}`);
+    // The exchange that ended while this pass ran goes next.
+    const next = this.waiting.get(keeper.agentId);
+    if (next && !this.closed && !this.core.stopping) {
+      this.waiting.delete(keeper.agentId);
+      const agent = this.store.records.find('profile', keeper.agentId);
+      if (agent && agent.status !== 'archived') this.begin(agent, next);
+    }
   }
 
-  private mark(work: AgentWork, memory: AgentMemoryPass): void {
-    const current = this.store.records.get('work', work.id);
-    this.store.records.update('work', current.id, current.revision, { ...current, memory });
+  /**
+   * `boite agent remember`: a dated line at the end of MEMORY.md. Refused
+   * once the file would pass `AGENT_MEMORY_MAX`, so nothing is written that a
+   * turn would not read.
+   */
+  note(agent: AgentProfile, raw: unknown): AgentBrain {
+    const line = checkedText(raw, 'text', NOTE_MAX).replace(/\s*\n\s*/g, ' ');
+    const brain = this.store.resident.brain(agent.id);
+    const entry = `- ${new Date().toISOString().slice(0, 10)} ${line}\n`;
+    const separator = brain.memory.length === 0 || brain.memory.endsWith('\n') ? '' : '\n';
+    if (brain.memory.length + separator.length + entry.length > AGENT_MEMORY_MAX) {
+      throw refused(`MEMORY.md holds ${brain.memory.length} of ${AGENT_MEMORY_MAX} characters; rewrite ${join(brain.path, 'MEMORY.md')} shorter before adding to it`, { field: 'text', path: join(brain.path, 'MEMORY.md') });
+    }
+    appendFileSync(join(brain.path, 'MEMORY.md'), separator + entry);
     this.store.changed();
+    return this.store.resident.brain(agent.id);
   }
 }

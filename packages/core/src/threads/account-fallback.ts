@@ -37,12 +37,15 @@ export function usableAccount(core: Core, providerId: ProviderId, preferred: Acc
  * context. The model, effort and speed stay when the new account lists them,
  * else the model alone, else the provider's default model. With nowhere to
  * go, a removed account refuses here and a signed-out one at the turn's
- * runnable check, naming it. A persistent agent keeps its profile's account.
+ * runnable check, naming it. A persistent agent moves only to an account the
+ * owner granted it.
  */
 export function followAgent(core: Core, thread: ThreadSummary): ThreadSummary {
   const own = core.journal.getAccount(thread.accountId);
   if (own !== null && own.status !== 'unauthenticated') return thread;
-  const other = thread.agentSessionId ? null : usableAccount(core, thread.providerId, thread.accountId);
+  const owner = thread.agentSessionId ? core.workforce.resident.ownerOf(thread.id) : null;
+  const found = usableAccount(core, thread.providerId, thread.accountId);
+  const other = found !== null && owner !== null && !core.workforce.resident.accountAllowed(owner, found.id) ? null : found;
   if (other === null) {
     if (own === null) throw accountRemoved(thread);
     return thread;
