@@ -16,6 +16,17 @@ describe('persistent agent records', () => {
     } finally { journal.close(); }
   });
 
+  test('find answers null for a missing record and still throws on a bad kind or a failing database', () => {
+    const journal = new Journal(':memory:');
+    const records = new AgentsRepository(journal);
+    const saved = records.create('routine', routine);
+    expect(records.find('routine', 'agt_routine_missing')).toBeNull();
+    expect(() => records.find('mission' as 'routine', 'agt_mission_1')).toThrow();
+    journal.close();
+    // A closed database is a failure the routine tick must see, not a missing routine.
+    expect(() => records.find('routine', saved.id)).toThrow();
+  });
+
   test('optimistic revisions refuse lost edits and keep the first update', () => {
     const journal = new Journal(':memory:');
     try {

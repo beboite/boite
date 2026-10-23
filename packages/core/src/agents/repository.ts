@@ -49,8 +49,11 @@ export class AgentsRepository {
     return JSON.parse(row.data) as AgentEntities[K];
   }
 
+  /** The record, or null when there is none; a bad kind, a database failure or corrupt JSON still throws. */
   find<K extends AgentEntityKind>(kind: K, id: string): AgentEntities[K] | null {
-    try { return this.get(kind, id); } catch { return null; }
+    checkKind(kind);
+    const row = this.journal.db.query('SELECT data FROM agent_entities WHERE kind = ? AND id = ?').get(kind, id) as Row | null;
+    return row ? JSON.parse(row.data) as AgentEntities[K] : null;
   }
 
   /** Every record of a kind: a few profiles, their sessions and routines. */
