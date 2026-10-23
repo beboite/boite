@@ -200,7 +200,7 @@ export class Layout {
     void (async () => {
       const core = origin !== undefined && origin !== location.origin ? notificationCore(s) : undefined;
       if (await pushCovers(origin, core !== undefined && s.group !== null)) return;
-      await sendNotification({ ...limitToast(alert, limitsKey(s.machineId)), origin });
+      await sendNotification({ ...limitToast(alert, limitsKey(s.machineId)), origin, ...(core === undefined ? {} : { core }) });
     })();
   }
 

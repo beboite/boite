@@ -606,21 +606,29 @@ export class Workspace {
    * connecting. False when it is not connected within `patience`.
    */
   async openMemberThread(coreId: string, threadId: string, patience = 90_000): Promise<boolean> {
+    // Longer than the group's own wait between two attempts at a machine (a minute), so one retry fits.
+    const target = await this.#memberStore(coreId, patience);
+    if (typeof target === 'string') return false;
+    await this.select(target, threadId);
+    return true;
+  }
+
+  /**
+   * The store of a machine of the group once it is connected. `superseded`
+   * when a newer tap, a closed workspace or the user opening something else
+   * took over meanwhile; `timeout` when it did not connect in time.
+   */
+  async #memberStore(coreId: string, patience: number): Promise<Store | 'superseded' | 'timeout'> {
     const lifecycle = this.#lifecycle;
-    // A newer tap takes over, and so does the user opening something else meanwhile.
     const tap = ++this.#memberTap;
     const active = this.active;
     const navigation = active.navigationGeneration;
-    // Longer than the group's own wait between two attempts at a machine (a minute), so one retry fits.
     const deadline = Date.now() + patience;
     for (;;) {
-      if (tap !== this.#memberTap || !this.#current(lifecycle) || this.active !== active || active.navigationGeneration !== navigation) return false;
+      if (tap !== this.#memberTap || !this.#current(lifecycle) || this.active !== active || active.navigationGeneration !== navigation) return 'superseded';
       const machine = this.machines.find((entry) => GroupLinks.coreOf(entry) === coreId && entry.store.connection === 'ready');
-      if (machine !== undefined) {
-        await this.select(machine.store, threadId);
-        return true;
-      }
-      if (Date.now() >= deadline) return false;
+      if (machine !== undefined) return machine.store;
+      if (Date.now() >= deadline) return 'timeout';
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
@@ -674,8 +682,10 @@ export class Workspace {
   async openLimits(member?: unknown): Promise<void> {
     let target: Store | undefined;
     if (typeof member === 'string' && /^[0-9a-f]{64}$/.test(member)) {
-      const deadline = Date.now() + 10_000;
-      while (!(target = this.machineOf(member)?.store) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 250));
+      // The same guards as a thread's tap: a newer tap or the user's own navigation wins.
+      const found = await this.#memberStore(member, 10_000);
+      if (found === 'superseded') return;
+      if (found !== 'timeout') target = found;
     }
     target ??= this.machines.find((entry) => entry.store.endpointUrl !== null && servesThisPage(entry.store.endpointUrl))?.store ?? store;
     await this.select(target);

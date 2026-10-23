@@ -398,7 +398,8 @@ export class QuotaStore {
   alert(accountId: string, period: QuotaAlertPeriod, threshold: number | null): AccountQuota[] {
     if (typeof accountId !== 'string' || !accountId) throw invalidParams('quotas.alert accountId must be a non-empty string', { field: 'accountId' });
     const row = this.known().find((quota) => quota.accountId === accountId);
-    if (!row) {
+    // Turning one off always goes through: a row that left the list must not keep its alert, and the poll, alive.
+    if (!row && !(threshold === null && this.alerts.all()[accountId])) {
       if (accountId.startsWith('proxy:')) throw invalidParams(`quotas.alert accountId ${accountId} is not an entry the gateway reports now`, { field: 'accountId', expected: 'an accountId quotas.list returns' });
       this.core.accounts.require(accountId);
       // A Douane in use lists only its own entries: this machine's logins have no limits row to alert on.

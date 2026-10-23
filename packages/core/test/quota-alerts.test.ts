@@ -117,6 +117,10 @@ test('quotas.alert refuses an unknown period, threshold or row, and a phone may 
   expect(await thrown(owner.call('quotas.alert', { accountId: account.id, period: 'weekly', threshold: 85 }))).toThrow('threshold must be null or one of 80, 90, 100');
   expect(await thrown(owner.call('quotas.alert', { accountId: 'acc_missing', period: 'weekly', threshold: 90 }))).toThrow();
   expect(await thrown(owner.call('quotas.alert', { accountId: 'proxy:claude:gone', period: 'weekly', threshold: 90 }))).toThrow('not an entry the gateway reports now');
+  // An alert whose entry left the gateway's answer can still be turned off, which stops the poll for it.
+  harness.core.quotas.alerts.set('proxy:claude:gone', 'weekly', 90, undefined);
+  await owner.call('quotas.alert', { accountId: 'proxy:claude:gone', period: 'weekly', threshold: null });
+  expect(harness.core.quotas.alerts.watched()).toEqual([]);
   const { connect } = await import('../src/client.ts');
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
