@@ -121,3 +121,14 @@ test('a paired phone lists agents, opens one and talks to it with turns.start', 
     expect(await thrown(phone.call('agents.profile.save', { id: agent.id, expectedRevision: agent.revision, value: agent }))).toThrow('owner');
   } finally { phone.close(); }
 });
+
+test('an agent created paused introduces itself once it is made active', async () => {
+  const agent = await client.call('agents.profile.save', { value: agentValue(echoAccount(h), { status: 'paused' }) });
+  const { threadId } = await client.call('agents.open', { agentId: agent.id });
+  await Bun.sleep(700);
+  expect(turnsOf(h, threadId)).toEqual([]);
+  const current = h.core.workforce.records.get('profile', agent.id);
+  await client.call('agents.profile.save', { id: agent.id, expectedRevision: current.revision, value: { ...current, status: 'active' } });
+  await waitFor(() => turnsOf(h, threadId).length === 1 && settled(h, threadId), 10_000);
+  expect(text(opening(threadId, turnsOf(h, threadId)[0]!.id)!.parts[0])).toMatchObject({ displayText: 'Just created' });
+});

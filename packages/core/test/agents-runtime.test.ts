@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { AgentRoutine } from '@boite/contracts';
+import { mkdtempSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { CoreClient } from '../src/client.ts';
 import { notifiesOnFinish } from '@boite/contracts';
 import { costing, makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
@@ -203,4 +206,51 @@ test('changed instructions wake the agent once to review its routines', async ()
   await client.call('agents.profile.save', { id: agent.id, expectedRevision: again.revision, value: { ...again, domain: 'Releases' } });
   await Bun.sleep(700);
   expect(turnsOf(h, threadId).filter(t => t.execution?.operation === 'event')).toHaveLength(2);
+});
+
+test('an occurrence skipped while the engine is paused keeps the clock going: the next one runs once it resumes', async () => {
+  const { agent, threadId } = await makeAgent(h, client);
+  const saved = await routine(agent.id, { schedule: { kind: 'interval', everyMinutes: 1 } });
+  h.core.workforce.setLimits({ paused: true });
+  due(saved.id);
+  h.core.workforce.routines.tick();
+  expect(read(saved.id).lastOutcome).toBe('skipped');
+  h.core.workforce.setLimits({ paused: false });
+  const before = turnsOf(h, threadId).length;
+  // No record changes between the skip and the next occurrence.
+  h.core.workforce.routines.tick(read(saved.id).nextAt! + 1);
+  expect(turnsOf(h, threadId)).toHaveLength(before + 1);
+  expect(turnsOf(h, threadId).at(-1)!.execution?.operation).toBe('routine');
+});
+
+test('instructions changed while the agent is paused wake it once it resumes', async () => {
+  const { agent, threadId } = await makeAgent(h, client);
+  const events = () => turnsOf(h, threadId).filter(t => t.execution?.operation === 'event');
+  let current = h.core.workforce.records.get('profile', agent.id);
+  await client.call('agents.profile.save', { id: agent.id, expectedRevision: current.revision, value: { ...current, status: 'paused' } });
+  current = h.core.workforce.records.get('profile', agent.id);
+  await client.call('agents.profile.save', { id: agent.id, expectedRevision: current.revision, value: { ...current, instructions: 'Check DAILY_MARKER every day at 09:00.' } });
+  await Bun.sleep(700);
+  expect(events()).toHaveLength(1);
+  current = h.core.workforce.records.get('profile', agent.id);
+  await client.call('agents.profile.save', { id: agent.id, expectedRevision: current.revision, value: { ...current, status: 'active' } });
+  await waitFor(() => events().length === 2 && settled(h, threadId), 10_000);
+  expect(h.core.journal.listMessages(threadId).find(m => m.turnId === events()[1]!.id && m.role === 'system')!.parts[0]).toMatchObject({ displayText: 'Instructions changed' });
+});
+
+test('moving the brains sends the context block again, with the new folder', async () => {
+  const driver = scripted(() => ({ text: 'Noted.' })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const sent = () => driver.prompts.get(threadId) ?? [];
+  await client.call('turns.start', { threadId, prompt: 'First question?' });
+  await waitFor(() => sent().length === 2 && settled(h, threadId));
+  expect(sent()[1]).not.toContain(BLOCK);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'boite-brains-')));
+  await client.call('agents.brain.root', { path: root });
+  const moved = h.core.workforce.resident.brain(agent.id).path;
+  expect(moved.startsWith(root)).toBe(true);
+  await client.call('turns.start', { threadId, prompt: 'Second question?' });
+  await waitFor(() => sent().length === 3 && settled(h, threadId));
+  expect(sent()[2]).toContain(BLOCK);
+  expect(sent()[2]).toContain(`Your brain is ${moved}.`);
 });

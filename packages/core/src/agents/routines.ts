@@ -169,6 +169,8 @@ export class AgentRoutines {
       if(attempt.held==='busy'){held=true;continue;}
       this.occurred(routine,attempt.turn?.id??null,true);
     }
+    // A skipped or started occurrence moved its own `nextAt`: the earliest is read again after them.
+    if(!held)for(const routine of this.r.list('routine'))if(routine.enabled&&routine.nextAt!==null&&routine.nextAt>now)at=at===null?routine.nextAt:Math.min(at,routine.nextAt);
     this.next=held?null:{writes:this.r.writes,at};
   }
 }

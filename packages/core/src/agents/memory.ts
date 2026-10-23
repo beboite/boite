@@ -36,7 +36,17 @@ const SHRINK_KEEP = 0.3;
 const SHRINK_FLOOR = 1_500;
 
 interface Keeper { agentId: string; turnId: string; memory: string; startedAt: number }
-interface Exchange { turnId: string; asked: string; answered: string }
+interface Exchange { turnId: string; asked: string; answered: string; joined?: true }
+
+/** Exchanges that ended while a pass ran, as one: each turn's part in order, the newest last. */
+function joined(previous: Exchange | undefined, next: Exchange): Exchange {
+  if (!previous) return next;
+  return { turnId: next.turnId, asked: `${previous.asked}\n\n---\n\n${next.asked}`, answered: `${previous.answered}\n\n---\n\n${next.answered}`, joined: true };
+}
+/** A text cut to `max`: from its start, or for joined exchanges from its end, which holds the newest. */
+function cut(text: string, max: number, fromEnd = false): string {
+  return text.length <= max ? text : fromEnd ? text.slice(-max) : text.slice(0, max);
+}
 
 export function memoryPrompt(agent: Pick<AgentProfile, 'name'>, memory: string, asked: string, answered: string, today: string): string {
   return [
@@ -146,7 +156,8 @@ export class MemoryKeeper {
     if (this.closed || agent.status === 'archived' || this.store.resident.config(agent.id).autoMemory === false) return;
     const exchange = this.exchange(turn);
     if (!exchange.answered.trim()) return;
-    if (this.running(agent.id)) { this.waiting.set(agent.id, exchange); return; }
+    // Every exchange that ends while a pass runs joins the next one, oldest first.
+    if (this.running(agent.id)) { this.waiting.set(agent.id, joined(this.waiting.get(agent.id), exchange)); return; }
     this.begin(agent, exchange);
   }
 
@@ -167,7 +178,7 @@ export class MemoryKeeper {
         this.core.journal.setSetting(`${KEEPER}${id}`, keeper);
       });
       const today = new Date().toISOString().slice(0, 10);
-      this.core.threads.startTurn(child, memoryPrompt(agent, brain.memory.slice(0, 64_000), exchange.asked.slice(0, ASKED_MAX), exchange.answered.slice(0, ANSWERED_MAX), today), [], undefined, 'delegation', undefined, undefined, `Update ${agent.name}'s memory`);
+      this.core.threads.startTurn(child, memoryPrompt(agent, brain.memory.slice(0, 64_000), cut(exchange.asked, ASKED_MAX, exchange.joined), cut(exchange.answered, ANSWERED_MAX, exchange.joined), today), [], undefined, 'delegation', undefined, undefined, `Update ${agent.name}'s memory`);
     } catch (error) {
       if (child) this.end(child, this.keepers.get(child)!, 'error', `The memory pass could not start: ${messageOf(error)}`);
       else this.core.log('warn', `memory pass for agent ${agent.id} could not start: ${messageOf(error)}`);

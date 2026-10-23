@@ -253,3 +253,25 @@ test('a dropped fact leaves a line in the agent\'s thread naming it, up to ten a
   expect(dropped).toHaveLength(10);
   expect(lines().filter(line => line === 'More events were dropped this hour; they are not listed.')).toHaveLength(1);
 });
+
+test('a thread put on the desk with an open pull request already linked tells its merge', async () => {
+  h.core.workforce.setLimits({ paused: true });
+  const url = 'https://github.com/acme/app/pull/8';
+  h.core.journal.setSetting(`linked-pull-requests:${worker}`, [{ url, repository: 'acme/app', number: 8, title: 'Docs', state: 'OPEN', draft: false, head: 'docs', base: 'main', headRepository: 'acme/app', checkedAt: Date.now() } satisfies LinkedPullRequest]);
+  h.core.workforce.watch({ agentId: agent.id, watchThreadId: worker, watched: true });
+  await h.core.linkedPullRequests.observe(worker, url, 'MERGED');
+  expect(facts().map(f => f.key)).toEqual([`pr-merged:${url}`]);
+});
+
+test('the last answer stays on the agent\'s row after many quiet wakes', async () => {
+  await owner.call('turns.start', { threadId: self, prompt: 'Run the checks' });
+  await waitFor(() => settled(h, self) && h.core.workforce.snapshot().status[0]!.last?.text === 'Tests pass.');
+  const execution = { ...turnsOf(h, self).at(-1)!.execution!, operation: 'routine' as const };
+  const now = Date.now();
+  for (let i = 0; i < 51; i++) {
+    const turnId = `trn_quiet${i}`;
+    h.core.journal.putTurn({ id: turnId, threadId: self, status: 'done', queuedAt: now + i, startedAt: now + i, finishedAt: now + i, usage: null, error: null, execution, quiet: true });
+    h.core.journal.putMessage({ id: `msg_quiet${i}`, threadId: self, turnId, role: 'assistant', parts: [{ type: 'text', text: '[quiet] nothing new' }], state: 'complete', createdAt: now + i });
+  }
+  expect(h.core.workforce.snapshot().status[0]!.last?.text).toBe('Tests pass.');
+});
