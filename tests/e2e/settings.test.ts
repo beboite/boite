@@ -183,7 +183,7 @@ test('the experiment adds the Threads and Agents switch on the desktop and Agent
   expect(await page.evaluate(`document.querySelector('${id('sidebar')} ${id('view-threads')}').getAttribute('aria-pressed')`)).toBe('true');
   await capture('agents-launcher-enabled-desktop.png');
   await page.click(id('view-agents'));
-  await page.waitFor(`document.querySelector('${id('agents-page')} ${id('view-agents')}')?.getAttribute('aria-pressed') === 'true'`);
+  await page.waitFor(`document.querySelector('${id('agents-page')}') && document.querySelector('.agents-rail ${id('view-agents')}')?.getAttribute('aria-pressed') === 'true'`);
   await capture('agents-switch-agents-desktop.png');
   // The same switch leads back to the threads.
   await page.click(id('view-threads'));
