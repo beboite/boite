@@ -230,7 +230,9 @@ test('pending agent updates remain in Machines after the tour closes', async () 
   await mobileAction(page, 'mobile-settings');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-connection]')`);
   await page.click('[data-testid=mobile-settings-connection]');
-  await page.waitFor(`document.querySelectorAll('[data-testid=harness-update-row-run]').length === 2`);
+  // Machines lists what the agents still offer, and Update starts them from there.
+  await page.waitFor(`[...document.querySelectorAll('[data-testid=updates-other]')].map(row => row.dataset.part).sort().join() === 'claude,codex'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=updates-run-all]').disabled`)).toBe(false);
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.harnessUpdates.filter(update => update.pending).length`)).toBe(2);
 }, 20_000);
 
@@ -254,7 +256,10 @@ test('an unavailable onboarding chunk keeps agent updates accessible in Machines
     await offline.click('[data-testid=nav-settings]');
     await offline.waitFor(`document.querySelector('[data-testid=settings-tab-machines]')`);
     await offline.click('[data-testid=settings-tab-machines]');
-    await offline.waitFor(`document.querySelector('[data-testid=machines-page]') && document.querySelectorAll('[data-testid=harness-update-row-run]').length === 2`);
+    await offline.waitFor(`document.querySelector('[data-testid=machines-page]') && [...document.querySelectorAll('[data-testid=updates-other]')].map(row => row.dataset.part).sort().join() === 'claude,codex'`);
+    // Each agent's own Update is on Providers.
+    await offline.click('[data-testid=settings-tab-accounts]');
+    await offline.waitFor(`document.querySelectorAll('[data-testid=harness-updates-card] [data-testid=harness-update-row-run]').length === 2`);
   } finally {
     await offline.close();
   }

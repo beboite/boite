@@ -30,8 +30,6 @@ export const strings = {
     removeBody: 'The other machines stop trusting it as each one hears of it. A machine that is off learns it when it comes back. The phones added on it stay in the group.',
     leave: 'Leave the group', leaveTitle: 'Leave {group}?',
     leaveBody: 'This machine forgets the group. Phones added on this machine leave the group with it.',
-    syncAll: 'Keep the settings of every machine like {source}',
-    syncAllHint: 'Copies limits, process guards, agent updates, keybindings and brain switches to every machine of the group, now and after each change, while this window is open. Network access and sign-ins stay on each machine.',
     lanHint: 'A phone reaches this link once the local network is on and Boite has restarted.',
     reach: {
       loopback: 'This link only works on this computer: Boite does not listen on the local network yet.',

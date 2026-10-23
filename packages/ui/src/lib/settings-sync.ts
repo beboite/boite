@@ -1,50 +1,32 @@
 import { errorText } from './errors';
 import {
   KEYBINDING_COMMANDS,
+  SYNCED_BRAIN,
+  SYNCED_DEFAULTS,
+  SYNCED_SETTINGS,
   RpcErrorCode,
-  type Account,
   type BrainStatus,
   type KeybindingCommand,
   type Keybindings,
-  type ProviderSummary,
   type Settings
 } from '@boite/contracts';
 import { RpcFailure, type Client } from './client';
-import { familyOf, providerRows, type ProviderRow } from './provider-family';
-import { connected } from './provider-setup';
 
 /**
- * Copying one machine's settings onto another, from a window that owns both.
- * The client does it with the calls each core already answers, so a core needs
- * nothing new and an older one simply lacks what it cannot take.
+ * Copying the group's settings home onto a machine that follows it, from a
+ * window that owns both. The client does it with the calls each core already
+ * answers, so a core needs nothing new and an older one simply lacks what it
+ * cannot take.
  *
- * Deleted-history retention, process guards, question mode, keybindings and
- * brain switches follow the user.
- * Resource limits, process retention, agent updates, storage, network access,
- * the brain folder and providers stay on their owning machine. Login tokens
- * never cross machines here: the report names every provider signed in
- * on the source and not on the target, so the user signs in there once.
+ * What follows is `SYNCED_SETTINGS`, the keybindings and the brain switches;
+ * everything else stays on its own machine. What the target changed for
+ * itself (`Settings.syncOverrides`) is skipped. Login tokens never cross
+ * machines: a sign-in stays where it was made.
  */
 
-/** The settings that describe the user, not the machine they sit on. */
-export const PORTABLE_SETTINGS = [
-  'threadDeletionRetentionDays',
-  'threadDoneRetentionDays',
-  'focusGuard',
-  'muteAgents',
-  'reapOrphans',
-  'asyncQuestions',
-  'shortAnswers',
-  'toolSummaries',
-  'autoCompact',
-  'cacheKeepalive'
-] as const satisfies readonly (keyof Settings)[];
-
-/** One machine as the sync sees it: its connection and what its store last listed. */
+/** One machine as the sync sees it. */
 export interface SyncEnd {
   client: Client;
-  providers: readonly ProviderSummary[];
-  accounts: Account[];
 }
 
 export interface SyncReport {
@@ -56,24 +38,20 @@ export interface SyncReport {
   keybindings: Keybindings | null;
   /** `copied` when both brains are connected, `absent` when only the source has one. */
   brain: 'copied' | 'absent' | 'none';
-  /** Providers the user works with on the source and has not signed into on the target. */
-  providers: ProviderRow[];
 }
 
-/** The portable part of a settings object, without the fields an older core leaves out. */
-export function portable(settings: Settings): Partial<Settings> {
+/** A synced setting's value in effect: what the core says, or its default when the core leaves it out. */
+function effective(settings: Settings, key: (typeof SYNCED_SETTINGS)[number]): unknown {
+  return settings[key] === undefined ? SYNCED_DEFAULTS[key] : settings[key];
+}
+
+/** The synced settings in effect on the home, but for those the target keeps. */
+export function portable(settings: Settings, kept: ReadonlySet<string> = new Set()): Partial<Settings> {
   const patch: Partial<Settings> = {};
-  for (const key of PORTABLE_SETTINGS) {
-    if (settings[key] !== undefined) (patch as Record<string, unknown>)[key] = settings[key];
+  for (const key of SYNCED_SETTINGS) {
+    if (!kept.has(key)) (patch as Record<string, unknown>)[key] = effective(settings, key);
   }
   return patch;
-}
-
-/** Families signed in on the source with no signed-in member on the target. */
-export function providersToConnect(source: Omit<SyncEnd, 'client'>, target: Omit<SyncEnd, 'client'>): ProviderRow[] {
-  const on = (end: Omit<SyncEnd, 'client'>, family: string) =>
-    end.providers.some((provider) => familyOf(provider.id) === family && connected(provider, end.accounts));
-  return providerRows(source.providers).filter((row) => on(source, row.id) && !on(target, row.id));
 }
 
 /** The three parts of a copy, in the order they reach the target. */
@@ -113,7 +91,7 @@ async function stage<T>(name: SyncStage, run: () => Promise<T>): Promise<T> {
  * nothing the target names is dropped before its replacement is in: a call that
  * fails puts every entry already changed back as it was.
  */
-async function copyKeybindings(source: Client, target: Client, signal?: AbortSignal): Promise<Keybindings | null> {
+async function copyKeybindings(source: Client, target: Client, kept: ReadonlySet<string>, signal?: AbortSignal): Promise<Keybindings | null> {
   const [from, to] = await Promise.all([
     optional(source.call('keybindings.get', {})),
     optional(target.call('keybindings.get', {}))
@@ -125,7 +103,7 @@ async function copyKeybindings(source: Client, target: Client, signal?: AbortSig
   let result = to;
   try {
     for (const command of KEYBINDING_COMMANDS) {
-      if (from.bindings[command] === to.bindings[command]) continue;
+      if (from.bindings[command] === to.bindings[command] || kept.has(`keybinding:${command}`)) continue;
       signal?.throwIfAborted();
       changed.push(command);
       result = await write(command, from.bindings[command]);
@@ -143,41 +121,52 @@ async function copyKeybindings(source: Client, target: Client, signal?: AbortSig
 
 /** Settings, then keybindings, then the brain: a failure names its stage in a SyncFailure. */
 export async function syncSettings(source: SyncEnd, target: SyncEnd, signal?: AbortSignal): Promise<SyncReport> {
+  let kept: ReadonlySet<string> = new Set();
   const { settings, changed } = await stage('settings', async () => {
     const [fromSettings, toSettings] = await Promise.all([
       source.client.call('settings.get', {}),
       target.client.call('settings.get', {})
     ]);
-    const patch = portable(fromSettings);
+    kept = new Set(toSettings.syncOverrides ?? []);
     // `autoCompact` is an object: two equal ones are never the same reference.
-    const changed = Object.entries(patch).filter(([key, value]) => JSON.stringify(toSettings[key as keyof Settings]) !== JSON.stringify(value)).length;
+    const differs = (settings: Settings) => Object.entries(portable(fromSettings, kept))
+      .filter(([key, value]) => JSON.stringify(effective(settings, key as (typeof SYNCED_SETTINGS)[number])) !== JSON.stringify(value));
+    const changed = differs(toSettings).length;
     signal?.throwIfAborted();
-    return { settings: changed ? await target.client.call('settings.set', patch) : toSettings, changed };
+    if (!changed) return { settings: toSettings, changed };
+    // The target leaves out what it keeps at the moment it writes: a save from another window meanwhile stays its own.
+    const patch = Object.fromEntries(differs(toSettings)) as Partial<Settings>;
+    const written = await optional(target.client.call('settings.follow', { patch }));
+    return { settings: written ?? await target.client.call('settings.set', patch), changed };
   });
 
+  // What the target keeps, read again before each later part: a chord or a switch kept there during the copy stays its own.
+  const keptNow = async () => new Set((await target.client.call('settings.get', {})).syncOverrides ?? []);
   signal?.throwIfAborted();
-  const keybindings = await stage('keybindings', () => copyKeybindings(source.client, target.client, signal));
+  const keybindings = await stage('keybindings', async () => copyKeybindings(source.client, target.client, await keptNow(), signal));
 
   const brain = await stage('brain', async (): Promise<SyncReport['brain']> => {
     const [fromBrain, toBrain] = await Promise.all([
       optional<BrainStatus>(source.client.call('brain.status', {})),
       optional<BrainStatus>(target.client.call('brain.status', {}))
     ]);
+    kept = await keptNow();
     if (!fromBrain?.config.path) return 'none';
     if (!toBrain?.config.path) return toBrain ? 'absent' : 'none';
-    // The folder is the target's own; only the switches come across.
+    // The folder is the target's own; only the switches it does not keep come across.
+    const follows = (name: (typeof SYNCED_BRAIN)[number]) => !kept.has(`brain:${name}`);
     const config = {
       ...toBrain.config,
-      enabled: fromBrain.config.enabled,
-      ...(fromBrain.config.autoPull !== undefined || toBrain.config.autoPull !== undefined
+      ...(follows('enabled') ? { enabled: fromBrain.config.enabled } : {}),
+      ...(follows('autoPull') && (fromBrain.config.autoPull !== undefined || toBrain.config.autoPull !== undefined)
         ? { autoPull: fromBrain.config.autoPull ?? { onStartup: false, intervalMinutes: 0 } } : {}),
-      ...(fromBrain.config.globalInstructions !== undefined ? { globalInstructions: fromBrain.config.globalInstructions } : {}),
-      ...(fromBrain.config.boiteGuide !== undefined ? { boiteGuide: fromBrain.config.boiteGuide } : {})
+      ...(follows('globalInstructions') && fromBrain.config.globalInstructions !== undefined ? { globalInstructions: fromBrain.config.globalInstructions } : {}),
+      ...(follows('boiteGuide') && fromBrain.config.boiteGuide !== undefined ? { boiteGuide: fromBrain.config.boiteGuide } : {})
     };
     signal?.throwIfAborted();
     if (JSON.stringify(config) !== JSON.stringify(toBrain.config)) await target.client.call('brain.configure', config);
     return 'copied';
   });
 
-  return { settings, changed, keybindings, brain, providers: providersToConnect(source, target) };
+  return { settings, changed, keybindings, brain };
 }

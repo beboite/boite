@@ -134,12 +134,11 @@ no real provider call and uses no existing login directory.
 ## Updating from the app
 
 Open Settings, Machines and updates. A remote server whose row says Update
-available has a signed release waiting: open its details, where the server
-shows its installed version, a Check for updates action and Update. The
-desktop app's own manual check and channel choices sit in the card above the
-list. Cards show the installed and offered versions together. The card's own
-Details expands the idle wait, backup and recovery behavior without adding it
-to the confirmation.
+available has a signed release waiting: the updates card at the top lists it
+under the app's own, with its installed and offered versions, and its Update
+button installs it with everything else waiting. While that server downloads
+or waits for its agents, its line offers Cancel. A Docker or hand-made server
+says on its row how it updates.
 
 The sidebar's update card lists that release too, and its Update all
 installs it after the machine's agents
@@ -156,8 +155,8 @@ The default service name is `boite.service`; set `BOITE_SERVER_SERVICE` in the
 service environment for another name. Its `ExecStart` must name that core
 directly, and `Restart` must be `on-failure` or `no`. Desktop sidecars, source
 runs, symlinked installs and containers keep their own installation method.
-Docker cards show the Compose update command; other unmanaged or older cores
-link to this guide. A core predating this feature needs one manual update first.
+When a release is available, a Docker core's row has a tip with the Compose
+update command and another unmanaged core's tip points to this guide. A core predating this feature needs one manual update first.
 
 The server checks eight seconds after startup, then every six hours. It follows
 its installed stable or nightly channel, downloads an immutable release's

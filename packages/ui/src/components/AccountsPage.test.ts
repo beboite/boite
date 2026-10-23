@@ -25,7 +25,7 @@ test('every missing provider has exactly one next step in its row', async ({ cre
   expect(row('claude')?.getAttribute('data-step')).toBe('manual');
   expect(row('claude')?.querySelector('a')?.getAttribute('href')).toContain('code.claude.com');
   expect(row('claude')?.querySelector('[data-testid="providers-refresh"]')).not.toBeNull();
-  expect(document.querySelector('button:disabled')).toBeNull();
+  expect(document.querySelector('[data-testid=provider-settings] button:disabled')).toBeNull();
 });
 
 const provider = (patch: Partial<ProviderSummary>): ProviderSummary => ({

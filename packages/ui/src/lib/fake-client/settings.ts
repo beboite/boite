@@ -1,12 +1,13 @@
 /** Core settings, the scheduler they size, keybindings and telemetry. */
-import { KEYBINDING_COMMANDS, parseChord, RpcErrorCode, checkSettingsPatch, keepLaterFavorites } from '@boite/contracts';
+import { KEYBINDING_COMMANDS, parseChord, RpcErrorCode, checkSettingsPatch, followedPatch, keepLaterFavorites } from '@boite/contracts';
+import type { Settings } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 import { gatewayQuotas } from './accounts';
 import { settleSettings } from './requests';
 
 export function settingsMethods(ctx: FakeContext) {
-  return {
+  const methods = {
     'subscriptionProxy.key': async ({ key }) => {
       if (key !== null && (typeof key !== 'string' || key.length > 4096 || !key.trim() || /[\u0000-\u0020\u007f]/.test(key))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'subscriptionProxy.key must be null or a non-empty token without whitespace' });
       return { configured: key !== null };
@@ -84,6 +85,12 @@ export function settingsMethods(ctx: FakeContext) {
       ctx.emit('keybindings.updated', structuredClone(ctx.keybindings));
       return structuredClone(ctx.keybindings);
     },
+    'settings.follow': async (params: { patch: unknown }): Promise<Settings> => {
+      const patch: unknown = params?.patch;
+      if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'patch: expected an object of settings', data: { field: 'patch' } });
+      const followed = followedPatch(ctx.settings, patch);
+      return Object.keys(followed).length === 0 ? structuredClone(ctx.settings) : methods['settings.set']({ ...followed });
+    },
     'settings.set': async (params) => {
       // The core's own check, so a value the core refuses is refused here too.
       const checked = checkSettingsPatch(params);
@@ -104,4 +111,5 @@ export function settingsMethods(ctx: FakeContext) {
       return { ...ctx.settings };
     },
   } satisfies Partial<FakeMethods>;
+  return methods;
 }

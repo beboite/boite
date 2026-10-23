@@ -1,5 +1,6 @@
 import type { GoalTrackerModel, ModelFavorite, ModelFavorites, Settings, TitleModel } from './index.ts';
 import { BROWSER_PROFILE_NAME_MAX, BROWSER_PROFILES_MAX, browserProfileIdError, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE, type BrowserProfile } from './browser';
+import { SYNC_KEY_PATTERN, SYNC_OVERRIDES_MAX } from './settings-sync';
 
 // Both supported hosts expose URL; contracts otherwise need no DOM or Node types.
 declare const URL: new (value: string) => {
@@ -180,6 +181,13 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       return { ok: false, field: 'quotaOrder', message: 'quotaOrder must contain at most 512 non-empty account ids of at most 200 characters' };
     }
     next.quotaOrder = [...new Set(order)];
+  }
+  if (patch.syncOverrides !== undefined) {
+    const keys: unknown = patch.syncOverrides;
+    if (!Array.isArray(keys) || keys.length > SYNC_OVERRIDES_MAX || keys.some((key) => typeof key !== 'string' || !SYNC_KEY_PATTERN.test(key))) {
+      return { ok: false, field: 'syncOverrides', message: `syncOverrides must list at most ${SYNC_OVERRIDES_MAX} keys: a setting, keybinding:<command> or brain:<switch>` };
+    }
+    next.syncOverrides = [...new Set(keys as string[])];
   }
   if (patch.worktreeStorage !== undefined) {
     const storage = patch.worktreeStorage;

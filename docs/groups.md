@@ -68,11 +68,10 @@ out; that machine is told and leaves on its own, or learns it the next time it
 reaches a member. **Leave the group** takes this machine out and tells the
 others first.
 
-The group card also offers one switch to keep the settings of every connected
-machine like the selected one. It uses the settings synchronization
-described in [machines](machines.md#automatic-settings-synchronization) for
-all of them at once, and has the same limits: the copy runs while that window
-is open.
+The group card also picks the group's **Default machine**, whose settings
+every other member follows. The choice lives in the roster, so every member
+shows it; the copy itself runs from a window that owns both machines
+([machines](machines.md#automatic-settings-synchronization)).
 
 A machine with no window uses the core's command, on the data directory of
 the running core:

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SyncMark from './SyncMark.svelte';
   import InfoTip from './InfoTip.svelte';
   import { untrack } from 'svelte';
   import type { ThreadId } from '@boite/contracts';
@@ -59,15 +60,15 @@
   <section class="card" id="settings-quiet">
     <h2 class="ui-label-box"><span class="ui-label">{strings.protection.quiet}</span><InfoTip topic={strings.protection.quiet} text={strings.protection.windows} /></h2>
     <label for="{uid}-focus-guard" class="switch-row">
-      <span class="text"><span id="{uid}-focus-guard-name">{strings.settings.focusGuard}</span></span>
+      <span class="text"><span id="{uid}-focus-guard-name">{strings.settings.focusGuard}</span><SyncMark {store} key="focusGuard" /></span>
       <input id="{uid}-focus-guard" aria-labelledby="{uid}-focus-guard-name" type="checkbox" role="switch" data-testid="setting-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={(event) => void toggled(event.currentTarget, focusGuard => store.saveSettings({ focusGuard }))} />
     </label>
     <label for="{uid}-mute-agents" class="switch-row">
-      <span class="text"><span id="{uid}-mute-agents-name">{strings.settings.muteAgents}</span></span>
+      <span class="text"><span id="{uid}-mute-agents-name">{strings.settings.muteAgents}</span><SyncMark {store} key="muteAgents" /></span>
       <input id="{uid}-mute-agents" aria-labelledby="{uid}-mute-agents-name" type="checkbox" role="switch" data-testid="setting-mute-agents" checked={store.settings?.muteAgents ?? true} onchange={(event) => void toggled(event.currentTarget, muteAgents => store.saveSettings({ muteAgents }))} />
     </label>
     <label for="{uid}-reap-orphans" class="switch-row">
-      <span class="text ui-label-box"><span class="ui-label" id="{uid}-reap-orphans-name">{strings.settings.reapOrphans}</span><InfoTip topic={strings.settings.reapOrphans} text={strings.settings.reapOrphansHint} /></span>
+      <span class="text ui-label-box"><span class="ui-label" id="{uid}-reap-orphans-name">{strings.settings.reapOrphans}</span><InfoTip topic={strings.settings.reapOrphans} text={strings.settings.reapOrphansHint} /><SyncMark {store} key="reapOrphans" /></span>
       <input id="{uid}-reap-orphans" aria-labelledby="{uid}-reap-orphans-name" type="checkbox" role="switch" data-testid="setting-reap-orphans" checked={store.settings?.reapOrphans ?? true} onchange={(event) => void toggled(event.currentTarget, reapOrphans => store.saveSettings({ reapOrphans }))} />
     </label>
   </section>

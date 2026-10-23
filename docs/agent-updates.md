@@ -15,11 +15,11 @@ agents without a readable latest version.
 
 ## What the user sees
 
-Settings, Machines and updates lists each machine's agents under that
-machine's details, with their installed and available versions, Update and
-Skip. A machine with a release waiting for one of its agents says Update
-available on its row before the details are opened; a skipped release does
-not. Updates create no pinned chat notice: the sidebar's update button and
+Each machine's Providers page (the machine picked above the page) lists its
+agents with their installed and available versions, Update and Skip. A machine
+with a release waiting for one of its agents says Update available on its row
+in Settings, Machines and updates, whose updates card lists that release; a
+skipped release does not. Updates create no pinned chat notice: the sidebar's update button and
 its card list them with the rest, and Update all starts every agent of every
 machine at once ([update everything](updates.md#update-everything)).
 
@@ -28,7 +28,7 @@ machine at once ([update everything](updates.md#update-everything)).
   agent the update still waits for to pause ([Turns in flight](#turns-in-flight));
   the next turn starts the new version.
 - Skip stops offering that version. A later version is offered again.
-  The same row in Machines and updates offers a skipped version again.
+  The same row on Providers offers a skipped version again.
 - A failed update keeps the updater's error and Try
   again. Standard error takes priority over progress on standard output; an
   explicit error takes priority over npm's final log-file location. OpenCode's
@@ -41,8 +41,9 @@ machine at once ([update everything](updates.md#update-everything)).
 itself, pausing running turns the same way and also waiting for the work
 agents left running in the background ([Background work](#background-work)).
 It is off by default. `Check for updates` reads its versions again.
-Providers keeps sign-ins and installation controls and names no version: an
-agent's version is on its machine's card and nowhere else.
+A provider's own row keeps its sign-ins and installation controls and names no
+version: the agent's version, Update and Skip sit in the Agent updates card
+lower on the same Providers page.
 
 ## Two routes
 
@@ -255,13 +256,14 @@ on the next core like any turn it cut.
 ## Remote machines
 
 A multi-machine client keeps separate update lists and routes each action to
-the owning core ([machines](machines.md)). Each agent row stays under its own
-machine's card, including when provider IDs match on different machines.
+the owning core ([machines](machines.md)). The Agent updates card shows the
+agents of the machine picked above the Providers page, including when provider
+IDs match on different machines.
 
 With `autoUpdateHarnesses` enabled, a headless core checks ten minutes after
 startup and every six hours, postponing checks while work is active, and
 updates an agent by pausing its turns in flight between two tool calls. Enable it
-under that machine's agents in Settings, Machines and updates. Providers
+on that machine's Providers page, under its agents. Providers
 without a managed release use the self route as the core user. An unwritable
 npm prefix fails before the
 updater starts and names the directory; other updater permission failures
@@ -292,8 +294,7 @@ The client treats that machine as having no updates and shows no error.
 
 - `providers.updates { refresh? }`: the list, answered from the last reading
   without running any agent. `refresh: true` reads every agent first. On a core
-  with no reading yet the list is empty; Settings, Machines and updates asks
-  for a refresh
+  with no reading yet the list is empty; the Providers page asks for a refresh
   when it opens on an empty list.
 - `providers.update { providerId }`: start one update. While turns of the
   agent still run a tool call, its entry is `updating` with `waitingFor` set
