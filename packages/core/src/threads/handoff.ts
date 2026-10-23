@@ -10,7 +10,7 @@ import { STOP_DEADLINE } from './turn-runner.ts';
  * restart starts is not waited for: one that outlasted the grace once rarely
  * ends within it, and two updates of 2026-10-22 each waited the whole 30
  * seconds on such a call (a nine minute script, a polling loop) before cutting
- * it. `maxAgeMs`: past it the next core resumes nothing, so a machine left off
+ * it, from `core.handoff.started` to `core.shutdown.started` in the core's log. `maxAgeMs`: past it the next core resumes nothing, so a machine left off
  * for a day does not start paid work by itself. Mutable so a test can shorten them.
  */
 export const HANDOFF = { graceMs: 30_000, longToolMs: 30_000, maxAgeMs: 3_600_000 };

@@ -100,7 +100,8 @@
 
   ; Nothing of this install runs, as after an in-app update stopped its core:
   ; the two PowerShell scripts below are skipped. Each took about a second on
-  ; Windows 11 (2026-10-23), most of an update's installation. That update's
+  ; Windows 11 with nothing to stop (`Measure-Command { powershell -NoProfile
+  ; -File stop-core.ps1 }`, 2026-10-23), most of an update's installation. That update's
   ; shell exits just after starting this installer, so a silent or passive
   ; run gives it 3 seconds to let go of its executable.
   Push $R6
