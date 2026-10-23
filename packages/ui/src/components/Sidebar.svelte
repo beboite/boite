@@ -59,7 +59,7 @@
   let all = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
   /** An archived project leaves the list for the fold under it; its threads keep running. */
   let groups = $derived(projectView.sorted(all.filter(({ project }) => project.archived !== true)));
-  /** At work on top, open, then set aside; idle projects go to their fold, or stay cards when idle grouping is off. */
+  /** At work on top when working grouping is on, open, then set aside; idle projects go to their fold. Each stays a card when its grouping is off. */
   let sections = $derived(projectSections(groups, recentPreferences.groupOtherProjects, recentPreferences.groupWorking));
   /** The cards in drawn order, the folded sections included: Alt+digit skips the rows a folded section hides. */
   let activeGroups = $derived([...sections.working, ...sections.open, ...sections.later]);
