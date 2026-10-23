@@ -115,6 +115,10 @@
     ${OrIf} $R6 >= 30
       ${ExitDo}
     ${EndIf}
+    ; A core holds the lock: no wait helps, the scripts decide.
+    ${If} ${FileExists} "${BOITE_DATA_ROOT}\${BOITE_DATA_NAME}\core.lock"
+      ${ExitDo}
+    ${EndIf}
     ${IfNot} ${Silent}
     ${AndIf} $PassiveMode != 1
       ${ExitDo}
@@ -127,7 +131,8 @@
   Pop $R8
   Pop $R7
   Pop $R6
-  StrCmp $0 "1" boite_core_free
+  ; Still through the last check below: something may take the file meanwhile.
+  StrCmp $0 "1" boite_core_check
 
   InitPluginsDir
   File "/oname=$PLUGINSDIR\boite-stop-shell.ps1" "${BOITE_HOOKS_DIR}\stop-shell.ps1"
@@ -195,6 +200,7 @@
   ; Whatever still holds the file (a core that would not stop, a scanner):
   ; move it aside, which Windows allows for a running executable, so the new
   ; one can be written, and delete the old one at the next restart.
+  boite_core_check:
   ClearErrors
   IfFileExists "$INSTDIR\boite-core.exe" 0 boite_core_free
     FileOpen $1 "$INSTDIR\boite-core.exe" a

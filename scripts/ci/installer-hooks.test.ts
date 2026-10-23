@@ -291,8 +291,8 @@ describe.skipIf(!ready)('installer hooks', () => {
 
     // Nothing of the install runs, as after an in-app update stopped its core
     // and its shell: no PowerShell starts. Each one took about a second on
-    // Windows 11, most of an update's installation (2026-10-23). The section
-    // itself sleeps 6 seconds for the box a user would read.
+    // Windows 11, most of an update's installation (2026-10-23). The scripts
+    // write their names to BOITE_HOOKS_TRACE when they run.
     function idle(name: string) {
       const install = join(base, name);
       mkdirSync(install, { recursive: true });
@@ -304,19 +304,49 @@ describe.skipIf(!ready)('installer hooks', () => {
       }
       return install;
     }
+    const trace = join(base, 'hooks-trace.txt');
+    async function traced(install: string) {
+      rmSync(trace, { force: true });
+      process.env.BOITE_HOOKS_TRACE = trace;
+      const at = performance.now();
+      try {
+        expect(await run([join(base, 'setup.exe'), '/S', `/D=${install}`])).toBe(0);
+      } finally { delete process.env.BOITE_HOOKS_TRACE; }
+      const scripts = existsSync(trace) ? readFileSync(trace, 'utf8').split(/\r?\n/).filter(Boolean) : [];
+      return { scripts, ms: Math.round(performance.now() - at) };
+    }
     rmSync(join(data, 'boite2', 'core.lock'), { force: true });
     const quiet = idle('idle');
-    const startedAt = Date.now();
-    expect(await run([join(base, 'setup.exe'), '/S', `/D=${quiet}`])).toBe(0);
-    const idleMs = Date.now() - startedAt;
-    console.log(`an install with nothing running took ${idleMs} ms, 6000 of them the section's own sleep`);
-    expect(idleMs).toBeLessThan(7_000);
+    const idleRun = await traced(quiet);
+    console.log(`an install with nothing running took ${idleRun.ms} ms, 6000 of them the section's own sleep`);
+    expect(idleRun.scripts).toEqual([]);
     expect(readFileSync(join(quiet, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
     expect(bundles(quiet)).toEqual({ core: false, ui: false, kept: true, aside: false });
-    // A lock a crashed core left behind takes the checked way, which finds nothing to stop.
+
+    // The in-app update's shell exits just after starting the installer: a
+    // shell executable let go of within the 3 seconds still skips the scripts.
+    const exiting = idle('exiting');
+    const exitingShell = join(exiting, 'boite-hooktest-shell.exe');
+    const holdingShell = join(base, 'holding-shell.txt');
+    const shellHolder = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+      `$f = [IO.File]::Open('${exitingShell}', 'Open', 'Read', 'Read'); Set-Content '${holdingShell}' 'held'; Start-Sleep -Milliseconds 1000; $f.Close()`], {
+      stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+    });
+    started.push(shellHolder.pid);
+    for (const deadline = Date.now() + 20_000; !existsSync(holdingShell);) {
+      if (Date.now() > deadline) throw new Error('the holder never opened the shell executable');
+      await Bun.sleep(50);
+    }
+    const exitingRun = await traced(exiting);
+    expect(await exited(shellHolder)).toBe(0);
+    expect(exitingRun.scripts).toEqual([]);
+    expect(readFileSync(join(exiting, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
+
+    // A lock a crashed core left behind takes the checked way, at once, which finds nothing to stop.
     writeFileSync(join(data, 'boite2', 'core.lock'), JSON.stringify({ pid: 999999, startedAt: Date.now() }));
     const crashed = idle('crashed');
-    expect(await run([join(base, 'setup.exe'), '/S', `/D=${crashed}`])).toBe(0);
+    const crashedRun = await traced(crashed);
+    expect(crashedRun.scripts).toEqual(['stop-shell', 'stop-core']);
     expect(readFileSync(join(crashed, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
     rmSync(join(data, 'boite2', 'core.lock'), { force: true });
 
