@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CoreClient } from '../src/client.ts';
 import { notifiesOnFinish } from '@boite/contracts';
+import { isAgentHeld } from '../src/agents/runtime.ts';
 import { costing, makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -159,6 +160,47 @@ test('past its daily budget a wake is skipped with one line, and the user\'s mes
   await waitFor(() => turnsOf(h, threadId).length === before + 1 && settled(h, threadId));
   expect(turnsOf(h, threadId).at(-1)!.status).toBe('done');
   expect((await client.call('agents.snapshot', {})).status[0]!.today.costUsd).toBe(1);
+});
+
+test('a turn the core starts by itself meets the pause and the budget: held with one line, then run; the user\'s messages and a resume are not held', async () => {
+  const driver = scripted(() => ({ text: 'Done.', usage: costing(0.5) })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  await client.call('turns.start', { threadId, prompt: 'One explicit user turn.' });
+  await waitFor(() => settled(h, threadId) && turnsOf(h, threadId).length === 2);
+  const runtime = await client.call('agents.runtime.get', { agentId: agent.id });
+  await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...runtime, dailyBudgetUsd: 0.1 } });
+  h.core.workforce.setLimits({ paused: true });
+  const turns = () => turnsOf(h, threadId).length;
+  const before = turns();
+  h.core.threads.deferred.wake(threadId, 'A background shell completed, without a user message.');
+  h.core.threads.deferred.wake(threadId, 'A second one completed.');
+  await Bun.sleep(700);
+  expect(turns()).toBe(before);
+  const held = () => lines(threadId).filter(text => text.startsWith('Held the turn its background work asked for'));
+  expect(held()).toEqual(['Held the turn its background work asked for: agents are paused. It runs once agents resume.']);
+  // Every other way the core starts a turn by itself meets the same gate.
+  for (const [operation, requestId] of [['coordination'], ['delegation'], ['pull-request'], ['resume', 'auto-continue_trn_x']] as const) {
+    let error: unknown = null;
+    try { h.core.threads.startTurn(threadId, 'autonomous', [], undefined, operation, undefined, requestId); } catch (caught) { error = caught; }
+    expect(isAgentHeld(error)).toBe(true);
+  }
+  await Bun.sleep(10);
+  expect(lines(threadId)).toContain('Held the automatic resume: agents are paused. It was dropped.');
+  // The user's own message runs through the pause and the spent budget.
+  await client.call('turns.start', { threadId, prompt: 'Still there?' });
+  await waitFor(() => turns() === before + 1 && settled(h, threadId));
+  // Resumed but past the budget: still held, the one line already said.
+  h.core.workforce.setLimits({ paused: false });
+  await Bun.sleep(700);
+  expect(turns()).toBe(before + 1);
+  await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...runtime, dailyBudgetUsd: null } });
+  await waitFor(() => turns() === before + 2 && settled(h, threadId));
+  const woke = turnsOf(h, threadId).at(-1)!;
+  expect(woke.execution?.operation).toBe('background');
+  const prompt = driver.prompts.get(threadId)!.at(-1)!;
+  expect(prompt).toContain('A background shell completed');
+  expect(prompt).toContain('A second one completed.');
+  expect(held()).toHaveLength(1);
 });
 
 test('a paused agent skips its routine and moves on, and still answers the user', async () => {

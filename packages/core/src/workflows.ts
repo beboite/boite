@@ -9,6 +9,7 @@ import type {
 } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
+import { isAgentHeld } from './agents/runtime.ts';
 import { checkContext } from './context-mode.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
@@ -666,6 +667,8 @@ export class Workflows {
     } catch (error) {
       // Said on the run, so the panel shows why the summary is held rather than waiting in silence.
       const reason = messageOf(error);
+      // A persistent agent that is paused or out of budget gets the summary once it may run.
+      if (isAgentHeld(error)) this.core.agentRuntime.whenAdmitted(root.id, `workflow:${run.id}`, () => this.deliver(run.id));
       this.core.log('warn', `workflow ${run.id} result not delivered: ${reason}`);
       this.mutate(run.id, current => current.deliveryError === reason ? false : void (current.deliveryError = reason));
     }
@@ -681,6 +684,7 @@ export class Workflows {
       this.handTo(root, notice.prompt, notice.display);
       this.mutate(run.id, current => { current.failuresNoticed = [...current.failuresNoticed ?? [], ...notice.keys]; });
     } catch (error) {
+      if (isAgentHeld(error)) this.core.agentRuntime.whenAdmitted(root.id, `workflow-failures:${run.id}`, () => this.noticeFailures(run.id));
       this.core.log('warn', `workflow ${run.id} failure not told to ${root.id}: ${messageOf(error)}`);
     }
   }

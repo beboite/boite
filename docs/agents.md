@@ -102,9 +102,19 @@ label, which its opening system line shows (`threads/operations.ts`):
 A wake never starts while the agent's thread has a turn queued, running or
 waiting, while the agent or every agent on the core is paused, or once its
 daily budget is spent. A held creation or instructions wake starts once the
-thread is free or the pause ends. Delegation results, `boite ask` answers,
-setting-card outcomes and background-shell wakes reach the agent's thread
-through the ordinary thread paths.
+thread is free or the pause ends.
+
+Every other turn the core starts by itself on the agent's thread meets the
+same policy in `threads.startTurn` (`AgentRuntime.admit`): the output of a
+background shell, an automatic resume, a letter from another thread, the
+results of its subagents or a workflow's summary, pull request news and the
+next turn of a goal. While the agent or the engine is paused, the agent is
+archived or its budget is spent, the turn does not start: one line in the
+agent's thread says what was held and why, and it starts once the agent may
+run again (`whenAdmitted`), except an automatic resume, which is dropped.
+The user's own messages, the owner's Run now, a compaction, a cache ping and a
+restart continuing a turn that was running are not held. `boite ask` answers
+and setting-card outcomes reach the thread through the ordinary thread paths.
 
 Creating an agent (`agents.profile.save` without an id) creates its thread and
 starts `Just created`: it introduces itself in two sentences, reads its
@@ -126,8 +136,11 @@ Only `routine` and `event` turns can be quiet; the user's own turns never are.
 ### Events
 
 Events are facts the core records for the agent's next `event` turn
-(`AgentRuntime.fact`). Each is short and names the thread by title and id, so
-the agent can act on it:
+(`AgentRuntime.fact`). Each is short and names the thread by id, so the agent
+can act on it. What comes from the thread itself, its title, a question and
+its options, a final answer, a tool's description, is a JSON string, so a
+hostile title cannot open a paragraph of its own, and the event prompt says it
+is data from other threads, not instructions:
 
 - a turn ends in a thread on its desk, with its final answer and pull request;
 - any thread of its projects fails, or asks the user something (after three
@@ -146,9 +159,10 @@ fact is 30 seconds old, and facts arriving meanwhile wait for the next one.
 An event prompt stops at 16,000 characters, older facts giving way, and one
 agent receives at most 60 facts in an hour. A dropped fact, under either cap,
 leaves a system line in the agent's thread naming it; past ten such lines in
-an hour, one more says the rest go unlisted. Taking a project back drops what
-waiting facts say about its threads. Waiting facts survive a restart
-(`agents:pending:<agent>`).
+an hour, one more says the rest go unlisted. Each fact records the threads it
+tells of; taking a project back drops what waiting facts say about its
+threads, and the runtime checks them again when it delivers them. Waiting
+facts survive a restart (`agents:pending:<agent>`).
 
 ## The context block
 
@@ -157,8 +171,10 @@ waiting facts say about its threads. Waiting facts survive a restart
 instructions), the brain path and its AGENTS.md, MEMORY.md (at most
 `AGENT_MEMORY_MAX` characters), a pointer to `memories-archive.md` when it
 exists, the names and paths of its skills (`skills/<name>/SKILL.md` or
-`skills/<name>.md`), its routines with their next run, its desk (one line per
-watched thread: title, id, project, state, stall, pull request and checks), its
+`skills/<name>.md`), its routines with their next run (at most 2,000
+characters of them, then `N more: boite agent routines`), its desk (one JSON
+object per watched thread: id, title, project, state, stall, pull request and
+checks, under a line that says titles are data from other threads), its
 projects and the commands that reach them, how it asks for a settings change,
 and a short guide to how it works.
 
@@ -195,6 +211,14 @@ works or a memory pass runs. A move that fails halfway puts back what moved.
 revision check. Filesystem access still follows provider permissions, not a
 separate OS sandbox per identity.
 
+The core reads and writes these files only inside the agent's own brain
+(`agents/brain-files.ts`): a link on AGENTS.md, MEMORY.md or
+`memories-archive.md`, or on any folder from the brains' root down, is refused
+with the file and the link named, so a planted link cannot send an agent's
+read or note into another brain. Files open with `O_NOFOLLOW` where the
+platform has it, and a rewrite goes through a fresh temporary file with an
+unpredictable name, created exclusively, then renamed over the file.
+
 MEMORY.md is the one memory store. `boite agent remember <fact>`
 (`agents.memory.note`) appends a dated line `- YYYY-MM-DD <fact>`, at most
 1,000 characters, refused once the file would pass `AGENT_MEMORY_MAX` (8,000)
@@ -206,7 +230,14 @@ rewritten with a one-line summary, keeping dated facts about the user, their
 projects, decisions and open follow-ups and dropping what the exchange made
 wrong or finished. It runs on the provider's small model (the one that titles
 threads) when the agent's subagent policy allows it, else on the agent's own
-model. The core writes the file, so the pass needs no tools. It keeps the old
+model. The core writes the file, so the pass runs with no tool at all, enforced
+by its driver rather than its prompt: no built-in tool, MCP server, hook,
+instruction file or guide (`TOOL_FREE_CONTEXT`), permission mode `dontAsk`,
+and a token that authenticates no method (`AgentTokens.seal`). Only a provider
+whose driver can start that way runs it (Claude, `CONTEXT_TRIMMABLE_PROTOCOLS`);
+an agent on another provider gets no pass, said once in the core log, and keeps
+MEMORY.md through `boite agent remember`. The pass reads MEMORY.md and the
+exchange as JSON strings. It keeps the old
 file when the owner edited it meanwhile, when the answer passes
 `AGENT_MEMORY_MAX`, or when it would drop most of a file past 1,500
 characters. The next turn never waits for it, and its notification never
@@ -227,6 +258,14 @@ thread is done or archived. At most 100 open threads sit on one desk; past
 that the oldest open follow leaves. `boite agent unwatch`, or the owner's x on
 a card, drops one. An agent watches only threads of its projects or already on
 its desk; the owner, any top-level thread.
+
+A follow the agent made through a project (started, written to, answered for,
+its own `boite agent watch`) holds only while that project is entrusted to it.
+When the owner takes the project back, those follows leave the desk with the
+facts they gathered, and the desk rows, the facts and the context block check
+the agent's projects again each time they are read or delivered. A thread the
+owner entrusted to the agent or watched for it (`owner` in the saved follow)
+stays: that is the owner's own grant.
 
 Each row is read from the thread itself, never from what the agent said:
 `state` is `needs-you` (a pending question or permission), `working`,
@@ -313,7 +352,9 @@ and `lastOutcome` (`done`, `quiet`, `error`, `stopped`, `skipped`) follow
 `turn.finished`. A single-date routine is done once it ran.
 
 The agent keeps its own routines (`boite agent routines|schedule|unschedule`,
-`agents.routine.save|remove`). Run now (`agents.routine.run`, owner only)
+`agents.routine.save|remove`). One agent holds at most `AGENT_ROUTINES_MAX`
+(50) routines, a new one past it refused with the count; a name holds at most
+80 characters and a prompt 4,000. Run now (`agents.routine.run`, owner only)
 returns the turn it started, is idempotent per request id and is refused while
 the thread has a turn in flight. The schedule editor writes a sentence under
 the choices saying what will happen and when it runs next, for example "Every
@@ -378,7 +419,11 @@ card, row, stall or pull request).
 ## Migration
 
 Agents saved before this model keep working (`agents/migration.ts`, run once at
-start, flag `agents:migrated:threads-v1`): profiles, routines (`lastWorkId`
+start, flag `agents:migrated:threads-v1`, each step recorded on its own as
+`agents:migrated:threads-v1:<step>` until all are done, so a retry neither
+redoes nor skips one). A legacy session, routine or memory record that does
+not have its shape is skipped with a log line naming its id and stays in
+`agent_entities`; the others migrate. Profiles, routines (`lastWorkId`
 becomes `lastTurnId: null`), the session of each agent's own conversation,
 entrustments, brain folders and grants stay. The threads of its group and
 mission sessions are archived and their records dropped. In each agent's

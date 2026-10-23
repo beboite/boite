@@ -68,6 +68,11 @@ or permission rule applies. Any other provider refuses a mode that drops
 instruction files, MCP servers or hooks or names tools, with the field, rather
 than start with them anyway.
 
+The core has one mode of its own that no request asks for:
+`TOOL_FREE_CONTEXT`, no instruction file, guide, MCP server, hook or built-in
+tool (an empty `tools` list). The memory pass of a persistent agent runs in it
+([agents](agents.md)), on Claude only.
+
 A conversation with a mode carries `BOITE_CONTEXT=<label>` in its environment,
 and `BOITE_GUIDES=0` when it drops guides: a hook that adds a guide of its own,
 such as a shared instruction set, can check it and print nothing

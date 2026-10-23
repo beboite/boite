@@ -3,6 +3,7 @@ import { CONTEXT_TRIMMABLE_PROTOCOLS, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATIO
 import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationResumed, DelegationView, PauseOrigin, PermissionMode, PermissionRequest, Principal, QuestionRequest, RequestId, RpcParams, ThreadContextMode, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, requiredText as text } from './errors.ts';
+import { isAgentHeld } from './agents/runtime.ts';
 import { checkContext } from './context-mode.ts';
 import { checkSavedSelection, checkSpeed } from './threads/selection.ts';
 import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
@@ -579,6 +580,8 @@ export class Delegation {
         for (const letter of letters) this.update(letter, 'uncertain', `${turn.status === 'queued' && this.core.journal.getTurn(turn.id)?.status === 'queued' ? 'Queued for' : 'Awaiting'} provider turn ${turn.id}`);
       }
     } catch (error) {
+      // A persistent agent that is paused or out of budget: the results wait in its inbox.
+      if (isAgentHeld(error)) { this.core.agentRuntime.whenAdmitted(threadId, 'delegation', () => this.kick(threadId)); return; }
       for (const letter of letters) this.update(letter, 'rejected', messageOf(error));
     } finally { this.delivering.delete(threadId); }
   }
