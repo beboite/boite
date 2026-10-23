@@ -112,7 +112,8 @@ describe('settled worktree cleanup', () => {
     expect(await cleanup.run()).toEqual([]);
     expect(existsSync(thread.cwd)).toBe(true);
     journal.putThread({ ...journal.getThread(thread.id)!, status: 'idle' });
-    expect((await cleanup.run()).map(result => result.path)).toEqual([thread.cwd]);
+    expect(await cleanup.run()).toEqual([expect.objectContaining({ projectId: project.id, branch: thread.branch, reason: 'pr-merged' })]);
+    expect(existsSync(thread.cwd)).toBe(false);
   });
 
   test('removes an archived thread\'s clean worktree with its branch, and the restored thread says so', async () => {
