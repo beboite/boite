@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_MEMORY_MAX } from '@boite/contracts';
 import { connect } from '../src/client.ts';
@@ -291,10 +291,10 @@ test('a pass whose rewrite cannot be written ends as failed: the agent is not le
   const driver = script(() => 'SUMMARY: updated\n<memory>\nPASS_REPLACEMENT\n</memory>');
   const { h, agent, threadId } = await setup();
   await waitFor(() => driver.held.length === 1);
-  // A brain folder that refuses new files: the temporary file of the rewrite cannot be created.
-  const folder = h.core.workforce.resident.brain(agent.id).path;
-  chmodSync(folder, 0o555);
-  restores.push(() => chmodSync(folder, 0o755));
+  // MEMORY.md turned into a folder: the rewrite cannot land on it, on every platform.
+  const memory = join(h.core.workforce.resident.brain(agent.id).path, 'MEMORY.md');
+  rmSync(memory, { force: true });
+  mkdirSync(memory);
   driver.release();
   await waitFor(() => h.core.workforce.memory.lastPass(agent.id)?.status !== 'running');
   expect(h.core.workforce.memory.lastPass(agent.id)).toMatchObject({ status: 'error', summary: expect.stringContaining('could not be written') });
