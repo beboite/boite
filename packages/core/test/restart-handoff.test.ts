@@ -295,6 +295,7 @@ test('a tool call already running longer than the grace when the restart starts 
   } finally { await h.stop(); }
 });
 
+// About five seconds by design: an aged call, then the whole grace.
 test('a turn that also runs a fresh tool call still waits for it, even beside an old one', async () => {
   // The old call is aged well past the threshold, the fresh one far below it however slow the runner.
   HANDOFF.graceMs = 3_000;
@@ -319,7 +320,7 @@ test('a turn that also runs a fresh tool call still waits for it, even beside an
     expect(h.core.journal.getTurn(turn.id)?.status).toBe('stopped');
     client.close();
   } finally { await h.stop(); }
-});
+}, 15_000);
 
 test('a queued turn runs once on the next core, and a turn the user stopped does not resume', async () => {
   let stops = 0;
