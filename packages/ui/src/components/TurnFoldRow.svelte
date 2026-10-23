@@ -1,6 +1,6 @@
 <script lang="ts">
   import { CalendarClock, ChevronRight, MoonStar, Sparkles, Zap } from '@lucide/svelte';
-  import { foldText, openedTurns, type TurnFold } from '../lib/agent-turns';
+  import { foldText, toggleTurn, type TurnFold } from '../lib/agent-turns';
   import { clockTime, fullTime } from '../lib/format';
   import { strings } from '../lib/strings';
 
@@ -15,10 +15,7 @@
   const quiet = $derived(fold.kind === 'quiet');
   const hint = $derived(quiet ? (fold.open ? t.hideTurn : t.showTurn) : (fold.open ? t.hideSteps : t.showSteps));
 
-  function toggle() {
-    if (openedTurns.has(fold.turnId)) openedTurns.delete(fold.turnId);
-    else openedTurns.add(fold.turnId);
-  }
+  const toggle = () => toggleTurn(fold.turnId);
 </script>
 
 <div class="turn-fold" data-kind={fold.kind} data-open={fold.open} data-testid="turn-fold">

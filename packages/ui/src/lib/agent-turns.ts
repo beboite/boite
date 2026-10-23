@@ -196,9 +196,32 @@ const NO_FOLDS: ReadonlyMap<string, TurnFold> = new Map();
 export class AgentTimeline {
   #folds = new TurnFolds();
   /** `pass` undefined: not an agent's own thread, and the timeline stays as it is. */
-  build(timeline: Message[], turns: readonly Turn[], pass: MemoryPass | null | undefined): { timeline: Message[]; folds: ReadonlyMap<string, TurnFold>; memoryTurnId: string | null } {
-    if (pass === undefined) return { timeline, folds: NO_FOLDS, memoryTurnId: null };
+  build(timeline: Message[], turns: readonly Turn[], pass: MemoryPass | null | undefined): ShapedTimeline {
+    if (pass === undefined) return { timeline, folds: NO_FOLDS, memoryTurnId: null, pass: null };
     const shaped = this.#folds.build(timeline, turns, openedTurns);
-    return { timeline: shaped, folds: this.#folds.folds, memoryTurnId: pass ? memoryTurn(turns, pass) : null };
+    return { timeline: shaped, folds: this.#folds.folds, memoryTurnId: pass ? memoryTurn(turns, pass) : null, pass };
   }
+}
+
+export interface ShapedTimeline {
+  timeline: Message[];
+  folds: ReadonlyMap<string, TurnFold>;
+  /** The turn the last memory pass followed. */
+  memoryTurnId: string | null;
+  pass: MemoryPass | null;
+}
+
+/** Opens a folded turn again, or folds it, for the app session. */
+export function toggleTurn(turnId: string): void {
+  if (openedTurns.has(turnId)) openedTurns.delete(turnId);
+  else openedTurns.add(turnId);
+}
+
+/** What a turn's summary line carries in an agent's thread: its folded steps, opened from the line, and the mark of the memory pass that followed it. */
+export function summaryMarks(shaped: ShapedTimeline, turnId: string, openDesk: () => void): { steps?: { count: number; open: boolean; toggle: () => void }; memory?: { pass: MemoryPass; open: () => void } } {
+  const fold = shaped.folds.get(FOLD_PREFIX + turnId);
+  return {
+    ...(fold?.kind === 'worked' ? { steps: { count: fold.steps, open: fold.open, toggle: () => toggleTurn(turnId) } } : {}),
+    ...(shaped.memoryTurnId === turnId && shaped.pass ? { memory: { pass: shaped.pass, open: openDesk } } : {}),
+  };
 }

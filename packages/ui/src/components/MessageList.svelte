@@ -12,7 +12,7 @@
   import AgentMessageGroup from './AgentMessageGroup.svelte';
   import WakeMarker from './WakeMarker.svelte';
   import TurnFoldRow from './TurnFoldRow.svelte';
-  import { AgentTimeline, FOLD_PREFIX, memoryPassOf, openedTurns } from '../lib/agent-turns';
+  import { AgentTimeline, memoryPassOf, summaryMarks } from '../lib/agent-turns';
   import { groupTimeline } from '../lib/timeline-group';
   import { agentMailFor } from '../lib/agent-mail';
   import DelegationActivity from './DelegationActivity.svelte';
@@ -67,10 +67,7 @@
   function releaseHeld(): void {
     for (const url of held) if (!viewing?.items.some(item => item.src === url)) { URL.revokeObjectURL(url); held.delete(url); }
   }
-  provideViewerHost({
-    open: (gallery) => { viewing = gallery; releaseHeld(); },
-    release: (url) => { held.add(url); releaseHeld(); }
-  });
+  provideViewerHost({ open: (gallery) => { viewing = gallery; releaseHeld(); }, release: (url) => { held.add(url); releaseHeld(); } });
   onDestroy(() => { viewing = null; releaseHeld(); });
   /** The find bar is its own chunk, fetched the first time it opens. A failed fetch tries again on the next open. */
   let FindBar = $state.raw<typeof import('./FindBar.svelte').default>();
@@ -99,8 +96,7 @@
   const views = $derived.by(() => (shownViews = turnViews(grouped.timeline, shownViews)));
   /** A finished turn's published files go after its answer, its pages after them; Boite's cache pings are one line; an agent's own thread folds its finished turns (`lib/agent-turns.ts`). */
   const agentTimeline = new AgentTimeline();
-  const memoryPass = $derived(memoryPassOf(store, threadId));
-  const shaped = $derived(agentTimeline.build(quietKeepalives(placeViews(filesLast(grouped.timeline, shownTurns), shownTurns, views), shownTurns), shownTurns, memoryPass));
+  const shaped = $derived(agentTimeline.build(quietKeepalives(placeViews(filesLast(grouped.timeline, shownTurns), shownTurns, views), shownTurns), shownTurns, memoryPassOf(store, threadId)));
   const timeline = $derived(shaped.timeline);
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
@@ -803,10 +799,8 @@
           {#if turn && closes}
             {@const files = filesOf(turn)}
             {#if files}<TurnFiles {store} {...files} loadDiffs={() => Promise.all(files.deferred.map(source => store.loadToolOutput(threadId, source.messageId, source.toolId))).then(() => {})} />{/if}
-            {@const steps = shaped.folds.get(FOLD_PREFIX + turn.id)}
             <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id}
-              steps={steps?.kind === 'worked' ? { count: steps.steps, open: steps.open, toggle: () => { if (openedTurns.has(turn.id)) openedTurns.delete(turn.id); else openedTurns.add(turn.id); } } : undefined}
-              memory={shaped.memoryTurnId === turn.id && memoryPass ? { pass: memoryPass, open: () => store.panel.open('desk') } : undefined}>
+              {...summaryMarks(shaped, turn.id, () => store.panel.open('desk'))}>
               {#snippet actions()}
                 <MessageActions
                   text={() => turnAnswer(messages, turn.id)}
