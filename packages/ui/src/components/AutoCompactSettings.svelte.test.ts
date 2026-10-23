@@ -134,6 +134,39 @@ test('a typed size saves after a pause or when the page leaves, without waiting 
   }
 });
 
+test('retrying a refused size leaves the switch alone, and the switch clears what the field left behind', async () => {
+  const store = render({ tokens: 200_000, moments: ['cache-expiry'] });
+  const type = async (value: string) => {
+    const field = input('auto-compact-tokens');
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+  };
+  store.saveSettings.mockResolvedValueOnce(false);
+  await type('250000');
+  const status = () => document.querySelector('[data-testid="save-status"]');
+  expect(status()?.getAttribute('data-state')).toBe('error');
+  (status()!.querySelector('.reason') as HTMLElement).click();
+  await settle();
+  expect(input('auto-compact-threshold').checked).toBe(true);
+  status()!.querySelector('button')!.click();
+  await settle();
+  expect(input('auto-compact-threshold').checked).toBe(true);
+  expect(store.saveSettings).toHaveBeenLastCalledWith({ autoCompact: { tokens: 250_000, moments: ['cache-expiry'] } });
+
+  await type('500');
+  expect(status()?.getAttribute('data-state')).toBe('invalid');
+  await flip('auto-compact-threshold', false);
+  await flip('auto-compact-threshold', true);
+  expect(input('auto-compact-tokens').value).toBe('200000');
+  expect(status()).toBeNull();
+  // A size changed elsewhere shows once the switch has sent the field's.
+  store.settings = { ...store.settings, autoCompact: { tokens: 600_000, moments: ['cache-expiry'] } };
+  await settle();
+  expect(input('auto-compact-tokens').value).toBe('600000');
+});
+
 test('a size typed on one machine saves there when the settings bar switches to another', async () => {
   const make = () => {
     const machine = $state({ owner: true, settings: { autoCompact: { tokens: 200_000, moments: ['cache-expiry'] } } as Partial<Settings>,

@@ -56,10 +56,12 @@
     const moments = AUTO_COMPACT_MOMENTS.filter((entry) => entry === moment ? input.checked : rule.moments.includes(entry));
     void save(moments.length ? { ...rule, moments } : null, input);
   }
-  function toggleThreshold(input: HTMLInputElement) {
+  /** The switch sends the size as it stands, so an earlier size status or draft no longer applies. */
+  async function toggleThreshold(input: HTMLInputElement) {
     if (!rule) return;
-    if (input.checked && !valid) { tokens = FIRST_TOKENS; dirty = false; }
-    void save({ ...rule, tokens: input.checked ? tokens as number : null }, input);
+    if (input.checked && !valid) tokens = FIRST_TOKENS;
+    sizeSave.state = 'idle';
+    if (await save({ ...rule, tokens: input.checked ? tokens as number : null }, input)) dirty = false;
   }
   /**
    * The size saves like every typed setting: after a pause, when the field is
@@ -73,7 +75,7 @@
     while (inflight) await inflight.catch(() => false);
     const target = typedFor ?? store;
     const current = target.settings?.autoCompact;
-    if (!current || current.tokens === null) return;
+    if (!current || current.tokens === null) { dirty = false; return; }
     const sent = tokens as number;
     if (current.tokens !== sent) await saved(save({ ...current, tokens: sent }, undefined, target));
     if (tokens === sent) dirty = false;
@@ -120,7 +122,8 @@
         <div class="option" class:on={rule.tokens !== null}>
           <span class="icon"><Ruler size={18} strokeWidth={1.75} /></span>
           <span class="words">
-            <label for="{uid}-threshold" class="name"><span class="ui-label" id="{uid}-threshold-name">{strings.settings.autoCompactThreshold}</span><InfoTip topic={strings.settings.autoCompactThreshold} text={rule.tokens === null ? strings.settings.autoCompactThresholdOff : strings.settings.autoCompactThresholdHint} />{#if rule.tokens !== null}<SaveStatus save={sizeSave} />{/if}</label>
+            <!-- Only the words label the switch: a retry beside them must not flip it. -->
+            <span class="name"><label for="{uid}-threshold" class="ui-label" id="{uid}-threshold-name">{strings.settings.autoCompactThreshold}</label><InfoTip topic={strings.settings.autoCompactThreshold} text={rule.tokens === null ? strings.settings.autoCompactThresholdOff : strings.settings.autoCompactThresholdHint} />{#if rule.tokens !== null}<SaveStatus save={sizeSave} />{/if}</span>
             {#if rule.tokens !== null}
               <span class="size">
                 <span class="presets" role="group" aria-label={strings.settings.autoCompactThreshold}>
@@ -143,7 +146,7 @@
             {/if}
           </span>
           <input id="{uid}-threshold" aria-labelledby="{uid}-threshold-name" type="checkbox" role="switch" data-testid="auto-compact-threshold"
-            checked={rule.tokens !== null} disabled={saving} onchange={(event) => toggleThreshold(event.currentTarget)} />
+            checked={rule.tokens !== null} disabled={saving} onchange={(event) => void toggleThreshold(event.currentTarget)} />
         </div>
       </div>
     {/if}
