@@ -702,6 +702,12 @@
   const firstAssistantInTurn = $derived(firstAssistantByTurn(messages));
   /** The last row of each turn: a later message of the same turn replaces an earlier one. */
   const lastInTurn = $derived(new Map(timeline.map((message): [string, string] => [message.turnId, message.id])));
+  /** The first message of each turn: on a wake turn, the prompt it opened with. A line Boite adds to that turn later is not a second wake. */
+  const firstInTurn = $derived.by(() => {
+    const first = new Map<string, string>();
+    for (const message of messages) if (!first.has(message.turnId)) first.set(message.turnId, message.id);
+    return first;
+  });
   /** Each turn's answers, rebuilt when a message comes or goes, never on a part or a delta. */
   const answers = $derived(answersByTurn(messages));
   const fileCache = new TurnFileCache();
@@ -788,7 +794,7 @@
             <MoveMarker notice={movedBy(message)!} />
           {:else if startedFrom(message)}
             <SpawnMarker {store} link={startedFrom(message)!} direction="to" />
-          {:else if message.role !== 'assistant' && (turn?.execution?.operation === 'routine' || turn?.execution?.operation === 'event')}
+          {:else if message.role !== 'assistant' && firstInTurn.get(message.turnId) === message.id && (turn?.execution?.operation === 'routine' || turn?.execution?.operation === 'event')}
             <WakeMarker {message} kind={turn.execution.operation} />
           {:else if message.role === 'user'}
             <UserMessage {store} {message} {turn} accepted={!!turn} responded={progress.responded(message.turnId)} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />

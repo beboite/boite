@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_MEMORY_MAX } from '@boite/contracts';
 import { connect } from '../src/client.ts';
@@ -285,6 +285,21 @@ test('a memory pass writes through a temporary file of its own: a link planted b
   expect(readFileSync(victim, 'utf8')).toBe('OWNER_ORIGINAL');
   // Nothing is left behind but the planted link.
   expect(readdirSync(brain.path).filter(name => name.endsWith('.tmp'))).toEqual(['MEMORY.md.tmp']);
+});
+
+test('a pass whose rewrite cannot be written ends as failed: the agent is not left with a pass running', async () => {
+  const driver = script(() => 'SUMMARY: updated\n<memory>\nPASS_REPLACEMENT\n</memory>');
+  const { h, agent, threadId } = await setup();
+  await waitFor(() => driver.held.length === 1);
+  // A brain folder that refuses new files: the temporary file of the rewrite cannot be created.
+  const folder = h.core.workforce.resident.brain(agent.id).path;
+  chmodSync(folder, 0o555);
+  restores.push(() => chmodSync(folder, 0o755));
+  driver.release();
+  await waitFor(() => h.core.workforce.memory.lastPass(agent.id)?.status !== 'running');
+  expect(h.core.workforce.memory.lastPass(agent.id)).toMatchObject({ status: 'error', summary: expect.stringContaining('could not be written') });
+  expect(h.core.workforce.memory.busy()).toBe(false);
+  expect(passes(h, threadId).every(t => t.archived)).toBe(true);
 });
 
 test('a memory pass runs with no tool: no built-in tool, MCP server or hook, a mode that approves nothing and a token that opens nothing', async () => {

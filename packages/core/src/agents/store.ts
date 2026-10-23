@@ -75,7 +75,7 @@ export class AgentStore {
       if (typeof threadId !== 'string' || !this.threads.has(threadId)) return;
       if (name === 'thread.updated' && (payload as ThreadSummary).unread === false) this.readUp(threadId);
       if (name.startsWith('turn.') || name === 'thread.updated' || name === 'thread.removed') this.todays.delete(threadId);
-      if (name === 'message.part' || name === 'thread.updated' || name.startsWith('question.') || name.startsWith('permission.')) this.changed();
+      if (name === 'message.part' || name === 'thread.updated' || name === 'thread.removed' || name.startsWith('question.') || name.startsWith('permission.')) this.changed();
     });
   }
   close(): void {
@@ -231,8 +231,10 @@ export class AgentStore {
       if (saved.status === 'archived' && !thread.archived) this.core.threads.archive(thread.id, true);
       if (saved.status !== 'archived' && thread.archived) this.core.threads.archive(thread.id, false);
       const selection = saved.selection;
-      const moved = thread.accountId !== selection.accountId || thread.model !== selection.model || thread.effort !== selection.effort || thread.permissionMode !== selection.permissionMode;
-      if ((moved && JSON.stringify(previous.selection) !== JSON.stringify(selection)) || thread.title !== saved.name) {
+      // Only a new route on the bot moves its thread: a rename keeps the route the thread was moved to.
+      const moved = JSON.stringify(previous.selection) !== JSON.stringify(selection)
+        && (thread.accountId !== selection.accountId || thread.model !== selection.model || thread.effort !== selection.effort || thread.permissionMode !== selection.permissionMode);
+      if (moved || thread.title !== saved.name) {
         try {
           this.core.threads.update({ threadId: thread.id, ...(thread.title !== saved.name ? { title: saved.name } : {}),
             ...(moved ? { accountId: selection.accountId, model: selection.model, effort: selection.effort, permissionMode: selection.permissionMode } : {}) });

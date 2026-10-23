@@ -59,6 +59,8 @@
   const directory = $derived(agentDirectory(store));
   const threadId = $derived(thread?.id ?? null);
   const agent = $derived(thread ? agentOfThread(snapshot, thread.id) ?? directory.ownerOf(thread) : null);
+  /** The open agent's id: every snapshot brings a new profile object, the id moves only when another agent opens. */
+  const agentId = $derived(agent?.id ?? null);
   const status = $derived(agent ? statusOf(snapshot, agent.id) : null);
   /** The conversation of an archived agent reads, and takes nothing more. */
   const locked = $derived(agent?.status === 'archived' ? labels.archivedNotice : null);
@@ -72,7 +74,7 @@
     return () => { for (const other of shown) other.pause(); };
   });
   // The snapshot carries the open agent's desk only.
-  $effect(() => { const id = agent?.id ?? null; untrack(() => view.showDesk(id)); });
+  $effect(() => { const id = agentId; untrack(() => view.showDesk(id)); });
   // The directory names the agent of a thread the snapshot does not list yet, a new one.
   $effect(() => { const target = directory; return untrack(() => target.watch()); });
   // A reconnect reads the snapshot again; the first visit already asked in `start`.
@@ -84,8 +86,8 @@
   });
   // The agent on screen is the one this machine reopens next time; a new thread brings the conversation back on a phone.
   $effect(() => {
-    const id = agent?.id;
-    void thread?.id;
+    const id = agentId;
+    void threadId;
     untrack(() => {
       if (id) rememberAgent(store, id);
       listShown = false;
@@ -94,13 +96,16 @@
     });
   });
   // The first time an agent opens on a wide window, its desk opens beside the conversation.
+  // A panel already in use keeps the visit unspent: the desk opens the next time it is free.
   $effect(() => {
-    const id = agent?.id;
+    const id = agentId;
     if (!id || !threadId || narrow.current) return;
-    untrack(() => { if (firstDeskVisit(id) && !store.panel.isOpen && store.panel.surfaces.length === 0) store.panel.open('desk'); });
+    untrack(() => { if (!store.panel.isOpen && store.panel.surfaces.length === 0 && firstDeskVisit(id)) store.panel.open('desk'); });
   });
   /** The desktop's default agent was opened, or gave way to one named on the way in. */
   let tried = false;
+  /** The default agent could not be opened: the card offers a retry instead of loading. */
+  let openFailed = $state(false);
   // A link from elsewhere (a thread an agent runs, a settings card) names the agent to open.
   $effect(() => {
     const target = store.agentsTarget;
@@ -124,9 +129,13 @@
   $effect(() => {
     if (narrow.current || focus || thread || !snapshot || !rows.length || store.agentsTarget || tried) return;
     tried = true;
-    const last = lastOpenedAgent(store);
-    void openAgent(store, rows.some(r => r.profile.id === last) ? last! : rows[0]!.profile.id);
+    untrack(openDefault);
   });
+  function openDefault() {
+    openFailed = false;
+    const last = lastOpenedAgent(store);
+    void openAgent(store, rows.some(r => r.profile.id === last) ? last! : rows[0]!.profile.id).then(opened => { if (!opened) openFailed = true; });
+  }
   // On a phone the open conversation hides the list; the root carries it as a class, as `.app:has(...)` would restyle every node.
   $effect(() => {
     const root = document.documentElement;
@@ -191,6 +200,8 @@
         <p class="hint">{labels.welcomeHint}</p>
         {#if store.owner}<button type="button" class="primary" onclick={() => { focus = { kind: 'new' }; }} data-testid="agents-first">{labels.createAgent}</button>{/if}
       </div>
+    {:else if openFailed}
+      <div class="agent-error" role="alert">{labels.openFailed}<button type="button" class="ghost small" onclick={openDefault} data-testid="agents-open-retry">{labels.retry}</button></div>
     {:else}
       <p class="agent-empty">{strings.app.loading}</p>
     {/if}

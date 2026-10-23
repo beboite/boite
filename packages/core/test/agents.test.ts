@@ -4,7 +4,7 @@ import { connect } from '../src/client.ts';
 import type { CoreClient } from '../src/client.ts';
 import { INTRO_PROMPT } from '../src/agents/store.ts';
 import { agentValue, echoAccount, makeAgent, settled, turnsOf } from './agent-fixture.ts';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, startTestCore, testProject, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 
 let h: TestCore;
@@ -74,6 +74,37 @@ test('an agent thread is never deleted; archiving the agent archives it and the 
   expect((await client.call('agents.snapshot', {})).status[0]!.state).toBe('archived');
   await client.call('agents.profile.save', { id: agent.id, expectedRevision: archived.revision, value: { ...archived, status: 'active' } });
   expect(h.core.threads.require(threadId).archived).toBe(false);
+});
+
+test('a bot thread removed with its project tells the clients, so no snapshot keeps naming it', async () => {
+  const { threadId } = await makeAgent(h, client);
+  // A bot carried over from an older core may keep its thread in a project.
+  const project = await testProject(h, client);
+  h.core.journal.putThread({ ...h.core.threads.require(threadId), projectId: project.id });
+  // Each event's dispatch notes whether it invalidated the snapshot: the archive that comes first may go out
+  // before the removal, and then nothing else would tell the clients the thread is gone.
+  const store = h.core.workforce as unknown as { changed: () => void };
+  const changed = store.changed.bind(store);
+  let invalidated = false;
+  store.changed = () => { invalidated = true; changed(); };
+  const told: Record<string, boolean> = {};
+  const off = h.core.bus.onAny((name, payload) => {
+    if ((payload as { threadId?: string; id?: string } | null)?.threadId === threadId || (payload as { id?: string } | null)?.id === threadId) told[name] = invalidated;
+    invalidated = false;
+  });
+  try { await client.call('projects.remove', { projectId: project.id }); } finally { off(); }
+  expect(h.core.journal.getThread(threadId)).toBeNull();
+  expect(told).toMatchObject({ 'thread.updated': true, 'thread.removed': true });
+});
+
+test('renaming a bot keeps the route its thread was moved to; a new route on the bot moves it', async () => {
+  const { agent, threadId } = await makeAgent(h, client);
+  // The user moved the conversation itself to another mode.
+  await client.call('threads.update', { threadId, permissionMode: 'plan' });
+  const renamed = await client.call('agents.profile.save', { id: agent.id, expectedRevision: agent.revision, value: { ...agent, name: 'Ada Two' } });
+  expect(h.core.threads.require(threadId)).toMatchObject({ title: 'Ada Two', permissionMode: 'plan' });
+  await client.call('agents.profile.save', { id: agent.id, expectedRevision: renamed.revision, value: { ...renamed, selection: { ...renamed.selection, permissionMode: 'acceptEdits' } } });
+  expect(h.core.threads.require(threadId).permissionMode).toBe('acceptEdits');
 });
 
 test('agents.open makes the thread again when it was lost', async () => {

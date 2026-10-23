@@ -59,17 +59,22 @@ export class AgentEntrustments {
     const objective = (params.objective === undefined ? '' : text(params.objective, 'objective', 4000, true)) || DEFAULT_OBJECTIVE;
     this.core.activity.set({ threadId, goal: { objective } });
     const entry: AgentEntrustment = { threadId, agentId, objective, at: Date.now() };
+    // Entrusted to another bot: the one before loses the grant, as on a take-back.
+    const before = this.of(threadId);
     this.write([...this.list().filter(other => other.threadId !== threadId), entry]);
+    if (before && before.agentId !== agentId) this.release(before);
     this.store.projects.follow(agentId, threadId, 'entrusted');
     this.core.agentRuntime.line(agentId, `The user entrusted "${thread.title}" (${threadId}) to you: ${objective}`);
     this.store.changed();
     return { ...entry };
   }
 
-  /** The owner takes the thread back: the entrustment and the goal it started end, without a message. */
+  /** The owner takes the thread back: the entrustment, the goal it started and the grant it gave end, without a message. */
   private takeBack(threadId: string): null {
-    if (!this.of(threadId)) return null;
-    this.write(this.list().filter(entry => entry.threadId !== threadId));
+    const entry = this.of(threadId);
+    if (!entry) return null;
+    this.write(this.list().filter(other => other.threadId !== threadId));
+    this.release(entry);
     if (this.core.journal.getThread(threadId) && this.core.activity.get(threadId).goal) {
       try { this.core.activity.control({ threadId, kind: 'goal', action: 'remove' }); } catch { /* The goal ended meanwhile. */ }
     }
@@ -97,6 +102,12 @@ export class AgentEntrustments {
     if (event.outcome === 'stopped') this.core.agentRuntime.line(entry.agentId, what);
     else this.core.agentRuntime.fact(entry.agentId, { key: `goal:${entry.threadId}:${event.outcome}:${Date.now()}`, text: `${what}\nIts final answer: ${quoted(event.text.slice(0, ANSWER_LIMIT))}`, threadIds: [entry.threadId] });
     this.store.changed();
+  }
+
+  /** The bot's follow loses the owner's grant; it stays only where the bot reaches the thread another way. */
+  private release(entry: AgentEntrustment): void {
+    const agent = this.profile(entry.agentId);
+    if (agent) this.store.projects.release(agent, entry.threadId);
   }
 
   private profile(agentId: string): AgentProfile | null {

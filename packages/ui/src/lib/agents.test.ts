@@ -1,5 +1,6 @@
 import { expect, vi } from 'vitest';
-import type { AgentsSnapshot } from '@boite/contracts';
+import { RpcErrorCode, type AgentsSnapshot } from '@boite/contracts';
+import { RpcFailure } from './rpc-error';
 import { test } from '../test/fake-client';
 import { AgentsView, agentOfThread, agentRows, liveStep, openAgent, previewOf, avatarText } from './agents.svelte';
 import { AgentDirectory, agentDirectory } from './agent-directory.svelte';
@@ -65,6 +66,22 @@ test('the newest agent open wins over an older one answered last, and a navigati
   answers.get('c')!({ threadId: 'thread-c' });
   await c;
   expect(open.mock.calls.map(([threadId]) => threadId)).toEqual(['thread-b']);
+});
+
+test('only an older core without agents.open falls back to the listed thread; another refusal is shown', async () => {
+  const snapshot = { profiles: [], status: [], sessions: [{ agentId: 'a', threadId: 'thread-a' }] } as unknown as AgentsSnapshot;
+  const refusal = { error: null as unknown };
+  const call = vi.fn(async () => { throw refusal.error; });
+  const open = vi.fn(async (_threadId: string) => {});
+  const store = { client: { call, on: () => () => {} }, open, navigationGeneration: 0, error: '' } as unknown as Store;
+  AgentsView.of(store).snapshot = snapshot;
+  refusal.error = new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'agent a is archived' });
+  expect(await openAgent(store, 'a')).toBeNull();
+  expect(open).not.toHaveBeenCalled();
+  expect(store.error).toContain('agent a is archived');
+  refusal.error = new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method agents.open' });
+  expect(await openAgent(store, 'a')).toBe('thread-a');
+  expect(open.mock.calls.map(([threadId]) => threadId)).toEqual(['thread-a']);
 });
 
 test('two users of one view keep it listening until the last one leaves', async () => {

@@ -33,6 +33,7 @@ export const fr: Translation = {
     done: 'Terminé',
     engine: 'Travail en arrière-plan', engineHint: 'Fermer cette page laisse les bots travailler sur le moteur connecté.',
     pauseWakes: 'Mettre tous les bots en pause', pauseWakesHint: 'Aucune routine ni aucun événement ne réveille un bot de ce moteur. Vous pouvez toujours leur écrire.',
+    openFailed: 'Ce bot n’a pas pu s’ouvrir. Choisissez-en un dans la liste ou réessayez.',
     offline: 'Chargement impossible. Reconnectez cette machine ou mettez son moteur à jour.', retry: 'Réessayer',
     stale: 'Connexion perdue. Voici le dernier état reçu. Le travail peut continuer sur la machine hôte.',
     status: 'État', settings: 'Réglages', createAction: 'Créer', rolePlaceholder: 'Recherche, développement ou relecture',

@@ -200,18 +200,25 @@ export class MemoryKeeper {
   }
 
   private finished(turn: Turn, keeper: Keeper): void {
-    if (turn.status !== 'done') { this.end(turn.threadId, keeper, 'error', turn.error ?? `The memory pass ${turn.status === 'stopped' ? 'was stopped' : 'failed'}.`); return; }
+    // A brain that cannot be read or written (a link, a full disk) ends the pass too: the agent is not left with one running.
+    let outcome: [status: 'done' | 'unchanged' | 'error', summary: string | null];
+    try { outcome = this.outcome(turn, keeper); } catch (error) { outcome = ['error', `The memory could not be written: ${messageOf(error)}`]; }
+    this.end(turn.threadId, keeper, ...outcome);
+  }
+
+  /** How a finished pass ends: its rewrite written to MEMORY.md, or why not. */
+  private outcome(turn: Turn, keeper: Keeper): [status: 'done' | 'unchanged' | 'error', summary: string | null] {
+    if (turn.status !== 'done') return ['error', turn.error ?? `The memory pass ${turn.status === 'stopped' ? 'was stopped' : 'failed'}.`];
     const { summary, memory } = parseMemoryAnswer(this.answer(turn));
-    if (memory === null) { this.end(turn.threadId, keeper, 'unchanged', null); return; }
+    if (memory === null) return ['unchanged', null];
     const brain = this.store.resident.brain(keeper.agentId);
-    if (brain.memory !== keeper.memory) { this.end(turn.threadId, keeper, 'error', 'MEMORY.md changed during the pass; it was kept as it is.'); return; }
-    if (memory.length > AGENT_MEMORY_MAX) { this.end(turn.threadId, keeper, 'error', `The rewritten memory ran past ${AGENT_MEMORY_MAX} characters; it was kept as it is.`); return; }
+    if (brain.memory !== keeper.memory) return ['error', 'MEMORY.md changed during the pass; it was kept as it is.'];
+    if (memory.length > AGENT_MEMORY_MAX) return ['error', `The rewritten memory ran past ${AGENT_MEMORY_MAX} characters; it was kept as it is.`];
     // A file longer than the cap may come back shorter than its share: the floor counts from the cap.
     const kept = Math.min(keeper.memory.length, AGENT_MEMORY_MAX);
-    if (kept > SHRINK_FLOOR && memory.length < kept * SHRINK_KEEP) { this.end(turn.threadId, keeper, 'error', 'The rewrite dropped most of the memory; it was kept as it is.'); return; }
+    if (kept > SHRINK_FLOOR && memory.length < kept * SHRINK_KEEP) return ['error', 'The rewrite dropped most of the memory; it was kept as it is.'];
     rewriteBrainFile(this.store.resident.brainRoot().path, join(brain.path, 'MEMORY.md'), memory);
-    this.end(turn.threadId, keeper, 'done', summary ?? 'Memory updated.');
-    this.store.changed();
+    return ['done', summary ?? 'Memory updated.'];
   }
 
   /** The whole answer of the pass's turn: `delegation.result` cuts at 4,000 characters, a memory file runs longer. */

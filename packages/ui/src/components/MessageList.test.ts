@@ -292,6 +292,29 @@ test('an agent thread folds a finished turn\'s steps behind the count on its sum
   expect(timeline()).not.toContain('The e2e job fails; its log names the redirect test.');
 });
 
+test('a line Boite writes on a wake turn stays a line of its own: only the prompt that opened the turn is its wake row', async ({ ready }) => {
+  setExperiment('resident-agents', true);
+  onTestFinished(() => setExperiment('resident-agents', false));
+  const { store: owner } = await ready({ delayMs: 0, agentsDemo: true });
+  const view = AgentsView.of(owner);
+  await view.refresh();
+  const nova = view.snapshot!.profiles.find(p => p.name === 'Nova')!;
+  await openAgent(owner, nova.id);
+  stubLayout(1200);
+  const thread = owner.openThread!;
+  const wake = thread.turns.findLast(turn => turn.execution?.operation === 'event' || turn.execution?.operation === 'routine')!;
+  const opening = thread.messages.find(message => message.turnId === wake.id)!;
+  // The runtime's notice lands on the thread's latest turn, here the wake turn.
+  const notice: Message = { id: 'msg_budget_notice', threadId: thread.id, turnId: wake.id, role: 'system', parts: [{ type: 'text', text: 'Skipped routine: past the daily budget.' }], state: 'complete', createdAt: opening.createdAt + 1 };
+  const messages = [...thread.messages.filter(message => message.turnId !== wake.id), opening, notice, ...thread.messages.filter(message => message.turnId === wake.id && message.id !== opening.id)];
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages } });
+  flushSync();
+  const markers = [...document.querySelectorAll<HTMLElement>('[data-testid="wake-marker"]')];
+  // The opening prompt is the wake row; the notice under it is not a second one.
+  expect(markers.map(marker => marker.textContent?.includes('Skipped routine'))).toEqual([false]);
+  expect(document.querySelector('[data-testid="timeline"]')!.textContent).toContain('Skipped routine: past the daily budget.');
+});
+
 test.for([false, true])('the outline rail is left of the bubbles on a desktop and not drawn on a phone (phone: %s)', async (phone, { createStore }) => {
   const { store: owner, client } = createStore({ delayMs: 0 });
   owner.attach(client);

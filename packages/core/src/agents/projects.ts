@@ -219,6 +219,23 @@ export class AgentProjects {
     const granted = owner || origin === 'entrusted' || previous?.owner === true ? { owner: true as const } : {};
     this.write(agentId, { ...follows, [threadId]: { ...previous, ...pr, at: now, origin: previous?.origin ?? origin, ...granted } });
   }
+  /**
+   * The owner took an entrusted thread back: the grant that came with it goes.
+   * The follow stays only when the bot reaches the thread another way (it
+   * started it, or the thread's project is entrusted to it), under that origin.
+   */
+  release(agent: AgentProfile, threadId: ThreadId): void {
+    const saved = this.saved(agent.id);
+    const follow = saved[threadId];
+    if (!follow) return;
+    const { owner: _owner, ...rest } = follow;
+    const kept: Follow = { ...rest, origin: follow.origin === 'entrusted' ? 'followed' : follow.origin };
+    const thread = this.core.journal.getThread(threadId);
+    if (thread && this.allowed(agent.id, kept, thread)) saved[threadId] = kept;
+    else delete saved[threadId];
+    this.write(agent.id, saved);
+    this.core.agentRuntime.filterFacts(agent.id, fact => this.core.agentRuntime.factThreads(fact).every(id => this.mayHear(agent, id)));
+  }
   unfollow(agentId: string, threadId: ThreadId): boolean {
     const saved = this.saved(agentId);
     if (!(threadId in saved)) return false;

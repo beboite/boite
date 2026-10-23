@@ -1,5 +1,6 @@
 import { errorText } from './errors';
-import type { AgentProfile, AgentStatus, AgentsSnapshot, RpcParams, RpcResult, AgentsRpcMethods, ThreadSummary } from '@boite/contracts';
+import { RpcErrorCode, type AgentProfile, type AgentStatus, type AgentsSnapshot, type RpcParams, type RpcResult, type AgentsRpcMethods, type ThreadSummary } from '@boite/contracts';
+import { RpcFailure } from './rpc-error';
 import type { Store } from './store.svelte';
 import { strings } from './strings';
 import { experimentOn } from './experiments.svelte';
@@ -110,8 +111,8 @@ export async function openAgent(store: Store, agentId: string): Promise<string |
   try {
     threadId = (await client.call('agents.open', { agentId })).threadId;
   } catch (error) {
-    // An older core without `agents.open` still lists the thread in its sessions.
-    if (!known) { store.error = errorText(error); return null; }
+    // An older core without `agents.open` still lists the thread in its sessions; any other refusal is the answer.
+    if (!known || !(error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound)) { store.error = errorText(error); return null; }
   }
   if (!threadId || store.client !== client || agentOpens.get(store) !== request || store.navigationGeneration !== navigation) return null;
   lastAgent.set(store, agentId);

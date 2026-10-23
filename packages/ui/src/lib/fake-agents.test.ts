@@ -1,5 +1,5 @@
 import { expect, vi } from 'vitest';
-import type { AgentProfile, Message } from '@boite/contracts';
+import { AGENT_MEMORY_MAX, type AgentProfile, type Message } from '@boite/contracts';
 import { test } from '../test/fake-client';
 import { deskState } from './agent-desk';
 import { FakeAgents } from './fake-agents';
@@ -78,6 +78,43 @@ test('remember appends a dated line to MEMORY.md, and a desk keeps the threads p
   expect((await client.call('agents.snapshot', {})).watches.map(w => w.threadId)).toEqual(['t-trace']);
   await client.call('agents.watch', { agentId: agent.id, watchThreadId: 't-trace', watched: false });
   expect((await client.call('agents.snapshot', {})).watches).toEqual([]);
+});
+
+test('the fake keeps MEMORY.md under its cap on remember too, as the core does', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0 });
+  const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  const brain = await client.call('agents.brain.get', { agentId: agent.id });
+  await client.call('agents.brain.save', { agentId: agent.id, expectedRevision: brain.revision, instructions: brain.instructions, memory: 'x'.repeat(AGENT_MEMORY_MAX - 10) });
+  await expect(client.call('agents.memory.note', { agentId: agent.id, text: 'One fact too many.' })).rejects.toThrow(`${AGENT_MEMORY_MAX}`);
+  expect((await client.call('agents.brain.get', { agentId: agent.id })).memory).toHaveLength(AGENT_MEMORY_MAX - 10);
+});
+
+test('entrusting a thread keeps the other bots\' desks; archiving it ends the entrustment, as in the core', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0 });
+  const save = (name: string) => client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  const ada = await save('Ada'), bob = await save('Bob');
+  await client.call('agents.watch', { agentId: bob.id, watchThreadId: 't-trace', watched: true });
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: ada.id });
+  const desk = (await client.call('agents.snapshot', {})).watches.map(w => [w.agentId, w.origin]);
+  expect(desk).toEqual(expect.arrayContaining([[bob.id, 'followed'], [ada.id, 'entrusted']]));
+  await client.call('threads.archive', { threadId: 't-trace' });
+  expect((await client.call('agents.snapshot', {})).entrusted).toEqual([]);
+});
+
+test('taking a thread back takes the grant in the fake as in the core: the watch stays only where the bot reaches the thread another way', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0 });
+  const ada = await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  const desk = async () => (await client.call('agents.snapshot', {})).watches.find(w => w.agentId === ada.id && w.threadId === 't-trace')?.origin ?? null;
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: ada.id });
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: null });
+  expect(await desk()).toBeNull();
+  // Its project entrusted to the bot: the thread stays on its desk as one it follows there.
+  const { projectId } = await client.call('threads.get', { threadId: 't-trace' });
+  const current = (await client.call('agents.snapshot', {})).profiles.find(a => a.id === ada.id)!;
+  await client.call('agents.profile.save', { id: ada.id, expectedRevision: current.revision, value: { ...current, projectIds: [projectId!] } });
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: ada.id });
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: null });
+  expect(await desk()).toBe('followed');
 });
 
 test('the demo has an agent at work on a live step, one waiting on a login and one at rest until its routine', async ({ ready }) => {
