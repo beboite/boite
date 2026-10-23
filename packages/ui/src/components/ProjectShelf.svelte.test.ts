@@ -27,7 +27,7 @@ test('history rows an idle project reported leave Alt+digit once the fold emptie
   await store.archive('t-trace', true);
   const entry: ProjectEntry = { machine: { id: 'local', label: 'local', store } as never, project: store.projects.find(project => project.id === 'p-boite')! };
   const onrows = vi.fn();
-  const props = $state({ idle: [entry], multi: false, now: Date.now(), onrows });
+  const props = $state({ projects: [entry], multi: false, now: Date.now(), onrows });
   mounted = mount(ProjectShelf, { target: document.body, props });
   projectThreadView.shelfOpen = true;
   await settle();
@@ -35,7 +35,7 @@ test('history rows an idle project reported leave Alt+digit once the fold emptie
   await settle();
   expect(onrows).toHaveBeenLastCalledWith([{ store, threadId: 't-trace' }]);
   // The project leaves the fold, the fold's rows go with it, and so does what they lent Alt+digit.
-  props.idle = [];
+  props.projects = [];
   await settle();
   expect(onrows).toHaveBeenLastCalledWith([]);
   projectThreadView.toggle(entry, 'done');

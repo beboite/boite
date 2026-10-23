@@ -224,9 +224,10 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate(`!document.querySelector('${root} ${id('project-shelf')} ${id(width < 720 ? 'mobile-project-group' : 'project')}')`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
       await click(`${building} ${id('project-working-toggle')}`);
-      await page.waitFor(`document.querySelector('${row(building, 't-building')}')`);
+      // The opened fold may still be scrolling to its header: bring the project at work on top back into view.
+      await page.waitFor(`(() => { document.querySelector('${building}')?.scrollIntoView({block:'center'}); return !!document.querySelector('${row(building, 't-building')}'); })()`);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-done-toggle')}') === null`)).toBe(true);
-      // Queued and background work also keep the project out of the fold of idle projects.
+      // Queued and background work also keep the project at work on top, out of the fold of idle projects.
       for (const [index, renderedState] of ['queued', 'monitoring', 'background', 'working'].entries()) {
         await page.evaluate(`(() => {
           const states = [
@@ -238,8 +239,12 @@ for (const width of [1280, 390]) {
           const store = globalThis.__boiteTest.workspace.machines[0].store;
           store.threads = store.threads.map(t => t.id === 't-building' ? {...t, ...states[${index}]} : t);
         })()`);
-        await page.waitFor(`document.querySelector('${row(building, 't-building')} ${id('thread-state')}[data-state="${renderedState}"]')`);
-        expect(await page.evaluate(`!document.querySelector('${idleRow(busy)}')`)).toBe(true);
+        // The section sits above the fold the test opened: its rows draw once it scrolls back into view.
+        await page.waitFor(`(() => {
+          document.querySelector('${building}')?.scrollIntoView({block:'center'});
+          return !!document.querySelector('${row(building, 't-building')} ${id('thread-state')}[data-state="${renderedState}"]');
+        })()`);
+        expect(await page.evaluate(`!document.querySelector('${idleRow(busy)}') && !!document.querySelector('${root} ${id('working-projects')}')?.contains(document.querySelector('${building}'))`)).toBe(true);
       }
       // An idle project keeps its done history one click away, under its row.
       const finished = idleRow('p-notes');

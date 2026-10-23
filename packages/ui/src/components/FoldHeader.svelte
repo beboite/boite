@@ -10,8 +10,9 @@
    * folds stacked in the sidebar read the same way. `nested` is the denser row
    * used inside a project, under its threads. Opening a fold scrolls its list
    * along with it, so a fold at the bottom of the list shows what it holds.
+   * `hint` says what the fold gathers, under the pointer.
    */
-  let { label, count, open, onclick, controls, nested = false, testid, icon, beforeReveal }: {
+  let { label, count, open, onclick, controls, nested = false, testid, icon, beforeReveal, hint }: {
     label: string;
     count: number;
     open: boolean;
@@ -21,6 +22,7 @@
     testid?: string;
     icon?: Snippet;
     beforeReveal?: () => Promise<void>;
+    hint?: string;
   } = $props();
   let stopReveal: (() => void) | undefined;
   $effect(() => { if (!open) stopReveal?.(); });
@@ -34,7 +36,7 @@
   }
 </script>
 
-<button type="button" class="ghost fold-header" class:nested data-testid={testid} aria-expanded={open} aria-controls={controls} onclick={(event) => toggle(event.currentTarget)}>
+<button type="button" class="ghost fold-header" class:nested data-testid={testid} title={hint} aria-expanded={open} aria-controls={controls} onclick={(event) => toggle(event.currentTarget)}>
   <span class="fold-caret" class:open><ChevronRight size={12} aria-hidden="true" /></span>
   {#if icon}{@render icon()}{/if}
   <span class="label ui-label">{label}</span> <span class="fold-count ui-label">{formatCount(count)}</span>

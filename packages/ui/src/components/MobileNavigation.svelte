@@ -3,7 +3,7 @@
   import WindowList from './WindowList.svelte';
   import MobileMenu from './MobileMenu.svelte';
   import ThreadHeader from './ThreadHeader.svelte';
-  import { Activity, ArrowLeft, ArrowUpDown, ChevronDown, Ellipsis, Folder, FolderPlus, MessageSquare, Plus, Radar, Search, X } from '@lucide/svelte';
+  import { Activity, Archive, ArrowLeft, ArrowUpDown, ChevronDown, Ellipsis, Folder, FolderPlus, LoaderCircle, MessageSquare, Plus, Radar, Search, X } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import MobileConnect from './MobileConnect.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -25,11 +25,12 @@
   import RecentDone from './RecentDone.svelte';
   import ProjectThreadCounters from './ProjectThreadCounters.svelte';
   import ProjectShelf from './ProjectShelf.svelte';
+  import FoldHeader from './FoldHeader.svelte';
   import DraftRow from './DraftRow.svelte';
   import GroupLabel from './GroupLabel.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import { projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
-  import { activeProject, archiveCount, projectThreadView } from '../lib/project-threads.svelte';
+  import { activeProject, archiveCount, projectSections, projectThreadView } from '../lib/project-threads.svelte';
   import { workingThread } from '../lib/recent.svelte';
   import { compareThreads } from '../lib/thread-order';
   import { needsUser } from '../lib/thread-state';
@@ -64,8 +65,8 @@
   let place = $derived(store.pairingRequired ? strings.mobile.pairingRequired : store.connection === 'ready' ? machine?.label ?? strings.mobile.computer : strings.connection[store.connection]);
   let project = $derived(store.openProject ?? store.projects.find(p => p.archived !== true));
   let groups = $derived(projectView.sorted(machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))));
-  let activeGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(activeProject) : groups);
-  let otherGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(entry => !activeProject(entry)) : []);
+  /** At work on top, open, then set aside; idle projects go to their fold, as on the desktop. */
+  let sections = $derived(projectSections(groups, recentPreferences.groupOtherProjects));
   let shelved = $derived(machines.flatMap(machine => machine.store.projects.filter(project => project.archived === true).map(project => ({ machine, project }))));
   let selected = $derived(projectView.selected(groups));
   let draftOwner = $derived(screen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);
@@ -165,11 +166,14 @@
     else store.startDraft(project?.id, { fresh: true });
     show('chat');
   }
-  /** The projects a project moves among: its own fold as drawn, or the one list a search shows. */
+  /** The projects a project moves among: its own section as drawn, or the one list a search shows. */
   function foldOf(entry: ProjectEntry): ProjectEntry[] {
     if (query) return groups;
-    return recentPreferences.groupOtherProjects && !activeProject(entry) ? otherGroups : activeGroups;
+    const key = projectKey(entry);
+    return Object.values(sections).find(list => list.some(other => projectKey(other) === key)) ?? groups;
   }
+  /** A set-aside project shows its archived conversations as its body, with no pill for them. */
+  const laterLists = ['archived'] as const;
 </script>
 
 <header class="mobile-header" class:chatting class:settings={store.page !== 'chat'} data-testid="mobile-header">
@@ -241,12 +245,12 @@
       </div>
     {/snippet}
     {#if screen === 'threads' && workspace.view === 'projects'}
-      {#snippet projectRows(projects: ProjectEntry[])}
+      {#snippet projectRows(projects: ProjectEntry[], later = false)}
       {#each projects as group (projectKey(group))}
         {@const groupRows = rows.filter(row => row.machine.id === group.machine.id && row.thread.projectId === group.project.id)}
         {@const workingOpen = projectThreadView.isOpen(group, 'working')}
         {@const doneOpen = archiveCount(group.project, 'done') > 0 && projectThreadView.isOpen(group, 'done')}
-        {@const archivedOpen = archiveCount(group.project, 'archived') > 0 && projectThreadView.isOpen(group, 'archived')}
+        {@const archivedOpen = archiveCount(group.project, 'archived') > 0 && (later || projectThreadView.isOpen(group, 'archived'))}
         {@const workingRows = groupRows.filter(row => workingThread(row.machine.store, row.thread))}
         {@const attentionRows = query || !recentPreferences.groupWorking ? groupRows : groupRows.filter(row => workingOpen ? !workingThread(row.machine.store, row.thread) : !groupWorkingThread(group.machine.store, row.thread))}
         {@const controls = `mobile-project-${encodeURIComponent(projectKey(group))}`}
@@ -255,7 +259,7 @@
         <section class="project-group" class:inactive={!activeProject(group)} data-testid="mobile-project-group" data-project-id={group.project.id} data-machine-id={group.machine.id}>
           <div class="project-heading">
             <ProjectTile project={group.project} store={group.machine.store} /><h2>{projectName(group.project)}{#if several}<span>{group.machine.label}</span>{/if}</h2>
-            <ProjectThreadCounters entry={group} working={group.machine.store.threadsOf(group.project.id).filter(thread => workingThread(group.machine.store, thread)).length} {controls} searching={!!query} away={group.machine.store.connection !== 'ready'} />
+            <ProjectThreadCounters entry={group} working={group.machine.store.threadsOf(group.project.id).filter(thread => workingThread(group.machine.store, thread)).length} {controls} searching={!!query} away={group.machine.store.connection !== 'ready'} body={later ? laterLists : undefined} />
             {#if projectView.order === 'manual'}
               <Menu items={[
                 { id: 'up', label: strings.sidebar.moveProjectUp, disabled: projectKey(foldOf(group)[0]!) === projectKey(group) },
@@ -283,18 +287,38 @@
             <RecentDone entries={[group]} {scrollRoot} {now} {query} open={doneOpen} header={false} onopen={() => show('chat')} />
           </div>
           <div id="{controls}-archived" hidden={!archivedOpen} data-testid="project-archived">
-            {#if archivedOpen}<GroupLabel kind="archived" count={query ? undefined : archiveCount(group.project, 'archived')} />{/if}
-            <RecentDone kind="archived" entries={[group]} {scrollRoot} {now} {query} open={archivedOpen} header={false} onopen={() => show('chat')} />
+            {#if archivedOpen && !later}<GroupLabel kind="archived" count={query ? undefined : archiveCount(group.project, 'archived')} />{/if}
+            <RecentDone kind="archived" entries={[group]} {scrollRoot} {now} {query} open={archivedOpen && (!later || projectThreadView.laterOpen)} header={false} onopen={() => show('chat')} />
           </div>
           {#if groupRows.length === 0 && !group.project.archivedThreads && drafts.length === 0}<p class="empty">{strings.sidebar.noThreads}</p>{/if}
         </section>
         {/if}
       {/each}
       {/snippet}
-      {@render projectRows(query ? groups : activeGroups)}
-      {#if !query}
-        {#if groups.length > 0 && activeGroups.length === 0}<p class="empty">{strings.sidebar.noActiveProjects}</p>{/if}
-        <ProjectShelf idle={otherGroups} archived={shelved} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
+      {#if query}{@render projectRows(groups)}
+      {:else}
+        {#if sections.working.length > 0}
+          <section class="section working" data-testid="working-projects">
+            <FoldHeader label={strings.sidebar.workingProjects} count={sections.working.length} open={projectThreadView.workingOpen} controls="mobile-working-projects"
+              testid="working-projects-toggle" hint={strings.sidebar.workingProjectsHint} onclick={() => (projectThreadView.workingOpen = !projectThreadView.workingOpen)}>
+              {#snippet icon()}<span class="section-glyph working"><LoaderCircle size={14} aria-hidden="true" /></span>{/snippet}
+            </FoldHeader>
+            <div id="mobile-working-projects" class="disclosure-fold" class:open={projectThreadView.workingOpen} inert={!projectThreadView.workingOpen}><div>{@render projectRows(sections.working)}</div></div>
+          </section>
+        {/if}
+        {@render projectRows(sections.open)}
+        {#if groups.length > 0 && sections.working.length + sections.open.length === 0}<p class="empty">{strings.sidebar.noActiveProjects}</p>{/if}
+        {#if sections.later.length > 0}
+          <section class="section later" data-testid="later-projects">
+            <FoldHeader label={strings.sidebar.laterProjects} count={sections.later.length} open={projectThreadView.laterOpen} controls="mobile-later-projects"
+              testid="later-projects-toggle" hint={strings.sidebar.laterProjectsHint} onclick={() => (projectThreadView.laterOpen = !projectThreadView.laterOpen)}>
+              {#snippet icon()}<span class="section-glyph"><Archive size={14} aria-hidden="true" /></span>{/snippet}
+            </FoldHeader>
+            <div id="mobile-later-projects" class="disclosure-fold" class:open={projectThreadView.laterOpen} inert={!projectThreadView.laterOpen}><div>{@render projectRows(sections.later, true)}</div></div>
+          </section>
+        {/if}
+        <ProjectShelf projects={sections.idle} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
+        <ProjectShelf kind="archived" projects={shelved} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
         {@render contacts()}
       {/if}
       <WindowList items={rows.filter(row => row.thread.projectId === null)} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements('unassigned')}>
@@ -377,6 +401,11 @@
     .list-heading { padding: 8px 0 14px; }
     p { font-size: var(--text-sm); }
     .project-group { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); margin-bottom: 12px; overflow: hidden; }
+    /* The sections of cards: at work on top, under a line that sets it apart from the open projects; set aside above the folds. */
+    .section.working { margin-bottom: 12px; border-bottom: 1px solid var(--color-border); }
+    .section.later { border-top: 1px solid var(--color-border); }
+    .section-glyph { display: inline-flex; flex: none; }
+    .section-glyph.working { color: var(--color-accent); }
     .project-heading { display: flex; align-items: center; padding: 8px 12px; gap: 8px; background: var(--color-surface-2); color: var(--color-muted-foreground); border-bottom: 1px solid var(--color-border); }
     .project-heading h2 { margin: 0; flex: 1; min-width: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
     .project-heading span { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
