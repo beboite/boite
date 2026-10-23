@@ -20,8 +20,12 @@ export type TurnExecution = Pick<ThreadSummary,
    * carries what changed (`threads.watchPullRequest`).
    * `keepalive`: a minimal turn the core sent so the prompt cache stays warm
    * while the thread waits on its agents (`cacheKeepalive`); always `automatic`.
+   * `routine`: a persistent agent's routine came due; the prompt is the
+   * routine's, the opening message reads `Routine · <name>`.
+   * `event`: the core woke a persistent agent: something happened on its desk
+   * or in its projects, it was just created, or its instructions changed.
    */
-  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume' | 'pull-request' | 'keepalive';
+  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume' | 'pull-request' | 'keepalive' | 'routine' | 'event';
   /** A `compact` the core opened by the `autoCompact` setting, or a `keepalive`: not one the user asked for. */
   automatic?: true;
 };
