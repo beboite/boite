@@ -199,7 +199,7 @@ of pairwise links.
 The group card's **Default machine** picks one member whose settings every
 other member follows, or None. The choice is the group's (`group.settingsHome`,
 kept in the roster beside its name and merged the same way: the latest choice
-wins), so every member and every window shows the same one, and a member that
+wins), so every member on current Boite shows the same one, and a member that
 leaves the group stops being the default. A core before `features.settingsHome`
 reports no choice and keeps its own settings; the card names it.
 
