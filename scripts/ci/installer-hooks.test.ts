@@ -289,6 +289,35 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(existsSync(join(failed.install, 'core', 'main-n3wn3wn3.js'))).toBe(false);
     expect(Bun.hash(readFileSync(join(failed.install, 'boite-core.exe')))).toBe(failedCore);
 
+    // Nothing of the install runs, as after an in-app update stopped its core
+    // and its shell: no PowerShell starts. Each one took about a second on
+    // Windows 11, most of an update's installation (2026-10-23). The section
+    // itself sleeps 6 seconds for the box a user would read.
+    function idle(name: string) {
+      const install = join(base, name);
+      mkdirSync(install, { recursive: true });
+      copyFileSync(process.execPath, join(install, 'boite-core.exe'));
+      copyFileSync(process.execPath, join(install, 'boite-hooktest-shell.exe'));
+      for (const [path, text] of [...STALE, ...KEPT]) {
+        mkdirSync(dirname(join(install, path)), { recursive: true });
+        writeFileSync(join(install, path), text);
+      }
+      return install;
+    }
+    rmSync(join(data, 'boite2', 'core.lock'), { force: true });
+    const quiet = idle('idle');
+    const startedAt = Date.now();
+    expect(await run([join(base, 'setup.exe'), '/S', `/D=${quiet}`])).toBe(0);
+    expect(Date.now() - startedAt).toBeLessThan(7_000);
+    expect(readFileSync(join(quiet, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
+    expect(bundles(quiet)).toEqual({ core: false, ui: false, kept: true, aside: false });
+    // A lock a crashed core left behind takes the checked way, which finds nothing to stop.
+    writeFileSync(join(data, 'boite2', 'core.lock'), JSON.stringify({ pid: 999999, startedAt: Date.now() }));
+    const crashed = idle('crashed');
+    expect(await run([join(base, 'setup.exe'), '/S', `/D=${crashed}`])).toBe(0);
+    expect(readFileSync(join(crashed, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
+    rmSync(join(data, 'boite2', 'core.lock'), { force: true });
+
     // An interrupted run left core.previous, and a scanner holds a file in it
     // without delete sharing: that leftover cannot go, so this run leaves core
     // where it is, and a failed copy must not put the leftover in its place.

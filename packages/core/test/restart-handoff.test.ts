@@ -271,6 +271,30 @@ test('a tool call still running after the grace is stopped, and its thread resum
   } finally { await (next ?? h).stop(); if (next) await h.stop().catch(() => undefined); }
 });
 
+test('a tool call already running longer than the grace when the restart starts is not waited for', async () => {
+  // An update waited its whole 30 seconds on a nine minute script (2026-10-23).
+  HANDOFF.graceMs = 10_000;
+  HANDOFF.longToolMs = 200;
+  let stops = 0;
+  const h = await startTestCore({ onShutdown: () => { stops += 1; } });
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    await client.call('threads.subscribe', { threadId });
+    const running = client.next('message.part', event => event.threadId === threadId && event.part.type === 'tool' && event.part.status === 'running');
+    const turn = await client.call('turns.start', { threadId, prompt: '[tool:60000] long command' });
+    await running;
+    await Bun.sleep(300);
+    const asked = Date.now();
+    expect((await ask(h)).status).toBe(202);
+    await waitFor(() => stops === 1);
+    expect(Date.now() - asked).toBeLessThan(5_000);
+    expect(h.core.journal.getTurn(turn.id)?.status).toBe('stopped');
+    expect(h.core.journal.getSetting('restart-handoff')).toMatchObject({ turns: [{ turnId: turn.id, was: 'running' }] });
+    client.close();
+  } finally { await h.stop(); }
+});
+
 test('a queued turn runs once on the next core, and a turn the user stopped does not resume', async () => {
   let stops = 0;
   const h = await startTestCore({ onShutdown: () => { stops += 1; } });

@@ -10,6 +10,9 @@ then lets the next core continue that work. The journal owns the record;
    any stop. A core killed during the wait therefore leaves a handoff.
 2. Stop each running turn between tool calls. An active tool has up to
    30 seconds to finish; after that, Stop applies at its current position.
+   A tool already running for 30 seconds when the restart starts gets no
+   wait: on 2026-10-22 two updates each spent the whole grace on such a call
+   (a nine minute script, a polling loop) and cut it anyway.
    Normal stop enforcement ends processes after 10 seconds and force-settles
    a remaining turn two seconds later.
 3. Exit after draining. Eligible queued turns remain queued in the journal.
