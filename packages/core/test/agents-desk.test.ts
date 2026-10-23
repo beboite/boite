@@ -336,7 +336,7 @@ test('a project taken back takes the follows the agent made through it, their fa
 
     const profile = h.core.workforce.records.get('profile', agent.id);
     agent = await owner.call('agents.profile.save', { id: profile.id, expectedRevision: profile.revision, value: { ...profile, projectIds: [] } });
-    expect(await thrown(own.call('resident.thread', { threadId: self, target: worker }))).toThrow('no project is entrusted');
+    expect(await thrown(own.call('resident.thread', { threadId: self, target: worker }))).toThrow('is not a thread of the projects entrusted to this bot, nor one it started');
     h.core.threads.update({ threadId: worker, title: 'PRIVATE_AFTER_REVOCATION' });
     // Its own snapshot and its context block no longer show the thread; the owner's grants are still there.
     const desk = (await own.call('agents.snapshot', { threadId: self })).watches.map(w => w.threadId);

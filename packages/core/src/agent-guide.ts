@@ -57,7 +57,7 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
       ? 'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps.'
       : 'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps. `boite todo list|add <text>|claim <id>` manages project todos; claim marks work done for user confirmation.',
     bot
-      ? '`boite projects` lists projects. `boite thread new <project> <brief>` starts independent work in one of yours, not a subagent; its answers come back as events.'
+      ? '`boite projects` lists projects. `boite thread new <project> <brief>` starts independent work in any of them, not a subagent; it lands on your desk, its answers come back as events and you drive it like the threads of your projects.'
       : '`boite projects` lists projects; `boite projects add <folder>` adds one. `boite thread new <project> <brief>` starts independent work in a project, not a subagent; its first answer comes back.',
     // Only while the owner lets agents read diagnostics; a skill that could not be written leaves the hint.
     ...(logAccess ? [`Boite itself failing (turn, window, phone)? \`boite logs problems\`${report ? `; skill ${report.name}: ${report.path}` : ''}`] : []),

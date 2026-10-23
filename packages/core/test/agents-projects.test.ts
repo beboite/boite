@@ -139,7 +139,7 @@ test('its messages reach a thread as the agent\'s whatever that thread\'s settin
 
   await waitFor(() => (prompts.get(worker) ?? []).some(p => p.includes('Finish, verify and open the pull request')));
   const prompt = prompts.get(worker)!.find(p => p.includes('Finish, verify'))!;
-  expect(prompt).toContain('the bot the user entrusted this project to');
+  expect(prompt).toContain("a bot of the user's that looks after this thread");
   expect(prompt).toContain('It is NOT the user');
   expect(prompt).not.toContain('messages from OTHER AGENTS');
   expect(h.core.journal.listMessages(worker).filter(m => m.role === 'user')).toHaveLength(0);
@@ -187,19 +187,47 @@ test('events: failures and asks from any thread, finished turns only from follow
   } finally { asker.close(); }
 });
 
-test('it starts threads in its projects only, and the thread\'s first answer comes back as an event', async () => {
+test('it starts threads in its projects, and the thread\'s first answer comes back as an event', async () => {
   const prompts = answering(); const { h, owner, other, cli, facts, agent } = await setup(['Other']);
-  expect((await cli(['thread', 'new', 'Notes', 'Write the notes'])).err).toContain('Notes is not entrusted to this bot');
   const started = await cli(['thread', 'new', 'Other', 'Write the release notes']);
   expect(started.err).toBe('');
   expect(started.out).toContain('It is on your desk; each turn it ends wakes you with an event');
   const id = /thread: (\S+)/.exec(started.out)![1]!;
   expect(h.core.threads.require(id).projectId).toBe(other.id);
   await waitFor(() => (prompts.get(id) ?? []).length > 0);
-  expect(prompts.get(id)![0]).toContain('started by Ada, the bot the user entrusted project Other to');
+  expect(prompts.get(id)![0]).toContain('started by Ada, a bot of the user\'s');
   expect(h.core.workforce.projects.follows(agent().id, id)).toBe(true);
   expect((await owner.call('agents.snapshot', {})).watches.find(w => w.threadId === id)).toMatchObject({ origin: 'started', projectId: other.id });
   await waitFor(() => facts().some(f => f.text.includes(id)));
+});
+
+test('a bot starts a thread in any project and drives what it started; threads it did not start stay out of reach outside its projects', async () => {
+  const prompts = answering(); const { h, owner, notes, outside, cli, entrust, agent } = await setup(['Other']);
+  const started = await cli(['thread', 'new', 'Notes', 'Write the notes']);
+  expect(started.err).toBe('');
+  const id = /thread: (\S+)/.exec(started.out)![1]!;
+  expect(h.core.threads.require(id).projectId).toBe(notes.id);
+  await waitFor(() => (prompts.get(id) ?? []).length > 0);
+  expect(prompts.get(id)![0]).toContain('started by Ada, a bot of the user\'s');
+  expect((await owner.call('agents.snapshot', {})).watches.find(w => w.threadId === id)).toMatchObject({ origin: 'started', projectId: notes.id });
+  await waitFor(() => h.core.threads.require(id).status === 'idle');
+  // Full control follows the thread it started, outside its projects.
+  expect((await cli(['thread', 'show', id])).err).toBe('');
+  const sent = await cli(['thread', 'send', id, 'Add the changelog', '--json']);
+  expect(sent.err).toBe('');
+  expect((JSON.parse(sent.out) as AgentLetter).origin).toBe('resident');
+  await waitFor(() => (prompts.get(id) ?? []).some(p => p.includes('Add the changelog')));
+  await waitFor(() => h.core.threads.require(id).status === 'idle');
+  expect((await cli(['thread', 'rename', id, 'Notes, written'])).err).toBe('');
+  expect((await cli(['threads'])).out).toContain(`${id} idle "Notes, written" desk=started machine=here`);
+  // A thread of the same project it did not start stays the owner's.
+  expect((await cli(['thread', 'show', outside])).err).toContain('is not a thread of the projects entrusted to this bot');
+  // With no project at all it still starts threads, and keeps what it started.
+  await entrust([]);
+  const again = await cli(['thread', 'new', 'Notes', 'Write more notes']);
+  expect(again.err).toBe('');
+  expect((await cli(['thread', 'done', id])).out).toContain(`${id} idle,done`);
+  expect(h.core.workforce.projects.follows(agent().id, id)).toBe(true);
 });
 
 test('the agent wakes a thread whose turn failed and puts it in Done once it is', async () => {

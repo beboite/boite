@@ -226,8 +226,15 @@ threads (`boite threads ...`) without the owner turning it on, and other
 threads can reach it the same way; its letters to the threads of its projects
 still go as its own whatever their settings. What stays out of reach: a
 worktree, a checkout, todos and `projects add` (it has no project), deleting
-a thread and allowing a tool permission (the owner's), and starting a thread
-in a project the owner did not entrust to it.
+a thread and allowing a tool permission (the owner's), and the threads of a
+project not entrusted to it that it did not start.
+
+A bot starts a thread in any project (`boite thread new`), with or without
+projects of its own. Full control follows the threads it started: they land
+on its desk (`started`) and it reads, steers, renames, stops, archives, marks
+done and answers for them as for the threads of its projects
+(`startedBy` and `drives` in `agents/projects.ts`). The others of that
+project stay out of its reach.
 
 ## Memory and brain
 
@@ -298,8 +305,9 @@ that the oldest open follow leaves. `boite bot unwatch`, or the owner's x on
 a card, drops one. A bot watches only threads of its projects or already on
 its desk; the owner, any top-level thread.
 
-A follow the bot made through a project (started, written to, answered for,
-its own `boite bot watch`) holds only while that project is entrusted to it.
+A follow the bot made through a project (written to, answered for, its own
+`boite bot watch`) holds only while that project is entrusted to it; a thread
+it started stays on its desk wherever it is.
 When the owner takes the project back, those follows leave the desk with the
 facts they gathered, and the desk rows, the facts and the context block check
 the bot's projects again each time they are read or delivered. A thread the
@@ -326,8 +334,9 @@ every thread there, the way a person in charge of a project would, through the
 which go through `resident.*` (`agents/projects.ts`):
 
 - it lists and reads their threads, with their questions and last answers;
-- it starts a thread in one of its projects (`boite thread new`), which codes,
-  verifies and opens the pull request, and lands on its desk;
+- it starts a thread (`boite thread new`), in one of its projects or any
+  other, which codes, verifies and opens the pull request, and lands on its
+  desk;
 - it steers a thread with a letter marked as its own (`origin: 'resident'`,
   see [coordination](coordination.md#letters-from-the-bot-of-a-project)),
   whatever that thread's communication settings, which wakes it even when its

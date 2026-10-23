@@ -343,8 +343,8 @@ methods: `thread send` is the owner's own prompt, queued behind a running turn,
 and `thread new` copies the agent of `--thread`, else of the project's most
 recent thread (`--model` replaces the model). Inside the thread of
 a [bot](bots.md#projects-entrusted-to-a-bot) the same words
-reach the threads of the projects the owner entrusted to it, through
-`resident.*`, and its messages reach them as that bot's letters, never as the
+reach the threads of the projects the owner entrusted to it and the threads
+it started in any project, through `resident.*`, and its messages reach them as that bot's letters, never as the
 user's. Deleting a thread and deciding a tool permission stay the owner's.
 
 `boite threads` (or `boite threads list`) is one listing of the threads the
@@ -495,8 +495,8 @@ elsewhere. There is no hourly limit. A thread an agent started cannot start anot
 until the user has
 written in it, so agents cannot chain threads on their own. Delegated
 children and workflow steps are refused, and a bot's thread starts
-threads only in the projects entrusted to it, where they land on its
-[desk](bots.md#the-desk). A retry
+threads in any project, where they land on its [desk](bots.md#the-desk) and
+stay its own to drive. A retry
 with the same `--request-id` returns the thread already started.
 
 `projects` prints one row per project: its id, name and folder, `(this
