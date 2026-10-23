@@ -104,25 +104,29 @@ test('production desktop and phone restore cached reading before a slow core rep
     expect(page.errors()).toEqual([]);
   } catch (error) {
     if (page) {
-      // Keep the failing viewport and expected row, before cleanup closes the browser.
-      const directory = join(import.meta.dir, '.artifacts');
-      mkdirSync(directory, { recursive: true });
-      const state = await page.evaluate(`(() => {
-        const box = document.querySelector('${timeline}');
-        const top = box?.getBoundingClientRect().top ?? 0;
-        return {
-          reading: globalThis.readingProof ?? null,
-          viewport: { width: innerWidth, height: innerHeight, covered: !!document.querySelector('.body.mobile-covered') },
-          timeline: box ? { top: box.scrollTop, height: box.scrollHeight, client: box.clientHeight } : null,
-          rows: [...document.querySelectorAll('[data-mid]')].map(node => ({ id: node.dataset.mid, top: node.getBoundingClientRect().top - top })),
-          fonts: document.fonts.status,
-          animations: document.getAnimations().filter(animation => animation.playState !== 'finished').map(animation => animation.animationName ?? animation.transitionProperty ?? animation.id),
-        };
-      })()`).catch(probe => ({ probeError: String(probe) }));
-      const evidence = { phase, getsFinished: Object.fromEntries(getsFinished), state, errors: page.errors() };
-      writeFileSync(join(directory, 'thread-switch-failure.json'), JSON.stringify(evidence, null, 2));
-      console.error('thread switch failure:', JSON.stringify(evidence));
-      await page.screenshot(join(directory, 'thread-switch-failure.png')).catch(probe => console.error('thread switch screenshot failed:', probe));
+      try {
+        // Keep the failing viewport and expected row, before cleanup closes the browser.
+        const directory = join(import.meta.dir, '.artifacts');
+        const state = await page.evaluate(`(() => {
+          const box = document.querySelector('${timeline}');
+          const top = box?.getBoundingClientRect().top ?? 0;
+          return {
+            reading: globalThis.readingProof ?? null,
+            viewport: { width: innerWidth, height: innerHeight, covered: !!document.querySelector('.body.mobile-covered') },
+            timeline: box ? { top: box.scrollTop, height: box.scrollHeight, client: box.clientHeight } : null,
+            rows: [...document.querySelectorAll('[data-mid]')].map(node => ({ id: node.dataset.mid, top: node.getBoundingClientRect().top - top })),
+            fonts: document.fonts.status,
+            animations: document.getAnimations().filter(animation => animation.playState !== 'finished').map(animation => animation.animationName ?? animation.transitionProperty ?? animation.id),
+          };
+        })()`, 2000).catch(probe => ({ probeError: String(probe) }));
+        const evidence = { phase, getsFinished: Object.fromEntries(getsFinished), state, errors: page.errors() };
+        console.error('thread switch failure:', JSON.stringify(evidence));
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(join(directory, 'thread-switch-failure.json'), JSON.stringify(evidence, null, 2));
+        await page.screenshot(join(directory, 'thread-switch-failure.png')).catch(probe => console.error('thread switch screenshot failed:', probe));
+      } catch (probe) {
+        console.error('thread switch diagnostics failed:', probe);
+      }
     }
     throw error;
   } finally { await page?.close(); await harness.stop(); }
