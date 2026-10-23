@@ -428,6 +428,9 @@ failed Git/GitHub read leaves the conversation visible.
 
 When a badge read or linked-PR watch detects a merge, that conversation is checked
 directly, without the startup grace, settling delay or periodic history scan.
+Failed detected proofs suppress repeated reads for a minute, independently of the
+scan. A thread update or changed PR links permit an earlier retry. A failed read
+of one conversation leaves it visible and does not stop other detected merges.
 It moves to Done even while viewed, unread or finishing its current prompt.
 The prompt and its processes keep running, its final answer is retained, and the
 Done row shows its live state until it finishes. Pinned threads remain visible,

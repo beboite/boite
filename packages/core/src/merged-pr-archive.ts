@@ -24,6 +24,8 @@ export class MergedPrArchive {
   private scanEnd = 0;
   /** Threads whose last proof found nothing, so each lap does not ask git and GitHub again. */
   private negative = new Map<string, Negative>();
+  /** A failed scan must not delay the first detected merge, or replace a detection's retry deadline. */
+  private readonly detectedNegative = new Map<string, Negative>();
   private readonly readyAt: number;
   private readonly detected = new Set<string>();
   private detection: Promise<void> | null = null;
@@ -49,10 +51,14 @@ export class MergedPrArchive {
     for (const id of this.detected) {
       this.detected.delete(id);
       if (this.closed || this.core.journal.isClosed()) return;
-      const thread = this.core.journal.getThread(id);
-      if (!thread || !this.eligible(thread, true)) continue;
-      const signal = AbortSignal.any([this.detectionController.signal, AbortSignal.timeout(30_000)]);
-      await this.archive(thread, signal, true);
+      try {
+        const thread = this.core.journal.getThread(id);
+        if (!thread || this.backingOff(thread, true) || !this.eligible(thread, true)) continue;
+        const signal = AbortSignal.any([this.detectionController.signal, AbortSignal.timeout(30_000)]);
+        await this.archive(thread, signal, true);
+      } catch {
+        if (!this.closed && !this.core.journal.isClosed()) this.core.log('warn', 'Merged PR detection failed; conversation remains visible', { source: 'merged-pr-archive', event: 'archive.detectionFailed', threadId: id });
+      }
     }
   }
   start(): void {
@@ -169,15 +175,16 @@ export class MergedPrArchive {
   private signature(thread: ThreadSummary): string {
     return `${thread.updatedAt}\n${linkedPullRequestSignature(this.core.journal, thread.id)}`;
   }
-  private backingOff(thread: ThreadSummary): boolean {
-    const entry = this.negative.get(thread.id);
+  private backingOff(thread: ThreadSummary, detected = false): boolean {
+    const entry = (detected ? this.detectedNegative : this.negative).get(thread.id);
     return entry !== undefined && entry.signature === this.signature(thread) && Date.now() < entry.nextAt;
   }
   /** Suppress repeated reads within one round, without delaying an external merge for an hour. */
-  private remember(thread: ThreadSummary, signature: string): void {
-    this.negative.delete(thread.id);
-    this.negative.set(thread.id, { signature, nextAt: Date.now() + NEGATIVE_RETRY_MS });
-    if (this.negative.size > NEGATIVE_ENTRIES) this.negative.delete(this.negative.keys().next().value!);
+  private remember(thread: ThreadSummary, signature: string, detected = false): void {
+    const entries = detected ? this.detectedNegative : this.negative;
+    entries.delete(thread.id);
+    entries.set(thread.id, { signature, nextAt: Date.now() + NEGATIVE_RETRY_MS });
+    if (entries.size > NEGATIVE_ENTRIES) entries.delete(entries.keys().next().value!);
   }
   private async pass(signal: AbortSignal): Promise<number> {
     let archived = 0;
@@ -195,20 +202,20 @@ export class MergedPrArchive {
     try {
       const proof = await archiveRead(this.pullRequests.proveMerged(thread, signal), signal);
       if (this.closed || signal.aborted || this.core.journal.isClosed()) return false;
-      if (!proof) { this.remember(thread, signature); return false; }
+      if (!proof) { this.remember(thread, signature, detected); return false; }
       const current = this.core.journal.getThread(thread.id);
       if (!current || (!detected && current.updatedAt !== thread.updatedAt) || !this.eligible(current, detected) || archiveState(this.core.journal, thread.id).generation !== generation) return false;
       const state = archiveState(this.core.journal, thread.id);
       const restored = state.restoredCheckout;
-      if (state.dismissed?.includes(proof.url) || (restored && restored.cwd === thread.cwd && restored.branch === thread.branch && restored.projectId === thread.projectId)) { this.remember(thread, signature); return false; }
+      if (state.dismissed?.includes(proof.url) || (restored && restored.cwd === thread.cwd && restored.branch === thread.branch && restored.projectId === thread.projectId)) { this.remember(thread, signature, detected); return false; }
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof });
-      if (!await archiveRead(this.pullRequests.validateMergedCheckout(thread, proof, signal), signal)) { this.remember(thread, signature); return false; }
+      if (!await archiveRead(this.pullRequests.validateMergedCheckout(thread, proof, signal), signal)) { this.remember(thread, signature, detected); return false; }
       if (this.closed || signal.aborted || this.core.journal.isClosed()) return false;
       // No await between the final state check and the visibility transaction.
-      if (this.core.threads.archiveMergedPr(thread, proof, generation, detected)) { this.negative.delete(thread.id); return true; }
+      if (this.core.threads.archiveMergedPr(thread, proof, generation, detected)) { this.negative.delete(thread.id); this.detectedNegative.delete(thread.id); return true; }
     } catch {
       // Missing auth, unavailable repositories and failed validation leave the conversation visible.
-      if (!signal.aborted && !this.closed) this.remember(thread, signature);
+      if (!signal.aborted && !this.closed) this.remember(thread, signature, detected);
     }
     return false;
   }

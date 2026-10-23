@@ -165,6 +165,63 @@ test.each(['restore', 'draft'] as const)('detected merges respect a late %s duri
   } finally { release(); held.mockRestore(); }
 });
 
+test('a failed detected conversation read leaves it visible and continues with the next merge', async () => {
+  const f = await fixture();
+  const core = harness.core, journal = core.journal;
+  const broken = 'unreadable-detected-thread';
+  journal.putThread({ ...core.threads.require(f.threadId), id: broken, branch: 'unreadable' });
+  const read = journal.getThread.bind(journal);
+  const warning = spyOn(core, 'log');
+  const get = spyOn(journal, 'getThread').mockImplementation(id => {
+    if (id === broken) throw new Error('fixture journal read failed');
+    return read(id);
+  });
+  try {
+    service.observe(broken);
+    service.observe(f.threadId);
+    await waitFor(() => core.threads.require(f.threadId).archived, 1500);
+    expect(warning.mock.calls.some(([, , context]) => context?.event === 'archive.detectionFailed' && context.threadId === broken)).toBe(true);
+  } finally { get.mockRestore(); warning.mockRestore(); }
+  expect(core.threads.require(broken).archived).toBe(false);
+});
+
+test('detected proof failures back off independently of history scans and retry after expiry or a thread change', async () => {
+  const f = await fixture();
+  const journal = harness.core.journal;
+  const original = harness.core.threads.require(f.threadId);
+  const proof = spyOn(harness.core.pullRequests, 'proveMerged').mockResolvedValue(null);
+  const now = Date.now.bind(Date);
+  let elapsed = 0;
+  const clock = spyOn(Date, 'now').mockImplementation(() => now() + elapsed);
+  const observe = async () => {
+    service.observe(f.threadId);
+    // A null proof settles within the detection turn, including its promise callbacks.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>(resolve => setImmediate(resolve));
+  };
+  try {
+    expect(await service.sweep()).toBe(0);
+    expect(proof).toHaveBeenCalledTimes(1);
+    elapsed = 30_000;
+    await observe(); // A scan's negative proof cannot delay newly detected work.
+    expect(proof).toHaveBeenCalledTimes(2);
+    for (let read = 0; read < 3; read++) await observe();
+    expect(proof).toHaveBeenCalledTimes(2);
+    elapsed = 60_001;
+    expect(await service.sweep()).toBe(0);
+    expect(proof).toHaveBeenCalledTimes(3);
+    await observe();
+    expect(proof).toHaveBeenCalledTimes(3);
+    elapsed = 90_001;
+    await observe();
+    expect(proof).toHaveBeenCalledTimes(4);
+    journal.putThread({ ...original, updatedAt: original.updatedAt + 1 });
+    await observe();
+    expect(proof).toHaveBeenCalledTimes(5);
+    expect(harness.core.threads.require(f.threadId).archived).toBe(false);
+  } finally { proof.mockRestore(); clock.mockRestore(); }
+});
+
 test('large archive sweeps bound hydration, yield to owner RPCs and advance beyond retained candidates', async () => {
   const f = await fixture();
   const journal = harness.core.journal;
