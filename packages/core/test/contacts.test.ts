@@ -492,7 +492,7 @@ test('an invitation for another network names the contact routes on Funnel, shar
   const invite = await hostClient.call('contacts.invite', { internet: true });
   expect(invite).toMatchObject({ share: { status: 'none' }, via: 'internet' });
   expect(decodeInvite(invite.link)).toMatchObject({ url: host.url, share: null });
-  expect(host.core.journal.getSetting('contacts:funnel')).toBe(true);
+  expect(host.core.journal.getSetting('contacts:funnel')).toEqual({ targets: [host.url] });
   const guestId = guest.core.coordination.card().coreId;
   expect((await guestClient.call('contacts.join', { link: invite.link })).url).toBe(host.url);
   await waitFor(() => host.core.contacts.linked(guestId));
@@ -500,13 +500,34 @@ test('an invitation for another network names the contact routes on Funnel, shar
   // Without a contact hosted or an invitation out, nothing needs the routes on the internet.
   await hostClient.call('contacts.remove', { coreId: guestId });
   await waitFor(() => closed === 1);
-  expect(host.core.journal.getSetting('contacts:funnel')).toBe(false);
+  await waitFor(() => host.core.journal.getSetting('contacts:funnel') === null);
   // A refused Funnel makes no invitation, and whatever it mounted comes down with it.
   host.core.contacts.internetUrl = async () => { throw unavailable('contacts.invite: Funnel refused'); };
   expect(await thrown(hostClient.call('contacts.invite', { internet: true }))).toThrow('Funnel refused');
   expect((await hostClient.call('contacts.get', {})).invitations).toBe(0);
   await waitFor(() => closed === 2);
   expect(await thrown(hostClient.call('contacts.invite', { internet: 'yes' as never }))).toThrow('internet: expected true or false');
+}, 30000);
+
+test('two invitations for another network at once: the refused one never takes down the mounts the other saved', async () => {
+  const harness = await startTestCore();
+  cores.push(harness);
+  let closed = 0;
+  (harness.core.contacts.funnel as unknown as { close: () => Promise<void> }).close = async () => { closed += 1; };
+  const opens: { resolve: (url: string) => void; reject: (error: Error) => void }[] = [];
+  harness.core.contacts.internetUrl = () => new Promise((resolve, reject) => { opens.push({ resolve, reject }); });
+  const refusedInvite = thrown(harness.core.contacts.invite(true, true));
+  const madeInvite = harness.core.contacts.invite(true, true);
+  await waitFor(() => opens.length === 2);
+  // Settled in one turn: the refusal's cleanup runs before the other invitation saves its token.
+  opens[0]!.reject(unavailable('contacts.invite: Funnel refused'));
+  opens[1]!.resolve(harness.url);
+  expect(await refusedInvite).toThrow('Funnel refused');
+  expect((await madeInvite).via).toBe('internet');
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(closed).toBe(0);
+  expect(harness.core.contacts.liveInvites()).toHaveLength(1);
+  expect(harness.core.journal.getSetting('contacts:funnel')).toEqual({ targets: [harness.url] });
 }, 30000);
 
 test('a tailnet outside tailscale.com invites someone already on it, and refuses to share this machine with another tailnet', async () => {

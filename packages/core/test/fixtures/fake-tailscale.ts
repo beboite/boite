@@ -8,8 +8,8 @@
  * `<state>.log`. Never touches a real tailnet.
  *
  * State: { status: object | null, statusStderr?, serve: object, consent?,
- * denied?, serveHangs?, funnelConsent?, funnelError? }. `status: null` is a
- * daemon that does not answer.
+ * denied?, serveHangs?, funnelConsent?, funnelError?, serveStatusFails? }.
+ * `status: null` is a daemon that does not answer.
  */
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 
@@ -20,6 +20,7 @@ interface State {
   consent?: string;
   funnelConsent?: string;
   funnelError?: string;
+  serveStatusFails?: boolean;
   denied?: boolean;
   serveHangs?: boolean;
 }
@@ -81,6 +82,7 @@ if (command === 'status --json') {
   if (state.status === null) fail(state.statusStderr ?? 'failed to connect to local tailscaled; it doesn\'t appear to be running');
   process.stdout.write(JSON.stringify(state.status));
 } else if (command === 'serve status --json') {
+  if (state.serveStatusFails) fail('failed to connect to local tailscaled; it doesn\'t appear to be running');
   process.stdout.write(JSON.stringify(state.serve));
 } else if (args[0] === 'serve') {
   if (state.denied) fail('Access denied: serve config denied. Use \'sudo tailscale serve\' or set an operator with tailscale set --operator=$USER, auth key tskey-auth-SECRET');

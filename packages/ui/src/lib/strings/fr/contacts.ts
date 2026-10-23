@@ -70,6 +70,7 @@ export const fr: Translation = {
       createTip: 'Sur son propre tailnet tailscale.com : le lien lui partage aussi cette machine.',
       internet: 'Ailleurs',
       internetTip: 'Headscale, un autre réseau ou pas de Tailscale : le lien joint cette machine par internet via Tailscale Funnel, sur les seules routes de contact de Boite.',
+      internetOld: 'Cette Boite est trop ancienne pour inviter quelqu\'un sur un autre réseau : mettez-la à jour d\'abord.',
       selfHosted: 'Votre tailnet n\'est pas sur tailscale.com : il ne peut ni partager cette machine ni ouvrir Funnel. Pour quelqu\'un sur un autre réseau, c\'est elle qui vous invite.',
       link: 'Lien d\'invitation',
       copy: 'Copier',

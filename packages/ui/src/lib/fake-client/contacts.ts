@@ -118,7 +118,8 @@ function seed(ctx: FakeContext): ContactsState {
     requests,
     settings: { minTier: 1 },
     tailscale: tailscale(true),
-    invitations: 0
+    invitations: 0,
+    internet: true
   };
 }
 

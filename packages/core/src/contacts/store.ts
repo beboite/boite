@@ -310,6 +310,7 @@ export class ContactStore {
       settings: this.settings(),
       tailscale: await this.tailscaleState(),
       invitations: this.liveInvites().length,
+      internet: true,
     };
   }
 
@@ -810,7 +811,7 @@ export class ContactStore {
     if (this.closed) return;
     this.started = true;
     this.listening = this.wantsTailnet();
-    if (!this.listening) this.funnel.release();
+    this.funnel.start(this.listening);
     if (this.list().length > 0 || this.liveInvites().length > 0) this.arm();
   }
 

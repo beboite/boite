@@ -39,29 +39,34 @@ export async function createInvite(store: ContactStore, core: Core, share: unkno
     if (liveInvites(core).length >= MAX_INVITES) throw refused(`at most ${MAX_INVITES} open invitations; cancel them or wait for one to be used or to expire`);
   };
   room();
-  let url: string;
-  let shared: ContactInvite['share'] = { status: 'none' };
-  if (internet) {
-    try { url = await store.funnel.acquire(() => store.internetUrl()); } catch (error) {
-      // Mounts made before the refusal leave with the rest when nothing else needs them.
-      store.relisten();
-      throw error;
+  // An invitation for another network holds the Funnel mounts until its token is saved, or until it gives up.
+  const unhold = internet ? store.funnel.hold() : null;
+  let saved = false;
+  try {
+    let url: string;
+    let shared: ContactInvite['share'] = { status: 'none' };
+    if (internet) url = await store.funnel.mount(() => store.internetUrl());
+    else {
+      url = await store.selfUrl(share);
+      if (share) shared = await store.tailscale.shareFor(tailnetAddress());
     }
-  } else {
-    url = await store.selfUrl(share);
-    if (share) shared = await store.tailscale.shareFor(tailnetAddress());
+    // Read again after the awaits: another invitation may have been made meanwhile.
+    room();
+    const token = newToken();
+    const expiresAt = Date.now() + INVITE_TTL_MS;
+    core.journal.setSetting(INVITES, Object.fromEntries([...liveInvites(core), [tokenHash(token), { expiresAt }]]));
+    saved = true;
+    // Dialled from now on: the tailnet listener opens before the link leaves this machine.
+    store.relisten();
+    store.arm();
+    const link = encodeInvite({ ...store.card(), url, token, share: shared.status === 'created' ? shared.url : null, expiresAt });
+    store.changed();
+    return { link, expiresAt, share: shared, via: internet ? 'internet' : 'tailnet' };
+  } finally {
+    unhold?.();
+    // Mounts made for an invitation never saved leave with the rest when nothing else needs them.
+    if (internet && !saved) store.relisten();
   }
-  // Read again after the awaits: another invitation may have been made meanwhile.
-  room();
-  const token = newToken();
-  const expiresAt = Date.now() + INVITE_TTL_MS;
-  core.journal.setSetting(INVITES, Object.fromEntries([...liveInvites(core), [tokenHash(token), { expiresAt }]]));
-  // Dialled from now on: the tailnet listener opens before the link leaves this machine.
-  store.relisten();
-  store.arm();
-  const link = encodeInvite({ ...store.card(), url, token, share: shared.status === 'created' ? shared.url : null, expiresAt });
-  store.changed();
-  return { link, expiresAt, share: shared, via: internet ? 'internet' : 'tailnet' };
 }
 
 /** This machine's tailnet origin for an invitee on Tailscale, refused with the reason when none can reach it. */

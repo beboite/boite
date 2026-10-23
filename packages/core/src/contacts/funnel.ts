@@ -20,7 +20,11 @@ import type { Core } from '../core.ts';
 import { messageOf, unavailable } from '../errors.ts';
 import { defaultCli, normalizeDnsName, runCli, tailscaleUrl, TAILSCALE_DNS_ADMIN, type Run } from '../tailscale.ts';
 
-/** Set while the mounts may be up: a core stopped meanwhile takes them down at its next start. */
+/**
+ * The loopback targets the mounts may proxy to, kept while they may be up: a
+ * core stopped meanwhile takes them down at its next start, and one that came
+ * back on another port still knows the old ones for its.
+ */
 const FUNNEL = 'contacts:funnel';
 const STATUS_TIMEOUT_MS = 5_000;
 /** `funnel --bg` on a node never allowed Funnel prints a consent link, then waits for it. */
@@ -40,50 +44,89 @@ export type Cli = () => string[] | null;
 type Mounts = { port: number; missing: string[] } | null;
 
 /**
- * The first Funnel port this module may use: one already carrying some of
- * these mounts to `target`, else one serving nothing at all.
+ * The first Funnel port this module may use: one carrying only these mounts,
+ * to one of `targets`, else one serving nothing at all. `missing` is what to
+ * mount again: a route absent, not on the internet or proxied to an old target.
  */
-export function funnelPort(config: ServeConfig, dnsName: string, paths: readonly string[], target: string): Mounts {
+export function funnelPort(config: ServeConfig, dnsName: string, paths: readonly string[], targets: readonly string[]): Mounts {
+  const [current] = targets;
   let free: number | null = null;
   for (const port of FUNNEL_PORTS) {
     const handlers = config.Web?.[`${dnsName}:${port}`]?.Handlers ?? {};
     const mounts = Object.entries(handlers);
-    if (mounts.length === 0 && config.TCP?.[String(port)] === undefined) { free ??= port; continue; }
-    const ours = mounts.every(([path, handler]) => paths.includes(path) && handler.Proxy === `${target}${path}`);
-    if (!ours) continue;
+    if (mounts.length === 0) {
+      // A TCP forward with no web mount is someone else's port.
+      if (config.TCP?.[String(port)] === undefined) free ??= port;
+      continue;
+    }
+    if (!mounts.every(([path, handler]) => paths.includes(path) && targets.some(target => handler.Proxy === `${target}${path}`))) continue;
     const funneled = config.AllowFunnel?.[`${dnsName}:${port}`] === true;
-    return { port, missing: paths.filter(path => !funneled || !(path in handlers)) };
+    return { port, missing: paths.filter(path => !funneled || handlers[path]?.Proxy !== `${current}${path}`) };
   }
   return free === null ? null : { port: free, missing: [...paths] };
 }
 
 export class ContactFunnel {
-  /** Invitations putting the mounts up right now: no teardown meanwhile. */
-  private opening = 0;
+  /** Invitations putting the mounts up right now: no teardown until each saved its token or gave up. */
+  private holding = 0;
   private closing: Promise<void> | null = null;
 
   constructor(private readonly core: Core, private readonly paths: readonly string[], private readonly cli: Cli = defaultCli) {}
 
-  /** The routes' origin from `open`, the mounts marked in use before they go up. */
-  async acquire(open: () => Promise<string>): Promise<string> {
-    this.opening += 1;
-    try {
-      // A teardown in flight ends before the mounts go up again.
-      await this.closing;
-      this.core.journal.setSetting(FUNNEL, true);
-      return await open();
-    } finally {
-      this.opening -= 1;
-    }
+  /** The targets the mounts may proxy to, from the journal. */
+  private recorded(): string[] {
+    const saved = this.core.journal.getSetting(FUNNEL) as { targets?: unknown } | null | undefined;
+    return Array.isArray(saved?.targets) ? saved.targets.filter((target): target is string => typeof target === 'string') : [];
   }
 
-  /** Nothing needs the mounts: they come down once, unless an invitation is putting them up. */
+  /** Keeps the mounts up until the returned call: an invitation holds them until its token is saved. */
+  hold(): () => void {
+    this.holding += 1;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      this.holding -= 1;
+    };
+  }
+
+  /** The routes' origin from `open`, the target recorded before the mounts go up. Call under `hold`. */
+  async mount(open: () => Promise<string>): Promise<string> {
+    // A teardown in flight ends before the mounts go up again.
+    await this.closing;
+    this.core.journal.setSetting(FUNNEL, { targets: [...new Set([this.target(), ...this.recorded()])] });
+    const url = await open();
+    this.core.journal.setSetting(FUNNEL, { targets: [this.target()] });
+    return url;
+  }
+
+  /**
+   * Nothing needs the mounts: they come down, unless an invitation holds
+   * them. The record stays until the removal is confirmed, so a failure is
+   * tried again at the next release or start.
+   */
   release(): void {
-    if (this.closing !== null || this.opening > 0 || this.core.journal.getSetting(FUNNEL) !== true) return;
-    this.core.journal.setSetting(FUNNEL, false);
-    this.closing = this.close().catch(error => {
+    if (this.closing !== null || this.holding > 0 || this.recorded().length === 0) return;
+    this.closing = this.close().then(() => {
+      if (this.holding === 0) this.core.journal.setSetting(FUNNEL, null);
+    }, error => {
       this.core.log('warn', `contacts: the Tailscale Funnel mounts could not be removed: ${messageOf(error)}`, { source: 'contacts' });
     }).finally(() => { this.closing = null; });
+  }
+
+  /**
+   * At start: mounts nothing needs come down, and mounts a contact still
+   * dials follow this core to the port it listens on now.
+   */
+  start(wanted: boolean): void {
+    if (!wanted) { this.release(); return; }
+    const recorded = this.recorded();
+    if (recorded.length === 0 || (recorded.length === 1 && recorded[0] === this.target())) return;
+    const unhold = this.hold();
+    // `mount` reads `closing` before this assignment: it waits for nothing older.
+    this.closing = this.mount(() => this.open()).then(() => undefined, error => {
+      this.core.log('warn', `contacts: the Tailscale Funnel mounts could not follow this core to ${this.target()}: ${messageOf(error)}`, { source: 'contacts' });
+    }).finally(() => { unhold(); this.closing = null; });
   }
 
   /** Resolves once a teardown in flight ended. */
@@ -136,7 +179,7 @@ export class ContactFunnel {
     if (cli === null) throw unavailable('contacts.invite: the tailscale command was not found on this machine; install Tailscale to invite someone from another network');
     const target = this.target();
     const { dnsName, config } = await this.read(cli);
-    const mounts = funnelPort(config, dnsName, this.paths, target);
+    const mounts = funnelPort(config, dnsName, this.paths, [target, ...this.recorded().filter(old => old !== target)]);
     if (mounts === null) throw unavailable(`contacts.invite: Tailscale already serves something else on ports ${FUNNEL_PORTS.join(' and ')} of this machine, the ones Funnel offers besides 443`);
     for (const path of mounts.missing) {
       const run = await runCli(this.core, cli, ['funnel', '--bg', `--https=${mounts.port}`, `--set-path=${path}`, `${target}${path}`], FUNNEL_TIMEOUT_MS);
@@ -145,20 +188,22 @@ export class ContactFunnel {
     return `https://${dnsName}:${mounts.port}`;
   }
 
-  /** Takes down the mounts this module made; anything else Tailscale serves stays. */
+  /** Takes down the mounts this module made, to this core or an older target; anything else Tailscale serves stays. Throws when a removal is not confirmed. */
   async close(): Promise<void> {
     const cli = this.cli();
-    if (cli === null) return;
-    const target = this.target();
+    if (cli === null) throw new Error('the tailscale command was not found');
+    const targets = [this.target(), ...this.recorded()];
     const serve = await runCli(this.core, cli, ['serve', 'status', '--json'], STATUS_TIMEOUT_MS);
+    if (serve.code !== 0 || serve.timedOut) throw new Error(`tailscale serve status failed${serve.timedOut ? ' (no answer)' : ''}`);
     let config: ServeConfig;
-    try { config = JSON.parse(serve.stdout || '{}') as ServeConfig; } catch { return; }
+    try { config = JSON.parse(serve.stdout || '{}') as ServeConfig; } catch { throw new Error('tailscale serve status answered something other than JSON'); }
     for (const [hostPort, web] of Object.entries(config.Web ?? {})) {
       const port = Number(hostPort.slice(hostPort.lastIndexOf(':') + 1));
       if (!(FUNNEL_PORTS as readonly number[]).includes(port)) continue;
       for (const [path, handler] of Object.entries(web.Handlers ?? {})) {
-        if (!this.paths.includes(path) || handler.Proxy !== `${target}${path}`) continue;
-        await runCli(this.core, cli, ['serve', `--https=${port}`, `--set-path=${path}`, 'off'], STATUS_TIMEOUT_MS);
+        if (!this.paths.includes(path) || !targets.some(target => handler.Proxy === `${target}${path}`)) continue;
+        const off = await runCli(this.core, cli, ['serve', `--https=${port}`, `--set-path=${path}`, 'off'], STATUS_TIMEOUT_MS);
+        if (off.code !== 0 || off.timedOut) throw new Error(`tailscale serve could not remove ${path} on ${port}`);
       }
     }
   }

@@ -8,6 +8,7 @@
 import type { Contact, ContactInvite, ContactRequest, ContactSettings, ContactsState, ContactTailscale, ProjectId } from '@boite/contracts';
 import { untrack } from 'svelte';
 import { errorText } from './errors';
+import { strings } from './strings';
 import type { Store } from './store.svelte';
 import { workspace, type Machine } from './workspace.svelte';
 
@@ -156,7 +157,11 @@ export class ContactsView {
    */
   async createInvite(reach: InviteReach = 'share'): Promise<boolean> {
     const params = reach === 'internet' ? { internet: true } : { share: reach === 'share' };
-    const invite = await this.#run('invite', () => this.#connected().call('contacts.invite', params));
+    const invite = await this.#run('invite', async () => {
+      // An older core would answer `internet` with a share of this machine: never sent there.
+      if (reach === 'internet' && this.state?.internet !== true) throw new Error(strings.contacts.invite.internetOld);
+      return this.#connected().call('contacts.invite', params);
+    });
     if (invite) this.invite = invite;
     return invite !== null;
   }

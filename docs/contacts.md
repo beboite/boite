@@ -120,10 +120,19 @@ these routes is signed and sealed as on the tailnet, with TLS instead of
 WireGuard under it. Requests Funnel hands over come from loopback, marked
 `Tailscale-Funnel-Request` with the sender in `X-Forwarded-For`, both set by
 tailscaled: the refusal quota counts them under that sender
-(`strangerAddress` in `server.ts`). The journal keeps `contacts:funnel` while
-the mounts may be up; `serve --https=<port> --set-path=<route> off` takes
-them down, and only them, once no contact is hosted and no invitation is
-out, at the next start too when the core stopped first.
+(`strangerAddress` in `server.ts`).
+
+The journal keeps `contacts:funnel`, the loopback targets the mounts may
+proxy to, while they may be up. An invitation holds the mounts until its
+token is saved, so a refused invitation made at the same time never takes
+them down. Once no contact is hosted and no invitation is out, `serve
+--https=<port> --set-path=<route> off` removes them, and only them; the
+record is cleared after every removal succeeded, else the next release or
+start tries again. A core that comes back on another port moves the mounts a
+hosted contact still dials to its new port, on the same public origin, and
+removes the old ones when nothing needs them. A client shows **Elsewhere**
+only when `contacts.get` answers `internet: true`: an older core reads only
+`share` and would share the machine instead.
 
 ## Projects and requests
 

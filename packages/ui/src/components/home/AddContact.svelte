@@ -78,9 +78,12 @@
     <button type="button" disabled={view.isBusy('invite') || selfHosted} title={labels.invite.createTip} onclick={() => void invite('share')} data-testid="contact-invite-create">
       <Share2 size={14} /><span class="ui-label">{labels.invite.create}</span>
     </button>
-    <button type="button" disabled={view.isBusy('invite') || selfHosted} title={labels.invite.internetTip} onclick={() => void invite('internet')} data-testid="contact-invite-internet">
-      <Globe size={14} /><span class="ui-label">{labels.invite.internet}</span>
-    </button>
+    <!-- An older core reads only `share` and would share the machine instead. -->
+    {#if view.state?.internet === true}
+      <button type="button" disabled={view.isBusy('invite') || selfHosted} title={labels.invite.internetTip} onclick={() => void invite('internet')} data-testid="contact-invite-internet">
+        <Globe size={14} /><span class="ui-label">{labels.invite.internet}</span>
+      </button>
+    {/if}
   </span>
 </div>
 {#if view.invite}

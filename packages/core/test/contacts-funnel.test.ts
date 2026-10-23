@@ -65,7 +65,9 @@ test('a port serving something else is left alone: the mounts take 10000, and wi
   expect(await thrown(funnel().open())).toThrow('already serves something else on ports 8443 and 10000');
   expect(calls().filter(call => call.startsWith('funnel'))).toHaveLength(before);
   // A port carrying these mounts and something else is not this module's either.
-  expect(funnelPort({ Web: { [`${DNS}:8443`]: { Handlers: { [ROUTE]: { Proxy: `${target()}${ROUTE}` }, '/': { Proxy: 'http://127.0.0.1:3000' } } } } }, DNS, PATHS, target())).toEqual({ port: 10000, missing: PATHS });
+  expect(funnelPort({ Web: { [`${DNS}:8443`]: { Handlers: { [ROUTE]: { Proxy: `${target()}${ROUTE}` }, '/': { Proxy: 'http://127.0.0.1:3000' } } } } }, DNS, PATHS, [target()])).toEqual({ port: 10000, missing: PATHS });
+  // Nor is one forwarding raw TCP: Tailscale refuses web mounts there.
+  expect(funnelPort({ TCP: { '8443': { TCPForward: '127.0.0.1:3000' } } }, DNS, PATHS, [target()])).toEqual({ port: 10000, missing: PATHS });
 });
 
 test('a tailnet outside tailscale.com, a node without Funnel or without HTTPS is refused with what to do, and the CLI text never shows', async () => {
@@ -94,4 +96,50 @@ test('a request Funnel hands over counts under its sender; any other loopback re
   // A remote peer cannot pick its own address by writing the headers.
   expect(strangerAddress('100.64.0.9', headers({ 'tailscale-funnel-request': '?1', 'x-forwarded-for': '203.0.113.9' }))).toBe('100.64.0.9');
   expect(strangerAddress(null, headers({}))).toBeNull();
+});
+
+/** The mounts up as an invitation leaves them: recorded, then held no more. */
+async function mounted(subject: ContactFunnel): Promise<void> {
+  const unhold = subject.hold();
+  try { await subject.mount(() => subject.open()); } finally { unhold(); }
+}
+
+const recorded = () => harness.core.journal.getSetting('contacts:funnel');
+const proxies = () => Object.values(readServe().Web?.[`${DNS}:8443`]?.Handlers ?? {}).map(handler => handler.Proxy).sort();
+
+test('a removal that fails keeps the record, and the next release takes the mounts down', async () => {
+  writeState({});
+  const subject = funnel();
+  await mounted(subject);
+  expect(recorded()).toEqual({ targets: [target()] });
+  writeState({ serve: readServe(), serveStatusFails: true });
+  subject.release();
+  await subject.settled();
+  expect(recorded()).toEqual({ targets: [target()] });
+  expect(proxies()).toHaveLength(PATHS.length);
+  writeState({ serve: readServe() });
+  subject.release();
+  await subject.settled();
+  expect(recorded()).toBeNull();
+  expect(readServe().Web?.[`${DNS}:8443`]).toBeUndefined();
+});
+
+test('a core back on another port moves the mounts a contact dials, and takes down the ones nothing needs', async () => {
+  const old = 'http://127.0.0.1:3773';
+  const stale = { TCP: { '8443': { HTTPS: true } }, Web: { [`${DNS}:8443`]: { Handlers: Object.fromEntries(PATHS.map(path => [path, { Proxy: `${old}${path}` }])) } }, AllowFunnel: { [`${DNS}:8443`]: true } };
+  writeState({ serve: stale });
+  harness.core.journal.setSetting('contacts:funnel', { targets: [old] });
+  const subject = funnel();
+  // A contact still hosted: same public port, new target.
+  subject.start(true);
+  await subject.settled();
+  expect(proxies()).toEqual(PATHS.map(path => `${target()}${path}`).sort());
+  expect(recorded()).toEqual({ targets: [target()] });
+  // Nothing hosted: the old target's mounts come down too.
+  writeState({ serve: stale });
+  harness.core.journal.setSetting('contacts:funnel', { targets: [old] });
+  subject.start(false);
+  await subject.settled();
+  expect(readServe().Web?.[`${DNS}:8443`]).toBeUndefined();
+  expect(recorded()).toBeNull();
 });

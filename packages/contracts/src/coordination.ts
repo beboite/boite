@@ -286,6 +286,12 @@ export interface ContactsState {
   tailscale: ContactTailscale;
   /** Invitations neither used nor expired. Absent from older cores. */
   invitations?: number;
+  /**
+   * This core makes invitations for another network (`contacts.invite` with
+   * `internet`). Absent from older cores, which read only `share` and would
+   * share the machine instead.
+   */
+  internet?: boolean;
 }
 export interface CoordinationView {
   self: AgentAddress;

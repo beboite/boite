@@ -74,6 +74,7 @@ export const strings = {
       /** Headscale, another network or no Tailscale: the link reaches this machine through Tailscale Funnel. */
       internet: 'Elsewhere',
       internetTip: 'Headscale, another network or no Tailscale: the link reaches this machine over the internet through Tailscale Funnel, on Boite\'s contact routes only.',
+      internetOld: 'This Boite is too old to invite someone on another network: update it first.',
       /** Under the buttons when this machine's tailnet is not a tailscale.com one. */
       selfHosted: 'Your tailnet is not on tailscale.com, so it can neither share this machine nor open Funnel. For someone on another network, they invite you.',
       link: 'Invitation link',
