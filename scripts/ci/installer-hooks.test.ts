@@ -308,7 +308,9 @@ describe.skipIf(!ready)('installer hooks', () => {
     const quiet = idle('idle');
     const startedAt = Date.now();
     expect(await run([join(base, 'setup.exe'), '/S', `/D=${quiet}`])).toBe(0);
-    expect(Date.now() - startedAt).toBeLessThan(7_000);
+    const idleMs = Date.now() - startedAt;
+    console.log(`an install with nothing running took ${idleMs} ms, 6000 of them the section's own sleep`);
+    expect(idleMs).toBeLessThan(7_000);
     expect(readFileSync(join(quiet, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
     expect(bundles(quiet)).toEqual({ core: false, ui: false, kept: true, aside: false });
     // A lock a crashed core left behind takes the checked way, which finds nothing to stop.
