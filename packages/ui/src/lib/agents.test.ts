@@ -190,11 +190,17 @@ test('pending mission decisions mark their home group, agent or standalone team'
   const missionWork = (id: string) => ({ id: 'w', agentId: 'mira', scope: { kind: 'mission', id }, status: 'waiting' }) as AgentEntities['work'];
   const waiting = { ...snapshot, work: [missionWork('m-studio')], decisions: [decision] };
   expect(waitingForUser(waiting, { kind: 'group', id: 'table' }, null)).toBe(true);
+  expect(waitingForUser(waiting, { kind: 'agent', id: 'mira' }, null)).toBe(false);
   waiting.work = [missionWork('m-solo')];
   expect(waitingForUser(waiting, { kind: 'agent', id: 'atlas' }, null)).toBe(true);
+  expect(waitingForUser(waiting, { kind: 'agent', id: 'mira' }, null)).toBe(false);
   waiting.missions = [...waiting.missions, { ...waiting.missions[0]!, id: 'm-crew', teamId: 'crew' }];
   waiting.work = [missionWork('m-crew')];
   expect(waitingForUser(waiting, { kind: 'team', id: 'crew' }, null)).toBe(true);
+  expect(waitingForUser(waiting, { kind: 'agent', id: 'mira' }, null)).toBe(false);
+  waiting.work = [{ ...missionWork(''), scope: { kind: 'group', id: 'table' } }];
+  expect(waitingForUser(waiting, { kind: 'group', id: 'table' }, null)).toBe(true);
+  expect(waitingForUser(waiting, { kind: 'agent', id: 'mira' }, null)).toBe(false);
 });
 
 /** The threads agent sessions run in: Atlas in the group, Mira alone (waiting on the user), and Mira's archived one. */

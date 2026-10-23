@@ -57,7 +57,10 @@ advance that position;
 new replies leave someone reading earlier messages in place. The floating
 missed-message button jumps to the next unread reply. Once caught up, a return
 visit opens at the latest message. Reading positions stay on this device per
-core in local storage. The optional read marks on `agents.snapshot` request
+core in local storage. Sending can show the latest window without reading a
+skipped gap; the missed-message button returns to its first unread reply. The
+entry divider stays attached to the original first missed message.
+The optional read marks on `agents.snapshot` request
 counts across all retained incoming messages, beyond its 50-message window;
 message bodies still arrive through bounded pages. `agents.messages` seeks by
 creation time and message ID, independent of later attachment updates, under

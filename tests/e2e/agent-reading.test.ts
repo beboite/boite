@@ -61,10 +61,24 @@ test('missed messages open at their first unread reply, stay unread off screen a
   expect(await page.evaluate(firstVisible)).toBe('reply-10');
   expect(await page.evaluate(`document.querySelectorAll('[data-message-id]').length`)).toBeLessThanOrEqual(50);
   expect(await page.evaluate(`window.__reading.calls.length`)).toBe(1);
-  const initialRead = await page.evaluate<number>(`window.__reading.view.readAt['profile:' + window.__reading.mira.id]`);
+  let initialRead = await page.evaluate<number>(`window.__reading.view.readAt['profile:' + window.__reading.mira.id]`);
   expect(initialRead).toBeGreaterThanOrEqual(await page.evaluate<number>(`window.__reading.start + 10000`));
   expect(initialRead).toBeLessThan(await page.evaluate<number>(`window.__reading.start + 849000`));
   await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-missed-conversation-desktop.png'));
+
+  // Sending shows the user's message without reading the history skipped to reach it.
+  await page.evaluate(`window.__reading.fake.limits.paused = true`);
+  await page.type('.agent-chat [data-testid="composer-input"]', 'I will catch up after sending this.');
+  await page.click('.agent-chat [data-testid="composer-send"]');
+  await page.waitFor(`document.querySelector('[data-testid="agent-user-message"]')?.textContent.includes('I will catch up after sending this.') && document.querySelector('[data-testid="composer-input"]').value === ''`);
+  expect(await page.evaluate(`window.__reading.view.readAt['profile:' + window.__reading.mira.id]`)).toBe(initialRead);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-unread-divider"]')`)).toBe(false);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-jump-unread"]')`)).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-sent-with-missed-desktop.png'));
+  await page.click('[data-testid="agent-jump-unread"]');
+  const afterSendFirst = await page.evaluate<string>(`'reply-' + (((${initialRead} - window.__reading.start) / 1000) + 1)`);
+  await page.waitFor(`${firstVisible} === ${JSON.stringify(afterSendFirst)}`);
+  initialRead = await page.evaluate<number>(`window.__reading.view.readAt['profile:' + window.__reading.mira.id]`);
 
   await page.evaluate(`(async () => {
     const f = window.__reading;
@@ -123,4 +137,5 @@ test('missed messages open at their first unread reply, stay unread off screen a
   await page.waitFor(`document.querySelector('.agents-identity [data-status="waiting"]')`);
   expect(await page.evaluate(`!!document.querySelector('.agents-identity [data-tone="waiting"]')`)).toBe(true);
   expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-entry-' + window.__reading.group.id + '"] [data-tone="waiting"]')`)).toBe(true);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-entry-' + window.__reading.mira.id + '"] [data-tone="waiting"]')`)).toBe(false);
 }, 60_000);

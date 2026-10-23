@@ -123,6 +123,55 @@ test('a previous send failure does not keep another conversation on loading', as
   expect(document.querySelector('.agent-reading-status')).toBeNull();
 });
 
+test('sending across an unloaded gap keeps missed replies unread and the entry divider at its original message', async () => {
+  const items = Array.from({ length: 120 }, (_, i) => message(`reply-${i}`, 'a-ada'));
+  const mine = message('my-new-message', null);
+  const view = $state({
+    seen: { messages: items.slice(-50), deliveries: [], decisions: [], work: [], runs: [] },
+    snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [], messages: items.slice(-50), unread: [{ scope, at: 0, count: items.length }], revision: 1 },
+    store: useStore(), readAt: {} as Record<string, number>, pending: false, loadingOlder: null,
+    fill() {}, hasOlder: () => false,
+    markRead(key: string, at: number) { view.readAt = { ...view.readAt, [key]: at }; },
+    call: async () => mine,
+    readMessages: async (p: { readAt?: number }) => {
+      const all = p.readAt === undefined ? [...items, mine] : items;
+      const start = p.readAt === undefined ? all.length - 50 : all.findIndex(m => m.createdAt > p.readAt!);
+      const messages = all.slice(start, start + 50);
+      view.seen.messages = [...new Map([...view.seen.messages, ...messages].map(m => [m.id, m])).values()];
+      return { messages, work: [], memories: [], deliveries: [], decisions: [], runs: [], older: start > 0, newer: start + 50 < all.length };
+    },
+  });
+  mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
+  const box = document.querySelector<HTMLElement>('.agent-chat-scroll')!;
+  let top = 0;
+  Object.defineProperties(box, {
+    clientHeight: { value: 200 }, scrollHeight: { get: () => box.querySelectorAll('[data-message-id]').length * 200 },
+    scrollTop: { get: () => top, set: value => { top = Math.max(0, Math.min(value, box.scrollHeight - 200)); } },
+  });
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const rows = [...box.querySelectorAll('[data-message-id]')];
+    const index = rows.indexOf(this);
+    const y = this === box ? 0 : this.matches('[data-testid="agent-unread-divider"]') ? -top : index * 200 - top;
+    return { top: y, bottom: y + 200, height: 200 } as DOMRect;
+  });
+  await settle();
+  const initialRead = view.readAt['profile:a-ada'];
+  expect(initialRead).toBe(items[0]!.createdAt);
+  expect(document.querySelector('[data-testid="agent-unread-divider"]')?.nextElementSibling?.getAttribute('data-message-id')).toBe(items[0]!.id);
+  const input = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')!;
+  input.value = 'I will catch up after sending this'; input.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid="composer-send"]')!.click(); await settle();
+  expect(document.querySelector('[data-message-id="my-new-message"]')).not.toBeNull();
+  expect.soft(view.readAt['profile:a-ada']).toBe(initialRead);
+  expect.soft(document.querySelector('[data-testid="agent-unread-divider"]')).toBeNull();
+  const jump = document.querySelector<HTMLButtonElement>('[data-testid="agent-jump-unread"]');
+  expect(jump).not.toBeNull();
+  jump!.click(); await settle();
+  expect(box.querySelector('[data-message-id]')?.getAttribute('data-message-id')).toBe(items[1]!.id);
+  expect(view.readAt['profile:a-ada']).toBe(items[1]!.createdAt);
+});
+
 test('an entrusted thread marker participates in reading and unread navigation', async () => {
   const view = replyView({}, { thread: { id: 't-entrusted', title: 'Review', event: 'entrusted' } });
   const markRead = vi.fn(); view.markRead = markRead;

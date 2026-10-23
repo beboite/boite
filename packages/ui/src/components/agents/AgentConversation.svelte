@@ -53,10 +53,12 @@
   const key = $derived(`message:${scope.kind}:${scope.id}`);
   const newest = $derived(messages.at(-1));
   const readKey = $derived(chatKey(scope.kind === 'agent' ? 'profile' : 'group', scope.id));
-  let entry = $state<{ key: string; at: number; count: number | null } | null>(null);
+  let entry = $state<{ key: string; at: number; count: number | null; first: string | null } | null>(null);
   let ready = $state(false);
   let awayFromBottom = $state(false);
-  const firstMissed = $derived(entry?.count === 0 ? undefined : messages.find(m => m.senderId !== null && m.createdAt > (entry?.at ?? 0)));
+  // A latest window can show our sent message while earlier replies remain unread.
+  let readGap = $state(false);
+  const firstMissed = $derived(messages.find(m => m.id === entry?.first));
   const missedAtEntry = $derived(entry?.count ?? unreadMessages(view.snapshot, held, scope, entry?.at ?? 0));
   const unreadTotal = $derived(unreadMessages(view.snapshot, held, scope, view.readAt?.[readKey] ?? 0));
   const unread = $derived(messages.filter(m => m.senderId !== null && m.createdAt > (view.readAt?.[readKey] ?? 0)));
@@ -67,8 +69,8 @@
   const worker = $derived(live ? view.snapshot?.profiles.find(a => view.snapshot?.sessions.some(s => s.threadId === live.id && s.agentId === a.id)) ?? null : null);
   $effect.pre(() => {
     if (entry?.key === key) return;
-    entry = { key, at: untrack(() => view.readAt?.[readKey] ?? 0), count: null };
-    ready = false; page = null; loading = false; followedSnapshot = undefined;
+    entry = { key, at: untrack(() => view.readAt?.[readKey] ?? 0), count: null, first: null };
+    ready = false; page = null; loading = false; readGap = false; followedSnapshot = undefined;
   });
   // One indexed window starts at the first unread reply, even on a new device.
   $effect(() => {
@@ -84,21 +86,26 @@
       void untrack(() => loadMessages('newer'));
     }
   });
-  async function loadMessages(direction: 'open' | 'older' | 'newer' | 'latest') {
+  async function loadMessages(direction: 'open' | 'older' | 'newer' | 'latest' | 'unread') {
     if (loading || disposed || !scroller || !entry) return;
     const opening = key, box = scroller, height = box.scrollHeight, top = box.scrollTop;
     loading = true;
     if (direction === 'open') entry = { ...entry, count: unreadMessages(view.snapshot, held, scope, entry.at) };
     const edge = direction === 'older' ? messages[0] : direction === 'newer' ? newest : undefined;
     const cursor = edge ? { createdAt: edge.createdAt, id: edge.id } : undefined;
-    const next = await view.readMessages({ scope, ...(direction === 'open' ? { readAt: entry.at } : direction === 'older' ? { before: cursor } : direction === 'newer' ? { after: cursor } : {}) });
+    const next = await view.readMessages({ scope, ...(direction === 'open' ? { readAt: entry.at } : direction === 'unread' ? { readAt: view.readAt?.[readKey] ?? 0 } : direction === 'older' ? { before: cursor } : direction === 'newer' ? { after: cursor } : {}) });
     if (disposed || opening !== key || box !== scroller) return;
+    if (direction === 'open') entry = { ...entry, first: entry.count ? (next?.messages ?? messages).find(m => m.senderId !== null && m.createdAt > entry!.at)?.id ?? null : null };
     if (next) {
+      const startsAfterRead = next.older && !!next.messages[0] && next.messages[0].createdAt > (view.readAt?.[readKey] ?? 0);
+      // Overlapping windows keep a continuous history; a disjoint tail cannot advance its read mark.
+      if (direction === 'latest') readGap = startsAfterRead && (readGap || !next.messages.some(m => messages.some(previous => previous.id === m.id)));
+      else if (direction === 'open' || direction === 'unread' || direction === 'older' && !startsAfterRead) readGap = false;
       const all = direction === 'older' ? [...next.messages, ...messages] : direction === 'newer' ? [...messages, ...next.messages] : next.messages;
       const unique = [...new Map(all.map(m => [m.id, m])).values()];
       // Adjacent history is appended without treating it as a newly arriving reply.
       const follow = direction === 'newer' && !page?.newer && !awayFromBottom;
-      if (direction === 'older' || direction === 'newer' && page?.newer) awayFromBottom = true;
+      if (direction === 'older' || direction === 'unread' || direction === 'newer' && page?.newer) awayFromBottom = true;
       followed = unique.at(-1)?.id ?? '';
       page = { ...next, messages: unique, older: direction === 'newer' ? page?.older ?? next.older : next.older, newer: direction === 'older' ? page?.newer ?? next.newer : next.newer };
       if (follow) await tick().then(() => { if (!disposed && box === scroller) box.scrollTop = box.scrollHeight; });
@@ -107,6 +114,11 @@
     if (disposed || opening !== key || box !== scroller) return;
     if (direction === 'open') {
       if (firstMissed && divider) box.scrollTop += divider.getBoundingClientRect().top - box.getBoundingClientRect().top;
+      else box.scrollTop = box.scrollHeight;
+    } else if (direction === 'unread') {
+      const first = unread[0];
+      const row = first ? [...box.querySelectorAll<HTMLElement>('[data-message-id]')].find(row => row.dataset.messageId === first.id) : null;
+      if (row) box.scrollTop += row.getBoundingClientRect().top - box.getBoundingClientRect().top;
       else box.scrollTop = box.scrollHeight;
     } else if (direction === 'older') box.scrollTop = top + box.scrollHeight - height;
     else if (direction === 'latest') box.scrollTop = box.scrollHeight;
@@ -133,8 +145,9 @@
   function readVisible() {
     if (disposed) return;
     const box = scroller;
-    if (!ready || !box || !box.clientHeight || document.hidden || !page && view.error) return;
+    if (!ready || loading || !box || !box.clientHeight || document.hidden || !page && view.error) return;
     awayFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight >= NEAR_BOTTOM;
+    if (readGap) return;
     const bounds = box.getBoundingClientRect();
     let at = view.readAt?.[readKey] ?? 0;
     for (const row of box.querySelectorAll<HTMLElement>('[data-message-id]')) {
@@ -147,6 +160,7 @@
   async function jumpToUnread() {
     const box = scroller;
     if (!box) return;
+    if (readGap) { await loadMessages('unread'); return; }
     if (!unread.length && page?.newer) await loadMessages(unreadTotal ? 'newer' : 'latest');
     if (disposed) return;
     const first = unread[0];
@@ -383,7 +397,7 @@
     </div>
   </div>
 
-  {#if ready && awayFromBottom}
+  {#if ready && (awayFromBottom || readGap)}
     <div class="agent-jump"><button type="button" class="chip" onclick={jumpToUnread} data-testid="agent-jump-unread"><ArrowDown size={14} /><span>{unreadTotal ? missedLabel(unreadTotal) : labels.latestMessages}</span></button></div>
   {/if}
 

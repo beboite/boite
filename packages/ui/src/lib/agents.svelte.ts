@@ -47,7 +47,7 @@ export function waitingForUser(snapshot: AgentsSnapshot | null, scope: AgentScop
   if (live?.status === 'waiting') return true;
   if (!scope || !snapshot) return false;
   const home = scopeHome(snapshot, scope);
-  return snapshot.decisions.some(d => d.status === 'pending' && snapshot.work.some(w => w.id === d.workId && (home !== null && scopeHome(snapshot, w.scope) === home || scope.kind === 'agent' && w.agentId === scope.id)));
+  return home !== null && snapshot.decisions.some(d => d.status === 'pending' && snapshot.work.some(w => w.id === d.workId && scopeHome(snapshot, w.scope) === home));
 }
 
 /** The team each group carries: the oldest team naming it as its discussion. */
