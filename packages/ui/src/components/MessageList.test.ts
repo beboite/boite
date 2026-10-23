@@ -271,6 +271,9 @@ test('an agent thread folds a finished turn\'s steps behind one row and a quiet 
   running = mount(MessageList, { target: document.body, props: { store: owner, threadId: owner.openThread!.id, messages: owner.openThread!.messages } });
   flushSync();
   const worked = folds().filter(fold => fold.dataset.kind === 'worked');
+  // Its answers are signed with its name, not the provider's.
+  expect([...document.querySelectorAll('[data-testid="message-model"]')].map(node => node.textContent?.trim())).toContain('Nova');
+  expect(timeline()).not.toMatch(/^Echo|\bEcho\b/);
   expect(worked.map(fold => fold.textContent?.trim())).toEqual(['Worked 2 min · 2 steps', 'Worked 2 min · 4 steps']);
   expect(timeline()).toContain('The login fix opened PR #482');
   expect(timeline()).not.toContain('The e2e job fails; its log names the redirect test.');
