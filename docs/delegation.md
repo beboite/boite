@@ -26,8 +26,9 @@ permissions, process trace and usage. It inherits the parent's project,
 checkout and permission mode at creation. Profiles can use any installed,
 runnable provider and account. Native provider subagents are separate from
 these Boite subagents, and appear in their own section of the tab. The global
-Persistent agents page holds agents with their own roles, memory and missions;
-it is not the list of children of a conversation. Enable it in Settings >
+Persistent agents page holds agents with their own identity, memory and
+routines, each in a thread of its own; it is not the list of children of a
+conversation. Enable it in Settings >
 Experiments to reveal its bottom-left launcher, which opens a dedicated
 interface. It adds no conversation panel or mobile navigation tab.
 
@@ -298,10 +299,7 @@ note says so. Each wake (`docs/cli.md`, "Watching a pull request") opens the
 child's next turn, and that turn's answer goes to the parent as a result, so
 the parent hears only what the child made of a CI verdict or a review. The
 child's watches end when it is stopped, by its own Stop, `delegate stop` or a
-failed turn, and when its parent stops, is archived or is removed. When a
-persistent agent takes its next work item, it archives its finished children
-but keeps one that still watches a pull request; that child is archived once
-its last watch ends, its turn is over and its last result reached the parent.
+failed turn, and when its parent stops, is archived or is removed.
 
 ### Finished children are put away
 

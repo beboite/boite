@@ -292,8 +292,8 @@ never start one. A delegated agent watches its own PR like a conversation:
 each wake is its next turn, and that turn's answer goes to its parent as a
 result. Its watches end when it is stopped (its own Stop, `boite delegate
 stop`, its turn failing) and when its parent stops, is archived or is
-removed. Workflow steps, goal reviewers and persistent agent sessions cannot
-watch: their run, their goal or Agents owns the work.
+removed. Workflow steps and goal reviewers cannot watch: their run or their
+goal owns the work. A persistent agent's thread watches like a conversation.
 At most 10 PRs per conversation.
 
 ## How an agent finds the core
@@ -341,7 +341,7 @@ archive|unarchive|remove|rename`, `thread move <project> <id>`, `questions`,
 and `thread new` need no `--thread` from a terminal. There they use the owner
 methods: `thread send` is the owner's own prompt, queued behind a running turn,
 and `thread new` copies the agent of `--thread`, else of the project's most
-recent thread (`--model` replaces the model). Inside the direct conversation of
+recent thread (`--model` replaces the model). Inside the thread of
 a [persistent agent](agents.md#projects-entrusted-to-an-agent) the same words
 reach the threads of the projects the owner entrusted to it, through
 `resident.*`, and its messages reach them as that agent's letters, never as the
@@ -396,17 +396,12 @@ boite agents log <agent>
 boite agents wait [agent] [--timeout <s>]
 boite agents contacts
 boite agents ask <contact> <text> [--wait] [--timeout <s>]
-boite agent context|inbox|missions
-boite agent send <recipient-ids|-> <text>
-boite agent reply <message-id> <text>
-boite agent acquire <task-id>
-boite agent submit <task-id> <assignment-generation> <result>
-boite agent artifact <json>
-boite agent decide <json>
-boite agent memory [query]
-boite agent remember <json>
+boite agent memory
+boite agent remember <fact>
 boite agent routines
 boite agent schedule <json>
+boite agent unschedule <routine-id>
+boite agent watch|unwatch <thread-id>
 boite delegate models|profiles|list
 boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [context flags]
 boite delegate send <thread-id> <text>
@@ -487,7 +482,9 @@ Pause refuses, and a thread restricted to its own project cannot start one
 elsewhere. There is no hourly limit. A thread an agent started cannot start another
 until the user has
 written in it, so agents cannot chain threads on their own. Delegated
-children, workflow steps and persistent agent sessions are refused. A retry
+children and workflow steps are refused, and a persistent agent's thread starts
+threads only in the projects entrusted to it, where they land on its
+[desk](agents.md#the-desk). A retry
 with the same `--request-id` returns the thread already started.
 
 `projects` prints one row per project: its id, name and folder, `(this
@@ -506,8 +503,8 @@ Registering a folder gives the agent no file access its process lacked. It
 reaches outside the thread's project, so the Communication settings decide as
 they do for `thread new` elsewhere: Off, Pause and a thread restricted to its
 own project refuse it. There is no hourly limit. A thread an agent started
-adds none until the user has written in it, and delegated children, workflow steps and persistent agent
-sessions are refused.
+adds none until the user has written in it, and delegated children, workflow steps and persistent agents'
+threads are refused.
 
 `view` publishes one HTML page as an [inline view](chat-files.md#inline-views):
 its local files are embedded, a remote resource or a script error refuses it
@@ -627,7 +624,7 @@ MCP tools `boite_settings` and `boite_settings_request` do the same.
 
 `settings agent [key]` reads a persistent agent's settings a card may change:
 `projects` (those entrusted to it), `model`, `effort`, `autoMemory` (the memory
-pass), `subagents` and `maxRunMinutes`. It prints the agent's name, each value
+pass), `subagents` and `dailyBudget` (dollars a day, or `null` for none). It prints the agent's name, each value
 and, for projects, models and efforts, the choices. `--agent <name or id>`
 names the agent; in an agent's own conversation it defaults to that agent.
 `settings agent request <key> <value> --why <text>` draws the card. `projects`
@@ -656,16 +653,18 @@ reach only those contacts. Replies preserve their message reference and
 authenticated sender identity.
 
 The singular `agent` commands belong to [persistent agents](agents.md), not
-ordinary thread coordination. They use the calling session's current scope.
-Pass `--request-id <stable-id>` when retrying a send, artifact or decision after
-a lost response. The same flag covers `agents send`, `agents reply`,
-`delegate spawn` and `delegate send`: a retry with the id of a call that already
-landed returns that letter or child instead of making a second one. Without the
-flag each call gets a fresh id. An artifact object contains `missionId`, `taskId`, `title`,
-`summary`, `paths`, `commit` and `verification`. A decision contains `prompt`
-and `options`; it yields execution until the user answers. A memory contains
-`title` and `text`, with `id` and `expectedRevision` for an edit. The core adds
-the source context. Use `--json` to preserve the structured result.
+ordinary thread coordination, and work only from an agent's own thread.
+`agent memory` prints MEMORY.md and its path; `agent remember <fact>` adds a
+dated line to it. `agent routines` lists its routines, `agent schedule <json>`
+saves one (`name`, `prompt`, `schedule`, with `id` to edit one and `enabled`),
+`agent unschedule <routine-id>` removes one. `agent watch|unwatch <thread-id>`
+puts a thread of its projects on its desk or takes one off. Use `--json` to
+preserve the structured result.
+Pass `--request-id <stable-id>` when retrying a send after a lost response. The
+flag covers `agents send`, `agents reply`, `delegate spawn` and `delegate
+send`: a retry with the id of a call that already landed returns that letter
+or child instead of making a second one. Without the flag each call gets a
+fresh id.
 [Delegation](delegation.md) runs each child on the model and reasoning level
 the agent names (`boite delegate models` lists them), else on the conversation's own
 route or an owner-added profile, and records team usage. `--speed <tier>` puts

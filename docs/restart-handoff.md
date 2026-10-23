@@ -73,9 +73,9 @@ agent resumes them with `boite delegate resume`
 ([delegation](delegation.md#stop-pause-and-resume),
 [workflows](workflows.md#failure-stop-and-restart)).
 
-Resident-agent sessions, compactions and coordination wakes are excluded. Their
-own runtimes require explicit resume when recovery pauses them. See
-[persistent agents](agents.md).
+Compactions and coordination wakes are excluded. A persistent agent's thread
+resumes like any conversation; a wake that was waiting for its thread to be
+free survives the restart ([persistent agents](agents.md#wakes)).
 Native processes and terminals follow the ordinary [shutdown limits](trace.md#linux-and-macos).
 
 ## Turns that stop before their answer
@@ -99,7 +99,7 @@ no turn running gets a resume for that alone.
 Nothing resumes for a turn that answered, a turn the user stopped, a refusal
 at capacity or at a usage limit, which retries on its own
 ([usage](usage.md#when-a-provider-refuses-a-turn)), a compaction or coordination turn, a
-sub-thread, a persistent agent, or background work a Stop or an archive ended.
+sub-thread, or background work a Stop or an archive ended.
 After a crash, nothing resumes when the previous core wrote its last thread
 event over an hour ago, or when it was stopped on purpose without a handoff
 (`core.shutdown`, `SIGINT`, `POST /shutdown`), which leaves the journal setting

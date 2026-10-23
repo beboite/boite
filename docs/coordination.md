@@ -25,9 +25,9 @@ to turn communication off or restrict it to the current project. The settings
 open in a dialog and remain available in the Agents panel. Explicit owner
 settings are preserved; a conversation saved in the former Brief or Team mode
 is on. Describe what the agent is working on in Resources so another agent can
-find the right contact. Archived conversations are unavailable. Persistent
-agents use their own group and mission permissions instead of ordinary thread
-coordination.
+find the right contact. Archived conversations are unavailable. A persistent
+agent's thread starts with coordination off: other threads reach it through
+its desk events, and the owner may turn it on.
 
 Coordination has no distributed lock or automatic loop detector. Instructions
 require messages tied to work, without courtesy replies or polling. Pause or
@@ -101,9 +101,7 @@ An answer that names a thread the way `boite agents` prints it (`thr_x`,
 does a bare one with [Chat files and previews](chat-files.md) on
 (`lib/chat-links.ts`), as does a Markdown link whose destination is one; an id
 inside a path (`thr_x.ts`, `src\thr_x`) stays text. Reasoning, a tool's
-Markdown documents and a mission's results and artifacts link a code-span
-thread the same way; a mission names no thread, so from there only a connected
-machine listing the id opens it. A click
+Markdown documents link a code-span thread the same way. A click
 (`workspace.followThreadLink`) opens it on a connected machine that lists the
 thread: this one when none is named, the one the address names, only this one
 for `here`. Otherwise this thread's contacts name its core, and last the one
@@ -117,12 +115,12 @@ the owner entrusted a thread's project to carries `origin: 'resident'` and is
 labelled with that agent in the timeline. The provider reads it in its own
 section, as direction from the user's delegate that is still not the user and
 grants no approval; the thread does not answer it by letter, since the agent
-reads the thread's final answer from a notice when the turn ends. Such a letter
+reads the thread's final answer in an event when the turn ends. Such a letter
 passes the communication settings of the thread, waits six hours instead of
 fifteen minutes, and is rejected once the project is no longer entrusted to the
-agent or the agent is paused. Only the local core sets the origin; a remote
-letter's origin is never believed. The core's notices to the agent are not
-letters: they reach it as work in its own conversation.
+agent or the agent is archived. Only the local core sets the origin; a remote
+letter's origin is never believed. The core's events to the agent are not
+letters: they reach it as `event` turns on its own thread.
 
 ## Reaching another computer
 

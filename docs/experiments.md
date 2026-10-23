@@ -50,7 +50,7 @@ The Agents page ([agents](agents.md)) and every button that leads there: the
 Threads and Agents switch at the top of the sidebar, the phone menu entry, the command palette row and the link from an agent's
 own thread. Turning
 the switch off closes the page if it is open. It hides the page only: agents
-already made keep their routines and missions on the core, which knows nothing
+already made keep their threads and routines on the core, which knows nothing
 of a client's experiments.
 
 ## Contacts

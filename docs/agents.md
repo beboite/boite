@@ -1,82 +1,56 @@
 # Persistent agents
 
-Agents is a page beside chat, behind the Resident agents switch in Settings >
-Experiments ([experiments](experiments.md)). An identity keeps its instructions, memberships
-and scoped memory when its provider, account or model changes. Pausing or
-archiving an identity stops its current execution and prevents new work; the
-stopped work item says the agent was paused or archived.
+A persistent agent is a thread with an identity. Its conversation is one
+ordinary thread (`AgentSession { agentId, threadId }`), projectless, working in
+`agent-workspaces/<agent-id>/agent-<agent-id>` in the host's data directory.
+What the agent adds to that thread is a persona, a brain folder, a clock
+(routines), a desk of the threads it runs or watches, and wakes: turns the core
+starts on its thread when a routine is due or something happens on its desk.
+The page sits beside chat, behind the Resident agents switch in Settings >
+Experiments ([experiments](experiments.md)). Contracts:
+`packages/contracts/src/agents.ts`; core: `packages/core/src/agents/`.
+
+## The agent's thread
+
+The user's messages are ordinary `turns.start` calls on the agent's thread, so
+everything a thread has works there: the queue, steering, Stop, attachments,
+edit and retry, questions and permission cards, subagents, the side panel
+(browser, files, views), the thread's own auto-compaction and the journal
+replay after it. No refusal exists only because `thread.agentSessionId` is
+set, except deleting the thread: an agent is archived, and its thread with it.
+`agents.open` returns the thread, and creates it again with a new session
+record when it was lost.
+
+An identity keeps its thread, brain and routines when its provider, account
+or model changes; a route change moves the thread's own selection. Paused,
+the agent gets no wakes and the user can still write to it. Archived, its
+thread is archived too and read-only; unarchiving the agent restores it.
 
 ## The page
 
-The page is a chat. Its list is the thread list's own column: both draw
-`RailFrame` (width, resize handle, the title bar's fold, the foot ending on the
-limits and Settings) and `RailHead` (the Threads and Agents switch and one row
-of tools), so switching between them changes only the rows and the tools.
-The column and the card beside it stay in place and only the card's content
-fades in; the column slides in from the window's edge only when it unfolds
-(`tests/e2e/agents.test.ts` reads both on every frame). Under it, one card
-holds every conversation, agents and groups together, newest first. A row
-shows the agent's picture, its name, an incoming unread count on the right
-(or the last activity time when read), and the last thing said under it.
-Interrupted work and old failures do not replace that count with "Needs you".
-The avatar keeps a waiting mark for a live question or pending decision.
-On desktop, the foot adds the engine settings for the owner; a phone draws no foot.
+The Agents page is the chat page with the agents in the thread list's column
+(`RailFrame` and `RailHead`, with the Threads and Agents switch). Opening an
+agent opens its thread on the store of the machine that owns it, in the
+ordinary `ChatView` with the ordinary `Composer`, so questions, the browser
+watch and `openQuestionPage` work as in any thread, and Open on a login card
+shows the browser beside the conversation. A phone shows the list, then the
+conversation full screen, with the desk and the browser in its panel.
 
-A conversation is the whole page, drawn with the thread's bubbles and the
-thread's own composer (`Composer.svelte` with a `ComposerTarget`,
-`lib/composer-target.ts`): attachments by the button, a paste or a drop,
-dictation, ArrowUp recall, undo, the stash chord, and Stop or Escape while the
-agent works, which cancels that work. Model, effort and permissions stay in
-the agent's Settings pane. A group shows its recipients in the composer.
-The worktree chip, the queue and the slash and mention menus
-stay out: a message never queues. Each prompt is the thread's own
-`UserMessage`: copy button, send time, two ticks (received, taken into a turn)
-and its pictures as thumbnails that open in the viewer. A received message
-keeps its receipt if execution fails, pauses or is cancelled. Paused work,
-including an execution stopped at its configured time limit, shows the reason
-and Resume in the conversation. Delivery failures remain visible only for
-recipients that never took the message into a turn. The user asks, the
-agent answers in its bubble, works (three dots in a bubble) and comes back with
-the result, in words, with the pictures and files it attached under the
-bubble. What the user attaches goes with `agents.message.send`: the message
-keeps each file's name, type and size, the bytes wait in the core's settings
-(`agents:attachments:<message>`) and reach every recipient's turn, and leave
-once each delivery is processed, cancelled or over the limit. The first turn
-that takes them sets each attachment's `source` (that turn's prompt in the
-agent's thread and the part's index); the conversation reads the thumbnails
-and originals there with `messages.attachment`, and shows names and sizes
-until then. An agent's own messages carry none. The agent's own thread, where its tools and code
-run, stays one step away: See its work in the header's menu opens it. A
-planned task's result is labelled with the task's name. A question the agent
-asks stands in the conversation with its answers to pick and a free answer. A group names who speaks and shows only deliveries that failed. The
-header keeps the picture, the name and how the agent stands; its planned tasks
-have a button with their count, and memory, settings, activity and missions
-wait in its menu.
+The header of an agent's thread shows its robot, its name and one live line:
+the step it is on (`AgentStatus.activity`) while it works, what it waits on,
+else its next routine or Idle. A `problem` shows as a warning with its fix.
+The header menu holds Settings, Brain, Pause or Resume and Archive. A routine
+or event turn opens with a compact system line (its label and time); a quiet
+turn folds to one line that expands to the whole turn.
 
-Opening a conversation starts at the first missed incoming message, with an
-"x missed messages" divider. A bounded chronological window seeks directly
-to that position; older and newer pages load as the user reads, including on
-a device with no previous read mark. Only messages visible in a visible page
-advance that position;
-new replies leave someone reading earlier messages in place. The floating
-missed-message button jumps to the next unread reply. Once caught up, a return
-visit opens at the latest message. Reading positions stay on this device per
-core in local storage. Sending can show the latest window without reading
-skipped replies, even when both windows overlap; the missed-message button
-returns to the first unread reply. Failed page requests preserve the current
-position, and navigation buttons wait for the current request to finish. The
-entry divider stays attached to the original first missed message and appears
-only after its opening window loads successfully.
-The optional read marks on `agents.snapshot` request
-counts across all retained incoming messages, beyond its 50-message window;
-message bodies still arrive through bounded pages. `agents.messages` seeks by
-creation time and message ID, independent of later attachment updates, under
-the same owner, device and execution-context policy as history.
+The desk is a surface of the thread's right panel. It shows what the agent is
+doing now, its watched threads as cards (title, project, state, pull request
+and checks, the pending question with its options to answer in place), its
+routines, its memory and AGENTS.md, and today's turns, wakes, quiet ones and
+spend against the daily budget.
 
-A new agent needs a name and what it does; its robot, model and permissions
-come filled in. The projects entrusted to it are picked beside its
-instructions, and role, tools and the rest wait under More options. The header
-says which projects it looks after.
+A new agent needs a name and what it does; its robot, model and projects come
+filled in. Creating it opens its thread, where its introduction runs live.
 
 ### Robots
 
@@ -91,249 +65,107 @@ pastel `--robot-1` to `--robot-9` that Bubble, Capsule and Retro share.
 
 The robot is stored in the existing `avatar` field as
 `bot:<style>.<shape>.<colour>.<face>.<top>`, for example `bot:d.0.0.0.0` for a
-round yellow jelly, so no record changed. An empty avatar draws the jelly the
-agent's id gives, the same on every client; one or two characters (an emoji,
-initials) stay text, and a code this build cannot read stays text too. Shuffle
-draws a new robot in the same style; Customize opens one row per part, each
-choice drawn on the robot. The face moves with the agent: it blinks at rest,
-a jelly squishes on the spot while it works (the other styles glance from
-side to side), and every style hops while it waits on the user. Reduced motion
-stills it.
+round yellow jelly. An empty avatar draws the jelly the agent's id gives, the
+same on every client; one or two characters (an emoji, initials) stay text,
+and a code this build cannot read stays text too. Shuffle draws a new robot in
+the same style; Customize opens one row per part, each choice drawn on the
+robot. The face moves with the agent: it blinks at rest, a jelly squishes on
+the spot while it works (the other styles glance from side to side), and every
+style hops while it waits on the user. Reduced motion stills it.
 
-### Threads an agent runs or carries
+## Wakes
 
-An agent works in threads of its own (`agentSessionId`). The Threads and
-Agents switch over the thread list counts the agents at work on every machine
-beside Agents: every agent whose own thread runs, is queued or waits on the
-user, and every entrusted thread mid-turn, each thread once. The count turns to the waiting colour while one of them needs the
-user, and Threads carries the same count for the conversations at work
-(`lib/work-counts.ts`). A project thread an agent runs, a mission task in a
-worktree for example, wears the agent's picture in place of the provider logo,
-and so does a delegated child of such a thread. Opening an agent's thread
-shows, where the composer would be, whose thread it is and the way to the
-agent's conversation, where the user talks to it.
+A wake is a turn the core starts on the agent's thread, through one entry
+point (`AgentRuntime.wake`, `agents/runtime.ts`). It has an operation and a
+label, which its opening system line shows (`threads/operations.ts`):
 
-### Entrusting a thread
+- `routine`: a routine came due. The prompt is the routine's prompt, the label
+  `Routine · <name>`.
+- `event`: something happened. The agent was just created (`Just created`),
+  its instructions changed (`Instructions changed`), or facts gathered about
+  its desk and projects (`3 project events`); the prompt carries the facts.
 
-Any kept thread of a project can be handed to an agent from its menus (row,
-title, phone sheet): Entrust to an agent, then the agent. `agents.entrust`
-(owner only, `packages/core/src/agents/entrust.ts`) refuses a delegated child,
-an agent session, an archived thread, a thread outside a project and an agent
-that is not active, naming the field. The thread keeps its own model and
-session. A goal starts on it (Take over this work where it stands and carry it
-to a verified result, unless another objective is given), the agent's name and
-instructions join each of its turns, and the agent posts in its own
-conversation that it takes the thread over, drawn as a marker across the
-conversation. When the goal is met the agent posts the thread's final answer
-in its bubble under a Done label and the entrustment ends; when
-the thread needs the user, or a turn fails, it posts that too and the
-entrustment stays, so the user's answer in the thread resumes the goal. The marker
-and each label open the thread. While entrusted, the thread wears the agent's picture
-in the list and an Entrusted to chip in its header, whose menu opens the agent
-or takes the thread back; taking it back removes the goal without a message.
-Archiving or removing the thread ends the entrustment. The snapshot carries
-the list as `entrusted`, and a message about a thread carries `thread` with
-its id, title and event; clients write the sentence from the event.
+A wake never starts while the agent's thread has a turn queued, running or
+waiting, while the agent or every agent on the core is paused, or once its
+daily budget is spent. A held creation or instructions wake starts once the
+thread is free or the pause ends. Delegation results, `boite ask` answers,
+setting-card outcomes and background-shell wakes reach the agent's thread
+through the ordinary thread paths.
 
-The thread list reads all this from the agents snapshot
-(`lib/agent-directory.svelte.ts`), loaded only with the Agents experiment on
-and refreshed on `agents.changed` at most every 1.5 seconds.
+Creating an agent (`agents.profile.save` without an id) creates its thread and
+starts `Just created`: it introduces itself in two sentences, reads its
+instructions, creates the routines they call for ("check every day" means a
+daily routine), then says what it will do and when. Saving changed
+instructions starts `Instructions changed`: it checks its routines and tells
+the user in one or two lines what changes for them.
 
-### Projects entrusted to an agent
+### Quiet turns
 
-An agent can be given projects (`AgentProfile.projectIds`, picked in its
-settings; drafts and unknown folders are refused). Its direct conversation
-then looks after every thread there, the way a person in charge of a project
-would, through the `boite threads`, `boite thread` and `boite answer` commands
-([CLI](cli.md)), which go through `resident.*` (`agents/projects.ts`):
+A wake that needs nothing from the user ends its last text block with a line
+`[quiet] <what it checked>`. Detection reads only the final text block of the
+turn's final assistant message: it is quiet when that block, trimmed, opens
+with `[quiet]` or its last line does, in any case. A quiet turn sets
+`Turn.quiet`, leaves the thread read, sends no push notification, runs no
+memory pass and records `lastOutcome: 'quiet'` on its routine; clients fold it.
+Only `routine` and `event` turns can be quiet; the user's own turns never are.
 
-- it lists and reads their threads, with their questions and last answers;
-- it starts a thread in one of its projects (`boite thread new`), which codes,
-  verifies and opens the pull request: an agent hands code work to threads and
-  never shows code itself;
-- it steers a thread with a letter marked as its own (`origin: 'resident'`,
-  see [coordination](coordination.md#letters-from-the-agent-of-a-project)),
-  whatever that thread's communication settings, which wakes it even when its
-  last turn failed;
-- it marks a thread done (`boite thread done`, the Done list, refused while a
-  turn or input is pending), archives, restores, renames, stops, or moves a thread to another of its
-  projects, and answers or skips a thread's question; each action leaves a
-  line in that thread's timeline naming the agent.
+### Events
 
-Deleting a thread and allowing a tool permission stay the owner's. A group or
-mission session of the same agent has none of this; neither has an agent that
-is paused or archived.
+Events are facts the core records for the agent's next `event` turn
+(`AgentRuntime.fact`). Each is short and names the thread by title and id, so
+the agent can act on it:
 
-The core tells the agent what happens there with notices, queued as one work
-item in its direct conversation (`AgentWork.purpose: 'notice'`): a notice
-waits 30 seconds for others to join it, and the item stops growing past 16,000
-characters, dropping its oldest notices. A thread the agent started, wrote to
-or answered for is followed for a week: every turn it ends comes back with its
-final answer and pull request. Any thread of its projects that fails or asks a
-question is reported too; a question waits three minutes first, since the user
-is often there to answer it. A permission a followed thread waits on is
-reported so the agent can tell the user. At most 60 notices an hour reach one
-agent; the rest are dropped with a line in the log. When nothing needs the
-user, the agent answers `[quiet]` and nothing is posted; otherwise its answer
-lands in the conversation under an About your projects label. Taking a
-project back drops what pending notices say about its threads, and cancels a
-notice with nothing left, along with the agent's letters still waiting there.
+- a turn ends in a thread on its desk, with its final answer and pull request;
+- any thread of its projects fails, or asks the user something (after three
+  minutes, since the user is often there to answer; at once on its desk);
+- a thread on its desk waits on a tool permission, which only the user gives;
+- a thread on its desk has a running turn that produced nothing for 20
+  minutes (`STALL_MS`, `agents/projects.ts`): once per turn, and the desk row
+  shows `stalledSince` until the turn speaks again or ends;
+- a pull request of a thread on its desk is merged, or its checks start to
+  fail (once each time they go from pending or passing to failing);
+- an entrusted thread's goal is done or blocked (a stop is the user's doing and
+  only leaves a line).
 
-### How an agent talks
+Facts gather: one `event` turn starts once the thread is free and the oldest
+fact is 30 seconds old, and facts arriving meanwhile wait for the next one.
+An event prompt stops at 16,000 characters, older facts giving way, and one
+agent receives at most 60 facts in an hour. A dropped fact, under either cap,
+leaves a system line in the agent's thread naming it; past ten such lines in
+an hour, one more says the rest go unlisted. Taking a project back drops what
+waiting facts say about its threads. Waiting facts survive a restart
+(`agents:pending:<agent>`).
 
-Every run tells the agent to write like a colleague in a chat, in the user's
-language, in short plain sentences: no code, diffs, logs or tool output in its
-answers, proof given with files it attaches and markdown links. A file it
-publishes with `boite attach` while it works rides with its answer
-(`AgentConversationMessage.files`, at most 20): the conversation draws
-pictures inline with the zoomable viewer and other files as cards, read with
-`artifacts.read` on the agent's own thread and message.
+## The context block
 
-### Asking to change an agent's settings
+`turn-context.ts` puts the agent's block in front of a turn of its thread
+(`agents/context.ts`): the persona (`You are <name>, <domain>.` and its
+instructions), the brain path and its AGENTS.md, MEMORY.md (at most
+`AGENT_MEMORY_MAX` characters), a pointer to `memories-archive.md` when it
+exists, the names and paths of its skills (`skills/<name>/SKILL.md` or
+`skills/<name>.md`), its routines with their next run, its desk (one line per
+watched thread: title, id, project, state, stall, pull request and checks), its
+projects and the commands that reach them, how it asks for a settings change,
+and a short guide to how it works.
 
-An agent's settings stay the owner's, but a thread, or the agent about itself,
-can propose a change with a card: `boite settings agent request <key> <value>
---why <reason>`, the same flow as a card about a Boite setting ([CLI](cli.md)).
-The keys are the projects entrusted to it, its model and reasoning effort, the
-memory pass (`autoMemory`), its subagents and `maxRunMinutes`. A run tells the
-agent how to ask, so one that needs a project it was not given asks for it
-instead of working around it. The card is asked without stopping and outlives
-its turn. In a thread it sits in the timeline; an agent's own cards, and any
-other card its hidden work threads raise, show in its conversation above the
-composer. Apply (`agents.settings.apply`, owner only) goes through the same
-checks as the agent's settings page, and for projects the owner can untick
-part of the proposal first. Any change to the agent, from the card or from
-the page, settles the cards it answers; the asking thread reads the outcome as
-a message, which a persistent agent receives as new work. Code:
-`packages/core/src/agents/setting-cards.ts`, shared checks in
-`packages/contracts/src/agent-setting-requests.ts`.
+The block goes whole on a fresh native session (no session id, after a
+compaction or an account switch) and whenever its hash moved since the last
+turn that carried it; otherwise nothing, since the session already holds it.
+The hash covers the persona, AGENTS.md, MEMORY.md, the skills, the routines and
+the projects, not the desk: event turns say what changed there. The core keeps
+`{ hash, sessionGeneration, turnId }` per thread (`agents:context:<thread>`)
+and clears it after a failed turn that carried the block or a compaction.
 
-Question events from persistent agents' hidden session threads reach owner
-and paired-device clients without a thread subscription. This keeps the
-conversation's cards current when a setting changes or another client answers.
-The session transcript and ordinary thread questions remain subscription-scoped.
+The guide tells it to talk like a colleague in the user's language, result
+first, with proof as attached files and links; to hand code work to project
+threads, steer them and answer their questions within its rules without
+repeating them to the user; to end a wake that needs nothing with `[quiet]`;
+to keep its routines matching its instructions; to note durable facts; to put
+threads on or off its desk; and to ask the user with `boite ask`. Commands an
+agent thread cannot run (`boite where`, checkout and pull request commands,
+todos, `projects add`) are left out of the guide it gets (`agent-guide.ts`).
 
-## Conversations and teams
-
-A group is a shared conversation without a required project. Each agent/group
-pair has its own native provider session. Direct conversations have separate
-sessions too. Agents can belong to several groups and teams.
-
-A team records members, responsibilities and projects. It may link to a group
-but does not become that group. A mission belongs to a team or to selected
-agents. It has an objective, expected result, tasks, resources and limits.
-
-Group response modes are explicit:
-
-- Selected recipients sends only to checked members.
-- One response per member sends one work item to each member.
-- Take turns automatically starts with the first member and passes the reply
-  to the next. Explicit recipients override the initial selection.
-
-A new user message starts an episode. Replies and decision continuations keep
-that episode. Total and per-agent turn limits apply. Messages retain recipients
-and delivery states, including exchange-limit refusals. A paused group keeps
-queued deliveries. Pausing a running execution requires explicit resume later.
-
-## Tasks, results and decisions
-
-Assignment checks revision and dependencies in one transaction. A dependency
-is satisfied only after the owner accepts its result. An assignment generation
-rejects obsolete submissions. Review waits until the provider has stopped.
-
-Project missions give each agent a Git worktree, reused by its later tasks in
-that mission. Preparation records the branch before Git starts. Restart checks
-that exact branch and directory before adoption. Projectless work uses a
-directory under the core data directory. Workspaces remain for inspection and
-handoff. There is no automatic merge, publication or deployment.
-
-The owner can accept, reject or request changes with feedback, then assign new
-work explicitly. Finish mission requires terminal tasks and executions.
-Cancellation stops current executions, cancels queued work and closes pending
-decisions. Finished and cancelled missions can be reopened. A used mission
-keeps its original project. Referenced projects cannot be removed, preserving
-workspaces and shared context. Accounts referenced by profiles are protected too.
-
-Artifacts include workspace files, an optional commit and the agent's
-verification report. Files must exist inside the workspace on first submission.
-A retry with the same request id returns the original artifact after completion.
-The interface exposes results and the execution without requiring process logs.
-
-An agent calls `boite agent decide` to release its slot and request a durable
-human decision. The prompt and its choices stand in the conversation where the
-work was asked; its avatar and header show waiting while the row keeps its
-missed-message count or last activity time. An answer creates
-one continuation in the same context. Native tool approvals still use the
-existing permission cards and provider process.
-
-## Memory and resources
-
-Memory belongs to an agent, group, team, mission or project. Records have
-revisions, source scopes, an optional source run and expiry. The Memory tab
-supports search, editing and expiration. Expired records remain visible to the
-owner but are not supplied to agents.
-
-Personal memory is readable by its agent; group memory stays in its group.
-A mission can read its team's and project's memory. Provenance further restricts
-access: copying a private-group finding into personal memory does not make it
-available to another group. Agents cannot strip provenance or widen scope.
-The owner controls wider sharing.
-
-Resources are instructions, HTTP/HTTPS URLs or existing absolute directories.
-Directory paths are canonicalized. Own-context and personal resources are
-supplied automatically. Select inherited team/project resources in the mission.
-Declared writers serialize against readers and writers of the same URL or
-overlapping directory. Interrupted executions keep their reservation until
-reconciled or cancelled. The queue names the resource holder. This is not an OS
-sandbox: provider permissions govern filesystem and network actions.
-
-## Execution and recovery
-
-The core owns the durable queue. Defaults are one run per agent and two
-background runs globally, controlled by the background concurrency setting.
-Account login checks and plugin holds still apply. Background work does not
-add work ahead of queued turns. Interactive turns have no global or per-account
-scheduler ceiling.
-
-Mission turn limits count started runs and accepted reservations. The time
-limit sums execution durations across agents and retries, excluding human wait
-time. Token limits check reported usage between turns, not inside a provider
-call. Missing usage pauses further work instead of counting it as zero. Direct
-and group executions default to ten minutes, configurable per identity.
-
-Closing the page stops rendering. Quitting the shell leaves its core running
-in the user's session. Reopening adopts that core. Background settings exposes
-owner-only Stop this core, which stops all work and disconnects clients. There
-is no OS service. General settings can start the shell at login, which starts
-the core and leaves the window in the tray. Tests and benchmarks use
-`BOITE_CORE_RESIDENT=0` when they need shell-owned shutdown.
-
-After restart, accepted work that never started is eligible again. Started
-work becomes Interrupted and needs an inspection note through Review and resume.
-Completed turns reconcile with their saved results. Durable decisions remain
-pending; native approvals expire with their process. Arbitrary shell effects
-cannot guarantee exactly-once execution and are never replayed blindly.
-
-A command that creates something (a message, a routine run, a decision) takes a
-`requestId`. The core remembers each id for 30 days: sending the same id again
-returns the same record, read again as it stands now, and does nothing twice.
-The receipt names the record rather than copying it, and the journal event of a
-record change names its kind, id and revision, so a routine with a long prompt
-does not copy that prompt into every receipt and event. Those events also leave
-the journal after 30 days, all but the newest, whose id is the revision clients
-compare; the records themselves stay.
-
-## Providers and tools
-
-Profiles use existing model probing, account selection, effort and drivers.
-A newly selected model must appear in the combined provider and account-probed
-catalog; examples and saved profiles do not establish availability.
-
-Muse Code uses MSP, including approvals and session resume. Antigravity runs
-its managed ACP server, with accounts of its own. See [providers](providers.md) and [accounts](accounts.md).
-Collaboration uses the provider-independent [`boite agent` commands](cli.md).
-
-## Individual brain and compaction
+## Memory and brain
 
 Each identity owns a brain folder: `agent-workspaces/<agent-id>/brain` in the
 host's data directory by default. The owner can choose another folder for every
@@ -344,172 +176,230 @@ files), kept through renames. Choosing a folder moves every existing brain
 there, and the default puts them back; a folder inside the core's data
 directory, or containing it, is refused, and so is a change while an agent
 works or a memory pass runs. A move that fails halfway puts back what moved.
-`AGENTS.md` holds its reusable instructions, `MEMORY.md` its personal
-notes, and `skills/` its procedures. The Brain tab edits both text files with a
-content revision check. The brain stays on the host across model changes and
-client disconnects. Personal notes are supplied only in direct conversations;
-shared contexts use scoped memory. Filesystem access still follows provider
-permissions, not a separate OS sandbox per identity.
+`AGENTS.md` holds its reusable instructions, `MEMORY.md` its notes and
+`skills/` its procedures. The Brain editor edits both text files with a content
+revision check. Filesystem access still follows provider permissions, not a
+separate OS sandbox per identity.
 
-After each finished piece of work in the direct conversation (a message,
-a planned task or notices it answered), a memory pass rewrites `MEMORY.md`
-(`agents/memory.ts`). It is a subagent of the agent's thread that the core
-owns, like a goal reviewer: it reads the current file, what was asked and what
-the agent answered, and returns the whole file rewritten with a one-line
-summary, keeping dated facts about the user, their projects, decisions and
-open follow-ups and dropping what the exchange made wrong or finished. It runs
-on the provider's small model (the one that titles threads) when the agent's
-subagent policy allows it, else on the agent's own model. The core writes the
-file, so the pass needs no tools; it keeps the old file when the owner edited
-it meanwhile, when the answer is too long, or when it would drop most of a
-file past 1,500 characters. The agent's next work waits up to five minutes for
-the pass, so it starts from the new notes; a pass still running after ten
-minutes is stopped. The pass is recorded on the work (`AgentWork.memory`), and
-the conversation shows Memory updated under the answer with the summary.
-Its answer never reaches the agent as mail. The agent's settings turn it off
-(`autoMemory`).
+MEMORY.md is the one memory store. `boite agent remember <fact>`
+(`agents.memory.note`) appends a dated line `- YYYY-MM-DD <fact>`, at most
+1,000 characters, refused once the file would pass `AGENT_MEMORY_MAX` (8,000)
+with the file's path. After a non-quiet turn whose answer the user sees, a
+memory pass rewrites the file (`agents/memory.ts`). It is a subagent of the
+agent's thread that the core owns, like a goal reviewer: it reads the current
+file, what was asked and what the agent answered, and returns the whole file
+rewritten with a one-line summary, keeping dated facts about the user, their
+projects, decisions and open follow-ups and dropping what the exchange made
+wrong or finished. It runs on the provider's small model (the one that titles
+threads) when the agent's subagent policy allows it, else on the agent's own
+model. The core writes the file, so the pass needs no tools. It keeps the old
+file when the owner edited it meanwhile, when the answer passes
+`AGENT_MEMORY_MAX`, or when it would drop most of a file past 1,500
+characters. The next turn never waits for it; one pass runs per agent at a
+time, and a pass still running after ten minutes is stopped. The agent's
+settings turn it off (`autoMemory`).
 
-Compaction runs after twelve completed turns by default, configurable from two
-to one hundred, at 85% of a reported context window, or on demand from Brain.
-It asks the current model for a bounded
-continuation note, stores that note for this context, then drops the native
-session. The next turn uses the note and bounded recent messages. Journal
-history and durable memory stay intact. Empty or failed summaries retain the
-old context and require review. Compaction waits for active children; managed
-collaboration writes and interactive tool approvals are denied during it.
-Providers without an approval channel still use their own launch permissions.
+## The desk
 
-## Routines and subscription allocation
+The desk (`AgentsSnapshot.watches`, `AgentWatch`) is built from data threads
+already keep. A thread joins when the agent starts it (`boite thread new`,
+`threads/spawn.ts`, origin `started`), is entrusted it (`entrusted`), writes to
+it, answers for it or calls `boite agent watch <thread>` (`followed`); the
+first origin stays. The follows live in `resident-follow:<agent>`. A follow
+holds while its thread is open, whatever its age, and leaves a day after the
+thread is done or archived. At most 100 open threads sit on one desk; past
+that the oldest open follow leaves. `boite agent unwatch`, or the owner's x on
+a card, drops one. An agent watches only threads of its projects or already on
+its desk; the owner, any top-level thread.
 
-Routines belong to one identity and run in its direct context. Choose a single
-date, an interval in minutes, or a daily local time with an IANA timezone. The
-core wakes them without an idle model loop. One unfinished occurrence blocks
-the next. After downtime, at most one overdue occurrence enters the durable
-queue; missed intervals are not replayed. Daily routines run once per local
-date, even when clocks move back. A skipped local time runs on the next
-scheduled day. A daily routine can be limited to chosen weekdays, for example
-Monday, Wednesday and Friday at 09:00; the weekday is read in its timezone.
-Pausing the identity or the engine also holds its routines. A single-date
-routine is done once it ran, on schedule or through Run now: the card reads
-Done and offers no Resume, and only a new date schedules it again, even one
-saved while the routine is paused.
+Each row is read from the thread itself, never from what the agent said:
+`state` is `needs-you` (a pending question or permission), `working`,
+`queued`, `failed` (its last turn errored), `idle`, `done` or `archived`;
+`stalledSince` comes from the stall event; `pullRequest` is the pull request
+Boite watches for the thread (`boite pr watch`), else its newest open link,
+else its newest link (`linked-pull-requests.ts`), with `draft`, `open`,
+`merged` or `closed` and the checks the watch last read (`pending`, `passing`,
+`failing`, or null); `question` is the oldest pending question with its
+options, which the desk answers through `questions.answer`. Open threads come
+first, then the settled ones, each group newest follow first.
 
-Planning a task asks two things: what to do, and when, picked from Once (with
-In an hour, This evening and Tomorrow morning), Every day, Some days (a toggle
-per weekday) and Repeatedly (15 minutes to a day, or any number of minutes). A
-sentence under the choices says what will happen and when it runs next before
-anything is saved, for example "Every Monday and Friday at 6:00 PM". The time
-zone is the device's and is never asked; a routine saved elsewhere names its
-zone in that sentence and keeps it until its time changes. The name is
-optional: it defaults to the first words of the task. The header's planned
-tasks button lists them and adds one. A routine's result comes
-back in the agent's conversation labelled with the routine's name. Each
-routine shows its next run and how its last run went, with Run
-now, Pause or Resume, Edit and the way into that run's thread.
+## Projects entrusted to an agent
 
-Models and limits separates the required default route, allowed main routes,
+An agent can be given projects (`AgentProfile.projectIds`, picked in its
+settings; drafts and unknown folders are refused). Its thread then looks after
+every thread there, the way a person in charge of a project would, through the
+`boite threads`, `boite thread` and `boite answer` commands ([CLI](cli.md)),
+which go through `resident.*` (`agents/projects.ts`):
+
+- it lists and reads their threads, with their questions and last answers;
+- it starts a thread in one of its projects (`boite thread new`), which codes,
+  verifies and opens the pull request, and lands on its desk;
+- it steers a thread with a letter marked as its own (`origin: 'resident'`,
+  see [coordination](coordination.md#letters-from-the-agent-of-a-project)),
+  whatever that thread's communication settings, which wakes it even when its
+  last turn failed;
+- it marks a thread done (`boite thread done`, the Done list, refused while a
+  turn or input is pending), archives, restores, renames, stops, or moves a
+  thread to another of its projects, and answers or skips a thread's question;
+  each action leaves a line in that thread's timeline naming the agent.
+
+Deleting a thread and allowing a tool permission stay the owner's. An archived
+agent has none of this; a paused one still acts when the user asks it to.
+
+## Entrusting a thread
+
+Any kept thread of a project can be handed to an agent from its menus (row,
+title, phone sheet): Entrust to an agent, then the agent. `agents.entrust`
+(owner only, `agents/entrust.ts`) refuses a delegated child, an agent's
+thread, an archived thread, a thread outside a project and an agent that is
+not active, naming the field. The thread keeps its own model and session. A
+goal starts on it (Take over this work where it stands and carry it to a
+verified result, unless another objective is given), the agent's name and
+instructions join each of its turns, the thread goes on the agent's desk and a
+line in the agent's thread says so. A goal done or blocked is an event for the
+agent; a met goal ends the entrustment, a blocker keeps it so the user's answer
+resumes the goal. Taking the thread back removes the goal without a message;
+archiving or removing the thread ends the entrustment. The snapshot carries the
+list as `entrusted`.
+
+## Asking to change an agent's settings
+
+An agent's settings stay the owner's, but a thread, or the agent about itself,
+can propose a change with a card: `boite settings agent request <key> <value>
+--why <reason>`, the same flow as a card about a Boite setting ([CLI](cli.md)).
+The keys are the projects entrusted to it, its model and reasoning effort, the
+memory pass (`autoMemory`), its subagents and its daily budget
+(`dailyBudget`, dollars a day or `null`). The context block tells the agent how
+to ask, so one that needs a project it was not given asks for it instead of
+working around it. The card is asked without stopping and outlives its turn.
+Apply (`agents.settings.apply`, owner only) goes through the same checks as the
+agent's settings page, and for projects the owner can untick part of the
+proposal first. Any change to the agent, from the card or from the page,
+settles the cards it answers, and a card whose key no longer exists closes; the
+asking thread reads the outcome as a message. Code:
+`agents/setting-cards.ts`, shared checks in
+`packages/contracts/src/agent-setting-requests.ts`.
+
+## Routines
+
+Routines (`agents/routines.ts`) belong to one identity and wake it on its own
+thread. Choose a single date, an interval in minutes, or a daily local time
+with an IANA timezone, optionally on chosen weekdays read in that timezone.
+The core wakes them without an idle model loop. A due routine starts a
+`routine` turn; while the previous occurrence is still queued or running the
+next one is skipped and `nextAt` still advances, and a failed, stopped or quiet
+one never blocks. A routine due while the thread is busy with another turn
+waits for it. After downtime, at most one overdue occurrence runs; missed
+intervals are not replayed. Daily routines run once per local date, even when
+clocks move back. A paused agent or engine, or a spent budget, skips the
+occurrence with `lastOutcome: 'skipped'` and advances `nextAt`. `lastTurnId`
+and `lastOutcome` (`done`, `quiet`, `error`, `stopped`, `skipped`) follow
+`turn.finished`. A single-date routine is done once it ran.
+
+The agent keeps its own routines (`boite agent routines|schedule|unschedule`,
+`agents.routine.save|remove`). Run now (`agents.routine.run`, owner only)
+returns the turn it started, is idempotent per request id and is refused while
+the thread has a turn in flight. The schedule editor writes a sentence under
+the choices saying what will happen and when it runs next, for example "Every
+Monday and Friday at 6:00 PM" (`schedule.ts`).
+
+## Budget and limits
+
+An agent has no run cap: a wake runs as long as any turn, and the thread's own
+auto-compaction (the user's compaction size setting) applies. `dailyBudgetUsd`
+in its runtime config (null by default) caps what its thread's turns spend
+from local midnight, read from each turn's `costUsdEquivalent`. Past it, wakes
+are skipped with one system line a day in its thread and `lastOutcome:
+'skipped'` on the routine; the user's own messages always run.
+`agents.limits.set { paused }` holds every wake on the core. Configs saved with
+`maxRunMinutes` or `compactAfterTurns` still load, without them.
+
+Models and limits separates the required default route, allowed main routes
 and allowed subagent profiles. A route names a provider, account and model.
-Subagents are on by default: with no profile listed, an agent's children run
-on any model of an account granted to it, unless the owner turns free model
-choice off; listing profiles restricts children to them, without gaining other
-main routes. The subagent guide joins a fresh session while they are on. The
-combined provider and account-probed catalog determines availability.
-There is no silent fallback to an unapproved model.
+Subagents are on by default: with no profile listed, an agent's children run on
+any model of an account granted to it, unless the owner turns free model choice
+off; listing profiles restricts children to them. The combined provider and
+account-probed catalog determines availability, and there is no silent
+fallback to an unapproved model. Saving retains a previously approved model
+and unchanged effort if a later catalog omits them. Account access grants each
+subscription to all identities or an explicit list, children included, and
+routes are checked again just before driver launch. An agent's thread moves to
+another account only when that account is granted to it.
 
-Saving settings retains a previously approved model and unchanged effort if a
-later catalog omits them, including allowed routes and subagent profiles.
-New routes, changed models and changed effort still require the current
-catalog. Account grants are checked on every save.
+Every card of an agent's settings saves by itself: a pick, a switch or a menu
+at once, a typed value after a pause in typing or when the field loses focus,
+with Saving, Saved or Not saved and the core's reason. Archiving asks for the
+agent's name first.
 
-Every card of an identity's Settings tab saves by itself, with no Save button:
-a pick, a switch or a menu at once, a typed name or number after a pause in
-typing or when the field loses focus. The card title then reads Saving, Saved,
-or Not saved with the core's reason and a Retry; a refused save never reads as
-saved, and the agent keeps running on the route the core holds. Saves of one
-identity run one at a time, each on the revision the previous one returned, so
-the identity card and the model card never refuse each other. A value the form
-cannot send, such as an empty route name, waits until it is valid again, and a
-change still waiting when the tab closes is sent. Archiving still asks for the
-identity's name before anything is saved. Creating an identity, a team or a
-mission keeps its Create button, and so do the brain folder, an identity's
-brain files, memories, routines and the first roles that make a group a team.
+## Status
 
-Account access grants each subscription to all identities or an explicit list.
-These grants also apply to their children. Revocation stops affected managed
-executions and pauses queued work for review. Routes are checked again just
-before driver launch. This controls Boite-managed launches; it does not prevent
-an unrestricted shell from invoking a provider independently.
+`AgentsSnapshot.status` holds one `AgentStatus` per agent, read from its
+thread:
 
-Children reuse the existing delegation driver and scheduler. Each new request
-or routine has its own delegation usage counters, with no child count, turn
-count or duration quota. Completed children remain in history when a new
-episode begins.
-Configuration and account grants remain owner-only. A paired device can read
-the brain and policy, converse and handle decisions on the selected host.
+- `state`: `archived`, `waiting` (a card waits for the user), `working`,
+  `queued`, `paused` (the agent or the engine), `error` (its last turn failed,
+  or `problem` is set), else `idle`;
+- `activity`: while a card waits, what it waits on (`Waiting for your answer:
+  <question>`); while a turn runs, the running tool's own summary or
+  description, else its name and what it acts on (`Bash: bun test`), else
+  Thinking, Compacting its context or Retrying;
+- `problem`: why it cannot run, naming the fix: its provider is gone (an agent
+  on a removed provider loads with it), its account is gone or its model left
+  the catalog;
+- `nextWake`: the next enabled routine occurrence;
+- `unread`: answers the user has not read on its thread, counted since it was
+  last read;
+- `last`: the final text block of its last non-quiet answer, first 200
+  characters;
+- `today`: its turns since local midnight, the wakes among them (`routine` and
+  `event`), the quiet ones and their spend in API-equivalent dollars.
 
-## Interface and storage
+`agents.changed` is an invalidation: clients fetch a snapshot. It goes out at
+most once a second, the first change at once, while an agent works (a step, a
+card, a title, an answer) and when its desk changes (a watched thread's turn,
+card, row, stall or pull request).
 
-The page opens conversations, activity, scoped memory, routines, the
-individual brain and model limits. With several machines, the machine button
-at the bottom left of the list, where the thread list keeps its own, selects the
-owning core and names it; closing this client does not stop that
-core. Disconnection marks the last state as stale. Retained scene sources have
-no navigation entry.
+## Migration
 
-Contracts live in `packages/contracts/src/agents.ts`. The journal stores domain records,
-receipts and projectless managed threads
-with prompt-cache and native delegation data. Supported schema migrations
-preserve their history. Records and
-events commit together. Revision checks protect edits; request receipts protect
-message, artifact and decision retries. Runs freeze execution and supplied
-context. `agents.changed` invalidates a revision without broadcasting messages.
-Agent RPC is restricted to its authenticated execution context. Paired devices
-can converse, inspect and answer; configuration and shutdown remain owner-only.
+Agents saved before this model keep working (`agents/migration.ts`, run once at
+start, flag `agents:migrated:threads-v1`): profiles, routines (`lastWorkId`
+becomes `lastTurnId: null`), the session of each agent's own conversation,
+entrustments, brain folders and grants stay. The threads of its group and
+mission sessions are archived and their records dropped. In each agent's
+thread, an old prompt whose first text part starts with `You are ` and holds
+`\nCurrent work: ` displays what follows the last `Current work: `, and one
+starting with `Notices from Boite` displays `Project events`; the text sent
+stays as it was. Each agent's old agent-scoped memories are written once to
+`brain/memories-archive.md` (title, date, text), never injected, and the
+context block names that file as older notes it may read. Records of removed
+kinds (groups, teams, missions, tasks, resources, artifacts, decisions,
+messages, deliveries, work, runs, episodes, scoped memories, read marks) stay
+in `agent_entities`, unread.
 
-History grows without bound, so `agents.snapshot` is bounded. It carries the
-newest 50 messages and memories, every unfinished work item plus the newest 50
-finished ones, and the deliveries, runs and decisions they point to. `more`
-says, per kind, whether older records exist. `agents.history` pages one kind
-newest first by last change, with an `(updatedAt, id)` cursor and at most 200
-records a page; `scopes` and, for work, `agentId` narrow it. Configuration
-kinds (profiles, groups, teams, missions, tasks, sessions, routines, resources,
-artifacts) stay whole. An agent session pages under the same rules as its
-snapshot: its own context only, and memory it may read by provenance. Runs
-leave out `context.instructions`; the frozen text stays in the core record and
-in the first turn of the run's thread.
+## Access
 
-The UI keeps every record a snapshot or a page brought since it connected, so a
-record that leaves the snapshot window stays on screen. A view showing fewer
-than 20 records loads one older page by itself; `Load earlier` fetches the
-rest. The CLI pages back when `agent reply` or `agent memory` needs a record
-older than the snapshot.
-
-Targeted reads never load a whole kind. Each goes through a partial expression
-index and names it with `INDEXED BY`, so a query the index cannot serve fails
-instead of scanning: sessions by thread, messages by source run, work by
-episode, agent or scope, deliveries, runs and decisions by work, and completed
-runs of a thread. `events_agents` serves the snapshot's revision.
+From its own thread an agent calls `agents.snapshot` (its own identity,
+routines, desk and status only), `agents.brain.get`, `agents.memory.note`,
+`agents.routine.save|remove`, `agents.watch` on its own desk,
+`agents.settings.read|request` and the `resident.*` methods
+(`packages/core/src/access.ts`, each with its reason). A paired device reads
+`agents.snapshot`, `agents.open`, `agents.runtime.get` and `agents.brain.get`
+(`packages/contracts/src/access.ts`) and talks to the agent through its thread
+like any other; configuration, account grants and entrusting stay owner-only.
 
 ## Verification
 
-Follow the relevant [development checks](development.md#checks-and-tests) and
-[shell procedure](development.md#rebuilding-the-shell-executable).
-
-Core tests cover assignments, scope isolation, receipts, decisions, resource
-serialization, CLI tools, interrupted runs and workspace preparation recovery.
-`agents-history.test.ts` covers bounded snapshots, paging every record once,
-same-millisecond cursors, session paging, the query plan of each targeted read
-and the migration from schema 15.
-The UI journey creates and converses with an agent, leaves the page, edits
-memory and brain files, plans a routine on chosen weekdays and reads its
-sentence, inspects model limits, accepts a task, finds the Agents count in the
-waiting colour over the thread list, opens the agent's thread and its conversation
-from there, answers a decision in the conversation, then entrusts a thread from its
-title menu and finds the take-over marker and the Done label in the agent's
-conversation. `robots.test.ts`, `schedule.test.ts`, `thread-entrust.test.ts` and
-`agents.test.ts` cover robot codes, schedule sentences, the entrust menu rows,
-the rows an agent at work lights and the thread list's directory;
-`agents-entrust.test.ts` covers the core's refusals, goal, persona, outcome
-messages and clean-up. Captures are under
-`tests/e2e/.artifacts`. The shell journey finishes work after shell exit,
-adopts the same PID and stops it explicitly. Real-provider inference is opt-in.
+Follow the relevant [development checks](development.md#checks-and-tests).
+Core tests: `agents.test.ts` (creation and introduction, the user's messages
+as ordinary turns, delete refused and archive, open recreates, own snapshot
+only), `agents-runtime.test.ts` (the context block, routine wakes and
+outcomes, quiet events, budget, pauses, fact batching, instructions changed),
+`agents-desk.test.ts` (desk rows from a started, an entrusted and a watched
+thread, follows kept while open and dropped a day after done, the open cap,
+the stall event once per turn, an entrusted goal waking the agent, pull
+request checks failing and merged, status activity and today's counts,
+dropped facts), `agents-projects.test.ts`, `agents-entrust.test.ts`,
+`agents-memory.test.ts`, `agents-migration.test.ts`,
+`agents-setting-cards.test.ts` and the agent section of `cli.test.ts`.
+`bench/agents-snapshot.ts` measures the snapshot over an agent thread with
+thousands of turns. Real-provider inference is opt-in.

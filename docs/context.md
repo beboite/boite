@@ -118,8 +118,8 @@ client's queued prompt, a wake and a held answer the time to open theirs. When
 it fires the core checks again and compacts only when all of this holds:
 
 - the turn ended `done`, and was not itself a compaction;
-- the thread is idle, not archived, has a native session, and is neither a
-  delegated agent's nor a resident agent's (those compact by `compactAfterTurns`);
+- the thread is idle, not archived, has a native session, and is not a
+  delegated agent's; a persistent agent's own thread compacts like any other;
 - the reading is at or above `tokens`;
 - the agent can compact, as for the manual button;
 - no goal or loop is active, no delegated agent or workflow of the thread is
