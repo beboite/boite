@@ -40,6 +40,11 @@ export interface AgentBrain {
 }
 /** The size MEMORY.md is kept under: the memory pass consolidates to it, a turn reads at most this much. */
 export const AGENT_MEMORY_MAX = 8000;
+/** Routines one agent may hold; a save past it is refused with the count. */
+export const AGENT_ROUTINES_MAX = 50;
+/** A routine's name and prompt, in characters. */
+export const AGENT_ROUTINE_NAME_MAX = 80;
+export const AGENT_ROUTINE_PROMPT_MAX = 4000;
 /**
  * A daily schedule with `days` runs only on those weekdays, numbered 0 (Sunday) to 6 in
  * its timezone. Absent means every day; the core drops a list of all seven.

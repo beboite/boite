@@ -71,6 +71,8 @@
     untrack(() => { for (const other of shown) other.start(); });
     return () => { for (const other of shown) other.pause(); };
   });
+  // The snapshot carries the open agent's desk only.
+  $effect(() => { const id = agent?.id ?? null; untrack(() => view.showDesk(id)); });
   // The directory names the agent of a thread the snapshot does not list yet, a new one.
   $effect(() => { const target = directory; return untrack(() => target.watch()); });
   // A reconnect reads the snapshot again; the first visit already asked in `start`.

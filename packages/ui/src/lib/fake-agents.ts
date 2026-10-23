@@ -1,4 +1,4 @@
-import { RpcErrorCode, AGENT_MEMORY_MAX } from '@boite/contracts';
+import { RpcErrorCode, AGENT_MEMORY_MAX, AGENT_ROUTINE_NAME_MAX, AGENT_ROUTINE_PROMPT_MAX, AGENT_ROUTINES_MAX } from '@boite/contracts';
 import type {
   AgentAccountGrant, AgentBrain, AgentBrainRoot, AgentEntrustment, AgentProfile, AgentRecord, AgentRoutine, AgentRuntimeConfig, AgentSchedule,
   AgentSelection, AgentSession, AgentStatus, AgentWatch, AgentsRpcMethods, AgentsSnapshot, RpcParams, RpcResult, Thread, Turn
@@ -241,7 +241,8 @@ export class FakeAgents {
     const stalledSince = state === 'working' ? watch.stalledSince : null;
     return { ...structuredClone(watch), title: thread.title, projectId: thread.projectId, state, question, stalledSince, lastActivityAt: thread.updatedAt ?? watch.lastActivityAt };
   }
-  snapshot(threadId?: string): AgentsSnapshot {
+  /** `desk` narrows the watches as the core does: one agent's, none with null, all when absent; an agent's own thread reads its own. */
+  snapshot(threadId?: string, desk?: string | null): AgentsSnapshot {
     // An agent's own thread reads its own agent only.
     const own = threadId === undefined ? null : this.ownerOf(threadId);
     const mine = <T extends { agentId: string }>(rows: T[]) => own === null ? rows : rows.filter(r => r.agentId === own);
@@ -252,7 +253,7 @@ export class FakeAgents {
       sessions: mine([...this.sessions.values()]),
       routines: mine([...this.routines.values()]).sort(byCreation),
       status: profiles.map(agent => this.statusOf(agent)),
-      watches: mine(this.watches).map(watch => this.watchOf(watch)).sort((a, b) => Number(['done', 'archived'].includes(a.state)) - Number(['done', 'archived'].includes(b.state)) || b.lastActivityAt - a.lastActivityAt),
+      watches: mine(this.watches).filter(w => own !== null || desk === undefined || w.agentId === desk).map(watch => this.watchOf(watch)).sort((a, b) => Number(['done', 'archived'].includes(a.state)) - Number(['done', 'archived'].includes(b.state)) || b.lastActivityAt - a.lastActivityAt),
       accountGrants: this.grants,
       limits: this.limits,
       entrusted: mine(this.entrusted),
@@ -267,7 +268,7 @@ export class FakeAgents {
     return handler?.(raw);
   }
   private readonly handlers: AgentHandlers = {
-    'agents.snapshot': p => this.snapshot(p.threadId),
+    'agents.snapshot': p => this.snapshot(p.threadId, p.desk),
     'agents.profile.save': p => this.saveProfile(p, true),
     'agents.open': p => this.openAgent(p.agentId),
     'agents.runtime.get': p => this.runtime(p.agentId),
@@ -384,10 +385,15 @@ export class FakeAgents {
     return structuredClone(saved);
   }
   private saveRoutine(p: RpcParams<'agents.routine.save'>): RpcResult<'agents.routine.save'> {
-    this.profile(p.value.agentId);
+    const agent = this.profile(p.value.agentId);
     const previous = p.id ? this.routines.get(p.id) : undefined;
     if (p.id && !previous) this.refuse(`routineId: unknown routine ${p.id}`);
     if (previous && previous.revision !== p.expectedRevision) this.refuse('routine revision changed');
+    // The core's caps: 50 routines an agent, a name of 80 characters, a prompt of 4,000.
+    const held = [...this.routines.values()].filter(r => r.agentId === agent.id).length;
+    if (!previous && held >= AGENT_ROUTINES_MAX) this.refuse(`routine: ${agent.name} already has ${held} routines, the most an agent may hold is ${AGENT_ROUTINES_MAX}; remove one before adding another`);
+    if (p.value.name.length > AGENT_ROUTINE_NAME_MAX || !p.value.name.trim()) this.refuse(`name: expected 1 to ${AGENT_ROUTINE_NAME_MAX} characters`);
+    if (p.value.prompt.length > AGENT_ROUTINE_PROMPT_MAX || !p.value.prompt.trim()) this.refuse(`prompt: expected 1 to ${AGENT_ROUTINE_PROMPT_MAX} characters`);
     const s = p.value.schedule, changed = JSON.stringify(previous?.schedule) !== JSON.stringify(s);
     const spent = s.kind === 'once' && !changed && previous?.lastScheduledAt != null;
     // The core's save: run bookkeeping comes from the record, and a new once date clears the run it replaces.

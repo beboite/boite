@@ -4,6 +4,7 @@ import type { Store } from './store.svelte';
 import { strings } from './strings';
 import { experimentOn } from './experiments.svelte';
 import { noteUpkeep } from './agent-upkeep';
+import { agentDirectory } from './agent-directory.svelte';
 
 /**
  * A persistent agent is a thread with an identity: its conversation is its
@@ -157,7 +158,12 @@ export function previewOf(text: string): string {
 
 const VIEWS = new WeakMap<Store, AgentsView>();
 
-/** One snapshot of a machine's agents per Store, kept between visits. */
+/**
+ * One snapshot of a machine's agents per Store, kept between visits. It
+ * carries one desk at most: the open agent's (`showDesk`), none otherwise,
+ * since every desk of every agent is most of a full snapshot's bytes. On
+ * screen it also feeds the machine's directory, which then fetches nothing.
+ */
 export class AgentsView {
   snapshot = $state.raw<AgentsSnapshot | null>(null);
   error = $state('');
@@ -170,6 +176,8 @@ export class AgentsView {
   private off: (() => void) | null = null;
   /** Users on screen: changes refresh the snapshot. Off screen the last one is kept for the next visit. */
   private users = 0;
+  /** The agent whose desk the snapshot carries, null for none. */
+  private desk: string | null = null;
   constructor(readonly store: Store) {}
   /**
    * The view of this store, kept between visits: the page draws the last
@@ -185,15 +193,23 @@ export class AgentsView {
   start(): void {
     this.users++;
     // A failure of an earlier visit is not news on this one.
-    if (this.users === 1) { this.error = ''; this.loadError = ''; }
+    if (this.users === 1) { this.error = ''; this.loadError = ''; agentDirectory(this.store).feed(true); }
     this.listen();
     void this.refresh();
   }
   /** Off screen: no snapshot is fetched for changes nobody sees. */
   pause(): void {
-    this.users = Math.max(0, this.users - 1);
+    if (this.users === 0) return;
+    this.users -= 1;
     if (this.users > 0) return;
     this.off?.(); this.off = null;
+    agentDirectory(this.store).feed(false);
+  }
+  /** The agent whose desk is on screen, or null: a change reads the snapshot again with that desk only. */
+  showDesk(agentId: string | null): void {
+    if (this.desk === agentId) return;
+    this.desk = agentId;
+    if (this.users > 0) void this.refresh();
   }
   private listen(): void {
     if (this.off || this.users === 0) return;
@@ -215,8 +231,11 @@ export class AgentsView {
       while (this.dirty && !this.disposed) {
         this.dirty = false;
         const client = this.client;
-        const snapshot = await client?.call('agents.snapshot', {});
-        if (snapshot && !this.disposed && client === this.store.client) { this.snapshot = snapshot; this.loadError = ''; noteUpkeep(this.store, snapshot); }
+        const snapshot = await client?.call('agents.snapshot', { desk: this.desk });
+        if (snapshot && !this.disposed && client === this.store.client) {
+          this.snapshot = snapshot; this.loadError = ''; noteUpkeep(this.store, snapshot);
+          agentDirectory(this.store).adopt(snapshot, client);
+        }
       }
     } catch (error) { if (!this.disposed) this.loadError = errorText(error); }
   }
@@ -250,5 +269,5 @@ export class AgentsView {
     this.saves = run.catch(() => undefined);
     return run;
   }
-  close(): void { this.users = 1; this.pause(); this.disposed = true; }
+  close(): void { if (this.users > 0) { this.users = 1; this.pause(); } this.disposed = true; }
 }

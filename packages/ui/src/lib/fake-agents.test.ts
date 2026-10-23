@@ -105,3 +105,21 @@ test('an agent\'s own thread reads only its own agent', () => {
   expect(agents.snapshot(one.threadId).profiles.map(p => p.name)).toEqual(['One']);
   expect(agents.snapshot().profiles.map(p => p.name)).toEqual(['One', 'Two']);
 });
+
+test('the fake core holds an agent to 50 routines, an 80-character name and a 4,000-character prompt, and narrows the desk', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0, agentsDemo: true });
+  const all = (await client.call('agents.snapshot', {})).watches;
+  expect(all.length).toBeGreaterThan(0);
+  expect((await client.call('agents.snapshot', { desk: all[0]!.agentId })).watches).toEqual(all.filter(w => w.agentId === all[0]!.agentId));
+  expect((await client.call('agents.snapshot', { desk: null })).watches).toEqual([]);
+  const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  expect((await client.call('agents.snapshot', { desk: agent.id })).watches).toEqual([]);
+  const routine = (name: string, prompt = 'Check the builds.') => client.call('agents.routine.save', { value: { agentId: agent.id, name, prompt, schedule: { kind: 'interval', everyMinutes: 60 }, enabled: true, nextAt: null, lastTurnId: null, lastScheduledAt: null } });
+  await expect(routine('x'.repeat(81))).rejects.toThrow('name: expected 1 to 80 characters');
+  await expect(routine('Long', 'x'.repeat(4001))).rejects.toThrow('prompt: expected 1 to 4000 characters');
+  for (let i = 0; i < 50; i++) await routine(`Check ${i}`);
+  await expect(routine('One more')).rejects.toThrow('the most an agent may hold is 50');
+  // An edit of one it holds is no new routine.
+  const first = (await client.call('agents.snapshot', {})).routines.find(r => r.agentId === agent.id)!;
+  await expect(client.call('agents.routine.save', { id: first.id, expectedRevision: first.revision, value: { ...first, name: 'Renamed' } })).resolves.toMatchObject({ name: 'Renamed' });
+});

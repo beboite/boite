@@ -138,6 +138,22 @@ try {
   }
   results.snapshot = { ms: +median(snapshotMs).toFixed(2), bytes: snapshotBytes, statements: sql.total, top: sql.top() };
 
+  // What the Agents page asks: the open agent's desk only, and the thread list's directory no desk.
+  const narrowed = async (desk: string | null) => {
+    const samples: number[] = [];
+    let bytes = 0;
+    for (let run = 0; run < 7; run++) {
+      sql.reset();
+      const start = performance.now();
+      const snapshot = await client.call('agents.snapshot', { desk });
+      if (run > 0) samples.push(performance.now() - start);
+      bytes = JSON.stringify(snapshot).length;
+    }
+    return { ms: +median(samples).toFixed(2), bytes, statements: sql.total };
+  };
+  results.snapshotOneDesk = await narrowed(agents[0]!.id);
+  results.snapshotNoDesk = await narrowed(null);
+
   // One agent's own snapshot, as its thread reads it.
   sql.reset();
   const own = timed(5, () => core.workforce.snapshot(agents[0]!.threadId));

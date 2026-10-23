@@ -47,6 +47,8 @@
   const step = $derived(liveStep(status, thread));
   const since = $derived(thread?.runningSince ?? turn?.startedAt ?? null);
 
+  // The snapshot carries the open agent's desk only; the Agents page asks for it too, this asks wherever the desk is drawn.
+  $effect(() => { const id = agent?.id; if (id) untrack(() => view.showDesk(id)); });
   const watches = $derived<AgentWatch[]>(agent ? deskOrder(view.snapshot?.watches.filter(w => w.agentId === agent.id) ?? []) : []);
   const today = $derived(status?.today ?? { turns: 0, wakes: 0, quiet: 0, costUsd: 0 });
 

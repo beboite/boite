@@ -27,11 +27,17 @@ export interface AgentAtWork {
  * session (`agentSessionId`), a delegated child its parent; the session names
  * the agent. An entrusted thread is named in the snapshot's `entrusted`. Only
  * with the Agents experiment on, the agents snapshot loads, at most once per
- * `SETTLE_MS`.
+ * `SETTLE_MS`, without any desk. While the Agents page is on screen its view
+ * fetches the snapshot and hands it here (`adopt`), so one change costs one
+ * fetch, not two.
  */
 export class AgentDirectory {
   snapshot = $state.raw<AgentsSnapshot | null>(null);
   private client: Store['client'] = null;
+  /** The client `snapshot` came from: a reattach to the same one keeps it on screen. */
+  private snapshotClient: Store['client'] = null;
+  /** Agents views on screen that fetch for this directory (`feed`). */
+  private feeders = 0;
   private off: (() => void) | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private loading = false;
@@ -62,9 +68,22 @@ export class AgentDirectory {
     if (this.client === this.store.client && this.off) return;
     this.off?.();
     this.client = this.store.client;
-    this.snapshot = null;
+    if (this.snapshotClient !== this.client) this.snapshot = null;
     this.off = this.client?.on('agents.changed', () => this.schedule()) ?? null;
-    void this.load();
+    if (this.feeders === 0) void this.load();
+  }
+
+  /** An Agents view on screen fetches the snapshot for this directory (true), or left the screen (false). */
+  feed(on: boolean): void {
+    this.feeders = Math.max(0, this.feeders + (on ? 1 : -1));
+    if (on && this.timer) { clearTimeout(this.timer); this.timer = null; }
+  }
+
+  /** A snapshot the Agents view read from `client`; its one desk changes nothing here. */
+  adopt(snapshot: AgentsSnapshot, client: Store['client']): void {
+    if (client !== this.store.client) return;
+    this.snapshot = snapshot;
+    this.snapshotClient = client;
   }
 
   private detach(): void {
@@ -86,7 +105,7 @@ export class AgentDirectory {
   }
 
   private schedule(): void {
-    if (this.timer) return;
+    if (this.timer || this.feeders > 0) return;
     this.timer = setTimeout(() => { this.timer = null; void this.load(); }, SETTLE_MS);
   }
 
@@ -96,8 +115,8 @@ export class AgentDirectory {
     if (!client) return;
     this.loading = true;
     try {
-      const snapshot = await client.call('agents.snapshot', {});
-      if (client === this.client) { this.snapshot = snapshot; noteUpkeep(this.store, snapshot); }
+      const snapshot = await client.call('agents.snapshot', { desk: null });
+      if (client === this.client) { this.snapshot = snapshot; this.snapshotClient = client; noteUpkeep(this.store, snapshot); }
     } catch {
       // An older core without agents, or a dropped connection: the rows keep their provider logo.
     } finally {

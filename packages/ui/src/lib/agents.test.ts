@@ -2,7 +2,7 @@ import { expect, vi } from 'vitest';
 import type { AgentsSnapshot } from '@boite/contracts';
 import { test } from '../test/fake-client';
 import { AgentsView, agentOfThread, agentRows, liveStep, openAgent, previewOf, avatarText } from './agents.svelte';
-import { AgentDirectory } from './agent-directory.svelte';
+import { AgentDirectory, agentDirectory } from './agent-directory.svelte';
 import { setExperiment } from './experiments';
 import { FakeAgents } from './fake-agents';
 import { openQuestionPage } from './question-page';
@@ -100,6 +100,36 @@ test('the list puts the agent that spoke last first, leaves archived agents out 
 test('previews drop markdown and avatars fall back to initials', () => {
   expect(previewOf('**Done**: see [the PR](https://x.test)\n\n```ts\ncode\n```')).toBe('Done: see the PR code');
   expect(avatarText('Mira Scout', '')).toBe('MS');
+});
+
+test('while an agent works, the Agents page reads one snapshot a change with the open agent\'s desk, and the directory shares it', async () => {
+  vi.useFakeTimers();
+  const snapshot = new FakeAgents(() => {}).snapshot();
+  const changed: (() => void)[] = [];
+  const calls: unknown[] = [];
+  const client = { call: vi.fn(async (_method: string, params: unknown) => { calls.push(params); return { ...snapshot, revision: calls.length }; }), on: vi.fn((_event: string, run: () => void) => { changed.push(run); return () => { changed.splice(changed.indexOf(run), 1); }; }) };
+  const store = { client, threads: [] } as unknown as Store;
+  const view = new AgentsView(store);
+  const directory = agentDirectory(store);
+  try {
+    view.start();
+    view.showDesk('agt_open');
+    const release = directory.watch();
+    await vi.advanceTimersByTimeAsync(3000);
+    calls.length = 0;
+    // A working agent: one `agents.changed` a second, for 30 seconds.
+    for (let second = 0; second < 30; second++) { for (const run of changed) run(); await vi.advanceTimersByTimeAsync(1000); }
+    expect(calls).toHaveLength(30);
+    expect(new Set(calls.map(params => JSON.stringify(params)))).toEqual(new Set([JSON.stringify({ desk: 'agt_open' })]));
+    expect(directory.snapshot).toBe(view.snapshot);
+    // Off the page the directory reads its own snapshot again, with no desk.
+    view.pause();
+    calls.length = 0;
+    for (const run of changed) run();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(calls).toEqual([{ desk: null }]);
+    release();
+  } finally { view.close(); vi.useRealTimers(); }
 });
 
 test('the directory counts an agent at work from its own status when this client has its thread row', () => {

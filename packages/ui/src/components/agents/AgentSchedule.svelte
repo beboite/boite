@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { CalendarClock } from '@lucide/svelte';
-  import type { AgentRoutine, AgentSchedule } from '@boite/contracts';
+  import { AGENT_ROUTINE_NAME_MAX, AGENT_ROUTINE_PROMPT_MAX, type AgentRoutine, type AgentSchedule } from '@boite/contracts';
   import type { AgentsView } from '../../lib/agents.svelte';
   import { dateTime, describeSchedule, INTERVALS, intervalChip, localZone, previewNext, routineName, spent, WEEK, WEEKDAYS, weekdayName } from '../../lib/schedule';
   import { fill, strings } from '../../lib/strings';
@@ -96,7 +96,7 @@
   {/if}
 
   <label class="agent-field">{t.what}
-    <textarea required rows="3" maxlength="16000" bind:value={prompt} placeholder={t.whatPlaceholder} data-testid="routine-prompt"></textarea>
+    <textarea required rows="3" maxlength={AGENT_ROUTINE_PROMPT_MAX} bind:value={prompt} placeholder={t.whatPlaceholder} data-testid="routine-prompt"></textarea>
   </label>
 
   <div class="agent-field"><span>{t.when}</span>
@@ -148,7 +148,7 @@
 
   <details class="agent-more-inline">
     <summary>{labels.advanced}</summary>
-    <label class="agent-field">{t.name}<input bind:value={name} maxlength="120" placeholder={prompt.trim() ? routineName(prompt) : ''} data-testid="routine-name" /></label>
+    <label class="agent-field">{t.name}<input bind:value={name} maxlength={AGENT_ROUTINE_NAME_MAX} placeholder={prompt.trim() ? routineName(prompt) : ''} data-testid="routine-name" /></label>
   </details>
 
   <div class="agent-form-actions">
