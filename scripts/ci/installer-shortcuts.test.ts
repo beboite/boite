@@ -29,8 +29,10 @@ function nsisFunction(name: string) {
   return template.slice(start, template.indexOf('FunctionEnd', start) + 'FunctionEnd'.length);
 }
 
-// Run the shipped NSIS functions with their real COM shortcut helpers. Only
-// the shell folders and registry namespace are redirected into this fixture.
+// Run the shipped NSIS functions with their real COM shortcut helpers. The
+// shell folders and registry namespace are redirected into this fixture, and
+// the uninstall's unpin and jump list calls are recorded in shell-calls.txt
+// instead of reaching this machine's Start menu and taskbar.
 describe.skipIf(!ready)('installer shortcuts', () => {
   let setup: string;
   function build() {
@@ -94,8 +96,12 @@ describe.skipIf(!ready)('installer shortcuts', () => {
     running.add(child);
     const at = Date.now();
     const code = await Promise.race([child.exited, Bun.sleep(RUN_DEADLINE_MS).then(() => 'stalled' as const)]);
+    if (code === 'stalled') {
+      // Awaited, so the killed run lets go of its directory before the next one or the cleanup.
+      child.kill(); await child.exited; running.delete(child);
+      throw new Error(`${exe} /S ${args.join(' ')} had not exited after ${RUN_DEADLINE_MS} ms`);
+    }
     running.delete(child);
-    if (code === 'stalled') { child.kill(); throw new Error(`${exe} /S ${args.join(' ')} had not exited after ${RUN_DEADLINE_MS} ms`); }
     slowest = Math.max(slowest, Date.now() - at);
     expect(code).toBe(0);
   }
