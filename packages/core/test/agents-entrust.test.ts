@@ -72,7 +72,7 @@ test('entrusting starts the goal, carries the persona, puts the thread on the de
   await waitFor(() => h.core.activity.get(threadId).goal?.status === 'complete');
   expect(prompts[0]).toContain('their agent Ada (Builds)');
   expect(prompts[0]).toContain('Always run the tests before answering.');
-  await waitFor(() => facts().some(f => f.text.startsWith(`Entrusted thread "Fix the login" (${threadId}): goal done.`)));
+  await waitFor(() => facts().some(f => f.text.startsWith(`Entrusted thread ${threadId}, titled "Fix the login": goal done.`)));
   expect(facts().find(f => f.key.startsWith('goal:'))!.text).toContain('All tests pass. The login works.');
   expect(h.core.workforce.entrusted.list()).toEqual([]);
   expect(h.core.workforce.entrusted.instructions(threadId)).toBe('');
@@ -109,6 +109,6 @@ test('a failed goal turn leaves one line in the agent thread and keeps the entru
   await client.call('agents.entrust', { threadId, agentId: agent.id });
   await waitFor(() => h.core.activity.get(threadId).goal?.status === 'paused' && h.core.threads.get(threadId).status !== 'running');
   await waitFor(() => lines().length === 2);
-  expect(lines()[1]).toBe(`Entrusted thread "echo thread" (${threadId}): goal stopped.`);
+  expect(lines()[1]).toBe(`Entrusted thread ${threadId}, titled "echo thread": goal stopped.`);
   expect(h.core.workforce.entrusted.list()).toHaveLength(1);
 });

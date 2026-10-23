@@ -12,7 +12,12 @@
  *
  * Its desk is the threads it follows: those it started, wrote to, answered
  * for, was entrusted or put there itself. A follow stays while the thread is
- * open and leaves a day after it is done or archived. Besides their turns,
+ * open and leaves a day after it is done or archived. A follow the agent made
+ * through a project it looks after holds only while that project is still
+ * entrusted to it: when the owner takes the project back it leaves the desk
+ * with the facts it gathered, and every desk read, fact and context block
+ * checks it again. A thread the owner entrusted or watched for the agent
+ * stays: that is the owner's own grant. Besides their turns,
  * questions and permissions, the desk reports a running turn silent for
  * `STALL_MS` (once per turn), a pull request merged and checks that start to
  * fail.
@@ -27,6 +32,7 @@ import { newId } from '../ids.ts';
 import { deskPullRequest } from './context.ts';
 import { NOTICE_BATCH_MS } from './runtime.ts';
 import type { AgentStore } from './store.ts';
+import { quoted } from './validation.ts';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -50,9 +56,10 @@ const ACTIONS: readonly ResidentThreadAction[] = ['archive', 'done', 'unarchive'
 /**
  * One followed thread; older cores saved the time alone. `pr` is the pull
  * request as the agent was last told of it, so a merge or failing checks
- * wake it once.
+ * wake it once. `owner`: the owner put it there, so it holds whatever the
+ * agent's projects (an entrusted thread is one too).
  */
-type Follow = { at: number; origin: AgentWatch['origin']; pr?: AgentWatchPullRequest | null };
+type Follow = { at: number; origin: AgentWatch['origin']; pr?: AgentWatchPullRequest | null; owner?: true };
 interface Stall { turnId: string; since: number | null }
 
 /** Whether a follow of this thread still holds: it is open, or done or archived less than a day ago. */
@@ -168,10 +175,6 @@ export class AgentProjects {
     this.store.changed();
   }
 
-  /** Whether a follow still holds: its thread is open, or done or archived less than a day ago. */
-  private holds(threadId: ThreadId, now: number): boolean {
-    return holding(this.core.journal.getThread(threadId), now);
-  }
   /** The threads of a desk in one read: a desk holds up to `WATCHES_MAX` open ones and the settled ones of the last day. */
   private threadsOf(ids: Iterable<ThreadId>): Map<ThreadId, ThreadSummary> {
     return new Map(this.core.journal.listThreadsIn(ids).map(thread => [thread.id, thread]));
@@ -183,7 +186,7 @@ export class AgentProjects {
    * the agent as a fact. The first origin stays. Past `WATCHES_MAX` open
    * threads the oldest open follow leaves; settled ones leave a day after.
    */
-  follow(agentId: string, threadId: ThreadId, origin: AgentWatch['origin'] = 'followed'): void {
+  follow(agentId: string, threadId: ThreadId, origin: AgentWatch['origin'] = 'followed', owner = false): void {
     const now = Date.now();
     const saved = this.saved(agentId);
     const previous = saved[threadId];
@@ -197,7 +200,8 @@ export class AgentProjects {
     // A new follow records the pull request as it stands, so its merge or failing checks are news.
     const thread = previous ? null : threads.get(threadId) ?? null;
     const pr = thread ? { pr: deskPullRequest(this.core, thread) } : {};
-    this.write(agentId, { ...follows, [threadId]: { ...previous, ...pr, at: now, origin: previous?.origin ?? origin } });
+    const granted = owner || origin === 'entrusted' || previous?.owner === true ? { owner: true as const } : {};
+    this.write(agentId, { ...follows, [threadId]: { ...previous, ...pr, at: now, origin: previous?.origin ?? origin, ...granted } });
   }
   unfollow(agentId: string, threadId: ThreadId): boolean {
     const saved = this.saved(agentId);
@@ -206,15 +210,44 @@ export class AgentProjects {
     this.write(agentId, saved);
     return true;
   }
+  /** Whether the agent follows the thread now: the follow holds and the agent may still see the thread. */
   follows(agentId: string, threadId: ThreadId): boolean {
-    return threadId in this.saved(agentId) && this.holds(threadId, Date.now());
+    const follow = this.saved(agentId)[threadId];
+    if (!follow) return false;
+    const thread = this.core.journal.getThread(threadId);
+    return holding(thread, Date.now()) && this.allowed(agentId, follow, thread);
+  }
+  /**
+   * The owner's grant, or a thread of a project still entrusted to the agent:
+   * what a follow needs to reach the agent. `projects` saves reading the
+   * profile again for every follow of one desk.
+   */
+  private allowed(agentId: string, follow: Follow, thread: ThreadSummary, projects?: readonly ProjectId[]): boolean {
+    if (follow.owner === true || follow.origin === 'entrusted') return true;
+    if (thread.projectId === null) return false;
+    if (projects) return projects.includes(thread.projectId);
+    const agent = this.store.records.find('profile', agentId);
+    return agent !== null && this.projectsOf(agent).includes(thread.projectId);
+  }
+  /**
+   * Whether a fact about `threadId` may still reach the agent: the thread is
+   * in one of its projects, or on its desk by a follow that still holds.
+   */
+  mayHear(agent: AgentProfile, threadId: ThreadId): boolean {
+    const projectId = this.core.journal.getThread(threadId)?.projectId;
+    return (projectId != null && this.projectsOf(agent).includes(projectId)) || this.follows(agent.id, threadId);
   }
   /** The threads on an agent's desk with each thread as read, open ones first, each group newest follow first. */
   watchesOf(agentId: string): { threadId: ThreadId; origin: AgentWatch['origin']; since: number; thread: ThreadSummary }[] {
     const now = Date.now();
     const saved = this.saved(agentId);
     const threads = this.threadsOf(Object.keys(saved));
-    const follows = newestFirst(Object.entries(saved).filter(([id]) => holding(threads.get(id) ?? null, now)))
+    const agent = this.store.records.find('profile', agentId);
+    const projects = agent ? this.projectsOf(agent) : [];
+    const follows = newestFirst(Object.entries(saved).filter(([id, follow]) => {
+      const thread = threads.get(id) ?? null;
+      return holding(thread, now) && this.allowed(agentId, follow, thread, projects);
+    }))
       .map(([threadId, follow]) => ({ threadId, origin: follow.origin, since: follow.at, thread: threads.get(threadId)! }));
     return [...follows.filter(f => !f.thread.archived), ...follows.filter(f => f.thread.archived)];
   }
@@ -313,8 +346,8 @@ export class AgentProjects {
       for (const agentId of agentIds) {
         const agent = this.store.records.find('profile', agentId);
         if (agent?.status !== 'active' || !this.follows(agentId, threadId)) continue;
-        this.notify(agent, `stall:${turn.id}`, `"${thread.title}" (${thread.id}) has a running turn that produced nothing for ${minutes} minutes. `
-          + `Read it with boite thread show ${thread.id}; steer it with boite thread send, or stop it with boite thread stop ${thread.id}.`);
+        this.notify(agent, `stall:${turn.id}`, `Thread ${thread.id}, titled ${quoted(thread.title)}, has a running turn that produced nothing for ${minutes} minutes. `
+          + `Read it with boite thread show ${thread.id}; steer it with boite thread send, or stop it with boite thread stop ${thread.id}.`, NOTICE_BATCH_MS, [thread.id]);
       }
       this.store.changed();
     }
@@ -336,16 +369,16 @@ export class AgentProjects {
       const was = follow.pr ?? null;
       this.core.journal.setSetting(`${FOLLOW}${agentId}`, { ...saved, [threadId]: { ...follow, pr: now } });
       const agent = this.store.records.find('profile', agentId);
-      if (now === null || was === null || agent?.status !== 'active' || !this.holds(threadId, Date.now())) continue;
+      if (now === null || was === null || agent?.status !== 'active' || !this.follows(agentId, threadId)) continue;
       const same = was.url === now.url;
       if (now.state === 'merged' && (!same || was.state !== 'merged')) {
-        this.notify(agent, `pr-merged:${now.url}`, `Pull request #${now.number} of "${thread.title}" (${thread.id}) was merged: ${now.url}. `
-          + `Mark the thread done (boite thread done ${thread.id}) once nothing is left in it.`);
+        this.notify(agent, `pr-merged:${now.url}`, `Pull request #${now.number} of thread ${thread.id}, titled ${quoted(thread.title)}, was merged: ${quoted(now.url)}. `
+          + `Mark the thread done (boite thread done ${thread.id}) once nothing is left in it.`, NOTICE_BATCH_MS, [thread.id]);
       } else if (now.checks === 'failing' && (!same || was.checks !== 'failing')) {
         const seen = this.core.pullRequestWatches.of(threadId).find(w => w.url.toLowerCase() === now.url.toLowerCase())?.seen;
         const counts = seen ? ` (${seen.checks.failed} of ${seen.checks.total} failed on ${seen.head})` : '';
-        this.notify(agent, `pr-checks:${now.url}:${seen?.head ?? Date.now()}`, `Checks fail on pull request #${now.number} of "${thread.title}" (${thread.id})${counts}: ${now.url}. `
-          + `Its thread is ${thread.status}; steer it with boite thread send ${thread.id} if it is not fixing them.`);
+        this.notify(agent, `pr-checks:${now.url}:${seen?.head ?? Date.now()}`, `Checks fail on pull request #${now.number} of thread ${thread.id}, titled ${quoted(thread.title)}${counts}: ${quoted(now.url)}. `
+          + `Its thread is ${thread.status}; steer it with boite thread send ${thread.id} if it is not fixing them.`, NOTICE_BATCH_MS, [thread.id]);
       }
     }
   }
@@ -481,23 +514,29 @@ export class AgentProjects {
 
   // -- facts ------------------------------------------------------------------
 
-  /** A fact for the agent's next event turn (`AgentRuntime.fact`). */
-  notify(agent: AgentProfile, key: string, text: string, delay = NOTICE_BATCH_MS): boolean {
+  /** A fact for the agent's next event turn (`AgentRuntime.fact`), about the threads it names. */
+  notify(agent: AgentProfile, key: string, text: string, delay = NOTICE_BATCH_MS, threadIds: ThreadId[] = []): boolean {
     if (this.closed) return false;
-    return this.core.agentRuntime.fact(agent.id, { key, text: trimmed(text, NOTICE_TEXT + 500), delay });
+    return this.core.agentRuntime.fact(agent.id, { key, text: trimmed(text, NOTICE_TEXT + 500), delay, threadIds });
   }
 
   /**
-   * After the owner takes projects back: waiting facts keep only what they
-   * say about threads still in the agent's projects or on its desk, so a
-   * thread's answer never reaches an agent that lost it.
+   * After the owner takes projects back: the follows the agent made through
+   * them leave its desk, and waiting facts keep only what they say about
+   * threads it may still hear of, so a thread's answer never reaches an agent
+   * that lost it. The runtime checks the facts again when it delivers them.
    */
   forget(agent: AgentProfile): void {
-    const kept = new Set(this.projectsOf(agent));
-    this.core.agentRuntime.filterFacts(agent.id, fact => [...fact.text.matchAll(/\((thr_[0-9a-z]+)\)/g)].every(([, id]) => {
-      const projectId = this.core.journal.getThread(id!)?.projectId;
-      return (projectId != null && kept.has(projectId)) || this.follows(agent.id, id!);
+    const saved = this.saved(agent.id);
+    const projects = this.projectsOf(agent);
+    const threads = this.threadsOf(Object.keys(saved));
+    const kept = Object.fromEntries(Object.entries(saved).filter(([id, follow]) => {
+      const thread = threads.get(id);
+      // A thread gone or settled leaves by itself a day after; only a lost project takes a follow now.
+      return !thread || this.allowed(agent.id, follow, thread, projects);
     }));
+    if (Object.keys(kept).length !== Object.keys(saved).length) this.write(agent.id, kept);
+    this.core.agentRuntime.filterFacts(agent.id, fact => this.core.agentRuntime.factThreads(fact).every(id => this.mayHear(agent, id)));
     this.store.changed();
   }
 
@@ -513,18 +552,18 @@ export class AgentProjects {
       // Threads it follows report every turn; the others only when they fail.
       if (!this.follows(agent.id, thread.id) && turn.status !== 'error') continue;
       const answer = this.core.delegation.result(turn);
-      const pr = thread.pullRequest ? `\nPull request #${thread.pullRequest.number} ${thread.pullRequest.state}: ${thread.pullRequest.url}` : '';
-      this.notify(agent, `turn:${turn.id}`, `Turn ${turn.status} in "${thread.title}" (${thread.id}).${pr}\n${answer === null ? 'No text answer.' : trimmed(answer, NOTICE_TEXT)}`);
+      const pr = thread.pullRequest ? `\nPull request #${thread.pullRequest.number} ${thread.pullRequest.state}: ${quoted(thread.pullRequest.url)}` : '';
+      this.notify(agent, `turn:${turn.id}`, `Turn ${turn.status} in thread ${thread.id}, titled ${quoted(thread.title)}.${pr}\n${answer === null ? 'No text answer.' : `Its final answer: ${quoted(trimmed(answer, NOTICE_TEXT))}`}`, NOTICE_BATCH_MS, [thread.id]);
     }
   }
 
   private noticeQuestion(question: QuestionRequest): void {
     const thread = this.core.journal.getThread(question.threadId);
     if (!this.watched(thread)) return;
-    const options = question.options.length ? `\nOptions: ${question.options.map(option => `${option.id}=${option.label}`).join('; ')}` : '';
+    const options = question.options.length ? `\nOptions, by id: ${JSON.stringify(Object.fromEntries(question.options.map(option => [option.id, option.label])))}` : '';
     for (const agent of this.concerned(thread)) {
-      this.notify(agent, `ask:${question.id}`, `"${thread.title}" (${thread.id}) asks the user, ask ${question.id} (still pending when you read this only if boite thread show lists it):\n${trimmed(question.text, NOTICE_TEXT)}${options}`,
-        this.follows(agent.id, thread.id) ? NOTICE_BATCH_MS : QUESTION_GRACE_MS);
+      this.notify(agent, `ask:${question.id}`, `Thread ${thread.id}, titled ${quoted(thread.title)}, asks the user, ask ${question.id} (still pending when you read this only if boite thread show lists it).\nQuestion: ${quoted(trimmed(question.text, NOTICE_TEXT))}${options}`,
+        this.follows(agent.id, thread.id) ? NOTICE_BATCH_MS : QUESTION_GRACE_MS, [thread.id]);
     }
   }
 
@@ -533,7 +572,7 @@ export class AgentProjects {
     if (!this.watched(thread)) return;
     for (const agent of this.concerned(thread)) {
       if (!this.follows(agent.id, thread.id)) continue;
-      this.notify(agent, `permission:${request.id}`, `"${thread.title}" (${thread.id}) waits on the user's permission for ${request.toolName}${request.description ? `: ${trimmed(request.description, 600)}` : ''}. Only the user can allow it.`, QUESTION_GRACE_MS);
+      this.notify(agent, `permission:${request.id}`, `Thread ${thread.id}, titled ${quoted(thread.title)}, waits on the user's permission for the tool ${quoted(request.toolName)}${request.description ? `, described as ${quoted(trimmed(request.description, 600))}` : ''}. Only the user can allow it.`, QUESTION_GRACE_MS, [thread.id]);
     }
   }
 

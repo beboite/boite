@@ -3,7 +3,7 @@ import type { GoalOutcome } from '../activity.ts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import type { AgentStore } from './store.ts';
-import { object, text } from './validation.ts';
+import { object, quoted, text } from './validation.ts';
 
 const SETTING = 'agents:entrusted';
 export const DEFAULT_OBJECTIVE = 'Take over this work where it stands and carry it to a verified result.';
@@ -93,9 +93,9 @@ export class AgentEntrustments {
     if (!entry) return;
     const thread = this.core.journal.getThread(event.threadId);
     if (event.outcome === 'complete') this.write(this.list().filter(other => other.threadId !== entry.threadId));
-    const what = `Entrusted thread "${thread?.title ?? ''}" (${entry.threadId}): goal ${EVENTS[event.outcome]}.`;
+    const what = `Entrusted thread ${entry.threadId}, titled ${quoted(thread?.title ?? '')}: goal ${EVENTS[event.outcome]}.`;
     if (event.outcome === 'stopped') this.core.agentRuntime.line(entry.agentId, what);
-    else this.core.agentRuntime.fact(entry.agentId, { key: `goal:${entry.threadId}:${event.outcome}:${Date.now()}`, text: `${what}\n${event.text.slice(0, ANSWER_LIMIT)}` });
+    else this.core.agentRuntime.fact(entry.agentId, { key: `goal:${entry.threadId}:${event.outcome}:${Date.now()}`, text: `${what}\nIts final answer: ${quoted(event.text.slice(0, ANSWER_LIMIT))}`, threadIds: [entry.threadId] });
     this.store.changed();
   }
 

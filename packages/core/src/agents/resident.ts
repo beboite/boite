@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { AGENT_DAILY_BUDGET } from '@boite/contracts';
 import type { AgentAccountGrant, AgentBrain, AgentBrainRoot, AgentProfile, AgentRuntimeConfig, AgentSelection, RpcParams } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { agentProvider, checkSavedSelection } from '../threads/selection.ts';
+import { checkBrainPath, createBrainFile, readBrainFile, rewriteBrainFile } from './brain-files.ts';
 import { ids, object, text } from './validation.ts';
 import type { AgentsRepository } from './repository.ts';
 import { slugOf } from '../worktree.ts';
@@ -146,10 +147,15 @@ export class ResidentAgents {
   }
   brain(agentId:string):AgentBrain {
     this.records.get('profile',agentId);
-    const path=this.brainPath(agentId);
+    const root=this.brainRoot().path,path=this.brainPath(agentId);
+    // A linked folder is refused before anything is created through it (`brain-files.ts`).
+    checkBrainPath(root,join(path,'skills'),true);
     mkdirSync(join(path,'skills'),{recursive:true});
-    for(const [name,content] of Object.entries(BRAIN_FILES))if(!existsSync(join(path,name)))writeFileSync(join(path,name),content,{flag:'wx'});
-    const instructions=readFileSync(join(path,'AGENTS.md'),'utf8'),memory=readFileSync(join(path,'MEMORY.md'),'utf8');
+    for(const [name,content] of Object.entries(BRAIN_FILES)){
+      try{createBrainFile(root,join(path,name),content);}
+      catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}
+    }
+    const instructions=readBrainFile(root,join(path,'AGENTS.md')),memory=readBrainFile(root,join(path,'MEMORY.md'));
     const revision=createHash('sha256').update(JSON.stringify([instructions,memory])).digest('hex');
     return{path,instructions,memory,revision};
   }
@@ -211,7 +217,7 @@ export class ResidentAgents {
     if(brain.revision!==p.expectedRevision)throw refused('brain revision changed; reload before saving');
     // An older MEMORY.md may run past AGENT_MEMORY_MAX: the owner can still save it while cutting it down.
     const instructions=text(p.instructions,'instructions',32000,true),memory=text(p.memory,'memory',64000,true);
-    for(const [name,content] of [['AGENTS.md',instructions],['MEMORY.md',memory]]){const target=join(brain.path,name!);writeFileSync(target+'.tmp',content!);renameSync(target+'.tmp',target);}
+    for(const [name,content] of [['AGENTS.md',instructions],['MEMORY.md',memory]])rewriteBrainFile(this.brainRoot().path,join(brain.path,name!),content!);
     this.core.workforce.changed();return this.brain(p.agentId);
   }
 }

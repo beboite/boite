@@ -1,3 +1,4 @@
+import { AGENT_ROUTINE_NAME_MAX, AGENT_ROUTINE_PROMPT_MAX, AGENT_ROUTINES_MAX } from '@boite/contracts';
 import type { AgentRoutine, AgentSchedule, RpcParams, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
@@ -82,6 +83,10 @@ export class AgentRoutines {
     if(params.threadId!==undefined&&this.core.workforce.agentOfThread(params.threadId)?.id!==agent.id)throw refused('routine: an agent schedules its own routines from its own thread',{field:'agentId'});
     const previous=params.id?this.r.get('routine',params.id):null;
     if(previous&&previous.agentId!==agent.id)throw refused('agentId: a routine cannot change owner');
+    if(!previous){
+      const held=this.r.list('routine').filter(r=>r.agentId===agent.id).length;
+      if(held>=AGENT_ROUTINES_MAX)throw refused(`routine: ${agent.name} already has ${held} routines, the most an agent may hold is ${AGENT_ROUTINES_MAX}; remove one before adding another`,{field:'agentId',count:held,max:AGENT_ROUTINES_MAX});
+    }
     const schedule=checkSchedule(v.schedule),enabled=boolean(v.enabled,'enabled');
     const changed=JSON.stringify(previous?.schedule)!==JSON.stringify(schedule);
     // A once routine that already ran is done: resuming it must not fire it again at its past date.
@@ -89,7 +94,7 @@ export class AgentRoutines {
     const spent=schedule.kind==='once'&&!changed&&previous?.lastScheduledAt!=null;
     const nextAt=!enabled||spent?null:previous?.enabled&&!changed?previous.nextAt:schedule.kind==='once'?schedule.at:nextOccurrence(schedule,Date.now());
     const lastScheduledAt=schedule.kind==='once'&&changed?null:previous?.lastScheduledAt??null;
-    const value:Omit<AgentRoutine,'id'|'revision'|'createdAt'|'updatedAt'>={agentId:agent.id,name:text(v.name,'name',120),prompt:text(v.prompt,'prompt',16000),schedule,enabled,nextAt,lastTurnId:previous?.lastTurnId??null,lastScheduledAt,lastOutcome:previous?.lastOutcome??null};
+    const value:Omit<AgentRoutine,'id'|'revision'|'createdAt'|'updatedAt'>={agentId:agent.id,name:text(v.name,'name',AGENT_ROUTINE_NAME_MAX),prompt:text(v.prompt,'prompt',AGENT_ROUTINE_PROMPT_MAX),schedule,enabled,nextAt,lastTurnId:previous?.lastTurnId??null,lastScheduledAt,lastOutcome:previous?.lastOutcome??null};
     const result=params.id?this.r.update('routine',params.id,integer(params.expectedRevision,'expectedRevision',1,Number.MAX_SAFE_INTEGER),value):this.r.create('routine',value);
     this.core.workforce.changed();return result;
   }

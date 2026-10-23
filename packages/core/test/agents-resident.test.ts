@@ -2,11 +2,13 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
+import { AGENT_ROUTINES_MAX } from '@boite/contracts';
 import type { AgentProfile, AgentRuntimeConfig } from '@boite/contracts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 import { Core } from '../src/core.ts';
 import { SCHEMA_VERSION } from '../src/journal/schema.ts';
 import { checkSchedule, nextOccurrence } from '../src/agents/routines.ts';
+import { agentContext, ROUTINES_TEXT_MAX } from '../src/agents/context.ts';
 import { connect } from '../src/client.ts';
 import { makeAgent, settled, turnsOf } from './agent-fixture.ts';
 import { thrown } from './settle.ts';
@@ -115,6 +117,28 @@ test('an agent schedules and removes only its own routines, from its own thread'
     expect(await thrown(own.call('agents.routine.remove', { threadId, routineId: theirs.id }))).toThrow('only its own routines');
     expect(await own.call('agents.routine.remove', { threadId, routineId: saved.id })).toEqual({ removed: true });
   } finally { own.close(); }
+});
+
+test('an agent holds at most 50 routines with short names and prompts, and its context lists 2,000 characters of them', async () => {
+  const own = await connect(h.url, h.core.agents.tokenFor(threadId));
+  try {
+    const save = (i: number, over: Record<string, unknown> = {}) => own.call('agents.routine.save', { threadId, value: routineValue({ name: `${i}:${'R'.repeat(70)}`, enabled: false, schedule: { kind: 'once', at: 1 }, ...over }) });
+    expect(await thrown(save(0, { name: 'N'.repeat(81) }))).toThrow('name');
+    expect(await thrown(save(0, { prompt: 'P'.repeat(4001) }))).toThrow('prompt');
+    for (let i = 0; i < AGENT_ROUTINES_MAX; i++) await save(i);
+    expect(await thrown(save(AGENT_ROUTINES_MAX))).toThrow(`already has ${AGENT_ROUTINES_MAX} routines, the most an agent may hold is ${AGENT_ROUTINES_MAX}`);
+    // The owner is held to the same count; an edit of one it has still saves.
+    expect(await thrown(client.call('agents.routine.save', { value: routineValue() }))).toThrow(`already has ${AGENT_ROUTINES_MAX} routines`);
+    const first = h.core.workforce.records.list('routine')[0]!;
+    await own.call('agents.routine.save', { threadId, id: first.id, expectedRevision: first.revision, value: routineValue({ name: 'Renamed', enabled: false, schedule: { kind: 'once', at: 1 } }) });
+  } finally { own.close(); }
+  expect(h.core.workforce.records.list('routine')).toHaveLength(AGENT_ROUTINES_MAX);
+  const block = agentContext(h.core, current()).text;
+  const section = block.slice(block.indexOf('Your routines:'), block.indexOf('\n\n', block.indexOf('Your routines:')));
+  const more = section.match(/\n(\d+) more: boite agent routines$/);
+  expect(more).not.toBeNull();
+  expect(section.length - more![0].length).toBeLessThanOrEqual('Your routines:\n'.length + ROUTINES_TEXT_MAX);
+  expect(section.split('\n').filter(line => line.startsWith('- ')).length + Number(more![1])).toBe(AGENT_ROUTINES_MAX);
 });
 
 test('a once routine that ran stays done: resuming it fires nothing, a new date re-arms it', async () => {
