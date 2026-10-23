@@ -8,7 +8,7 @@
   import { backgroundLabel } from '../lib/background';
   import { secondClock } from '../lib/clock.svelte';
   import type { Snippet } from 'svelte';
-  let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, pointed = false, actions }: {
+  let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, pointed = false, timed = true, actions }: {
     turn: Turn;
     /**
      * When the user's request this turn belongs to started, earlier than the
@@ -28,6 +28,8 @@
     stop?: () => void;
     /** The pointer is on another message of this turn: the settled summary shows as if its own message were pointed at. */
     pointed?: boolean;
+    /** False when a fold row above the answer already says how long the turn worked. */
+    timed?: boolean;
     /** The turn's own buttons (copy, retry, fork), at the end of the line. */
     actions?: Snippet;
   } = $props();
@@ -84,7 +86,7 @@
       </div>
     {:else}
     {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else if !activeContent && !activeTool}<LoaderCircle size={16} class="spinner" />{/if}
-    {#if spent !== null}
+    {#if spent !== null && (timed || running)}
       <span class="ui-label" data-testid="turn-elapsed" title={ownLabel}>{fill(elapsedLabel, { time: elapsed(spent) })}</span>
     {/if}
     {#if compactOperation && (turn.status === 'error' || turn.status === 'stopped')}
@@ -101,8 +103,11 @@
         {@render metric('turn-provider-signal', fill(strings.chat.providerSignal, { time: elapsed(providerAge) }))}
       {/if}
     {/if}
-    {#if turn.finishedAt !== null}
+    {#if turn.finishedAt !== null && (timed || running)}
       {@render metric('turn-finished-at', fill(turn.status === 'error' ? strings.chat.failedAt : strings.chat.finishedAt, { time: clockTime(turn.finishedAt) }), exactTime(turn.finishedAt))}
+    {:else if turn.finishedAt !== null}
+      <!-- The time it worked is on the fold row above the answer: the line opens on when it finished, with no dot before it. -->
+      <span class="ui-label" data-testid="turn-finished-at" title={exactTime(turn.finishedAt)}>{fill(turn.status === 'error' ? strings.chat.failedAt : strings.chat.finishedAt, { time: clockTime(turn.finishedAt) })}</span>
     {/if}
     {#if total > 0}
       {@render metric('turn-tokens', `${formatTokens(total)} ${strings.units.tokens}`, breakdown)}

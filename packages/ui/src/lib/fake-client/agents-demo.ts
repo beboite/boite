@@ -89,6 +89,7 @@ export function seedAgentsDemo(ctx: FakeContext): void {
     const notes = deskThread(ctx, project.id, 'Release notes 2.0.4', now - 7 * 60 * MINUTE, 'done');
     askAsync(ctx, icons, icons.turns[0]!, null, 'Two icon sets fit the release. Which one should the app ship with?', ['Lucide', 'Phosphor'], false);
     icons.openQuestions = 1;
+    icons.updatedAt = now - 30 * MINUTE;
     const pr = (number: number, state: 'open' | 'merged', checks: 'passing' | 'failing' | null) => ({ number, url: `https://github.com/example/boite/pull/${number}`, state, checks });
     ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: fix.id, origin: 'started', since: fix.createdAt, stalledSince: null, pullRequest: pr(482, 'open', 'failing') });
     ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: flaky.id, origin: 'started', since: flaky.createdAt, stalledSince: null, pullRequest: null });

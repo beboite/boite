@@ -38,7 +38,8 @@
   }
   .memory-pass:disabled { opacity: 1; cursor: default; }
   .memory-pass:hover:not(:disabled), .memory-pass:focus-visible { color: var(--color-foreground); }
-  .glyph { display: inline-flex; color: var(--color-accent); }
+  .glyph { flex: none; display: inline-flex; color: var(--color-accent); }
+  .memory-pass > .ui-label { flex: none; }
   .memory-pass[data-status='running'] .glyph { animation: pulse 1.6s var(--ease-out-quint) infinite var(--loops); }
   .memory-pass[data-status='error'] .glyph { color: var(--color-danger); }
   .memory-pass[data-status='unchanged'] .glyph { color: var(--color-subtle); }

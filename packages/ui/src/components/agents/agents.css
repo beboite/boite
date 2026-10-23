@@ -220,6 +220,7 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
  * threads on its desk as cards, its routines, its memory and its day.
  */
 .agent-desk { display: flex; flex-direction: column; gap: 18px; height: 100%; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 14px 14px 28px; }
+.agent-desk > * { flex: none; }
 .agent-desk .hint { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
 .desk-label { font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted-foreground); }
 .desk-now { --tone: var(--color-subtle); position: relative; display: flex; align-items: center; gap: 14px; padding: 14px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: linear-gradient(135deg, color-mix(in srgb, var(--tone) 16%, var(--color-surface)) 0%, var(--color-surface) 70%); box-shadow: var(--shadow-e1); overflow: hidden; transition: background var(--dur-3) var(--ease-out-quint), border-color var(--dur-3) var(--ease-out-quint); }

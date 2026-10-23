@@ -13,7 +13,7 @@
   import WakeMarker from './WakeMarker.svelte';
   import TurnFoldRow from './TurnFoldRow.svelte';
   import MemoryPassLine from './MemoryPassLine.svelte';
-  import { MEMORY_PREFIX, MemoryLines, TurnFolds, openedTurns } from '../lib/agent-turns';
+  import { FOLD_PREFIX, MEMORY_PREFIX, MemoryLines, TurnFolds, openedTurns } from '../lib/agent-turns';
   import { AgentsView } from '../lib/agents.svelte';
   import { agentMailFor, groupAgentMail, withAgentMail } from '../lib/agent-mail';
   import DelegationActivity from './DelegationActivity.svelte';
@@ -825,7 +825,7 @@
           {#if turn && closes}
             {@const files = filesOf(turn)}
             {#if files}<TurnFiles {store} {...files} loadDiffs={() => Promise.all(files.deferred.map(source => store.loadToolOutput(threadId, source.messageId, source.toolId))).then(() => {})} />{/if}
-            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id}>
+            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id} timed={!folded.folds.has(FOLD_PREFIX + turn.id)}>
               {#snippet actions()}
                 <MessageActions
                   text={() => turnAnswer(messages, turn.id)}
