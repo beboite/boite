@@ -32,7 +32,11 @@ model if it was not. A group shows its recipients there instead, and a paired
 device no chips. The worktree chip, the queue and the slash and mention menus
 stay out: a message never queues. Each prompt is the thread's own
 `UserMessage`: copy button, send time, two ticks (received, taken into a turn)
-and its pictures as thumbnails that open in the viewer. The user asks, the
+and its pictures as thumbnails that open in the viewer. A received message
+keeps its receipt if execution fails, pauses or is cancelled. Paused work,
+including an execution stopped at its configured time limit, shows the reason
+and Resume in the conversation. Delivery failures remain visible only for
+recipients that never took the message into a turn. The user asks, the
 agent answers in its bubble, works (three dots in a bubble) and comes back with
 the result, in words, with the pictures and files it attached under the
 bubble. What the user attaches goes with `agents.message.send`: the message

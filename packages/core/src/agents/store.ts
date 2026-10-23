@@ -346,9 +346,9 @@ export class AgentStore {
   private heldFor(work: AgentWork): Held | undefined {
     return work.messageId ? this.core.journal.getSetting(heldKey(work.messageId)) as Held | undefined : undefined;
   }
-  /** Lets a message's attachments go once no recipient's work can start again: every delivery processed, cancelled or over the limit. */
+  /** Cancellation releases held files even when a received message keeps its receipt. */
   releaseHeld(messageId: string | null): void {
-    if (messageId && this.records.find('delivery', 'messageId', [messageId]).every(d => ['processed', 'cancelled', 'limited'].includes(d.status))) this.core.journal.deleteSetting(heldKey(messageId));
+    if (messageId && this.records.find('delivery', 'messageId', [messageId]).every(d => ['processed', 'cancelled', 'limited'].includes(d.status) || d.workId && this.records.get('work', d.workId).status === 'cancelled')) this.core.journal.deleteSetting(heldKey(messageId));
   }
 
   /**
@@ -472,7 +472,7 @@ export class AgentStore {
         this.records.update('task', task.id, task.revision, { ...task, generation: taskGeneration, leaseUntil: null, status: action === 'cancel' ? 'cancelled' : 'assigned' });
       }
       if (action === 'cancel') for (const decision of this.records.find('decision', 'workId', [work.id]).filter(d => d.status === 'pending')) this.records.update('decision', decision.id, decision.revision, { ...decision, status: 'cancelled' });
-      for (const d of this.records.find('delivery', 'workId', [work.id])) this.records.update('delivery', d.id, d.revision, { ...d, status: action === 'cancel' ? 'cancelled' : 'pending' });
+      for (const d of this.records.find('delivery', 'workId', [work.id]).filter(d => !['included', 'processed'].includes(d.status))) this.records.update('delivery', d.id, d.revision, { ...d, status: action === 'cancel' ? 'cancelled' : 'pending' });
       const prompt = status === 'pending' ? `${work.prompt}\n\nResuming after an interruption. Inspect previous results and filesystem changes before repeating actions. Continue only unfinished work.\nOwner instructions: ${note || 'Continue from the last known state.'}` : work.prompt;
       const next = this.records.update('work', work.id, work.revision, { ...work, status, taskGeneration, prompt, error: null, runId: status === 'pending' ? null : work.runId });
       if (status === 'cancelled') this.releaseHeld(work.messageId);

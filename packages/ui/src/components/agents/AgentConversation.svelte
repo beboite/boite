@@ -3,7 +3,7 @@
   import { secureId } from '../../lib/secure-id';
   import { tick, untrack } from 'svelte';
   import { Brain, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, FileText, FolderKanban, Handshake, Image } from '@lucide/svelte';
-  import type { AgentConversationMessage, AgentScope, AgentWork, Attachment, ImageMimeType, Message, MessagePart, ThreadSummary } from '@boite/contracts';
+  import type { AgentConversationMessage, AgentDelivery, AgentScope, AgentWork, Attachment, ImageMimeType, Message, MessagePart, ThreadSummary } from '@boite/contracts';
   import { chatKey, type AgentsView } from '../../lib/agents.svelte';
   import { fill, strings } from '../../lib/strings';
   import { avatarStatus } from '../../lib/thread-state';
@@ -49,7 +49,7 @@
   const history = $derived({ kind: 'message' as const, scopes: [scope] });
   const newest = $derived(messages.at(-1));
   /** Work of this conversation that waits on the user: a decision, an interruption, a failure. */
-  const pending = $derived(view.snapshot?.work.filter(w => w.scope.kind === scope.kind && w.scope.id === scope.id && (['waiting', 'interrupted', 'error'].includes(w.status) || view.seen.decisions.some(d => d.workId === w.id && d.status === 'pending'))) ?? []);
+  const pending = $derived(view.snapshot?.work.filter(w => w.scope.kind === scope.kind && w.scope.id === scope.id && (['paused', 'waiting', 'interrupted', 'error'].includes(w.status) || view.seen.decisions.some(d => d.workId === w.id && d.status === 'pending'))) ?? []);
   const worker = $derived(live ? view.snapshot?.profiles.find(a => view.snapshot?.sessions.some(s => s.threadId === live.id && s.agentId === a.id)) ?? null : null);
   $effect(() => { view.fill(key, history, messages); });
   $effect(() => {
@@ -189,7 +189,13 @@
   /** A user message's two ticks: the core holds it, and an agent took it into a turn. */
   function receipts(message: AgentConversationMessage) {
     const deliveries = view.seen.deliveries.filter(d => d.messageId === message.id);
-    return { responded: deliveries.some(d => d.status === 'included' || d.status === 'processed') || messages.some(m => m.replyTo === message.id) };
+    return { responded: deliveries.some(received) || messages.some(m => m.replyTo === message.id) };
+  }
+  /** Older cores marked received messages failed when their execution stopped. */
+  function received(delivery: AgentDelivery): boolean {
+    return delivery.status === 'included' || delivery.status === 'processed'
+      || view.seen.runs.some(run => run.workId === delivery.workId && run.startedAt !== null)
+      || messages.some(m => m.replyTo === delivery.messageId && m.senderId === delivery.agentId);
   }
 </script>
 
@@ -218,7 +224,7 @@
         {@const first = newDay || previous.senderId !== message.senderId}
         {#if newDay}<p class="agent-day"><span>{longDay(message.createdAt)}</span></p>{/if}
         {#if mine}
-          {@const failed = view.seen.deliveries.filter(d => d.messageId === message.id && (d.status === 'failed' || d.status === 'limited'))}
+          {@const failed = view.seen.deliveries.filter(d => d.messageId === message.id && (d.status === 'failed' || d.status === 'limited') && !received(d))}
           {@const prompt = promptOf(message)}
           <article class="agent-message message from-user" class:first data-testid="agent-user-message">
             <span class="agent-sr-only">{labels.user}</span>

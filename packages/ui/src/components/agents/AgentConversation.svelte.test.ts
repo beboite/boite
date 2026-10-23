@@ -37,6 +37,29 @@ const scope = { kind: 'agent' as const, id: 'a-ada' };
 let at = Date.parse('2026-09-20T10:00:00Z');
 const message = (id: string, senderId: string | null) => ({ id, scope, senderId, recipientIds: [], text: id, createdAt: at += 60_000 });
 
+test.each([null, 1])('a failed delivery reports whether the agent had started (%s)', async (startedAt) => {
+  const work = { id: 'w-timeout', revision: 3, agentId: scope.id, scope, status: 'paused', runId: 'r-timeout', error: 'Execution time limit reached.' };
+  const call = vi.fn(async () => null);
+  const view = {
+    seen: {
+      messages: [message('m-timeout', null)],
+      deliveries: [{ id: 'd-timeout', messageId: 'm-timeout', agentId: scope.id, workId: work.id, status: 'failed' }],
+      decisions: [], runs: [{ id: work.runId, workId: work.id, startedAt, threadId: 't-timeout' }], work: [work],
+    },
+    snapshot: { profiles: [{ id: scope.id, name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [work], sessions: [] },
+    store: useStore(), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
+  };
+  mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
+  await settle();
+  expect(document.querySelector('.from-user .failed')?.textContent ?? null).toBe(startedAt === null ? 'Ada did not get it' : null);
+  expect(document.querySelector('[data-testid="receipt-responded"]')?.classList.contains('received')).toBe(startedAt !== null);
+  const card = document.querySelector('[data-testid="agent-work-w-timeout"]');
+  expect(card?.textContent).toContain('Execution time limit reached.');
+  const resume = Array.from(card!.querySelectorAll('button')).find(b => b.textContent === strings.agents.resume)!;
+  resume.click(); await settle();
+  expect(call).toHaveBeenCalledWith('agents.work.control', { workId: work.id, expectedRevision: work.revision, action: 'resume' });
+});
+
 test('an agent message follows a reader at the bottom and leaves one reading older messages alone', async () => {
   const view = $state({
     seen: { messages: [message('m1', 'a-ada')], deliveries: [], decisions: [] },
