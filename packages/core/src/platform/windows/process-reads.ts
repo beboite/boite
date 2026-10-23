@@ -93,6 +93,8 @@ export function commandLineOf(api: ProcessReads, handle: number): string | null 
 
   const text = new Uint8Array(length);
   if (!api.readMemory(handle, address, text)) return null;
+  // Its length can read before its text is written: zeros are a line not there yet.
+  if (text.every(byte => byte === 0)) return null;
   return Buffer.from(text.buffer, 0, length).toString('utf16le');
 }
 

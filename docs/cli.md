@@ -83,7 +83,12 @@ agent's own machine. `boite browser profiles` lists the profiles the user made
 in Settings > General > Browser profiles on that machine, and
 `open <url> --profile Pro` opens a new tab in one of them, by name or id.
 `--profile private` opens a private tab that keeps nothing once the last private
-tab closes. `tab list` names each tab's profile, `tab new <url>` opens another,
+tab closes, or once the browser or Boite restarts. A second account the agent
+must keep, beside the default profile's, goes in a profile of its own:
+`boite browser profiles add "Account B"` adds one to that machine's list (a name
+already listed answers that profile), then `open <url> --profile "Account B"`.
+An agent can add a profile, never rename or delete one: that stays in Settings.
+`tab list` names each tab's profile, `tab new <url>` opens another,
 `tab <id>` makes one current and `--tab <id>` aims a single command at it. The
 agent cannot select a tab from another conversation.
 
