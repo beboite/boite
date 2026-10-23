@@ -211,7 +211,7 @@ The client copies:
 - deleted-history retention, process guards and question mode;
 - keybindings where the two differ, including unbound commands and restored
   defaults. A failed or canceled copy attempts to restore entries already changed;
-- the brain's Use with agents, instructions, guide and automatic pull switches
+- the brain's Share instructions automatically, instructions, guide and automatic pull switches
   when both machines have a brain folder. The target keeps its own folder.
 
 Resource limits, memory protection, process retention, automatic agent updates,

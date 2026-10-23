@@ -216,7 +216,7 @@ Automatic pulls fetch and fast-forward only; they never push local commits.
 They use the same dirty-folder and divergence checks as Synchronize. A failure
 appears in the inventory and the next interval retries. The interval starts after
 the previous attempt finishes, and a manual synchronization takes priority.
-These settings apply even when Use with agents is off. Disconnect stops pulls;
+These settings apply even when automatic sharing is off. Disconnect stops pulls;
 closing the core cancels the timer and drains its Git processes.
 
 This version does not clone repositories, commit edits or copy files directly
