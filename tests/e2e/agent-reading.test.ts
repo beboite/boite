@@ -150,8 +150,22 @@ test('missed messages open at their first unread reply, stay unread off screen a
     f.view.store.showAgents(f.short.id);
   })()`);
   await page.waitFor(`!document.querySelector('.agent-reading-status') && ${firstVisible} === 'short-0'`);
-  const shortRead = await page.evaluate<number>(`window.__reading.view.readAt['profile:' + window.__reading.short.id]`);
+  // Resizing and focusing the composer can expose another reply before Send.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1300, deviceScaleFactor: 1, mobile: false });
   await page.type('.agent-chat [data-testid="composer-input"]', 'I will read the other replies next.');
+  await page.settleAnimations();
+  const shortRead = await page.evaluate<number>(`(() => {
+    ${box}.dispatchEvent(new Event('scroll'));
+    return window.__reading.view.readAt['profile:' + window.__reading.short.id];
+  })()`);
+  expect(shortRead).toBe(await page.evaluate<number>(`(() => {
+    const box = ${box}, top = box.getBoundingClientRect().top;
+    return Math.max(...[...box.querySelectorAll('[data-message-at]')].filter(row => {
+      const rect = row.getBoundingClientRect();
+      return rect.top < top + box.clientHeight && rect.bottom > top;
+    }).map(row => Number(row.dataset.messageAt)));
+  })()`));
+  expect(shortRead).toBeLessThan(await page.evaluate<number>(`window.__reading.shortStart + 24000`));
   await page.click('.agent-chat [data-testid="composer-send"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-user-message"]')?.textContent.includes('I will read the other replies next.') && !!document.querySelector('[data-testid="agent-jump-unread"]')`);
   expect(await page.evaluate(`window.__reading.view.readAt['profile:' + window.__reading.short.id]`)).toBe(shortRead);

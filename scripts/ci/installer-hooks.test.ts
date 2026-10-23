@@ -72,10 +72,10 @@ describe.skipIf(!ready)('installer hooks', () => {
       const script = `!addplugindir /x86-unicode "${PLUGINS}"\n` + withHooks
         .replace(/^!define BUNDLEID ".*"\r?$/m, `!define BUNDLEID "${id}"`)
         .replace(/^!define OUTFILE ".*"\r?$/m, `!define OUTFILE "${join(directory, 'setup.exe')}"`)
-        // Only the script is under test: no compression, and the payload
-        // files a build staged need not exist any more.
-        .replace('!if "lzma" == "none"', '!if "none" == "none"')
-        .replace(/^(\s*)File (?!\/nonfatal)/gm, '$1File /nonfatal ');
+        // Only hook placement is under test: omit application/WebView payloads
+        // even when the build's files still exist, and disable any compression.
+        .replace(/^!if "[^"]+" == "none"\r?$/m, '!if "none" == "none"')
+        .replace(/^([ \t]*)File [^\r\n]*\r?$/gm, '$1; payload omitted by hook template test');
       writeFileSync(join(directory, 'installer.nsi'), script);
       const output = makensis(join(directory, 'installer.nsi'));
       const chosen = [...output.matchAll(/SetEnvironmentVariable\(t "BOITE_STOP_DIR", t "([^"]*)"\)/g)].map((match) => match[1]);
