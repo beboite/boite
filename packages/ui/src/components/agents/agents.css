@@ -32,7 +32,7 @@
 .agent-head-text strong { font-size: var(--text-md); font-weight: 600; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agent-live { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
 .agent-live-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-live-time { flex: none; color: var(--color-subtle); font-variant-numeric: tabular-nums; }
+.agent-live-time { flex: none; display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; color: var(--color-subtle); font-variant-numeric: tabular-nums; }
 .agent-live[data-state='working'] .agent-live-text { color: var(--color-accent); }
 .agent-live[data-state='waiting'] .agent-live-text { color: var(--color-live); }
 .agent-live[data-state='error'] .agent-live-text { color: var(--color-danger); }

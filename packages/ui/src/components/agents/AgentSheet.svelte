@@ -36,8 +36,7 @@
 </script>
 
 {#if sheet.shown}
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class="agent-sheet" class:closing={sheet.closing} use:sheet.attach onanimationend={sheet.end} role="dialog" aria-label={shown === 'brain' ? labels.brain : labels.settings} tabindex="-1" bind:this={body} {onkeydown} data-testid="agent-sheet">
+  <div class="agent-sheet" class:closing={sheet.closing} use:sheet.attach onanimationend={sheet.end} role="dialog" aria-label={shown === 'brain' ? labels.brain : labels.settings} tabindex="-1" bind:this={body} {onkeydown} data-testid="agent-sheet">
     <header class="agent-sheet-head">
       <h2>{fill(shown === 'brain' ? labels.brainOf : labels.settingsOf, { name: agent.name })}</h2>
       <button type="button" class="ghost icon" aria-label={strings.common.close} title={strings.common.close} onclick={onclose} data-testid="agent-sheet-close"><X size={16} strokeWidth={1.75} /></button>
@@ -53,5 +52,5 @@
         {/if}
       {/key}
     </div>
-  </section>
+  </div>
 {/if}
