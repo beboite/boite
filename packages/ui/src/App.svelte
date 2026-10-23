@@ -261,13 +261,7 @@
     window.addEventListener('online', resume);
     window.addEventListener('offline', offline);
     window.addEventListener('pageshow', pageshow);
-    const notification = (event: MessageEvent) => {
-      if (event.data?.type === 'boite.open-limits') { void workspace.openLimits(event.data.core); return; }
-      if (event.data?.type !== 'boite.open-thread' || typeof event.data.threadId !== 'string') return;
-      if (typeof event.data.key === 'string' && event.data.core === undefined) void workspace.openNotification(event.data.key);
-      else void workspace.openFromWorker(event.data.threadId, event.data.core);
-      mobileScreen = 'chat';
-    };
+    const notification = (event: MessageEvent) => { if (workspace.workerMessage(event.data)) mobileScreen = 'chat'; };
     navigator.serviceWorker?.addEventListener('message', notification);
     return () => {
       stopViewport();

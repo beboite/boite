@@ -625,6 +625,19 @@ export class Workspace {
     }
   }
 
+  /**
+   * What the worker posts when a notification is tapped with a window open:
+   * Limits, or a thread. True when a thread opens, so the phone shows the chat.
+   */
+  workerMessage(data: unknown): boolean {
+    const message = (data ?? {}) as { type?: unknown; threadId?: unknown; key?: unknown; core?: unknown };
+    if (message.type === 'boite.open-limits') { void this.openLimits(message.core); return false; }
+    if (message.type !== 'boite.open-thread' || typeof message.threadId !== 'string') return false;
+    if (typeof message.key === 'string' && message.core === undefined) void this.openNotification(message.key);
+    else void this.openFromWorker(message.threadId, message.core);
+    return true;
+  }
+
   /** A notification the worker reports tapped: its thread on the machine it names, else on the core that served the page. */
   async openFromWorker(threadId: string, member?: unknown): Promise<void> {
     if (typeof member === 'string' && /^[0-9a-f]{64}$/.test(member)) {
