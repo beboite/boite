@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import type { AutoCompact, Settings } from '@boite/contracts';
 import type { Store } from '../lib/store.svelte';
 import AutoCompactSettings from './AutoCompactSettings.svelte';
+import KeyedHost from './AutoCompactSettings.test-host.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => {
@@ -131,6 +132,25 @@ test('a typed size saves after a pause or when the page leaves, without waiting 
   } finally {
     vi.useRealTimers();
   }
+});
+
+test('a size typed on one machine saves there when the settings bar switches to another', async () => {
+  const make = () => {
+    const machine = $state({ owner: true, settings: { autoCompact: { tokens: 200_000, moments: ['cache-expiry'] } } as Partial<Settings>,
+      saveSettings: vi.fn(async (patch: Partial<Settings>) => { machine.settings = { ...machine.settings, ...patch }; return true; }) });
+    return machine;
+  };
+  const first = make(), second = make();
+  const pick = $state({ store: first as unknown as Store });
+  mounted = mount(KeyedHost, { target: document.body, props: { pick } });
+  flushSync();
+  const field = input('auto-compact-tokens');
+  field.value = '250000';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  pick.store = second as unknown as Store;
+  await settle();
+  expect(first.saveSettings).toHaveBeenLastCalledWith({ autoCompact: { tokens: 250_000, moments: ['cache-expiry'] } });
+  expect(second.saveSettings).not.toHaveBeenCalled();
 });
 
 test('a size typed while a switch saves goes after it, on the rule that switch left', async () => {

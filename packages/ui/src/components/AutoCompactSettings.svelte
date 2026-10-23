@@ -43,9 +43,9 @@
   /** Every control builds the whole rule from the saved one, so none moves while a save is on its way. */
   let saving = $state(false);
   let inflight: Promise<boolean> | null = null;
-  async function save(next: AutoCompact | null, input?: HTMLInputElement) {
+  async function save(next: AutoCompact | null, input?: HTMLInputElement, target = store) {
     saving = true;
-    const sent = inflight = store.saveSettings({ autoCompact: next }).finally(() => { saving = false; if (inflight === sent) inflight = null; });
+    const sent = inflight = target.saveSettings({ autoCompact: next }).finally(() => { saving = false; if (inflight === sent) inflight = null; });
     const ok = await sent;
     if (!ok && input) input.checked = !input.checked;
     return ok;
@@ -65,19 +65,24 @@
    * The size saves like every typed setting: after a pause, when the field is
    * left, or when the page goes, from the rule the core holds once a switch's
    * save has landed. The field stays enabled, so a save never takes its focus.
+   * It goes to the machine it was typed for: switching machines flushes it
+   * while `store` already reads the next one.
    */
+  let typedFor: Store | null = null;
   const sizeSave = new Autosave(async () => {
     while (inflight) await inflight.catch(() => false);
-    const current = store.settings?.autoCompact;
+    const target = typedFor ?? store;
+    const current = target.settings?.autoCompact;
     if (!current || current.tokens === null) return;
     const sent = tokens as number;
-    if (current.tokens !== sent) await saved(save({ ...current, tokens: sent }));
+    if (current.tokens !== sent) await saved(save({ ...current, tokens: sent }, undefined, target));
     if (tokens === sent) dirty = false;
   }, () => valid ? null : strings.settings.autosave.invalid);
   $effect(() => () => void sizeSave.flush());
   function typeTokens(delay: number, value = tokens) {
     tokens = value;
     dirty = true;
+    typedFor = store;
     sizeSave.change('', delay);
   }
 </script>
