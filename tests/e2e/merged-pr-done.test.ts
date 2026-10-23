@@ -61,12 +61,14 @@ for (const width of [1280, 390]) {
           return {x:box.x + box.width / 2, y:box.y + 12};
         })()`);
         await page.send('Input.dispatchMouseEvent', {type:'mouseMoved', ...point});
+        await page.waitFor(`document.querySelector('${done}').matches(':hover') && getComputedStyle(document.querySelector('${done} [data-testid="thread-state"]')).opacity === '0' && getComputedStyle(document.querySelector('${done} [data-testid="done-thread-restore"]')).opacity === '1'`);
         expect(await page.evaluate(`document.querySelector('${done}').matches(':hover')`)).toBe(true);
         expect(await page.evaluate(`getComputedStyle(document.querySelector('${done} [data-testid="thread-state"]')).opacity`)).toBe('0');
         await page.screenshot(join(import.meta.dir, '.artifacts', `merged-pr-restore-hover-${width}.png`));
         await page.send('Input.dispatchMouseEvent', {type:'mouseMoved', x:width - 1, y:1});
       } else {
         await page.send('Emulation.setTouchEmulationEnabled', {enabled:true, maxTouchPoints:1});
+        await page.waitFor(`matchMedia('(hover: none)').matches && matchMedia('(pointer: coarse)').matches && getComputedStyle(document.querySelector('${done} [data-testid="thread-state"]')).opacity === '1' && getComputedStyle(document.querySelector('${done} [data-testid="done-thread-restore"]')).display === 'none'`);
         expect(await page.evaluate(`matchMedia('(hover: none)').matches && matchMedia('(pointer: coarse)').matches`)).toBe(true);
         expect(await page.evaluate(`getComputedStyle(document.querySelector('${done} [data-testid="thread-state"]')).opacity`)).toBe('1');
         expect(await page.evaluate(`getComputedStyle(document.querySelector('${done} [data-testid="done-thread-restore"]')).display`)).toBe('none');
