@@ -119,11 +119,15 @@ test('the phone settings hold this phone\'s three screens and the machine\'s ess
   await waitFor(home);
   expect([...document.querySelectorAll<HTMLElement>('[data-testid=mobile-settings-home] .row')].map(row => row.dataset.testid)).toEqual([
     'mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy',
-    'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-archived'
+    'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-browser-profiles', 'mobile-settings-archived'
   ]);
   // The header already says Settings, and the list's display options group the threads.
   expect(document.querySelector('[data-testid=mobile-settings-home] h1')).toBeNull();
   expect(document.querySelector('[data-testid=setting-group-working-threads]')).toBeNull();
+
+  query<HTMLButtonElement>('[data-testid=mobile-settings-browser-profiles]').click();
+  await waitFor(() => document.querySelector('[data-testid=browser-profiles-card]') !== null);
+  await back();
 
   // The analytics switches have a screen of their own, out of the notifications.
   query<HTMLButtonElement>('[data-testid=mobile-settings-phone]').click();

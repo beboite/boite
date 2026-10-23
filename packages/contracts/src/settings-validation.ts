@@ -1,5 +1,5 @@
 import type { GoalTrackerModel, ModelFavorite, ModelFavorites, Settings, TitleModel } from './index.ts';
-import { BROWSER_PROFILE_NAME_MAX, BROWSER_PROFILES_MAX, browserProfileIdError, browserProfileNameError, DEFAULT_BROWSER_PROFILE, type BrowserProfile } from './browser';
+import { BROWSER_PROFILE_NAME_MAX, BROWSER_PROFILES_MAX, browserProfileIdError, browserProfileNameError, browserUserAgentError, DEFAULT_BROWSER_PROFILE, type BrowserProfile } from './browser';
 import { SYNC_KEY_PATTERN, SYNC_OVERRIDES_MAX } from './settings-sync';
 
 // Both supported hosts expose URL; contracts otherwise need no DOM or Node types.
@@ -234,7 +234,10 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       if (profiles.some(profile => profile.id === entry.id || profile.name.toLowerCase() === name.toLowerCase())) {
         return { ok: false, field: 'browserProfiles', message: `browserProfiles: ${entry.id} repeats another profile's id or name` };
       }
-      profiles.push({ id: entry.id as string, name });
+      const userAgentError = browserUserAgentError(entry.userAgent);
+      if (userAgentError) return { ok: false, field: 'browserProfiles', message: `browserProfiles: ${entry.id}: ${userAgentError}` };
+      const userAgent = entry.userAgent?.value.trim() ? { mode: entry.userAgent.mode, value: entry.userAgent.value.trim() } : undefined;
+      profiles.push({ id: entry.id as string, name, ...(userAgent ? { userAgent } : {}) });
     }
     next.browserProfiles = profiles;
   }

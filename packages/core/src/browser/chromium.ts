@@ -5,6 +5,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { BrowserUserAgent } from '@boite/contracts';
 
 export interface ChromiumFound { path: string }
 export interface ChromiumMissing { path: null; reason: string }
@@ -151,6 +152,13 @@ export async function drawsWithGpu(platform = process.platform): Promise<boolean
  * `Emulation.setUserAgentOverride` takes them.
  */
 export interface BrowserIdentity { userAgent: string; metadata: Record<string, unknown> }
+
+/** Empty preserves the native identity byte for byte; client hints still describe the real engine. */
+export function profileIdentity(identity: BrowserIdentity, setting?: BrowserUserAgent): BrowserIdentity {
+  if (!setting?.value.trim()) return identity;
+  const value = setting.value.trim();
+  return { ...identity, userAgent: setting.mode === 'suffix' ? `${identity.userAgent} ${value}` : value };
+}
 
 /**
  * Read in a page of the browser itself, without `--user-agent`: that flag

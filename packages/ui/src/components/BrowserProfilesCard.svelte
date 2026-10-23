@@ -3,6 +3,7 @@
   import { BROWSER_PROFILES_MAX, checkSettingsPatch, DEFAULT_BROWSER_PROFILE, type BrowserProfile } from '@boite/contracts';
   import { tick } from 'svelte';
   import InfoTip from './InfoTip.svelte';
+  import BrowserUserAgent from './BrowserUserAgent.svelte';
   import Menu from './Menu.svelte';
   import { canCopySignIns, copySignIns } from '../lib/browser-cookies';
   import { workspace } from '../lib/workspace.svelte';
@@ -146,6 +147,7 @@
           {#if !builtIn}
             <button type="button" class="small ghost" data-testid="browser-profile-rename" disabled={busy || !ready} onclick={() => void startRename(profile)}>{strings.common.rename}</button>
             <button type="button" class="small ghost danger" data-testid="browser-profile-delete" disabled={busy || !ready} onclick={() => void remove(profile)}>{strings.common.delete}</button>
+            <BrowserUserAgent {profile} disabled={busy || !ready} />
           {/if}
         {/if}
       </li>

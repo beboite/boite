@@ -6,7 +6,6 @@
   import ArchivedThreads from './ArchivedThreads.svelte';
   import WorktreesCard from './WorktreesCard.svelte';
   import BrowserProfilesCard from './BrowserProfilesCard.svelte';
-  import { browserBridge } from '../lib/browser-bridge';
   import { strings } from '../lib/strings';
   import { openTour } from '../lib/onboarding.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -75,8 +74,8 @@
 
   <ArchivedThreads {store} />
   <WorktreesCard {store} />
-  <!-- Only a window that shows pages has profiles to keep them in. -->
-  {#if browserBridge.paints}<BrowserProfilesCard />{/if}
+  <!-- Profiles also configure the core's agent browser from a plain web client. -->
+  {#if here.owner}<BrowserProfilesCard />{/if}
 
   <section class="card" id="settings-app">
     <h2>{strings.settings.app}</h2>

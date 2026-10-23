@@ -75,6 +75,23 @@ flag adds and that took 56 pixels of the page, and `--screen-info={1920x1080}`.
 A browser whose identity cannot be read starts as it is, with a warning in the
 log. A page check of `boite view` skips the read.
 
+Settings > General > Browser profiles has a User-Agent editor on each custom
+profile. Leave it empty for the unchanged browser identity, append a suffix
+such as a bug bounty program marker, or replace the complete value. The
+setting is stored as `browserProfiles[].userAgent` (`mode: suffix | replace`,
+`value`) and applies when that profile's agent browser next starts. Close its
+agent tabs and wait for the idle process to end, or restart the core, to apply
+a change to an already running profile. Default and private profiles keep the
+browser identity; create a named profile to customize it.
+
+A customized profile starts a separate Chromium process even while the desktop
+app hosts other agent tabs: webviews cannot set per-profile process flags for
+workers and popups. The panel displays its remote view. The process receives
+the complete value through `--user-agent`; tab overrides use that same value
+with the real browser's client hints. Replacing the value does not impersonate
+another engine or OS in client hints. If the native identity cannot be read,
+a customized profile refuses to start rather than omit its program marker.
+
 This brings it level with the same Chrome running with a window on the same
 network, not past it. Etsy, SeLoger and Reddit still asked for a captcha on
 2026-10-09, and so did Chrome with a window under Xvfb on that address. The
