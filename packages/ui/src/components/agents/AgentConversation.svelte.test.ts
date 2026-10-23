@@ -37,24 +37,32 @@ const scope = { kind: 'agent' as const, id: 'a-ada' };
 let at = Date.parse('2026-09-20T10:00:00Z');
 const message = (id: string, senderId: string | null) => ({ id, scope, senderId, recipientIds: [], text: id, createdAt: at += 60_000 });
 
-test.each([null, 1])('a failed delivery reports whether the agent had started (%s)', async (startedAt) => {
+test.each([
+  { evidence: 'before execution', startedAt: null, replied: false, delivery: true },
+  { evidence: 'after execution started', startedAt: 1, replied: false, delivery: true },
+  { evidence: 'with a reply outside the current page', startedAt: null, replied: true, delivery: true },
+  { evidence: 'with a reply outside the page and no delivery record', startedAt: null, replied: true, delivery: false },
+])('a failed delivery reports receipt $evidence', async ({ startedAt, replied, delivery }) => {
   const work = { id: 'w-timeout', revision: 3, agentId: scope.id, scope, status: 'paused', runId: 'r-timeout', error: 'Execution time limit reached.' };
   const call = vi.fn(async () => null);
+  const sent = message('m-timeout', null);
   const seen = {
-    messages: [message('m-timeout', null)],
-    deliveries: [{ id: 'd-timeout', messageId: 'm-timeout', agentId: scope.id, workId: work.id, status: 'failed' }],
-    decisions: [], runs: [{ id: work.runId, workId: work.id, startedAt, threadId: 't-timeout' }], work: [work],
+    messages: [sent, ...(replied ? [{ ...message('m-reply', scope.id), replyTo: sent.id }] : [])],
+    deliveries: delivery ? [{ id: 'd-timeout', messageId: sent.id, agentId: scope.id, workId: work.id, status: 'failed' }] : [],
+    decisions: [], runs: replied ? [] : [{ id: work.runId, workId: work.id, startedAt, threadId: 't-timeout' }], work: [work],
   };
   const view = {
     seen,
     snapshot: { profiles: [{ id: scope.id, name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [work], sessions: [] },
-    readMessages: async () => ({ ...seen, memories: [], older: false, newer: false }),
+    readMessages: async () => ({ ...seen, messages: [sent], memories: [], older: false, newer: replied }),
     store: useStore(), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
   };
   mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
   await settle();
-  expect(document.querySelector('.from-user .failed')?.textContent ?? null).toBe(startedAt === null ? 'Ada did not get it' : null);
-  expect(document.querySelector('[data-testid="receipt-responded"]')?.classList.contains('received')).toBe(startedAt !== null);
+  if (replied) expect(document.querySelector('[data-message-id="m-reply"]')).toBeNull();
+  const received = startedAt !== null || replied;
+  expect(document.querySelector('.from-user .failed')?.textContent ?? null).toBe(received ? null : 'Ada did not get it');
+  expect(document.querySelector('[data-testid="receipt-responded"]')?.classList.contains('received')).toBe(received);
   const card = document.querySelector('[data-testid="agent-work-w-timeout"]');
   expect(card?.textContent).toContain('Execution time limit reached.');
   const resume = Array.from(card!.querySelectorAll('button')).find(b => b.textContent === strings.agents.resume)!;

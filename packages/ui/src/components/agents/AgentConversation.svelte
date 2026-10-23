@@ -271,13 +271,13 @@
   /** A user message's two ticks: the core holds it, and an agent took it into a turn. */
   function receipts(message: AgentConversationMessage) {
     const deliveries = view.seen.deliveries.filter(d => d.messageId === message.id);
-    return { responded: deliveries.some(received) || messages.some(m => m.replyTo === message.id) };
+    return { responded: deliveries.some(received) || held.some(m => m.replyTo === message.id) };
   }
   /** Older cores marked received messages failed when their execution stopped. */
   function received(delivery: AgentDelivery): boolean {
     return delivery.status === 'included' || delivery.status === 'processed'
       || view.seen.runs.some(run => run.workId === delivery.workId && run.startedAt !== null)
-      || messages.some(m => m.replyTo === delivery.messageId && m.senderId === delivery.agentId);
+      || held.some(m => m.replyTo === delivery.messageId && m.senderId === delivery.agentId);
   }
 </script>
 
