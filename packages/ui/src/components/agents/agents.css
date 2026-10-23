@@ -227,9 +227,9 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
 .desk-now[data-state='working'], .desk-now[data-state='queued'] { --tone: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border)); }
 .desk-now[data-state='waiting'] { --tone: var(--color-live); border-color: color-mix(in srgb, var(--color-live) 35%, var(--color-border)); }
 .desk-now[data-state='error'] { --tone: var(--color-danger); }
-/* While it works, a light runs along the foot of the card. */
-.desk-now[data-state='working']::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--color-accent), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: desk-scan 1.6s var(--ease-out-quint) infinite var(--loops); }
-@keyframes desk-scan { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+/* While it works, a light breathes along the foot of the card: it widens from the middle and fades, on the compositor only. */
+.desk-now[data-state='working']::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--color-accent), transparent); transform-origin: center; animation: desk-breathe 1.6s var(--ease-out-quint) infinite alternate var(--loops); }
+@keyframes desk-breathe { from { opacity: 0.25; transform: scaleX(0.3); } to { opacity: 1; transform: scaleX(1); } }
 .desk-now-robot { flex: none; display: inline-flex; transition: transform var(--dur-3) var(--ease-out-quint); }
 .desk-now[data-state='working'] .desk-now-robot { transform: scale(1.05); }
 .desk-now-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
