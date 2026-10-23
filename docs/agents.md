@@ -16,23 +16,26 @@ The column and the card beside it stay in place and only the card's content
 fades in; the column slides in from the window's edge only when it unfolds
 (`tests/e2e/agents.test.ts` reads both on every frame). Under it, one card
 holds every conversation, agents and groups together, newest first. A row
-reads like a thread row: the agent's picture where the provider logo goes, its
-name, the same state a thread shows on the right (Working with its time, Needs
-you while it waits on the user, or when it last moved) and the last thing said
-under it. On desktop, the foot adds the engine settings for the owner; a phone draws no foot.
+shows the agent's picture, its name, an incoming unread count on the right
+(or the last activity time when read), and the last thing said under it.
+Interrupted work and old failures do not replace that count with "Needs you".
+The avatar keeps a waiting mark for a live question or pending decision.
+On desktop, the foot adds the engine settings for the owner; a phone draws no foot.
 
 A conversation is the whole page, drawn with the thread's bubbles and the
 thread's own composer (`Composer.svelte` with a `ComposerTarget`,
 `lib/composer-target.ts`): attachments by the button, a paste or a drop,
 dictation, ArrowUp recall, undo, the stash chord, and Stop or Escape while the
-agent works, which cancels that work. In a direct conversation the owner gets
-the thread's model, effort and mode chips: a pick saves the agent's main route
-through `agents.runtime.configure`, as the Settings tab does, and allows that
-model if it was not. A group shows its recipients there instead, and a paired
-device no chips. The worktree chip, the queue and the slash and mention menus
+agent works, which cancels that work. Model, effort and permissions stay in
+the agent's Settings pane. A group shows its recipients in the composer.
+The worktree chip, the queue and the slash and mention menus
 stay out: a message never queues. Each prompt is the thread's own
 `UserMessage`: copy button, send time, two ticks (received, taken into a turn)
-and its pictures as thumbnails that open in the viewer. The user asks, the
+and its pictures as thumbnails that open in the viewer. A received message
+keeps its receipt if execution fails, pauses or is cancelled. Paused work,
+including an execution stopped at its configured time limit, shows the reason
+and Resume in the conversation. Delivery failures remain visible only for
+recipients that never took the message into a turn. The user asks, the
 agent answers in its bubble, works (three dots in a bubble) and comes back with
 the result, in words, with the pictures and files it attached under the
 bubble. What the user attaches goes with `agents.message.send`: the message
@@ -49,6 +52,26 @@ asks stands in the conversation with its answers to pick and a free answer. A gr
 header keeps the picture, the name and how the agent stands; its planned tasks
 have a button with their count, and memory, settings, activity and missions
 wait in its menu.
+
+Opening a conversation starts at the first missed incoming message, with an
+"x missed messages" divider. A bounded chronological window seeks directly
+to that position; older and newer pages load as the user reads, including on
+a device with no previous read mark. Only messages visible in a visible page
+advance that position;
+new replies leave someone reading earlier messages in place. The floating
+missed-message button jumps to the next unread reply. Once caught up, a return
+visit opens at the latest message. Reading positions stay on this device per
+core in local storage. Sending can show the latest window without reading
+skipped replies, even when both windows overlap; the missed-message button
+returns to the first unread reply. Failed page requests preserve the current
+position, and navigation buttons wait for the current request to finish. The
+entry divider stays attached to the original first missed message and appears
+only after its opening window loads successfully.
+The optional read marks on `agents.snapshot` request
+counts across all retained incoming messages, beyond its 50-message window;
+message bodies still arrive through bounded pages. `agents.messages` seeks by
+creation time and message ID, independent of later attachment updates, under
+the same owner, device and execution-context policy as history.
 
 A new agent needs a name and what it does; its robot, model and permissions
 come filled in. The projects entrusted to it are picked beside its
@@ -238,7 +261,8 @@ The interface exposes results and the execution without requiring process logs.
 
 An agent calls `boite agent decide` to release its slot and request a durable
 human decision. The prompt and its choices stand in the conversation where the
-work was asked, and the agent's row reads Needs you. An answer creates
+work was asked; its avatar and header show waiting while the row keeps its
+missed-message count or last activity time. An answer creates
 one continuation in the same context. Native tool approvals still use the
 existing permission cards and provider process.
 

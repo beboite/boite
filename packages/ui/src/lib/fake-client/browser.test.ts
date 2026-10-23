@@ -97,5 +97,10 @@ test('a profile copied in is listed and opens by name, as on the core; a taken n
     const listed = (await client.call('browser.command', { threadId, action: { kind: 'profiles' } })).value as { profiles: Array<{ id: string; name: string }> };
     expect(listed.profiles.map(profile => [profile.id, profile.name])).toEqual([['default', 'Default'], ['p-work', 'Work'], ['p-other', 'work 2'], ['private', 'Private']]);
     expect((await client.call('browser.command', { threadId, action: { kind: 'open', url: 'https://example.com/', profile: 'WORK' } })).profile).toBe('p-work');
+    // An agent adds one for a second account; a listed name answers that profile, as on the core.
+    expect((await client.call('browser.command', { threadId, action: { kind: 'profile-add', name: 'work 2' } })).value).toEqual({ id: 'p-other', name: 'work 2', created: false });
+    const added = (await client.call('browser.command', { threadId, action: { kind: 'profile-add', name: ' Compte B ' } })).value as { id: string; name: string; created: boolean };
+    expect(added).toEqual({ id: expect.stringMatching(/^p-[0-9a-f]{12}$/), name: 'Compte B', created: true });
+    expect((await client.call('browser.command', { threadId, action: { kind: 'open', url: 'https://example.com/', profile: 'compte b' } })).profile).toBe(added.id);
   } finally { client.close(); }
 });

@@ -97,6 +97,8 @@ jobs:
           save-if: false
       - name: Shell Rust tests
         run: bun run test:shell --release
+      - name: Windows CLI launcher tests
+        run: cargo test --locked --manifest-path apps/shell/launcher/Cargo.toml
 
   windows:
     name: Windows x64

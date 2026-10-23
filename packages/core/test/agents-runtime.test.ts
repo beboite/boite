@@ -5,6 +5,35 @@ import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { thrown } from './settle.ts';
 
+test('a time-limited agent keeps its message receipt through resume and cancellation', async () => {
+  const h = await startTestCore();
+  try {
+    const client = await h.connect();
+    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+    const agent = await client.call('agents.profile.save', { value: { name: 'Worker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
+    await quiet(client, agent);
+    const message = await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [], text: '[sleep:60000]', attachments: [{ kind: 'file', mimeType: 'text/plain', name: 'notes.txt', data: Buffer.from('Keep this receipt.').toString('base64') }], requestId: 'receipt_timeout_001' });
+    await waitFor(() => h.core.workforce.records.list('run').some(r => r.status === 'running'));
+    const run = h.core.workforce.records.list('run')[0]!;
+    h.core.workforce.records.update('run', run.id, run.revision, { ...run, startedAt: Date.now() - 61 * 60000 });
+    await waitFor(() => h.core.workforce.records.get('work', run.workId).status === 'paused');
+    await waitFor(() => h.core.scheduler.state().running.length === 0);
+    const paused = h.core.workforce.records.get('work', run.workId);
+    expect(paused.error).toBe('Execution time limit reached.');
+    const delivery = () => h.core.workforce.records.find('delivery', 'messageId', [message.id])[0]!;
+    expect(delivery().status).toBe('included');
+    expect(h.core.journal.getSetting(`agents:attachments:${message.id}`)).toBeDefined();
+
+    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
+    const resumed = await client.call('agents.work.control', { workId: paused.id, expectedRevision: paused.revision, action: 'resume' });
+    expect(delivery().status).toBe('included');
+    expect(resumed.status).toBe('pending');
+    await client.call('agents.work.control', { workId: resumed.id, expectedRevision: resumed.revision, action: 'cancel' });
+    expect(delivery().status).toBe('included');
+    expect(h.core.journal.getSetting(`agents:attachments:${message.id}`)).toBeUndefined();
+  } finally { await h.stop(); }
+}, 15000);
+
 test('declared shared write resources serialize agents until the holder stops', async () => {
   const h = await startTestCore();
   try {

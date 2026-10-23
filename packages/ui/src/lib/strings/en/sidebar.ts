@@ -10,9 +10,13 @@ export const strings = {
     projectArchivedThreads: '{project}: {count} archived',
     /** The fold under the list for projects with no open conversation, and what choosing one does. */
     idleProjects: 'Idle projects',
-    /** The same fold once it also holds archived projects. */
-    otherProjects: 'Other projects',
-    archivedProject: 'Archived',
+    /** The section on top of the Projects view: projects whose every conversation is at work, so nothing there waits on the user. */
+    workingProjects: 'Working',
+    workingProjectsHint: 'Every conversation in these projects is at work. A project moves down once one needs you.',
+    /** The section under the open projects: nothing open, conversations archived to pick up again. */
+    laterProjects: 'Set aside',
+    laterProjectsHint: 'Conversations you archived to pick up later, in projects with nothing else open.',
+    idleProjectsHint: 'Nothing to do here: no open or set-aside conversation. Choose one to start a thread.',
     groupingOptions: 'Display options',
     /** The sidebar's top switch between the thread list and the Agents page. */
     surface: 'Threads or agents',

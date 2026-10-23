@@ -332,8 +332,11 @@ test('a console host whose image name could not be read is still left out of the
   expect(consoleHost(null, null)).toBe(false);
 });
 
-/** A process handle whose parameters Windows writes only after `polls` command line reads. */
-function lateParameters(polls: number, text = 'ping -n 30 127.0.0.1'): ProcessReads {
+/**
+ * A process handle whose parameters Windows writes only after `polls` command
+ * line reads, and whose command line text stays zeros for `blank` reads more.
+ */
+function lateParameters(polls: number, text = 'ping -n 30 127.0.0.1', blank = 0): ProcessReads {
   const PEB = 0x1000n, PARAMETERS = 0x2000n, BUFFER = 0x3000n;
   const utf16 = new Uint8Array(Buffer.from(text, 'utf16le'));
   let reads = 0;
@@ -346,7 +349,7 @@ function lateParameters(polls: number, text = 'ping -n 30 127.0.0.1'): ProcessRe
       const view = new DataView(into.buffer);
       if (address === PEB + 0x20n) view.setBigUint64(0, reads > polls ? PARAMETERS : 0n, true);
       else if (address === PARAMETERS + 0x70n) { view.setUint16(0, utf16.length, true); view.setBigUint64(8, BUFFER, true); }
-      else if (address === BUFFER) into.set(utf16);
+      else if (address === BUFFER) into.set(reads > polls + blank ? utf16 : new Uint8Array(utf16.length));
       else return false;
       return true;
     },
@@ -362,6 +365,14 @@ test('a process the job reports before Windows wrote its command line gets it on
   expect(lines).toEqual([]);
   await waitFor(() => lines.length > 0, 1000);
   expect(lines).toEqual(['ping -n 30 127.0.0.1']);
+
+  // windows-2025 also read the command line's length while its text was still zeros (2026-10-22).
+  const zeros: (string | null)[] = [];
+  const unwritten = lateParameters(0, 'ping -n 30 127.0.0.1', 2);
+  expect(commandLineOf(unwritten, 1)).toBeNull();
+  whenCommandLineReads(unwritten, 1, null, line => zeros.push(line), 20, 1);
+  await waitFor(() => zeros.length > 0, 1000);
+  expect(zeros).toEqual(['ping -n 30 127.0.0.1']);
 
   // One that never gets parameters settles with none after its tries; one that exits first settles at once.
   const never: (string | null)[] = [];

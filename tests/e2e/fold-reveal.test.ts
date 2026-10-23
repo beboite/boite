@@ -10,7 +10,7 @@ beforeAll(async () => { port = await freePort(); server = await startUi(port); }
 afterAll(async () => { await server?.close(); }, 30_000);
 
 for (const width of [1280, 390]) {
-  test(`opening the other projects at the bottom of a scrolled list brings them into view at ${width}px`, async () => {
+  test(`opening the idle projects at the bottom of a scrolled list brings them into view at ${width}px`, async () => {
     const page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width, height: width < 720 ? 844 : 900 } });
     try {
       await page.waitFor('globalThis.__boiteTest?.workspace.active.booted');

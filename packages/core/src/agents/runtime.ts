@@ -334,7 +334,8 @@ export class AgentRuntime {
       const task = this.r.get('task', work.taskId);
       if (task.generation === work.taskGeneration && ['assigned', 'running'].includes(task.status)) this.r.update('task', task.id, task.revision, { ...task, status: status === 'cancelled' ? 'cancelled' : 'waiting', leaseUntil: null });
     }
-    for (const d of this.r.find('delivery', 'workId', [work.id]).filter(d => d.status !== 'processed')) this.r.update('delivery', d.id, d.revision, { ...d, status: status === 'cancelled' ? 'cancelled' : 'failed' });
+    // An execution can stop after it received the message; its receipt stays true.
+    for (const d of this.r.find('delivery', 'workId', [work.id]).filter(d => !['included', 'processed'].includes(d.status))) this.r.update('delivery', d.id, d.revision, { ...d, status: status === 'cancelled' ? 'cancelled' : 'failed' });
     this.store.releaseHeld(work.messageId);
     this.store.changed();
   }

@@ -10,6 +10,10 @@
 # Boite and Boite Dev install side by side and a build can run from a cargo
 # target directory: a shell of the same file name anywhere else is left alone.
 
+# installer-hooks.test.ts names a file here to learn which scripts ran; a
+# trace that cannot be written never stops the script.
+if ($env:BOITE_HOOKS_TRACE) { Add-Content -LiteralPath $env:BOITE_HOOKS_TRACE -ErrorAction SilentlyContinue -Value 'stop-shell' }
+
 $dir = [IO.Path]::GetFullPath($env:BOITE_SHELL_DIR)
 # Bare file names only: a registry value cannot point the check outside the install.
 $paths = @($env:BOITE_SHELL_NAMES -split '\|' | Where-Object { $_ -match '^[\w .-]+\.exe$' } |

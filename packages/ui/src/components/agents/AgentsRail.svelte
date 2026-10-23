@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Plus, Search, Settings2, UserRoundPlus, Users, X } from '@lucide/svelte';
   import type { AgentsSnapshot, ThreadSummary } from '@boite/contracts';
-  import { agentsFilter, chatKey, previewOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentsView } from '../../lib/agents.svelte';
+  import { agentsFilter, chatKey, previewOf, waitingForUser, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentsView } from '../../lib/agents.svelte';
   import { type MenuItem } from '../../lib/menu';
   import { fill, strings } from '../../lib/strings';
   import { workspace, type Machine } from '../../lib/workspace.svelte';
@@ -16,9 +16,9 @@
   /**
    * The conversations with agents, listed the way a messenger lists its chats
    * in the thread list's own frame and head (`RailFrame`, `RailHead`): one
-   * card of rows, each with its picture, its name, where it stands and the
-   * last thing said. An agent that waits on the user says so on its row; what
-   * it asks is in its conversation. Like the thread list, it holds every
+   * card of rows, each with its picture, its name, missed-message count and
+   * the last thing said. An agent's current question marks its picture;
+   * what it asks is in its conversation. Like the thread list, it holds every
    * connected machine's agents, newest first, each row with its machine's icon
    * once there are two; the foot's machine button narrows it to one.
    */
@@ -118,8 +118,8 @@
       {#each rows as { machine, view: owner, chat, live } (JSON.stringify([machine.id, chat.kind, chat.id]))}
         {@const key = chatKey(chat.kind, chat.id)}
         {@const thread = live.get(key) ?? null}
-        {@const waiting = chat.attention > 0 || chat.status === 'waiting'}
-        <AgentRow title={chat.name} open={owner === view && active === key} unread={chat.unread} live={thread} {waiting} away={machine.store.connection !== 'ready'} at={chat.at} {now} detail={detail(owner.snapshot, chat)} machine={multi ? machine : undefined} testid="agent-entry-{chat.id}" onclick={() => openRow(machine, chat.kind, chat.id)}>
+        {@const waiting = waitingForUser(owner.snapshot, chat.scope ?? { kind: 'team', id: chat.id }, thread)}
+        <AgentRow title={chat.name} open={owner === view && active === key} unread={chat.unread} away={machine.store.connection !== 'ready'} at={chat.at} {now} detail={detail(owner.snapshot, chat)} machine={multi ? machine : undefined} testid="agent-entry-{chat.id}" onclick={() => openRow(machine, chat.kind, chat.id)}>
           {#snippet picture()}<AgentAvatar kind={chat.kind} id={chat.id} name={chat.name} avatar={chat.avatar} members={memberList(owner.snapshot, chat)} status={waiting ? 'waiting' : thread ? 'running' : 'idle'} size={22} />{/snippet}
         </AgentRow>
       {/each}

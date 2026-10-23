@@ -199,7 +199,7 @@ export class FakeAgents {
           this.deliver(message);
         }
       }
-      for (const d of this.all('delivery').filter(d => d.workId === work.id)) this.update('delivery', { ...d, status: turn.status === 'done' ? 'processed' : 'failed' });
+      for (const d of this.all('delivery').filter(d => d.workId === work.id && (turn.status === 'done' || !['included', 'processed'].includes(d.status)))) this.update('delivery', { ...d, status: turn.status === 'done' ? 'processed' : 'failed' });
     }
     this.kick();
   }
@@ -296,7 +296,7 @@ export class FakeAgents {
       decisions: this.all('decision').filter(d => workIds.has(d.workId)),
     };
   }
-  snapshot(): AgentsSnapshot {
+  snapshot(readAt?: RpcParams<'agents.snapshot'>['readAt']): AgentsSnapshot {
     const messages = this.newest('message', undefined, undefined, null, AGENT_HISTORY_PAGE);
     const recent = this.newest('work', undefined, undefined, null, AGENT_HISTORY_PAGE);
     const ids = new Set(recent.items.map(w => w.id));
@@ -305,7 +305,35 @@ export class FakeAgents {
     return { revision: this.revision, routines: this.all('routine'), accountGrants: structuredClone(this.grants), limits: { ...this.limits }, profiles: this.all('profile'), groups: this.all('group'), teams: this.all('team'), missions: this.all('mission'), tasks: this.all('task'), sessions: this.all('session'), messages: messages.items, work, memories: memories.items, ...this.related(messages.items, work), resources: this.all('resource'), artifacts: this.all('artifact'), more: { message: messages.more, work: recent.more, memory: memories.more },
       // The core drops an entrustment when its thread is archived or removed.
       entrusted: this.entrusted.filter(e => { const thread = this.runner?.thread?.(e.threadId); return thread && !thread.archived; }).map(e => ({ ...e })),
-      brainRoot: this.brainRoot() };
+      brainRoot: this.brainRoot(), ...(readAt ? { unread: this.unread(readAt) } : {}) };
+  }
+  private unread(marks: NonNullable<RpcParams<'agents.snapshot'>['readAt']>): NonNullable<AgentsSnapshot['unread']> {
+    const counts = new Map<string, NonNullable<AgentsSnapshot['unread']>[number]>();
+    for (const m of this.all('message')) {
+      if (m.senderId === null || !['agent', 'group'].includes(m.scope.kind)) continue;
+      const at = marks.find(mark => mark.scope.kind === m.scope.kind && mark.scope.id === m.scope.id)?.at ?? 0;
+      if (m.createdAt <= at) continue;
+      const key = `${m.scope.kind}:${m.scope.id}`;
+      const held = counts.get(key) ?? { scope: m.scope, at, count: 0 };
+      held.count++; counts.set(key, held);
+    }
+    return [...counts.values()];
+  }
+  private messagePage(p: RpcParams<'agents.messages'>) {
+    const limit = p.limit ?? AGENT_HISTORY_PAGE;
+    if (!Number.isInteger(limit) || limit < 1 || limit > AGENT_HISTORY_MAX_PAGE) this.refuse(`limit: expected an integer from 1 to ${AGENT_HISTORY_MAX_PAGE}`);
+    if ([p.readAt, p.before, p.after].filter(v => v !== undefined).length > 1) this.refuse('readAt/before/after: expected only one reading position');
+    if (p.readAt !== undefined && (!Number.isSafeInteger(p.readAt) || p.readAt < 0)) this.refuse('readAt: expected a nonnegative safe integer');
+    for (const [field, cursor] of [['before', p.before], ['after', p.after]] as const) if (cursor && (!Number.isSafeInteger(cursor.createdAt) || cursor.createdAt < 0 || !cursor.id)) this.refuse(`${field}: expected createdAt and id`);
+    const all = this.all('message').filter(m => m.scope.kind === p.scope.kind && m.scope.id === p.scope.id).sort(byCreation);
+    const pivot = p.readAt === undefined ? -1 : all.findIndex(m => m.senderId !== null && m.createdAt > p.readAt!);
+    const compare = (m: AgentConversationMessage, c: { createdAt: number; id: string }) => m.createdAt - c.createdAt || (m.id < c.id ? -1 : m.id > c.id ? 1 : 0);
+    let start = Math.max(0, all.length - limit), end = all.length;
+    if (p.before) { end = all.findIndex(m => compare(m, p.before!) >= 0); if (end < 0) end = all.length; start = Math.max(0, end - limit); }
+    else if (p.after) { start = all.findIndex(m => compare(m, p.after!) > 0); if (start < 0) start = all.length; end = Math.min(all.length, start + limit); }
+    else if (pivot >= 0) { start = Math.max(0, Math.min(pivot, all.length - limit)); end = Math.min(all.length, start + limit); }
+    const messages = all.slice(start, end);
+    return { messages, work: [], memories: [], ...this.related(messages, []), older: start > 0, newer: end < all.length };
   }
   private history(p: RpcParams<'agents.history'>): AgentsHistoryPage {
     const kind = HISTORY_KIND[p.kind];
@@ -320,7 +348,7 @@ export class FakeAgents {
     return { ...empty, work: page.items as AgentWork[], ...this.related([], page.items as AgentWork[]), more: page.more };
   }
   call(method: keyof AgentsRpcMethods, raw: unknown): unknown {
-    try { return this.dispatch(method, raw); } finally { if (method !== 'agents.snapshot' && method !== 'agents.history') this.kick(); }
+    try { return this.dispatch(method, raw); } finally { if (method !== 'agents.snapshot' && method !== 'agents.history' && method !== 'agents.messages') this.kick(); }
   }
   private readonly handlers: AgentHandlers = {
     'agents.runtime.get': p => this.runtime(p.agentId),
@@ -332,7 +360,8 @@ export class FakeAgents {
     'agents.routine.save': p => this.saveRoutine(p),
     'agents.routine.run': p => this.runRoutine(p),
     'agents.context.compact': p => this.compactContext(p),
-    'agents.snapshot': () => this.snapshot(),
+    'agents.snapshot': p => this.snapshot(p.readAt),
+    'agents.messages': p => this.messagePage(p),
     'agents.history': p => this.history(p),
     'agents.profile.save': p => this.saveProfile(p),
     'agents.group.save': p => this.saveGroup(p),
@@ -562,7 +591,7 @@ export class FakeAgents {
     let taskGeneration = work.taskGeneration;
     if (work.taskId) { const task = this.get('task', work.taskId); taskGeneration = task.generation + 1; this.update('task', { ...task, generation: taskGeneration, leaseUntil: null, status: p.action === 'cancel' ? 'cancelled' : 'assigned' }); }
     if (p.action === 'cancel') for (const d of this.all('decision').filter(d => d.workId === work.id && d.status === 'pending')) this.update('decision', { ...d, status: 'cancelled' });
-    for (const d of this.all('delivery').filter(d => d.workId === work.id)) this.update('delivery', { ...d, status: p.action === 'cancel' ? 'cancelled' : 'pending' });
+    for (const d of this.all('delivery').filter(d => d.workId === work.id && !['included', 'processed'].includes(d.status))) this.update('delivery', { ...d, status: p.action === 'cancel' ? 'cancelled' : 'pending' });
     const updated = this.update('work', { ...work, taskGeneration, status: p.action === 'pause' ? 'paused' : p.action === 'cancel' ? 'cancelled' : 'pending', runId: ['resume', 'reconcile'].includes(p.action) ? null : work.runId, error: null });
     if (work.runId && ['pause', 'cancel'].includes(p.action)) this.runner?.stop(this.get('run', work.runId).threadId);
     return updated;

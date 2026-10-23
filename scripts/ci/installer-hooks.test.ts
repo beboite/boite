@@ -72,10 +72,10 @@ describe.skipIf(!ready)('installer hooks', () => {
       const script = `!addplugindir /x86-unicode "${PLUGINS}"\n` + withHooks
         .replace(/^!define BUNDLEID ".*"\r?$/m, `!define BUNDLEID "${id}"`)
         .replace(/^!define OUTFILE ".*"\r?$/m, `!define OUTFILE "${join(directory, 'setup.exe')}"`)
-        // Only the script is under test: no compression, and the payload
-        // files a build staged need not exist any more.
-        .replace('!if "lzma" == "none"', '!if "none" == "none"')
-        .replace(/^(\s*)File (?!\/nonfatal)/gm, '$1File /nonfatal ');
+        // Only hook placement is under test: omit application/WebView payloads
+        // even when the build's files still exist, and disable any compression.
+        .replace(/^!if "[^"]+" == "none"\r?$/m, '!if "none" == "none"')
+        .replace(/^([ \t]*)File [^\r\n]*\r?$/gm, '$1; payload omitted by hook template test');
       writeFileSync(join(directory, 'installer.nsi'), script);
       const output = makensis(join(directory, 'installer.nsi'));
       const chosen = [...output.matchAll(/SetEnvironmentVariable\(t "BOITE_STOP_DIR", t "([^"]*)"\)/g)].map((match) => match[1]);
@@ -288,6 +288,70 @@ describe.skipIf(!ready)('installer hooks', () => {
     for (const [path, text] of STALE) expect(readFileSync(join(failed.install, path), 'utf8')).toBe(text);
     expect(existsSync(join(failed.install, 'core', 'main-n3wn3wn3.js'))).toBe(false);
     expect(Bun.hash(readFileSync(join(failed.install, 'boite-core.exe')))).toBe(failedCore);
+
+    // Nothing of the install runs, as after an in-app update stopped its core
+    // and its shell: no PowerShell starts. Each one took about a second on
+    // Windows 11, most of an update's installation (2026-10-23). The scripts
+    // write their names to BOITE_HOOKS_TRACE when they run.
+    function idle(name: string) {
+      const install = join(base, name);
+      mkdirSync(install, { recursive: true });
+      copyFileSync(process.execPath, join(install, 'boite-core.exe'));
+      copyFileSync(process.execPath, join(install, 'boite-hooktest-shell.exe'));
+      for (const [path, text] of [...STALE, ...KEPT]) {
+        mkdirSync(dirname(join(install, path)), { recursive: true });
+        writeFileSync(join(install, path), text);
+      }
+      return install;
+    }
+    const trace = join(base, 'hooks-trace.txt');
+    async function traced(install: string) {
+      rmSync(trace, { force: true });
+      const at = performance.now();
+      // Handed over explicitly: a child started without `env` does not see a later change to process.env.
+      const child = Bun.spawn([join(base, 'setup.exe'), '/S', `/D=${install}`], {
+        env: { ...process.env, BOITE_HOOKS_TRACE: trace }, stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+      });
+      started.push(child.pid);
+      expect(await child.exited).toBe(0);
+      const scripts = existsSync(trace) ? readFileSync(trace, 'utf8').split(/\r?\n/).filter(Boolean) : [];
+      return { scripts, ms: Math.round(performance.now() - at) };
+    }
+    rmSync(join(data, 'boite2', 'core.lock'), { force: true });
+    const quiet = idle('idle');
+    const idleRun = await traced(quiet);
+    console.log(`an install with nothing running took ${idleRun.ms} ms, 6000 of them the section's own sleep`);
+    expect(idleRun.scripts).toEqual([]);
+    expect(readFileSync(join(quiet, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
+    expect(bundles(quiet)).toEqual({ core: false, ui: false, kept: true, aside: false });
+
+    // The in-app update's shell exits just after starting the installer: a
+    // shell executable let go of within the 3 seconds still skips the scripts.
+    const exiting = idle('exiting');
+    const exitingShell = join(exiting, 'boite-hooktest-shell.exe');
+    const holdingShell = join(base, 'holding-shell.txt');
+    // The paths go through the environment, so an apostrophe in them cannot end a PowerShell string.
+    const shellHolder = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+      "$f = [IO.File]::Open($env:BOITE_HOLD_FILE, 'Open', 'Read', 'Read'); Set-Content -LiteralPath $env:BOITE_HOLD_SIGNAL 'held'; Start-Sleep -Milliseconds 1000; $f.Close()"], {
+      env: { ...process.env, BOITE_HOLD_FILE: exitingShell, BOITE_HOLD_SIGNAL: holdingShell }, stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+    });
+    started.push(shellHolder.pid);
+    for (const deadline = Date.now() + 20_000; !existsSync(holdingShell);) {
+      if (Date.now() > deadline) throw new Error('the holder never opened the shell executable');
+      await Bun.sleep(50);
+    }
+    const exitingRun = await traced(exiting);
+    expect(await exited(shellHolder)).toBe(0);
+    expect(exitingRun.scripts).toEqual([]);
+    expect(readFileSync(join(exiting, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
+
+    // A lock a crashed core left behind takes the checked way, at once, which finds nothing to stop.
+    writeFileSync(join(data, 'boite2', 'core.lock'), JSON.stringify({ pid: 999999, startedAt: Date.now() }));
+    const crashed = idle('crashed');
+    const crashedRun = await traced(crashed);
+    expect(crashedRun.scripts).toEqual(['stop-shell', 'stop-core']);
+    expect(readFileSync(join(crashed, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
+    rmSync(join(data, 'boite2', 'core.lock'), { force: true });
 
     // An interrupted run left core.previous, and a scanner holds a file in it
     // without delete sharing: that leftover cannot go, so this run leaves core
