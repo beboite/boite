@@ -1652,6 +1652,7 @@ test('manual skills complete on a draft with sharing on or off and disappear aft
   await waitFor(() => slashMenu() === null);
   await store.client!.call('brain.configure', { path: '/shared/brain', enabled: false });
   await type('/');
+  await store.loadBrainCommands();
   await waitFor(() => slashRows().includes('focus'));
   expect(slashMenu()?.textContent).toContain('Work through one task at a time.');
   expect(slashRows()).not.toContain('code-review');
