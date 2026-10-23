@@ -131,6 +131,17 @@ test('in the fake as in the core, a watch the bot had before an entrustment surv
   expect(await desk()).toBeNull();
 });
 
+test('a removed thread leaves every desk in the fake as in the core, whatever brought it there', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0 });
+  const save = (name: string) => client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  const ada = await save('Ada'), bob = await save('Bob');
+  await client.call('agents.watch', { agentId: ada.id, watchThreadId: 't-trace', watched: true });
+  await client.call('agents.watch', { agentId: bob.id, watchThreadId: 't-trace', watched: true });
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: ada.id });
+  await client.call('threads.remove', { threadId: 't-trace' });
+  expect((await client.call('agents.snapshot', {})).watches.filter(w => w.threadId === 't-trace')).toEqual([]);
+});
+
 test('the demo has an agent at work on a live step, one waiting on a login and one at rest until its routine', async ({ ready }) => {
   const { client } = await ready({ delayMs: 0, agentsDemo: true });
   const snapshot = await client.call('agents.snapshot', {});

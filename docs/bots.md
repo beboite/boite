@@ -313,7 +313,8 @@ already keep. A thread joins when the bot starts it (`boite thread new`,
 it, answers for it or calls `boite bot watch <thread>` (`followed`); the
 first origin stays. The follows live in `resident-follow:<agent>`. A follow
 holds while its thread is open, whatever its age, and leaves a day after the
-thread is done or archived. At most 100 open threads sit on one desk; past
+thread is done or archived; a removed thread leaves every desk at once,
+whatever its origin. At most 100 open threads sit on one desk; past
 that the oldest open follow leaves. `boite bot unwatch`, or the owner's x on
 a card, drops one. A bot watches only threads of its projects or already on
 its desk; the owner, any top-level thread.
@@ -379,7 +380,9 @@ resumes the goal. Taking the thread back removes the goal without a message.
 However the entrustment ends (a met goal, a take-back, the thread archived or
 removed, the thread entrusted to another bot), the owner's grant ends with it
 (`AgentProjects.release`): the bot loses the access the entrustment gave. A
-watch it had before the entrustment, followed or started, stays as it was;
+watch it had before the entrustment, followed or started, stays as it was,
+and so does a watch the owner adds while the thread is entrusted, a grant of
+its own kept as `followed`;
 the one the entrustment made stays only when the thread's project is
 entrusted to the bot, as `followed`, and otherwise leaves the desk. The news
 of a met goal still reaches the bot. The snapshot carries the list as

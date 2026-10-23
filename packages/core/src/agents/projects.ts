@@ -221,7 +221,9 @@ export class AgentProjects {
     // A follow the bot had before an entrustment keeps what it was: only the grant the entrustment adds is lent.
     const lent = !owner && (previous?.lent === true || (origin === 'entrusted' && previous !== undefined && previous.owner !== true));
     const { lent: _lent, ...before } = previous ?? {};
-    this.write(agentId, { ...follows, [threadId]: { ...before, ...pr, at: now, origin: previous?.origin ?? origin, ...granted, ...(lent ? { lent: true as const } : {}) } });
+    // The owner watching a thread entrusted to the bot grants it on its own: a `followed` watch the entrustment's end leaves.
+    const from = owner && previous?.origin === 'entrusted' ? 'followed' : previous?.origin ?? origin;
+    this.write(agentId, { ...follows, [threadId]: { ...before, ...pr, at: now, origin: from, ...granted, ...(lent ? { lent: true as const } : {}) } });
   }
   /**
    * An entrustment ended (taken back, met, archived, removed, given to another

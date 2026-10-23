@@ -261,7 +261,8 @@ export class FakeAgents {
       sessions: mine([...this.sessions.values()]),
       routines: mine([...this.routines.values()]).sort(byCreation),
       status: profiles.map(agent => this.statusOf(agent)),
-      watches: mine(this.watches).filter(w => own !== null || desk === undefined || w.agentId === desk).map(watch => this.watchOf(watch)).sort((a, b) => Number(['done', 'archived'].includes(a.state)) - Number(['done', 'archived'].includes(b.state)) || b.lastActivityAt - a.lastActivityAt),
+      // A removed thread leaves every desk, as the core reads none it cannot find.
+      watches: mine(this.watches).filter(w => (own !== null || desk === undefined || w.agentId === desk) && (!this.runner?.thread || this.runner.thread(w.threadId) !== undefined)).map(watch => this.watchOf(watch)).sort((a, b) => Number(['done', 'archived'].includes(a.state)) - Number(['done', 'archived'].includes(b.state)) || b.lastActivityAt - a.lastActivityAt),
       accountGrants: this.grants,
       limits: this.limits,
       entrusted: mine(this.entrusted),

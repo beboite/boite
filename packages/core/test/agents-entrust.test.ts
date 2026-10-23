@@ -154,6 +154,20 @@ test('an entrustment that ends any way gives the grant back, and a watch the bot
   expect(h.core.workforce.projects.follows(agent.id, watched)).toBe(true);
 });
 
+test('an owner watch added while a thread is entrusted is a grant of its own: it outlives the entrustment', async () => {
+  script('Working.');
+  const desk = async (threadId: string) => (await client.call('agents.snapshot', {})).watches.find(w => w.agentId === agent.id && w.threadId === threadId)?.origin ?? null;
+  const { threadId } = await echoThread(h, client);
+  await client.call('agents.entrust', { threadId, agentId: agent.id, objective: 'Keep going' });
+  await client.call('agents.watch', { agentId: agent.id, watchThreadId: threadId, watched: true });
+  await client.call('agents.entrust', { threadId, agentId: null });
+  expect(await desk(threadId)).toBe('followed');
+  expect(h.core.workforce.projects.follows(agent.id, threadId)).toBe(true);
+  // A removed thread leaves the desk whatever brought it there.
+  await client.call('threads.remove', { threadId });
+  expect(await desk(threadId)).toBeNull();
+});
+
 test('archiving drops the entrustment', async () => {
   const { threadId } = await echoThread(h, client);
   script('Working.');
