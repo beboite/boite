@@ -247,7 +247,8 @@ real('three agents in the list; a phone shows the list, then the conversation fu
   const row = id(`agent-entry-${nova.agent.id}`);
   await page.waitFor(`document.querySelectorAll('.agents-rail [data-testid^="agent-entry-"]').length === 3`);
   await page.waitFor(`document.querySelector('${row} ${id('agent-row-detail')}')?.textContent.includes('fake_tool')`);
-  await page.evaluate(`(() => { const desk = document.querySelector('${id('agent-desk-toggle')}'); if (desk?.getAttribute('aria-pressed') === 'true') desk.click(); })()`);
+  // The panel left open beside the open agent (Mira's browser, or a desk) closes for the rail's capture.
+  await page.evaluate(`document.querySelector('${id('right-panel')} ${id('panel-close')}')?.click()`);
   await page.waitFor(`!(document.querySelector('${id('right-panel')}')?.getBoundingClientRect().width > 0)`);
   await capture('rail-three-desktop.png');
 
