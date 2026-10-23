@@ -10,12 +10,14 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_MEMORY_MAX } from '@boite/contracts';
-import type { AgentProfile, ThreadSummary } from '@boite/contracts';
+import type { AgentProfile, AgentWatchPullRequest, LinkedPullRequest, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { scheduleText } from './routines.ts';
 
 const AGENTS_MD_MAX = 32_000;
 const SKILLS_MAX = 50;
+/** Where `linked-pull-requests.ts` keeps a thread's links. */
+const LINKED = 'linked-pull-requests:';
 /** The file older scoped memories were archived to on upgrade (`migration.ts`). */
 export const MEMORY_ARCHIVE = 'memories-archive.md';
 
@@ -69,6 +71,32 @@ export function deskState(core: Core, thread: ThreadSummary): string {
   return 'idle';
 }
 
+/**
+ * The pull request a desk line shows: the one Boite watches for the thread,
+ * else its newest open link, else its newest link, with the checks the watch
+ * last read. Null when the thread linked none.
+ */
+export function deskPullRequest(core: Core, thread: ThreadSummary): AgentWatchPullRequest | null {
+  const linked = (core.journal.getSetting(`${LINKED}${thread.id}`) as LinkedPullRequest[] | undefined) ?? [];
+  const watches = core.pullRequestWatches?.of(thread.id) ?? [];
+  const pr = linked.find(p => watches.some(w => w.url.toLowerCase() === p.url.toLowerCase()))
+    ?? [...linked].reverse().find(p => p.state === 'OPEN') ?? linked.at(-1);
+  if (!pr) {
+    const known = thread.pullRequest;
+    return known ? { number: known.number, url: known.url, state: known.state === 'MERGED' ? 'merged' : known.state === 'CLOSED' ? 'closed' : 'open', checks: null } : null;
+  }
+  const seen = watches.find(w => w.url.toLowerCase() === pr.url.toLowerCase())?.seen ?? null;
+  const checks: AgentWatchPullRequest['checks'] = seen === null || seen.checks.total === 0 ? null
+    : seen.checks.failed > 0 ? 'failing' : seen.checks.running > 0 ? 'pending' : 'passing';
+  const state: AgentWatchPullRequest['state'] = pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : pr.draft ? 'draft' : 'open';
+  return { number: pr.number, url: pr.url, state, checks: state === 'merged' || state === 'closed' ? null : checks };
+}
+
+/** A desk line's pull request, in a few words: `PR #12 open, checks failing`. */
+export function pullRequestText(pr: AgentWatchPullRequest | null): string {
+  return pr ? `PR #${pr.number} ${pr.state}${pr.checks ? `, checks ${pr.checks}` : ''}` : '';
+}
+
 /** The agent's context block, with the hash that says when it must be sent again. */
 export function agentContext(core: Core, agent: AgentProfile): { text: string; hash: string } {
   const store = core.workforce;
@@ -85,8 +113,9 @@ export function agentContext(core: Core, agent: AgentProfile): { text: string; h
     const thread = core.journal.getThread(threadId);
     if (!thread) return [];
     const project = thread.projectId === null ? null : core.journal.getProject(thread.projectId)?.name ?? null;
-    const pr = thread.pullRequest ? `, PR #${thread.pullRequest.number} ${thread.pullRequest.state}` : '';
-    return [`- "${thread.title}" (${thread.id})${project ? ` in ${project}` : ''}: ${deskState(core, thread)}${pr}`];
+    const pr = pullRequestText(deskPullRequest(core, thread));
+    const stalled = store.projects.stalledSince(thread.id);
+    return [`- "${thread.title}" (${thread.id})${project ? ` in ${project}` : ''}: ${deskState(core, thread)}${stalled === null ? '' : ', silent since ' + new Date(stalled).toISOString()}${pr ? `, ${pr}` : ''}`];
   });
   const text = [
     'Boite: who you are, as a persistent agent. This block comes again only when it changes; your conversation so far is in this session.',

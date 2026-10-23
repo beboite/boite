@@ -15,7 +15,7 @@ import { AgentRoutines } from './routines.ts';
 import { AgentProjects } from './projects.ts';
 import { AgentSettingCards, registerAgentSettingMethods } from './setting-cards.ts';
 import { MemoryKeeper } from './memory.ts';
-import { agentContext, deskState } from './context.ts';
+import { agentContext, deskPullRequest, deskState } from './context.ts';
 import { finalText, midnight, type AgentFact, type AgentWake } from './runtime.ts';
 import { migrateAgents } from './migration.ts';
 import { boolean, ids, integer, object, oneOf, text } from './validation.ts';
@@ -24,6 +24,13 @@ const DEFAULT_LIMITS: AgentsSnapshot['limits'] = { paused: false };
 /** `agents.changed` goes out at most this often while agents work. */
 const CHANGED_EVERY_MS = 1_000;
 const LAST_MAX = 200;
+const ACTIVITY_MAX = 80;
+
+/** The first line of a text, cut to a status line. */
+function oneLine(text: string): string {
+  const line = text.trim().split('\n')[0]!.trim();
+  return line.length > ACTIVITY_MAX ? `${line.slice(0, ACTIVITY_MAX - 3)}...` : line;
+}
 const CONTEXT = 'agents:context:';
 /** Answers the user has not read on an agent's thread, counted since it was last read. */
 const UNREAD = 'agents:unread:';
@@ -303,12 +310,12 @@ export class AgentStore {
       if (!thread) return [];
       const state = deskState(this.core, thread);
       const ask = this.core.threads.listQuestions(thread.id)[0];
-      const pr = thread.pullRequest;
       return [{
         agentId, threadId, title: thread.title, projectId: thread.projectId, origin, since,
         state: state === 'needs the user' ? 'needs-you' : state as AgentWatch['state'],
-        stalledSince: null, lastActivityAt: thread.updatedAt,
-        pullRequest: pr ? { number: pr.number, url: pr.url, state: pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : 'open', checks: null } : null,
+        stalledSince: this.projects.stalledSince(thread.id),
+        lastActivityAt: Math.max(thread.updatedAt, this.projects.lastHeard(thread.id) ?? 0),
+        pullRequest: deskPullRequest(this.core, thread),
         question: ask ? { id: ask.id, text: ask.text, options: ask.options.map(o => o.label) } : null,
       }];
     });
@@ -328,8 +335,16 @@ export class AgentStore {
     return null;
   }
 
-  /** The step a running turn is on, in a few words. */
+  /**
+   * The step a running turn is on, in a few words: the running tool's own
+   * summary or description, else its name and what it acts on. While a card
+   * holds the thread, what it waits on.
+   */
   private activity(thread: ThreadSummary): string | null {
+    const ask = this.core.threads.listQuestions(thread.id)[0];
+    const permission = this.core.threads.listPermissions(thread.id)[0];
+    if (ask) return `Waiting for your answer: ${oneLine(ask.text)}`;
+    if (permission) return `Waiting for your permission to use ${permission.toolName}`;
     const turn = this.core.journal.runningTurn(thread.id);
     if (!turn) return null;
     let tool: string | null = null;
@@ -337,8 +352,9 @@ export class AgentStore {
       for (const part of message.parts) {
         if (part.type !== 'tool' || part.status !== 'running') continue;
         const input = part.input && typeof part.input === 'object' ? part.input as Record<string, unknown> : {};
-        const said = [part.summary, input['description'], input['command'], input['file_path'], input['url']].find(value => typeof value === 'string' && value.trim());
-        tool = `${part.name}${said ? `: ${String(said).trim().split('\n')[0]!.slice(0, 80)}` : ''}`;
+        const title = [part.summary, input['description']].find(value => typeof value === 'string' && value.trim());
+        const target = [input['command'], input['file_path'], input['path'], input['url'], input['pattern'], input['query']].find(value => typeof value === 'string' && value.trim());
+        tool = title ? oneLine(String(title)) : `${part.name}${target ? `: ${oneLine(String(target))}` : ''}`;
       }
     }
     if (tool) return tool;

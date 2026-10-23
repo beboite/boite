@@ -12,15 +12,19 @@
  *
  * Its desk is the threads it follows: those it started, wrote to, answered
  * for, was entrusted or put there itself. A follow stays while the thread is
- * open and leaves a day after it is done or archived.
+ * open and leaves a day after it is done or archived. Besides their turns,
+ * questions and permissions, the desk reports a running turn silent for
+ * `STALL_MS` (once per turn), a pull request merged and checks that start to
+ * fail.
  */
 import type {
-  AgentLetter, AgentProfile, AgentWatch, Message, MessagePart, PermissionRequest, ProjectId, ProjectThreadRow, QuestionRequest,
+  AgentLetter, AgentProfile, AgentWatch, AgentWatchPullRequest, Message, MessagePart, PermissionRequest, ProjectId, ProjectThreadRow, QuestionRequest,
   ResidentThreadAction, ResidentView, RpcParams, ThreadId, ThreadSummary, Turn,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
+import { deskPullRequest } from './context.ts';
 import { NOTICE_BATCH_MS } from './runtime.ts';
 import type { AgentStore } from './store.ts';
 
@@ -33,31 +37,55 @@ export const WATCHES_MAX = 100;
  * the user, often right there, answers it before the agent is asked to.
  */
 export const QUESTION_GRACE_MS = 3 * 60_000;
+/** A desk thread's running turn that produced nothing for this long wakes the agent, once per turn. */
+export const STALL_MS = 20 * 60_000;
+/** How often desk threads are checked for a stall. */
+const STALL_CHECK_MS = 10_000;
 const NOTICE_TEXT = 1_500;
 const FOLLOW = 'resident-follow:';
+/** The turn a desk thread stalled on, and since when it is silent (null once it spoke again). */
+const STALL = 'agents:stall:';
 const ACTIONS: readonly ResidentThreadAction[] = ['archive', 'done', 'unarchive', 'stop', 'rename', 'move'];
 
-/** One followed thread; older cores saved the time alone. */
-type Follow = { at: number; origin: AgentWatch['origin'] };
+/**
+ * One followed thread; older cores saved the time alone. `pr` is the pull
+ * request as the agent was last told of it, so a merge or failing checks
+ * wake it once.
+ */
+type Follow = { at: number; origin: AgentWatch['origin']; pr?: AgentWatchPullRequest | null };
+interface Stall { turnId: string; since: number | null }
 
 function trimmed(text: string, max: number): string {
   const flat = text.trim();
   return flat.length > max ? `${flat.slice(0, max - 20)}\n[Truncated.]` : flat;
 }
 
+/** Follows newest first; within one millisecond, the one saved later first. */
+function newestFirst(entries: [string, Follow][]): [string, Follow][] {
+  return entries.map((entry, index) => ({ entry, index })).sort((a, b) => b.entry[1].at - a.entry[1].at || b.index - a.index).map(({ entry }) => entry);
+}
+
 export class AgentProjects {
   private readonly off: () => void;
   private closed = false;
-  /** Notice times per agent in the last hour. Reset by a restart, which a cap need not survive. */
-  private readonly sent = new Map<string, number[]>();
+  /** The agents each desk thread is on, built from the saved follows on first use and after each write. */
+  private desk: Map<ThreadId, Set<string>> | null = null;
+  /** When each desk thread's running turn last produced something. A restart starts the count again. */
+  private readonly heard = new Map<ThreadId, number>();
+  private readonly stalls = new Map<ThreadId, Stall>();
+  private checkedAt = 0;
 
   constructor(private readonly core: Core, private readonly store: AgentStore) {
+    for (const row of core.journal.db.query("SELECT key, value FROM settings WHERE key LIKE 'agents:stall:%'").all() as { key: string; value: string }[]) {
+      try { this.stalls.set(row.key.slice(STALL.length), JSON.parse(row.value) as Stall); } catch { /* A stall record that does not parse is no stall. */ }
+    }
     this.off = core.bus.onAny((name, payload) => {
       if (this.closed || core.journal.isClosed()) return;
       try {
         if (name === 'turn.finished') this.noticeTurn(payload as Turn);
         else if (name === 'question.asked') this.noticeQuestion(payload as QuestionRequest);
         else if (name === 'permission.requested') this.noticePermission(payload as PermissionRequest);
+        this.onDesk(name, payload);
       } catch (error) {
         core.log('warn', `agent notice after ${name}: ${messageOf(error)}`);
       }
@@ -121,7 +149,17 @@ export class AgentProjects {
     const raw = (this.core.journal.getSetting(`${FOLLOW}${agentId}`) as Record<string, number | Follow> | undefined) ?? {};
     return Object.fromEntries(Object.entries(raw).map(([id, value]) => [id, typeof value === 'number' ? { at: value, origin: 'followed' as const } : value]));
   }
+  private write(agentId: string, follows: Record<string, Follow>): void {
+    this.core.journal.setSetting(`${FOLLOW}${agentId}`, follows);
+    this.desk = null;
+    this.store.changed();
+  }
 
+  /** Whether a thread is open: not done, not archived. */
+  private open(threadId: ThreadId): boolean {
+    const thread = this.core.journal.getThread(threadId);
+    return thread !== null && !thread.archived;
+  }
   /** Whether a follow still holds: its thread is open, or done or archived less than a day ago. */
   private holds(threadId: ThreadId, now: number): boolean {
     const thread = this.core.journal.getThread(threadId);
@@ -133,36 +171,163 @@ export class AgentProjects {
   /**
    * The agent follows a thread: it started it, wrote to it, answered for it,
    * was entrusted it or put it on its desk. Every turn it ends comes back to
-   * the agent as a fact. The first origin stays.
+   * the agent as a fact. The first origin stays. Past `WATCHES_MAX` open
+   * threads the oldest open follow leaves; settled ones leave a day after.
    */
   follow(agentId: string, threadId: ThreadId, origin: AgentWatch['origin'] = 'followed'): void {
     const now = Date.now();
     const saved = this.saved(agentId);
-    const kept = Object.entries(saved).filter(([id]) => id !== threadId && this.holds(id, now)).sort((a, b) => b[1].at - a[1].at).slice(0, WATCHES_MAX - 1);
     const previous = saved[threadId];
-    this.core.journal.setSetting(`${FOLLOW}${agentId}`, { ...Object.fromEntries(kept), [threadId]: { at: now, origin: previous?.origin ?? origin } });
-    this.store.changed();
+    const others = newestFirst(Object.entries(saved).filter(([id]) => id !== threadId && this.holds(id, now)));
+    let open = this.open(threadId) ? 1 : 0;
+    const kept = new Set(others.filter(([id]) => !this.open(id) || ++open <= WATCHES_MAX).map(([id]) => id));
+    // Saved oldest first, so the order of the entries breaks ties within one millisecond.
+    const follows = Object.fromEntries(Object.entries(saved).filter(([id]) => kept.has(id)));
+    this.write(agentId, { ...follows, [threadId]: { ...previous, at: now, origin: previous?.origin ?? origin } });
   }
   unfollow(agentId: string, threadId: ThreadId): boolean {
     const saved = this.saved(agentId);
     if (!(threadId in saved)) return false;
     delete saved[threadId];
-    this.core.journal.setSetting(`${FOLLOW}${agentId}`, saved);
-    this.store.changed();
+    this.write(agentId, saved);
     return true;
   }
   follows(agentId: string, threadId: ThreadId): boolean {
     return threadId in this.saved(agentId) && this.holds(threadId, Date.now());
   }
-  /** The threads on an agent's desk, newest follow first. */
+  /** The threads on an agent's desk, open ones first, each group newest follow first. */
   watchesOf(agentId: string): { threadId: ThreadId; origin: AgentWatch['origin']; since: number }[] {
     const now = Date.now();
-    return Object.entries(this.saved(agentId)).filter(([id]) => this.holds(id, now))
-      .sort((a, b) => b[1].at - a[1].at).map(([threadId, follow]) => ({ threadId, origin: follow.origin, since: follow.at }));
+    const follows = newestFirst(Object.entries(this.saved(agentId)).filter(([id]) => this.holds(id, now)))
+      .map(([threadId, follow]) => ({ threadId, origin: follow.origin, since: follow.at, open: this.open(threadId) }));
+    return [...follows.filter(f => f.open), ...follows.filter(f => !f.open)].map(({ open: _open, ...watch }) => watch);
   }
   /** Agents that follow a thread, whatever its project. */
   private followers(threadId: ThreadId): AgentProfile[] {
     return this.store.records.list('profile').filter(agent => agent.status === 'active' && this.follows(agent.id, threadId));
+  }
+  /** Every desk thread with the agents whose desk it is on, whatever their status. */
+  private deskIndex(): Map<ThreadId, Set<string>> {
+    if (this.desk) return this.desk;
+    const desk = new Map<ThreadId, Set<string>>();
+    for (const agent of this.store.records.list('profile')) {
+      for (const threadId of Object.keys(this.saved(agent.id))) {
+        const agents = desk.get(threadId) ?? new Set<string>();
+        agents.add(agent.id);
+        desk.set(threadId, agents);
+      }
+    }
+    this.desk = desk;
+    return desk;
+  }
+
+  /** When a desk thread's running turn last produced something, since this core started. */
+  lastHeard(threadId: ThreadId): number | null { return this.heard.get(threadId) ?? null; }
+
+  /** Since when a desk thread's running turn is silent, once that wakes its agents, else null. */
+  stalledSince(threadId: ThreadId): number | null {
+    const stall = this.stalls.get(threadId);
+    if (stall?.since == null) return null;
+    const status = this.core.journal.getThread(threadId)?.status;
+    return status === 'running' || status === 'waiting' ? stall.since : null;
+  }
+
+  /**
+   * What happens on a desk thread: its row changes for the client, a word
+   * from its running turn resets the stall clock, and its pull request is
+   * compared with what its agents were last told.
+   */
+  private onDesk(name: string, payload: unknown): void {
+    const threadId = name === 'thread.updated' ? (payload as { id?: unknown }).id : (payload as { threadId?: unknown } | null)?.threadId;
+    if (typeof threadId !== 'string' || !this.deskIndex().has(threadId)) return;
+    if (name === 'message.delta' || name === 'message.part' || name === 'message.started' || name === 'message.completed') {
+      this.heard.set(threadId, Date.now());
+      const stall = this.stalls.get(threadId);
+      // It spoke again: the turn is no longer stalled, and it will not wake the agent twice.
+      if (stall?.since != null) { this.setStall(threadId, { ...stall, since: null }); this.store.changed(); }
+      return;
+    }
+    if (name === 'turn.started' || name === 'turn.finished') {
+      this.heard.set(threadId, Date.now());
+      if (name === 'turn.finished' && this.stalls.has(threadId)) this.setStall(threadId, null);
+    }
+    if (name === 'thread.updated' || name === 'threads.pullRequestsChanged') this.comparePullRequest(threadId);
+    if (name === 'thread.updated' || name === 'thread.removed' || name.startsWith('turn.') || name.startsWith('question.') || name.startsWith('permission.') || name === 'threads.pullRequestsChanged') this.store.changed();
+  }
+
+  private setStall(threadId: ThreadId, stall: Stall | null): void {
+    if (stall === null) { this.stalls.delete(threadId); this.core.journal.deleteSetting(`${STALL}${threadId}`); return; }
+    this.stalls.set(threadId, stall);
+    this.core.journal.setSetting(`${STALL}${threadId}`, stall);
+  }
+
+  /** Called on the agents' tick: every `STALL_CHECK_MS`, desk threads whose running turn went silent. */
+  tick(now = Date.now()): void {
+    if (this.closed || now - this.checkedAt < STALL_CHECK_MS) return;
+    this.checkedAt = now;
+    this.checkStalls(now);
+  }
+
+  /**
+   * A desk thread whose running turn produced nothing for `STALL_MS` wakes the
+   * agents whose desk it is on, once per turn. A turn already silent when the
+   * core started is counted from the first check.
+   */
+  checkStalls(now = Date.now()): void {
+    for (const [threadId, agentIds] of this.deskIndex()) {
+      const thread = this.core.journal.getThread(threadId);
+      if (thread === null || thread.archived || (thread.status !== 'running' && thread.status !== 'waiting')) {
+        // A turn that ended while the core was down left its stall behind.
+        if (this.stalls.has(threadId)) this.setStall(threadId, null);
+        continue;
+      }
+      const turn = this.core.journal.runningTurn(threadId);
+      if (turn === null || this.stalls.get(threadId)?.turnId === turn.id) continue;
+      // A card waiting for the user is no stall: the question and permission events tell of it.
+      if (this.core.threads.listQuestions(threadId).length || this.core.threads.listPermissions(threadId).length) continue;
+      const heard = this.heard.get(threadId);
+      if (heard === undefined) { this.heard.set(threadId, now); continue; }
+      if (now - heard < STALL_MS) continue;
+      this.setStall(threadId, { turnId: turn.id, since: heard });
+      const minutes = Math.round((now - heard) / 60_000);
+      for (const agentId of agentIds) {
+        const agent = this.store.records.find('profile', agentId);
+        if (agent?.status !== 'active' || !this.follows(agentId, threadId)) continue;
+        this.notify(agent, `stall:${turn.id}`, `"${thread.title}" (${thread.id}) has a running turn that produced nothing for ${minutes} minutes. `
+          + `Read it with boite thread show ${thread.id}; steer it with boite thread send, or stop it with boite thread stop ${thread.id}.`);
+      }
+      this.store.changed();
+    }
+  }
+
+  /**
+   * The desk thread's pull request against what each agent was last told:
+   * a merge, or checks that start to fail, is a fact. The first sight of a
+   * pull request is only recorded.
+   */
+  private comparePullRequest(threadId: ThreadId): void {
+    const thread = this.core.journal.getThread(threadId);
+    if (thread === null) return;
+    const now = deskPullRequest(this.core, thread);
+    for (const agentId of this.deskIndex().get(threadId) ?? []) {
+      const saved = this.saved(agentId);
+      const follow = saved[threadId];
+      if (!follow || JSON.stringify(follow.pr ?? null) === JSON.stringify(now)) continue;
+      const was = follow.pr ?? null;
+      this.core.journal.setSetting(`${FOLLOW}${agentId}`, { ...saved, [threadId]: { ...follow, pr: now } });
+      const agent = this.store.records.find('profile', agentId);
+      if (now === null || was === null || agent?.status !== 'active' || !this.holds(threadId, Date.now())) continue;
+      const same = was.url === now.url;
+      if (now.state === 'merged' && (!same || was.state !== 'merged')) {
+        this.notify(agent, `pr-merged:${now.url}`, `Pull request #${now.number} of "${thread.title}" (${thread.id}) was merged: ${now.url}. `
+          + `Mark the thread done (boite thread done ${thread.id}) once nothing is left in it.`);
+      } else if (now.checks === 'failing' && (!same || was.checks !== 'failing')) {
+        const seen = this.core.pullRequestWatches.of(threadId).find(w => w.url.toLowerCase() === now.url.toLowerCase())?.seen;
+        const counts = seen ? ` (${seen.checks.failed} of ${seen.checks.total} failed on ${seen.head})` : '';
+        this.notify(agent, `pr-checks:${now.url}:${seen?.head ?? Date.now()}`, `Checks fail on pull request #${now.number} of "${thread.title}" (${thread.id})${counts}: ${now.url}. `
+          + `Its thread is ${thread.status}; steer it with boite thread send ${thread.id} if it is not fixing them.`);
+      }
+    }
   }
 
   // -- agent methods ----------------------------------------------------------
