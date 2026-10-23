@@ -130,7 +130,13 @@ export class FakeAgents {
     const operation = turn.execution?.operation;
     const last = answer.trim().split(/\n\s*\n/).at(-1)?.trim() ?? '';
     const quiet = (operation === 'routine' || operation === 'event') && turn.status === 'done' && QUIET.test(last.split('\n').at(-1)?.trim() ?? '');
-    if (quiet) { this.quiet.add(turn.id); this.runner?.settle?.(turn.threadId); }
+    if (quiet) {
+      this.quiet.add(turn.id);
+      // As the core's turn settlement: the turn says it was quiet, and it leaves nothing unread.
+      const held = this.runner?.thread?.(turn.threadId)?.turns.find(t => t.id === turn.id);
+      if (held) held.quiet = true;
+      this.runner?.settle?.(turn.threadId);
+    }
     for (const routine of this.routines.values()) {
       if (routine.lastTurnId !== turn.id) continue;
       routine.lastOutcome = quiet ? 'quiet' : turn.status === 'error' ? 'error' : turn.status === 'stopped' ? 'stopped' : 'done';
@@ -253,7 +259,7 @@ export class FakeAgents {
     'agents.runtime.get': p => this.runtime(p.agentId),
     'agents.runtime.configure': p => this.configureRuntime(p),
     'agents.accounts.set': p => this.setAccounts(p),
-    'agents.brain.get': p => this.getBrain(p.agentId),
+    'agents.brain.get': p => this.getBrain(p.threadId !== undefined && !p.agentId ? this.ownerOf(p.threadId) ?? p.agentId : p.agentId),
     'agents.brain.save': p => this.saveBrain(p),
     'agents.brain.root': p => this.moveBrains(p),
     'agents.memory.note': p => this.note(p),

@@ -21,7 +21,8 @@ export const fr: Translation = {
     none: 'Aucun',
     noProjects: 'Aucun projet',
     defaultEffort: 'Par défaut',
-    minutes: '{count} min',
+    dollars: '{amount} $ par jour',
+    noCap: 'Sans limite',
     send: 'Envoyer',
     keys: {
       projects: 'Projets',
@@ -29,7 +30,7 @@ export const fr: Translation = {
       effort: 'Niveau de raisonnement',
       autoMemory: 'Mettre à jour la mémoire après chaque tâche',
       subagents: 'Sous-agents',
-      maxRunMinutes: 'Minutes maximum par exécution',
+      dailyBudget: 'Budget quotidien de ses réveils',
     },
   }
 };

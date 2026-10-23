@@ -29,9 +29,10 @@ export function agentSettingValueText(key: AgentSettingKey, value: unknown, name
     return ids.length === 0 ? words.noProjects : ids.map((id) => projectName(id, names)).join(', ');
   }
   if (key === 'effort' && (value === null || value === undefined)) return words.defaultEffort;
+  if (key === 'dailyBudget' && (value === null || value === undefined)) return words.noCap;
   if (value === null || value === undefined) return words.none;
   if (typeof value === 'boolean') return value ? words.on : words.off;
-  if (key === 'maxRunMinutes' && typeof value === 'number') return fill(words.minutes, { count: String(value) });
+  if (key === 'dailyBudget' && typeof value === 'number') return fill(words.dollars, { amount: String(value) });
   if (key === 'model' && typeof value === 'string') {
     for (const provider of names.providers) {
       const model = provider.models.find((entry) => entry.id === value);

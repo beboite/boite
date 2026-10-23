@@ -39,6 +39,7 @@ export function seedAgentsDemo(ctx: FakeContext): void {
     answer: 'It reads well: the title is clear and the button stands out. On a phone the subtitle wraps to three lines, so I would cut it to one sentence. Here is how it looks now.', picture: true });
   const quiet = exchange(ctx, miraThread, { at: now - 20 * 60 * MINUTE, operation: 'routine', label: 'Routine · Evening review', prompt: 'Check the new issues and pull requests of the projects I look after and tell me what needs me.',
     answer: 'Read 4 new issues and 2 pull requests. Nothing needs you tonight.\n\n[quiet] 4 issues, 2 pull requests, nothing new' });
+  quiet.quiet = true;
   ctx.agents.seedQuiet(quiet.id);
   exchange(ctx, miraThread, { at: now - 95 * MINUTE, prompt: 'Remember that the welcome screen must fit in three lines on a phone.', answer: 'Noted in my memory: the welcome screen stays under three lines on a phone. I will check it in tonight\'s review.' });
   const evening = ctx.agents.seedRoutine({ agentId: mira.agent.id, name: 'Evening review', prompt: 'Check the new issues and pull requests of the projects I look after and tell me what needs me.', schedule: { kind: 'daily', time: '20:00', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone } });
