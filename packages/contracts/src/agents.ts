@@ -186,7 +186,12 @@ export interface AgentBrainRoot { path: string; custom: boolean }
 export type AgentDraft<T extends AgentRecord> = Omit<T, keyof AgentRecord>;
 export type AgentSave<T extends AgentRecord> = { id?: string; expectedRevision?: number; value: AgentDraft<T> };
 export interface AgentsRpcMethods {
-  'agents.snapshot': { params: { threadId?: string }; result: AgentsSnapshot };
+  /**
+   * `desk` narrows `watches` to one agent's desk, or to none with null: the
+   * Agents page asks only the open agent's. Absent: every desk it may read.
+   * An agent's own thread always reads its own desk.
+   */
+  'agents.snapshot': { params: { threadId?: string; desk?: string | null }; result: AgentsSnapshot };
   /**
    * Creates or edits an identity. Creating one creates its thread and starts a
    * first turn there: it introduces itself and schedules what its instructions

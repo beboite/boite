@@ -447,7 +447,7 @@ export class AgentStore {
    * Every agent, or only the calling agent's own records when an agent's
    * thread asks (`threadId`): no other agent, grant or entrustment.
    */
-  snapshot(threadId?: string): AgentsSnapshot {
+  snapshot(threadId?: string, desk?: string | null): AgentsSnapshot {
     const own = threadId === undefined ? null : this.callerAgent(threadId, 'agents.snapshot');
     const profiles = own ? [own] : this.records.list('profile');
     const mine = (agentId: string) => !own || agentId === own.id;
@@ -458,7 +458,7 @@ export class AgentStore {
       sessions: sessions.filter(s => mine(s.agentId)),
       routines: routines.filter(r => mine(r.agentId)),
       status: profiles.map(agent => this.status(agent, sessions, routines)),
-      watches: profiles.flatMap(agent => this.watchesOf(agent.id)),
+      watches: profiles.filter(agent => own !== null || desk === undefined || agent.id === desk).flatMap(agent => this.watchesOf(agent.id)),
       accountGrants: own ? [] : this.resident.grants(),
       limits: this.limits(),
       entrusted: this.entrusted.list().filter(e => mine(e.agentId)),
@@ -469,7 +469,7 @@ export class AgentStore {
 
 export function registerPersistentAgents(core: Core): void {
   const store = core.workforce;
-  core.router.register('agents.snapshot', p => store.snapshot(p.threadId));
+  core.router.register('agents.snapshot', p => store.snapshot(p.threadId, p.desk));
   core.router.register('agents.profile.save', p => store.saveProfile(p));
   core.router.register('agents.open', p => store.open(p.agentId));
   core.router.register('agents.runtime.get', p => store.resident.config(p.agentId));

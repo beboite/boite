@@ -93,6 +93,10 @@ test('the desk holds a thread it started, one entrusted to it and one it watches
   const rows = (await owner.call('agents.snapshot', {})).watches;
   expect(rows.map(w => [w.threadId, w.origin])).toEqual(expect.arrayContaining([[startedId, 'started'], [entrusted, 'entrusted'], [review, 'followed']]));
   expect(rows.find(w => w.threadId === startedId)).toMatchObject({ agentId: agent.id, title: 'Write the release notes', projectId: project, state: 'idle', stalledSince: null, pullRequest: null, question: null });
+  // The Agents page reads only the open agent's desk, or none.
+  expect((await owner.call('agents.snapshot', { desk: agent.id })).watches).toHaveLength(rows.length);
+  expect((await owner.call('agents.snapshot', { desk: 'agt_profile_other' })).watches).toEqual([]);
+  expect((await owner.call('agents.snapshot', { desk: null })).watches).toEqual([]);
 
   // A question in a watched thread makes it need the user, answerable from the desk with its options.
   const asker = await connect(h.url, h.core.agents.tokenFor(review));
