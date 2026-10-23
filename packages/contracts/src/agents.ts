@@ -155,6 +155,13 @@ export interface AgentStatus {
   last: { text: string; at: number } | null;
   /** Its own turns since local midnight. */
   today: { turns: number; wakes: number; quiet: number; costUsd: number };
+  /**
+   * Its last memory pass: `threadId` is the core's own child conversation that
+   * ran it, housekeeping clients leave out of subagent lists and notification
+   * gates; `summary` says in one line what changed in MEMORY.md. Null before
+   * the first pass.
+   */
+  memory?: { threadId: string; status: 'running' | 'done' | 'unchanged' | 'error'; summary: string | null; at: number } | null;
 }
 export interface AgentsSnapshot {
   revision: number;
