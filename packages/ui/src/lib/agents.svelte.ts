@@ -3,6 +3,7 @@ import type { AgentProfile, AgentStatus, AgentsSnapshot, RpcParams, RpcResult, A
 import type { Store } from './store.svelte';
 import { strings } from './strings';
 import { experimentOn } from './experiments.svelte';
+import { noteUpkeep } from './agent-upkeep';
 
 /**
  * A persistent agent is a thread with an identity: its conversation is its
@@ -208,7 +209,7 @@ export class AgentsView {
         this.dirty = false;
         const client = this.client;
         const snapshot = await client?.call('agents.snapshot', {});
-        if (snapshot && !this.disposed && client === this.store.client) { this.snapshot = snapshot; this.loadError = ''; }
+        if (snapshot && !this.disposed && client === this.store.client) { this.snapshot = snapshot; this.loadError = ''; noteUpkeep(snapshot); }
       }
     } catch (error) { if (!this.disposed) this.loadError = errorText(error); }
   }

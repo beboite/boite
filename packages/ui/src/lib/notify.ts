@@ -21,6 +21,7 @@ import { NOTIFICATION_KINDS, notifiesOnFinish, threadBusy, type NotificationKind
 import type { Client } from './client';
 import { PUSH_ENABLED_KEY } from './pwa';
 import { strings } from './strings';
+import { upkeepThreads } from './agent-upkeep';
 
 export const NOTIFICATIONS_STORAGE_KEY = 'boite.notifications';
 export const NOTIFICATION_MUTED_STORAGE_KEY = 'boite.notifications.muted';
@@ -51,11 +52,15 @@ export function shouldNotify(input: NotifyDecision): boolean {
  * (`notifiesOnFinish`) applied to the threads this client holds. A thread it
  * does not hold yet keeps the old answer: a done or a failure is news.
  */
-export function finishNotifies(threads: readonly ThreadSummary[], turn: Pick<Turn, 'threadId' | 'status' | 'execution' | 'quiet'>): boolean {
+export function finishNotifies(threads: readonly ThreadSummary[], turn: Pick<Turn, 'threadId' | 'status' | 'execution' | 'quiet'> & { finishedAt?: number | null }, upkeep: ReadonlySet<string> = upkeepThreads): boolean {
   const thread = threads.find((t) => t.id === turn.threadId);
   if (thread === undefined) return turn.status === 'done' || turn.status === 'error';
+  // A persistent agent's memory pass is a child the core starts as the turn
+  // ends: its answer waits on nothing there. The snapshot names it once read;
+  // until then, a child of an agent's thread born after the turn ended is one.
+  const upkept = (t: ThreadSummary) => upkeep.has(t.id) || (!!thread.agentSessionId && typeof turn.finishedAt === 'number' && t.createdAt >= turn.finishedAt);
   // A child waiting on its own background work is still at work: its result has not come back.
-  const activeChildren = threads.filter((t) => t.parentThreadId === thread.id && threadBusy(t)).length;
+  const activeChildren = threads.filter((t) => t.parentThreadId === thread.id && threadBusy(t) && !upkept(t)).length;
   return notifiesOnFinish(thread, turn, activeChildren);
 }
 

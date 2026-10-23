@@ -12,7 +12,9 @@
   import AgentMessageGroup from './AgentMessageGroup.svelte';
   import WakeMarker from './WakeMarker.svelte';
   import TurnFoldRow from './TurnFoldRow.svelte';
-  import { TurnFolds, openedTurns } from '../lib/agent-turns';
+  import MemoryPassLine from './MemoryPassLine.svelte';
+  import { MEMORY_PREFIX, MemoryLines, TurnFolds, openedTurns } from '../lib/agent-turns';
+  import { AgentsView } from '../lib/agents.svelte';
   import { agentMailFor, groupAgentMail, withAgentMail } from '../lib/agent-mail';
   import DelegationActivity from './DelegationActivity.svelte';
   import { teamLaunches } from '../lib/delegation-progress';
@@ -113,8 +115,11 @@
   /** A persistent agent's finished turns read like messages: their steps fold behind one row, a quiet wake to one line (`lib/agent-turns.ts`). */
   const turnFolds = new TurnFolds();
   const agentThread = $derived(store.openThread?.id === threadId && !!store.openThread.agentSessionId);
+  /** Its last memory pass, a line under the answer it followed. */
+  const memoryLines = new MemoryLines();
+  const pass = $derived(agentThread ? AgentsView.of(store).snapshot?.status?.find(status => status.threadId === threadId)?.memory ?? null : null);
   const folded = $derived.by(() => agentThread
-    ? { timeline: turnFolds.build(placed, shownTurns, openedTurns), folds: turnFolds.folds }
+    ? { timeline: memoryLines.place(turnFolds.build(placed, shownTurns, openedTurns), shownTurns, pass), folds: turnFolds.folds }
     : { timeline: placed, folds: new Map() as typeof turnFolds.folds });
   const timeline = $derived(folded.timeline);
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
@@ -792,6 +797,8 @@
         >
           {#if row.failures}
             <FailedAttempts {store} {threadId} messages={row.failures} turns={shownTurns} {signedOut} canFork={!narrow.current && forkable && !store.openThread?.incognito} reveal={failureTarget} oninspect={inspectFailures} />
+          {:else if pass && message.id === MEMORY_PREFIX + pass.threadId}
+            <MemoryPassLine {pass} onopen={() => store.panel.open('desk')} />
           {:else if fold}
             <TurnFoldRow {fold} at={message.createdAt} wake={turn?.execution?.operation === 'routine' || turn?.execution?.operation === 'event' ? turn.execution.operation : undefined} />
           {:else if launches.has(message.id)}

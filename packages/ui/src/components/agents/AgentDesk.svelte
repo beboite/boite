@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { Check, ChevronRight, LoaderCircle, Pencil, TriangleAlert } from '@lucide/svelte';
+  import { Brain, Check, ChevronRight, LoaderCircle, Pencil, TriangleAlert } from '@lucide/svelte';
   import type { AgentBrain, AgentWatch } from '@boite/contracts';
   import { AgentsView, agentOfThread, faceOf, liveState, liveStep, statusOf, waitingOn } from '../../lib/agents.svelte';
   import { budgetMeter, deskOrder, dollars, runningTurn, turnSteps } from '../../lib/agent-desk';
@@ -8,6 +8,7 @@
   import { minuteClock } from '../../lib/clock.svelte';
   import { errorText } from '../../lib/errors';
   import { dateTime } from '../../lib/schedule';
+  import { relativeTime } from '../../lib/format';
   import type { Store } from '../../lib/store.svelte';
   import { fill, strings } from '../../lib/strings';
   import { toolLine } from '../../lib/tool-groups';
@@ -152,6 +153,14 @@
         <h3>{t.memory}</h3>
         {#if store.owner && brain && !editing}<button type="button" class="ghost small" onclick={() => { editing = true; }} data-testid="desk-memory-edit"><Pencil size={13} strokeWidth={1.75} />{strings.agents.edit}</button>{/if}
       </header>
+      {#if status?.memory}
+        {@const pass = status.memory}
+        <p class="desk-memory-pass" data-status={pass.status} data-testid="desk-memory-pass">
+          <Brain size={13} strokeWidth={1.75} />
+          <span class="desk-memory-pass-when">{pass.status === 'running' ? t.memoryPass.running : fill(t.memoryPass[pass.status], { when: relativeTime(pass.at, now) })}</span>
+          {#if pass.summary && pass.status !== 'running'}<span class="desk-memory-pass-summary">{pass.summary}</span>{/if}
+        </p>
+      {/if}
       {#if editing}
         <AgentBrainEditor {view} agentId={agent.id} ondone={saved => { brain = saved; editing = false; }} oncancel={() => { editing = false; }} />
       {:else if brain}

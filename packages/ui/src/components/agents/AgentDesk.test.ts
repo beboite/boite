@@ -50,6 +50,7 @@ test('Nova\'s desk shows its live step, every card state in order, answers a que
 
     // Its memory, rendered, and the day against its budget.
     await vi.waitFor(() => expect(document.querySelector('[data-testid=desk-memory-text]')?.textContent).toContain('The login fix ships in it'));
+    expect(document.querySelector('[data-testid=desk-memory-pass]')?.textContent).toMatch(/Updated 37 min\. ago\s*PR #482 fails its e2e redirect test/);
     await vi.waitFor(() => expect(document.querySelector('[data-testid=desk-budget]')?.textContent).toContain('$1.35 of $2.00'));
     expect(document.querySelector('[data-testid=desk-schedule]')?.textContent).toContain('Release check');
   } finally {

@@ -252,6 +252,10 @@ test('an agent thread folds a finished turn\'s steps behind one row and a quiet 
   expect(document.querySelector('[data-testid="wake-marker"]')).toBeNull();
   expect(timeline()).not.toContain('Nothing needs you tonight');
   expect(document.querySelectorAll('[data-testid="tool-group"], [data-testid="tool-card"]')).toHaveLength(0);
+  // Its last memory pass is one line under the answer it followed.
+  const pass = document.querySelector<HTMLElement>('[data-testid="memory-pass"]')!;
+  expect(pass.textContent).toContain('Memory updated · Noted that the welcome screen fits in three lines on a phone.');
+  expect(pass.closest('article')?.previousElementSibling?.textContent).toContain('Noted in my memory');
   quiet.querySelector('button')!.click();
   flushSync();
   expect(document.querySelector('[data-testid="wake-marker"]')?.textContent).toContain('Routine · Evening review');

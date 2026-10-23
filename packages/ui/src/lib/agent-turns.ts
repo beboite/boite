@@ -1,5 +1,5 @@
 import { SvelteSet } from 'svelte/reactivity';
-import type { Message, MessagePart, Turn } from '@boite/contracts';
+import type { AgentStatus, Message, MessagePart, Turn } from '@boite/contracts';
 import { fill, strings } from './strings';
 
 /**
@@ -159,5 +159,41 @@ export class TurnFolds {
     const trimmed = { ...message, parts };
     this.#trimmed.set(message, { key, message: trimmed });
     return trimmed;
+  }
+}
+
+/** An agent's last memory pass, as its status reports it. */
+export type MemoryPass = NonNullable<AgentStatus['memory']>;
+/** The id of the line a memory pass draws under the answer it followed. */
+export const MEMORY_PREFIX = 'memory-pass:';
+
+/**
+ * The turn a memory pass followed: the last one that ended before it with an
+ * answer the user saw. A quiet wake, a cache ping or a compaction starts none.
+ */
+export function memoryTurn(turns: readonly Turn[], pass: Pick<MemoryPass, 'at'>): string | null {
+  let best: Turn | null = null;
+  for (const turn of turns) {
+    const operation = turn.execution?.operation;
+    if (!settled(turn) || turn.status === 'stopped' || turn.quiet || operation === 'keepalive' || operation === 'compact') continue;
+    if (turn.finishedAt === null || turn.finishedAt > pass.at) continue;
+    if (!best || turn.finishedAt >= (best.finishedAt ?? 0)) best = turn;
+  }
+  return best?.id ?? null;
+}
+
+/** `timeline` with one line after the last message of the turn the pass followed, kept as one object while the pass stands still. */
+export class MemoryLines {
+  #row: { key: string; message: Message } | null = null;
+  place(timeline: readonly Message[], turns: readonly Turn[], pass: MemoryPass | null | undefined): Message[] {
+    const turnId = pass ? memoryTurn(turns, pass) : null;
+    const at = turnId ? timeline.findLastIndex(message => message.turnId === turnId) : -1;
+    if (!pass || at < 0) return timeline as Message[];
+    const anchor = timeline[at]!;
+    const key = `${pass.threadId}|${pass.status}|${pass.summary}|${pass.at}|${anchor.id}`;
+    if (this.#row?.key !== key) {
+      this.#row = { key, message: { id: MEMORY_PREFIX + pass.threadId, threadId: anchor.threadId, turnId: MEMORY_PREFIX + pass.threadId, role: 'system', parts: [], state: 'complete', createdAt: anchor.createdAt } };
+    }
+    return [...timeline.slice(0, at + 1), this.#row.message, ...timeline.slice(at + 1)];
   }
 }

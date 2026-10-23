@@ -76,6 +76,18 @@ describe('finishNotifies', () => {
     expect(finishNotifies(threads, turn('plain', 'done'))).toBe(true);
     expect(finishNotifies(threads, turn('unknown', 'done'))).toBe(true);
   });
+
+  test('a persistent agent\'s memory pass never holds back the answer it follows, a subagent still does', () => {
+    const agent = thread('agent', { agentSessionId: 's-1', projectId: null });
+    const pass = thread('memory', { parentThreadId: 'agent', status: 'running', createdAt: 100 });
+    const finished = { ...turn('agent', 'done'), finishedAt: 100 };
+    // Started as the turn ended, before any snapshot named it.
+    expect(finishNotifies([agent, pass], finished, new Set())).toBe(true);
+    // Named by the snapshot, whenever it started.
+    expect(finishNotifies([agent, { ...pass, createdAt: 10 }], turn('agent', 'done'), new Set(['memory']))).toBe(true);
+    // A subagent the turn sent and left running is still work the answer waits on.
+    expect(finishNotifies([agent, thread('sub', { parentThreadId: 'agent', status: 'running', createdAt: 50 })], finished, new Set())).toBe(false);
+  });
 });
 
 describe('the switch', () => {

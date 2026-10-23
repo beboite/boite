@@ -72,6 +72,8 @@ export class FakeAgents {
   private unread = new Map<string, number>();
   /** What each agent's turns cost today, API-equivalent dollars: the fake runs no model to count it. */
   private spend = new Map<string, number>();
+  /** Each agent's last memory pass, as the core reports it: the fake runs none. */
+  private passes = new Map<string, NonNullable<AgentStatus['memory']>>();
   /** The folder the owner chose for brains, null for the default. */
   private brainFolder: string | null = null;
   /** Each agent's folder under a chosen root, named after it the first time it was placed there. */
@@ -181,6 +183,7 @@ export class FakeAgents {
   /** How many answers the list counts missed while the thread is unread; one by default. */
   seedUnread(agentId: string, count: number): void { this.unread.set(agentId, count); }
   seedSpend(agentId: string, usd: number): void { this.spend.set(agentId, usd); }
+  seedMemoryPass(agentId: string, pass: NonNullable<AgentStatus['memory']>): void { this.passes.set(agentId, pass); }
   seedRuntime(agentId: string, change: Partial<AgentRuntimeConfig>): void { this.configs.set(agentId, { ...this.runtime(agentId), ...change }); }
 
   private makeThread(agent: AgentProfile): string {
@@ -223,6 +226,7 @@ export class FakeAgents {
       unread: thread?.unread ? this.unread.get(agent.id) ?? 1 : 0,
       last: lastMessage ? { text: lastText.slice(0, 200), at: lastMessage.createdAt } : null,
       today: { turns: today.length, wakes: wakes.length, quiet: wakes.filter(t => this.quiet.has(t.id)).length, costUsd: this.spend.get(agent.id) ?? 0 },
+      memory: this.passes.get(agent.id) ?? null,
     };
   }
   private watchOf(watch: AgentWatch): AgentWatch {

@@ -51,6 +51,7 @@ export function seedAgentsDemo(ctx: FakeContext): void {
   exchange(ctx, miraThread, { at: now - 95 * MINUTE, prompt: 'Remember that the welcome screen must fit in three lines on a phone.', answer: 'Noted in my memory: the welcome screen stays under three lines on a phone. I will check it in tonight\'s review.' });
   const evening = ctx.agents.seedRoutine({ agentId: mira.agent.id, name: 'Evening review', prompt: 'Check the new issues and pull requests of the projects I look after and tell me what needs me.', schedule: { kind: 'daily', time: '20:00', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone } });
   void evening;
+  ctx.agents.seedMemoryPass(mira.agent.id, { threadId: 't-agents-demo-memory-mira', status: 'done', summary: 'Noted that the welcome screen fits in three lines on a phone.', at: now - 92 * MINUTE });
   ctx.agents.seedMemory(mira.agent.id, '- The welcome screen stays under three lines on a phone.\n- The user wants pictures of what changed, not descriptions.');
   miraThread.unread = true;
   ctx.agents.seedUnread(mira.agent.id, 1);
@@ -100,6 +101,7 @@ export function seedAgentsDemo(ctx: FakeContext): void {
   ctx.agents.seedMemory(nova.agent.id, '## Release 2.0.4\n- The login fix ships in it, PR #482.\n- Release notes live in `CHANGELOG.md`, newest first.\n\n## How the user likes it\n- A pull request is done when its checks pass, not when it opens.');
   ctx.agents.seedRuntime(nova.agent.id, { dailyBudgetUsd: 2 });
   ctx.agents.seedSpend(nova.agent.id, 1.35);
+  ctx.agents.seedMemoryPass(nova.agent.id, { threadId: 't-agents-demo-memory-nova', status: 'done', summary: 'PR #482 fails its e2e redirect test; the upload test only timed out.', at: now - 37 * MINUTE });
 }
 
 /** A finished turn: the prompt (or a wake's label), then the agent's answer. */

@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Message, MessagePart, Turn } from '@boite/contracts';
-import { FOLD_PREFIX, TurnFolds, foldText, quietReason } from './agent-turns';
+import { FOLD_PREFIX, MEMORY_PREFIX, MemoryLines, TurnFolds, foldText, memoryTurn, quietReason } from './agent-turns';
 
 const turn = (id: string, extra: Partial<Turn> = {}): Turn => ({ id, threadId: 't', status: 'done', queuedAt: 0, startedAt: 0, finishedAt: 180_000, usage: null, error: null, ...extra });
 const message = (id: string, turnId: string, role: Message['role'], parts: MessagePart[], createdAt = 0): Message => ({ id, threadId: 't', turnId, role, state: 'complete', createdAt, parts });
@@ -76,4 +76,17 @@ test('a quiet wake folds whole, its opening line included, to one "Nothing to re
   expect(opened.map(m => m.id)).toEqual([`${FOLD_PREFIX}r`, 'w1', 'a1', 'u2']);
   expect(opened[1]).toBe(wake);
   expect(opened[2]).toBe(answer);
+});
+
+test('a memory pass draws its line under the last answer the user saw before it, never under a quiet wake', () => {
+  const turns = [turn('a', { finishedAt: 100 }), turn('b', { finishedAt: 200 }), routine('q', { finishedAt: 250, quiet: true }), turn('c', { finishedAt: 400 })];
+  expect(memoryTurn(turns, { at: 300 })).toBe('b');
+  expect(memoryTurn(turns, { at: 50 })).toBeNull();
+  const lines = new MemoryLines();
+  const timeline = [message('ua', 'a', 'user', [text('1')]), message('aa', 'a', 'assistant', [text('one')]), message('ub', 'b', 'user', [text('2')]), message('ab', 'b', 'assistant', [text('two')]), message('uc', 'c', 'user', [text('3')])];
+  const pass = { threadId: 'mem', status: 'done' as const, summary: 'Noted the second answer.', at: 300 };
+  const placed = lines.place(timeline, turns, pass);
+  expect(placed.map(m => m.id)).toEqual(['ua', 'aa', 'ub', 'ab', `${MEMORY_PREFIX}mem`, 'uc']);
+  expect(lines.place(timeline, turns, pass)[4]).toBe(placed[4]);
+  expect(lines.place(timeline, turns, null)).toBe(timeline);
 });

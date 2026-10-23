@@ -72,6 +72,7 @@ export const fr: Translation = {
       checks: { pending: 'vérifications en cours', passing: 'vérifications OK', failing: 'vérifications en échec' },
       origin: { started: 'Lancé par lui', entrusted: 'Confié à lui', followed: 'Suivi par lui' },
       memoryEmpty: 'Rien de noté pour l’instant. Il écrit ici ce qu’il apprend.',
+      memoryPass: { running: 'Mise à jour en cours', done: 'Mise à jour {when}', unchanged: 'Relue {when}, rien à changer', error: 'Échec de la mise à jour {when}' },
       ways: 'Façons de travailler', waysEmpty: 'Pas encore d’AGENTS.md.',
       turns: 'Tours', wakes: 'Réveils', quiet: 'Calmes',
       spent: "Dépensé aujourd'hui", spentOf: '{spent} sur {budget}', noCap: 'sans plafond', setBudget: 'Fixer un budget', budgetReached: 'Budget atteint : les réveils attendent demain.',

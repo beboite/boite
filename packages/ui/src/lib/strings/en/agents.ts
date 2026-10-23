@@ -70,6 +70,7 @@ export const strings = {
       checks: { pending: 'checks running', passing: 'checks pass', failing: 'checks failing' },
       origin: { started: 'It started this', entrusted: 'Entrusted to it', followed: 'It follows this' },
       memoryEmpty: 'Nothing noted yet. It writes here what it learns.',
+      memoryPass: { running: 'Updating now', done: 'Updated {when}', unchanged: 'Checked {when}, nothing to change', error: 'Update failed {when}' },
       ways: 'Ways of working', waysEmpty: 'No AGENTS.md yet.',
       turns: 'Turns', wakes: 'Wakes', quiet: 'Quiet',
       spent: 'Spent today', spentOf: '{spent} of {budget}', noCap: 'no daily cap', setBudget: 'Set a budget', budgetReached: 'Budget reached: wakes wait until tomorrow.',
