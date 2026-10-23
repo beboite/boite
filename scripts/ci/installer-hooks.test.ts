@@ -330,9 +330,10 @@ describe.skipIf(!ready)('installer hooks', () => {
     const exiting = idle('exiting');
     const exitingShell = join(exiting, 'boite-hooktest-shell.exe');
     const holdingShell = join(base, 'holding-shell.txt');
+    // The paths go through the environment, so an apostrophe in them cannot end a PowerShell string.
     const shellHolder = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-Command',
-      `$f = [IO.File]::Open('${exitingShell}', 'Open', 'Read', 'Read'); Set-Content '${holdingShell}' 'held'; Start-Sleep -Milliseconds 1000; $f.Close()`], {
-      stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+      "$f = [IO.File]::Open($env:BOITE_HOLD_FILE, 'Open', 'Read', 'Read'); Set-Content -LiteralPath $env:BOITE_HOLD_SIGNAL 'held'; Start-Sleep -Milliseconds 1000; $f.Close()"], {
+      env: { ...process.env, BOITE_HOLD_FILE: exitingShell, BOITE_HOLD_SIGNAL: holdingShell }, stdout: 'ignore', stderr: 'ignore', windowsHide: true,
     });
     started.push(shellHolder.pid);
     for (const deadline = Date.now() + 20_000; !existsSync(holdingShell);) {

@@ -296,8 +296,9 @@ test('a tool call already running longer than the grace when the restart starts 
 });
 
 test('a turn that also runs a fresh tool call still waits for it, even beside an old one', async () => {
-  HANDOFF.graceMs = 1_500;
-  HANDOFF.longToolMs = 200;
+  // The old call is aged well past the threshold, the fresh one far below it however slow the runner.
+  HANDOFF.graceMs = 3_000;
+  HANDOFF.longToolMs = 1_500;
   let stops = 0;
   const h = await startTestCore({ onShutdown: () => { stops += 1; } });
   try {
@@ -307,14 +308,14 @@ test('a turn that also runs a fresh tool call still waits for it, even beside an
     const running = client.next('message.part', event => event.threadId === threadId && event.part.type === 'tool' && event.part.status === 'running');
     const turn = await client.call('turns.start', { threadId, prompt: '[tool:60000] long command' });
     const old = await running;
-    await Bun.sleep(300);
+    await Bun.sleep(1_700);
     // A second call of the same turn, started just now: the one a polling loop runs beside.
     h.core.bus.emit('message.part', { threadId, messageId: old.messageId, partIndex: old.partIndex + 1,
       part: { type: 'tool', toolId: 'fresh', name: 'Bash', input: {}, output: null, status: 'running', startedAt: Date.now() } });
     const asked = Date.now();
     expect((await ask(h)).status).toBe(202);
     await waitFor(() => stops === 1);
-    expect(Date.now() - asked).toBeGreaterThanOrEqual(1_400);
+    expect(Date.now() - asked).toBeGreaterThanOrEqual(2_900);
     expect(h.core.journal.getTurn(turn.id)?.status).toBe('stopped');
     client.close();
   } finally { await h.stop(); }

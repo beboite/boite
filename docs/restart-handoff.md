@@ -12,9 +12,10 @@ then lets the next core continue that work. The journal owns the record;
    30 seconds to finish; after that, Stop applies at its current position.
    A tool already running for 30 seconds when the restart starts gets no
    wait: on 2026-10-22 two updates each spent the whole grace on such a call
-   (a nine minute script, a polling loop) and cut it anyway: 30.6 and 30.2
-   seconds from `core.handoff.started` to `core.shutdown.started` in the
-   core's log.
+   (a nine-minute script, a polling loop) and cut it anyway: 30.6 and 30.2
+   seconds between the `core.handoff.started` and `core.shutdown.started`
+   events of `%LOCALAPPDATA%\boite2\logs\core.*.ndjson`, each line's `at`
+   subtracted.
    Normal stop enforcement ends processes after 10 seconds and force-settles
    a remaining turn two seconds later.
 3. Exit after draining. Eligible queued turns remain queued in the journal.
