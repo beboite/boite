@@ -349,6 +349,8 @@ export class Connection {
     s.groupKnown = false;
     s.ungrouped = false;
     s.projects = [];
+    // The next core's folds come from storage; unreadable storage must not carry these over to its ids.
+    s.collapsedProjects = [];
     s.threads = [];
     // What the next core answers replaces these; one that cannot answer must not show the last one's.
     s.harnessUpdates = [];
@@ -432,6 +434,8 @@ export class Connection {
       const core = await client.connect();
       if (!this.ctx.currentClient(client, generation)) return;
       this.core = core;
+      // Before the landing: a draft it opens unfolds its project over the restored folds.
+      this.ctx.projects.restoreFolds();
       if (this.localCore) noteThisComputer(core.hostname);
       this.connection = client.state;
       this.principal = client.principal;
@@ -605,6 +609,7 @@ export class Connection {
     const primary = [
       slice(client.call('projects.list', {}), rows => {
         s.projects = retainRows(s.projects, this.ctx.projects.withPendingArchives(projectRead.apply(rows, s.projects)));
+        this.ctx.projects.pruneFolds();
         this.ctx.projects.bootListAt = Date.now();
         void this.ctx.projects.sendPendingArchives(rows);
       }, () => projectRead.cancel()),
