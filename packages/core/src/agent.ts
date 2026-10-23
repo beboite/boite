@@ -53,9 +53,13 @@ export class AgentTokens {
     this.sealed.add(threadId);
   }
 
-  forget(threadId: ThreadId): void {
+  /**
+   * The thread's token opens nothing from now on. Its seal goes only with the
+   * thread itself (`removed`): an archived memory pass restored later stays sealed.
+   */
+  forget(threadId: ThreadId, removed = false): void {
     const held = this.byThread.get(threadId);
-    this.sealed.delete(threadId);
+    if (removed) this.sealed.delete(threadId);
     if (held === undefined) return;
     this.byThread.delete(threadId);
     this.byToken.delete(held);
@@ -293,14 +297,14 @@ export function registerAgentMethods(core: Core): void {
   // Forgetting the token only stops the next hello, so a socket an agent
   // already opened goes too: it used to keep claiming cards and opening
   // panels on a thread the user had put away.
-  const shut = (threadId: ThreadId): void => {
+  const shut = (threadId: ThreadId, removed = false): void => {
     core.browser.release(threadId);
     core.devices.release(threadId);
-    core.agents.forget(threadId);
+    core.agents.forget(threadId, removed);
     core.subscribers.closeAgents(threadId);
   };
   core.bus.onAny((name, payload) => {
-    if (name === 'thread.removed') shut((payload as { threadId: ThreadId }).threadId);
+    if (name === 'thread.removed') shut((payload as { threadId: ThreadId }).threadId, true);
     if (name === 'thread.updated') {
       const thread = payload as ThreadSummary;
       if (thread.archived) shut(thread.id);
