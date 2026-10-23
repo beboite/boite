@@ -312,8 +312,8 @@ name is `Boite`. The install is per user and asks for no elevation.
 - `boite` and `boite.cmd`, the CLI shims the core puts on an agent's PATH; each
   invokes the adjacent core's CLI entry ([cli.md](cli.md)).
 - `boite.exe`, the same CLI without cmd.exe, which Windows finds first; built
-  from `apps/shell/launcher` by `stage-sidecar.ts`. The installer moves a copy
-  an agent's command still holds aside, as it does `boite-core.exe`.
+  from `apps/shell/launcher` by `stage-sidecar.ts`. Once the core has stopped,
+  the installer moves aside a copy an agent's command still holds.
 - `ui/`, the same build a phone gets over the pairing link.
 
 `core/` and `ui/` hold only the current build. Their file names carry a hash,

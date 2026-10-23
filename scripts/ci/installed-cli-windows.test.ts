@@ -25,7 +25,8 @@ test.skipIf(process.platform !== 'win32' || (!required && !existsSync(launcher))
     copyFileSync(resolve('packages/core/shims/boite.cmd'), join(directory, 'boite.cmd'));
     copyFileSync(launcher, join(directory, 'boite.exe'));
     // Windows names it `Path`; a second `PATH` beside it would not be the one read.
-    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PATH'));
+    // An inherited BOITE_CORE_EXECUTABLE would run another core than the one staged here.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !['PATH', 'BOITE_CORE_EXECUTABLE'].includes(name.toUpperCase())));
     env.Path = `${directory};${process.env.Path ?? process.env.PATH ?? ''}`;
     // Verbatim, so cmd.exe reads the line as typed rather than with escaped quotes.
     const run = (command: string[]) => {

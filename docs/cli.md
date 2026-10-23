@@ -735,7 +735,7 @@ An installed Windows app also has `boite.exe` (`apps/shell/launcher`), which
 Windows finds before `boite.cmd`. A `.cmd` runs through cmd.exe, which ends the
 command at an unquoted `&`: from PowerShell, `boite browser open
 'https://a.test/?a=1&b=2' --profile private` reached the core as
-`open https://a.test/?a=1`. The `.exe` hands each argument over as it came;
+`browser open https://a.test/?a=1`. The `.exe` hands each argument over as it came;
 `scripts/ci/installed-cli-windows.test.ts` checks it from PowerShell and cmd.
 The shell supplies `BOITE_CORE_EXECUTABLE` and a resource `BOITE_CLI_DIR` for
 packaged launches. Standalone cores resolve their executable beside the shim.
