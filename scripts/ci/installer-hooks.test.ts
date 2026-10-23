@@ -307,11 +307,13 @@ describe.skipIf(!ready)('installer hooks', () => {
     const trace = join(base, 'hooks-trace.txt');
     async function traced(install: string) {
       rmSync(trace, { force: true });
-      process.env.BOITE_HOOKS_TRACE = trace;
       const at = performance.now();
-      try {
-        expect(await run([join(base, 'setup.exe'), '/S', `/D=${install}`])).toBe(0);
-      } finally { delete process.env.BOITE_HOOKS_TRACE; }
+      // Handed over explicitly: a child started without `env` does not see a later change to process.env.
+      const child = Bun.spawn([join(base, 'setup.exe'), '/S', `/D=${install}`], {
+        env: { ...process.env, BOITE_HOOKS_TRACE: trace }, stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+      });
+      started.push(child.pid);
+      expect(await child.exited).toBe(0);
       const scripts = existsSync(trace) ? readFileSync(trace, 'utf8').split(/\r?\n/).filter(Boolean) : [];
       return { scripts, ms: Math.round(performance.now() - at) };
     }
