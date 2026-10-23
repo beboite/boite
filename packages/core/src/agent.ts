@@ -55,6 +55,7 @@ export class AgentTokens {
 
   forget(threadId: ThreadId): void {
     const held = this.byThread.get(threadId);
+    this.sealed.delete(threadId);
     if (held === undefined) return;
     this.byThread.delete(threadId);
     this.byToken.delete(held);

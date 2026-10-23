@@ -16,6 +16,7 @@ export const fr: Translation = {
     brainHint: 'Sa mémoire et ses façons de travailler, gardées d’un modèle à l’autre dans son dossier :',
     routineHint: "Il se réveille seul pour celles-ci, même cette fenêtre fermée. Une routine encore en cours n’est jamais relancée.",
     runNow: "Lancer maintenant",
+    runNowBusy: "Il travaille : relance-la quand son tour est fini",
     accountAccess: "Accès aux comptes",
     accountAccessHint: 'Quels bots peuvent utiliser chaque compte, sous-agents compris. Retirer un accès arrête les exécutions qui s\'en servent.',
     allAgents: "Tous les bots, actuels et futurs",

@@ -28,6 +28,10 @@ test('Nova\'s desk shows its live step, every card state in order, answers a que
     expect(document.querySelector('[data-testid=desk-now]')?.textContent).toContain('4 steps so far');
     expect(document.querySelectorAll('[data-testid=desk-steps] li')).toHaveLength(4);
     expect(document.querySelector('[data-testid=desk-steps] li:last-child')?.getAttribute('data-status')).toBe('running');
+    // Run now waits while Nova works: the core refuses a second turn in flight.
+    const run = document.querySelector<HTMLButtonElement>('[data-testid=routine-run]')!;
+    expect(run.disabled).toBe(true);
+    expect(run.title).toBe('It is at work: run it again once its turn ends');
 
     // Work: what needs the user first, then the silent turn, the work, the open pull request with failing checks, the merged one.
     expect(chips()).toEqual(['Needs you', 'Stalled', 'Working', 'PR open', 'Merged']);

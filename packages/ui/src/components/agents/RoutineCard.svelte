@@ -11,8 +11,8 @@
   /**
    * One routine in words: what it does, when, when it runs next, and how its
    * last occurrence ended. Run now, pause, edit and remove sit under it;
-   * editing opens the same form that planned it. Run now queues behind a turn
-   * already running in the agent's thread. `compact`, on the desk: one row,
+   * editing opens the same form that planned it. Run now waits while the bot's
+   * thread is at work, as the core refuses a second turn then. `compact`, on the desk: one row,
    * the name over its schedule and next time, the actions as icons on the right.
    */
   let { view, routine, compact = false }: { view: AgentsView; routine: AgentRoutine; compact?: boolean } = $props();
@@ -24,6 +24,8 @@
   /** The prompt under the name, unless the name is only its first words. */
   const showPrompt = $derived(routine.name !== routineName(routine.prompt) && routine.name.trim() !== routine.prompt.trim());
   const outcome = $derived(routine.lastOutcome ?? null);
+  /** The core refuses Run now while the bot's thread has a turn in flight. */
+  const busy = $derived(['working', 'queued', 'waiting'].includes(view.snapshot?.status.find(s => s.agentId === routine.agentId)?.state ?? ''));
 
   async function toggle() {
     await view.call('agents.routine.save', { id: routine.id, expectedRevision: routine.revision, value: { ...routine, enabled: !routine.enabled } });
@@ -49,7 +51,7 @@
     </div>
     {#if view.store.owner}
       <div class="desk-routine-actions">
-        <button type="button" class="ghost small icon" disabled={view.pending || agent?.status === 'archived'} title={labels.runNow} aria-label={labels.runNow} onclick={() => void runNow()} data-testid="routine-run"><Play size={13} strokeWidth={1.75} /></button>
+        <button type="button" class="ghost small icon" disabled={view.pending || busy || agent?.status === 'archived'} title={busy ? labels.runNowBusy : labels.runNow} aria-label={labels.runNow} onclick={() => void runNow()} data-testid="routine-run"><Play size={13} strokeWidth={1.75} /></button>
         {#if !spent(routine)}<button type="button" class="ghost small icon" disabled={view.pending} title={routine.enabled ? labels.pause : labels.resume} aria-label={routine.enabled ? labels.pause : labels.resume} onclick={() => void toggle()} data-testid="routine-toggle">{#if routine.enabled}<Pause size={13} strokeWidth={1.75} />{:else}<Play size={13} strokeWidth={1.75} />{/if}</button>{/if}
         <button type="button" class="ghost small icon" title={labels.edit} aria-label={labels.edit} onclick={() => { editing = true; }} data-testid="routine-edit"><Pencil size={13} strokeWidth={1.75} /></button>
         <button type="button" class="ghost small icon" disabled={view.pending} title={labels.remove} aria-label={labels.remove} onclick={() => void remove()} data-testid="routine-remove"><Trash2 size={13} strokeWidth={1.75} /></button>
@@ -74,7 +76,7 @@
     {/if}
     {#if view.store.owner}
       <div class="agent-actions">
-        <button type="button" class="small" disabled={view.pending || agent?.status === 'archived'} onclick={() => void runNow()} data-testid="routine-run"><Play size={13} strokeWidth={1.75} />{labels.runNow}</button>
+        <button type="button" class="small" disabled={view.pending || busy || agent?.status === 'archived'} title={busy ? labels.runNowBusy : undefined} onclick={() => void runNow()} data-testid="routine-run"><Play size={13} strokeWidth={1.75} />{labels.runNow}</button>
         {#if !spent(routine)}<button type="button" class="ghost small" disabled={view.pending} onclick={() => void toggle()} data-testid="routine-toggle">{#if routine.enabled}<Pause size={13} strokeWidth={1.75} />{labels.pause}{:else}<Play size={13} strokeWidth={1.75} />{labels.resume}{/if}</button>{/if}
         <button type="button" class="ghost small" onclick={() => { editing = true; }} data-testid="routine-edit"><Pencil size={13} strokeWidth={1.75} />{labels.edit}</button>
         <button type="button" class="ghost small" disabled={view.pending} onclick={() => void remove()} data-testid="routine-remove"><Trash2 size={13} strokeWidth={1.75} />{labels.remove}</button>

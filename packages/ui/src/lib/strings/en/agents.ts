@@ -14,6 +14,7 @@ export const strings = {
     brainHint: 'Its memory and its ways of working, kept across models in its brain folder:',
     routineHint: "It wakes on its own for these, even with this window closed. One still running is never started twice.",
     runNow: "Run now",
+    runNowBusy: "It is at work: run it again once its turn ends",
     accountAccess: "Account access",
     accountAccessHint: 'Which bots may use each account, subagents included. Removing access stops the executions that use it.',
     allAgents: "All bots, including future bots",
