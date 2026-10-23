@@ -3,6 +3,7 @@ import type { AgentCommand } from './threads.ts';
 /** A brain lives on the core's machine. Detected plugins are not installed by Boite. */
 export interface BrainConfig {
   path: string | null;
+  /** Automatically share instructions and the model skill catalog. Manual commands only require a path. */
   enabled: boolean;
   /** Pull only. An interval of 0 disables periodic pulls. Defaults to off. */
   autoPull?: { onStartup: boolean; intervalMinutes: number };

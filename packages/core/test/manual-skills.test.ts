@@ -85,7 +85,7 @@ test('manual expansion preserves browser mention positions in the transcript', a
   expect(part.text).not.toContain('/focus');
 });
 
-test('manual commands expose only metadata to phones and stop when the brain is disabled', async () => {
+test('manual commands expose only metadata to phones until the brain is disconnected', async () => {
   const owner = await h.connect();
   const expected = [{ name: 'focus', description: 'focus description', hint: null }];
   expect(await owner.call('brain.commands', {})).toEqual(expected);
@@ -97,9 +97,36 @@ test('manual commands expose only metadata to phones and stop when the brain is 
     skill('focus', 'disable-model-invocation: true\n', 'Updated body');
     expect(h.core.brain.expandPrompt('/focus')).toBe('Updated body');
     await h.core.brain.configure({ path: root, enabled: false });
+    expect(await device.call('brain.commands', {})).toEqual(expected);
+    expect(h.core.brain.expandPrompt('/focus')).toBe('Updated body');
+    expect(h.core.brain.instructions()).toBe('');
+    await h.core.brain.configure({ path: null, enabled: false });
     expect(await device.call('brain.commands', {})).toEqual([]);
     expect(h.core.brain.expandPrompt('/focus')).toBe('/focus');
   } finally { device.close(); }
+});
+
+test('manual skills reach the driver without injecting shared instructions when sharing is off', async () => {
+  writeFileSync(join(root, 'AGENTS.md'), 'Shared rules sentinel');
+  await h.core.brain.configure({ path: root, enabled: false });
+  const received: string[] = [];
+  restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    received.push(ctx.prompt);
+    return { done: Promise.resolve({ status: 'done', sessionId: null, usage: null }), stop() {} };
+  } });
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  for (const [prompt, expected] of [['Hello', 'Hello'], ['/focus next', `${body} next`]] as const) {
+    const turn = await owner.call('turns.start', { threadId, prompt });
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'done');
+    expect(received.at(-1)?.endsWith(expected)).toBe(true);
+    expect(h.core.journal.lastUserMessage(threadId, turn.id)?.parts).toEqual([{ type: 'text', text: expected }]);
+  }
+  for (const prompt of received) {
+    expect(prompt).not.toContain('Shared agent brain:');
+    expect(prompt).not.toContain('Shared rules sentinel');
+    expect(prompt).not.toContain('review description');
+  }
 });
 
 test('a malformed manual marker is reported and cannot invoke the skill', async () => {

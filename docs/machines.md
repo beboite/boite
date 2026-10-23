@@ -199,7 +199,7 @@ of pairwise links.
 The group card's **Default machine** picks one member whose settings every
 other member follows, or None. The choice is the group's (`group.settingsHome`,
 kept in the roster beside its name and merged the same way: the latest choice
-wins), so every member and every window shows the same one, and a member that
+wins), so every member on current Boite shows the same one, and a member that
 leaves the group stops being the default. A core before `features.settingsHome`
 reports no choice and keeps its own settings; the card names it.
 
@@ -215,7 +215,7 @@ The client copies (`SYNCED_SETTINGS` in the contracts):
   tool summaries, automatic compaction and the cache keepalive;
 - keybindings where the two differ, including unbound commands and restored
   defaults. A failed or canceled copy attempts to restore entries already changed;
-- the brain's Use with agents, instructions, guide and automatic pull switches
+- the brain's Share instructions automatically, instructions, guide and automatic pull switches
   when both machines have a brain folder. The target keeps its own folder.
 
 Resource limits, memory protection, process retention, automatic agent updates,

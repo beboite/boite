@@ -9,11 +9,18 @@ same repository can live at different locations on different computers.
 
 Only owners can inspect or configure a brain and synchronize it. A paired
 device cannot call these methods. An owner using a phone-sized browser has the
-same controls. The connected folder shows Synchronize and a Use with agents
+same controls. The connected folder shows Synchronize and a Share instructions automatically
 switch, which saves immediately. Change folder reveals the path editor and
 Disconnect, which removes the setting and leaves the files alone.
 Instructions, Skills and Plugins each have a tab with a count. Select a file
 to expand its description and path; Git details stay under Sync details.
+
+Manual skills marked `disable-model-invocation: true` appear in the composer's
+slash menu as soon as a folder is connected. Sending `/name` expands the skill
+body, preserving any following arguments. A native agent command with the same
+name takes precedence. Turning automatic sharing off keeps these commands
+available without adding the brain's instructions or skill catalog to each
+turn. Disconnect the folder to remove its manual commands as well.
 
 ## Detection
 
@@ -139,7 +146,7 @@ when a Claude process starts, so a warm session keeps its value until then.
 ## Global instructions
 
 Global AGENTS.md links the brain's root `AGENTS.md` into the user profiles on
-the core's machine. The switch is off by default and requires Use with agents.
+the core's machine. The switch is off by default and requires automatic sharing.
 These links also apply outside Boite, when the harness loads its global rules.
 
 | Harness | Default destination |
@@ -209,7 +216,7 @@ Automatic pulls fetch and fast-forward only; they never push local commits.
 They use the same dirty-folder and divergence checks as Synchronize. A failure
 appears in the inventory and the next interval retries. The interval starts after
 the previous attempt finishes, and a manual synchronization takes priority.
-These settings apply even when Use with agents is off. Disconnect stops pulls;
+These settings apply even when automatic sharing is off. Disconnect stops pulls;
 closing the core cancels the timer and drains its Git processes.
 
 This version does not clone repositories, commit edits or copy files directly

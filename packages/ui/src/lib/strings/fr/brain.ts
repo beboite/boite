@@ -5,7 +5,8 @@ export const fr: Translation = {
   brain: {
     heading: 'Cerveau', description: 'Les mêmes instructions et skills pour tous vos agents.',
     folder: 'Dossier du cerveau', pathHint: 'Chemin du dossier', save: 'Connecter le dossier', browse: 'Parcourir', useFolder: 'Choisir ce dossier',
-    enabled: 'Utiliser avec les agents', disconnect: 'Déconnecter', sync: 'Synchroniser', working: 'En cours',
+    enabled: 'Partager les instructions automatiquement', enabledHint: 'Ajoute les instructions et le catalogue de skills à chaque tour. Les commandes /skill restent disponibles tant que le dossier est connecté.',
+    disconnect: 'Déconnecter', sync: 'Synchroniser', working: 'En cours',
     empty: 'Connectez votre cerveau', emptyHint: 'Choisissez le dossier de vos instructions et skills.',
     change: 'Changer de dossier',
     autoPull: 'Pull automatique', onStartup: 'Au démarrage', periodic: 'À intervalle régulier', minutes: 'min',

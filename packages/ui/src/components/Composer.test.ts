@@ -1637,7 +1637,7 @@ test('a slash lists the agent commands first, filters, and completes the box', a
   expect(answer).toBe('HELLO');
 });
 
-test('global manual skills appear with descriptions and complete on a draft without driver commands', async ({ app: _app }) => {
+test('manual skills complete on a draft with sharing on or off and disappear after disconnect', async ({ app: _app }) => {
   await store.client!.call('brain.configure', { path: '/shared/brain', enabled: true });
   store.startDraft();
   await waitFor(() => store.draft !== null);
@@ -1651,6 +1651,15 @@ test('global manual skills appear with descriptions and complete on a draft with
   await waitFor(() => input().value === '/focus ');
   await waitFor(() => slashMenu() === null);
   await store.client!.call('brain.configure', { path: '/shared/brain', enabled: false });
+  await type('/');
+  await store.loadBrainCommands();
+  await waitFor(() => slashRows().includes('focus'));
+  expect(slashMenu()?.textContent).toContain('Work through one task at a time.');
+  expect(slashRows()).not.toContain('code-review');
+  query('[data-testid=slash-row][data-name=focus]').click();
+  await waitFor(() => input().value === '/focus ');
+  await waitFor(() => slashMenu() === null);
+  await store.client!.call('brain.configure', { path: null, enabled: false });
   await type('/');
   await waitFor(() => slashMenu() !== null && store.brainCommands.length === 0);
   expect(slashRows()).not.toContain('focus');

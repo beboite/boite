@@ -56,6 +56,20 @@ test('configure, inspect, synchronize and disconnect a brain at desktop and phon
   expect(await page.evaluate(`document.querySelector('${id('brain-links')}')`)).toBeNull();
   expect(await page.evaluate(`document.querySelector('${id('brain-startup')}').checked`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('brain-interval')}').value`)).toBe('30');
+  expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('brain.commands', {})`)).toEqual([
+    { name: 'focus', description: 'Work through one task at a time.', hint: null },
+  ]);
+  await page.click(id('brain-enabled-help'));
+  await page.waitFor(`document.querySelector('${id('brain-enabled-help-text')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('brain-enabled-help-text')}').textContent`)).toContain('Manual /skill commands stay available');
+  expect(await page.evaluate(`document.querySelector('${id('brain-enabled')}').checked`)).toBe(false);
+  await capture('brain-manual-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  expect(await page.evaluate('document.documentElement.scrollWidth <= 390')).toBe(true);
+  await capture('brain-manual-phone.png');
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1100, deviceScaleFactor: 1, mobile: false });
   await page.click(id('brain-enabled'));
   await page.waitFor(`document.querySelector('${id('brain-enabled')}')?.checked === true && document.querySelector('${id('brain-page')}')?.getAttribute('aria-busy') === 'false'`);
   expect(await page.evaluate(`document.querySelector('${id('brain-links')}').textContent`)).toContain('7/7');

@@ -5,7 +5,7 @@ import type { FakeContext, FakeMethods } from './context';
 
 export function brainMethods(ctx: FakeContext) {
   return {
-    'brain.commands': async () => ctx.brain.config.enabled ? ctx.brain.entries
+    'brain.commands': async () => ctx.brain.config.path ? ctx.brain.entries
       .filter(entry => entry.kind === 'skill' && !entry.error && entry.disableModelInvocation)
       .filter((entry, index, entries) => entries.findIndex(other => other.name === entry.name) === index)
       .map(entry => ({ name: entry.name, description: entry.description, hint: null })) : [],

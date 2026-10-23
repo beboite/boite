@@ -146,7 +146,7 @@
         {:else}<Check size={14} /><span class="ui-label">{status.lastSync ? `${t.lastSync} ${exactTime(status.lastSync)}` : t.never}</span>{/if}
       </div>
       <div class="connection-bottom">
-        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span class="ui-label">{t.enabled}</span><SyncMark {store} key="brain:enabled" /></label>
+        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span class="ui-label">{t.enabled}</span><SyncMark {store} key="brain:enabled" /><InfoTip topic={t.enabled} text={t.enabledHint} testid="brain-enabled-help" /></label>
         <button class="ghost small" disabled={busy} onclick={() => { editing = !editing; path = status!.config.path!; folders = null; }} data-testid="brain-change"><span class="ui-label">{editing ? strings.common.cancel : t.change}</span></button>
       </div>
       <div class="global-instructions">
