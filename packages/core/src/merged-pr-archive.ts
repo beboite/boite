@@ -25,8 +25,35 @@ export class MergedPrArchive {
   /** Threads whose last proof found nothing, so each lap does not ask git and GitHub again. */
   private negative = new Map<string, Negative>();
   private readonly readyAt: number;
+  private readonly detected = new Set<string>();
+  private detection: Promise<void> | null = null;
+  private readonly detectionController = new AbortController();
+  private readonly unlisten: () => void;
   constructor(private core: Core, private pullRequests: PullRequests, private settleMs = 60_000, graceMs = 90_000) {
     this.readyAt = Date.now() + graceMs;
+    this.unlisten = core.bus.onCommitted((name, payload) => {
+      if (name !== 'threads.pullRequestsChanged') return;
+      const event = payload as { threadId: string; pullRequests: { state: string }[] };
+      if (event.pullRequests.some(pr => pr.state === 'MERGED')) this.observe(event.threadId);
+    });
+  }
+  /** A badge or watch already detected the merge. Check this thread without waiting for the history scan. */
+  observe(threadId: string): void {
+    if (this.closed) return;
+    this.detected.add(threadId);
+    this.detection ??= this.drainDetected().finally(() => { this.detection = null; });
+  }
+  private async drainDetected(): Promise<void> {
+    // Coalesce badge and linked-PR notifications, and leave their RPC free to return.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    for (const id of this.detected) {
+      this.detected.delete(id);
+      if (this.closed || this.core.journal.isClosed()) return;
+      const thread = this.core.journal.getThread(id);
+      if (!thread || !this.eligible(thread, true)) continue;
+      const signal = AbortSignal.any([this.detectionController.signal, AbortSignal.timeout(30_000)]);
+      await this.archive(thread, signal, true);
+    }
   }
   start(): void {
     const run = (): void => {
@@ -40,42 +67,47 @@ export class MergedPrArchive {
   }
   async close(): Promise<void> {
     this.closed = true;
+    this.unlisten();
+    this.detected.clear();
+    this.detectionController.abort();
     if (this.timer) clearTimeout(this.timer);
     this.controller?.abort();
     await this.pending;
+    await this.detection;
     if (this.timer) clearTimeout(this.timer);
   }
-  eligible(thread: ThreadSummary): boolean {
-    return this.eligibleWithScheduler(thread, this.busyThreads());
+  eligible(thread: ThreadSummary, detected = false): boolean {
+    return this.eligibleWithScheduler(thread, this.busyThreads(), detected);
   }
-  private eligibleWithScheduler(thread: ThreadSummary, busy: ReadonlySet<string>): boolean {
+  private eligibleWithScheduler(thread: ThreadSummary, busy: ReadonlySet<string>, detected = false): boolean {
     const core = this.core;
-    if (this.closed || Date.now() < this.readyAt || core.stopping || core.threads.handoff.active || core.threads.isRemoving(thread.id)) return false;
+    if (this.closed || (!detected && Date.now() < this.readyAt) || core.stopping || core.threads.handoff.active || core.threads.isRemoving(thread.id)) return false;
     if (thread.archived || thread.parentThreadId || thread.agentSessionId || !thread.projectId || !thread.branch || thread.branch === 'HEAD' || thread.branchNamingPending) return false;
     const project = core.journal.getProject(thread.projectId);
     if (!project || project.archived || project.path === thread.cwd || core.journal.getSetting(`project-auto-archive-merged-pr:${project.id}`) === false) return false;
-    if (!this.quiescent(thread, busy)) return false;
+    if (!this.quiescent(thread, busy, false, detected)) return false;
     // Retained children remain history. Every visible or archived member must
     // have completed and delivered its work before the parent can reach Done.
     const children = core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT id FROM threads WHERE parent_thread_id = ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family WHERE id <> ? AND id NOT IN (SELECT thread_id FROM thread_deletions)').all(thread.id, thread.id) as { id: string }[];
-    if (children.some(({ id }) => { const child = core.journal.getThread(id); return !child || !this.quiescent(child, busy, true); })) return false;
+    if (children.some(({ id }) => { const child = core.journal.getThread(id); return !child || !this.quiescent(child, busy, true, detected); })) return false;
     const repository = repositoryOf(thread.cwd);
     const holders = core.journal.db.query('SELECT id, cwd, project_id FROM threads WHERE branch = ? AND parent_thread_id IS NULL AND agent_session_id IS NULL').all(thread.branch) as { id: string; cwd: string; project_id: string | null }[];
     return holders.filter(row => row.project_id === thread.projectId || repositoryOf(row.cwd) === repository).length === 1;
   }
-  private quiescent(thread: ThreadSummary, busy: ReadonlySet<string>, child = false): boolean {
+  private quiescent(thread: ThreadSummary, busy: ReadonlySet<string>, child = false, detected = false): boolean {
     const core = this.core;
+    const finishing = detected && !child && thread.status === 'running';
     // Reading or viewing completed work is not pending work. Keep unread history in Done.
-    if (core.threads.isRemoving(thread.id) || thread.agentSessionId || thread.status !== 'idle' || thread.pinned || Date.now() - thread.updatedAt < this.settleMs || core.threads.focus.hasProtectedInput(thread.id)) return false;
-    if (core.threads.sideQuestions.active(thread.id) || core.threads.runner.handles.has(thread.id) || core.threads.runner.steering.has(thread.id) || core.threads.agentState.background.get(thread.id)?.length || core.threads.moves.pendingOf(thread.id)) return false;
-    if (busy.has(thread.id)) return false;
-    if (core.procs.liveCount(thread.id) || core.terminals.threadProcesses(thread.id) || core.threads.cards.listPermissions(thread.id).length || [...core.threads.cards.questions.values()].some(entry => entry.request.threadId === thread.id) || [...core.threads.cards.asyncCards.values()].some(entry => entry.threadId === thread.id)) return false;
+    if (core.threads.isRemoving(thread.id) || thread.agentSessionId || (thread.status !== 'idle' && !finishing) || thread.pinned || (!detected && Date.now() - thread.updatedAt < this.settleMs) || core.threads.focus.hasProtectedInput(thread.id)) return false;
+    if (core.threads.sideQuestions.active(thread.id) || (!finishing && (core.threads.runner.handles.has(thread.id) || core.threads.runner.steering.has(thread.id) || core.threads.agentState.background.get(thread.id)?.length)) || core.threads.moves.pendingOf(thread.id)) return false;
+    if (!finishing && busy.has(thread.id)) return false;
+    if ((!finishing && core.procs.liveCount(thread.id)) || core.terminals.threadProcesses(thread.id) || core.threads.cards.listPermissions(thread.id).length || [...core.threads.cards.questions.values()].some(entry => entry.request.threadId === thread.id) || [...core.threads.cards.asyncCards.values()].some(entry => entry.threadId === thread.id)) return false;
     if (core.threads.deferred.deferredAnswers.get(thread.id)?.length || core.threads.deferred.consumed.has(thread.id) || core.threads.deferred.pendingWakes.has(thread.id)) return false;
     const activity = core.activity.get(thread.id);
     if ((activity.goal && activity.goal.status !== 'complete') || (activity.loop && activity.loop.status !== 'complete') || core.workflows.active(thread.id)) return false;
     if (core.journal.db.query("SELECT 1 FROM workflow_runs WHERE root_id = ? AND status IN ('done', 'failed') AND json_extract(data, '$.delivered') IS NOT 1 LIMIT 1").get(thread.id)) return false;
     const last = core.journal.db.query('SELECT status FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1').get(thread.id) as { status: string } | null;
-    if ((child && !last) || (last && last.status !== 'done')) return false;
+    if ((child && !last) || (last && last.status !== 'done' && !(finishing && last.status === 'running'))) return false;
     if (core.journal.db.query("SELECT 1 FROM delegation_messages WHERE root_id = ? AND status NOT IN ('delivered', 'expired', 'rejected') LIMIT 1").get(thread.id) || core.journal.db.query("SELECT 1 FROM coordination_letters WHERE thread_id = ? AND status NOT IN ('delivered', 'expired', 'rejected') LIMIT 1").get(thread.id) || core.journal.db.query('SELECT 1 FROM coordination_wakes WHERE thread_id = ? LIMIT 1').get(thread.id)) return false;
     return true;
   }
@@ -153,29 +185,32 @@ export class MergedPrArchive {
     const selected = await this.select(signal);
     for (const thread of selected) {
       if (Date.now() >= deadline || this.closed || signal.aborted || this.core.journal.isClosed()) break;
-      const initial = archiveState(this.core.journal, thread.id);
-      const generation = initial.generation;
-      const signature = this.signature(thread);
-      try {
-        const proof = await archiveRead(this.pullRequests.proveMerged(thread, signal), signal);
-        if (this.closed || signal.aborted || this.core.journal.isClosed()) break;
-        if (!proof) { this.remember(thread, signature); continue; }
-        const current = this.core.journal.getThread(thread.id);
-        if (!current || current.updatedAt !== thread.updatedAt || !this.eligible(current) || archiveState(this.core.journal, thread.id).generation !== generation) continue;
-        const state = archiveState(this.core.journal, thread.id);
-        const restored = state.restoredCheckout;
-        if (state.dismissed?.includes(proof.url) || (restored && restored.cwd === thread.cwd && restored.branch === thread.branch && restored.projectId === thread.projectId)) { this.remember(thread, signature); continue; }
-        this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof });
-        if (!await archiveRead(this.pullRequests.validateMergedCheckout(thread, proof, signal), signal)) { this.remember(thread, signature); continue; }
-        if (this.closed || signal.aborted || this.core.journal.isClosed()) break;
-        // No await between the final state check and the visibility transaction.
-        if (this.core.threads.archiveMergedPr(thread, proof, generation)) { archived++; this.negative.delete(thread.id); }
-      } catch {
-        // Missing auth, unavailable repositories and failed validation leave the conversation visible.
-        if (!signal.aborted && !this.closed) this.remember(thread, signature);
-      }
+      if (await this.archive(thread, signal)) archived++;
     }
     return archived;
+  }
+  private async archive(thread: ThreadSummary, signal: AbortSignal, detected = false): Promise<boolean> {
+    const generation = archiveState(this.core.journal, thread.id).generation;
+    const signature = this.signature(thread);
+    try {
+      const proof = await archiveRead(this.pullRequests.proveMerged(thread, signal), signal);
+      if (this.closed || signal.aborted || this.core.journal.isClosed()) return false;
+      if (!proof) { this.remember(thread, signature); return false; }
+      const current = this.core.journal.getThread(thread.id);
+      if (!current || (!detected && current.updatedAt !== thread.updatedAt) || !this.eligible(current, detected) || archiveState(this.core.journal, thread.id).generation !== generation) return false;
+      const state = archiveState(this.core.journal, thread.id);
+      const restored = state.restoredCheckout;
+      if (state.dismissed?.includes(proof.url) || (restored && restored.cwd === thread.cwd && restored.branch === thread.branch && restored.projectId === thread.projectId)) { this.remember(thread, signature); return false; }
+      this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof });
+      if (!await archiveRead(this.pullRequests.validateMergedCheckout(thread, proof, signal), signal)) { this.remember(thread, signature); return false; }
+      if (this.closed || signal.aborted || this.core.journal.isClosed()) return false;
+      // No await between the final state check and the visibility transaction.
+      if (this.core.threads.archiveMergedPr(thread, proof, generation, detected)) { this.negative.delete(thread.id); return true; }
+    } catch {
+      // Missing auth, unavailable repositories and failed validation leave the conversation visible.
+      if (!signal.aborted && !this.closed) this.remember(thread, signature);
+    }
+    return false;
   }
 }
 

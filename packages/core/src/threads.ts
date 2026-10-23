@@ -372,13 +372,13 @@ export class ThreadStore {
 
   isRemoving(threadId: ThreadId): boolean { return this.removing.has(threadId); }
 
-  /** A quiescent automatic archive changes visibility only, retaining the checkout and execution state. */
-  archiveMergedPr(expected: ThreadSummary, proof: MergedPrProof, generation: number): ThreadSummary | null {
+  /** Automatic Done changes visibility only, retaining the checkout and any prompt still finishing. */
+  archiveMergedPr(expected: ThreadSummary, proof: MergedPrProof, generation: number, detected = false): ThreadSummary | null {
     const thread = this.core.journal.getThread(expected.id);
     const state = archiveState(this.core.journal, expected.id);
     const project = thread?.projectId ? this.core.journal.getProject(thread.projectId) : null;
     if (!thread || !project || repositoryOf(thread.cwd) !== proof.checkoutRepository || repositoryOf(project.path) !== proof.checkoutRepository) return null;
-    if (!thread || thread.updatedAt !== expected.updatedAt || thread.cwd !== expected.cwd || thread.branch !== expected.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread)) return null;
+    if ((!detected && thread.updatedAt !== expected.updatedAt) || thread.cwd !== expected.cwd || thread.branch !== expected.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread, detected)) return null;
     const archivedThread = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof, reason: { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: Date.now() } });
       const now = Date.now();

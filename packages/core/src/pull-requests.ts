@@ -283,7 +283,10 @@ export class PullRequests {
 
   read(threadId: string, refresh = false): Promise<PullRequest> {
     const thread = this.core.threads.require(threadId);
-    return this.#read(thread, refresh).catch((error: unknown) => {
+    return this.#read(thread, refresh).then(pr => {
+      if (pr?.state === 'MERGED') this.core.mergedPrArchive.observe(threadId);
+      return pr;
+    }).catch((error: unknown) => {
       throw refused(`pull request for ${thread.cwd}: ${messageOf(error)}`);
     });
   }

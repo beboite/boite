@@ -151,9 +151,9 @@ export class WorktreeCleanup {
 
   /** The threads' rows as they are now; `ids` narrows them without reading every folder again. */
   private rows(ids?: ThreadId[]): Omit<Holder, 'key'>[] {
-    const query = `SELECT t.id, t.cwd, t.branch, t.archived, t.archived_at, t.updated_at, d.deleted_at
+    const query = `SELECT t.id, t.cwd, t.branch, t.status, t.archived, t.archived_at, t.updated_at, d.deleted_at
       FROM threads t LEFT JOIN thread_deletions d ON d.thread_id = t.id`;
-    type Row = { id: ThreadId; cwd: string; branch: string | null; archived: number; archived_at: number | null; updated_at: number; deleted_at: number | null };
+    type Row = { id: ThreadId; cwd: string; branch: string | null; status: string; archived: number; archived_at: number | null; updated_at: number; deleted_at: number | null };
     const rows = ids === undefined
       ? this.core.journal.db.query(query).all() as Row[]
       : ids.flatMap((id) => (this.core.journal.db.query(`${query} WHERE t.id = ?`).all(id) as Row[]));
@@ -162,8 +162,9 @@ export class WorktreeCleanup {
       cwd: row.cwd,
       branch: row.branch,
       deleted: row.deleted_at !== null,
+      // Automatic Done may still have a prompt, including a runtime with no tracked process.
       // An archive written by an older core has no date of its own.
-      settledAt: row.deleted_at ?? (row.archived ? row.archived_at ?? row.updated_at : null),
+      settledAt: row.deleted_at ?? (row.archived && row.status === 'idle' ? row.archived_at ?? row.updated_at : null),
     }));
   }
 

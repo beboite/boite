@@ -1,6 +1,7 @@
 import { orderPullRequests, pullRequestAddress, type LinkedPullRequest, type PullRequestWatch } from '@boite/contracts';
 import type { FakeContext, FakeMethods } from './context';
 import { refusal, toSummary } from './shared';
+import { sweepMergedPrFixtures } from './merged-pr-archive';
 
 type Methods = Pick<FakeMethods, 'threads.pullRequest' | 'threads.pullRequests' | 'threads.linkPullRequest' | 'threads.unlinkPullRequest' | 'threads.pullRequestReview' | 'threads.pullRequestFiles' | 'threads.watchPullRequest' | 'threads.unwatchPullRequest'>;
 
@@ -44,8 +45,12 @@ export function pullRequestMethods(ctx: FakeContext): Methods {
     'threads.pullRequest': async ({ threadId }) => {
       const list = read(threadId), linked = list.findLast(pr => pr.state === 'OPEN') ?? list.at(-1);
       const thread = ctx.thread(threadId);
-      const discovered = thread.branch && thread.branch !== 'HEAD' ? thread.pullRequest ?? null : null;
+      const fixture = ctx.mergedPrFixtures.get(threadId);
+      const candidate = fixture?.candidates.find(pr => pr.linked || (!pr.fork && pr.branch === fixture.branch));
+      const merged = candidate ? { number: candidate.number, url: candidate.url, state: 'MERGED' as const } : null;
+      const discovered = thread.branch && thread.branch !== 'HEAD' ? thread.pullRequest ?? merged : null;
       const pr = linked?.state === 'OPEN' ? linked : discovered?.state === 'OPEN' ? discovered : linked ?? discovered;
+      if (pr?.state === 'MERGED') await sweepMergedPrFixtures(ctx, threadId);
       return pr ? { number: pr.number, url: pr.url, state: pr.state } : null;
     },
     'threads.watchPullRequest': async ({ threadId, url }) => {
