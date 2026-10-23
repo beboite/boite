@@ -398,6 +398,7 @@ export class AgentStore {
     return {
       agentId: agent.id, threadId, state, activity: thread && state !== 'archived' ? this.activity(thread) : null, problem,
       nextWake: next ? { at: next.nextAt!, routineId: next.id, label: next.name } : null, unread, last, today,
+      memory: this.memory.lastPass(agent.id),
     };
   }
 

@@ -214,3 +214,21 @@ test('a running memory pass never holds back the notification of the answer the 
   driver.release();
   await waitFor(() => !h.core.workforce.memory.busy());
 });
+
+test('its status shows the last memory pass, running then how it ended, and each change tells the clients', async () => {
+  const driver = script(() => 'SUMMARY: Noted the release date\n<memory>\n- the release is on Friday\n</memory>');
+  const { h, agent, threadId } = await setup();
+  await waitFor(() => driver.held.length === 1);
+  const status = () => h.core.workforce.snapshot().status.find(s => s.agentId === agent.id)!;
+  const pass = passes(h, threadId)[0]!.id;
+  expect(status().memory).toMatchObject({ threadId: pass, status: 'running', summary: null });
+  const store = h.core.workforce as unknown as { changed: () => void };
+  const changed = store.changed.bind(store);
+  let calls = 0;
+  store.changed = () => { calls += 1; changed(); };
+  driver.release();
+  await waitFor(() => status().memory?.status === 'done');
+  expect(status().memory).toMatchObject({ threadId: pass, summary: 'Noted the release date' });
+  expect(calls).toBeGreaterThan(0);
+  expect(h.core.journal.getSetting(`agents:memory-pass:${agent.id}`)).toEqual(status().memory);
+});

@@ -15,7 +15,7 @@
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_MEMORY_MAX, defaultTitleModel } from '@boite/contracts';
-import type { AgentBrain, AgentProfile, Turn } from '@boite/contracts';
+import type { AgentBrain, AgentProfile, AgentStatus, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import type { ChildRoute } from '../delegation/routes.ts';
 import { assertDriverRunnable } from '../drivers/index.ts';
@@ -25,6 +25,9 @@ import type { AgentStore } from './store.ts';
 import { text as checkedText } from './validation.ts';
 
 const KEEPER = 'agents:keeper:';
+/** Each agent's last pass, as its status shows it (`AgentStatus.memory`). */
+const LAST_PASS = 'agents:memory-pass:';
+type Pass = NonNullable<AgentStatus['memory']>;
 /** A pass still running after this is stopped and recorded as failed. */
 export const MEMORY_PASS_MAX_MS = 10 * 60_000;
 const ASKED_MAX = 6_000;
@@ -117,6 +120,14 @@ export class MemoryKeeper {
   /** A memory pass child: delegation delivers its answer nowhere and lets it run while the team rests. */
   owns(threadId: string): boolean { return this.keepers.has(threadId); }
   busy(): boolean { return this.keepers.size > 0; }
+  /** The agent's last pass: running, or how it ended. Null before the first. */
+  lastPass(agentId: string): Pass | null {
+    return (this.core.journal.getSetting(`${LAST_PASS}${agentId}`) as Pass | undefined) ?? null;
+  }
+  private record(agentId: string, pass: Pass): void {
+    this.core.journal.setSetting(`${LAST_PASS}${agentId}`, pass);
+    this.store.changed();
+  }
   private running(agentId: string): boolean {
     for (const keeper of this.keepers.values()) if (keeper.agentId === agentId) return true;
     return false;
@@ -177,6 +188,7 @@ export class MemoryKeeper {
         this.keepers.set(id, keeper);
         this.core.journal.setSetting(`${KEEPER}${id}`, keeper);
       });
+      this.record(agent.id, { threadId: child, status: 'running', summary: null, at: keeper.startedAt });
       const today = new Date().toISOString().slice(0, 10);
       this.core.threads.startTurn(child, memoryPrompt(agent, brain.memory.slice(0, 64_000), cut(exchange.asked, ASKED_MAX, exchange.joined), cut(exchange.answered, ANSWERED_MAX, exchange.joined), today), [], undefined, 'delegation', undefined, undefined, `Update ${agent.name}'s memory`);
     } catch (error) {
@@ -218,6 +230,7 @@ export class MemoryKeeper {
       this.core.journal.putThread(archived);
       this.core.bus.emit('thread.updated', archived);
     }
+    this.record(keeper.agentId, { threadId, status, summary: status === 'unchanged' ? null : summary, at: Date.now() });
     if (status === 'error') this.core.log('warn', `memory pass ${threadId} for agent ${keeper.agentId}: ${summary}`);
     else this.core.log('info', `memory pass ${threadId} for agent ${keeper.agentId}: ${status === 'done' ? summary : 'no change'}`);
     // The exchange that ended while this pass ran goes next.
