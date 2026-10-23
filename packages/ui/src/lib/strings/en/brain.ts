@@ -3,7 +3,8 @@ export const strings = {
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
     folder: 'Brain folder', pathHint: 'Folder path', save: 'Connect folder', browse: 'Browse', useFolder: 'Choose this folder',
-    enabled: 'Use with agents', disconnect: 'Disconnect', sync: 'Synchronize', working: 'Working',
+    enabled: 'Share instructions automatically', enabledHint: 'Adds instructions and the skill catalog to each turn. Manual /skill commands stay available while the folder is connected.',
+    disconnect: 'Disconnect', sync: 'Synchronize', working: 'Working',
     empty: 'Connect your brain', emptyHint: 'Choose the folder with your instructions and skills.',
     change: 'Change folder',
     autoPull: 'Pull automatically', onStartup: 'At startup', periodic: 'Periodically', minutes: 'min',

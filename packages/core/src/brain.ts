@@ -298,10 +298,10 @@ export class BrainStore {
     return `${text}\n\n`;
   }
 
-  /** The global manual skill menu, regardless of the selected driver. */
+  /** Manual skills remain available with a connected folder, independently of automatic sharing. */
   commands(): AgentCommand[] {
-    const { path, enabled } = this.config();
-    if (!enabled || !path) return [];
+    const { path } = this.config();
+    if (!path) return [];
     const commands = new Map<string, AgentCommand>();
     let entries: BrainEntry[];
     // An unreadable brain folder leaves the menu empty instead of failing it.
@@ -317,8 +317,8 @@ export class BrainStore {
   expandPrompt(prompt: string, commands: readonly AgentCommand[] = []): string {
     const name = /^\/([^\s]+)(?:\s|$)/.exec(prompt)?.[1];
     if (!name || commands.some(command => command.name === name)) return prompt;
-    const { path, enabled } = this.config();
-    if (!enabled || !path) return prompt;
+    const { path } = this.config();
+    if (!path) return prompt;
     let scan: Inventory;
     // An unreadable brain folder leaves the prompt as the user wrote it.
     try { scan = this.current(path); } catch { return prompt; }
