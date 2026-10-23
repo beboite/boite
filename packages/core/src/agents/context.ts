@@ -77,7 +77,8 @@ export function deskState(core: Core, thread: ThreadSummary): string {
  * last read. Null when the thread linked none.
  */
 export function deskPullRequest(core: Core, thread: ThreadSummary): AgentWatchPullRequest | null {
-  const linked = (core.journal.getSetting(`${LINKED}${thread.id}`) as LinkedPullRequest[] | undefined) ?? [];
+  const stored = core.journal.getSetting(`${LINKED}${thread.id}`);
+  const linked = Array.isArray(stored) ? (stored as LinkedPullRequest[]).filter(p => typeof p?.url === 'string') : [];
   const watches = core.pullRequestWatches?.of(thread.id) ?? [];
   const pr = linked.find(p => watches.some(w => w.url.toLowerCase() === p.url.toLowerCase()))
     ?? [...linked].reverse().find(p => p.state === 'OPEN') ?? linked.at(-1);
