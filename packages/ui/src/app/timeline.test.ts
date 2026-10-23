@@ -53,8 +53,13 @@ test('an async question waits in the dock above the composer, stacked, and the t
   // The composer answers the docked question until it is set aside for an ordinary prompt.
   query<HTMLButtonElement>('[data-testid=composer-reply-ignore]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-reply]') === null);
+  query<HTMLButtonElement>('[data-testid=activity-question-toggle]').click();
+  await waitFor(() => query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded') === 'false');
   await sendPrompt('[ask] two');
   await waitFor(() => document.querySelectorAll('[data-testid=activity-question]').length === 2);
+  expect(query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded')).toBe('false');
+  query<HTMLButtonElement>('[data-testid=activity-question-toggle]').click();
+  await waitFor(() => query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded') === 'true');
 
   // New arrivals leave the oldest up; the timeline holds a line per question, no card.
   expect(query('[data-testid=activity-question-index]').textContent).toBe('1 of 2');

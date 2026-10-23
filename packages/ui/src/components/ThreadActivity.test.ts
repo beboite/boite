@@ -44,7 +44,12 @@ test('new questions leave the current question and selection in place, then answ
   const option = document.querySelector<HTMLButtonElement>('[data-testid=question-option]')!;
   option.click();
   flushSync();
+  const fold = document.querySelector<HTMLButtonElement>('[data-testid=activity-question-toggle]')!;
+  fold.click();
+  flushSync();
+  expect(fold.getAttribute('aria-expanded')).toBe('false');
   flushSync(() => { store.pendingQuestions = [...store.pendingQuestions, question('middle', 2), question('newest', 3)]; });
+  expect(fold.getAttribute('aria-expanded')).toBe('false');
   expect(shownQuestion()).toBe('oldest');
   expect(document.querySelector('[data-testid=activity-question-index]')!.textContent).toBe('1 of 3');
   expect(option.getAttribute('aria-checked')).toBe('true');
@@ -53,6 +58,7 @@ test('new questions leave the current question and selection in place, then answ
   flushSync();
   expect(shownQuestion()).toBe('middle');
   flushSync(() => { store.pendingQuestions = [...store.pendingQuestions, question('last', 4)]; });
+  expect(fold.getAttribute('aria-expanded')).toBe('false');
   expect(shownQuestion()).toBe('middle');
   flushSync(() => { store.pendingQuestions = store.pendingQuestions.filter(q => q.id !== 'middle'); });
   expect(shownQuestion()).toBe('oldest');
