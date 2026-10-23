@@ -41,7 +41,7 @@ export interface AgentFact {
   text: string;
   /** How long it waits for more before it wakes the agent. */
   delay?: number;
-  /** The threads it tells of: checked again against what the agent may still see when it is delivered. */
+  /** The threads it tells of: checked again against what the agent may still see when it is delivered. Absent, the ids its text names; empty, none. */
   threadIds?: string[];
 }
 
@@ -277,7 +277,7 @@ export class AgentRuntime {
       return false;
     }
     sent.at.push(now);
-    let facts = [...pending.facts, { key: fact.key, text: fact.text, at: now, notBefore: now + (fact.delay ?? NOTICE_BATCH_MS), ...(fact.threadIds?.length ? { threadIds: [...fact.threadIds] } : {}) }];
+    let facts = [...pending.facts, { key: fact.key, text: fact.text, at: now, notBefore: now + (fact.delay ?? NOTICE_BATCH_MS), ...(fact.threadIds ? { threadIds: [...fact.threadIds] } : {}) }];
     while (facts.length > 1 && this.eventPrompt(facts).length > EVENT_PROMPT_MAX) {
       this.dropped(agentId, sent, `Event dropped to keep the next wake under ${EVENT_PROMPT_MAX} characters. ${about(facts[0]!.text)}`);
       facts = facts.slice(1);

@@ -117,6 +117,20 @@ test('taking a thread back takes the grant in the fake as in the core: the watch
   expect(await desk()).toBe('followed');
 });
 
+test('in the fake as in the core, a watch the bot had before an entrustment survives its end, and an archive ends it like a take-back', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0 });
+  const ada = await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  const desk = async () => (await client.call('agents.snapshot', {})).watches.find(w => w.agentId === ada.id && w.threadId === 't-trace')?.origin ?? null;
+  await client.call('agents.watch', { agentId: ada.id, watchThreadId: 't-trace', watched: true });
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: ada.id });
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: null });
+  expect(await desk()).toBe('followed');
+  await client.call('agents.watch', { agentId: ada.id, watchThreadId: 't-trace', watched: false });
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: ada.id });
+  await client.call('threads.archive', { threadId: 't-trace' });
+  expect(await desk()).toBeNull();
+});
+
 test('the demo has an agent at work on a live step, one waiting on a login and one at rest until its routine', async ({ ready }) => {
   const { client } = await ready({ delayMs: 0, agentsDemo: true });
   const snapshot = await client.call('agents.snapshot', {});

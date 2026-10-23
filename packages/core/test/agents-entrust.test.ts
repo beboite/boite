@@ -62,19 +62,20 @@ test('refuses threads and agents that cannot be entrusted', async () => {
   expect(lines()).toEqual([]);
 });
 
-test('entrusting starts the goal, carries the persona, puts the thread on the desk and its end wakes the agent', async () => {
+test('entrusting starts the goal, carries the persona, and its end wakes the agent and takes the thread off the desk', async () => {
   const { threadId } = await echoThread(h, client, 'Fix the login');
   script('All tests pass. The login works.\n[BOITE_GOAL_COMPLETE]');
   const entry = await client.call('agents.entrust', { threadId, agentId: agent.id });
   expect(entry).toMatchObject({ threadId, agentId: agent.id, objective: 'Take over this work where it stands and carry it to a verified result.' });
   expect(lines()).toEqual([`The user entrusted "Fix the login" (${threadId}) to you: Take over this work where it stands and carry it to a verified result.`]);
-  expect((await client.call('agents.snapshot', {})).watches.find(w => w.threadId === threadId)).toMatchObject({ origin: 'entrusted' });
+  // On the desk while it is entrusted (the take-back test reads it there); the goal here is met at once and takes it off.
   await waitFor(() => h.core.activity.get(threadId).goal?.status === 'complete');
   expect(prompts[0]).toContain('their agent Ada (Builds)');
   expect(prompts[0]).toContain('Always run the tests before answering.');
   await waitFor(() => facts().some(f => f.text.startsWith(`Entrusted thread ${threadId}, titled "Fix the login": goal done.`)));
   expect(facts().find(f => f.key.startsWith('goal:'))!.text).toContain('All tests pass. The login works.');
   expect(h.core.workforce.entrusted.list()).toEqual([]);
+  expect((await client.call('agents.snapshot', {})).watches.find(w => w.threadId === threadId)).toBeUndefined();
   expect(h.core.workforce.entrusted.instructions(threadId)).toBe('');
 });
 
@@ -123,6 +124,34 @@ test('taking a thread back takes the grant: the watch goes unless the bot reache
   await entrustAndTakeBack(inProject);
   expect(await desk(inProject)).toBe('followed');
   expect(h.core.workforce.projects.follows(agent.id, inProject)).toBe(true);
+});
+
+test('an entrustment that ends any way gives the grant back, and a watch the bot had before survives it', async () => {
+  const desk = async (threadId: string) => (await client.call('agents.snapshot', {})).watches.find(w => w.agentId === agent.id && w.threadId === threadId)?.origin ?? null;
+  // A met goal ends it: the thread leaves the desk, and the news of the goal still reaches the bot.
+  script('Done.\n[BOITE_GOAL_COMPLETE]');
+  const { threadId: met } = await echoThread(h, client, 'Ship it');
+  await client.call('agents.entrust', { threadId: met, agentId: agent.id });
+  await waitFor(() => h.core.workforce.entrusted.list().length === 0 && facts().some(f => f.text.includes('goal done')));
+  expect(await desk(met)).toBeNull();
+  expect(h.core.workforce.projects.follows(agent.id, met)).toBe(false);
+  // Delivery reads again what the bot may hear: the goal's news passes that check.
+  const news = facts().find(f => f.text.includes('goal done'))!;
+  expect(h.core.agentRuntime.factThreads(news).every(id => h.core.workforce.projects.mayHear(agent, id))).toBe(true);
+  // An archived thread ends it the same way.
+  script('Working.');
+  const { threadId: archived } = await echoThread(h, client);
+  await client.call('agents.entrust', { threadId: archived, agentId: agent.id, objective: 'Keep going' });
+  await client.call('threads.archive', { threadId: archived });
+  await waitFor(() => h.core.workforce.entrusted.list().length === 0);
+  expect(h.core.workforce.projects.follows(agent.id, archived)).toBe(false);
+  // The owner put the thread on the bot's desk first: taking it back leaves that watch.
+  const { threadId: watched } = await echoThread(h, client);
+  await client.call('agents.watch', { agentId: agent.id, watchThreadId: watched, watched: true });
+  await client.call('agents.entrust', { threadId: watched, agentId: agent.id, objective: 'Keep going' });
+  await client.call('agents.entrust', { threadId: watched, agentId: null });
+  expect(await desk(watched)).toBe('followed');
+  expect(h.core.workforce.projects.follows(agent.id, watched)).toBe(true);
 });
 
 test('archiving drops the entrustment', async () => {

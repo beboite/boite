@@ -59,7 +59,8 @@ const ACTIONS: readonly ResidentThreadAction[] = ['archive', 'done', 'unarchive'
  * wake it once. `owner`: the owner put it there, so it holds whatever the
  * agent's projects (an entrusted thread is one too).
  */
-type Follow = { at: number; origin: AgentWatch['origin']; pr?: AgentWatchPullRequest | null; owner?: true };
+/** `lent`: the `owner` flag came with an entrustment of a thread the bot already followed, and leaves with it. */
+type Follow = { at: number; origin: AgentWatch['origin']; pr?: AgentWatchPullRequest | null; owner?: true; lent?: true };
 interface Stall { turnId: string; since: number | null }
 
 /** Whether a follow of this thread still holds: it is open, or done or archived less than a day ago. */
@@ -217,22 +218,31 @@ export class AgentProjects {
     const thread = previous ? null : threads.get(threadId) ?? null;
     const pr = thread ? { pr: deskPullRequest(this.core, thread) } : {};
     const granted = owner || origin === 'entrusted' || previous?.owner === true ? { owner: true as const } : {};
-    this.write(agentId, { ...follows, [threadId]: { ...previous, ...pr, at: now, origin: previous?.origin ?? origin, ...granted } });
+    // A follow the bot had before an entrustment keeps what it was: only the grant the entrustment adds is lent.
+    const lent = !owner && (previous?.lent === true || (origin === 'entrusted' && previous !== undefined && previous.owner !== true));
+    const { lent: _lent, ...before } = previous ?? {};
+    this.write(agentId, { ...follows, [threadId]: { ...before, ...pr, at: now, origin: previous?.origin ?? origin, ...granted, ...(lent ? { lent: true as const } : {}) } });
   }
   /**
-   * The owner took an entrusted thread back: the grant that came with it goes.
-   * The follow stays only when the bot reaches the thread another way (it
-   * started it, or the thread's project is entrusted to it), under that origin.
+   * An entrustment ended (taken back, met, archived, removed, given to another
+   * bot): the grant that came with it goes. A follow the bot had before stays
+   * as it was. One the entrustment made stays only when the bot reaches the
+   * thread another way, its project entrusted to it, as `followed`.
    */
   release(agent: AgentProfile, threadId: ThreadId): void {
     const saved = this.saved(agent.id);
     const follow = saved[threadId];
     if (!follow) return;
-    const { owner: _owner, ...rest } = follow;
-    const kept: Follow = { ...rest, origin: follow.origin === 'entrusted' ? 'followed' : follow.origin };
-    const thread = this.core.journal.getThread(threadId);
-    if (thread && this.allowed(agent.id, kept, thread)) saved[threadId] = kept;
-    else delete saved[threadId];
+    const { owner: _owner, lent: _lent, ...rest } = follow;
+    if (follow.origin !== 'entrusted') {
+      if (!follow.lent) return;
+      saved[threadId] = rest;
+    } else {
+      const kept: Follow = { ...rest, origin: 'followed' };
+      const thread = this.core.journal.getThread(threadId);
+      if (thread && this.allowed(agent.id, kept, thread)) saved[threadId] = kept;
+      else delete saved[threadId];
+    }
     this.write(agent.id, saved);
     this.core.agentRuntime.filterFacts(agent.id, fact => this.core.agentRuntime.factThreads(fact).every(id => this.mayHear(agent, id)));
   }
@@ -551,8 +561,8 @@ export class AgentProjects {
 
   // -- facts ------------------------------------------------------------------
 
-  /** A fact for the agent's next event turn (`AgentRuntime.fact`), about the threads it names. */
-  notify(agent: AgentProfile, key: string, text: string, delay = NOTICE_BATCH_MS, threadIds: ThreadId[] = []): boolean {
+  /** A fact for the agent's next event turn (`AgentRuntime.fact`), about the threads it names: `threadIds`, else the ids in its text. */
+  notify(agent: AgentProfile, key: string, text: string, delay = NOTICE_BATCH_MS, threadIds?: ThreadId[]): boolean {
     if (this.closed) return false;
     return this.core.agentRuntime.fact(agent.id, { key, text: trimmed(text, NOTICE_TEXT + 500), delay, threadIds });
   }
