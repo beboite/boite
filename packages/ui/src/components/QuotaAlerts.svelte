@@ -75,7 +75,7 @@
             </button>
           {/each}
           {#if editing === period}
-            <input class="field" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" bind:value={draft} use:focus
+            <input class="field" type="text" inputmode="numeric" pattern="[0-9]*" bind:value={draft} use:focus
               aria-label={strings.quotas.alertCustomLabel} placeholder={strings.quotas.alertCustomPlaceholder} data-testid="quota-alert-{period}-input"
               onkeydown={(event) => { if (event.key === 'Enter') commit(period); else if (event.key === 'Escape') { event.stopPropagation(); editing = null; } }}
               onblur={() => commit(period)} />
