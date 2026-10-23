@@ -91,6 +91,40 @@ test('a blocker keeps the entrustment and wakes the agent; taking it back remove
   expect(h.core.workforce.entrusted.list()).toEqual([]);
 });
 
+test('taking a thread back takes the grant: the watch goes unless the bot reaches the thread another way', async () => {
+  script('Working.');
+  const desk = async (threadId: string) => (await client.call('agents.snapshot', {})).watches.find(w => w.agentId === agent.id && w.threadId === threadId)?.origin ?? null;
+  const entrustAndTakeBack = async (threadId: string) => {
+    await client.call('agents.entrust', { threadId, agentId: agent.id, objective: 'Keep going' });
+    expect(await desk(threadId)).not.toBeNull();
+    await client.call('agents.entrust', { threadId, agentId: null });
+  };
+  // Nothing else ties the bot to it: the watch and the access leave together.
+  const { threadId: plain } = await echoThread(h, client);
+  await entrustAndTakeBack(plain);
+  expect(await desk(plain)).toBeNull();
+  expect(h.core.workforce.projects.follows(agent.id, plain)).toBe(false);
+  // Entrusted to another bot: the first one's grant goes the same way.
+  const { agent: other } = await makeAgent(h, client, { name: 'Other' });
+  await client.call('agents.entrust', { threadId: plain, agentId: agent.id });
+  await client.call('agents.entrust', { threadId: plain, agentId: other.id });
+  expect(await desk(plain)).toBeNull();
+  expect(h.core.workforce.projects.follows(other.id, plain)).toBe(true);
+  await client.call('agents.entrust', { threadId: plain, agentId: null });
+  // A thread it started stays its own.
+  const { threadId: started } = await echoThread(h, client);
+  h.core.workforce.projects.follow(agent.id, started, 'started');
+  await entrustAndTakeBack(started);
+  expect(await desk(started)).toBe('started');
+  // A thread of a project entrusted to it stays, as a thread it follows there.
+  const { threadId: inProject } = await echoThread(h, client);
+  const current = h.core.workforce.records.get('profile', agent.id);
+  await client.call('agents.profile.save', { id: agent.id, expectedRevision: current.revision, value: { ...current, projectIds: [h.core.threads.require(inProject).projectId!] } });
+  await entrustAndTakeBack(inProject);
+  expect(await desk(inProject)).toBe('followed');
+  expect(h.core.workforce.projects.follows(agent.id, inProject)).toBe(true);
+});
+
 test('archiving drops the entrustment', async () => {
   const { threadId } = await echoThread(h, client);
   script('Working.');

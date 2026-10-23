@@ -101,6 +101,22 @@ test('entrusting a thread keeps the other bots\' desks; archiving it ends the en
   expect((await client.call('agents.snapshot', {})).entrusted).toEqual([]);
 });
 
+test('taking a thread back takes the grant in the fake as in the core: the watch stays only where the bot reaches the thread another way', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0 });
+  const ada = await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  const desk = async () => (await client.call('agents.snapshot', {})).watches.find(w => w.agentId === ada.id && w.threadId === 't-trace')?.origin ?? null;
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: ada.id });
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: null });
+  expect(await desk()).toBeNull();
+  // Its project entrusted to the bot: the thread stays on its desk as one it follows there.
+  const { projectId } = await client.call('threads.get', { threadId: 't-trace' });
+  const current = (await client.call('agents.snapshot', {})).profiles.find(a => a.id === ada.id)!;
+  await client.call('agents.profile.save', { id: ada.id, expectedRevision: current.revision, value: { ...current, projectIds: [projectId!] } });
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: ada.id });
+  await client.call('agents.entrust', { threadId: 't-trace', agentId: null });
+  expect(await desk()).toBe('followed');
+});
+
 test('the demo has an agent at work on a live step, one waiting on a login and one at rest until its routine', async ({ ready }) => {
   const { client } = await ready({ delayMs: 0, agentsDemo: true });
   const snapshot = await client.call('agents.snapshot', {});

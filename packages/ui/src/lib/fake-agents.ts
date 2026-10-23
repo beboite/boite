@@ -439,9 +439,11 @@ export class FakeAgents {
   }
   private entrust(p: RpcParams<'agents.entrust'>): RpcResult<'agents.entrust'> {
     const thread = this.runner?.thread?.(p.threadId);
+    const before = this.entrusted.find(e => e.threadId === p.threadId);
     if (p.agentId === null) {
-      if (!this.entrusted.some(e => e.threadId === p.threadId)) return null;
+      if (!before) return null;
       this.entrusted = this.entrusted.filter(e => e.threadId !== p.threadId);
+      this.release(before.agentId, p.threadId);
       if (thread?.activity?.goal) this.runner?.goal?.(p.threadId, null);
       this.bump();
       return null;
@@ -457,10 +459,19 @@ export class FakeAgents {
     this.runner?.goal?.(p.threadId, objective);
     const entry: AgentEntrustment = { threadId: p.threadId, agentId: agent.id, objective, at: Date.now() };
     this.entrusted = [...this.entrusted.filter(e => e.threadId !== p.threadId), entry];
+    // Entrusted to another bot: the one before loses the grant, as on a take-back.
+    if (before && before.agentId !== agent.id) this.release(before.agentId, p.threadId);
     // It joins the agent's desk, as the core puts an entrusted thread there: the first origin stays, and other bots' desks keep it.
     if (!this.watches.some(w => w.agentId === agent.id && w.threadId === p.threadId)) this.watches.push({ agentId: agent.id, threadId: p.threadId, title: thread.title, projectId: thread.projectId, origin: 'entrusted', since: entry.at, state: 'idle', stalledSince: null, lastActivityAt: entry.at, pullRequest: null, question: null });
     this.bump();
     return { ...entry };
+  }
+  /** The owner's grant ends: the watch stays only where the bot reaches the thread another way (it started it, or its project is the bot's). */
+  private release(agentId: string, threadId: string): void {
+    const projectId = this.runner?.thread?.(threadId)?.projectId ?? null;
+    const reaches = projectId !== null && (this.profiles.get(agentId)?.projectIds ?? []).includes(projectId);
+    this.watches = this.watches.flatMap(w => w.agentId !== agentId || w.threadId !== threadId || w.origin === 'started' ? [w]
+      : reaches ? [{ ...w, origin: w.origin === 'entrusted' ? 'followed' as const : w.origin }] : []);
   }
   private once<T>(requestId: string, value: unknown, run: () => T): T {
     if (!/^[A-Za-z0-9_-]{8,128}$/.test(requestId)) this.refuse('requestId: expected 8 to 128 letters, numbers, underscores or hyphens');

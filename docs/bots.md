@@ -322,7 +322,7 @@ When the owner takes the project back, those follows leave the desk with the
 facts they gathered, and the desk rows, the facts and the context block check
 the bot's projects again each time they are read or delivered. A thread the
 owner entrusted to the bot or watched for it (`owner` in the saved follow)
-stays: that is the owner's own grant.
+stays: that is the owner's own grant, until the owner takes the thread back.
 
 Each row is read from the thread itself, never from what the bot said:
 `state` is `needs-you` (a pending question or permission), `working`,
@@ -371,8 +371,13 @@ verified result, unless another objective is given), the bot's name and
 instructions join each of its turns, the thread goes on the bot's desk and a
 line in the bot's thread says so. A goal done or blocked is an event for the
 bot; a met goal ends the entrustment, a blocker keeps it so the user's answer
-resumes the goal. Taking the thread back removes the goal without a message;
-archiving or removing the thread ends the entrustment. The snapshot carries the
+resumes the goal. Taking the thread back removes the goal without a message
+and the owner's grant with it: the thread leaves the bot's desk and the bot
+loses the access the entrustment gave, unless it still reaches the thread
+another way. A thread it started stays as `started`, a thread of a project
+entrusted to it stays as `followed`. Entrusting the thread to another bot
+takes it from the first the same way. Archiving or removing the thread ends
+the entrustment. The snapshot carries the
 list as `entrusted`.
 
 ## Asking to change a bot's settings
