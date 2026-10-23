@@ -199,7 +199,7 @@ export class FakeAgents {
           this.deliver(message);
         }
       }
-      for (const d of this.all('delivery').filter(d => d.workId === work.id)) this.update('delivery', { ...d, status: turn.status === 'done' ? 'processed' : 'failed' });
+      for (const d of this.all('delivery').filter(d => d.workId === work.id && (turn.status === 'done' || !['included', 'processed'].includes(d.status)))) this.update('delivery', { ...d, status: turn.status === 'done' ? 'processed' : 'failed' });
     }
     this.kick();
   }
@@ -591,7 +591,7 @@ export class FakeAgents {
     let taskGeneration = work.taskGeneration;
     if (work.taskId) { const task = this.get('task', work.taskId); taskGeneration = task.generation + 1; this.update('task', { ...task, generation: taskGeneration, leaseUntil: null, status: p.action === 'cancel' ? 'cancelled' : 'assigned' }); }
     if (p.action === 'cancel') for (const d of this.all('decision').filter(d => d.workId === work.id && d.status === 'pending')) this.update('decision', { ...d, status: 'cancelled' });
-    for (const d of this.all('delivery').filter(d => d.workId === work.id)) this.update('delivery', { ...d, status: p.action === 'cancel' ? 'cancelled' : 'pending' });
+    for (const d of this.all('delivery').filter(d => d.workId === work.id && !['included', 'processed'].includes(d.status))) this.update('delivery', { ...d, status: p.action === 'cancel' ? 'cancelled' : 'pending' });
     const updated = this.update('work', { ...work, taskGeneration, status: p.action === 'pause' ? 'paused' : p.action === 'cancel' ? 'cancelled' : 'pending', runId: ['resume', 'reconcile'].includes(p.action) ? null : work.runId, error: null });
     if (work.runId && ['pause', 'cancel'].includes(p.action)) this.runner?.stop(this.get('run', work.runId).threadId);
     return updated;

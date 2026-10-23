@@ -1,8 +1,28 @@
 import { expect, test } from 'vitest';
-import { AGENT_HISTORY_PAGE, type AgentRecord, type AgentsHistoryPage } from '@boite/contracts';
+import { AGENT_HISTORY_PAGE, type AgentProfile, type AgentRecord, type AgentsHistoryPage, type Turn } from '@boite/contracts';
 import { oldestOf } from './agents.svelte';
 import { FakeAgents } from './fake-agents';
 import { FakeClient } from './fake-client';
+
+test('the fake keeps received messages included when execution fails, resumes or is cancelled', async () => {
+  const turn = { id: 'turn-receipt', threadId: 'thread-receipt', status: 'running' } as Turn;
+  const fake = new FakeAgents(() => {}, { create: () => turn.threadId, start: () => turn, stop: () => {} });
+  try {
+    const agent = fake.call('agents.profile.save', { value: { name: 'Worker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: 'echo', model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } }) as AgentProfile;
+    fake.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [], text: 'Work', requestId: 'fake_receipt_001' });
+    await Promise.resolve();
+    fake.finished({ ...turn, status: 'error', error: 'Execution failed.' }, '');
+    expect(fake.snapshot().deliveries[0]?.status).toBe('included');
+    fake.call('agents.limits.set', { ...fake.snapshot().limits, paused: true });
+    const failed = fake.snapshot().work[0]!;
+    expect(failed.status).toBe('error');
+    fake.call('agents.work.control', { workId: failed.id, expectedRevision: failed.revision, action: 'resume' });
+    expect(fake.snapshot().deliveries[0]?.status).toBe('included');
+    const resumed = fake.snapshot().work[0]!;
+    fake.call('agents.work.control', { workId: resumed.id, expectedRevision: resumed.revision, action: 'cancel' });
+    expect(fake.snapshot().deliveries[0]?.status).toBe('included');
+  } finally { fake.close(); }
+});
 
 test('runtime settings retain approved missing models but refuse newly added unlisted routes', async () => {
   const client = new FakeClient({ delayMs: 0 });
