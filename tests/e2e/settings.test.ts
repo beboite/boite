@@ -261,30 +261,60 @@ test('machines list each execution host and disconnect only the selected host', 
   await page.evaluate(`document.documentElement.dataset.theme = 'dark'`);
   await page.waitFor(`document.querySelectorAll('[data-machine-id="http://builder.test"] [data-testid="thread-row"]').length > 0`);
   await page.click(id('nav-settings'));
-    await page.click(id('settings-tab-machines'));
+  await page.click(id('settings-tab-machines'));
   await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 2`);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="machine-rename"]')).map(input => input.value)`)).toContain('Builder');
   await capture('machines.png');
-  // Checking the option immediately copies settings and keeps following changes.
-  expect(await page.evaluate(`document.querySelectorAll('${id('group-sync')}').length`)).toBe(1);
+  // Picking a default machine copies its settings to the other member at once and keeps following changes.
+  expect(await page.evaluate(`document.querySelectorAll('${id('group-home-pick')}').length`)).toBe(1);
   await page.evaluate(`(async () => {
     const w = globalThis.__boiteTest.workspace;
     await w.machines.find(machine => machine.id === 'http://builder.test').store.client.call('settings.set', { asyncQuestions: true });
     await w.active.client.call('settings.set', { asyncQuestions: false });
   })()`);
-  await page.click(id('group-sync'));
+  const home = await page.evaluate<string>(`globalThis.__boiteTest.workspace.active.group.self`);
+  await page.click(id('group-home-pick'));
+  await page.waitFor(`document.querySelector('${id('group-home-pick-menu')} [data-value="${home}"]:not([disabled])')`);
+  await page.click(`${id('group-home-pick-menu')} [data-value="${home}"]`);
   await page.waitFor(`globalThis.__boiteTest.workspace.settingsSync.reports['http://builder.test'] && !globalThis.__boiteTest.workspace.settingsSync.busy['http://builder.test']`);
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === 'http://builder.test').store.settings.asyncQuestions`)).toBe(false);
-  expect(await page.evaluate(`document.querySelector('${id('group-sync')}').closest('${id('group-card')}').querySelector('[data-machine-id="http://builder.test"] ${id('machine-rename')}').value`)).toBe('Builder');
-  expect(await page.evaluate(`document.querySelector('${id('machine-sync-report')}') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('group-sync')}').checked`)).toBe(true);
-  await capture('machines-sync.png');
+  expect(await page.evaluate(`document.querySelector('${id('group-card')}').querySelector('[data-machine-id="http://builder.test"] ${id('machine-rename')}').value`)).toBe('Builder');
+  // The default machine carries the badge in its row, and the menu names it.
+  await page.waitFor(`document.querySelectorAll('${id('machine-home')}').length === 1`);
+  expect(await page.evaluate(`document.querySelector('${id('machine-home')}').closest('${id('machine-card')}').dataset.coreId`)).toBe(home);
+  expect(await page.evaluate(`document.querySelector('${id('group-home-older')}') === null`)).toBe(true);
+  const homeName = (await page.text(id('group-home-pick'))).trim();
+  expect(homeName).not.toBe('None');
+  await capture('machines-home.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  // The phone layout draws the page anew; the checked state stays.
-  await page.waitFor(`document.querySelector('${id('group-sync')}')?.checked`);
-  expect(await page.evaluate(`document.querySelector('${id('machine-sync-report')}') === null`)).toBe(true);
-  await capture('machines-sync-phone.png');
+  // The phone layout draws the page anew; the default machine stays.
+  await page.waitFor(`document.querySelector('${id('group-home-pick')}')?.textContent.trim() === ${JSON.stringify(homeName)} && document.querySelectorAll('${id('machine-home')}').length === 1`);
+  await capture('machines-home-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  // On General, the bar picks Builder: it says it follows the default machine, a setting changed there gets a star, and the star gives it back.
+  const active = await page.evaluate<string>('globalThis.__boiteTest.workspace.active.machineId');
+  await page.click(id('settings-tab-general'));
+  await page.waitFor(`document.querySelector('${id('settings-machine')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('settings-is-home')}') !== null && document.querySelector('${id('settings-follows')}') === null`)).toBe(true);
+  await page.click(id('settings-machine'));
+  await page.waitFor(`document.querySelector('${id('settings-machine-menu')} [data-value="http://builder.test"]')`);
+  await page.click(`${id('settings-machine-menu')} [data-value="http://builder.test"]`);
+  await page.waitFor(`document.querySelector('${id('settings-follows')}') && document.querySelector('${id('setting-async-questions')}')`);
+  expect(await page.text(id('settings-follows'))).toContain(homeName);
+  expect(await page.evaluate('globalThis.__boiteTest.workspace.active.machineId')).toBe(active);
+  expect(await page.evaluate(`document.querySelector('${id('setting-async-questions')}').checked`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('${id('sync-mark')}[data-key="asyncQuestions"]') === null`)).toBe(true);
+  await page.click(id('setting-async-questions'));
+  await page.waitFor(`document.querySelector('${id('sync-mark')}[data-key="asyncQuestions"]')`);
+  expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === 'http://builder.test').store.settings.asyncQuestions`)).toBe(true);
+  expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.settings.asyncQuestions`)).toBe(false);
+  await capture('settings-follower-kept.png');
+  await page.click(`${id('sync-mark')}[data-key="asyncQuestions"]`);
+  await page.waitFor(`document.querySelector('${id('sync-mark')}[data-key="asyncQuestions"]') === null && globalThis.__boiteTest.workspace.machines.find(machine => machine.id === 'http://builder.test').store.settings.asyncQuestions === false`);
+  expect(await page.evaluate(`document.querySelector('${id('setting-async-questions')}').checked`)).toBe(false);
+  await page.click(id('settings-tab-machines'));
+  await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 2`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
   await page.click(id('machine-remove'));
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);

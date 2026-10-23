@@ -75,7 +75,7 @@ binds `0.0.0.0` instead, and `--host` takes a specific address:
 bun packages/core/src/main.ts --lan
 ```
 
-Settings, Machines and updates, Phone app, Reachable on the local network saves
+Settings, Advanced, Phone app, Reachable on the local network saves
 `listenOnLan`. The core
 reads it at startup; enabling it binds `0.0.0.0`. Explicit `--host` or `--lan`
 flags take precedence. A running core never rebinds, so changing the switch
@@ -433,7 +433,7 @@ boite.example.com {
 
 ### Through Tailscale
 
-On a tailnet the phone is already on, Settings, Machines, Phone app has
+On a tailnet the phone is already on, Settings, Advanced, Phone app has
 **HTTPS through Tailscale**. It reads the `tailscale` CLI (found on `PATH`, or
 where the installers put it on Windows, macOS and Linux; `BOITE_TAILSCALE_CLI`
 names another) and says which of these it found, with the way out of each:
@@ -466,7 +466,7 @@ access to the ports required for its certificate challenge and public HTTPS.
 Keep the core bound to loopback when the proxy is local. A private VPN still
 needs a certificate the phone trusts for PWA features.
 
-Set the matching origin in Machines and updates, Phone app, Use another HTTPS
+Set the matching origin in Advanced, Phone app, Use another HTTPS
 address. A headless
 core accepts `--public-url https://boite.example.com` or `BOITE_PUBLIC_URL`.
 This saves `settings.publicUrl`, uses it in new links to add a device, and

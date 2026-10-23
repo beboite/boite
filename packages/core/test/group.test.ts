@@ -131,6 +131,35 @@ test('group names converge after concurrent renames and a stale roster cannot un
   expect(mergeRosters(concurrent, { ...renamed, name: 'A', nameRev: 2 }).name).toBe('A');
 });
 
+test('the settings home converges by revision then id, and a roster without it keeps the local choice', () => {
+  const [x, y] = ['1'.repeat(64), '2'.repeat(64)];
+  const base: Roster = { id: 'grp', name: 'Home', founder: 'a', cores: [entry('a', 1), entry(x, 1), entry(y, 1)], devices: [] };
+  const chosen: Roster = { ...base, settingsHome: x, settingsHomeRev: 1 };
+  const home = (roster: Roster) => [roster.settingsHome, roster.settingsHomeRev];
+  // An older core sends neither field: the choice stays, both ways.
+  expect(home(mergeRosters(chosen, base))).toEqual([x, 1]);
+  expect(home(mergeRosters(base, chosen))).toEqual([x, 1]);
+  // A clearing at a higher revision wins over the older choice.
+  const cleared: Roster = { ...base, settingsHome: null, settingsHomeRev: 2 };
+  expect(home(mergeRosters(chosen, cleared))).toEqual([null, 2]);
+  expect(home(mergeRosters(cleared, chosen))).toEqual([null, 2]);
+  // Two members chose at the same revision: both end on the larger id, and a clearing loses the tie.
+  const other: Roster = { ...base, settingsHome: y, settingsHomeRev: 1 };
+  expect(home(mergeRosters(chosen, other))).toEqual([y, 1]);
+  expect(digestOf(mergeRosters(chosen, other))).toBe(digestOf(mergeRosters(other, chosen)));
+  const tie: Roster = { ...base, settingsHome: null, settingsHomeRev: 1 };
+  expect(home(mergeRosters(tie, chosen))).toEqual([x, 1]);
+  expect(digestOf(mergeRosters(tie, chosen))).toBe(digestOf(mergeRosters(chosen, tie)));
+  // A member removed x before it heard x was chosen: the merge meets both and clears the home on every side.
+  const removed: Roster = { ...base, cores: [entry('a', 1), entry(x, 3, { removed: true }), entry(y, 1)] };
+  expect(home(mergeRosters(removed, chosen))).toEqual([null, 2]);
+  expect(home(mergeRosters(chosen, removed))).toEqual([null, 2]);
+  expect(digestOf(mergeRosters(removed, chosen))).toBe(digestOf(mergeRosters(chosen, removed)));
+  // x admitted again later is no home: the cleared revision outranks the stale choice.
+  const back: Roster = { ...mergeRosters(removed, chosen), cores: [entry('a', 1), entry(x, 4, { epoch: 2 }), entry(y, 1)] };
+  expect(home(mergeRosters(chosen, back))).toEqual([null, 2]);
+});
+
 test('the owner renames a group on either member, and the name survives synchronization and restart', async () => {
   const a = await machine();
   const b = await machine();
@@ -150,10 +179,28 @@ test('the owner renames a group on either member, and the name survives synchron
   const grant = a.core.sessions.grant();
   const phone = await connect(a.url, '', { grant: grant.grant, client: { name: 'pwa', version: '1' } });
   expect(await thrown(phone.call('group.rename', { name: 'Denied' }))).toThrow();
+
+  // The settings home is chosen the same way: on one member, for all of them.
+  expect(await owner.call('group.settingsHome', { coreId: id(a) })).toMatchObject({ settingsHome: id(a) });
+  await waitFor(() => a.core.group.view('owner')?.settingsHome === id(a));
+  expect(checkRoster(a.core.journal.getSetting('group'))).toMatchObject({ settingsHome: id(a), settingsHomeRev: 1 });
+  for (const bad of ['f'.repeat(64), 42, undefined]) expect(await thrown(owner.call('group.settingsHome', { coreId: bad } as never))).toThrow('coreId: expected the id of a machine of this group');
+  expect(await thrown(phone.call('group.settingsHome', { coreId: null }))).toThrow('owner only');
+  expect(() => checkRoster({ ...stored, settingsHome: 'nope', settingsHomeRev: 1 })).toThrow('roster.settingsHome');
+  // Choosing it again changes nothing; clearing it is a change of its own.
+  b.core.group.settingsHome(id(a));
+  expect(b.core.group.view('owner')).toMatchObject({ settingsHome: id(a) });
+  expect(checkRoster(b.core.journal.getSetting('group')).settingsHomeRev).toBe(1);
+  expect((await owner.call('group.settingsHome', { coreId: null })).settingsHome).toBeUndefined();
+  await waitFor(() => a.core.group.view('owner')?.settingsHome === undefined);
+  expect(checkRoster(a.core.journal.getSetting('group'))).toMatchObject({ settingsHome: null, settingsHomeRev: 2 });
+  a.core.group.settingsHome(id(b));
   await hangUp(a, phone);
   await hangUp(b, owner);
   await a.core.group.close();
-  expect(restart(a).view('owner')?.name).toBe('Studio');
+  const back = restart(a).view('owner');
+  expect(back?.name).toBe('Studio');
+  expect(back?.settingsHome).toBe(id(b));
 });
 
 test('migration preserves granted transcript reads only for the current group admission', async () => {
@@ -468,10 +515,15 @@ test('a removed machine is told, leaves, and its keys die on the members that st
   const key = await connect(a.url, '', { ticket: b.core.group.clients.ticket(id(a), { principal: 'owner', sessionId: null, threadId: null }).ticket });
   await hangUp(a, key);
   expect(a.core.sessions.list(null)).toHaveLength(1);
+  expect(a.core.group.settingsHome(id(b)).settingsHome).toBe(id(b));
 
   expect(a.core.group.remove(id(b)).cores.map((core) => core.coreId).sort()).toEqual([id(a), id(c)].sort());
   expect(() => a.core.group.remove(id(b))).toThrow('not a machine of this group');
   expect(() => a.core.group.remove(id(a))).toThrow('group.leave');
+  // A home that left reads as none, and cannot be chosen again; the roster forgets it, so b coming back is no home either.
+  expect(a.core.group.view('owner')?.settingsHome).toBeUndefined();
+  expect([a.core.group.roster?.settingsHome, a.core.group.roster?.settingsHomeRev]).toEqual([null, 2]);
+  expect(() => a.core.group.settingsHome(id(b))).toThrow('coreId: expected the id of a machine of this group');
   expect(a.core.sessions.list(null)).toEqual([]);
   await waitFor(() => b.core.group.view('owner') === null && members(c).length === 2);
   // What b signs is no longer listened to, and a ticket from it opens nothing.

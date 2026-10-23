@@ -274,6 +274,7 @@ export class Store {
   loadGroup(...args: Parameters<Pairing['loadGroup']>) { return this.#ctx.pairing.loadGroup(...args); }
   createGroup(...args: Parameters<Pairing['createGroup']>) { return this.#ctx.pairing.createGroup(...args); }
   renameGroup(...args: Parameters<Pairing['renameGroup']>) { return this.#ctx.pairing.renameGroup(...args); }
+  setSettingsHome(...args: Parameters<Pairing['setSettingsHome']>) { return this.#ctx.pairing.setSettingsHome(...args); }
   joinGroup(...args: Parameters<Pairing['joinGroup']>) { return this.#ctx.pairing.joinGroup(...args); }
   leaveGroup(...args: Parameters<Pairing['leaveGroup']>) { return this.#ctx.pairing.leaveGroup(...args); }
   removeFromGroup(...args: Parameters<Pairing['removeFromGroup']>) { return this.#ctx.pairing.removeFromGroup(...args); }
@@ -345,6 +346,10 @@ export class Store {
   get bindings() { return this.#ctx.settings.bindings; }
 
   saveSettings(...args: Parameters<CoreSettings['saveSettings']>) { return this.#ctx.settings.saveSettings(...args); }
+  get settingsHome() { return this.#ctx.settings.settingsHome; }
+  kept(...args: Parameters<CoreSettings['kept']>) { return this.#ctx.settings.kept(...args); }
+  keep(...args: Parameters<CoreSettings['keep']>) { return this.#ctx.settings.keep(...args); }
+  followHome(...args: Parameters<CoreSettings['followHome']>) { return this.#ctx.settings.followHome(...args); }
   commandForKey(...args: Parameters<CoreSettings['commandForKey']>) { return this.#ctx.settings.commandForKey(...args); }
   isKey(...args: Parameters<CoreSettings['isKey']>) { return this.#ctx.settings.isKey(...args); }
   keyLabel(...args: Parameters<CoreSettings['keyLabel']>) { return this.#ctx.settings.keyLabel(...args); }

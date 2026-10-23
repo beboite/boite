@@ -17,6 +17,10 @@ test('an origins draft survives a settings update from elsewhere, and saving it 
   const store = $state({
     owner: true,
     core: null,
+    client: null,
+    endpointUrl: null,
+    sessions: [],
+    deviceInvite: null,
     connection: 'ready',
     settings: { ...base, browserOrigins: ['https://a.test'] },
     saveSettings: vi.fn(async (patch: { browserOrigins?: string[] }) => {
@@ -51,6 +55,10 @@ test('an origin being typed is not sent until it is a valid origin, and a refuse
   const store = $state({
     owner: true,
     core: null,
+    client: null,
+    endpointUrl: null,
+    sessions: [],
+    deviceInvite: null,
     connection: 'ready',
     settings: { ...base, browserOrigins: [] as string[] },
     saveSettings: vi.fn(async (patch: { browserOrigins?: string[] }) => {

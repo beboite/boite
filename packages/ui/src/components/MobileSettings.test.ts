@@ -5,6 +5,7 @@ import { store } from '../lib/store.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { archiveThread } from '../lib/archive';
 import type { FakeClient } from '../lib/fake-client';
+import { workspace } from '../lib/workspace.svelte';
 
 /** The phone has no General page: the archive it can fill must be reachable from its own settings list. */
 
@@ -12,6 +13,8 @@ const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async (_url: string) => {
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl }));
 
 let running: Record<string, unknown> | null = null;
+// jsdom has no scrolling: a page opened on a card scrolls to it.
+Element.prototype.scrollIntoView ??= vi.fn();
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -142,4 +145,30 @@ test('the phone settings hold this phone\'s three screens and the machine\'s ess
   await waitFor(() => document.querySelector('[data-testid=appearance-page]') !== null);
   expect(document.querySelector('[data-testid=setting-chat-artifacts]')).not.toBeNull();
   for (const id of ['chat-width-comfortable', 'terminal-gpu', 'settings-buttons', 'start-in-drafts']) expect(document.querySelector(`[data-testid=${id}]`)).toBeNull();
+});
+
+test('on a phone too, a page of one machine is picked above it without moving the window', async () => {
+  phoneWidth();
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  window.history.replaceState(null, '', '/?fake=1&machines=1');
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  store.booted = false;
+  store.page = 'chat';
+  closeTour();
+  running = mount(App, { target });
+  await waitFor(() => store.booted && workspace.machines.length === 2 && workspace.machines.every((machine) => machine.store.connection === 'ready'));
+  const remote = workspace.machines.find((machine) => machine.store !== store)!;
+  await remote.store.client!.call('settings.set', { muteAgents: true });
+  await store.client!.call('settings.set', { muteAgents: true });
+  store.showSettings('resources');
+  await waitFor(() => document.querySelector('[data-testid=settings-machine]') !== null && document.querySelector('[data-testid=setting-mute-agents]') !== null);
+  query<HTMLButtonElement>('[data-testid=settings-machine]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-machine-menu]') !== null);
+  query<HTMLElement>(`[data-testid=settings-machine-menu] [data-value="${remote.id}"]`).click();
+  await waitFor(() => query('[data-testid=settings-machine]').textContent?.includes(remote.label) === true);
+  query<HTMLInputElement>('[data-testid=setting-mute-agents]').click();
+  await waitFor(() => remote.store.settings?.muteAgents === false);
+  expect(store.settings?.muteAgents).toBe(true);
+  expect(workspace.active).toBe(store);
 });
