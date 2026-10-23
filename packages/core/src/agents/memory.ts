@@ -9,9 +9,11 @@
  * answer goes to the memory, never to the agent as mail. It runs with no tool
  * at all, enforced by its driver rather than asked in its prompt: no built-in
  * tool, MCP server, hook, instruction file or guide (`TOOL_FREE_CONTEXT`), a
- * permission mode that approves nothing, and a token that opens no method. So
- * only a provider whose driver can start that way (Claude) runs it; an agent
- * on another keeps MEMORY.md through `boite agent remember`. The agent's next turn
+ * permission mode that approves nothing, and a token that opens no method. A
+ * driver that cannot drop every tool runs it in the most restricted mode it
+ * has: `plan`, so Codex has a read-only sandbox with no network and asks
+ * nothing, and Muse and ACP agents their plan mode; whatever tool it still asks
+ * for is denied without a card. The agent's next turn
  * never waits for it. One pass runs per agent at a time; a turn that ends while
  * one runs is remembered and passed on once it ends. A pass runs on the
  * provider's small model (the one that writes thread titles) when the agent's
@@ -97,8 +99,6 @@ export class MemoryKeeper {
   private readonly waiting = new Map<string, Exchange>();
   private readonly off: () => void;
   private closed = false;
-  /** Agents already told, once per core run, that their provider cannot run a pass. */
-  private readonly told = new Set<string>();
 
   constructor(private readonly core: Core, private readonly store: AgentStore) {
     // A pass the core was running when it stopped cannot finish: say so and let the agent go on.
@@ -148,10 +148,6 @@ export class MemoryKeeper {
     const provider = this.core.providers.get(agent.selection.providerId);
     // Not installed: the agent could not run either, and its status says so.
     if (provider === undefined) return null;
-    if (!CONTEXT_TRIMMABLE_PROTOCOLS.includes(provider.protocol)) {
-      if (!this.told.has(agent.id)) { this.told.add(agent.id); this.core.log('warn', `memory pass for agent ${agent.id}: ${provider.name} cannot start without tools, so no pass runs; MEMORY.md changes through boite agent remember`); }
-      return null;
-    }
     const small = defaultTitleModel(provider, modelsFor(provider, agent.selection.accountId));
     const base = { id: 'memory', name: 'Memory', providerId: provider.id, accountId: agent.selection.accountId, effort: null };
     for (const model of [small, agent.selection.model]) {
@@ -182,7 +178,7 @@ export class MemoryKeeper {
     const parent = threadId ? this.core.journal.getThread(threadId) : null;
     if (!parent || parent.archived) return;
     const route = this.route(agent);
-    if (!route) { if (!this.told.has(agent.id)) this.core.log('warn', `memory pass for agent ${agent.id}: no model the agent may use for subagents can run it`); return; }
+    if (!route) { this.core.log('warn', `memory pass for agent ${agent.id}: no model the agent may use for subagents can run it`); return; }
     const brain = this.store.resident.brain(agent.id);
     let child: string | null = null;
     try {
@@ -193,7 +189,7 @@ export class MemoryKeeper {
         this.keepers.set(id, keeper);
         this.core.journal.setSetting(`${KEEPER}${id}`, keeper);
         this.core.agents.seal(id);
-      }, undefined, false, { contextMode: TOOL_FREE_CONTEXT, permissionMode: 'dontAsk' });
+      }, undefined, false, { contextMode: TOOL_FREE_CONTEXT, permissionMode: CONTEXT_TRIMMABLE_PROTOCOLS.includes(provider.protocol) ? 'dontAsk' : 'plan' });
       this.record(agent.id, { threadId: child, status: 'running', summary: null, at: keeper.startedAt });
       const today = new Date().toISOString().slice(0, 10);
       this.core.threads.startTurn(child, memoryPrompt(agent, brain.memory.slice(0, 64_000), cut(exchange.asked, ASKED_MAX, exchange.joined), cut(exchange.answered, ANSWERED_MAX, exchange.joined), today), [], undefined, 'delegation', undefined, undefined, `Update ${agent.name}'s memory`);

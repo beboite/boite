@@ -232,11 +232,16 @@ wrong or finished. It runs on the provider's small model (the one that titles
 threads) when the agent's subagent policy allows it, else on the agent's own
 model. The core writes the file, so the pass runs with no tool at all, enforced
 by its driver rather than its prompt: no built-in tool, MCP server, hook,
-instruction file or guide (`TOOL_FREE_CONTEXT`), permission mode `dontAsk`,
-and a token that authenticates no method (`AgentTokens.seal`). Only a provider
-whose driver can start that way runs it (Claude, `CONTEXT_TRIMMABLE_PROTOCOLS`);
-an agent on another provider gets no pass, said once in the core log, and keeps
-MEMORY.md through `boite agent remember`. The pass reads MEMORY.md and the
+instruction file or guide (`TOOL_FREE_CONTEXT`), and a token that
+authenticates no method (`AgentTokens.seal`). Claude drops every tool and runs
+it in `dontAsk`. A driver that cannot drop them all runs it in its most
+restricted mode, `plan`: Codex starts with a read-only sandbox (no writes, no
+network), approvals `never`, no MCP server, plugin, app, hook, project
+instructions or web search; pi with `--no-tools`, `--no-extensions`,
+`--no-context-files`, `--no-skills` and `--no-prompt-templates`; ACP agents
+in their plan mode with no MCP server Boite passes; Muse in its plan posture
+(no write, no shell, unmatched approvals denied). Whatever tool such a thread
+still asks for is denied without a card. The pass reads MEMORY.md and the
 exchange as JSON strings. It keeps the old
 file when the owner edited it meanwhile, when the answer passes
 `AGENT_MEMORY_MAX`, or when it would drop most of a file past 1,500

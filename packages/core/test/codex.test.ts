@@ -1833,6 +1833,30 @@ describe('codex driver', () => {
   }
 });
 
+test('a persistent agent\'s memory pass on Codex runs read-only, asks nothing, and starts no MCP server, plugin, hook or web search', async () => {
+  const client = await startCore();
+  const { accountId } = await codexAccount(client);
+  process.env['CODEX_FAKE_MCP'] = '{"ssh":{"command":"ssh-mcp"}}';
+  const agent = await client.call('agents.profile.save', { value: {
+    name: 'Ada', domain: '', instructions: 'Keep notes.', avatar: '', status: 'active', projectIds: [],
+    selection: { providerId: 'codex-fake', accountId, model: 'fake-codex', effort: null, permissionMode: 'yolo' },
+  } });
+  const self = harness!.core.workforce.sessionOf(agent.id)!.threadId;
+  const pass = () => harness!.core.journal.listThreads().find(thread => thread.parentThreadId === self);
+  await waitFor(() => pass() !== undefined && harness!.core.journal.listTurns(pass()!.id).length > 0, 20000);
+  const child = pass()!;
+  expect(child.permissionMode).toBe('plan');
+  expect(child.contextMode?.tools).toEqual([]);
+  // The agent itself runs with full access; its pass gets the read-only sandbox and never asks.
+  await waitFor(() => fakeLog().includes('thread/start approvalPolicy=never sandbox=read-only model=gpt-6-luna\n'), 20000);
+  expect(fakeLog()).toContain('thread/start approvalPolicy=never sandbox=danger-full-access model=fake-codex');
+  expect(fakeLog()).toContain('config:thread/start {"tools.update_plan.enabled":true,"mcp_optional_startup_grace_ms":10000,"mcp_servers":{"ssh":{"enabled":false}}}');
+  await waitFor(() => harness!.core.procs.liveCount(child.id) > 0 || harness!.core.journal.getTurn(harness!.core.journal.listTurns(child.id)[0]!.id)!.status !== 'running', 20000);
+  const launched = (await client.call('trace.get', { threadId: child.id })).find(process => process.commandLine?.includes('app-server') || process.commandLine?.includes('codex-server'));
+  for (const flag of ['features.hooks=false', 'features.plugins=false', 'features.apps=false', 'project_doc_max_bytes=0', 'web_search="disabled"']) expect(launched?.commandLine).toContain(flag);
+  expect(harness!.core.agents.authenticate(harness!.core.agents.tokenFor(child.id))).toBeNull();
+});
+
 describe('codex hooks', () => {
   test('a prompt a hook refused shows why in the thread, and a hook Codex skips is reported once', async () => {
     process.env['CODEX_FAKE_HOOKS'] = '1';

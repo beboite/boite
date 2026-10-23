@@ -71,7 +71,10 @@ than start with them anyway.
 The core has one mode of its own that no request asks for:
 `TOOL_FREE_CONTEXT`, no instruction file, guide, MCP server, hook or built-in
 tool (an empty `tools` list). The memory pass of a persistent agent runs in it
-([agents](agents.md)), on Claude only.
+([agents](agents.md)). Claude honours all of it; Codex and pi leave out what
+their command line can (see the memory pass in [agents](agents.md)), the
+thread's `plan` mode restricts the rest, and any tool such a thread asks
+for is denied without a card.
 
 A conversation with a mode carries `BOITE_CONTEXT=<label>` in its environment,
 and `BOITE_GUIDES=0` when it drops guides: a hook that adds a guide of its own,

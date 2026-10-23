@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { CONTEXT_TRIMMABLE_PROTOCOLS, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswerable as answerable, delegationNeeds as needsOf, delegationReply, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswerable as answerable, delegationNeeds as needsOf, delegationReply, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
 import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationResumed, DelegationView, PauseOrigin, PermissionMode, PermissionRequest, Principal, QuestionRequest, RequestId, RpcParams, ThreadContextMode, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, requiredText as text } from './errors.ts';
@@ -378,8 +378,7 @@ export class Delegation {
    * parent's checkout: its branch and folder now, the worktree itself before
    * its first turn ([worktrees](./delegation/worktrees.ts)). `fixed` is a
    * context mode and a permission mode the core sets itself, such as a memory
-   * pass that runs no tool: refused on a provider whose driver cannot honour
-   * the mode.
+   * pass that runs no tool; each driver honours what it can of the mode.
    */
   createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void, context?: unknown, worktree = false,
     fixed?: { contextMode: ThreadContextMode; permissionMode: PermissionMode }): string {
@@ -388,7 +387,6 @@ export class Delegation {
     if (asked != null && route.model === null) throw invalidParams(SPEED_NEEDS_MODEL);
     const provider = this.core.providers.require(route.providerId);
     const speed = checkSpeed(provider, route.accountId, route.model, asked ?? null);
-    if (fixed && !CONTEXT_TRIMMABLE_PROTOCOLS.includes(provider.protocol)) throw refused(`${provider.name} cannot start without its tools, so it cannot run this conversation`, { field: 'providerId', expected: CONTEXT_TRIMMABLE_PROTOCOLS.join(' or ') });
     const contextMode = fixed ? { ...fixed.contextMode, tools: fixed.contextMode.tools === null ? null : [...fixed.contextMode.tools] } : checkContext(provider, context);
     const planned = worktree ? this.worktrees.plan(parent, id) : null;
     this.core.journal.db.transaction(() => {

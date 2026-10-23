@@ -1,4 +1,4 @@
-import type { NativeAgentUpdate, PermissionMode, ToolStatus } from '@boite/contracts';
+import type { NativeAgentUpdate, PermissionMode, ThreadContextMode, ToolStatus } from '@boite/contracts';
 
 /** What the agent sees as `clientInfo.name`. */
 export const CLIENT_NAME = 'boite';
@@ -38,6 +38,22 @@ export const THREAD_CONFIG = {
  * own MCP servers are turned off by name at `thread/start` (`titleTurn`).
  */
 export const NO_PLUGINS = ['--config', 'features.plugins=false', '--config', 'features.apps=false'] as const;
+
+/**
+ * What a thread in a context mode leaves out on the command line: Codex cannot
+ * drop its shell, so a thread with no tool (`TOOL_FREE_CONTEXT`) also loses web
+ * search, and its `plan` mode keeps the sandbox read-only with no network. MCP
+ * servers go off by name at `thread/start` (`threadConfig`).
+ */
+export function contextArgs(mode: ThreadContextMode | null | undefined): string[] {
+  if (!mode) return [];
+  return [
+    ...(mode.hooks ? [] : ['--config', 'features.hooks=false']),
+    ...(mode.mcp ? [] : NO_PLUGINS),
+    ...(mode.instructions ? [] : ['--config', 'project_doc_max_bytes=0']),
+    ...(mode.tools?.length === 0 ? ['--config', 'web_search="disabled"'] : []),
+  ];
+}
 
 export const STDERR_MAX = 400;
 

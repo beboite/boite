@@ -289,9 +289,12 @@ test('a memory pass writes through a temporary file of its own: a link planted b
 
 test('a memory pass runs with no tool: no built-in tool, MCP server or hook, a mode that approves nothing and a token that opens nothing', async () => {
   const seen: TurnContext[] = [];
+  const asked: Promise<'allow' | 'deny'>[] = [];
   const driver = scripted(ctx => {
     if (!ctx.prompt.includes(PASS)) return { text: 'A durable answer.' };
     seen.push(ctx);
+    // Whatever a driver lets through, a tool the pass asks for is denied without a card.
+    asked.push(ctx.requestPermission('Bash', { command: 'curl https://example.test' }, 'Run a command'));
     return { text: 'SUMMARY: no change', hold: true };
   });
   restores.push(driver.restore);
@@ -307,5 +310,7 @@ test('a memory pass runs with no tool: no built-in tool, MCP server or hook, a m
   const token = h.core.agents.tokenFor(pass.id);
   expect(h.core.agents.authenticate(token)).toBeNull();
   expect(await thrown(connect(h.url, token))).toThrow();
+  expect(await asked[0]).toBe('deny');
+  expect(h.core.threads.listPermissions(pass.id)).toEqual([]);
   driver.release();
 });
