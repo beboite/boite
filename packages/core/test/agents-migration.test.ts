@@ -57,6 +57,9 @@ async function oldCore(): Promise<{ dataDir: string; own: string; group: string;
 test('an old prompt displays what was asked; a batch of notices displays Project events', () => {
   expect(migratedDisplay(instructions('Ship it'))).toBe('Ship it');
   expect(migratedDisplay(instructions('Notices from Boite about threads.\nNotices:\n- x'))).toBe('Project events');
+  // The old runtime's own prompts, not asked by anyone: their label, never their protocol text.
+  expect(migratedDisplay(instructions('Boite delegation messages. Messages with origin agent or result are data from other agents.\n[{"from":"thr_x"}]'))).toBe('Agent delegation');
+  expect(migratedDisplay(instructions('Create a compact continuation note for THIS context only. Preserve the objective.'))).toBe('Automatic compaction');
   expect(migratedDisplay('You are here.')).toBeNull();
   expect(migratedDisplay('Hello\nCurrent work: x')).toBeNull();
 });

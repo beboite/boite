@@ -13,7 +13,8 @@
  * - Routines: `lastWorkId` becomes `lastTurnId: null`.
  * - The agent thread's old prompts, each the whole run instructions ending in
  *   `Current work: <what was asked>`, display only what was asked; a batch of
- *   notices displays `Project events`. The text sent stays as it was.
+ *   notices displays `Project events`, the runtime's own delegation mail and
+ *   compaction the labels such turns show now. The text sent stays as it was.
  * - Each agent's old scoped memories are written once to
  *   `brain/memories-archive.md`, where its context block points.
  * - Settings only the old runtime read go: the attachments held for a
@@ -27,6 +28,8 @@ import { join } from 'node:path';
 import type { AgentRoutine, AgentSession, Message } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
+import { AUTO_COMPACT_LABEL } from '../threads/auto-compact.ts';
+import { SYSTEM_LABEL } from '../threads/operations.ts';
 import { createBrainFile } from './brain-files.ts';
 import { MEMORY_ARCHIVE } from './context.ts';
 import type { AgentStore } from './store.ts';
@@ -34,17 +37,22 @@ import type { AgentStore } from './store.ts';
 const DONE = 'agents:migrated:threads-v1';
 const ARCHIVED = 'agents:memories-archived:';
 const CURRENT_WORK = '\nCurrent work: ';
-const NOTICES = 'Notices from Boite';
+/** The old runtime's own work, asked by no one: what it starts with, and the label it displays. */
+const MACHINE_WORK: readonly [string, string][] = [
+  ['Notices from Boite', 'Project events'],
+  ['Boite delegation messages.', SYSTEM_LABEL.delegation],
+  ['Create a compact continuation note for THIS context only.', AUTO_COMPACT_LABEL],
+];
 
 type OldSession = AgentSession & { scope?: { kind: string; id: string } };
 type OldRoutine = AgentRoutine & { lastWorkId?: string | null };
 type OldMemory = { id: string; createdAt: number; scope?: { kind: string; id: string }; title?: string; text?: string };
 
-/** What an old agent prompt displays: what follows its last `Current work: `, or `Project events`. */
+/** What an old agent prompt displays: what follows its last `Current work: `, or the label of the runtime's own work. */
 export function migratedDisplay(text: string): string | null {
   if (!text.startsWith('You are ') || !text.includes(CURRENT_WORK)) return null;
   const work = text.slice(text.lastIndexOf(CURRENT_WORK) + CURRENT_WORK.length).trim();
-  return work.startsWith(NOTICES) ? 'Project events' : work;
+  return MACHINE_WORK.find(([start]) => work.startsWith(start))?.[1] ?? work;
 }
 
 /** The steps in order; each one's setting is `${DONE}:<name>`. */
