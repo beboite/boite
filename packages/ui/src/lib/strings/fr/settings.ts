@@ -43,7 +43,7 @@ export const fr: Translation = {
     groupWorkingThreads: 'Regrouper les conversations en cours',
     groupWorkingThreadsHint: 'Replie les conversations en cours et le travail en arrière-plan dans Projets et Récent. Les épingles, brouillons, erreurs et demandes de réponse restent visibles. Cet appareil seulement.',
     groupOtherProjects: 'Regrouper les projets inactifs',
-    groupOtherProjectsHint: 'Dans la vue Projets, les projets dont il ne reste que des conversations archivées passent dans Mis de côté, ceux où il n’y a rien à faire dans Projets inactifs. Désactive pour garder tous les projets dans la liste. Cet appareil seulement.',
+    groupOtherProjectsHint: 'Dans la vue Projets, les projets sans rien d’ouvert mais avec des conversations archivées à la main passent dans Mis de côté, ceux où il n’y a rien à faire dans Projets inactifs. Désactive pour garder tous les projets dans la liste. Cet appareil seulement.',
     app: 'Application',
     tourReplay: 'Revoir la présentation',
     execution: 'Exécution des agents',

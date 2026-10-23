@@ -250,6 +250,8 @@ for (const width of [1280, 390]) {
       const finished = idleRow('p-notes');
       await page.waitFor(`document.querySelector('${finished}')`);
       await click(`${finished} ${id('project-done-toggle')}`);
+      // Open, the row's done pill keeps its fill inside the touch target: no opaque edge bars above and below it on a phone.
+      if (width < 720) expect(await page.evaluate(`getComputedStyle(document.querySelector('${finished} ${id('project-done-toggle')}')).borderTopColor`)).toBe('rgba(0, 0, 0, 0)');
       const done = `${root} ${id('done-thread')}[data-machine-id="${main}"][data-thread-id="t-descriptors"]`;
       const revealDone = () => page.waitFor(`(() => {
         document.querySelector('${finished} ${id('project-done')}')?.scrollIntoView({block:'center'});

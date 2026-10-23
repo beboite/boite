@@ -65,17 +65,21 @@
   let activeGroups = $derived([...sections.working, ...sections.open, ...sections.later]);
   /** A set-aside card shows its archived conversations as its body: their pill shows only while it is folded. */
   const laterLists = ['archived'] as const;
-  let previousLeader: { key: string; activity: number } | undefined;
+  /** The first card drawn, and the first open one: a prompt can lead either, the Working section sitting above the open cards. */
+  const leaders = () => [activeGroups[0], sections.open[0]] as const;
+  let previousLeaders: ({ key: string; activity: number } | undefined)[] = [];
   $effect(() => {
-    const first = sections.working[0] ?? sections.open[0];
-    const next = first && { key: projectKey(first), activity: projectActivity(first) };
-    const promoted = next && previousLeader && next.key !== previousLeader.key && next.activity > previousLeader.activity;
-    previousLeader = next;
+    const now = leaders().map(first => first && { entry: first, key: projectKey(first), activity: projectActivity(first) });
+    const promoted = now.find((next, index) => {
+      const before = previousLeaders[index];
+      return next && before && next.key !== before.key && next.activity > before.activity;
+    });
+    previousLeaders = now.map(next => next && { key: next.key, activity: next.activity });
     // Follow a new prompt in the selected project; removing rows keeps the reading position.
     if (promoted && workspace.view === 'projects' && projectView.order === 'recent'
-      && untrack(() => first.machine.store === workspace.active && first.project.id === store.openProject?.id)) {
+      && untrack(() => promoted.entry.machine.store === workspace.active && promoted.entry.project.id === store.openProject?.id)) {
       savedScroll = 0;
-      void tick().then(() => { const leader = sections.working[0] ?? sections.open[0]; if (scrollRoot && leader && projectKey(leader) === next.key) scrollRoot.scrollTop = 0; });
+      void tick().then(() => { if (scrollRoot && leaders().some(leader => leader && projectKey(leader) === promoted.key)) scrollRoot.scrollTop = 0; });
     }
   });
   let shelved = $derived(all.filter(({ project }) => project.archived === true));

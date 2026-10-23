@@ -239,6 +239,19 @@ test('projects sink after losing recent threads and the sidebar follows a select
     await page.waitFor(`document.querySelector('${id('project')}')?.dataset.projectId === ${state}.openThread.projectId`);
     await page.waitFor(`document.querySelector('${id('sidebar')} .scroll').scrollTop === 0`);
     await capture(page, 'project-promotion-after.png');
+    // With a project at work on top, a prompt leads the open cards under it: the sidebar still goes to the top.
+    await page.evaluate(`(() => {
+      const s = ${state};
+      s.threads = s.threads.map(t => t.title === 'Conversation 5' ? {...t, status:'running'} : t.title === 'Conversation 6' ? {...t, lastUserMessageAt:Date.now() + 2000000} : t);
+    })()`);
+    await page.waitFor(`document.querySelector('${id('working-projects')} ${id('project')}') && document.querySelector('${id('project')}:not(${id('working-projects')} *)')?.dataset.projectId !== ${state}.openThread.projectId`);
+    await page.evaluate(`document.querySelector('${id('sidebar')} .scroll').scrollTop = 500`);
+    await page.waitFor(`document.querySelector('${id('sidebar')} .scroll').scrollTop >= 400`);
+    await page.evaluate(`(() => { const s = ${state}; s.threads = s.threads.map(t => t.id === s.openThread.id ? {...t, lastUserMessageAt:Date.now() + 3000000} : t); })()`);
+    await page.waitFor(`document.querySelector('${id('project')}:not(${id('working-projects')} *)')?.dataset.projectId === ${state}.openThread.projectId`);
+    await page.waitFor(`document.querySelector('${id('sidebar')} .scroll').scrollTop === 0`);
+    await page.evaluate(`(() => { const s = ${state}; s.threads = s.threads.map(t => t.title === 'Conversation 5' ? {...t, status:'idle'} : t); })()`);
+    await page.waitFor(`!document.querySelector('${id('working-projects')}')`);
     await page.evaluate(`${state}.archive(${state}.openThread.id)`);
     await page.waitFor(`${state}.draft`);
     expect(await page.evaluate(`document.querySelector('${id('project')}').dataset.projectId === ${state}.draft.projectId`)).toBe(false);

@@ -337,8 +337,9 @@
       padding: 0 7px;
       gap: 5px;
     }
-    /* The 44px target stays; the transparent border leaves the 22px pill drawn inside it. */
+    /* The 44px target stays; the transparent border leaves the 22px pill drawn inside it, its open ring included. */
     .counter.done { border-width: 11px 0; }
+    .counter.done.active { border-color: transparent; background-clip: padding-box; box-shadow: inset 0 0 0 1px var(--color-edge); }
   }
   /* A dragged thread can land on an idle project: same dashed edge and accent fill as a project section. */
   :global(html.thread-dragging) li:not(.candidate) {
