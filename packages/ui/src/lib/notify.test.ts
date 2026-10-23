@@ -128,12 +128,12 @@ describe('toastFor', () => {
 
 describe('limitToast', () => {
   test('names the account and the scoped window, says the share used and keeps the machine for the click', () => {
-    const alert = { accountId: 'a', providerId: 'claude', providerName: 'Claude', label: 'Perso', period: 'weekly' as const, threshold: 90,
+    const alert = { accountId: 'a', providerId: 'claude', providerName: 'Claude', label: 'Perso', period: 'weekly' as const, threshold: 10,
       window: { id: 'model:Opus', label: 'Weekly · Opus', usedPercent: 91.6, resetsAt: null }, at: 1 };
-    expect(limitToast(alert, limitsKey('m1'))).toEqual({ title: 'Claude · Perso · Opus', body: 'Weekly limit: 92% used', threadId: 'boite-limits:m1', limits: true });
+    expect(limitToast(alert, limitsKey('m1'))).toEqual({ title: 'Claude · Perso · Opus', body: 'Weekly limit: 8% left', threadId: 'boite-limits:m1', limits: true });
     // A gateway entry's label already names its provider.
     expect(limitToast({ ...alert, label: 'Claude Max · chris@', period: 'fiveHour', window: { ...alert.window, label: '5 hours' } }, limitsKey(null)))
-      .toEqual({ title: 'Claude Max · chris@', body: '5-hour limit: 92% used', threadId: 'boite-limits:', limits: true });
+      .toEqual({ title: 'Claude Max · chris@', body: '5-hour limit: 8% left', threadId: 'boite-limits:', limits: true });
     expect([limitsMachine('boite-limits:m1'), limitsMachine('boite-limits:'), limitsMachine('["m1","t1"]')]).toEqual(['m1', '', null]);
   });
 });

@@ -21,15 +21,15 @@
    */
   let { rows, loading = false, completed = [], store, onalert }: {
     rows: AccountQuota[]; loading?: boolean; completed?: string[]; store?: Store;
-    onalert?: (accountId: string, period: QuotaAlertPeriod, threshold: number | null) => Promise<void>;
+    onalert?: (accountId: string, period: QuotaAlertPeriod, thresholds: number[]) => Promise<void>;
   } = $props();
   /** The cards whose alerts are folded out. */
   let opened = $state<string[]>([]);
 
   /** What the bell says on hover: each alert set, or what it opens. */
   function bellTitle(row: AccountQuota): string {
-    const set = alertPeriods(row).flatMap((period) => row.alerts?.[period] === undefined ? []
-      : [fill(strings.quotas.alertSet, { period: strings.quotas.alertPeriods[period], percent: String(row.alerts[period]) })]);
+    const set = alertPeriods(row).flatMap((period) => !row.alerts?.[period]?.length ? []
+      : [fill(strings.quotas.alertSet, { period: strings.quotas.alertPeriods[period], percents: row.alerts[period].map((left) => fill(strings.quotas.alertAt, { percent: String(left) })).join(', ') })]);
     return set.length ? `${strings.quotas.alerts}: ${set.join(', ')}` : strings.quotas.alerts;
   }
 </script>

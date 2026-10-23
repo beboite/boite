@@ -1,5 +1,5 @@
 /** Accounts, their quotas and the fake sign-in a login runs. */
-import { QUOTA_ALERT_PERIODS, QUOTA_ALERT_THRESHOLDS, RpcErrorCode, subscriptionProxyOf, threadActive, type Account, type AccountQuota, type QuotaAlerts, type GatewayQuotaEntry, type QuotaWindow, type RpcEvents, type SubscriptionProxyQuotas } from '@boite/contracts';
+import { QUOTA_ALERT_MAX, QUOTA_ALERT_PERIODS, quotaAlertThresholds, RpcErrorCode, subscriptionProxyOf, threadActive, type Account, type AccountQuota, type QuotaAlerts, type GatewayQuotaEntry, type QuotaWindow, type RpcEvents, type SubscriptionProxyQuotas } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { sessionStatus } from './checks';
 import { DATA_DIR } from './shared';
@@ -165,13 +165,14 @@ export function accountMethods(ctx: FakeContext) {
     'quotas.alert': async (params) => {
       if (!QUOTA_ALERT_PERIODS.includes(params.period)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams,
         message: `quotas.alert period must be one of ${QUOTA_ALERT_PERIODS.join(', ')}`, data: { field: 'period', expected: QUOTA_ALERT_PERIODS } });
-      if (params.threshold !== null && !QUOTA_ALERT_THRESHOLDS.includes(params.threshold)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams,
-        message: `quotas.alert threshold must be null or one of ${QUOTA_ALERT_THRESHOLDS.join(', ')}`, data: { field: 'threshold', expected: [null, ...QUOTA_ALERT_THRESHOLDS] } });
-      if (!quotas(ctx).some(row => row.accountId === params.accountId)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams,
+      const thresholds = quotaAlertThresholds(params.thresholds);
+      if (thresholds === null) throw new RpcFailure({ code: RpcErrorCode.InvalidParams,
+        message: `quotas.alert thresholds must be a list of at most ${QUOTA_ALERT_MAX} whole percentages left, from 0 to 99`, data: { field: 'thresholds', expected: `at most ${QUOTA_ALERT_MAX} integers from 0 to 99` } });
+      if (!quotas(ctx).some(row => row.accountId === params.accountId) && !(thresholds.length === 0 && ctx.quotaAlerts[params.accountId])) throw new RpcFailure({ code: RpcErrorCode.InvalidParams,
         message: `quotas.alert accountId ${params.accountId} is not a row quotas.list returns`, data: { field: 'accountId' } });
       const alerts: QuotaAlerts = { ...ctx.quotaAlerts[params.accountId] };
-      if (params.threshold === null) delete alerts[params.period];
-      else alerts[params.period] = params.threshold;
+      if (thresholds.length) alerts[params.period] = thresholds;
+      else delete alerts[params.period];
       if (Object.keys(alerts).length) ctx.quotaAlerts[params.accountId] = alerts;
       else delete ctx.quotaAlerts[params.accountId];
       const rows = quotas(ctx); ctx.emit('quotas.updated', rows); return rows;

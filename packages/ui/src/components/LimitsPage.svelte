@@ -93,9 +93,9 @@
   }
 
   /** A device may set alerts too: they decide when a window it already reads notifies. */
-  async function alert(accountId: string, period: QuotaAlertPeriod, threshold: number | null) {
+  async function alert(accountId: string, period: QuotaAlertPeriod, thresholds: number[]) {
     if (!store.client) return;
-    try { await reader.alert(store.client, accountId, period, threshold); }
+    try { await reader.alert(store.client, accountId, period, thresholds); }
     catch (error) { store.error = fill(strings.quotas.alertFailed, { error: errorText(error) }); }
   }
 

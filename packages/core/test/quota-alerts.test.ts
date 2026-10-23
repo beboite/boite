@@ -28,105 +28,116 @@ test('every source names its 5-hour and weekly windows the way alerts read them'
   expect([period('w', '15 hours'), period('credits', 'Credits')]).toEqual([null, null]);
 });
 
-test('a window alerts once at its threshold, again after it fell back or reset, and a restart remembers', async () => {
+test('each share left alerts once, again after the window climbed back or reset, and a restart remembers', async () => {
   harness = await startTestCore();
   const account = harness.core.accounts.add({ providerId: 'codex', label: 'Work' });
   const reset = Date.now() + 2 * HOUR;
   let windows: QuotaWindow[] = [
-    { id: 'primary', label: '5 hours', usedPercent: 50, resetsAt: reset },
+    { id: 'primary', label: '5 hours', usedPercent: 40, resetsAt: reset },
     { id: 'secondary', label: 'Weekly', usedPercent: 100, resetsAt: Date.now() + 90 * HOUR },
   ];
+  const used = (usedPercent: number) => { windows = [{ ...windows[0]!, usedPercent }, windows[1]!]; };
   const reader = async () => windows;
   const store = new QuotaStore(harness.core, reader);
   const alerts = heard(harness.core);
   const read = async () => { store.invalidate(); return (await store.list()).find((row) => row.accountId === account.id)!; };
   await read();
 
-  const rows = store.alert(account.id, 'fiveHour', 90);
-  expect(rows.find((row) => row.accountId === account.id)?.alerts).toEqual({ fiveHour: 90 });
-  expect((await read()).alerts).toEqual({ fiveHour: 90 });
+  // Kept distinct and highest first, whatever order they came in.
+  const rows = store.alert(account.id, 'fiveHour', [10, 50, 25, 50]);
+  expect(rows.find((row) => row.accountId === account.id)?.alerts).toEqual({ fiveHour: [50, 25, 10] });
+  expect((await read()).alerts).toEqual({ fiveHour: [50, 25, 10] });
   expect(alerts).toEqual([]);
 
-  windows = [{ ...windows[0]!, usedPercent: 92 }, windows[1]!];
+  used(55);
   await read();
-  // The weekly window is spent, but only the 5-hour one has an alert.
+  // The weekly window is spent, but only the 5-hour one has alerts.
   expect(alerts.map((alert) => [alert.accountId, alert.period, alert.threshold, alert.window.id, alert.label, alert.providerName]))
-    .toEqual([[account.id, 'fiveHour', 90, 'primary', 'Work', 'Codex']]);
-  windows = [{ ...windows[0]!, usedPercent: 97 }, windows[1]!];
+    .toEqual([[account.id, 'fiveHour', 50, 'primary', 'Work', 'Codex']]);
+  used(60);
   await read();
   expect(alerts).toHaveLength(1);
+  used(80);
+  await read();
+  expect(alerts.map((alert) => alert.threshold)).toEqual([50, 25]);
 
-  // The same journal after a restart knows that window already alerted.
+  // The same journal after a restart knows those thresholds already alerted.
   const restarted = new QuotaStore(harness.core, reader);
   restarted.invalidate();
   await restarted.list();
-  expect(alerts).toHaveLength(1);
-
-  // Usage that falls well under the threshold arms it again, as does a reset time that passed.
-  windows = [{ ...windows[0]!, usedPercent: 75 }, windows[1]!];
-  await read();
-  windows = [{ ...windows[0]!, usedPercent: 91 }, windows[1]!];
-  await read();
   expect(alerts).toHaveLength(2);
+
+  // Climbing ten points back above a threshold arms it again, as does a reset time that passed.
+  used(60);
+  await read();
+  used(76);
+  await read();
+  expect(alerts.map((alert) => alert.threshold)).toEqual([50, 25, 25]);
   store.alerts.check([{ ...(await read()), windows: [{ ...windows[0]!, resetsAt: reset + 5 * HOUR }] }], reset + HOUR);
-  expect(alerts).toHaveLength(3);
+  expect(alerts.map((alert) => alert.threshold)).toEqual([50, 25, 25, 25]);
   // A reading whose window already reset describes a period that is over: it says nothing.
-  store.alerts.check([{ ...(await read()), windows: [{ ...windows[0]!, id: 'other', resetsAt: Date.now() - 1 }] }]);
-  expect(alerts).toHaveLength(3);
+  store.alerts.check([{ ...(await read()), windows: [{ ...windows[0]!, id: 'other', usedPercent: 99, resetsAt: Date.now() - 1 }] }]);
+  expect(alerts).toHaveLength(4);
 });
 
-test('a window already past the threshold chosen stays quiet, and a failed read never alerts', async () => {
+test('a reading past several shares at once says the lowest once, a share already passed when chosen stays quiet, and a failed read never alerts', async () => {
   harness = await startTestCore();
   const account = harness.core.accounts.add({ providerId: 'claude', label: 'Perso' });
   let fail = false;
-  let used = 95;
+  let used = 30;
   const store = new QuotaStore(harness.core, async () => {
     if (fail) throw new Error('fixture offline');
     return [{ id: 'seven_day', label: 'Weekly', usedPercent: used, resetsAt: Date.now() + 40 * HOUR }];
   });
   const alerts = heard(harness.core);
-  await store.list();
-  store.alert(account.id, 'weekly', 90);
-  store.invalidate();
-  await store.list();
-  expect(alerts).toEqual([]);
-  // Raising it past the reading arms it: 100 % is news.
-  store.alert(account.id, 'weekly', 100);
+  const read = async () => { store.invalidate(); return (await store.list()).find((row) => row.accountId === account.id)!; };
+  await read();
+  store.alert(account.id, 'weekly', [50, 25, 10]);
+  used = 95;
+  await read();
+  expect(alerts.map((alert) => [alert.period, alert.threshold])).toEqual([['weekly', 10]]);
+  await read();
+  expect(alerts).toHaveLength(1);
+
+  // A custom share the window already passed is not news; one it has not reached yet is.
+  store.alert(account.id, 'weekly', [50, 25, 10, 7, 0]);
+  await read();
+  expect(alerts).toHaveLength(1);
   used = 100;
   fail = true;
-  store.invalidate();
-  const stale = (await store.list()).find((row) => row.accountId === account.id)!;
+  const stale = await read();
   expect([stale.status, stale.windows[0]?.usedPercent]).toEqual(['unavailable', 95]);
-  expect(alerts).toEqual([]);
+  expect(alerts).toHaveLength(1);
   fail = false;
-  store.invalidate();
-  await store.list();
-  expect(alerts.map((alert) => [alert.period, alert.threshold, alert.window.usedPercent])).toEqual([['weekly', 100, 100]]);
-  // Off clears the row's alerts, and a removed account takes them with it.
-  expect(store.alert(account.id, 'weekly', null).find((row) => row.accountId === account.id)?.alerts).toBeUndefined();
-  store.alert(account.id, 'weekly', 80);
+  await read();
+  expect(alerts.map((alert) => alert.threshold)).toEqual([10, 0]);
+  // An empty list turns the period off, and a removed account takes its alerts with it.
+  expect(store.alert(account.id, 'weekly', []).find((row) => row.accountId === account.id)?.alerts).toBeUndefined();
+  store.alert(account.id, 'weekly', [20]);
   await harness.core.accounts.remove(account.id);
   expect(store.alerts.all()).toEqual({});
 });
 
-test('quotas.alert refuses an unknown period, threshold or row, and a phone may set one', async () => {
+test('quotas.alert refuses an unknown period, a bad list or row, and a phone may set one', async () => {
   harness = await startTestCore();
   const account = harness.core.accounts.add({ providerId: 'claude', label: 'Perso' });
   const owner = await harness.connect();
-  expect(await thrown(owner.call('quotas.alert', { accountId: account.id, period: 'daily' as 'weekly', threshold: 90 }))).toThrow('period must be one of fiveHour, weekly');
-  expect(await thrown(owner.call('quotas.alert', { accountId: account.id, period: 'weekly', threshold: 85 }))).toThrow('threshold must be null or one of 80, 90, 100');
-  expect(await thrown(owner.call('quotas.alert', { accountId: 'acc_missing', period: 'weekly', threshold: 90 }))).toThrow();
-  expect(await thrown(owner.call('quotas.alert', { accountId: 'proxy:claude:gone', period: 'weekly', threshold: 90 }))).toThrow('not an entry the gateway reports now');
+  expect(await thrown(owner.call('quotas.alert', { accountId: account.id, period: 'daily' as 'weekly', thresholds: [10] }))).toThrow('period must be one of fiveHour, weekly');
+  for (const thresholds of [[100], [-1], [12.5], [1, 2, 3, 4, 5, 6, 7], 'ten' as unknown as number[]]) {
+    expect(await thrown(owner.call('quotas.alert', { accountId: account.id, period: 'weekly', thresholds }))).toThrow('thresholds must be a list of at most 6 whole percentages left, from 0 to 99');
+  }
+  expect(await thrown(owner.call('quotas.alert', { accountId: 'acc_missing', period: 'weekly', thresholds: [10] }))).toThrow();
+  expect(await thrown(owner.call('quotas.alert', { accountId: 'proxy:claude:gone', period: 'weekly', thresholds: [10] }))).toThrow('not an entry the gateway reports now');
   // An alert whose entry left the gateway's answer can still be turned off, which stops the poll for it.
-  harness.core.quotas.alerts.set('proxy:claude:gone', 'weekly', 90, undefined);
-  await owner.call('quotas.alert', { accountId: 'proxy:claude:gone', period: 'weekly', threshold: null });
+  harness.core.quotas.alerts.set('proxy:claude:gone', 'weekly', [10], undefined);
+  await owner.call('quotas.alert', { accountId: 'proxy:claude:gone', period: 'weekly', thresholds: [] });
   expect(harness.core.quotas.alerts.watched()).toEqual([]);
   const { connect } = await import('../src/client.ts');
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
   try {
-    const rows = await phone.call('quotas.alert', { accountId: account.id, period: 'fiveHour', threshold: 80 });
-    expect(rows.find((row) => row.accountId === account.id)?.alerts).toEqual({ fiveHour: 80 });
+    const rows = await phone.call('quotas.alert', { accountId: account.id, period: 'fiveHour', thresholds: [20] });
+    expect(rows.find((row) => row.accountId === account.id)?.alerts).toEqual({ fiveHour: [20] });
   } finally { phone.close(); }
 });
 
@@ -150,11 +161,11 @@ test('a Douane entry alerts from the gateway reading, and the poll reads only wh
   const alerts = heard(harness.core);
   await owner.call('quotas.list', {});
   const id = 'proxy:claude:max';
-  const rows: AccountQuota[] = await owner.call('quotas.alert', { accountId: id, period: 'fiveHour', threshold: 80 });
-  expect(rows.find((row) => row.accountId === id)?.alerts).toEqual({ fiveHour: 80 });
+  const rows: AccountQuota[] = await owner.call('quotas.alert', { accountId: id, period: 'fiveHour', thresholds: [20] });
+  expect(rows.find((row) => row.accountId === id)?.alerts).toEqual({ fiveHour: [20] });
   // The gateway lists only its entries: a login of this machine has no row to alert on.
   const own = harness.core.accounts.add({ providerId: 'claude', label: 'Hidden' });
-  expect(await thrown(owner.call('quotas.alert', { accountId: own.id, period: 'weekly', threshold: 90 }))).toThrow('has no row in quotas.list now');
+  expect(await thrown(owner.call('quotas.alert', { accountId: own.id, period: 'weekly', thresholds: [10] }))).toThrow('has no row in quotas.list now');
   used = 85;
   const before = asked;
   // What the five-minute timer runs, once the gateway's minute of cache is over: asked once, with no client listing.
@@ -164,7 +175,7 @@ test('a Douane entry alerts from the gateway reading, and the poll reads only wh
     await waitFor(() => alerts.length === 1);
   } finally { setSystemTime(); }
   expect(asked).toBe(before + 1);
-  expect(alerts[0]).toMatchObject({ accountId: id, providerName: 'Claude', label: 'Claude Max · chris@…', period: 'fiveHour', threshold: 80 });
+  expect(alerts[0]).toMatchObject({ accountId: id, providerName: 'Claude', label: 'Claude Max · chris@…', period: 'fiveHour', threshold: 20 });
 });
 
 test('a phone gets the alert as a limits push its words translate, and not when it turned limits off', async () => {
@@ -176,11 +187,11 @@ test('a phone gets the alert as a limits push its words translate, and not when 
     p256dh: ecdh.generateKeys().toString('base64url'), auth: randomBytes(16).toString('base64url') } });
   const deliveries: PushPayload[] = [];
   harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
-  const alert: QuotaAlert = { accountId: 'acc_1', providerId: 'claude', providerName: 'Claude', label: 'Perso', period: 'weekly', threshold: 90,
+  const alert: QuotaAlert = { accountId: 'acc_1', providerId: 'claude', providerName: 'Claude', label: 'Perso', period: 'weekly', threshold: 10,
     window: { id: 'model:Opus', label: 'Weekly · Opus', usedPercent: 91.6, resetsAt: null }, at: Date.now() };
   harness.core.bus.emit('quotas.alerted', alert);
   await waitFor(() => deliveries.length === 1);
-  expect(deliveries[0]).toMatchObject({ title: 'Claude · Perso · Opus', body: 'Weekly limit: 92% used', label: 'limitWeekly', values: { percent: '92' },
+  expect(deliveries[0]).toMatchObject({ title: 'Claude · Perso · Opus', body: 'Weekly limit: 8% left', label: 'limitWeekly', values: { percent: '8' },
     kind: 'limits', threadId: null, tag: 'limit-acc_1-model:Opus' });
   harness.core.push.setKinds(paired.id, { kinds: ['approvals', 'questions', 'finished', 'errors'] });
   harness.core.bus.emit('quotas.alerted', { ...alert, window: { ...alert.window, id: 'seven_day', label: 'Weekly' } });
@@ -199,7 +210,7 @@ test('a full read begun before an observation alerted neither re-arms nor repeat
   const first = store.list();
   answer!([window(70)]);
   await first;
-  store.alert(account.id, 'fiveHour', 90);
+  store.alert(account.id, 'fiveHour', [10]);
   // After a restart or an invalidation there is no full read to merge into: the observation alerts all the same.
   store.invalidate();
   const slow = store.list();
@@ -221,7 +232,7 @@ test('another login on the account alerts on its own, and a read in flight when 
   const store = new QuotaStore(harness.core, () => new Promise<QuotaWindow[]>((resolve) => { answer = resolve; }));
   const alerts = heard(harness.core);
   const weekly = [{ id: 'seven_day', label: 'Weekly', usedPercent: 95, resetsAt: Date.now() + 40 * HOUR }];
-  store.alert(account.id, 'weekly', 90);
+  store.alert(account.id, 'weekly', [10]);
   const first = store.list();
   answer!(weekly);
   await first;

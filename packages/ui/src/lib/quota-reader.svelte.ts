@@ -188,11 +188,11 @@ export class QuotaReader {
     await this.read(client).catch(() => {});
   }
 
-  /** One period's alert threshold; the core answers every row, as for a switch. */
-  async alert(client: Client, accountId: string, period: QuotaAlertPeriod, threshold: number | null): Promise<void> {
+  /** One period's alert thresholds, shares left; the core answers every row, as for a switch. */
+  async alert(client: Client, accountId: string, period: QuotaAlertPeriod, thresholds: number[]): Promise<void> {
     ++this.#latest;
     this.loading = false;
-    this.accept(await client.call('quotas.alert', { accountId, period, threshold }));
+    this.accept(await client.call('quotas.alert', { accountId, period, thresholds }));
   }
 }
 

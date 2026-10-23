@@ -1,5 +1,5 @@
 import { createHash, ECDH, randomUUID } from 'node:crypto';
-import { lastAgentText, NOTIFICATION_KINDS, notifiesOnFinish, quotaAlertTitle, requestExcerpt, requestKind } from '@boite/contracts';
+import { lastAgentText, NOTIFICATION_KINDS, notifiesOnFinish, quotaAlertLeft, quotaAlertTitle, requestExcerpt, requestKind } from '@boite/contracts';
 import type { CoordinationPeer, NotificationKind, NotificationLabel, PushPayload, QuotaAlert, RpcEvents, RpcParams } from '@boite/contracts';
 import type { PushSubscription } from 'web-push';
 import type { Core } from './core.ts';
@@ -440,9 +440,9 @@ export class PushStore {
  * used in the body, which the page's words replace by `label` in its language.
  */
 export function limitNews(alert: QuotaAlert): News {
-  const percent = String(Math.round(alert.window.usedPercent));
+  const percent = String(quotaAlertLeft(alert));
   const weekly = alert.period === 'weekly';
-  return { title: quotaAlertTitle(alert), body: `${weekly ? 'Weekly' : '5-hour'} limit: ${percent}% used`,
+  return { title: quotaAlertTitle(alert), body: `${weekly ? 'Weekly' : '5-hour'} limit: ${percent}% left`,
     label: weekly ? 'limitWeekly' : 'limitFiveHour', values: { percent }, kind: 'limits' };
 }
 

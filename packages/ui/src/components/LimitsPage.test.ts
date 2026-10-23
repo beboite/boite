@@ -284,7 +284,7 @@ test('the automatic resume switch saves the setting and a refusal puts it back',
   expect(toggle.checked).toBe(false);
 });
 
-test('the bell of a card, a gateway entry included, sets an alert per period the account reports', async () => {
+test('the bell of a card, a gateway entry included, sets several shares left per period, presets and custom ones', async () => {
   const calls: unknown[] = [];
   const rows: AccountQuota[] = [{
     ...quota('Claude'), accountId: 'proxy:claude:max', label: 'Claude Max', providerName: 'Claude',
@@ -294,8 +294,8 @@ test('the bell of a card, a gateway entry included, sets an alert per period the
   const call = vi.fn(async (method: string, params: unknown) => {
     if (method === 'quotas.alert') {
       calls.push(params);
-      const { period, threshold } = params as { period: 'fiveHour'; threshold: number | null };
-      rows[0] = { ...rows[0]!, alerts: threshold === null ? undefined : { [period]: threshold } };
+      const { period, thresholds } = params as { period: 'fiveHour'; thresholds: number[] };
+      rows[0] = { ...rows[0]!, alerts: thresholds.length ? { [period]: [...thresholds].sort((a, b) => b - a) } : undefined };
       return structuredClone(rows);
     }
     if (method === 'quotas.list') return structuredClone(rows);
@@ -306,18 +306,41 @@ test('the bell of a card, a gateway entry included, sets an alert per period the
     settings: { subscriptionProxy: { enabled: true, kind: 'douane', baseUrl: 'http://douane.test/v1', dashboardUrl: null } } } as unknown as Store;
   mounted = mount(LimitsPage, { target: document.body, props: { store } });
   await settle();
-  const bell = document.querySelector<HTMLButtonElement>('[data-testid="quota-alert-bell"]')!;
-  expect(bell.classList.contains('set')).toBe(false);
-  bell.click();
+  const bell = () => document.querySelector<HTMLButtonElement>('[data-testid="quota-alert-bell"]')!;
+  const chip = (id: string) => document.querySelector<HTMLButtonElement>(`[data-testid="quota-alert-${id}"]`)!;
+  expect(bell().classList.contains('set')).toBe(false);
+  bell().click();
   await settle();
-  // Credits have no period: the 5-hour window is the only choice.
+  // Credits have no period: the 5-hour window is the only line.
   expect([...document.querySelectorAll('[data-testid="quota-alerts"] .period')].map((node) => node.textContent)).toEqual([strings.quotas.alertPeriods.fiveHour]);
-  document.querySelector<HTMLButtonElement>('[data-testid="quota-alert-fiveHour-90"]')!.click();
+  chip('fiveHour-25').click();
   await settle();
-  expect(calls).toEqual([{ accountId: 'proxy:claude:max', period: 'fiveHour', threshold: 90 }]);
-  expect(document.querySelector('[data-testid="quota-alert-fiveHour-90"]')!.getAttribute('aria-checked')).toBe('true');
-  expect(document.querySelector('[data-testid="quota-alert-bell"]')!.classList.contains('set')).toBe(true);
-  document.querySelector<HTMLButtonElement>('[data-testid="quota-alert-fiveHour-off"]')!.click();
+  chip('fiveHour-10').click();
   await settle();
-  expect(calls.at(-1)).toEqual({ accountId: 'proxy:claude:max', period: 'fiveHour', threshold: null });
+  expect(calls).toEqual([{ accountId: 'proxy:claude:max', period: 'fiveHour', thresholds: [25] }, { accountId: 'proxy:claude:max', period: 'fiveHour', thresholds: [25, 10] }]);
+  expect(['fiveHour-50', 'fiveHour-25', 'fiveHour-10'].map((id) => chip(id).getAttribute('aria-pressed'))).toEqual(['false', 'true', 'true']);
+  expect(bell().classList.contains('set')).toBe(true);
+
+  // Custom adds its own chip; out of range saves nothing; a click on a custom chip removes it.
+  chip('fiveHour-custom').click();
+  await settle();
+  const input = chip('fiveHour-input') as unknown as HTMLInputElement;
+  input.value = '150';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await settle();
+  expect(calls).toHaveLength(2);
+  chip('fiveHour-custom').click();
+  await settle();
+  const again = chip('fiveHour-input') as unknown as HTMLInputElement;
+  again.value = '5';
+  again.dispatchEvent(new Event('input', { bubbles: true }));
+  again.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await settle();
+  expect(calls.at(-1)).toEqual({ accountId: 'proxy:claude:max', period: 'fiveHour', thresholds: [25, 10, 5] });
+  expect(chip('fiveHour-5').getAttribute('aria-pressed')).toBe('true');
+  chip('fiveHour-5').click();
+  await settle();
+  expect(calls.at(-1)).toEqual({ accountId: 'proxy:claude:max', period: 'fiveHour', thresholds: [25, 10] });
+  expect(chip('fiveHour-5')).toBeNull();
 });

@@ -17,7 +17,7 @@
  * the core is the one that sends those.
  */
 
-import { NOTIFICATION_KINDS, notifiesOnFinish, quotaAlertTitle, threadBusy, type NotificationKind, type NotificationLabel, type QuotaAlert, type ThreadSummary, type Turn } from '@boite/contracts';
+import { NOTIFICATION_KINDS, notifiesOnFinish, quotaAlertLeft, quotaAlertTitle, threadBusy, type NotificationKind, type NotificationLabel, type QuotaAlert, type ThreadSummary, type Turn } from '@boite/contracts';
 import type { Client } from './client';
 import { PUSH_ENABLED_KEY } from './pwa';
 import { fill, strings } from './strings';
@@ -158,7 +158,7 @@ export function limitsMachine(key: string): string | null {
  * the model or group a scoped window names, and the period and share in the body.
  */
 export function limitToast(alert: QuotaAlert, key: string): Toast {
-  const percent = String(Math.round(alert.window.usedPercent));
+  const percent = String(quotaAlertLeft(alert));
   const body = fill(alert.period === 'weekly' ? strings.notify.limitWeekly : strings.notify.limitFiveHour, { percent });
   return { title: quotaAlertTitle(alert), body, threadId: key, limits: true };
 }

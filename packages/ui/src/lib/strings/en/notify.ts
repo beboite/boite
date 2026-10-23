@@ -7,7 +7,7 @@ export const strings = {
     needsYou: 'Needs your answer',
     connected: 'Notifications are connected',
     /** A limit alert; `{percent}` is the share of the window used. */
-    limitFiveHour: '5-hour limit: {percent}% used',
-    limitWeekly: 'Weekly limit: {percent}% used'
+    limitFiveHour: '5-hour limit: {percent}% left',
+    limitWeekly: 'Weekly limit: {percent}% left'
   }
 } as const;

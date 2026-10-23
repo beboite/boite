@@ -72,7 +72,7 @@ export function registerModules(core: Core): void {
   core.router.register('quotas.list', (params, ctx) => core.quotas.list(params.refresh, params.requestId,
     (quota) => ctx.connection.sendEvent('quotas.progress', { requestId: params.requestId!, quota })));
   core.router.register('quotas.configure', (params) => core.quotas.configure(params.accountId, params.enabled));
-  core.router.register('quotas.alert', (params) => core.quotas.alert(params.accountId, params.period, params.threshold));
+  core.router.register('quotas.alert', (params) => core.quotas.alert(params.accountId, params.period, params.thresholds));
   core.router.register('quotas.reset', (params) => core.quotas.resets.reset(params.accountId, params.confirmed));
   core.router.register('plugins.list', () => core.plugins.list());
   core.router.register('plugins.inspect', (params) => core.plugins.inspect(params));

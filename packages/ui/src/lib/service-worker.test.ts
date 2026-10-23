@@ -73,14 +73,14 @@ test('a push another machine sent through this one opens its thread on that mach
 
 test('a limit alert reads in the page\'s words and its tap opens Limits on the machine that sent it', async () => {
   const sw = worker();
-  sw.cache.match.mockResolvedValue(Response.json({ limitWeekly: 'Limite hebdo : {percent} % utilisés', done: 'Terminé' }));
+  sw.cache.match.mockResolvedValue(Response.json({ limitWeekly: 'Limite hebdo : {percent} % restants', done: 'Terminé' }));
   const core = 'c'.repeat(64);
-  await sw.emit('push', { data: { json: () => ({ title: 'Claude · Perso', body: 'Weekly limit: 92% used', label: 'limitWeekly', values: { percent: '92' },
+  await sw.emit('push', { data: { json: () => ({ title: 'Claude · Perso', body: 'Weekly limit: 8% left', label: 'limitWeekly', values: { percent: '8' },
     threadId: null, tag: 'limit-a-seven_day', kind: 'limits', core }) } });
-  expect(sw.notification).toHaveBeenCalledWith('Claude · Perso', expect.objectContaining({ body: 'Limite hebdo : 92 % utilisés', tag: 'limit-a-seven_day', data: { limits: true, core } }));
+  expect(sw.notification).toHaveBeenCalledWith('Claude · Perso', expect.objectContaining({ body: 'Limite hebdo : 8 % restants', tag: 'limit-a-seven_day', data: { limits: true, core } }));
   // A word with a place the push leaves empty falls back on the core's English.
-  await sw.emit('push', { data: { json: () => ({ title: 'x', body: 'Weekly limit: 92% used', label: 'limitWeekly', threadId: null, tag: 't', kind: 'limits' }) } });
-  expect(sw.notification).toHaveBeenLastCalledWith('x', expect.objectContaining({ body: 'Weekly limit: 92% used', data: { limits: true } }));
+  await sw.emit('push', { data: { json: () => ({ title: 'x', body: 'Weekly limit: 8% left', label: 'limitWeekly', threadId: null, tag: 't', kind: 'limits' }) } });
+  expect(sw.notification).toHaveBeenLastCalledWith('x', expect.objectContaining({ body: 'Weekly limit: 8% left', data: { limits: true } }));
   const close = vi.fn();
   await sw.emit('notificationclick', { notification: { close, data: { limits: true, core } } });
   expect(sw.postMessage).toHaveBeenCalledWith({ type: 'boite.open-limits', core });

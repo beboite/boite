@@ -24,10 +24,26 @@ export interface QuotaWindow {
  */
 export type QuotaAlertPeriod = 'fiveHour' | 'weekly';
 export const QUOTA_ALERT_PERIODS: readonly QuotaAlertPeriod[] = ['fiveHour', 'weekly'];
-/** The used percentages an alert can go off at. */
-export const QUOTA_ALERT_THRESHOLDS: readonly number[] = [80, 90, 100];
-/** Per period, the used percentage that notifies; a period left out sends nothing. */
-export type QuotaAlerts = Partial<Record<QuotaAlertPeriod, number>>;
+/** The shares left Limits offers in one click; any other whole percentage is a custom one. */
+export const QUOTA_ALERT_PRESETS: readonly number[] = [50, 25, 10];
+/** How many thresholds one period may hold. */
+export const QUOTA_ALERT_MAX = 6;
+/**
+ * Per period, the shares left (whole percentages, 0 to 99) that each notify
+ * once, highest first; a period left out sends nothing.
+ */
+export type QuotaAlerts = Partial<Record<QuotaAlertPeriod, number[]>>;
+
+/**
+ * The thresholds of one period as the core keeps them: distinct, highest
+ * first. Null when the list is not one: more than `QUOTA_ALERT_MAX` values, or
+ * a value that is not a whole percentage from 0 to 99.
+ */
+export function quotaAlertThresholds(value: unknown): number[] | null {
+  if (!Array.isArray(value) || value.length > QUOTA_ALERT_MAX) return null;
+  if (!value.every((left) => Number.isInteger(left) && left >= 0 && left <= 99)) return null;
+  return [...new Set(value as number[])].sort((a, b) => b - a);
+}
 
 /**
  * Which period a window covers, from the ids and labels every source sends:
@@ -43,7 +59,7 @@ export function quotaAlertPeriod(window: Pick<QuotaWindow, 'id' | 'label'>): Quo
   return null;
 }
 
-/** What `quotas.alerted` says: one window of one account crossed the threshold set for its period. */
+/** What `quotas.alerted` says: one window of one account fell to a share left set for its period. */
 export interface QuotaAlert {
   accountId: AccountId;
   providerId: ProviderId;
@@ -51,6 +67,7 @@ export interface QuotaAlert {
   /** The account's name as Limits shows it. */
   label: string;
   period: QuotaAlertPeriod;
+  /** The share left, in percent, that was reached: the lowest one when a reading passed several. */
   threshold: number;
   window: QuotaWindow;
   at: Timestamp;
@@ -64,6 +81,11 @@ export function quotaAlertTitle(alert: Pick<QuotaAlert, 'label' | 'providerName'
   const name = alert.label.includes(alert.providerName) ? alert.label : `${alert.providerName} · ${alert.label}`;
   const scope = alert.window.label.split(' · ').filter((part) => !/week|hour|seven|\b\d+\s*-?[hd]\b/i.test(part)).join(' · ');
   return scope ? `${name} · ${scope}` : name;
+}
+
+/** What the alerted window has left, in whole percent, never above what was used allows: 99.6 % used is 0 % left. */
+export function quotaAlertLeft(alert: Pick<QuotaAlert, 'window'>): number {
+  return Math.max(0, Math.floor(100 - alert.window.usedPercent));
 }
 
 /** No redeemable identifiers reach the client. The core selects the next credit. */
@@ -197,11 +219,12 @@ export interface AccountsRpcMethods {
   'quotas.list': { params: { refresh?: boolean; requestId?: string }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
   /**
-   * The used percentage, one of `QUOTA_ALERT_THRESHOLDS`, at which a window of
-   * this period notifies; null turns that alert off. Takes an account or a
-   * gateway entry (`proxy:<provider>:<entry>`) the list holds now.
+   * Every share left, in whole percent, at which a window of this period
+   * notifies (`quotaAlertThresholds`); an empty list turns the period off.
+   * Takes an account or a gateway entry (`proxy:<provider>:<entry>`) the list
+   * holds now, or one that still has alerts, to turn them off.
    */
-  'quotas.alert': { params: { accountId: AccountId; period: QuotaAlertPeriod; threshold: number | null }; result: AccountQuota[] };
+  'quotas.alert': { params: { accountId: AccountId; period: QuotaAlertPeriod; thresholds: number[] }; result: AccountQuota[] };
   /** Owner-only: consumes a banked reset after an explicit client confirmation. */
   'quotas.reset': { params: { accountId: AccountId; confirmed: true }; result: QuotaResetResult };
 
