@@ -15,7 +15,13 @@ then lets the next core continue that work. The journal owns the record;
    (a nine-minute script, a polling loop) and cut it anyway: 30.6 and 30.2
    seconds between the `core.handoff.started` and `core.shutdown.started`
    events of `%LOCALAPPDATA%\boite2\logs\core.*.ndjson`, each line's `at`
-   subtracted.
+   subtracted. On Windows:
+
+   ```powershell
+   Get-Content "$env:LOCALAPPDATA\boite2\logs\core.*.ndjson" | ConvertFrom-Json |
+     Where-Object event -in 'core.handoff.started', 'core.shutdown.started' |
+     Sort-Object at | Select-Object at, event
+   ```
    Normal stop enforcement ends processes after 10 seconds and force-settles
    a remaining turn two seconds later.
 3. Exit after draining. Eligible queued turns remain queued in the journal.
