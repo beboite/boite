@@ -4,15 +4,71 @@ import type { Settings } from '@boite/contracts';
 import BrowserProfilesCard from './BrowserProfilesCard.svelte';
 import { browserProfiles } from '../lib/browser-profiles.svelte';
 import { store } from '../lib/store.svelte';
+import { browserBridge } from '../lib/browser-bridge';
+import { confirm } from '../lib/confirm.svelte';
+
+const originalDelete = browserBridge.deleteProfile;
 
 let app: ReturnType<typeof mount> | undefined;
 
 afterEach(async () => {
   if (app) await unmount(app);
   app = undefined;
+  confirm.answer(false);
+  browserBridge.deleteProfile = originalDelete;
   browserProfiles.source = null;
   store.settings = null;
   document.body.innerHTML = '';
+});
+
+function showDeletableProfile() {
+  store.settings = { browserProfiles: [{ id: 'p-one', name: 'One' }] } as Settings;
+  const save = vi.fn(async (patch: Partial<Settings>) => {
+    store.settings = { ...store.settings!, ...patch };
+    return true;
+  });
+  browserProfiles.source = { get settings() { return store.settings; }, saveSettings: save };
+  app = mount(BrowserProfilesCard, { target: document.body });
+  flushSync();
+  return save;
+}
+
+function deleteProfile() {
+  query<HTMLButtonElement>('[data-testid=browser-profile-delete]').click();
+  flushSync();
+  if (confirm.current) confirm.answer(true);
+}
+
+test('a client without profile erasure retains the profile and explains how to delete it', async () => {
+  browserBridge.deleteProfile = undefined;
+  const save = showDeletableProfile();
+  deleteProfile();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(query('[data-testid=browser-profile-error]').textContent).toContain('desktop app');
+  });
+  expect(save).not.toHaveBeenCalled();
+  expect(store.settings?.browserProfiles).toEqual([{ id: 'p-one', name: 'One' }]);
+});
+
+test('a failed profile erase retains the entry and a retry removes it only after erasure', async () => {
+  browserBridge.deleteProfile = async () => { throw new Error('data locked'); };
+  const save = showDeletableProfile();
+  deleteProfile();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(query('[data-testid=browser-profile-error]').textContent).toContain('data locked');
+  });
+  expect(save).not.toHaveBeenCalled();
+  expect(store.settings?.browserProfiles).toEqual([{ id: 'p-one', name: 'One' }]);
+  let erased!: () => void;
+  browserBridge.deleteProfile = () => new Promise<void>(resolve => { erased = resolve; });
+  deleteProfile();
+  await vi.waitFor(() => expect(erased).toBeTypeOf('function'));
+  expect(save).not.toHaveBeenCalled();
+  erased();
+  await vi.waitFor(() => expect(store.settings?.browserProfiles).toEqual([]));
+  expect(save).toHaveBeenCalledTimes(1);
 });
 
 function query<T extends HTMLElement = HTMLElement>(selector: string): T {

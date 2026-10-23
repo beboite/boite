@@ -42,8 +42,10 @@ export class BrowserEngines {
       : join(this.core.dataDir, 'browser', profile);
   }
 
-  /** While the desktop app hosts, a new tab opens in its webviews; tabs already open stay where they are. */
+  /** A profile keeps one engine, including while its User-Agent or the attached host changes. */
   get(profile: string): Promise<Engine> {
+    const current = this.pending.get(profile) ?? this.pending.get(`host:${profile}`);
+    if (current) return current.then(engine => this.#closing.has(engine) ? engine.exited.then(() => this.get(profile)) : engine);
     // A webview has no per-profile process flags. Custom identities use Chromium
     // so its workers and popups inherit the same User-Agent as its pages.
     const hosted = this.host.attached && !this.#userAgent(profile);
@@ -157,10 +159,6 @@ export class BrowserEngines {
 
   async shut(engine: Engine): Promise<void> {
     this.#closing.add(engine);
-    if (this.pending.has(engine.key)) {
-      const current = await this.pending.get(engine.key)!.catch(() => null);
-      if (current === engine) this.pending.delete(engine.key);
-    }
     this.#stopTimers(engine);
     await this.saveCookies(engine);
     // A clean close lets the browser write its own files; the kill is for one that does not end.

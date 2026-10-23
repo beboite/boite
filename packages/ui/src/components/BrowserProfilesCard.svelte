@@ -98,10 +98,12 @@
 
   /**
    * Its tabs close first, then the shell erases what the profile kept, then the
-   * list forgets it. A profile the shell could not erase is still removed from
-   * the list, and the reason is shown.
+   * list forgets it. If erasure is unavailable or fails, the entry stays and
+   * the reason is shown.
    */
   async function remove(profile: BrowserProfile): Promise<void> {
+    const erase = browserBridge.deleteProfile?.bind(browserBridge);
+    if (!erase) { problem = s.deleteUnavailable; return; }
     const sure = await confirm.ask({
       title: fill(s.deleteTitle, { name: profile.name }),
       body: s.deleteBody,
@@ -113,10 +115,12 @@
     busy = true;
     problem = '';
     rightPanel.closeProfile(profile.id);
-    let failure = '';
-    try { await browserBridge.deleteProfile?.(profile.id); } catch (error) { failure = errorText(error); }
-    const saved = await save(profiles => profiles.filter(one => one.id !== profile.id));
-    if (saved && failure) problem = fill(s.deleteFailed, { reason: failure });
+    try {
+      await erase(profile.id);
+      await save(profiles => profiles.filter(one => one.id !== profile.id));
+    } catch (error) {
+      problem = fill(s.deleteFailed, { reason: errorText(error) });
+    } finally { busy = false; }
   }
 </script>
 

@@ -11,11 +11,12 @@ import { startDevUi } from './lib/ui.ts';
 
 test.skipIf(!findChromium().path)('a configured profile sends its User-Agent to a file page and its worker at process startup', async () => {
   const harness = await startTestCore();
-  const owner = await harness.connect();
   const engines = new BrowserEngines(harness.core, new BrowserHost(), findChromium, 'fixture', 'system:browser', () => {}, () => {},
     { prepare: () => harness.dataDir, lost: () => {} });
   let engine: Awaited<ReturnType<typeof engines.launch>> | undefined;
+  let owner: Awaited<ReturnType<typeof harness.connect>> | undefined;
   try {
+    owner = await harness.connect();
     await owner.call('settings.set', { browserProfiles: [{ id: 'p-file', name: 'File', userAgent: { mode: 'suffix', value: 'Bounty/1' } }] });
     engine = await engines.launch('p-file');
     const path = join(harness.dataDir, 'user-agent.html');
@@ -39,8 +40,8 @@ test.skipIf(!findChromium().path)('a configured profile sends its User-Agent to 
     expect(result.value[0]).toMatch(/ Chrome\/.* Bounty\/1$/);
     expect(result.value[1]).toBe(result.value[0]);
   } finally {
-    if (engine) await engines.shut(engine);
-    owner.close(); await harness.stop();
+    try { if (engine) await engines.shut(engine); }
+    finally { owner?.close(); await harness.stop(); }
   }
 }, 90_000);
 
@@ -82,6 +83,12 @@ test('profile User-Agent settings save, survive rename and clear on desktop and 
       await page.type('[data-testid=browser-user-agent-value]', '');
       await page.click('[data-testid=browser-user-agent-save]');
       await page.waitFor(`${store}.settings.browserProfiles[0].userAgent === undefined`);
+      await page.click('[data-testid=browser-profile-delete]');
+      await page.waitFor("document.querySelector('[data-testid=browser-profile-error]')?.textContent.includes('desktop app')");
+      expect(await page.evaluate(`${store}.settings.browserProfiles[0].name`)).toBe('Research renamed');
+      await page.evaluate("document.querySelector('[data-testid=browser-profile-error]').scrollIntoView({ block: 'center' }); true");
+      await page.settleAnimations();
+      await page.screenshot(join(import.meta.dir, '.artifacts', mobile ? 'browser-profile-delete-phone.png' : 'browser-profile-delete-desktop.png'));
     }
   } finally { await page?.close(); await server.close(); }
 }, 90_000);
