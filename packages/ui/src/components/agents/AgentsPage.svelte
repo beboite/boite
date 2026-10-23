@@ -2,7 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { ArrowLeft, Bot } from '@lucide/svelte';
-  import { AgentsView, agentOfThread, agentRows, agentsFilter, lastOpenedAgent, openAgent, rememberAgent, statusOf, type AgentFocus } from '../../lib/agents.svelte';
+  import { AgentsView, agentOfThread, agentRows, agentsFilter, firstDeskVisit, lastOpenedAgent, openAgent, rememberAgent, statusOf, type AgentFocus } from '../../lib/agents.svelte';
   import { agentDirectory } from '../../lib/agent-directory.svelte';
   import { mobileOverlay } from '../../lib/mobile-history';
   import type { AgentPane } from '../../lib/store/layout.svelte';
@@ -57,6 +57,7 @@
   /** The agent thread on screen: an ordinary thread left open from the chat is not drawn here. */
   const thread = $derived(store.openThread?.agentSessionId ? store.openThread : null);
   const directory = $derived(agentDirectory(store));
+  const threadId = $derived(thread?.id ?? null);
   const agent = $derived(thread ? agentOfThread(snapshot, thread.id) ?? directory.ownerOf(thread) : null);
   const status = $derived(agent ? statusOf(snapshot, agent.id) : null);
   /** The conversation of an archived agent reads, and takes nothing more. */
@@ -89,6 +90,12 @@
       pane = wanted && wanted.agentId === id ? wanted.pane : null;
       if (wanted?.agentId === id) wanted = null;
     });
+  });
+  // The first time an agent opens on a wide window, its desk opens beside the conversation.
+  $effect(() => {
+    const id = agent?.id;
+    if (!id || !threadId || narrow.current) return;
+    untrack(() => { if (firstDeskVisit(id) && !store.panel.isOpen && store.panel.surfaces.length === 0) store.panel.open('desk'); });
   });
   // A link from elsewhere (a thread an agent runs, a settings card) names the agent to open.
   $effect(() => {

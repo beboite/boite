@@ -17,8 +17,11 @@ const MINUTE = 60_000;
 /**
  * `?fake=1&agents=1`: three agents, each in its own thread, the way the core
  * would have written them.
- * - Nova is at work: a turn runs a test step live, and its desk holds two
- *   threads it started in the first project, one with an open pull request.
+ * - Nova is at work: a turn runs a test step live after four calls, its
+ *   earlier turns fold their steps, and its desk holds every state a desk
+ *   card has: a thread at work, one gone silent, one asking a question, a
+ *   pull request whose checks fail and one merged. It spent $1.35 of its $2
+ *   daily budget.
  * - Iris waits on the user: a deploy failed and it asks for a login, with the
  *   page to open beside the conversation.
  * - Mira rests until its 20:00 routine; its history holds a picture it
@@ -38,13 +41,17 @@ export function seedAgentsDemo(ctx: FakeContext): void {
   exchange(ctx, miraThread, { at: now - 26 * 60 * MINUTE, prompt: 'Can you look at the new welcome screen and tell me how it reads?',
     answer: 'It reads well: the title is clear and the button stands out. On a phone the subtitle wraps to three lines, so I would cut it to one sentence. Here is how it looks now.', picture: true });
   const quiet = exchange(ctx, miraThread, { at: now - 20 * 60 * MINUTE, operation: 'routine', label: 'Routine · Evening review', prompt: 'Check the new issues and pull requests of the projects I look after and tell me what needs me.',
-    answer: 'Read 4 new issues and 2 pull requests. Nothing needs you tonight.\n\n[quiet] 4 issues, 2 pull requests, nothing new' });
+    answer: 'Read 4 new issues and 2 pull requests. Nothing needs you tonight.\n\n[quiet] 4 issues, 2 pull requests, nothing new',
+    steps: [
+      { tool: 'Bash', input: { command: 'gh issue list --state open --limit 20', description: 'List the open issues' }, output: '#61 Settings page scrolls twice\n#60 Dark mode flashes on start\n#58 Export as PDF\n#57 Typo on the welcome screen' },
+      { tool: 'Bash', input: { command: 'gh pr list --state open', description: 'List the open pull requests' }, output: '#482 Fix login redirect loop\n#479 Release notes 2.0.4' },
+    ] });
   quiet.quiet = true;
   ctx.agents.seedQuiet(quiet.id);
   exchange(ctx, miraThread, { at: now - 95 * MINUTE, prompt: 'Remember that the welcome screen must fit in three lines on a phone.', answer: 'Noted in my memory: the welcome screen stays under three lines on a phone. I will check it in tonight\'s review.' });
   const evening = ctx.agents.seedRoutine({ agentId: mira.agent.id, name: 'Evening review', prompt: 'Check the new issues and pull requests of the projects I look after and tell me what needs me.', schedule: { kind: 'daily', time: '20:00', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone } });
   void evening;
-  ctx.agents.seedMemory(mira.agent.id, '- The welcome screen stays under three lines on a phone.\n- Meetsu wants pictures of what changed, not descriptions.');
+  ctx.agents.seedMemory(mira.agent.id, '- The welcome screen stays under three lines on a phone.\n- The user wants pictures of what changed, not descriptions.');
   miraThread.unread = true;
   ctx.agents.seedUnread(mira.agent.id, 1);
 
@@ -60,26 +67,56 @@ export function seedAgentsDemo(ctx: FakeContext): void {
   // Nova, at work.
   const nova = ctx.agents.seedAgent({ name: 'Nova', domain: 'Release captain', instructions: 'Carry the login fix to a merged pull request and keep the release notes current.', avatar: '', selection, status: 'active', projectIds }, now - 86_400_000);
   const novaThread = ctx.thread(nova.threadId);
-  exchange(ctx, novaThread, { at: now - 5 * 60 * MINUTE, prompt: 'Keep the login fix moving and tell me when its pull request is green.', answer: 'On it. I started a thread in boite for the fix and I watch its pull request from my desk.' });
+  exchange(ctx, novaThread, { at: now - 5 * 60 * MINUTE, prompt: 'Keep the login fix moving and tell me when its pull request is green.', answer: 'On it. I started a thread in boite for the fix and I watch its pull request from my desk.',
+    steps: [
+      { narration: 'I will hand the fix to a thread of its own in the project.', tool: 'Bash', input: { command: 'boite thread new boite "Fix the login redirect loop and open a pull request"', description: 'Start the fix thread' }, output: 'Started thread t-fix' },
+      { tool: 'Bash', input: { command: 'boite agent watch t-fix', description: 'Put it on my desk' }, output: 'Watching t-fix' },
+    ] });
   exchange(ctx, novaThread, { at: now - 40 * MINUTE, operation: 'event', label: '2 project events', prompt: 'Thread "Fix login redirect loop" opened pull request #482. Thread "Flaky upload test" failed its last turn.',
-    answer: 'The login fix opened PR #482 and its checks pass. The upload test failed once on a timeout, so I asked its thread to retry with more time.' });
+    answer: 'The login fix opened PR #482, but its end-to-end check fails on the redirect test. The upload test failed once on a timeout, so I asked its thread to retry with more time.',
+    steps: [
+      { tool: 'Bash', input: { command: 'gh pr checks 482', description: 'Read the checks of #482' }, output: 'build\tpass\nunit\tpass\ne2e\tfail' },
+      { narration: 'The e2e job fails; its log names the redirect test.', tool: 'Bash', input: { command: 'gh run view --log-failed --job e2e | tail -20', description: 'Read the failed e2e log' }, output: 'login.spec.ts: expected /home, got /login' },
+      { tool: 'Read', input: { file_path: 'tests/e2e/login.spec.ts' }, output: "test('redirects home after login', ...)" },
+      { narration: 'The upload test only timed out. A retry with more time is enough.', tool: 'Bash', input: { command: 'boite thread send t-flaky "Run the upload test again with a 60 s timeout"', description: 'Ask the upload thread to retry' }, output: 'Sent' },
+    ] });
   if (project) {
     const fix = deskThread(ctx, project.id, 'Fix login redirect loop', now - 4 * 60 * MINUTE, 'idle');
     const flaky = deskThread(ctx, project.id, 'Flaky upload test', now - 3 * 60 * MINUTE, 'running');
-    ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: fix.id, origin: 'started', since: fix.createdAt, stalledSince: null, pullRequest: { number: 482, url: 'https://github.com/example/boite/pull/482', state: 'open', checks: 'passing' } });
+    const migrate = deskThread(ctx, project.id, 'Migrate the settings store', now - 90 * MINUTE, 'running');
+    const icons = deskThread(ctx, project.id, 'Pick the release icon set', now - 50 * MINUTE, 'idle');
+    const notes = deskThread(ctx, project.id, 'Release notes 2.0.4', now - 7 * 60 * MINUTE, 'done');
+    askAsync(ctx, icons, icons.turns[0]!, null, 'Two icon sets fit the release. Which one should the app ship with?', ['Lucide', 'Phosphor'], false);
+    icons.openQuestions = 1;
+    const pr = (number: number, state: 'open' | 'merged', checks: 'passing' | 'failing' | null) => ({ number, url: `https://github.com/example/boite/pull/${number}`, state, checks });
+    ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: fix.id, origin: 'started', since: fix.createdAt, stalledSince: null, pullRequest: pr(482, 'open', 'failing') });
     ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: flaky.id, origin: 'started', since: flaky.createdAt, stalledSince: null, pullRequest: null });
+    ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: migrate.id, origin: 'entrusted', since: migrate.createdAt, stalledSince: now - 24 * MINUTE, pullRequest: null });
+    ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: icons.id, origin: 'followed', since: icons.createdAt, stalledSince: null, pullRequest: null });
+    ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: notes.id, origin: 'started', since: notes.createdAt, stalledSince: null, pullRequest: pr(479, 'merged', null) });
   }
   liveTurn(ctx, novaThread, now - 3 * MINUTE, 'Is the release notes draft ready?', 'Checking the release branch first, then I will sum up what changed since 2.0.', { name: 'Bash', input: { command: 'bun run test packages/ui', description: 'Run the UI tests' }, step: 'Run the UI tests' });
   ctx.agents.seedRoutine({ agentId: nova.agent.id, name: 'Release check', prompt: 'Check the release branch and the open pull requests.', schedule: { kind: 'interval', everyMinutes: 120 } });
+  ctx.agents.seedMemory(nova.agent.id, '## Release 2.0.4\n- The login fix ships in it, PR #482.\n- Release notes live in `CHANGELOG.md`, newest first.\n\n## How the user likes it\n- A pull request is done when its checks pass, not when it opens.');
+  ctx.agents.seedRuntime(nova.agent.id, { dailyBudgetUsd: 2 });
+  ctx.agents.seedSpend(nova.agent.id, 1.35);
 }
 
 /** A finished turn: the prompt (or a wake's label), then the agent's answer. */
-function exchange(ctx: FakeContext, thread: Thread, spec: { at: number; prompt: string; answer: string; operation?: 'routine' | 'event'; label?: string; picture?: boolean }): Turn {
+/** A call a finished turn made on the way to its answer, with the words the agent said before it. */
+interface StepSpec { narration?: string; tool: string; input: Record<string, unknown>; output: string }
+
+function exchange(ctx: FakeContext, thread: Thread, spec: { at: number; prompt: string; answer: string; operation?: 'routine' | 'event'; label?: string; picture?: boolean; steps?: StepSpec[] }): Turn {
   const turn: Turn = { id: `turn-agents-demo-${++ctx.seq}`, threadId: thread.id, status: 'done', queuedAt: spec.at, startedAt: spec.at, finishedAt: spec.at + 2 * MINUTE, usage: null, error: null, execution: execution(thread, spec.operation) };
   thread.turns.push(turn);
   const prompt: MessagePart = { type: 'text', text: spec.prompt, ...(spec.label ? { displayText: spec.label } : {}) };
   thread.messages.push({ id: `m-${++ctx.seq}`, threadId: thread.id, turnId: turn.id, role: 'user', state: 'complete', createdAt: spec.at, parts: [prompt] });
-  const parts: MessagePart[] = [{ type: 'text', text: spec.answer }];
+  const parts: MessagePart[] = (spec.steps ?? []).flatMap((step, index): MessagePart[] => {
+    const startedAt = spec.at + 10_000 + index * 20_000;
+    const call: MessagePart = { type: 'tool', toolId: `tool-agents-demo-${++ctx.seq}`, name: step.tool, input: step.input, output: step.output, status: 'done', startedAt, finishedAt: startedAt + 8_000 };
+    return step.narration ? [{ type: 'text', text: step.narration }, call] : [call];
+  });
+  parts.push({ type: 'text', text: spec.answer });
   if (spec.picture) parts.push(picture(ctx));
   thread.messages.push({ id: `m-${++ctx.seq}`, threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: spec.at + MINUTE, parts });
   thread.updatedAt = Math.max(thread.updatedAt, spec.at + 2 * MINUTE);
@@ -107,7 +144,8 @@ function picture(ctx: FakeContext): MessagePart {
 }
 
 /** A thread of a project an agent started: it sits on that agent's desk. */
-function deskThread(ctx: FakeContext, projectId: string, title: string, at: number, status: 'idle' | 'running'): Thread {
+function deskThread(ctx: FakeContext, projectId: string, title: string, at: number, standing: 'idle' | 'running' | 'done'): Thread {
+  const status = standing === 'running' ? 'running' : 'idle';
   const project = ctx.projects.find(p => p.id === projectId)!;
   const account = ctx.accounts.find(a => a.providerId === 'echo') ?? ctx.accounts[0]!;
   const id = `t-agents-desk-${++ctx.seq}`;
@@ -118,6 +156,7 @@ function deskThread(ctx: FakeContext, projectId: string, title: string, at: numb
     permissionMode: 'default', archived: false, pinned: false, branch: `fix/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, messagesBefore: null, commands: [],
     status, unread: false, sessionId: `sess-${id}`, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, createdAt: at, updatedAt: at + 20 * MINUTE,
     ...(status === 'running' ? { runningSince: at + 10 * MINUTE } : {}),
+    ...(standing === 'done' ? { doneAt: at + 30 * MINUTE } : {}),
     turns: [turn],
     messages: [
       { id: `m-${++ctx.seq}`, threadId: id, turnId, role: 'user', parts: [{ type: 'text', text: title }], state: 'complete', createdAt: at },
@@ -143,6 +182,8 @@ function liveTurn(ctx: FakeContext, thread: Thread, at: number, prompt: string, 
     { type: 'thinking', text: 'The release notes depend on what landed on the release branch: read it, then run the tests to be sure.', startedAt: at + 5_000, finishedAt: at + 20_000 },
     { type: 'text', text },
     { type: 'tool', toolId: `tool-${ctx.seq}`, name: 'Read', input: { file_path: 'CHANGELOG.md' }, output: '## 2.0.4\n- Fix the login redirect loop', status: 'done', startedAt: at + 30_000 },
+    { type: 'tool', toolId: `tool-${ctx.seq}-log`, name: 'Bash', input: { command: 'git log --oneline v2.0.3..release', description: 'List what landed since 2.0.3' }, output: 'a1b2c3d Fix login redirect loop\n9f8e7d6 Faster upload retries', status: 'done', startedAt: at + 45_000 },
+    { type: 'tool', toolId: `tool-${ctx.seq}-grep`, name: 'Grep', input: { pattern: 'TODO\\(release\\)', path: 'packages' }, output: 'No matches', status: 'done', startedAt: at + 60_000 },
     { type: 'tool', toolId: `tool-${ctx.seq}-run`, name: tool.name, input: tool.input, output: null, status: 'running', startedAt: toolStarted },
   ] };
   thread.messages.push(answer);

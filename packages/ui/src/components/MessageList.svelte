@@ -11,6 +11,8 @@
   import MessageOutline from './MessageOutline.svelte';
   import AgentMessageGroup from './AgentMessageGroup.svelte';
   import WakeMarker from './WakeMarker.svelte';
+  import TurnFoldRow from './TurnFoldRow.svelte';
+  import { TurnFolds, openedTurns } from '../lib/agent-turns';
   import { agentMailFor, groupAgentMail, withAgentMail } from '../lib/agent-mail';
   import DelegationActivity from './DelegationActivity.svelte';
   import { teamLaunches } from '../lib/delegation-progress';
@@ -107,7 +109,14 @@
   let shownViews: ReadonlyMap<string, Message[]> | undefined;
   const views = $derived.by(() => (shownViews = turnViews(grouped.timeline, shownViews)));
   /** A finished turn's published files go after its answer, its pages after them; Boite's cache pings are one line. */
-  const timeline = $derived(quietKeepalives(placeViews(filesLast(grouped.timeline, shownTurns), shownTurns, views), shownTurns));
+  const placed = $derived(quietKeepalives(placeViews(filesLast(grouped.timeline, shownTurns), shownTurns, views), shownTurns));
+  /** A persistent agent's finished turns read like messages: their steps fold behind one row, a quiet wake to one line (`lib/agent-turns.ts`). */
+  const turnFolds = new TurnFolds();
+  const agentThread = $derived(store.openThread?.id === threadId && !!store.openThread.agentSessionId);
+  const folded = $derived.by(() => agentThread
+    ? { timeline: turnFolds.build(placed, shownTurns, openedTurns), folds: turnFolds.folds }
+    : { timeline: placed, folds: new Map() as typeof turnFolds.folds });
+  const timeline = $derived(folded.timeline);
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   /** What the window lists and measures: a row per message, several for the message of a long turn (lib/timeline-rows.ts). */
@@ -769,7 +778,8 @@
         {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
         {@const source = group || viewPart(message) || publishedFile(message) ? messages.findLast(current => current.turnId === message.turnId) : message}
-        {@const closes = row.last && turn !== undefined && turn.execution?.operation !== 'keepalive' && lastInTurn.get(turn.id) === message.id}
+        {@const fold = folded.folds.get(message.id)}
+        {@const closes = row.last && !fold && turn !== undefined && turn.execution?.operation !== 'keepalive' && lastInTurn.get(turn.id) === message.id}
         {@const joined = seam(rows[view.start + index - 1], row)}
         <article
           use:track={{ row, joined }}
@@ -782,6 +792,8 @@
         >
           {#if row.failures}
             <FailedAttempts {store} {threadId} messages={row.failures} turns={shownTurns} {signedOut} canFork={!narrow.current && forkable && !store.openThread?.incognito} reveal={failureTarget} oninspect={inspectFailures} />
+          {:else if fold}
+            <TurnFoldRow {fold} at={message.createdAt} wake={turn?.execution?.operation === 'routine' || turn?.execution?.operation === 'event' ? turn.execution.operation : undefined} />
           {:else if launches.has(message.id)}
             <DelegationActivity {store} agents={launches.get(message.id)!.agents} />
           {:else if workflowRows.has(message.id)}

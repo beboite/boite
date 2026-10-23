@@ -317,6 +317,10 @@ export class FakeContext {
       thread: threadId => this.threads.get(threadId),
       settle: threadId => { const thread = this.threads.get(threadId); if (thread?.unread) { thread.unread = false; this.touch(thread); } },
       waiting: threadId => [...this.pendingQuestions.values()].some(q => q.request.threadId === threadId) || [...this.pendingPermissions.values()].some(p => p.request.threadId === threadId),
+      question: threadId => {
+        const ask = [...this.pendingQuestions.values()].find(q => q.request.threadId === threadId)?.request;
+        return ask ? { id: ask.id, text: ask.text, options: ask.options.map(o => o.label) } : null;
+      },
       goal: (threadId, objective) => {
         const methods = activityMethods(this);
         void (objective === null ? methods['threads.activity.control']({ threadId, kind: 'goal', action: 'remove' }) : methods['threads.activity.set']({ threadId, goal: { objective } })).catch(() => {});

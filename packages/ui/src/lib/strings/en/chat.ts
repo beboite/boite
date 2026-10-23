@@ -110,6 +110,15 @@ export const strings = {
     wake: { routine: 'Routine', event: 'Woken up' },
     wakeShow: 'Show what the agent read',
     wakeHide: 'Hide what the agent read',
+    /** A persistent agent's finished turn: its steps folded above its answer, or a wake that had nothing for the user. */
+    fold: {
+      worked: 'Worked {time}', workedBare: 'Worked',
+      stepOne: '1 step', stepMany: '{count} steps',
+      seconds: '{count} s', minutes: '{count} min', hours: '{hours} h {minutes} min',
+      quiet: 'Nothing to report',
+      showSteps: 'Show the steps', hideSteps: 'Hide the steps',
+      showTurn: 'Show the whole turn', hideTurn: 'Fold this turn',
+    },
     /** At the foot of a thread the user moved: the note rides on the next prompt, not sent yet. */
     movePending: 'Moved to {project} · the agent will be told with your next message',
     movePendingShow: 'Show what the agent will be told',

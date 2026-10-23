@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { ArrowLeft, Brain, Ellipsis, Archive, Pause, Play, PanelRight, Settings2, TriangleAlert } from '@lucide/svelte';
+  import { ArrowLeft, Brain, Ellipsis, Archive, Pause, Play, LampDesk, Settings2, TriangleAlert } from '@lucide/svelte';
   import type { AgentProfile, AgentStatus, ThreadSummary } from '@boite/contracts';
-  import { faceOf, liveStep, type AgentsView } from '../../lib/agents.svelte';
+  import { faceOf, liveState, liveStep, waitingOn, type AgentsView } from '../../lib/agents.svelte';
   import { confirm } from '../../lib/confirm.svelte';
   import { dateTime } from '../../lib/schedule';
   import type { AgentPane } from '../../lib/store/layout.svelte';
@@ -34,27 +34,12 @@
   const labels = $derived(strings.agents);
   const now = $derived(minuteClock.now);
   /** What it waits on: the question it asked, else the permission it needs. */
-  const pending = $derived.by<string | null>(() => {
-    const id = thread?.id;
-    if (!id) return null;
-    const question = store.pendingQuestions.find(q => q.threadId === id);
-    if (question) return question.text.split('\n')[0]!.trim();
-    const permission = store.pendingPermissions.find(p => p.threadId === id);
-    return permission ? permission.description ?? permission.toolName : null;
-  });
-  /** The thread's own row wins over the snapshot: it moves with every event, the snapshot at most once a second. */
-  const state = $derived.by<AgentStatus['state']>(() => {
-    if (agent.status === 'archived') return 'archived';
-    if (thread?.status === 'running') return 'working';
-    if (thread?.status === 'queued') return 'queued';
-    if (thread?.status === 'waiting' || pending) return 'waiting';
-    if (status?.state === 'error' || status?.problem) return 'error';
-    if (agent.status === 'paused') return 'paused';
-    return status?.state === 'working' || status?.state === 'queued' || status?.state === 'waiting' ? status.state : 'idle';
-  });
+  const pending = $derived(waitingOn(store, thread?.id));
+  const state = $derived(liveState(agent, status, thread, !!pending));
   const step = $derived(liveStep(status, thread));
   const since = $derived(thread?.status === 'running' ? thread.runningSince ?? thread.progress?.since ?? null : null);
-  const panelOpen = $derived(store.panelOpen);
+  /** The desk is a surface of its thread's panel: pressed while the panel shows it. */
+  const deskOpen = $derived(store.panelOpen && store.panel.active?.kind === 'desk');
 
   const menuItems = $derived([
     { id: 'settings', label: labels.settings, glyph: Settings2 },
@@ -117,8 +102,7 @@
     </span>
   </button>
   <nav class="agent-head-actions" aria-label={agent.name}>
-    <!-- The desk is the panel of its thread: browser, files, views, and in a later version its desk. -->
-    <button type="button" class="ghost icon" class:active={panelOpen} aria-pressed={panelOpen} title={labels.desk} aria-label={labels.desk} onclick={() => store.togglePanel()} data-testid="agent-desk-toggle"><PanelRight size={17} strokeWidth={1.75} /></button>
+    <button type="button" class="ghost icon" class:active={deskOpen} aria-pressed={deskOpen} title={labels.desk} aria-label={labels.desk} onclick={() => store.panel.toggleKind('desk')} data-testid="agent-desk-toggle"><LampDesk size={17} strokeWidth={1.75} /></button>
     <Menu placement="bottom" align="end" variant="ghost" label={labels.more} testid="agent-menu" items={menuItems} onpick={id => void pick(id)}>
       <Ellipsis size={18} strokeWidth={1.75} />
     </Menu>
