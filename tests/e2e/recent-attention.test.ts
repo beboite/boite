@@ -45,6 +45,12 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url, windowSize: { width: 1280, height: 900 } });
 }, 60_000);
 beforeEach(async () => {
+  if (await page.evaluate(`matchMedia('(max-width: 720px)').matches && !!document.querySelector('${id('mobile-back')}')`)) {
+    await page.click(id('mobile-back'));
+    await page.waitFor(`document.querySelector('${id('mobile-list')}')`);
+  }
+  // A phone panel's history traversal must land before the next navigation.
+  await page.waitFor('!history.state?.boiteOverlay');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.evaluate(`localStorage.removeItem('boite.recent.v1'); localStorage.removeItem('boite.project-view.v1'); localStorage.setItem('boite.locale', 'fr')`);
   await page.navigate(url);
