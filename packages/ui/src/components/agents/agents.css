@@ -280,7 +280,7 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
 .desk-card-pr { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
 .desk-pr-badge, .desk-pr-checks { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .desk-card-pr[data-pr='open'] .desk-pr-badge, .desk-card-pr[data-pr='draft'] .desk-pr-badge { color: var(--color-live); }
-.desk-card-pr[data-pr='merged'] .desk-pr-badge { color: var(--color-accent); }
+.desk-card-pr[data-pr='merged'] .desk-pr-badge { color: var(--color-success); }
 .desk-card-pr[data-pr='closed'] .desk-pr-badge { color: var(--color-danger); }
 .desk-card-pr[data-checks='failing'] .desk-pr-checks { color: var(--color-danger); }
 .desk-card-pr[data-checks='passing'] .desk-pr-checks { color: var(--color-success); }

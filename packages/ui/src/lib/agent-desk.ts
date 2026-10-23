@@ -26,14 +26,15 @@ export function deskState(watch: Pick<AgentWatch, 'state' | 'stalledSince' | 'pu
 
 /**
  * The colour a state takes, from the app's status tokens: live for what waits
- * on someone, danger for what broke. A pull request keeps the badge colours
- * of the thread list: yellow while open, the accent once merged.
+ * on someone, danger for what broke, success for what landed (a merged pull
+ * request included), the accent only for work under way, as the thread
+ * list's running mark.
  */
 export function deskTone(state: DeskState): 'accent' | 'live' | 'danger' | 'success' | 'muted' {
   if (state === 'needs-you' || state === 'stalled' || state === 'review') return 'live';
   if (state === 'failed') return 'danger';
-  if (state === 'working' || state === 'queued' || state === 'merged') return 'accent';
-  if (state === 'done') return 'success';
+  if (state === 'working' || state === 'queued') return 'accent';
+  if (state === 'done' || state === 'merged') return 'success';
   return 'muted';
 }
 

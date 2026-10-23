@@ -251,6 +251,8 @@
   {#key `${key}:${store.draft?.projectId ?? ''}`}
   <ComposerOptions busy={picking} levels={[]} effort={null} agentDefault={false} speeds={[]} speed={null} modes={[]} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => {}} />
   {/key}
+  <!-- The chips' room, empty, so the tools keep their place at the end of the row on both widths. -->
+  <div class="chips" aria-hidden="true"></div>
   {:else if !answering}
   {#key `${key}:${store.draft?.projectId ?? ''}`}
   <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {agentDefault} {speeds} speed={speedOptions.speed} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />

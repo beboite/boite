@@ -18,9 +18,9 @@ test('a desk card says first what needs the user, then a silent turn, a failure,
   expect(deskState(watch('r', { state: 'idle', pullRequest: pr('open', 'failing') }))).toBe('review');
   expect(deskState(watch('c', { state: 'done', pullRequest: pr('closed') }))).toBe('done');
   expect(deskState(watch('a', { state: 'archived' }))).toBe('archived');
-  // Colours follow the thread list's badges: yellow for what waits, the accent once merged.
+  // Hue says status: yellow for what waits, danger for what broke, success once merged or done, the accent only for work under way.
   expect(['needs-you', 'stalled', 'review'].map(s => deskTone(s as never))).toEqual(['live', 'live', 'live']);
-  expect([deskTone('failed'), deskTone('merged'), deskTone('working'), deskTone('done'), deskTone('idle')]).toEqual(['danger', 'accent', 'accent', 'success', 'muted']);
+  expect([deskTone('failed'), deskTone('merged'), deskTone('working'), deskTone('done'), deskTone('idle')]).toEqual(['danger', 'success', 'accent', 'success', 'muted']);
 });
 
 test('the desk lists what needs the user first and settled threads last, newest first within a state', () => {
