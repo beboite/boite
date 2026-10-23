@@ -83,12 +83,16 @@ export function projectSection(entry: ProjectEntry): ProjectSection {
   return archiveCount(entry.project, 'archived') > 0 ? 'later' : 'idle';
 }
 
-/** The listed projects split by section, each in the order it came in. Without idle grouping, set-aside and idle projects stay open cards. */
-export function projectSections(entries: readonly ProjectEntry[], groupIdle: boolean): Record<ProjectSection, ProjectEntry[]> {
+/**
+ * The listed projects split by section, each in the order it came in. Without working grouping, projects at work stay
+ * open cards; without idle grouping, set-aside and idle projects do too.
+ */
+export function projectSections(entries: readonly ProjectEntry[], groupIdle: boolean, groupWorking: boolean): Record<ProjectSection, ProjectEntry[]> {
   const sections: Record<ProjectSection, ProjectEntry[]> = { working: [], open: [], later: [], idle: [] };
   for (const entry of entries) {
     const section = projectSection(entry);
-    sections[groupIdle || section === 'working' ? section : 'open'].push(entry);
+    const grouped = section === 'working' ? groupWorking : groupIdle;
+    sections[grouped ? section : 'open'].push(entry);
   }
   return sections;
 }

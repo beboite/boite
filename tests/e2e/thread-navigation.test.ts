@@ -240,6 +240,10 @@ test('projects sink after losing recent threads and the sidebar follows a select
     await page.waitFor(`document.querySelector('${id('sidebar')} .scroll').scrollTop === 0`);
     await capture(page, 'project-promotion-after.png');
     // With projects at work on top, taller than the list, a prompt leads the open cards under them: its card comes into view.
+    // The Working section needs working grouping, off by default.
+    await page.click(id('grouping-options'));
+    await page.click(`${id('grouping-options-menu')} [data-value=working]`);
+    await page.click(id('grouping-options'));
     // Conversation 5 and 7 to 23, named in the page: a test value never becomes code there.
     const busy = `[5, ...Array.from({ length: 17 }, (_, i) => i + 7)].map(i => 'Conversation ' + i)`;
     await page.evaluate(`(() => {

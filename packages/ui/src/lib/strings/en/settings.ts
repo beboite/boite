@@ -39,7 +39,7 @@ export const strings = {
     connectProvider: 'Connect a provider',
     conversations: 'Conversations',
     groupWorkingThreads: 'Group working threads',
-    groupWorkingThreadsHint: 'Fold working and background threads in Projects and Recent. Pins, drafts, errors and threads that need you stay visible. This device only.',
+    groupWorkingThreadsHint: 'Fold working and background threads in Projects and Recent, and list projects where every thread is at work under Working, on top. Pins, drafts, errors and threads that need you stay visible. This device only.',
     groupOtherProjects: 'Group idle projects',
     groupOtherProjectsHint: 'In the Projects view, projects with nothing open but conversations archived by hand go under Set aside, and those with nothing to do into the Idle projects fold. Turn off to keep all projects in the list. This device only.',
     app: 'App',

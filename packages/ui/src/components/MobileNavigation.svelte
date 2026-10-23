@@ -66,7 +66,7 @@
   let project = $derived(store.openProject ?? store.projects.find(p => p.archived !== true));
   let groups = $derived(projectView.sorted(machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))));
   /** At work on top, open, then set aside; idle projects go to their fold, as on the desktop. */
-  let sections = $derived(projectSections(groups, recentPreferences.groupOtherProjects));
+  let sections = $derived(projectSections(groups, recentPreferences.groupOtherProjects, recentPreferences.groupWorking));
   let shelved = $derived(machines.flatMap(machine => machine.store.projects.filter(project => project.archived === true).map(project => ({ machine, project }))));
   let selected = $derived(projectView.selected(groups));
   let draftOwner = $derived(screen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);

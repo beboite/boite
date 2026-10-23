@@ -8,11 +8,12 @@ import { writeExperiments } from './lib/experiments';
 import { closeTour } from './lib/onboarding.svelte';
 import { work } from './lib/work-prefs.svelte';
 import { projectThreadView, projectSections } from './lib/project-threads.svelte';
+import { recentPreferences } from './lib/recent.svelte';
 import type { ProjectEntry } from './lib/project-view.svelte';
 
 /*
  * The Projects view in sections, over the in-memory fake: projects whose every
- * conversation is at work on top, the open ones, the ones whose work was set
+ * conversation is at work on top once working grouping is on, the open ones, the ones whose work was set
  * aside, then the idle fold. A project moves between them as its threads do.
  */
 
@@ -28,6 +29,7 @@ afterEach(() => {
   document.body.innerHTML = '';
   writeExperiments([]);
   window.localStorage.clear();
+  recentPreferences.groupWorking = false;
   work.load();
   workspace.view = 'projects';
   projectThreadView.shelfOpen = false;
@@ -74,13 +76,17 @@ function setThread(id: string, change: Partial<ThreadSummary>): void {
 const card = (within: string, projectId: string) => document.querySelector<HTMLElement>(`${within} section[data-testid=project][data-project-id="${projectId}"]`);
 const cards = () => [...document.querySelectorAll<HTMLElement>('[data-testid=sidebar] section[data-testid=project]')].map((s) => s.dataset['projectId']);
 
-test('a project whose every conversation is at work sits on top, and moves down once one needs the user', async () => {
+test('with working grouping on, a project whose every conversation is at work sits on top, and moves down once one needs the user', async () => {
   await mountOnFake();
   const busy = await project('busy');
   const build = await thread(busy.id, 'Long build');
   const tests = await thread(busy.id, 'Test sweep');
   setThread(build.id, { status: 'running' });
   setThread(tests.id, { status: 'running' });
+  // Off by default: the project at work stays among the open cards, with no section above them.
+  await waitFor(() => card('[data-testid=sidebar]', busy.id) !== null);
+  expect(document.querySelector('[data-testid=working-projects]')).toBeNull();
+  recentPreferences.setGroupWorking(true);
   await waitFor(() => card('[data-testid=working-projects]', busy.id) !== null);
   // On top of every open project, under the section's own header.
   expect(cards()[0]).toBe(busy.id);
@@ -141,7 +147,7 @@ test('a project whose only conversations were archived by hand shows them under 
   await waitFor(() => document.querySelector('[data-testid=later-projects]') === null && card('[data-testid=sidebar]', paused.id) !== null);
 });
 
-test('an unsent new draft keeps its project among the open ones; without idle grouping, set-aside and idle projects stay open cards', () => {
+test('an unsent new draft keeps its project among the open ones; without a grouping, its projects stay open cards', () => {
   const entry = (id: string, threads: Partial<ThreadSummary>[], counts: Partial<Project> = {}, drafts: { projectId: string; text: string }[] = []): ProjectEntry => ({
     machine: {
       id: 'local', label: 'local',
@@ -159,6 +165,7 @@ test('an unsent new draft keeps its project among the open ones; without idle gr
     entry('open', [{}]), entry('paused', [], { archivedThreads: 2 }), entry('quiet', [], { archivedThreads: 1, doneThreads: 1 })
   ];
   const ids = (sections: Record<string, ProjectEntry[]>) => Object.fromEntries(Object.entries(sections).map(([key, list]) => [key, list.map((e) => e.project.id)]));
-  expect(ids(projectSections(entries, true))).toEqual({ working: ['busy'], open: ['drafting', 'open'], later: ['paused'], idle: ['quiet'] });
-  expect(ids(projectSections(entries, false))).toEqual({ working: ['busy'], open: ['drafting', 'open', 'paused', 'quiet'], later: [], idle: [] });
+  expect(ids(projectSections(entries, true, true))).toEqual({ working: ['busy'], open: ['drafting', 'open'], later: ['paused'], idle: ['quiet'] });
+  expect(ids(projectSections(entries, false, true))).toEqual({ working: ['busy'], open: ['drafting', 'open', 'paused', 'quiet'], later: [], idle: [] });
+  expect(ids(projectSections(entries, true, false))).toEqual({ working: [], open: ['busy', 'drafting', 'open'], later: ['paused'], idle: ['quiet'] });
 });
