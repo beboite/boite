@@ -40,7 +40,7 @@
       <span class="title">{title}</span>
       {#if aside}{@render aside()}
       {:else}
-        {#if unread > 0}<span class="unread-count" title={missed} aria-label={missed} data-testid="agent-unread-count">{unread}</span>
+        {#if unread > 0}<span class="unread-count" role="img" title={missed} aria-label={missed} data-testid="agent-unread-count">{unread}</span>
         {:else if at > 0}<time class="when" datetime={new Date(at).toISOString()} title={exactTime(at)}>{ago(at, now)}</time>{/if}
       {/if}
     </span>

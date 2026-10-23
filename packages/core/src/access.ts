@@ -83,6 +83,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['agents.routine.save', 'bounded durable scheduling for its own identity from its direct conversation, when the owner enabled routines'],
   ['agents.snapshot', 'only the persistent identity, context and resources of this execution'],
   ['agents.history', 'older messages, work and memory of this execution context, under the snapshot rules'],
+  ['agents.messages', 'chronological message windows held to this execution context, under the history rules'],
   ['agents.message.send', 'a bounded message as this agent to recipients in its current conversation'],
   ['agents.memory.save', 'scoped memory with mandatory provenance, no widening of access'],
   ['agents.task.acquire', 'atomic self-assignment inside the current authorized mission'],

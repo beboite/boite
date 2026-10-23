@@ -50,14 +50,18 @@ have a button with their count, and memory, settings, activity and missions
 wait in its menu.
 
 Opening a conversation starts at the first missed incoming message, with an
-"x missed messages" divider. Older pages load until the saved reading position
-is reached. Only messages visible in a visible page advance that position;
+"x missed messages" divider. A bounded chronological window seeks directly
+to that position; older and newer pages load as the user reads, including on
+a device with no previous read mark. Only messages visible in a visible page
+advance that position;
 new replies leave someone reading earlier messages in place. The floating
 missed-message button jumps to the next unread reply. Once caught up, a return
 visit opens at the latest message. Reading positions stay on this device per
 core in local storage. The optional read marks on `agents.snapshot` request
 counts across all retained incoming messages, beyond its 50-message window;
-message bodies still arrive through bounded history pages.
+message bodies still arrive through bounded pages. `agents.messages` seeks by
+creation time and message ID, independent of later attachment updates, under
+the same owner, device and execution-context policy as history.
 
 A new agent needs a name and what it does; its robot, model and permissions
 come filled in. The projects entrusted to it are picked beside its
@@ -247,7 +251,8 @@ The interface exposes results and the execution without requiring process logs.
 
 An agent calls `boite agent decide` to release its slot and request a durable
 human decision. The prompt and its choices stand in the conversation where the
-work was asked, and the agent's row reads Needs you. An answer creates
+work was asked; its avatar and header show waiting while the row keeps its
+missed-message count or last activity time. An answer creates
 one continuation in the same context. Native tool approvals still use the
 existing permission cards and provider process.
 

@@ -45,7 +45,9 @@ export const chatKey = (kind: AgentChatKind, id: string) => `${kind}:${id}`;
 /** A current question or decision, rather than a past failure or interruption. */
 export function waitingForUser(snapshot: AgentsSnapshot | null, scope: AgentScope | null, live: ThreadSummary | null): boolean {
   if (live?.status === 'waiting') return true;
-  return !!scope && !!snapshot?.decisions.some(d => d.status === 'pending' && snapshot.work.some(w => w.id === d.workId && w.scope.kind === scope.kind && w.scope.id === scope.id));
+  if (!scope || !snapshot) return false;
+  const home = scopeHome(snapshot, scope);
+  return snapshot.decisions.some(d => d.status === 'pending' && snapshot.work.some(w => w.id === d.workId && (home !== null && scopeHome(snapshot, w.scope) === home || scope.kind === 'agent' && w.agentId === scope.id)));
 }
 
 /** The team each group carries: the oldest team naming it as its discussion. */
@@ -67,6 +69,23 @@ export function missionHome(snapshot: AgentsSnapshot, mission: AgentMission, byG
   if (mission.agentIds.length === 1) return chatKey('profile', first);
   const group = snapshot.groups.find(g => mission.agentIds.every(id => g.memberIds.includes(id)));
   return group ? chatKey('group', group.id) : chatKey('profile', first);
+}
+
+/** The conversation a context belongs to, including missions and teams folded into groups. */
+function scopeHome(snapshot: AgentsSnapshot, scope: AgentScope, byGroup = teamsByGroup(snapshot)): string | null {
+  if (scope.kind === 'agent') return chatKey('profile', scope.id);
+  if (scope.kind === 'group') return chatKey('group', scope.id);
+  if (scope.kind === 'mission') { const mission = snapshot.missions.find(m => m.id === scope.id); return mission ? missionHome(snapshot, mission, byGroup) : null; }
+  if (scope.kind === 'team') { const group = [...byGroup].find(([, t]) => t.id === scope.id); return group ? chatKey('group', group[0]) : chatKey('team', scope.id); }
+  return null;
+}
+
+/** Retained counts with locally read messages subtracted from the in-flight snapshot. */
+export function unreadMessages(snapshot: AgentsSnapshot | null, messages: AgentConversationMessage[], scope: AgentScope, at: number): number {
+  const incoming = messages.filter(m => m.scope.kind === scope.kind && m.scope.id === scope.id && m.senderId !== null);
+  if (!snapshot?.unread) return incoming.filter(m => m.createdAt > at).length;
+  const total = snapshot.unread.find(row => row.scope.kind === scope.kind && row.scope.id === scope.id);
+  return Math.max(0, (total?.count ?? 0) - (total ? incoming.filter(m => m.createdAt > total.at && m.createdAt <= at).length : 0));
 }
 
 /**
@@ -99,12 +118,7 @@ export function agentChats(snapshot: AgentsSnapshot, messages: AgentConversation
   for (const t of snapshot.teams) if (!folded.has(t.id)) add({ kind: 'team', id: t.id, name: t.name, avatar: '', members: t.members.map(m => m.agentId), scope: null, teamId: t.id, at: t.updatedAt });
 
   const missions = new Map(snapshot.missions.map(m => [m.id, missionHome(snapshot, m, byGroup)]));
-  const home = (scope: AgentScope): string | null =>
-    scope.kind === 'agent' ? chatKey('profile', scope.id)
-    : scope.kind === 'group' ? chatKey('group', scope.id)
-    : scope.kind === 'mission' ? missions.get(scope.id) ?? null
-    : scope.kind === 'team' ? (folded.has(scope.id) ? chatKey('group', snapshot.teams.find(t => t.id === scope.id)!.groupId!) : chatKey('team', scope.id))
-    : null;
+  const home = (scope: AgentScope) => scopeHome(snapshot, scope, byGroup);
   const rank: Record<AgentChatStatus, number> = { idle: 0, paused: 1, running: 2, waiting: 3 };
   const raise = (chat: AgentChat | undefined, status: AgentChatStatus) => { if (chat && rank[status] > rank[chat.status]) chat.status = status; };
 
@@ -125,12 +139,7 @@ export function agentChats(snapshot: AgentsSnapshot, messages: AgentConversation
     chat.at = Math.max(chat.at, m.createdAt);
     if (m.senderId !== null && m.createdAt > (readAt[where!] ?? 0)) chat.unread++;
   }
-  if (snapshot.unread) for (const [key, chat] of chats) {
-    const total = snapshot.unread.find(row => row.scope.kind === chat.scope?.kind && row.scope.id === chat.id);
-    const read = readAt[key] ?? 0;
-    const readSince = total ? messages.filter(m => m.scope.kind === total.scope.kind && m.scope.id === total.scope.id && m.senderId !== null && m.createdAt > total.at && m.createdAt <= read).length : 0;
-    chat.unread = Math.max(0, (total?.count ?? 0) - readSince);
-  }
+  for (const [key, chat] of chats) if (chat.scope) chat.unread = unreadMessages(snapshot, messages, chat.scope, readAt[key] ?? 0);
   for (const w of attention.work) { const where = home(w.scope); const chat = where ? chats.get(where) : undefined; if (chat) chat.attention++; }
   for (const t of attention.review) { const where = missions.get(t.missionId); const chat = where ? chats.get(where) : undefined; if (chat) chat.attention++; }
   return [...chats.values()].sort((a, b) => b.at - a.at || a.name.localeCompare(b.name));
@@ -258,6 +267,7 @@ export class AgentsView {
    */
   readAt = $state.raw<Record<string, number>>({});
   private readCore: string | null = null;
+  private readRefresh: ReturnType<typeof setTimeout> | null = null;
   /** The view key whose older page is loading. */
   loadingOlder = $state<string | null>(null);
   /** Per view key, whether a page said older records remain. Missing means the snapshot's flag for the kind. */
@@ -304,6 +314,8 @@ export class AgentsView {
   /** Off screen: no snapshot is fetched for changes nobody sees. */
   pause(): void {
     this.shown = false;
+    if (this.readRefresh !== null) clearTimeout(this.readRefresh);
+    this.readRefresh = null;
     this.off?.(); this.off = null;
   }
   private listen(): void {
@@ -376,6 +388,20 @@ export class AgentsView {
     if ((marks[key] ?? 0) >= at) return;
     this.readAt = { ...marks, [key]: at };
     try { localStorage.setItem(READ_KEY, JSON.stringify({ ...readStored(), [this.readCore ?? '']: this.readAt })); } catch { /* the count stays for this session */ }
+    // A jump can cross records never loaded here; only the core can recount
+    // those exactly. Coalesce scroll events instead of issuing a call per row.
+    if (this.shown && this.readRefresh === null) this.readRefresh = setTimeout(() => { this.readRefresh = null; if (this.shown) void this.refresh(); }, 200);
+  }
+  /** A bounded conversation window; the renderer owns which adjacent pages remain on screen. */
+  async readMessages(params: RpcParams<'agents.messages'>): Promise<RpcResult<'agents.messages'> | null> {
+    const client = this.client;
+    if (!client || this.disposed) return null;
+    try {
+      const page = await client.call('agents.messages', params);
+      if (this.disposed || client !== this.store.client) return null;
+      this.seen = absorb(this.seen, page);
+      return page;
+    } catch (error) { if (!this.disposed) this.error = errorText(error); return null; }
   }
   hasOlder(key: string, kind: AgentHistoryKind): boolean {
     return this.older[key] ?? this.snapshot?.more[kind] ?? false;
@@ -433,5 +459,5 @@ export class AgentsView {
     this.saves = run.catch(() => undefined);
     return run;
   }
-  close(): void { this.disposed = true; this.off?.(); }
+  close(): void { this.pause(); this.disposed = true; }
 }

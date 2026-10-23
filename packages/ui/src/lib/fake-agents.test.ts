@@ -80,8 +80,14 @@ test('the fake bounds snapshot bodies, counts all unread replies and pages older
   }
   const snapshot = fake.snapshot([]);
   expect(snapshot.messages).toHaveLength(AGENT_HISTORY_PAGE);
+  expect(snapshot.more.message).toBe(true);
   expect(snapshot.unread).toEqual([{ scope, at: 0, count: AGENT_HISTORY_PAGE + 25 }]);
   expect(fake.snapshot([{ scope, at: Date.now() }]).unread).toEqual([]);
+  const window = fake.call('agents.messages', { scope, readAt: 0, limit: 7 }) as import('@boite/contracts').AgentMessagesPage;
+  expect(window.messages).toHaveLength(7); expect(window.older).toBe(false); expect(window.newer).toBe(true);
+  const edge = window.messages.at(-1)!;
+  const next = fake.call('agents.messages', { scope, after: { createdAt: edge.createdAt, id: edge.id }, limit: 7 }) as import('@boite/contracts').AgentMessagesPage;
+  expect(new Set([...window.messages, ...next.messages].map(m => m.id)).size).toBe(14);
   expect(snapshot.memories).toHaveLength(AGENT_HISTORY_PAGE);
   expect(snapshot.more.memory).toBe(true);
   const seen = new Set(snapshot.memories.map(m => m.id));

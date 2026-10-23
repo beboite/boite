@@ -118,7 +118,7 @@
       {#each rows as { machine, view: owner, chat, live } (JSON.stringify([machine.id, chat.kind, chat.id]))}
         {@const key = chatKey(chat.kind, chat.id)}
         {@const thread = live.get(key) ?? null}
-        {@const waiting = waitingForUser(owner.snapshot, chat.scope, thread)}
+        {@const waiting = waitingForUser(owner.snapshot, chat.scope ?? { kind: 'team', id: chat.id }, thread)}
         <AgentRow title={chat.name} open={owner === view && active === key} unread={chat.unread} away={machine.store.connection !== 'ready'} at={chat.at} {now} detail={detail(owner.snapshot, chat)} machine={multi ? machine : undefined} testid="agent-entry-{chat.id}" onclick={() => openRow(machine, chat.kind, chat.id)}>
           {#snippet picture()}<AgentAvatar kind={chat.kind} id={chat.id} name={chat.name} avatar={chat.avatar} members={memberList(owner.snapshot, chat)} status={waiting ? 'waiting' : thread ? 'running' : 'idle'} size={22} />{/snippet}
         </AgentRow>

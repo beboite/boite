@@ -289,6 +289,8 @@ export type AgentRunSummary = Omit<AgentRun, 'context'> & { context: Omit<AgentR
 export type AgentHistoryKind = 'message' | 'work' | 'memory';
 /** Records are ordered by their last change, newest first. A cursor is the oldest record a client already holds. */
 export interface AgentHistoryCursor { updatedAt: number; id: string }
+/** Stable chronological position, including messages created in the same millisecond. */
+export interface AgentMessageCursor { createdAt: number; id: string }
 export interface AgentsHistoryPage {
   messages: AgentConversationMessage[];
   work: AgentWork[];
@@ -305,6 +307,7 @@ export const AGENT_HISTORY_MAX_PAGE = 200;
 /** Device-local reading positions. Only incoming conversation messages count. */
 export interface AgentReadMark { scope: AgentScope; at: number }
 export interface AgentUnread extends AgentReadMark { count: number }
+export interface AgentMessagesPage extends Omit<AgentsHistoryPage, 'more'> { older: boolean; newer: boolean }
 export interface AgentsSnapshot {
   routines: AgentRoutine[];
   accountGrants: AgentAccountGrant[];
@@ -358,6 +361,11 @@ export interface AgentsRpcMethods {
   'agents.routine.run': { params: { routineId: string; requestId: string }; result: AgentWork };
   'agents.context.compact': { params: { sessionId: string; requestId: string }; result: AgentWork };
   'agents.snapshot': { params: { threadId?: string; readAt?: AgentReadMark[] }; result: AgentsSnapshot };
+  /** A bounded chronological window: at the first incoming message after readAt, before/after a cursor, or at the latest messages. */
+  'agents.messages': {
+    params: { threadId?: string; scope: AgentScope; readAt?: number; before?: AgentMessageCursor; after?: AgentMessageCursor; limit?: number };
+    result: AgentMessagesPage;
+  };
   /**
    * Older records of one kind, newest first, strictly before `before`. `scopes`
    * and `agentId` narrow the page; an agent session is held to its own context.

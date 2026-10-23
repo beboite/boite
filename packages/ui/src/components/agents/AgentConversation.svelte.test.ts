@@ -44,7 +44,7 @@ test('an agent message follows a reader at the bottom and leaves one reading old
     store: useStore(), readAt: { 'profile:a-ada': at },
     pending: false,
     loadingOlder: null,
-    fill() {},
+    readMessages: async () => null, fill() {},
     markRead() {},
     hasOlder: () => false,
     loadOlder: async () => {},
@@ -78,6 +78,7 @@ test('an agent message follows a reader at the bottom and leaves one reading old
   view.seen.messages = [...view.seen.messages, message('m3', 'a-ada')];
   await settle();
   expect(top).toBe(1000);
+  expect(document.querySelector('[data-testid="agent-unread-divider"]')).toBeNull();
 
   // The user's own message always shows, wherever they were.
   top = 0;
@@ -93,7 +94,7 @@ test('opening unread messages starts at the first missed one and reads only the 
     seen: { messages: items, deliveries: [], decisions: [] },
     snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
     store: useStore(), readAt: { 'profile:a-ada': items[0]!.createdAt }, markRead,
-    pending: false, loadingOlder: null, fill() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
+    pending: false, loadingOlder: null, readMessages: async () => null, fill() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
   });
   mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
   const box = document.querySelector<HTMLElement>('.agent-chat-scroll')!;
@@ -114,12 +115,45 @@ test('opening unread messages starts at the first missed one and reads only the 
   expect(markRead).toHaveBeenLastCalledWith('profile:a-ada', items[2]!.createdAt);
 });
 
+test('a previous send failure does not keep another conversation on loading', async () => {
+  const view = replyView({}, {}, {});
+  view.error = 'Earlier send failed';
+  mounted = mount(AgentConversation, { target: document.body, props: { view, scope } });
+  await settle();
+  expect(document.querySelector('.agent-reading-status')).toBeNull();
+});
+
+test('an entrusted thread marker participates in reading and unread navigation', async () => {
+  const view = replyView({}, { thread: { id: 't-entrusted', title: 'Review', event: 'entrusted' } });
+  const markRead = vi.fn(); view.markRead = markRead;
+  mounted = mount(AgentConversation, { target: document.body, props: { view, scope } });
+  const box = document.querySelector<HTMLElement>('.agent-chat-scroll')!;
+  Object.defineProperties(box, { clientHeight: { value: 200 }, scrollHeight: { value: 200 } });
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 200, height: 200 } as DOMRect);
+  await settle();
+  expect(markRead).toHaveBeenCalledWith('profile:a-ada', view.seen.messages[0]!.createdAt);
+});
+
+test('a failed adjacent page stops automatic paging and leaves loaded messages visible', async () => {
+  const view = replyView({});
+  const readMessages = vi.fn().mockResolvedValueOnce({ messages: view.seen.messages, work: [], memories: [], deliveries: [], runs: [], decisions: [], older: false, newer: true }).mockResolvedValue(null);
+  view.readMessages = readMessages;
+  mounted = mount(AgentConversation, { target: document.body, props: { view, scope } });
+  const box = document.querySelector<HTMLElement>('.agent-chat-scroll')!;
+  Object.defineProperties(box, { clientHeight: { value: 200 }, scrollHeight: { value: 200 } });
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 200, height: 200 } as DOMRect);
+  await settle();
+  expect(readMessages).toHaveBeenCalledTimes(2);
+  expect(document.querySelector('[data-message-id="m-reply"]')).not.toBeNull();
+  expect(document.querySelector('.agent-reading-status')).toBeNull();
+});
+
 test('HTTP agent sending keeps its secure request id for an uncertain retry', async () => {
   vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
   const call = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'm-sent' });
   const view = {
     seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
-    store: useStore(), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
+    store: useStore(), pending: false, loadingOlder: null, readMessages: async () => null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
   };
   mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
   await settle();
@@ -147,7 +181,7 @@ function replyView(work: Record<string, unknown>, reply: Record<string, unknown>
       work: [{ id: 'w-1', messageId: null, taskId: null, ...work }],
     },
     snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [], routines: [] },
-    store: useStore(store), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
+    store: useStore(store), pending: false, loadingOlder: null, readMessages: async () => null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
   } as unknown as AgentsView;
 }
 
@@ -234,7 +268,7 @@ test('the conversation keeps attachments and dictation with engine controls in s
   const call = vi.fn().mockResolvedValue({ id: 'm-sent' });
   const view = {
     seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
-    store: useStore(), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
+    store: useStore(), pending: false, loadingOlder: null, readMessages: async () => null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
   };
   mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
   await settle();
@@ -262,7 +296,7 @@ test('a retry keeps its request id only for the same bytes: another file of the 
   const call = vi.fn().mockResolvedValue(null);
   const view = {
     seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
-    store: useStore(), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
+    store: useStore(), pending: false, loadingOlder: null, readMessages: async () => null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
   };
   mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
   await settle();
@@ -291,7 +325,7 @@ test('a picture the user sent shows as a thread\'s does once the agent\'s turn h
   const waiting = { ...message('m-waiting', null), text: 'And this', attachments: [{ kind: 'file', mimeType: 'text/plain', name: 'notes.txt', bytes: 5 }] };
   const view = {
     seen: { messages: [sent, waiting], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
-    store: useStore({ loadMessageAttachment, loadDisplayImage }), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
+    store: useStore({ loadMessageAttachment, loadDisplayImage }), pending: false, loadingOlder: null, readMessages: async () => null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
   } as unknown as AgentsView;
   mounted = mount(AgentConversation, { target: document.body, props: { view, scope } });
   await settle();

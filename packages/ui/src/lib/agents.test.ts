@@ -184,6 +184,19 @@ test('running and waiting work lights the conversation it belongs to and the age
   expect(waitingForUser(pending, { kind: 'group', id: 'table' }, null)).toBe(false);
 });
 
+test('pending mission decisions mark their home group, agent or standalone team', () => {
+  const { snapshot } = directory();
+  const decision = { workId: 'w', status: 'pending' } as AgentEntities['decision'];
+  const missionWork = (id: string) => ({ id: 'w', agentId: 'mira', scope: { kind: 'mission', id }, status: 'waiting' }) as AgentEntities['work'];
+  const waiting = { ...snapshot, work: [missionWork('m-studio')], decisions: [decision] };
+  expect(waitingForUser(waiting, { kind: 'group', id: 'table' }, null)).toBe(true);
+  waiting.work = [missionWork('m-solo')];
+  expect(waitingForUser(waiting, { kind: 'agent', id: 'atlas' }, null)).toBe(true);
+  waiting.missions = [...waiting.missions, { ...waiting.missions[0]!, id: 'm-crew', teamId: 'crew' }];
+  waiting.work = [missionWork('m-crew')];
+  expect(waitingForUser(waiting, { kind: 'team', id: 'crew' }, null)).toBe(true);
+});
+
 /** The threads agent sessions run in: Atlas in the group, Mira alone (waiting on the user), and Mira's archived one. */
 function sessionThreads() {
   const { snapshot } = directory();
@@ -243,6 +256,19 @@ test('avatars take a short avatar or the initials, previews drop markdown', () =
   expect(avatarText('Mira', 'a long avatar')).toBe('M');
   expect(avatarText('  ')).toBe('?');
   expect(previewOf('**Bold** and `code`\n\n- [a link](https://x)')).toBe('Bold and code - a link');
+});
+
+test('read marks refresh retained totals even when a jump crosses messages never loaded', async () => {
+  vi.useFakeTimers(); localStorage.clear();
+  const { snapshot } = directory();
+  const call = vi.fn(async (_method: string, params: { readAt?: { at: number }[] }) => ({ ...snapshot, unread: params.readAt?.some(m => m.at >= 100) ? [] : [{ scope: { kind: 'agent', id: 'mira' }, at: 0, count: 75 }] }));
+  const view = new AgentsView({ client: { call, on: () => () => {} }, core: { coreId: 'jump' } } as unknown as Store);
+  try {
+    view.start(); await view.refresh();
+    view.markRead('profile:mira', 100);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(view.snapshot?.unread).toEqual([]);
+  } finally { view.close(); vi.useRealTimers(); localStorage.clear(); }
 });
 
 test('read marks survive a return visit and distinguish cores with the same data directory', async () => {

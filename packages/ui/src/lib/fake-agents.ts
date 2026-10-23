@@ -319,6 +319,22 @@ export class FakeAgents {
     }
     return [...counts.values()];
   }
+  private messagePage(p: RpcParams<'agents.messages'>) {
+    const limit = p.limit ?? AGENT_HISTORY_PAGE;
+    if (!Number.isInteger(limit) || limit < 1 || limit > AGENT_HISTORY_MAX_PAGE) this.refuse(`limit: expected an integer from 1 to ${AGENT_HISTORY_MAX_PAGE}`);
+    if ([p.readAt, p.before, p.after].filter(v => v !== undefined).length > 1) this.refuse('readAt/before/after: expected only one reading position');
+    if (p.readAt !== undefined && (!Number.isSafeInteger(p.readAt) || p.readAt < 0)) this.refuse('readAt: expected a nonnegative safe integer');
+    for (const [field, cursor] of [['before', p.before], ['after', p.after]] as const) if (cursor && (!Number.isSafeInteger(cursor.createdAt) || cursor.createdAt < 0 || !cursor.id)) this.refuse(`${field}: expected createdAt and id`);
+    const all = this.all('message').filter(m => m.scope.kind === p.scope.kind && m.scope.id === p.scope.id).sort(byCreation);
+    const pivot = p.readAt === undefined ? -1 : all.findIndex(m => m.senderId !== null && m.createdAt > p.readAt!);
+    const compare = (m: AgentConversationMessage, c: { createdAt: number; id: string }) => m.createdAt - c.createdAt || (m.id < c.id ? -1 : m.id > c.id ? 1 : 0);
+    let start = Math.max(0, all.length - limit), end = all.length;
+    if (p.before) { end = all.findIndex(m => compare(m, p.before!) >= 0); if (end < 0) end = all.length; start = Math.max(0, end - limit); }
+    else if (p.after) { start = all.findIndex(m => compare(m, p.after!) > 0); if (start < 0) start = all.length; end = Math.min(all.length, start + limit); }
+    else if (pivot >= 0) { start = Math.max(0, Math.min(pivot, all.length - limit)); end = Math.min(all.length, start + limit); }
+    const messages = all.slice(start, end);
+    return { messages, work: [], memories: [], ...this.related(messages, []), older: start > 0, newer: end < all.length };
+  }
   private history(p: RpcParams<'agents.history'>): AgentsHistoryPage {
     const kind = HISTORY_KIND[p.kind];
     if (!kind) this.refuse('kind: expected message, work, memory');
@@ -332,7 +348,7 @@ export class FakeAgents {
     return { ...empty, work: page.items as AgentWork[], ...this.related([], page.items as AgentWork[]), more: page.more };
   }
   call(method: keyof AgentsRpcMethods, raw: unknown): unknown {
-    try { return this.dispatch(method, raw); } finally { if (method !== 'agents.snapshot' && method !== 'agents.history') this.kick(); }
+    try { return this.dispatch(method, raw); } finally { if (method !== 'agents.snapshot' && method !== 'agents.history' && method !== 'agents.messages') this.kick(); }
   }
   private readonly handlers: AgentHandlers = {
     'agents.runtime.get': p => this.runtime(p.agentId),
@@ -345,6 +361,7 @@ export class FakeAgents {
     'agents.routine.run': p => this.runRoutine(p),
     'agents.context.compact': p => this.compactContext(p),
     'agents.snapshot': p => this.snapshot(p.readAt),
+    'agents.messages': p => this.messagePage(p),
     'agents.history': p => this.history(p),
     'agents.profile.save': p => this.saveProfile(p),
     'agents.group.save': p => this.saveGroup(p),

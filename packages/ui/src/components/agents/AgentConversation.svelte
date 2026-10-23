@@ -3,8 +3,8 @@
   import { secureId } from '../../lib/secure-id';
   import { onDestroy, tick, untrack } from 'svelte';
   import { ArrowDown, Brain, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, FileText, FolderKanban, Handshake, Image } from '@lucide/svelte';
-  import type { AgentConversationMessage, AgentScope, AgentWork, Attachment, ImageMimeType, Message, MessagePart, ThreadSummary } from '@boite/contracts';
-  import { chatKey, type AgentsView } from '../../lib/agents.svelte';
+  import type { AgentConversationMessage, AgentMessagesPage, AgentScope, AgentWork, Attachment, ImageMimeType, Message, MessagePart, ThreadSummary } from '@boite/contracts';
+  import { chatKey, unreadMessages, type AgentsView } from '../../lib/agents.svelte';
   import { fill, strings } from '../../lib/strings';
   import { avatarStatus } from '../../lib/thread-state';
   import { bytes, longDay } from '../../lib/format';
@@ -45,16 +45,20 @@
   const labels = $derived(strings.agents);
   const group = $derived(scope.kind === 'group' ? view.snapshot?.groups.find(g => g.id === scope.id) : null);
   const agent = $derived(scope.kind === 'agent' ? view.snapshot?.profiles.find(a => a.id === scope.id) ?? null : null);
-  const messages = $derived(view.seen.messages.filter(m => m.scope.kind === scope.kind && m.scope.id === scope.id));
+  let page = $state<AgentMessagesPage | null>(null);
+  let loading = $state(false);
+  let followedSnapshot: number | undefined;
+  const held = $derived(view.seen.messages.filter(m => m.scope.kind === scope.kind && m.scope.id === scope.id));
+  const messages = $derived(page ? page.messages.map(m => held.find(h => h.id === m.id) ?? m) : held);
   const key = $derived(`message:${scope.kind}:${scope.id}`);
-  const history = $derived({ kind: 'message' as const, scopes: [scope] });
   const newest = $derived(messages.at(-1));
   const readKey = $derived(chatKey(scope.kind === 'agent' ? 'profile' : 'group', scope.id));
-  let entry = $state<{ key: string; at: number } | null>(null);
+  let entry = $state<{ key: string; at: number; count: number | null } | null>(null);
   let ready = $state(false);
   let awayFromBottom = $state(false);
-  const firstMissed = $derived(messages.find(m => m.senderId !== null && m.createdAt > (entry?.at ?? 0)));
-  const missedAtEntry = $derived(messages.filter(m => m.senderId !== null && m.createdAt > (entry?.at ?? 0)).length);
+  const firstMissed = $derived(entry?.count === 0 ? undefined : messages.find(m => m.senderId !== null && m.createdAt > (entry?.at ?? 0)));
+  const missedAtEntry = $derived(entry?.count ?? unreadMessages(view.snapshot, held, scope, entry?.at ?? 0));
+  const unreadTotal = $derived(unreadMessages(view.snapshot, held, scope, view.readAt?.[readKey] ?? 0));
   const unread = $derived(messages.filter(m => m.senderId !== null && m.createdAt > (view.readAt?.[readKey] ?? 0)));
   const missedLabel = (count: number) => fill(count === 1 ? labels.missedOne : labels.missedMany, { count: String(count) });
   let divider = $state<HTMLElement>();
@@ -63,27 +67,53 @@
   const worker = $derived(live ? view.snapshot?.profiles.find(a => view.snapshot?.sessions.some(s => s.threadId === live.id && s.agentId === a.id)) ?? null : null);
   $effect.pre(() => {
     if (entry?.key === key) return;
-    entry = { key, at: untrack(() => view.readAt?.[readKey] ?? 0) };
-    ready = false;
+    entry = { key, at: untrack(() => view.readAt?.[readKey] ?? 0), count: null };
+    ready = false; page = null; loading = false; followedSnapshot = undefined;
   });
-  // Page back to the saved reading position before choosing the first missed
-  // message. A snapshot is global and may hold none of this conversation.
+  // One indexed window starts at the first unread reply, even on a new device.
   $effect(() => {
-    if (ready || !entry || !scroller || !view.snapshot || view.loadingOlder || view.error) return;
-    if (view.hasOlder(key, 'message') && (!messages.length || messages[0]!.createdAt > entry.at)) {
-      void view.loadOlder(key, history, messages);
-      return;
-    }
-    const opening = key;
-    void tick().then(() => {
-      if (disposed || opening !== key || !scroller) return;
-      if (firstMissed && divider) scroller.scrollTop += divider.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-      else scroller.scrollTop = scroller.scrollHeight;
-      followed = newest?.id ?? '';
-      ready = true;
-      readVisible();
-    });
+    if (!ready && !loading && entry && scroller && view.snapshot) void untrack(() => loadMessages('open'));
   });
+  // A bounded window that reached the end can pick up new replies. Older reading
+  // windows wait for a scroll or the unread button, so no gap is ever skipped.
+  $effect(() => {
+    if (!ready || loading || !page || page.newer) return;
+    if (view.snapshot?.revision === followedSnapshot) return;
+    if (view.snapshot?.messages.some(m => m.scope.kind === scope.kind && m.scope.id === scope.id && (!newest || m.createdAt > newest.createdAt || m.createdAt === newest.createdAt && m.id > newest.id))) {
+      followedSnapshot = view.snapshot.revision;
+      void untrack(() => loadMessages('newer'));
+    }
+  });
+  async function loadMessages(direction: 'open' | 'older' | 'newer' | 'latest') {
+    if (loading || disposed || !scroller || !entry) return;
+    const opening = key, box = scroller, height = box.scrollHeight, top = box.scrollTop;
+    loading = true;
+    if (direction === 'open') entry = { ...entry, count: unreadMessages(view.snapshot, held, scope, entry.at) };
+    const edge = direction === 'older' ? messages[0] : direction === 'newer' ? newest : undefined;
+    const cursor = edge ? { createdAt: edge.createdAt, id: edge.id } : undefined;
+    const next = await view.readMessages({ scope, ...(direction === 'open' ? { readAt: entry.at } : direction === 'older' ? { before: cursor } : direction === 'newer' ? { after: cursor } : {}) });
+    if (disposed || opening !== key || box !== scroller) return;
+    if (next) {
+      const all = direction === 'older' ? [...next.messages, ...messages] : direction === 'newer' ? [...messages, ...next.messages] : next.messages;
+      const unique = [...new Map(all.map(m => [m.id, m])).values()];
+      // Adjacent history is appended without treating it as a newly arriving reply.
+      const follow = direction === 'newer' && !page?.newer && !awayFromBottom;
+      if (direction === 'older' || direction === 'newer' && page?.newer) awayFromBottom = true;
+      followed = unique.at(-1)?.id ?? '';
+      page = { ...next, messages: unique, older: direction === 'newer' ? page?.older ?? next.older : next.older, newer: direction === 'older' ? page?.newer ?? next.newer : next.newer };
+      if (follow) await tick().then(() => { if (!disposed && box === scroller) box.scrollTop = box.scrollHeight; });
+    }
+    await tick();
+    if (disposed || opening !== key || box !== scroller) return;
+    if (direction === 'open') {
+      if (firstMissed && divider) box.scrollTop += divider.getBoundingClientRect().top - box.getBoundingClientRect().top;
+      else box.scrollTop = box.scrollHeight;
+    } else if (direction === 'older') box.scrollTop = top + box.scrollHeight - height;
+    else if (direction === 'latest') box.scrollTop = box.scrollHeight;
+    followed = newest?.id ?? '';
+    ready = true; loading = false;
+    if (next || !page) readVisible();
+  }
   /**
    * A user's own new message scrolls to the bottom. An agent's
    * message does only for a reader already there, measured before it is drawn;
@@ -103,7 +133,7 @@
   function readVisible() {
     if (disposed) return;
     const box = scroller;
-    if (!ready || !box || !box.clientHeight || document.hidden) return;
+    if (!ready || !box || !box.clientHeight || document.hidden || !page && view.error) return;
     awayFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight >= NEAR_BOTTOM;
     const bounds = box.getBoundingClientRect();
     let at = view.readAt?.[readKey] ?? 0;
@@ -112,10 +142,13 @@
       if (rect.top < bounds.top + box.clientHeight && rect.bottom > bounds.top) at = Math.max(at, Number(row.dataset.messageAt));
     }
     if (at > 0) untrack(() => view.markRead(readKey, at));
+    if (!awayFromBottom && page?.newer && !loading) void loadMessages('newer');
   }
-  function jumpToUnread() {
+  async function jumpToUnread() {
     const box = scroller;
     if (!box) return;
+    if (!unread.length && page?.newer) await loadMessages(unreadTotal ? 'newer' : 'latest');
+    if (disposed) return;
     const first = unread[0];
     const row = first ? [...box.querySelectorAll<HTMLElement>('[data-message-id]')].find(row => row.dataset.messageId === first.id) : null;
     if (row) box.scrollTop += row.getBoundingClientRect().top - box.getBoundingClientRect().top;
@@ -189,7 +222,7 @@
     try {
       if (!request || request.signature !== signature) request = { signature, id: secureId() };
       const sent = await view.call('agents.message.send', { scope, text, recipientIds, requestId: request.id, ...(attachments.length ? { attachments } : {}) });
-      if (sent) { request = null; return true; }
+      if (sent) { request = null; await loadMessages('latest'); return true; }
     } catch (error) { view.error = errorText(error); }
     return false;
   }
@@ -247,7 +280,7 @@
   <div class="agent-chat-scroll" bind:this={scroller} onscroll={readVisible}>
     <div class="agent-chat-column" data-testid="agent-transcript">
       {#if !ready}<p class="agent-reading-status" role="status">{labels.loadingMissed}</p>{/if}
-      {#if view.hasOlder(key, 'message')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === key} onclick={() => void view.loadOlder(key, history, messages)} data-testid="agent-messages-older">{labels.loadEarlier}</button>{/if}
+      {#if page?.older || !page && view.hasOlder(key, 'message')}<button type="button" class="ghost small agent-older" disabled={loading} onclick={() => void loadMessages(page ? 'older' : 'open')} data-testid="agent-messages-older">{labels.loadEarlier}</button>{/if}
       {#each messages as message, index (message.id)}
         {@const previous = messages[index - 1]}
         {@const mine = message.senderId === null}
@@ -278,7 +311,7 @@
           <!-- Taking a thread over is a moment of the conversation, marked across it the way a started thread is. -->
           {@const event = message.thread}
           {@const present = view.store.threads.some(t => t.id === event.id)}
-          <div class="agent-marker" data-testid="agent-thread-event" data-event="entrusted">
+          <div class="agent-marker" data-message-id={message.id} data-message-at={message.createdAt} data-testid="agent-thread-event" data-event="entrusted">
             <span class="rule"></span>
             {#if present}
               <button type="button" class="ghost small label" title={labels.openThread} onclick={() => void view.store.open(event.id)} data-testid="agent-thread-event-open"><Handshake size={13} strokeWidth={1.75} /><span class="ui-label">{fill(labels.threadEvent.entrusted, { name: nameOf(message.senderId!), title: event.title })}</span></button>
@@ -333,6 +366,7 @@
         </div>
       {/each}
 
+      {#if page?.newer}<button type="button" class="ghost small agent-older" disabled={loading} onclick={() => void loadMessages('newer')} data-testid="agent-messages-newer">{labels.loadLater}</button>{/if}
       {#each pending as work (work.id)}<AgentWorkCard {view} {work} compact />{/each}
       <AgentPendingQuestions {view} {scope} />
 
@@ -350,7 +384,7 @@
   </div>
 
   {#if ready && awayFromBottom}
-    <div class="agent-jump"><button type="button" class="chip" onclick={jumpToUnread} data-testid="agent-jump-unread"><ArrowDown size={14} /><span>{unread.length ? missedLabel(unread.length) : labels.latestMessages}</span></button></div>
+    <div class="agent-jump"><button type="button" class="chip" onclick={jumpToUnread} data-testid="agent-jump-unread"><ArrowDown size={14} /><span>{unreadTotal ? missedLabel(unreadTotal) : labels.latestMessages}</span></button></div>
   {/if}
 
   <Composer store={view.store} {target} />

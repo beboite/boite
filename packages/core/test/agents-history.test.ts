@@ -28,7 +28,38 @@ test('unread counts include incoming messages outside the snapshot window and re
     expect(snapshot.unread).toEqual([{ scope: target, at: 0, count: HISTORY }]);
     const read = await c.call('agents.snapshot', { readAt: [{ scope: target, at: Date.now() }] });
     expect(read.unread).toEqual([]);
+    // A device keeps positions for all conversations, including removed ones.
+    const marks = Array.from({ length: 100 }, (_, i) => ({ scope: { kind: 'group' as const, id: `old-${i}` }, at: 1 }));
+    expect((await c.call('agents.snapshot', { readAt: [...marks, { scope: target, at: Date.now() }] })).unread).toEqual([]);
     expect(await thrown(c.call('agents.snapshot', { readAt: [{ scope: target, at: -1 }] }))).toThrow('readAt[0].at');
+  } finally { await h.stop(); }
+});
+
+test('message windows seek to the first unread reply and page in both directions without crossing scopes', async () => {
+  const h = await startTestCore();
+  try {
+    const c = await h.connect(), agent = await agentOf(h, c);
+    const target: AgentScope = { kind: 'agent', id: agent.id };
+    const records = h.core.workforce.records;
+    for (let i = 0; i < HISTORY; i++) records.create('message', { scope: target, senderId: agent.id, text: `reply ${i}`, recipientIds: [], replyTo: null, episodeId: 'window', sourceRunId: null });
+    // Equal creation timestamps and an attachment edit must not reorder the reading cursor.
+    h.core.journal.db.exec("UPDATE agent_entities SET created_at = 1000, data = json_set(data, '$.createdAt', 1000) WHERE kind = 'message'");
+    const opened = await c.call('agents.messages', { scope: target, readAt: 0, limit: 7 });
+    expect(opened.messages).toHaveLength(7);
+    expect(opened.older).toBe(false); expect(opened.newer).toBe(true);
+    const edited = opened.messages[2]!;
+    records.update('message', edited.id, edited.revision, { ...edited, text: 'Metadata updated later' });
+    const end = opened.messages.at(-1)!;
+    const next = await c.call('agents.messages', { scope: target, after: { createdAt: end.createdAt, id: end.id }, limit: 7 });
+    expect(next.messages).toHaveLength(7); expect(next.older).toBe(true);
+    expect(new Set([...opened.messages, ...next.messages].map(m => m.id)).size).toBe(14);
+    const first = next.messages[0]!;
+    const back = await c.call('agents.messages', { scope: target, before: { createdAt: first.createdAt, id: first.id }, limit: 7 });
+    expect(back.messages.map(m => m.id)).toEqual(opened.messages.map(m => m.id));
+    const latest = await c.call('agents.messages', { scope: target, readAt: 1000, limit: 7 });
+    expect(latest.newer).toBe(false); expect(latest.older).toBe(true);
+    expect(await thrown(c.call('agents.messages', { scope: target, readAt: -1 }))).toThrow('readAt');
+    expect(await thrown(c.call('agents.messages', { scope: target, readAt: 0, after: { createdAt: end.createdAt, id: end.id } }))).toThrow('expected only one');
   } finally { await h.stop(); }
 });
 
@@ -164,6 +195,12 @@ test('an agent session pages only its own context and provenance', async () => {
       for (const scope of [own, shared]) r.create('message', { scope, senderId: agent.id, text: 'Private reply', recipientIds: [], replyTo: null, episodeId: 'private-count', sourceRunId: null });
       const unread = await scoped.call('agents.snapshot', { threadId: thread.id, readAt: [] });
       expect(unread.unread).toEqual([{ scope: own, at: 0, count: 1 }]);
+      const window = await scoped.call('agents.messages', { threadId: thread.id, scope: own, readAt: 0, limit: 7 });
+      expect(window.messages).toHaveLength(7);
+      expect(window.messages.filter(m => m.senderId !== null)).toHaveLength(1);
+      expect(window.messages.every(m => m.scope.id === own.id)).toBe(true);
+      expect((await scoped.call('agents.messages', { threadId: thread.id, scope: own, limit: 7 })).messages).toHaveLength(7);
+      expect(await thrown(scoped.call('agents.messages', { threadId: thread.id, scope: shared }))).toThrow('own context');
     } finally { scoped.close(); }
   } finally { await h.stop(); }
 }, 30000);
@@ -182,6 +219,7 @@ test('targeted lookups and pages go through their indexes', async () => {
       ["SELECT data FROM agent_entities INDEXED BY {index} WHERE kind = 'decision' AND json_extract(data, '$.workId') IN (?) ORDER BY created_at, rowid", 'agent_decision_work'],
       ["SELECT id FROM agent_entities INDEXED BY {index} WHERE kind = 'run' AND json_extract(data, '$.threadId') = ? AND json_extract(data, '$.finishedAt') > ? AND json_extract(data, '$.status') = 'done' ORDER BY json_extract(data, '$.finishedAt')", 'agent_run_thread'],
       ["SELECT data FROM agent_entities INDEXED BY {index} WHERE kind = 'message' AND json_extract(data, '$.scope.kind') = ? AND json_extract(data, '$.scope.id') = ? AND (updated_at, id) < (?, ?) ORDER BY updated_at DESC, id DESC LIMIT ?", 'agent_message_scope'],
+      ["SELECT data FROM agent_entities INDEXED BY {index} WHERE kind = 'message' AND json_extract(data, '$.scope.kind') = ? AND json_extract(data, '$.scope.id') = ? AND (created_at, id) > (?, ?) ORDER BY created_at, id LIMIT ?", 'agent_message_reading'],
       ["SELECT data FROM agent_entities INDEXED BY {index} WHERE kind = 'work' AND json_extract(data, '$.agentId') = ? AND (updated_at, id) < (?, ?) ORDER BY updated_at DESC, id DESC LIMIT ?", 'agent_work_agent'],
       ["SELECT data FROM agent_entities INDEXED BY {index} WHERE kind = 'memory' AND json_extract(data, '$.scope.kind') = ? AND json_extract(data, '$.scope.id') = ? ORDER BY updated_at DESC, id DESC LIMIT ?", 'agent_memory_scope'],
       ["SELECT data FROM agent_entities INDEXED BY {index} WHERE kind = 'message' AND (updated_at, id) < (?, ?) ORDER BY updated_at DESC, id DESC LIMIT ?", 'agent_recent'],

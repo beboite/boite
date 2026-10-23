@@ -484,6 +484,7 @@ function bindLegacyTurnRequests(db: Database): void {
 
 /** Maintain lookup indexes in the same transaction as the schema they serve. */
 export function ensureIndexes(db: Database): void {
+  db.exec("CREATE INDEX IF NOT EXISTS agent_message_reading ON agent_entities (json_extract(data, '$.scope.kind'), json_extract(data, '$.scope.id'), created_at, id) WHERE kind = 'message'");
   db.exec('CREATE INDEX IF NOT EXISTS thread_deletions_by_date ON thread_deletions (deleted_at)');
   db.exec('CREATE INDEX IF NOT EXISTS processes_by_started ON processes (thread_id, started_at DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS turns_by_status ON turns (status)');
