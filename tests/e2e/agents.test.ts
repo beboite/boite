@@ -195,7 +195,10 @@ test('Run now on a routine opens a "Routine · <name>" turn, and the list shows 
   const ran = turns(threadId).at(-1)!;
   expect(ran.status).toBe('done');
   await waitFor(() => harness.core.workforce.records.get('routine', routine.id)?.lastTurnId === ran.id, 5_000);
-  await page.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  // The settings stayed open through the run and its snapshot updates; a real Escape, sent where the focus is, closes them.
+  expect(await page.evaluate(`!!document.querySelector('.agent-sheet:not(.closing)')`)).toBe(true);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await page.waitFor(`!document.querySelector('.agent-sheet')`);
 }, 60_000);
 
