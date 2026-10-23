@@ -10,9 +10,13 @@ const { nsis: NSIS, generated: GENERATED, ready } = installerPrerequisites({ roo
 // store its expanded spelling, which the NSIS target comparison expects.
 const scratch = ready ? realpathSync.native(mkdtempSync(join(tmpdir(), 'boite-shortcuts-'))) : '';
 const running = new Set<Bun.Subprocess>();
+/** One install, update or uninstall of the fixture: a fraction of a second when nothing stalls. */
+const RUN_DEADLINE_MS = 10_000;
+let slowest = 0;
 // Where the fixture records its MainBinaryName, as the template does under its uninstall key.
 const UNINSTKEY = 'Software\\Boite shortcut test uninstall';
 afterAll(async () => {
+  if (slowest) console.log(`slowest installer run: ${slowest} ms`);
   for (const child of running) { child.kill(); await child.exited; }
   if (scratch) rmSync(scratch, { recursive: true, force: true });
   if (ready) Bun.spawnSync(['reg', 'delete', `HKCU\\${UNINSTKEY}`, '/f'], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
@@ -36,8 +40,18 @@ describe.skipIf(!ready)('installer shortcuts', () => {
     const removeEnd = template.indexOf('  ; Remove registry information', removeStart);
     expect(removeStart).toBeGreaterThan(0);
     expect(removeEnd).toBeGreaterThan(removeStart);
+    // Unpinning and clearing jump lists reach this machine's own Start menu
+    // and taskbar, which no redirection covers: the fixture records them
+    // instead. Both CI hangs ran out of time in this uninstall (#707,
+    // 2026-10-21, and #731, 2026-10-23), whose only calls into another
+    // process are these.
+    const record = (call: string) => `    FileOpen $9 "$INSTDIR\\shell-calls.txt" a\n    FileSeek $9 0 END\n    FileWrite $9 "${call}$\\n"\n    FileClose $9`;
     const remove = template.slice(removeStart, removeEnd)
-      .replace(/^.*!insertmacro MUI_STARTMENU_GETFOLDER.*$/m, '    StrCpy $AppStartMenuFolder ""');
+      .replace(/^.*!insertmacro MUI_STARTMENU_GETFOLDER.*$/m, '    StrCpy $AppStartMenuFolder ""')
+      .replace(/^\s*!insertmacro DeleteAppUserModelId\s*$/m, record('jump lists'))
+      .replace(/^\s*!insertmacro UnpinShortcut "([^"]+)"\s*$/gm, (_line, link: string) => record(`unpin ${link}`));
+    expect(remove).not.toContain('!insertmacro UnpinShortcut');
+    expect(remove).not.toContain('!insertmacro DeleteAppUserModelId');
     const finishAction = template.match(/^!define MUI_FINISHPAGE_SHOWREADME_FUNCTION (\w+)$/m)![1]!;
     const script = [
       'Unicode true', 'SetCompress off', 'RequestExecutionLevel user', 'SilentInstall silent',
@@ -74,11 +88,15 @@ describe.skipIf(!ready)('installer shortcuts', () => {
     const built = Bun.spawnSync([join(NSIS, 'makensis.exe'), '/V4', file], { windowsHide: true });
     if (built.exitCode !== 0) throw new Error(built.stdout.toString() + built.stderr.toString());
   }
+  // Each run gets its own deadline, so a stall names the run instead of timing the whole test out.
   async function run(exe: string, args: string[]) {
     const child = Bun.spawn([exe, '/S', ...args], { stdout: 'pipe', stderr: 'pipe', windowsHide: true });
     running.add(child);
-    const code = await child.exited;
+    const at = Date.now();
+    const code = await Promise.race([child.exited, Bun.sleep(RUN_DEADLINE_MS).then(() => 'stalled' as const)]);
     running.delete(child);
+    if (code === 'stalled') { child.kill(); throw new Error(`${exe} /S ${args.join(' ')} had not exited after ${RUN_DEADLINE_MS} ms`); }
+    slowest = Math.max(slowest, Date.now() - at);
     expect(code).toBe(0);
   }
   for (const [name, flags] of [['manual', []], ['in-app', ['/UPDATE']]] as const) {
@@ -98,6 +116,11 @@ describe.skipIf(!ready)('installer shortcuts', () => {
       }
       await run(join(install, 'uninstall.exe'), [`_?=${install}`]);
       for (const path of links) expect(existsSync(path)).toBe(false);
+      // The real uninstall's shell calls, each still made once per link.
+      // An empty Start menu folder leaves a doubled separator in the first path the template tries.
+      expect(readFileSync(join(install, 'shell-calls.txt'), 'utf8').replace(/\\+/g, '\\').split(/\r?\n/).filter(Boolean))
+        .toEqual(['jump lists', `unpin ${links[0]}`, `unpin ${links[1]}`]);
+      rmSync(join(install, 'shell-calls.txt'));
 
       // A user who removed these links must not get new ones on an update.
       await run(setup, [...flags, `/D=${install}`]);
