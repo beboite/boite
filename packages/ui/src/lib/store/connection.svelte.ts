@@ -432,6 +432,8 @@ export class Connection {
       const core = await client.connect();
       if (!this.ctx.currentClient(client, generation)) return;
       this.core = core;
+      // Before the landing: a draft it opens unfolds its project over the restored folds.
+      this.ctx.projects.restoreFolds();
       if (this.localCore) noteThisComputer(core.hostname);
       this.connection = client.state;
       this.principal = client.principal;

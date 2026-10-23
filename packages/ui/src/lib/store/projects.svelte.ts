@@ -49,9 +49,38 @@ export class Projects {
   }
 
   toggleProject(projectId: ProjectId): void {
-    this.collapsedProjects = this.ctx.store.isCollapsed(projectId)
+    this.#fold(this.ctx.store.isCollapsed(projectId)
       ? this.collapsedProjects.filter((id) => id !== projectId)
-      : [...this.collapsedProjects, projectId];
+      : [...this.collapsedProjects, projectId]);
+  }
+
+  /** A project something must show (a draft in it, a thread moved there) opens, and stays open after a restart. */
+  unfold(projectId: ProjectId): void {
+    if (this.isCollapsed(projectId)) this.#fold(this.collapsedProjects.filter((id) => id !== projectId));
+  }
+
+  /**
+   * Folds belong to this device and survive a restart. Per core, like the drafts:
+   * project ids can collide between machines, and the shell's own core may change port.
+   */
+  #foldsKey(): string {
+    const s = this.ctx.store;
+    return 'boite.foldedProjects.v1:' + JSON.stringify([s.localCore ? 'local' : s.machineId || s.endpointUrl, s.core?.hostname, s.core?.dataDir]);
+  }
+
+  #fold(ids: string[]): void {
+    this.collapsedProjects = ids;
+    try {
+      if (ids.length === 0) localStorage.removeItem(this.#foldsKey());
+      else localStorage.setItem(this.#foldsKey(), JSON.stringify(ids));
+    } catch { /* storage unavailable: the folds last until the app closes */ }
+  }
+
+  /** The folds this device left on the core that just answered. Unreadable storage keeps the ones on screen. */
+  restoreFolds(): void {
+    let stored: unknown;
+    try { stored = JSON.parse(localStorage.getItem(this.#foldsKey()) ?? '[]'); } catch { return; }
+    this.collapsedProjects = Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : [];
   }
 
   /** Per core, so two machines each land on their own project. */
@@ -450,6 +479,7 @@ export class Projects {
     this.ctx.drafts.forgetProject(projectId);
     for (const thread of s.threads.filter(t => t.projectId === projectId)) delete s.composerStates[thread.id];
     this.projects = this.projects.filter((p) => p.id !== projectId);
+    this.unfold(projectId);
     s.threads = s.threads.filter((t) => t.projectId !== projectId);
     if (s.openThread?.projectId === projectId || this.draft?.projectId === projectId) {
       this.ctx.threads.invalidateNavigation();
@@ -492,7 +522,7 @@ export class Projects {
     this.ctx.requests.keepRequestsOf(null);
     this.ctx.drafts.resume(target, { fresh, ...(draftId === undefined ? {} : { draftId }) });
     this.ctx.drafts.persist();
-    if (target !== null) this.collapsedProjects = this.collapsedProjects.filter(id => id !== target);
+    if (target !== null) this.unfold(target);
     if (target !== null) this.rememberProject(target);
     if (options.refresh !== false) void this.refreshProjects();
     s.page = 'chat';
@@ -519,7 +549,7 @@ export class Projects {
     this.draft = { ...kept, ...(draft.id ? {} : { id: secureId(), createdAt: created() }), ...(incognito && drafts ? { incognito } : {}), projectId: target, worktree: drafts || project?.repository !== true ? false : draft.worktreeExplicit ? draft.worktree : project?.worktreeDefault === true };
     if (target === null) return;
     this.rememberProject(target);
-    this.collapsedProjects = this.collapsedProjects.filter((id) => id !== target);
+    this.unfold(target);
   }
 
   /** The draft's incognito switch, offered in the drafts only. */

@@ -290,6 +290,9 @@ with the mouse or, on a phone, after holding a header still for a moment; a
 line shows where the project lands and Escape cancels. Their menus also offer Move project up and Move
 project down, including on a phone. Switching back to recent activity keeps
 the saved custom arrangement. The view and custom order belong to this device.
+So do folded projects: a project folded under its header stays folded after a
+restart, kept per core in localStorage (`boite.foldedProjects.v1`). A draft
+opened in a folded project, or a conversation moved into it, unfolds it.
 
 Recent flattens the list. Its All projects picker can limit conversations and
 drafts to one project on one machine. The new-conversation button and Ctrl+N
