@@ -25,3 +25,6 @@ export function ids(value: unknown, field: string, max = 100): string[] {
   if (new Set(found).size !== found.length) throw invalidParams(`${field}: duplicate entries are not allowed`);
   return found;
 }
+
+/** A field quoted from another thread, as a JSON string: its text can open no paragraph or heading of its own. */
+export const quoted = (text: string): string => JSON.stringify(text);

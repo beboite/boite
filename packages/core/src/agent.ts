@@ -29,6 +29,8 @@ const TASK_STATUSES: readonly AgentTask['status'][] = ['pending', 'in_progress',
 export class AgentTokens {
   private readonly byThread = new Map<ThreadId, string>();
   private readonly byToken = new Map<string, ThreadId>();
+  /** Threads whose token opens nothing: the core reads their answer and gives them no method (a memory pass). */
+  private readonly sealed = new Set<ThreadId>();
 
   /** The thread's token, the same one for every process it launches. */
   tokenFor(threadId: ThreadId): string {
@@ -42,7 +44,13 @@ export class AgentTokens {
 
   /** The thread a token speaks for, or null: a wrong token says nothing about which. */
   authenticate(token: string): ThreadId | null {
-    return this.byToken.get(token) ?? null;
+    const threadId = this.byToken.get(token);
+    return threadId === undefined || this.sealed.has(threadId) ? null : threadId;
+  }
+
+  /** From now on the thread's token, minted or not, authenticates nothing. */
+  seal(threadId: ThreadId): void {
+    this.sealed.add(threadId);
   }
 
   forget(threadId: ThreadId): void {

@@ -305,7 +305,8 @@ export class AgentStore {
     if (params.threadId !== undefined && !this.projects.follows(agent.id, target.id) && (target.projectId === null || !this.projects.projectsOf(agent).includes(target.projectId))) {
       throw refused(`agents.watch.watchThreadId: ${target.id} is not in a project entrusted to ${agent.name}`, { field: 'watchThreadId', expected: 'a thread of its projects' });
     }
-    this.projects.follow(agent.id, target.id, 'followed');
+    // The owner's watch is a grant of its own; the agent's holds while the thread's project is entrusted to it.
+    this.projects.follow(agent.id, target.id, 'followed', params.threadId === undefined);
     return this.watchesOf(agent.id).find(w => w.threadId === target.id) ?? null;
   }
 

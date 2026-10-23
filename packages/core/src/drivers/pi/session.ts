@@ -9,6 +9,7 @@ import {
   agentEnv,
   commandsOf,
   contentText,
+  contextArgs,
   imagesOf,
   modelArgs,
   numberOf,
@@ -443,6 +444,7 @@ export class PiSession {
       '--session-dir',
       sessionDir,
       ...modelArgs(ctx),
+      ...contextArgs(ctx.thread.contextMode),
     ];
     const child = ctx.spawnChild(launch.executable, args, {
       cwd: ctx.thread.cwd,

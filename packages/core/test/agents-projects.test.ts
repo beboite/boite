@@ -133,8 +133,8 @@ test('its messages reach a thread as the agent\'s whatever that thread\'s settin
   expect(h.core.coordination.get(worker).messages.find(m => m.id === letter.id)?.relation).toBe('resident');
 
   // The thread is on the agent's desk now: its turn's answer waits as a fact, a short while for more.
-  await waitFor(() => facts().some(f => f.text.includes(`Turn done in "Worker" (${worker}).`)));
-  expect(facts().find(f => f.text.includes(`(${worker})`))!.text).toContain('Done in');
+  await waitFor(() => facts().some(f => f.text.includes(`Turn done in thread ${worker}, titled "Worker".`)));
+  expect(facts().find(f => f.text.includes(worker))!.text).toContain('Its final answer: "Done in');
   expect((await h.connect().then(c => c.call('agents.snapshot', {}))).watches.map(w => [w.threadId, w.origin])).toContainEqual([worker, 'followed']);
   await Bun.sleep(700);
   expect(events()).toHaveLength(1);
@@ -162,8 +162,8 @@ test('events: failures and asks from any thread, finished turns only from follow
     const { questionId } = await asker.call('questions.ask', { threadId: quiet, text: 'Merge now?', options: ['Yes', 'No'] });
     await waitFor(() => facts().some(f => f.text.includes(questionId)));
     expect(facts().map(f => f.key)).toEqual([expect.stringMatching(/^turn:/), `ask:${questionId}`]);
-    expect(facts()[0]!.text).toContain(`Turn error in "Worker" (${worker})`);
-    expect(facts()[1]!.text).toContain('Merge now?');
+    expect(facts()[0]!.text).toContain(`Turn error in thread ${worker}, titled "Worker"`);
+    expect(facts()[1]!.text).toContain('Question: "Merge now?"');
     // The ask waits for the user first: its fact is due only past the grace delay.
     const pending = (h.core.agentRuntime as unknown as { pending: Map<string, { facts: { key: string; at: number; notBefore: number }[] }> }).pending.get(agent().id)!;
     const ask = pending.facts.find(f => f.key === `ask:${questionId}`)!;
@@ -186,7 +186,7 @@ test('it starts threads in its projects only, and the thread\'s first answer com
   expect(prompts.get(id)![0]).toContain('started by Ada, the persistent agent the user entrusted project Other to');
   expect(h.core.workforce.projects.follows(agent().id, id)).toBe(true);
   expect((await owner.call('agents.snapshot', {})).watches.find(w => w.threadId === id)).toMatchObject({ origin: 'started', projectId: other.id });
-  await waitFor(() => facts().some(f => f.text.includes(`(${id})`)));
+  await waitFor(() => facts().some(f => f.text.includes(id)));
 });
 
 test('the agent wakes a thread whose turn failed and puts it in Done once it is', async () => {

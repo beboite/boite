@@ -1,10 +1,10 @@
-import { afterEach, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import { existsSync, readFileSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Message, ThreadSummary } from '@boite/contracts';
 import { MEMORY_ARCHIVE } from '../src/agents/context.ts';
-import { migratedDisplay } from '../src/agents/migration.ts';
-import { echoAccount } from './agent-fixture.ts';
+import { migrateAgents, migratedDisplay } from '../src/agents/migration.ts';
+import { echoAccount, makeAgent } from './agent-fixture.ts';
 import { echoThread, removeDir, startTestCore, type TestCore } from './harness.ts';
 
 const cores: TestCore[] = [];
@@ -101,4 +101,56 @@ test('agents of a hidden-thread core come back as their threads, once, whatever 
       cores.splice(cores.indexOf(h), 1);
     }
   } finally { await removeDir(old.dataDir); }
+});
+
+/** A current core with one agent whose session still has its old scope, as if the upgrade had not run. */
+async function unmigrated() {
+  const h = await startTestCore(); cores.push(h);
+  const client = await h.connect();
+  const { agent } = await makeAgent(h, client);
+  const session = h.core.workforce.sessionOf(agent.id)!;
+  h.core.workforce.records.update('session', session.id, session.revision, { agentId: agent.id, threadId: session.threadId, scope: { kind: 'agent', id: agent.id } } as never);
+  h.core.journal.db.query("DELETE FROM settings WHERE key LIKE 'agents:migrated:%' OR key LIKE 'agents:memories-archived:%'").run();
+  const log = spyOn(h.core, 'log');
+  return { h, agent, log, logged: () => log.mock.calls.map(([, message]) => message) };
+}
+
+test('a malformed legacy row is skipped with its id named; the rest migrates and the upgrade is marked done', async () => {
+  const { h, agent, logged } = await unmigrated();
+  row(h, 'memory', 'agt_memory_bad', { scope: { kind: 'agent', id: agent.id }, text: { unexpected: true } });
+  row(h, 'memory', 'agt_memory_good', { scope: { kind: 'agent', id: agent.id }, title: 'Kept', text: 'A valid note.' });
+  row(h, 'session', 'agt_session_bad', { agentId: agent.id, threadId: 42 });
+  h.core.journal.db.query("INSERT INTO agent_entities (kind, id, revision, created_at, updated_at, data) VALUES ('memory', 'agt_memory_json', 1, 1, 1, '[1]')").run();
+  migrateAgents(h.core, h.core.workforce);
+  expect(h.core.journal.getSetting('agents:migrated:threads-v1')).toBeTruthy();
+  expect('scope' in h.core.workforce.sessionOf(agent.id)!).toBe(false);
+  expect(readFileSync(join(h.core.workforce.resident.brain(agent.id).path, MEMORY_ARCHIVE), 'utf8')).toContain('## Kept (2023-11-14)\n\nA valid note.');
+  expect(logged()).toEqual(expect.arrayContaining([
+    'agents migration: skipped the memory record agt_memory_bad: expected text as text; it stays as it was',
+    'agents migration: skipped the memory record agt_memory_json: its data is not an object; it stays as it was',
+    'agents migration: skipped the session record agt_session_bad: expected a session with id, agentId and threadId; it stays as it was',
+  ]));
+  // Skipped rows stay where they were.
+  expect(h.core.journal.db.query("SELECT id FROM agent_entities WHERE id IN ('agt_memory_bad', 'agt_session_bad')").all()).toHaveLength(2);
+});
+
+test('a step that fails runs again at the next start while the steps already done stay done', async () => {
+  const { h, agent, logged } = await unmigrated();
+  row(h, 'memory', 'agt_memory_good', { scope: { kind: 'agent', id: agent.id }, title: 'Kept', text: 'A valid note.' });
+  const archive = join(h.core.workforce.resident.brain(agent.id).path, MEMORY_ARCHIVE);
+  // A link where the archive goes: the brain refuses to write through it.
+  symlinkSync(join(h.dataDir, 'elsewhere.md'), archive);
+  migrateAgents(h.core, h.core.workforce);
+  expect(h.core.journal.getSetting('agents:migrated:threads-v1')).toBeUndefined();
+  expect(h.core.journal.getSetting('agents:migrated:threads-v1:sessions')).toBeTruthy();
+  expect(h.core.journal.getSetting('agents:migrated:threads-v1:memories')).toBeUndefined();
+  expect(logged().some(line => line.startsWith('agents migration, step memories:') && line.includes('symbolic link'))).toBe(true);
+  expect('scope' in h.core.workforce.sessionOf(agent.id)!).toBe(false);
+  // A session written after its step finished is left alone: the step does not run twice.
+  row(h, 'session', 'agt_session_later', { agentId: agent.id, threadId: 'thr_later', scope: { kind: 'group', id: 'agt_group_x' } });
+  unlinkSync(archive);
+  migrateAgents(h.core, h.core.workforce);
+  expect(h.core.journal.getSetting('agents:migrated:threads-v1')).toBeTruthy();
+  expect(readFileSync(archive, 'utf8')).toContain('A valid note.');
+  expect(h.core.workforce.records.find('session', 'agt_session_later')).not.toBeNull();
 });

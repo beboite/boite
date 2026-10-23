@@ -1,7 +1,11 @@
 /**
  * The one upgrade from agents that ran in a hidden thread to agents that are
  * their thread. Each step checks before it writes, so it runs again safely;
- * a setting records that it finished.
+ * a setting records each step that finished, and one more the whole upgrade.
+ * A legacy record that does not have the shape it should is skipped with a
+ * log line naming it and stays where it is: one bad row never stops the
+ * others. A step that fails otherwise (a file it cannot write) runs again at
+ * the next start, the steps already done stay done.
  *
  * - Sessions: an agent keeps the session of its own conversation, without its
  *   old `scope`; the hidden threads of group and mission sessions are archived
@@ -18,11 +22,12 @@
  *
  * Old records of every other kind stay in `agent_entities`, unread.
  */
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentRoutine, AgentSession, Message } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
+import { createBrainFile } from './brain-files.ts';
 import { MEMORY_ARCHIVE } from './context.ts';
 import type { AgentStore } from './store.ts';
 
@@ -42,29 +47,78 @@ export function migratedDisplay(text: string): string | null {
   return work.startsWith(NOTICES) ? 'Project events' : work;
 }
 
-export function migrateAgents(core: Core, store: AgentStore): void {
-  if (core.journal.getSetting(DONE)) return;
-  try {
-    const threads = migrateSessions(core, store);
-    migrateRoutines(store);
-    for (const threadId of threads) migratePrompts(core, threadId);
-    for (const agent of store.records.list('profile')) archiveMemories(core, store, agent.id);
-    core.journal.db.query("DELETE FROM settings WHERE key LIKE 'agents:attachments:%' OR key LIKE 'agents:checkpoint:%'").run();
-    core.journal.setSetting(DONE, { at: Date.now() });
-  } catch (error) {
-    // Left unmarked: the next start tries again. Agents load meanwhile.
-    core.log('error', `agents migration: ${messageOf(error)}`);
+/** The steps in order; each one's setting is `${DONE}:<name>`. */
+const STEPS = ['sessions', 'routines', 'prompts', 'memories', 'settings'] as const;
+
+/** A legacy record that is not what it should be: skipped, never fatal. */
+class Malformed extends Error {}
+
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isScope = (value: unknown): value is { kind: string; id: string } => typeof value === 'object' && value !== null && isText((value as { kind?: unknown }).kind) && isText((value as { id?: unknown }).id);
+
+/** The legacy rows of one kind, each parsed alone: one that does not parse is skipped with its id. */
+function rows<T>(core: Core, kind: string, check: (value: Record<string, unknown>) => string | null): T[] {
+  const found: T[] = [];
+  for (const row of core.journal.db.query('SELECT id, data FROM agent_entities WHERE kind = ? ORDER BY created_at, rowid').all(kind) as { id: string; data: string }[]) {
+    try {
+      let value: unknown;
+      try { value = JSON.parse(row.data); } catch { throw new Malformed('its data is not JSON'); }
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Malformed('its data is not an object');
+      const problem = check(value as Record<string, unknown>);
+      if (problem !== null) throw new Malformed(problem);
+      found.push(value as T);
+    } catch (error) {
+      skipped(core, kind, row.id, error);
+    }
   }
+  return found;
 }
 
-/** Keeps each agent's own session, scope dropped; returns the threads kept. */
-function migrateSessions(core: Core, store: AgentStore): string[] {
-  const kept: string[] = [];
-  for (const session of store.records.list('session') as OldSession[]) {
+function skipped(core: Core, kind: string, id: string, error: unknown): void {
+  if (!(error instanceof Malformed)) throw error;
+  core.log('warn', `agents migration: skipped the ${kind} record ${id}: ${error.message}; it stays as it was`);
+}
+
+export function migrateAgents(core: Core, store: AgentStore): void {
+  if (core.journal.getSetting(DONE)) return;
+  const run: Record<(typeof STEPS)[number], () => void> = {
+    sessions: () => migrateSessions(core, store),
+    routines: () => migrateRoutines(core, store),
+    // The sessions left are the agents' own: their threads hold the old prompts.
+    prompts: () => { for (const session of rows<OldSession>(core, 'session', sessionProblem)) if (session.threadId) migratePrompts(core, session.threadId); },
+    memories: () => archiveAll(core, store),
+    settings: () => { core.journal.db.query("DELETE FROM settings WHERE key LIKE 'agents:attachments:%' OR key LIKE 'agents:checkpoint:%'").run(); },
+  };
+  let complete = true;
+  for (const step of STEPS) {
+    if (core.journal.getSetting(`${DONE}:${step}`)) continue;
+    try {
+      run[step]();
+      core.journal.setSetting(`${DONE}:${step}`, { at: Date.now() });
+    } catch (error) {
+      // Left unmarked: the next start tries this step again. Agents load meanwhile.
+      complete = false;
+      core.log('error', `agents migration, step ${step}: ${messageOf(error)}; the next start tries it again`);
+    }
+  }
+  if (!complete) return;
+  core.journal.setSetting(DONE, { at: Date.now() });
+  for (const step of STEPS) core.journal.deleteSetting(`${DONE}:${step}`);
+}
+
+function sessionProblem(value: Record<string, unknown>): string | null {
+  if (!isText(value['id']) || !isText(value['agentId']) || !isText(value['threadId'])) return 'expected a session with id, agentId and threadId';
+  if (!Number.isInteger(value['revision'])) return 'expected an integer revision';
+  if (value['scope'] !== undefined && !isScope(value['scope'])) return 'expected a scope with a kind and an id';
+  return null;
+}
+
+/** Keeps each agent's own session, scope dropped. */
+function migrateSessions(core: Core, store: AgentStore): void {
+  for (const session of rows<OldSession>(core, 'session', sessionProblem)) {
     const own = session.scope === undefined || (session.scope.kind === 'agent' && session.scope.id === session.agentId);
     if (own && store.records.find('profile', session.agentId)) {
       if (session.scope !== undefined) store.records.update('session', session.id, session.revision, { agentId: session.agentId, threadId: session.threadId });
-      if (session.threadId) kept.push(session.threadId);
       continue;
     }
     const thread = core.journal.getThread(session.threadId);
@@ -74,17 +128,16 @@ function migrateSessions(core: Core, store: AgentStore): string[] {
     }
     store.records.remove('session', session.id);
   }
-  return kept;
 }
 
-function migrateRoutines(store: AgentStore): void {
-  for (const routine of store.records.list('routine') as OldRoutine[]) {
+function migrateRoutines(core: Core, store: AgentStore): void {
+  const routines = rows<OldRoutine>(core, 'routine', value => !isText(value['id']) || !Number.isInteger(value['revision']) ? 'expected a routine with an id and an integer revision' : null);
+  for (const routine of routines) {
     if (!('lastWorkId' in routine)) continue;
     const { lastWorkId: _lastWorkId, ...rest } = routine;
     store.records.update('routine', routine.id, routine.revision, { ...rest, lastTurnId: routine.lastTurnId ?? null, lastOutcome: routine.lastOutcome ?? null });
   }
 }
-
 /** Gives the old prompts of one agent thread the text they display. */
 function migratePrompts(core: Core, threadId: string): void {
   const rows = core.journal.db.query("SELECT id FROM messages WHERE thread_id = ? AND role = 'user' AND parts LIKE '%You are %'").all(threadId) as { id: string }[];
@@ -98,18 +151,37 @@ function migratePrompts(core: Core, threadId: string): void {
   }
 }
 
+function memoryProblem(value: Record<string, unknown>): string | null {
+  if (!isText(value['id'])) return 'expected an id';
+  const createdAt = value['createdAt'];
+  if (typeof createdAt !== 'number' || !Number.isFinite(new Date(createdAt).getTime())) return 'expected createdAt as a valid time';
+  if (value['scope'] !== undefined && !isScope(value['scope'])) return 'expected a scope with a kind and an id';
+  if (value['title'] !== undefined && !isText(value['title'])) return 'expected title as text';
+  if (value['text'] !== undefined && !isText(value['text'])) return 'expected text as text';
+  return null;
+}
+
+/** Every agent's old scoped memories; an agent whose archive cannot be written fails the step after the others ran. */
+function archiveAll(core: Core, store: AgentStore): void {
+  const memories = rows<OldMemory>(core, 'memory', memoryProblem);
+  let failed: unknown = null;
+  for (const agent of store.records.list('profile')) {
+    try { archiveMemories(core, store, agent.id, memories); }
+    catch (error) { failed ??= error; core.log('warn', `agents migration: the older notes of agent ${agent.id} were not archived: ${messageOf(error)}`); }
+  }
+  if (failed !== null) throw failed;
+}
+
 /** The agent's old scoped memories, written once beside MEMORY.md. */
-function archiveMemories(core: Core, store: AgentStore, agentId: string): void {
+function archiveMemories(core: Core, store: AgentStore, agentId: string, all: readonly OldMemory[]): void {
   if (core.journal.getSetting(`${ARCHIVED}${agentId}`)) return;
-  const memories = (core.journal.db.query("SELECT data FROM agent_entities WHERE kind = 'memory' ORDER BY created_at, rowid").all() as { data: string }[])
-    .map(row => JSON.parse(row.data) as OldMemory)
-    .filter(memory => memory.scope?.kind === 'agent' && memory.scope.id === agentId);
+  const memories = all.filter(memory => memory.scope?.kind === 'agent' && memory.scope.id === agentId);
   if (memories.length) {
     const brain = store.resident.brain(agentId);
     const target = join(brain.path, MEMORY_ARCHIVE);
     if (!existsSync(target)) {
       const body = memories.map(memory => `## ${memory.title ?? 'Note'} (${new Date(memory.createdAt).toISOString().slice(0, 10)})\n\n${(memory.text ?? '').trim()}\n`).join('\n');
-      writeFileSync(target, `# Older notes\n\nWhat this agent noted before its memory became MEMORY.md alone. Read it when it matters; nothing here is sent by itself.\n\n${body}`);
+      createBrainFile(store.resident.brainRoot().path, target, `# Older notes\n\nWhat this agent noted before its memory became MEMORY.md alone. Read it when it matters; nothing here is sent by itself.\n\n${body}`);
     }
   }
   core.journal.setSetting(`${ARCHIVED}${agentId}`, { at: Date.now(), count: memories.length });

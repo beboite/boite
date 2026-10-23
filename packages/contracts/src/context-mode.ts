@@ -133,6 +133,20 @@ export function resolveContext(request: unknown): ThreadContextMode | null {
   };
 }
 
+/**
+ * The context of a conversation the core runs that must use no tool at all,
+ * such as a memory pass: no instruction file, guide, MCP server, hook or
+ * built-in tool. The core sets it on a thread it creates; no request asks for
+ * it. `CONTEXT_TRIMMABLE_PROTOCOLS` honour all of it; every other driver
+ * leaves out what it can (Codex its MCP servers, plugins, hooks, project
+ * instructions and web search; pi its tools, extensions, skills and context
+ * files) and the thread's permission mode restricts the rest. Whatever tool
+ * such a thread still asks for is denied without a card (`threads/cards.ts`).
+ */
+export const TOOL_FREE_CONTEXT: Readonly<ThreadContextMode> = Object.freeze({
+  label: 'custom', instructions: false, guides: false, mcp: false, hooks: false, tools: [], rules: null,
+});
+
 /** The parts a mode leaves out, in a stable order: what a badge's tooltip lists. */
 export function contextDropped(mode: ThreadContextMode): ContextPart[] {
   return CONTEXT_PARTS.filter(part => !mode[part]);

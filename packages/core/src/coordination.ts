@@ -14,6 +14,7 @@ import { checkTailnetName } from './contacts/invite.ts';
 import { pack, SEALED } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
+import { isAgentHeld } from './agents/runtime.ts';
 
 const HOUR = 3_600_000;
 /** How long a delivered, expired, rejected or uncertain letter stays in the journal. */
@@ -715,6 +716,8 @@ export class Coordination {
         })();
       }
     } catch (error) {
+      // A persistent agent that is paused or out of budget: its letters wait in the inbox for it.
+      if (isAgentHeld(error)) { this.core.agentRuntime.whenAdmitted(threadId, 'coordination', () => this.kick(threadId)); return; }
       if (!this.closed && !this.core.journal.isClosed()) {
         this.pause(threadId, 'failure'); this.core.log('warn', `coordination ${threadId}: ${messageOf(error)}`);
       }
