@@ -58,7 +58,7 @@
   }
 </script>
 
-<div class="switch-row">
+<div class="switch-row invite-row">
   <span class="text">
     <span class="ui-label-box"><span class="ui-label">{labels.invite.title}</span><InfoTip topic={labels.invite.title} text={labels.invite.tip} /></span>
     <span class="hint">{labels.invite.pick}</span>
@@ -145,7 +145,9 @@
   /* What a row made sits under it, before the next row's rule. */
   .under { display: grid; gap: 8px; padding-bottom: 16px; min-width: 0; animation: rise var(--dur-3) var(--ease-out-quint); }
   .join-row { border-top: 1px solid var(--color-border); }
-  .invite-actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+  /* Three answers to "where is the person?": under the question, never squeezing it. */
+  :global(.settings .page) .invite-row { flex-direction: column; align-items: stretch; gap: 12px; }
+  .invite-actions { display: flex; flex: none; flex-wrap: wrap; gap: 8px; }
   .line { display: flex; gap: 8px; min-width: 0; }
   .link { flex: 1; min-width: 0; font-size: var(--text-xs); }
   .hint { margin: 0; }
