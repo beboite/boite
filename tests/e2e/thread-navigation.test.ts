@@ -240,9 +240,10 @@ test('projects sink after losing recent threads and the sidebar follows a select
     await page.waitFor(`document.querySelector('${id('sidebar')} .scroll').scrollTop === 0`);
     await capture(page, 'project-promotion-after.png');
     // With projects at work on top, taller than the list, a prompt leads the open cards under them: its card comes into view.
-    const busy = [5, ...Array.from({ length: 17 }, (_, i) => i + 7)].map(i => `Conversation ${i}`);
+    // Conversation 5 and 7 to 23, named in the page: a test value never becomes code there.
+    const busy = `[5, ...Array.from({ length: 17 }, (_, i) => i + 7)].map(i => 'Conversation ' + i)`;
     await page.evaluate(`(() => {
-      const s = ${state}, busy = ${JSON.stringify(busy)};
+      const s = ${state}, busy = ${busy};
       s.threads = s.threads.map(t => busy.includes(t.title) ? {...t, status:'running'} : t.title === 'Conversation 6' ? {...t, lastUserMessageAt:Date.now() + 2000000} : t);
     })()`);
     await page.waitFor(`document.querySelector('${id('working-projects')} ${id('project')}') && document.querySelector('${id('project')}:not(${id('working-projects')} *)')?.dataset.projectId !== ${state}.openThread.projectId`);
@@ -255,7 +256,7 @@ test('projects sink after losing recent threads and the sidebar follows a select
       const box = document.querySelector('${id('sidebar')} .scroll').getBoundingClientRect(), card = ${leader}.getBoundingClientRect();
       return card.top >= box.top - 1 && card.bottom <= box.bottom + 1;
     })()`);
-    await page.evaluate(`(() => { const s = ${state}, busy = ${JSON.stringify(busy)}; s.threads = s.threads.map(t => busy.includes(t.title) ? {...t, status:'idle'} : t); })()`);
+    await page.evaluate(`(() => { const s = ${state}, busy = ${busy}; s.threads = s.threads.map(t => busy.includes(t.title) ? {...t, status:'idle'} : t); })()`);
     await page.waitFor(`!document.querySelector('${id('working-projects')}')`);
     await page.evaluate(`${state}.archive(${state}.openThread.id)`);
     await page.waitFor(`${state}.draft`);
