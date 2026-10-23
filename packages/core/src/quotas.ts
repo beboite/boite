@@ -189,7 +189,10 @@ export class QuotaStore {
       if (name === 'accounts.updated') {
         const account = payload as Account;
         const kept = this.lastGood.get(account.id);
-        if (kept && !sameLogin(kept.identity, account.identity)) this.forget((id) => id === account.id);
+        if (kept && !sameLogin(kept.identity, account.identity)) {
+          this.forget((id) => id === account.id);
+          this.alerts.rearm(account.id);
+        }
         else if (kept && kept.identity === null) kept.identity = account.identity;
       }
       if (name === 'accounts.updated' || name === 'accounts.removed') this.invalidate(String(object(payload)['id'] ?? object(payload)['accountId'] ?? ''));
@@ -206,7 +209,8 @@ export class QuotaStore {
   }
   /** Drops the readings of these accounts, for a login that now belongs to someone else. */
   forget(matches: (accountId: string) => boolean): void {
-    for (const id of new Set([...this.cache.keys(), ...this.lastGood.keys(), ...this.observations.keys()])) {
+    // A read still in flight is dropped too: its account may be switched off before it lands.
+    for (const id of new Set([...this.cache.keys(), ...this.lastGood.keys(), ...this.observations.keys(), ...this.pending.keys()])) {
       if (!matches(id)) continue;
       this.cache.delete(id);
       this.lastGood.delete(id);
@@ -250,6 +254,8 @@ export class QuotaStore {
   private observeRead(account: Account, reading: QuotaReading, observedAt: number): void {
     const base = this.base(account);
     if (base.status !== 'unavailable' || !reading.windows.length) return;
+    // Alerts hear every observed window, even one that cannot stand in for a full read below.
+    this.alerts.check([{ ...base, windows: reading.windows, status: 'ready', checkedAt: observedAt }]);
     const held = this.cache.get(account.id);
     const previous = held?.value;
     if (!previous || previous.status !== 'ready' || held.readAt === undefined || observedAt - held.readAt > OBSERVED_MS) return;
@@ -260,7 +266,6 @@ export class QuotaStore {
       status: 'ready', source: 'observation', checkedAt: observedAt, error: null };
     this.cache.set(account.id, { value, retryAt: Date.now() + 10_000, readAt: held.readAt });
     this.lastGood.set(account.id, { value, identity: account.identity });
-    this.alerts.check([value]);
     const same = previous?.status === 'ready' && JSON.stringify([previous.windows, previous.resetCredits, previous.credits]) === JSON.stringify([value.windows, value.resetCredits, value.credits]);
     if (!same) this.core.bus.emit('quotas.updated', this.known());
   }
@@ -353,6 +358,7 @@ export class QuotaStore {
     const epoch = this.epochs.get(account.id) ?? 0;
     const running = (async () => {
       let value: AccountQuota;
+      const startedAt = Date.now();
       try {
         const raw = await this.read(account);
         const reading = Array.isArray(raw) ? { windows: raw } : raw;
@@ -360,7 +366,10 @@ export class QuotaStore {
         value = { ...base, ...reading, status: 'ready', checkedAt: Date.now(), error: null };
         if (epoch === (this.epochs.get(account.id) ?? 0)) {
           this.lastGood.set(account.id, { value, identity: account.identity });
-          this.alerts.check([value]);
+          // Still switched on and still this login: the reading is the account's, taken when the read began.
+          if (generation === this.generation && accountGeneration === (this.accountGenerations.get(account.id) ?? 0) && this.base(account).status === 'unavailable') {
+            this.alerts.check([value], Date.now(), startedAt);
+          }
         }
       } catch (error) {
         const kept = epoch === (this.epochs.get(account.id) ?? 0) ? this.kept(account) : undefined;
@@ -392,6 +401,8 @@ export class QuotaStore {
     if (!row) {
       if (accountId.startsWith('proxy:')) throw invalidParams(`quotas.alert accountId ${accountId} is not an entry the gateway reports now`, { field: 'accountId', expected: 'an accountId quotas.list returns' });
       this.core.accounts.require(accountId);
+      // A Douane in use lists only its own entries: this machine's logins have no limits row to alert on.
+      throw invalidParams(`quotas.alert accountId ${accountId} has no row in quotas.list now`, { field: 'accountId', expected: 'an accountId quotas.list returns' });
     }
     this.alerts.set(accountId, period, threshold, row);
     const result = this.known();

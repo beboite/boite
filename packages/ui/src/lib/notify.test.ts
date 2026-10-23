@@ -130,10 +130,10 @@ describe('limitToast', () => {
   test('names the account and the scoped window, says the share used and keeps the machine for the click', () => {
     const alert = { accountId: 'a', providerId: 'claude', providerName: 'Claude', label: 'Perso', period: 'weekly' as const, threshold: 90,
       window: { id: 'model:Opus', label: 'Weekly · Opus', usedPercent: 91.6, resetsAt: null }, at: 1 };
-    expect(limitToast(alert, limitsKey('m1'))).toEqual({ title: 'Claude · Perso · Opus', body: 'Weekly limit: 92% used', threadId: 'boite-limits:m1' });
+    expect(limitToast(alert, limitsKey('m1'))).toEqual({ title: 'Claude · Perso · Opus', body: 'Weekly limit: 92% used', threadId: 'boite-limits:m1', limits: true });
     // A gateway entry's label already names its provider.
     expect(limitToast({ ...alert, label: 'Claude Max · chris@', period: 'fiveHour', window: { ...alert.window, label: '5 hours' } }, limitsKey(null)))
-      .toEqual({ title: 'Claude Max · chris@', body: '5-hour limit: 92% used', threadId: 'boite-limits:' });
+      .toEqual({ title: 'Claude Max · chris@', body: '5-hour limit: 92% used', threadId: 'boite-limits:', limits: true });
     expect([limitsMachine('boite-limits:m1'), limitsMachine('boite-limits:'), limitsMachine('["m1","t1"]')]).toEqual(['m1', '', null]);
   });
 });
@@ -207,6 +207,22 @@ describe('sendNotification', () => {
       // No group id known: still the worker, and the window opens it by its own key.
       await sendNotification({ title: 'Which branch?', body: 'Needs you', threadId: '["m3","t-2"]', coreThreadId: 't-2', origin: 'https://other.test' });
       expect(showNotification).toHaveBeenLastCalledWith('Which branch?', expect.objectContaining({ tag: 'thread-["m3","t-2"]', data: { threadId: 't-2', key: '["m3","t-2"]' } }));
+      expect(browserNotification).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  test('a limit alert goes through the worker with the data of the core\'s push, never the constructor Android refuses', async () => {
+    const showNotification = vi.fn().mockResolvedValue(undefined);
+    const browserNotification = vi.fn(function () { throw new TypeError('Illegal constructor'); });
+    Object.assign(browserNotification, { permission: 'granted' });
+    vi.stubGlobal('Notification', browserNotification);
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistration: vi.fn().mockResolvedValue({ showNotification }) } });
+    const core = 'c'.repeat(64);
+    try {
+      await sendNotification({ title: 'Claude · Perso', body: 'Weekly limit: 92% used', threadId: 'boite-limits:', limits: true, origin: location.origin });
+      expect(showNotification).toHaveBeenLastCalledWith('Claude · Perso', expect.objectContaining({ data: { limits: true } }));
+      await sendNotification({ title: 'Codex · Work', body: '5-hour limit: 90% used', threadId: 'boite-limits:m2', limits: true, origin: 'https://remote.test', core });
+      expect(showNotification).toHaveBeenLastCalledWith('Codex · Work', expect.objectContaining({ data: { limits: true, core } }));
       expect(browserNotification).not.toHaveBeenCalled();
     } finally { vi.unstubAllGlobals(); }
   });

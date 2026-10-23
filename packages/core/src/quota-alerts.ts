@@ -85,6 +85,11 @@ export class QuotaAlertStore {
       delete all[accountId];
       this.core.journal.setSetting(SETTING, all);
     }
+    this.rearm(accountId);
+  }
+
+  /** Another login on the same account: its windows are not the ones that alerted. The thresholds stay. */
+  rearm(accountId: string): void {
     const fired = this.fired();
     const prefix = key(accountId, '');
     const kept = Object.fromEntries(Object.entries(fired).filter(([name]) => !name.startsWith(prefix)));
@@ -96,9 +101,11 @@ export class QuotaAlertStore {
 
   /**
    * Fresh readings only: a failed read keeps old windows, and a window whose
-   * reset time passed describes a period that is over.
+   * reset time passed describes a period that is over. `readAt` is when the
+   * reading was taken, its `checkedAt` unless given: one taken before a
+   * window alerted is older news and neither re-arms nor alerts it.
    */
-  check(rows: AccountQuota[], now = Date.now()): void {
+  check(rows: AccountQuota[], now = Date.now(), readAt?: number): void {
     const config = this.all();
     if (!rows.some((row) => config[row.accountId])) return;
     const fired = this.fired();
@@ -112,6 +119,7 @@ export class QuotaAlertStore {
         const threshold = alerts[period];
         const name = key(row.accountId, window.id);
         const record = fired[name];
+        if (record && (readAt ?? row.checkedAt ?? now) < record.at) continue;
         if (record && (threshold === undefined || record.threshold !== threshold || window.usedPercent <= record.threshold - REARM_POINTS
           || (record.resetsAt !== null && now >= record.resetsAt))) {
           delete fired[name];

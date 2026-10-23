@@ -148,6 +148,9 @@ test('a Douane entry alerts from the gateway reading, and the poll reads only wh
   const id = 'proxy:claude:max';
   const rows: AccountQuota[] = await owner.call('quotas.alert', { accountId: id, period: 'fiveHour', threshold: 80 });
   expect(rows.find((row) => row.accountId === id)?.alerts).toEqual({ fiveHour: 80 });
+  // The gateway lists only its entries: a login of this machine has no row to alert on.
+  const own = harness.core.accounts.add({ providerId: 'claude', label: 'Hidden' });
+  expect(await thrown(owner.call('quotas.alert', { accountId: own.id, period: 'weekly', threshold: 90 }))).toThrow('has no row in quotas.list now');
   used = 85;
   const before = asked;
   // What the five-minute timer runs, once the gateway's minute of cache is over: asked once, with no client listing.
@@ -179,4 +182,57 @@ test('a phone gets the alert as a limits push its words translate, and not when 
   harness.core.bus.emit('quotas.alerted', { ...alert, window: { ...alert.window, id: 'seven_day', label: 'Weekly' } });
   await Bun.sleep(50);
   expect(deliveries).toHaveLength(1);
+});
+
+test('a full read begun before an observation alerted neither re-arms nor repeats it, and an observation alerts with no full read held', async () => {
+  harness = await startTestCore();
+  const account = harness.core.accounts.add({ providerId: 'codex', label: 'Work' });
+  const reset = Date.now() + 2 * HOUR;
+  const window = (usedPercent: number): QuotaWindow => ({ id: 'primary', label: '5 hours', usedPercent, resetsAt: reset });
+  let answer: ((windows: QuotaWindow[]) => void) | undefined;
+  const store = new QuotaStore(harness.core, () => new Promise<QuotaWindow[]>((resolve) => { answer = resolve; }));
+  const alerts = heard(harness.core);
+  const first = store.list();
+  answer!([window(70)]);
+  await first;
+  store.alert(account.id, 'fiveHour', 90);
+  // After a restart or an invalidation there is no full read to merge into: the observation alerts all the same.
+  store.invalidate();
+  const slow = store.list();
+  await Bun.sleep(5);
+  store.observe(account.id, { windows: [window(95)] }, Date.now());
+  expect(alerts).toHaveLength(1);
+  // The read that began before it lands with its older 70 %: the next observation is the same crossing.
+  answer!([window(70)]);
+  await slow;
+  await Bun.sleep(2);
+  store.observe(account.id, { windows: [window(96)] }, Date.now());
+  expect(alerts).toHaveLength(1);
+});
+
+test('another login on the account alerts on its own, and a read in flight when monitoring goes off says nothing', async () => {
+  harness = await startTestCore();
+  const account = harness.core.accounts.add({ providerId: 'claude', label: 'Perso' });
+  let answer: ((windows: QuotaWindow[]) => void) | undefined;
+  const store = new QuotaStore(harness.core, () => new Promise<QuotaWindow[]>((resolve) => { answer = resolve; }));
+  const alerts = heard(harness.core);
+  const weekly = [{ id: 'seven_day', label: 'Weekly', usedPercent: 95, resetsAt: Date.now() + 40 * HOUR }];
+  store.alert(account.id, 'weekly', 90);
+  const first = store.list();
+  answer!(weekly);
+  await first;
+  expect(alerts).toHaveLength(1);
+  harness.core.bus.emit('accounts.updated', { ...account, identity: 'first@example.com' });
+  harness.core.bus.emit('accounts.updated', { ...account, identity: 'second@example.com' });
+  const second = store.list();
+  answer!(weekly);
+  await second;
+  expect(alerts).toHaveLength(2);
+
+  harness.core.bus.emit('accounts.updated', { ...account, identity: 'third@example.com' });
+  const pending = store.list();
+  await store.configure(account.id, false);
+  answer!(weekly);
+  await pending;
+  expect(alerts).toHaveLength(2);
 });

@@ -86,9 +86,11 @@ up in the accent colour once an alert is set, and its tooltip lists them.
   group (`Weekly · Opus`) counts for its period and names its scope in the
   notification. Daily, monthly and credit windows have none.
 - `QuotaAlertStore` (`packages/core/src/quota-alerts.ts`) looks at every fresh
-  reading: a successful read, a Codex or Muse observation, each answer of the
-  gateway. A failed read's stale windows and a window whose reset time passed
-  never alert. A window alerts once when its used share reaches the threshold,
+  reading: a successful read, a Codex or Muse observation (even one with no
+  full read to merge into), each answer of the gateway. A failed read's stale
+  windows, a window whose reset time passed, a read that began before the
+  window alerted and a read that lands after monitoring went off never alert.
+  Another login on the same account starts its windows over. A window alerts once when its used share reaches the threshold,
   and again only after its reset time passed or it fell 10 points under. The
   windows that alerted are kept in the journal, so a restart does not repeat
   them. Choosing a threshold a window has already passed marks it as alerted:
@@ -103,7 +105,9 @@ up in the accent colour once an alert is set, and its tooltip lists them.
   `5-hour limit: 92% used` in the body, labelled `limitFiveHour` or
   `limitWeekly` with `values.percent`, which the phone's words fill in its
   language. A desktop shows a toast whatever is on screen; a click opens
-  Settings, Limits, on the machine that sent it. A tapped push opens the app.
+  Settings, Limits, on the machine that sent it. A tapped push, or a page's
+  notice through the service worker, opens Limits the same way
+  (`?limits=1&member=<core id>` with no window open).
 
 ### Gateway quotas
 

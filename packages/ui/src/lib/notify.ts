@@ -119,8 +119,10 @@ export interface Toast {
    * data a push of that machine would, so a tap opens it there.
    */
   core?: string;
-  /** The thread a click on the toast opens. */
+  /** The thread a click on the toast opens, or a limit alert's `limitsKey`. */
   threadId: string;
+  /** A limit alert: through the worker, it carries the data of the core's push, which opens Limits. */
+  limits?: true;
 }
 
 /**
@@ -158,7 +160,7 @@ export function limitsMachine(key: string): string | null {
 export function limitToast(alert: QuotaAlert, key: string): Toast {
   const percent = String(Math.round(alert.window.usedPercent));
   const body = fill(alert.period === 'weekly' ? strings.notify.limitWeekly : strings.notify.limitFiveHour, { percent });
-  return { title: quotaAlertTitle(alert), body, threadId: key };
+  return { title: quotaAlertTitle(alert), body, threadId: key, limits: true };
 }
 
 /** Where `sw.js` reads them. Not a `boite-ui-` cache: those go with each new build. */
@@ -313,6 +315,19 @@ async function webSender(toast: Toast): Promise<void> {
   // on a page, and the phone app's page serves no machine. The tag and data are
   // the ones a push about that thread uses (`sw.js`), so a later push replaces
   // this notice and a tap opens the thread where it is.
+  if (toast.limits && navigator.serviceWorker) {
+    try {
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (registration) {
+        const core = toast.origin === location.origin ? undefined : toast.core;
+        await registration.showNotification(toast.title, {
+          body: toast.body, tag: `limit-${toast.threadId}-${toast.title}`, icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
+          data: core ? { limits: true, core } : { limits: true }
+        });
+        return;
+      }
+    } catch { /* A missing worker must not disable the browser fallback. */ }
+  }
   if (toast.coreThreadId && navigator.serviceWorker) {
     try {
       const registration = await navigator.serviceWorker.getRegistration();

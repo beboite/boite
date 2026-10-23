@@ -168,7 +168,8 @@ self.addEventListener('push', (event) => {
       body,
       icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
       tag: threadId ? (core ? `thread-${core}-${threadId}` : `thread-${threadId}`) : typeof payload.tag === 'string' ? payload.tag : 'boite-update',
-      data: core ? { threadId, core } : { threadId }
+      // A limit alert belongs to no thread: its tap opens Limits on the machine that sent it.
+      data: payload.kind === 'limits' ? (core ? { limits: true, core } : { limits: true }) : core ? { threadId, core } : { threadId }
     });
     // The icon's count of threads waiting for the user, as the core counted it when it sent this.
     await setBadge(payload.badge);
@@ -221,6 +222,12 @@ self.addEventListener('notificationclick', (event) => {
   // A page's notice about a machine with no group id: the open window finds the thread by its own key for it.
   const key = typeof event.notification.data?.key === 'string' && event.notification.data.key.length <= 600 ? event.notification.data.key : null;
   const url = new URL('/', self.location.origin);
+  if (event.notification.data?.limits === true) {
+    url.searchParams.set('limits', '1');
+    if (typeof core === 'string') url.searchParams.set('member', core);
+    event.waitUntil(openOrTell(url, { type: 'boite.open-limits', ...(typeof core === 'string' ? { core } : {}) }));
+    return;
+  }
   if (typeof threadId === 'string') url.searchParams.set('thread', threadId);
   if (typeof threadId === 'string' && typeof core === 'string') url.searchParams.set('member', core);
   // Opened with no window, or one refusing focus: the boot reads the machine from the key (`takeNotificationTarget`).
@@ -235,6 +242,15 @@ self.addEventListener('notificationclick', (event) => {
     } else await self.clients.openWindow(url.href);
   })());
 });
+
+/** Hands an open window of this origin the message, else opens the address, which says the same at boot. */
+async function openOrTell(url, message) {
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const existing = windows.find(client => new URL(client.url).origin === url.origin);
+  if (!existing) { await self.clients.openWindow(url.href); return; }
+  existing.postMessage(message);
+  try { await existing.focus(); } catch { await self.clients.openWindow(url.href); }
+}
 
 /**
  * A file under `/assets/` carries its content hash in its name, so the copy in

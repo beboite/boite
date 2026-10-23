@@ -636,7 +636,13 @@ export class Workspace {
   }
 
   /** The boot, on the thread a notification tapped with no window open named, on whichever machine it is. */
-  async bootAt(tapped: { thread: string | null; member: string | null; key?: string | null }): Promise<void> {
+  async bootAt(tapped: { thread: string | null; member: string | null; key?: string | null; limits?: boolean }): Promise<void> {
+    // A tapped limit alert: Limits, on the machine it names once the group has connected it.
+    if (tapped.limits) {
+      await this.boot(null);
+      await this.openLimits(tapped.member);
+      return;
+    }
     // A page notice about a machine with no group id: this window's own key names the machine.
     if (tapped.key) {
       await this.boot(null);
@@ -645,6 +651,22 @@ export class Workspace {
     }
     await this.boot(tapped.member === null ? tapped.thread : null);
     if (tapped.member !== null && tapped.thread !== null) await this.openMemberThread(tapped.member, tapped.thread);
+  }
+
+  /**
+   * A tapped limit alert the worker reports: Limits on the machine of the group
+   * it names, else on the core that served the page. A machine of the group
+   * still connecting gets the same few seconds a thread does.
+   */
+  async openLimits(member?: unknown): Promise<void> {
+    let target: Store | undefined;
+    if (typeof member === 'string' && /^[0-9a-f]{64}$/.test(member)) {
+      const deadline = Date.now() + 10_000;
+      while (!(target = this.machineOf(member)?.store) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    target ??= this.machines.find((entry) => entry.store.endpointUrl !== null && servesThisPage(entry.store.endpointUrl))?.store ?? store;
+    await this.select(target);
+    target.showSettings('limits');
   }
 
   async openNotification(key: string): Promise<void> {
