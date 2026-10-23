@@ -55,6 +55,13 @@ const ACTIONS: readonly ResidentThreadAction[] = ['archive', 'done', 'unarchive'
 type Follow = { at: number; origin: AgentWatch['origin']; pr?: AgentWatchPullRequest | null };
 interface Stall { turnId: string; since: number | null }
 
+/** Whether a follow of this thread still holds: it is open, or done or archived less than a day ago. */
+function holding(thread: ThreadSummary | null, now: number): thread is ThreadSummary {
+  if (thread === null) return false;
+  if (!thread.archived) return true;
+  return (thread.archivedAt ?? thread.updatedAt) > now - DAY;
+}
+
 function trimmed(text: string, max: number): string {
   const flat = text.trim();
   return flat.length > max ? `${flat.slice(0, max - 20)}\n[Truncated.]` : flat;
@@ -96,11 +103,16 @@ export class AgentProjects {
 
   // -- who looks after what ---------------------------------------------------
 
-  /** The projects of a profile that still exist and are not archived; drafts never count. */
-  projectsOf(agent: Pick<AgentProfile, 'projectIds'>): ProjectId[] {
+  /** The projects of a profile that still exist and are not archived; drafts never count. `live` remembers each project read across profiles. */
+  projectsOf(agent: Pick<AgentProfile, 'projectIds'>, live = new Map<ProjectId, boolean>()): ProjectId[] {
     return (agent.projectIds ?? []).filter(id => {
-      const project = this.core.journal.getProject(id);
-      return project !== null && project.archived !== true && project.kind !== 'drafts';
+      let kept = live.get(id);
+      if (kept === undefined) {
+        const project = this.core.journal.getProject(id);
+        kept = project !== null && project.archived !== true && project.kind !== 'drafts';
+        live.set(id, kept);
+      }
+      return kept;
     });
   }
 
@@ -121,7 +133,8 @@ export class AgentProjects {
   /** Active agents the project is entrusted to: a paused one gathers no facts. */
   agentsFor(projectId: ProjectId | null): AgentProfile[] {
     if (projectId === null) return [];
-    return this.store.records.list('profile').filter(agent => agent.status === 'active' && this.projectsOf(agent).includes(projectId));
+    const live = new Map<ProjectId, boolean>();
+    return this.store.records.list('profile').filter(agent => agent.status === 'active' && this.projectsOf(agent, live).includes(projectId));
   }
 
   /**
@@ -155,17 +168,13 @@ export class AgentProjects {
     this.store.changed();
   }
 
-  /** Whether a thread is open: not done, not archived. */
-  private open(threadId: ThreadId): boolean {
-    const thread = this.core.journal.getThread(threadId);
-    return thread !== null && !thread.archived;
-  }
   /** Whether a follow still holds: its thread is open, or done or archived less than a day ago. */
   private holds(threadId: ThreadId, now: number): boolean {
-    const thread = this.core.journal.getThread(threadId);
-    if (thread === null) return false;
-    if (!thread.archived) return true;
-    return (thread.archivedAt ?? thread.updatedAt) > now - DAY;
+    return holding(this.core.journal.getThread(threadId), now);
+  }
+  /** The threads of a desk in one read: a desk holds up to `WATCHES_MAX` open ones and the settled ones of the last day. */
+  private threadsOf(ids: Iterable<ThreadId>): Map<ThreadId, ThreadSummary> {
+    return new Map(this.core.journal.listThreadsIn(ids).map(thread => [thread.id, thread]));
   }
 
   /**
@@ -178,13 +187,15 @@ export class AgentProjects {
     const now = Date.now();
     const saved = this.saved(agentId);
     const previous = saved[threadId];
-    const others = newestFirst(Object.entries(saved).filter(([id]) => id !== threadId && this.holds(id, now)));
-    let open = this.open(threadId) ? 1 : 0;
-    const kept = new Set(others.filter(([id]) => !this.open(id) || ++open <= WATCHES_MAX).map(([id]) => id));
+    const threads = this.threadsOf([...Object.keys(saved), threadId]);
+    const isOpen = (id: ThreadId) => threads.get(id)?.archived === false;
+    const others = newestFirst(Object.entries(saved).filter(([id]) => id !== threadId && holding(threads.get(id) ?? null, now)));
+    let open = isOpen(threadId) ? 1 : 0;
+    const kept = new Set(others.filter(([id]) => !isOpen(id) || ++open <= WATCHES_MAX).map(([id]) => id));
     // Saved oldest first, so the order of the entries breaks ties within one millisecond.
     const follows = Object.fromEntries(Object.entries(saved).filter(([id]) => kept.has(id)));
     // A new follow records the pull request as it stands, so its merge or failing checks are news.
-    const thread = previous ? null : this.core.journal.getThread(threadId);
+    const thread = previous ? null : threads.get(threadId) ?? null;
     const pr = thread ? { pr: deskPullRequest(this.core, thread) } : {};
     this.write(agentId, { ...follows, [threadId]: { ...previous, ...pr, at: now, origin: previous?.origin ?? origin } });
   }
@@ -198,16 +209,20 @@ export class AgentProjects {
   follows(agentId: string, threadId: ThreadId): boolean {
     return threadId in this.saved(agentId) && this.holds(threadId, Date.now());
   }
-  /** The threads on an agent's desk, open ones first, each group newest follow first. */
-  watchesOf(agentId: string): { threadId: ThreadId; origin: AgentWatch['origin']; since: number }[] {
+  /** The threads on an agent's desk with each thread as read, open ones first, each group newest follow first. */
+  watchesOf(agentId: string): { threadId: ThreadId; origin: AgentWatch['origin']; since: number; thread: ThreadSummary }[] {
     const now = Date.now();
-    const follows = newestFirst(Object.entries(this.saved(agentId)).filter(([id]) => this.holds(id, now)))
-      .map(([threadId, follow]) => ({ threadId, origin: follow.origin, since: follow.at, open: this.open(threadId) }));
-    return [...follows.filter(f => f.open), ...follows.filter(f => !f.open)].map(({ open: _open, ...watch }) => watch);
+    const saved = this.saved(agentId);
+    const threads = this.threadsOf(Object.keys(saved));
+    const follows = newestFirst(Object.entries(saved).filter(([id]) => holding(threads.get(id) ?? null, now)))
+      .map(([threadId, follow]) => ({ threadId, origin: follow.origin, since: follow.at, thread: threads.get(threadId)! }));
+    return [...follows.filter(f => !f.thread.archived), ...follows.filter(f => f.thread.archived)];
   }
-  /** Agents that follow a thread, whatever its project. */
+  /** Active agents that follow a thread, whatever its project: only those whose desk lists it are read. */
   private followers(threadId: ThreadId): AgentProfile[] {
-    return this.store.records.list('profile').filter(agent => agent.status === 'active' && this.follows(agent.id, threadId));
+    const agentIds = this.deskIndex().get(threadId);
+    if (!agentIds) return [];
+    return this.store.records.list('profile').filter(agent => agent.status === 'active' && agentIds.has(agent.id) && this.follows(agent.id, threadId));
   }
   /** Every desk thread with the agents whose desk it is on, whatever their status. */
   private deskIndex(): Map<ThreadId, Set<string>> {
@@ -277,13 +292,15 @@ export class AgentProjects {
    * core started is counted from the first check.
    */
   checkStalls(now = Date.now()): void {
-    for (const [threadId, agentIds] of this.deskIndex()) {
-      const thread = this.core.journal.getThread(threadId);
-      if (thread === null || thread.archived || (thread.status !== 'running' && thread.status !== 'waiting')) {
-        // A turn that ended while the core was down left its stall behind.
-        if (this.stalls.has(threadId)) this.setStall(threadId, null);
-        continue;
-      }
+    const desk = this.deskIndex();
+    if (desk.size === 0 && this.stalls.size === 0) return;
+    // One read of the threads at work, not one per desk thread: a desk holds hundreds, few of them run.
+    const working = new Map(this.core.journal.listThreadsWithStatus(['running', 'waiting']).filter(thread => !thread.archived).map(thread => [thread.id, thread]));
+    // A turn that ended while the core was down left its stall behind.
+    for (const threadId of [...this.stalls.keys()]) if (!working.has(threadId)) this.setStall(threadId, null);
+    for (const [threadId, thread] of working) {
+      const agentIds = desk.get(threadId);
+      if (!agentIds) continue;
       const turn = this.core.journal.runningTurn(threadId);
       if (turn === null || this.stalls.get(threadId)?.turnId === turn.id) continue;
       // A card waiting for the user is no stall: the question and permission events tell of it.

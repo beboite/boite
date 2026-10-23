@@ -144,6 +144,47 @@ test('a follow stays past seven days while its thread is open and leaves a day a
   expect(ids).toContain(worker);
 });
 
+/** The statements `run` sends to SQLite, counted through `db.query`. */
+function statements(run: () => void): number {
+  const db = h.core.journal.db;
+  const query = db.query;
+  let count = 0;
+  db.query = ((sql: string) => {
+    const statement = query.call(db, sql);
+    return new Proxy(statement, { get: (target, prop) => {
+      const value = Reflect.get(target, prop, target) as unknown;
+      if (typeof value !== 'function') return value;
+      return (...args: unknown[]) => { if (prop === 'get' || prop === 'all' || prop === 'run' || prop === 'values') count += 1; return (value as (...a: unknown[]) => unknown).apply(target, args); };
+    } });
+  }) as typeof db.query;
+  try { run(); } finally { db.query = query; }
+  return count;
+}
+
+test('a desk of many threads reads them, their pull requests and the threads at work in one statement each', () => {
+  const base = h.core.threads.require(worker);
+  const add = (from: number, to: number) => {
+    for (let i = from; i < to; i++) {
+      const id = `thr_desk${i}`;
+      h.core.journal.putThread({ ...base, id, title: `Desk ${i}` });
+      h.core.journal.setSetting(`linked-pull-requests:${id}`, [{ url: `https://github.com/acme/app/pull/${i}`, repository: 'acme/app', number: i, title: 'x', state: 'OPEN', draft: false, head: 'h', base: 'main', headRepository: 'acme/app', checkedAt: 0 }]);
+      h.core.workforce.projects.follow(agent.id, id, 'followed');
+    }
+  };
+  // Each read once first: today's sums and the desk index are kept until the next change.
+  const count = () => {
+    h.core.workforce.snapshot(); h.core.workforce.projects.checkStalls();
+    return { snapshot: statements(() => h.core.workforce.snapshot()), context: statements(() => agentContext(h.core, agent)), stalls: statements(() => h.core.workforce.projects.checkStalls()) };
+  };
+  add(0, 3);
+  const small = count();
+  add(3, 40);
+  expect(watches()).toHaveLength(40);
+  expect(watchOf('thr_desk39')!.pullRequest).toMatchObject({ number: 39, state: 'open' });
+  expect(count()).toEqual(small);
+  expect(small.stalls).toBe(1);
+});
+
 test('a desk thread silent for 20 minutes wakes the agent once per turn and shows since when', async () => {
   h.core.workforce.setLimits({ paused: true });
   h.core.workforce.projects.follow(agent.id, worker, 'followed');

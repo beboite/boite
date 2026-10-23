@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_MEMORY_MAX } from '@boite/contracts';
-import type { AgentProfile, AgentWatchPullRequest, LinkedPullRequest, ThreadSummary } from '@boite/contracts';
+import type { AgentBrain, AgentProfile, AgentWatchPullRequest, LinkedPullRequest, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { scheduleText } from './routines.ts';
 
@@ -76,8 +76,7 @@ export function deskState(core: Core, thread: ThreadSummary): string {
  * else its newest open link, else its newest link, with the checks the watch
  * last read. Null when the thread linked none.
  */
-export function deskPullRequest(core: Core, thread: ThreadSummary): AgentWatchPullRequest | null {
-  const stored = core.journal.getSetting(`${LINKED}${thread.id}`);
+export function deskPullRequest(core: Core, thread: ThreadSummary, stored: unknown = core.journal.getSetting(`${LINKED}${thread.id}`)): AgentWatchPullRequest | null {
   const linked = Array.isArray(stored) ? (stored as LinkedPullRequest[]).filter(p => typeof p?.url === 'string') : [];
   const watches = core.pullRequestWatches?.of(thread.id) ?? [];
   const pr = linked.find(p => watches.some(w => w.url.toLowerCase() === p.url.toLowerCase()))
@@ -93,37 +92,81 @@ export function deskPullRequest(core: Core, thread: ThreadSummary): AgentWatchPu
   return { number: pr.number, url: pr.url, state, checks: state === 'merged' || state === 'closed' ? null : checks };
 }
 
+/**
+ * The linked pull requests of many threads in one read, by thread id, for a
+ * desk of a hundred threads. A thread that linked none is missing.
+ */
+export function linkedPullRequests(core: Core, threadIds: readonly string[]): Map<string, unknown> {
+  const linked = new Map<string, unknown>();
+  if (threadIds.length === 0) return linked;
+  const rows = core.journal.db.query('SELECT key, value FROM settings WHERE key IN (SELECT value FROM json_each(?))')
+    .all(JSON.stringify(threadIds.map(id => `${LINKED}${id}`))) as { key: string; value: string }[];
+  for (const row of rows) {
+    try { linked.set(row.key.slice(LINKED.length), JSON.parse(row.value)); } catch { /* A link list that does not parse links nothing. */ }
+  }
+  return linked;
+}
+
 /** A desk line's pull request, in a few words: `PR #12 open, checks failing`. */
 export function pullRequestText(pr: AgentWatchPullRequest | null): string {
   return pr ? `PR #${pr.number} ${pr.state}${pr.checks ? `, checks ${pr.checks}` : ''}` : '';
 }
 
-/** The agent's context block, with the hash that says when it must be sent again. */
-export function agentContext(core: Core, agent: AgentProfile): { text: string; hash: string } {
+/**
+ * What the block says apart from the desk, and the hash of it: brain files,
+ * skills, routines and projects are read on every turn of an agent's thread,
+ * the desk only when the block goes out.
+ */
+interface ContextInputs {
+  brain: AgentBrain; memoryPath: string; memory: string; archive: string; archived: boolean;
+  skills: { name: string; path: string }[]; routineLines: string[]; projects: string; persona: string; hash: string;
+}
+
+function contextInputs(core: Core, agent: AgentProfile): ContextInputs {
   const store = core.workforce;
   const brain = store.resident.brain(agent.id);
   const memoryPath = join(brain.path, 'MEMORY.md');
   const memory = capped(brain.memory.trim(), AGENT_MEMORY_MAX, memoryPath);
   const archive = join(brain.path, MEMORY_ARCHIVE);
+  const archived = existsSync(archive);
   const skills = skillsOf(brain.path);
   const routines = store.records.list('routine').filter(r => r.agentId === agent.id);
   const projects = store.projects.instructions(agent);
   const persona = [`You are ${agent.name}${agent.domain.trim() ? `, ${agent.domain.trim()}` : ''}.`, agent.instructions.trim()].filter(Boolean).join('\n');
   const routineLines = routines.map(r => `- ${r.name} (${r.id}): ${scheduleText(r.schedule)}${r.enabled ? r.nextAt !== null ? `, next ${new Date(r.nextAt).toISOString()}` : ', done' : ', off'}`);
-  const desk = store.projects.watchesOf(agent.id).slice(0, 30).flatMap(({ threadId }) => {
-    const thread = core.journal.getThread(threadId);
-    if (!thread) return [];
-    const project = thread.projectId === null ? null : core.journal.getProject(thread.projectId)?.name ?? null;
-    const pr = pullRequestText(deskPullRequest(core, thread));
+  const hash = createHash('sha256').update(JSON.stringify([
+    brain.path, persona, brain.instructions, memory, archived, skills, routines.map(r => [r.id, r.name, r.schedule, r.enabled]), projects, OWN_SETTINGS, HOW_YOU_WORK,
+  ])).digest('hex');
+  return { brain, memoryPath, memory, archive, archived, skills, routineLines, projects, persona, hash };
+}
+
+/** The desk lines of the block: the first 30 watches, their threads and pull requests read in one pass each. */
+function deskLines(core: Core, agent: AgentProfile): string[] {
+  const store = core.workforce;
+  const watches = store.projects.watchesOf(agent.id).slice(0, 30);
+  const linked = linkedPullRequests(core, watches.map(w => w.threadId));
+  const projectNames = new Map<string, string | null>();
+  return watches.map(({ thread }) => {
+    let project: string | null = null;
+    if (thread.projectId !== null) {
+      if (!projectNames.has(thread.projectId)) projectNames.set(thread.projectId, core.journal.getProject(thread.projectId)?.name ?? null);
+      project = projectNames.get(thread.projectId)!;
+    }
+    const pr = pullRequestText(deskPullRequest(core, thread, linked.get(thread.id) ?? null));
     const stalled = store.projects.stalledSince(thread.id);
-    return [`- "${thread.title}" (${thread.id})${project ? ` in ${project}` : ''}: ${deskState(core, thread)}${stalled === null ? '' : ', silent since ' + new Date(stalled).toISOString()}${pr ? `, ${pr}` : ''}`];
+    return `- "${thread.title}" (${thread.id})${project ? ` in ${project}` : ''}: ${deskState(core, thread)}${stalled === null ? '' : ', silent since ' + new Date(stalled).toISOString()}${pr ? `, ${pr}` : ''}`;
   });
+}
+
+function render(core: Core, agent: AgentProfile, inputs: ContextInputs): string {
+  const { brain, memoryPath, memory, archive, archived, skills, routineLines, projects, persona } = inputs;
+  const desk = deskLines(core, agent);
   const text = [
     'Boite: who you are, as a persistent agent. This block comes again only when it changes; your conversation so far is in this session.',
     persona,
     `Your brain is ${brain.path}. Its AGENTS.md:\n${capped(brain.instructions.trim(), AGENTS_MD_MAX, join(brain.path, 'AGENTS.md')) || '(empty)'}`,
     `Your memory, ${memoryPath}:\n${memory || '(empty)'}`,
-    ...(existsSync(archive) ? [`Older notes you may read when they matter: ${archive}`] : []),
+    ...(archived ? [`Older notes you may read when they matter: ${archive}`] : []),
     skills.length ? `Your skills (read the file before using one):\n${skills.map(s => `- ${s.name}: ${s.path}`).join('\n')}` : `Your skills go in ${join(brain.path, 'skills')}, one folder with a SKILL.md each.`,
     routineLines.length ? `Your routines:\n${routineLines.join('\n')}` : 'You have no routine yet.',
     desk.length ? `Your desk:\n${desk.join('\n')}` : 'Your desk is empty.',
@@ -131,8 +174,20 @@ export function agentContext(core: Core, agent: AgentProfile): { text: string; h
     OWN_SETTINGS,
     HOW_YOU_WORK,
   ].filter(Boolean).join('\n\n');
-  const hash = createHash('sha256').update(JSON.stringify([
-    brain.path, persona, brain.instructions, memory, existsSync(archive), skills, routines.map(r => [r.id, r.name, r.schedule, r.enabled]), projects, OWN_SETTINGS, HOW_YOU_WORK,
-  ])).digest('hex');
-  return { text: `${text}\n\n`, hash };
+  return `${text}\n\n`;
+}
+
+/** The agent's context block, with the hash that says when it must be sent again. */
+export function agentContext(core: Core, agent: AgentProfile): { text: string; hash: string } {
+  const inputs = contextInputs(core, agent);
+  return { text: render(core, agent, inputs), hash: inputs.hash };
+}
+
+/**
+ * The block for one turn: built only when `send` accepts its hash, so a turn
+ * that carries nothing never reads the desk.
+ */
+export function agentContextIf(core: Core, agent: AgentProfile, send: (hash: string) => boolean): { text: string; hash: string } | null {
+  const inputs = contextInputs(core, agent);
+  return send(inputs.hash) ? { text: render(core, agent, inputs), hash: inputs.hash } : null;
 }

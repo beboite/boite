@@ -1,13 +1,12 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
-  AgentBrain, AgentProfile, AgentSave, AgentSession, AgentStatus, AgentWatch, AgentsSnapshot, RpcParams, ThreadSummary, Turn,
+  AgentBrain, AgentProfile, AgentRoutine, AgentSave, AgentSession, AgentStatus, AgentWatch, AgentsSnapshot, RpcParams, ThreadSummary, Turn,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, refused } from '../errors.ts';
 import { checkModel, checkEffort, agentProvider, modelsFor } from '../threads/selection.ts';
 import { withLoad } from '../threads/records.ts';
-import { toTurn, type TurnRow } from '../journal/rows.ts';
 import { AgentsRepository } from './repository.ts';
 import { AgentEntrustments } from './entrust.ts';
 import { ResidentAgents } from './resident.ts';
@@ -15,7 +14,7 @@ import { AgentRoutines } from './routines.ts';
 import { AgentProjects } from './projects.ts';
 import { AgentSettingCards, registerAgentSettingMethods } from './setting-cards.ts';
 import { MemoryKeeper } from './memory.ts';
-import { agentContext, deskPullRequest, deskState } from './context.ts';
+import { agentContextIf, deskPullRequest, deskState, linkedPullRequests } from './context.ts';
 import { finalText, midnight, type AgentFact, type AgentWake } from './runtime.ts';
 import { migrateAgents } from './migration.ts';
 import { boolean, ids, integer, object, oneOf, text } from './validation.ts';
@@ -52,6 +51,12 @@ export class AgentStore {
   readonly projects: AgentProjects;
   readonly memory: MemoryKeeper;
   readonly settingCards: AgentSettingCards;
+  /**
+   * Today's sums per agent thread, read again after any turn or row change of
+   * that thread and at midnight: a snapshot a second while an agent works
+   * would otherwise sum the whole day each time. One entry per agent.
+   */
+  private readonly todays = new Map<string, { since: number; today: AgentStatus['today'] }>();
   /** Agent threads by id, so a bus event about any other thread costs a map lookup. */
   private readonly threads = new Map<string, string>();
   private readonly off: () => void;
@@ -69,6 +74,7 @@ export class AgentStore {
       const threadId = (payload as { threadId?: unknown; id?: unknown } | null)?.threadId ?? (name === 'thread.updated' ? (payload as { id?: unknown }).id : undefined);
       if (typeof threadId !== 'string' || !this.threads.has(threadId)) return;
       if (name === 'thread.updated' && (payload as ThreadSummary).unread === false) this.readUp(threadId);
+      if (name.startsWith('turn.') || name === 'thread.updated' || name === 'thread.removed') this.todays.delete(threadId);
       if (name === 'message.part' || name === 'thread.updated' || name.startsWith('question.') || name.startsWith('permission.')) this.changed();
     });
   }
@@ -251,13 +257,13 @@ export class AgentStore {
   contextFor(thread: ThreadSummary, sessionId: string | null, turnId: string): string {
     const agent = this.agentOfThread(thread.id);
     if (!agent) return '';
-    const { text: block, hash } = agentContext(this.core, agent);
     const key = `${CONTEXT}${thread.id}`;
     const sent = this.core.journal.getSetting(key) as ContextSent | undefined;
     const generation = thread.sessionGeneration ?? 0;
-    if (sessionId !== null && sent && sent.hash === hash && sent.sessionGeneration === generation) return '';
-    this.core.journal.setSetting(key, { hash, sessionGeneration: generation, turnId } satisfies ContextSent);
-    return block;
+    const block = agentContextIf(this.core, agent, hash => sessionId === null || !sent || sent.hash !== hash || sent.sessionGeneration !== generation);
+    if (!block) return '';
+    this.core.journal.setSetting(key, { hash: block.hash, sessionGeneration: generation, turnId } satisfies ContextSent);
+    return block.text;
   }
   /**
    * The next turn carries the block again after one that failed (it may never
@@ -303,21 +309,21 @@ export class AgentStore {
     return this.watchesOf(agent.id).find(w => w.threadId === target.id) ?? null;
   }
 
-  /** The desk rows of an agent, from the threads themselves. */
+  /** The desk rows of an agent, from the threads themselves: its threads and their pull requests in one read each. */
   private watchesOf(agentId: string): AgentWatch[] {
-    return this.projects.watchesOf(agentId).flatMap(({ threadId, origin, since }) => {
-      const thread = this.core.journal.getThread(threadId);
-      if (!thread) return [];
+    const watches = this.projects.watchesOf(agentId);
+    const linked = linkedPullRequests(this.core, watches.map(w => w.threadId));
+    return watches.map(({ threadId, origin, since, thread }) => {
       const state = deskState(this.core, thread);
       const ask = this.core.threads.listQuestions(thread.id)[0];
-      return [{
+      return {
         agentId, threadId, title: thread.title, projectId: thread.projectId, origin, since,
         state: state === 'needs the user' ? 'needs-you' : state as AgentWatch['state'],
         stalledSince: this.projects.stalledSince(thread.id),
         lastActivityAt: Math.max(thread.updatedAt, this.projects.lastHeard(thread.id) ?? 0),
-        pullRequest: deskPullRequest(this.core, thread),
+        pullRequest: deskPullRequest(this.core, thread, linked.get(thread.id) ?? null),
         question: ask ? { id: ask.id, text: ask.text, options: ask.options.map(o => o.label) } : null,
-      }];
+      };
     });
   }
 
@@ -362,8 +368,9 @@ export class AgentStore {
     return progress?.phase === 'thinking' ? 'Thinking' : progress?.phase === 'compacting' ? 'Compacting its context' : progress?.phase === 'retrying' ? 'Retrying' : null;
   }
 
-  status(agent: AgentProfile): AgentStatus {
-    const threadId = this.sessionOf(agent.id)?.threadId ?? null;
+  /** `sessions` and `routines`: the records a snapshot already read, so ten agents read them once. */
+  status(agent: AgentProfile, sessions: readonly AgentSession[] = this.records.list('session'), routines: readonly AgentRoutine[] = this.records.list('routine')): AgentStatus {
+    const threadId = sessions.find(session => session.agentId === agent.id)?.threadId ?? null;
     const thread = threadId ? this.core.journal.getThread(threadId) : null;
     const problem = this.problem(agent);
     const asks = thread ? this.core.threads.listQuestions(thread.id).length + this.core.threads.listPermissions(thread.id).length : 0;
@@ -375,18 +382,12 @@ export class AgentStore {
             : asks > 0 ? 'waiting'
               : agent.status === 'paused' || this.limits().paused ? 'paused'
                 : problem !== null || thread?.status === 'error' ? 'error' : 'idle';
-    const next = this.records.list('routine').filter(r => r.agentId === agent.id && r.enabled && r.nextAt !== null).sort((a, b) => a.nextAt! - b.nextAt!)[0];
+    const next = routines.filter(r => r.agentId === agent.id && r.enabled && r.nextAt !== null).sort((a, b) => a.nextAt! - b.nextAt!)[0];
     const today = { turns: 0, wakes: 0, quiet: 0, costUsd: 0 };
     let last: AgentStatus['last'] = null;
     let unread = 0;
     if (thread) {
-      for (const turn of this.turnsSince(thread.id, midnight())) {
-        today.turns += 1;
-        const operation = turn.execution?.operation;
-        if (operation === 'routine' || operation === 'event') today.wakes += 1;
-        if (turn.quiet) today.quiet += 1;
-        today.costUsd += turn.usage?.costUsdEquivalent ?? 0;
-      }
+      Object.assign(today, this.today(thread.id, midnight()));
       today.costUsd = Math.round(today.costUsd * 10_000) / 10_000;
       const answered = this.answered(thread.id);
       if (answered) {
@@ -413,13 +414,31 @@ export class AgentStore {
     if (this.core.journal.getSetting(`${UNREAD}${threadId}`) !== undefined) this.core.journal.deleteSetting(`${UNREAD}${threadId}`);
   }
 
-  /** Its turns since `since`, read in SQL: an agent thread gathers thousands of them. */
-  private turnsSince(threadId: string, since: number): Turn[] {
-    return (this.core.journal.db.query('SELECT * FROM turns WHERE thread_id = ? AND queued_at >= ?').all(threadId, since) as TurnRow[]).map(toTurn);
+  /**
+   * Its turns started since `since`, summed in SQL through the partial index
+   * `turns_by_thread_queue` (whose `started_at IS NOT NULL` the query repeats):
+   * an agent thread gathers thousands of turns, today's are a few. A turn
+   * still waiting in the queue counts once it starts.
+   */
+  private today(threadId: string, since: number): AgentStatus['today'] {
+    const held = this.todays.get(threadId);
+    if (held?.since === since) return { ...held.today };
+    const today = this.core.journal.db.query(`SELECT COUNT(*) AS turns,
+      COALESCE(SUM(json_extract(execution, '$.operation') IN ('routine', 'event')), 0) AS wakes,
+      COALESCE(SUM(COALESCE(quiet, 0) <> 0), 0) AS quiet,
+      COALESCE(SUM(json_extract(usage, '$.costUsdEquivalent')), 0) AS costUsd
+      FROM turns INDEXED BY turns_by_thread_queue WHERE thread_id = ? AND queued_at >= ? AND started_at IS NOT NULL`).get(threadId, since) as AgentStatus['today'];
+    this.todays.set(threadId, { since, today });
+    return { ...today };
   }
-  /** The last finished turn whose answer the user reads: not quiet, not housekeeping. */
+  /**
+   * The last finished turn whose answer the user reads: not quiet, not
+   * housekeeping. Walks the thread's own index back from its newest turn;
+   * left to itself, SQLite picks `turns_by_status` and reads every done turn
+   * of every thread.
+   */
   private answered(threadId: string): Turn | null {
-    const row = this.core.journal.db.query(`SELECT id FROM turns WHERE thread_id = ? AND status = 'done' AND COALESCE(quiet, 0) = 0
+    const row = this.core.journal.db.query(`SELECT id FROM turns INDEXED BY turns_by_thread WHERE thread_id = ? AND status = 'done' AND COALESCE(quiet, 0) = 0
       AND COALESCE(json_extract(execution, '$.operation'), '') NOT IN ('compact', 'keepalive') ORDER BY rowid DESC LIMIT 1`).get(threadId) as { id: string } | null;
     return row ? this.core.journal.getTurn(row.id) : null;
   }
@@ -432,12 +451,13 @@ export class AgentStore {
     const own = threadId === undefined ? null : this.callerAgent(threadId, 'agents.snapshot');
     const profiles = own ? [own] : this.records.list('profile');
     const mine = (agentId: string) => !own || agentId === own.id;
+    const sessions = this.records.list('session'), routines = this.records.list('routine');
     return {
       revision: this.records.revision(),
       profiles,
-      sessions: this.records.list('session').filter(s => mine(s.agentId)),
-      routines: this.records.list('routine').filter(r => mine(r.agentId)),
-      status: profiles.map(agent => this.status(agent)),
+      sessions: sessions.filter(s => mine(s.agentId)),
+      routines: routines.filter(r => mine(r.agentId)),
+      status: profiles.map(agent => this.status(agent, sessions, routines)),
       watches: profiles.flatMap(agent => this.watchesOf(agent.id)),
       accountGrants: own ? [] : this.resident.grants(),
       limits: this.limits(),

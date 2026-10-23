@@ -280,7 +280,8 @@ quiet, each with its cost) and leaves a 20 KB work row of the older agent model
 per step in `agent_entities`, on a temporary core. It then reads
 `agents.snapshot` over RPC and looks up the agent of its thread, six samples
 each after a warm-up. On 2026-10-23, at 2,000 steps, on Linux:
-snapshot 1,002 bytes, median 7.21 ms; thread lookup median 0.014 ms. The
+snapshot 1,018 bytes, median 8.15 ms, and 2.39 ms once the last answer walks
+the thread's own index (below); thread lookup median 0.010 ms. The
 snapshot no longer carries history: the conversation is the thread's, paged
 like any thread, and the status (today's turns and spend, the last answer)
 reads the turns table with SQL instead of loading the thread.
@@ -288,6 +289,35 @@ reads the turns table with SQL instead of loading the thread.
 The older model measured, on 2026-09-24 at 2,000 steps, 43.0 MB and 351.78 ms
 on main `11631eb` and 121 KB and 3.66 ms with a bounded snapshot of messages,
 memories and work.
+
+### Ten agents at weeks of scale
+
+`bun run bench/agents-load.ts [turns-per-agent]` gives 10 agents 5,000 turns
+each, a desk of 100 watched threads (a third with a linked pull request), 10
+routines each and 20,000 rows of the older agent model, then counts the SQL
+statements each step runs by wrapping `db.query`. On 2026-10-23, on this Linux
+LXC, before and after the desk and status reads were batched:
+
+| Step | Before | After |
+| --- | --- | --- |
+| `agents.snapshot` over RPC | 407 ms, 4,106 statements | 29 ms, 96 statements |
+| One agent's own snapshot | 71 ms, 415 statements | 3.0 ms, 14 statements |
+| Context block, turn that sends nothing | 7.0 ms, 298 statements | 0.8 ms, 7 statements |
+| Context block, fresh session (5.7 KB) | 7.8 ms, 296 statements | 2.0 ms, 9 statements |
+| Stall check, every 10 s | 13.5 ms, 1,000 statements | 0.13 ms, 1 statement |
+| `turn.finished` of a thread in an entrusted project | 3.4 ms, 35 statements | 1.1 ms, 15 statements |
+| Idle core with 10 agents | 86 statements/s | 3.2 statements/s, as with none |
+
+The snapshot stays 353 KB at this scale: every agent's desk rides in it. The
+batching: a desk's threads are one `listThreadsIn`, their linked pull requests
+one `settings` read, the stall check one read of the threads at work, the
+context block reads the desk only when it goes out, the last answer walks
+`turns_by_thread` (SQLite picked `turns_by_status` and read every done turn of
+every thread, 31 ms per agent), today's sums go through `turns_by_thread_queue`
+and are kept per thread until a turn or row of that thread changes.
+`agents.changed` goes out once a second while an agent works (6 in 6.1 s of 20
+parts a second). The 500 ms agents tick costs 5 µs and no statement when
+nothing is due.
 
 ## Local and remote connections
 

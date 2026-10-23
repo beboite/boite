@@ -248,9 +248,9 @@ export class AgentRuntime {
     return this.core.threads.startTurn(thread.id, wake.prompt, [], undefined, wake.kind, undefined, wake.requestId, wake.label);
   }
 
-  /** What the agent's thread spent today, in API-equivalent dollars. */
+  /** What the agent's thread spent today, in API-equivalent dollars, through the partial index `turns_by_thread_queue`. */
   spentToday(threadId: string, now = Date.now()): number {
-    const row = this.core.journal.db.query("SELECT COALESCE(SUM(json_extract(usage, '$.costUsdEquivalent')), 0) AS cost FROM turns WHERE thread_id = ? AND queued_at >= ? AND usage IS NOT NULL")
+    const row = this.core.journal.db.query("SELECT COALESCE(SUM(json_extract(usage, '$.costUsdEquivalent')), 0) AS cost FROM turns INDEXED BY turns_by_thread_queue WHERE thread_id = ? AND queued_at >= ? AND started_at IS NOT NULL AND usage IS NOT NULL")
       .get(threadId, midnight(now)) as { cost: number };
     return row.cost;
   }
