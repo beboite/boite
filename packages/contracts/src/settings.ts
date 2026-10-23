@@ -153,7 +153,8 @@ export interface Settings {
   /**
    * While this machine follows its group's settings home, what it keeps for
    * itself (`SyncKey`): each entry was changed here and the copy skips it.
-   * Missing or empty: everything synced follows. Read only by clients.
+   * Missing or empty: everything synced follows. Clients write it; the core
+   * reads it to leave those keys out of `settings.follow`.
    */
   syncOverrides?: string[];
 }

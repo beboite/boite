@@ -213,3 +213,18 @@ test('a setting another window keeps on the target while the copy is on its way 
   expect(spy.mock.calls.some(([method]) => method === 'settings.follow')).toBe(true);
   expect(await to.call('settings.get', {})).toMatchObject({ shortAnswers: true, muteAgents: false, syncOverrides: ['shortAnswers'] });
 });
+
+test('a chord kept on the target while the settings part is copied is left alone by the keybindings part', async () => {
+  const from = await machine();
+  const to = await machine();
+  await from.call('settings.set', { muteAgents: false });
+  await from.call('keybindings.set', { command: 'panel', chord: 'mod+shift+p' });
+  const call = to.call.bind(to) as Client['call'];
+  const racing = older(to, (method, params) => method === 'settings.follow'
+    // Another window changes the chord, and keeps it, while the settings part is on its way.
+    ? call('keybindings.set', { command: 'panel', chord: 'mod+alt+p' })
+      .then(() => call('settings.set', { syncOverrides: ['keybinding:panel'] }))
+      .then(() => call('settings.follow', params as never)) as Promise<never> : null);
+  await syncSettings(await end(from), await end(racing));
+  expect((await to.call('keybindings.get', {})).bindings.panel).toBe('mod+alt+p');
+});

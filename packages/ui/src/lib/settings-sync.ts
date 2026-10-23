@@ -140,14 +140,17 @@ export async function syncSettings(source: SyncEnd, target: SyncEnd, signal?: Ab
     return { settings: written ?? await target.client.call('settings.set', patch), changed };
   });
 
+  // What the target keeps, read again before each later part: a chord or a switch kept there during the copy stays its own.
+  const keptNow = async () => new Set((await target.client.call('settings.get', {})).syncOverrides ?? []);
   signal?.throwIfAborted();
-  const keybindings = await stage('keybindings', () => copyKeybindings(source.client, target.client, kept, signal));
+  const keybindings = await stage('keybindings', async () => copyKeybindings(source.client, target.client, await keptNow(), signal));
 
   const brain = await stage('brain', async (): Promise<SyncReport['brain']> => {
     const [fromBrain, toBrain] = await Promise.all([
       optional<BrainStatus>(source.client.call('brain.status', {})),
       optional<BrainStatus>(target.client.call('brain.status', {}))
     ]);
+    kept = await keptNow();
     if (!fromBrain?.config.path) return 'none';
     if (!toBrain?.config.path) return toBrain ? 'absent' : 'none';
     // The folder is the target's own; only the switches it does not keep come across.
