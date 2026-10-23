@@ -5,6 +5,7 @@
   import { fill, strings } from '../lib/strings';
   import { formatTokens } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
+  import SyncMark from './SyncMark.svelte';
   import InfoTip from './InfoTip.svelte';
 
   /**
@@ -68,7 +69,7 @@
   <section class="card" id="settings-auto-compact" data-testid="auto-compact-settings">
     <label for="{uid}-on" class="master">
       <span class="words">
-        <h2 class="ui-label-box"><span class="ui-label" id="{uid}-on-name">{strings.settings.autoCompact}</span><InfoTip topic={strings.settings.autoCompact} text={strings.settings.autoCompactHint} /></h2>
+        <h2 class="ui-label-box"><span class="ui-label" id="{uid}-on-name">{strings.settings.autoCompact}</span><InfoTip topic={strings.settings.autoCompact} text={strings.settings.autoCompactHint} /><SyncMark {store} key="autoCompact" /></h2>
       </span>
       <input id="{uid}-on" aria-labelledby="{uid}-on-name" type="checkbox" role="switch" data-testid="auto-compact-on"
         checked={rule !== null} disabled={!store.settings || saving} onchange={(event) => void save(event.currentTarget.checked ? FIRST : null, event.currentTarget)} />

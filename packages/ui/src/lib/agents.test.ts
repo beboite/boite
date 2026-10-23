@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest';
 import type { AgentEntities, AgentScope, AgentsSnapshot } from '@boite/contracts';
-import { AgentsView, agentChats, attentionOf, avatarText, liveThreads, missionPreset, missionsOf, previewOf } from './agents.svelte';
+import { AgentsView, agentChats, attentionOf, avatarText, liveThreads, missionPreset, missionsOf, previewOf, waitingForUser } from './agents.svelte';
 import { AgentDirectory } from './agent-directory.svelte';
 import type { ThreadSummary } from '@boite/contracts';
 import { FakeAgents } from './fake-agents';
@@ -155,6 +155,15 @@ test('the chat list folds a team into its group, orders by activity and counts u
   expect(chats.some(c => c.id === 'lin' || c.id === 'studio')).toBe(false);
 });
 
+test('chat counts use retained history totals and subtract messages read while a snapshot was in flight', () => {
+  const { snapshot, message } = directory();
+  snapshot.unread = [{ scope: { kind: 'agent', id: 'mira' }, at: 10, count: 75 }];
+  const messages = [message('newly-read', { kind: 'agent', id: 'mira' }, 'mira', 20), message('mine', { kind: 'agent', id: 'mira' }, null, 25), message('still-unread', { kind: 'agent', id: 'mira' }, 'mira', 30)];
+  const chats = agentChats(snapshot, messages, { 'profile:mira': 25 }, attentionOf(snapshot, []));
+  expect(chats.find(c => c.id === 'mira')?.unread).toBe(74);
+  expect(chats.find(c => c.id === 'table')?.unread).toBe(0);
+});
+
 test('running and waiting work lights the conversation it belongs to and the agent doing it', () => {
   const { snapshot } = directory();
   const work = (id: string, agentId: string, scope: AgentScope, status: AgentEntities['work']['status'], at: number): AgentEntities['work'] => ({ id, revision: 1, createdAt: at, updatedAt: at, agentId, scope, taskId: null, taskGeneration: null, messageId: null, episodeId: id, prompt: id, status, error: null, runId: null, notBefore: 0 });
@@ -165,6 +174,33 @@ test('running and waiting work lights the conversation it belongs to and the age
   expect(of('profile:atlas').status).toBe('running');
   expect(of('profile:mira').status).toBe('waiting');
   expect(chats[0]!.id).toBe('table');
+  // Old work statuses remain in Activity, but only a current question marks a chat.
+  const direct: AgentScope = { kind: 'agent', id: 'mira' };
+  const previous = { ...snapshot, work: [work('old', 'mira', direct, 'interrupted', 50)] };
+  expect(waitingForUser(previous, direct, null)).toBe(false);
+  expect(waitingForUser(previous, direct, { status: 'waiting' } as ThreadSummary)).toBe(true);
+  const pending = { ...previous, decisions: [{ workId: 'old', status: 'pending' } as AgentEntities['decision']] };
+  expect(waitingForUser(pending, direct, null)).toBe(true);
+  expect(waitingForUser(pending, { kind: 'group', id: 'table' }, null)).toBe(false);
+});
+
+test('pending mission decisions mark their home group, agent or standalone team', () => {
+  const { snapshot } = directory();
+  const decision = { workId: 'w', status: 'pending' } as AgentEntities['decision'];
+  const missionWork = (id: string) => ({ id: 'w', agentId: 'mira', scope: { kind: 'mission', id }, status: 'waiting' }) as AgentEntities['work'];
+  const waiting = { ...snapshot, work: [missionWork('m-studio')], decisions: [decision] };
+  expect(waitingForUser(waiting, { kind: 'group', id: 'table' }, null)).toBe(true);
+  expect(waitingForUser(waiting, { kind: 'agent', id: 'mira' }, null)).toBe(false);
+  waiting.work = [missionWork('m-solo')];
+  expect(waitingForUser(waiting, { kind: 'agent', id: 'atlas' }, null)).toBe(true);
+  expect(waitingForUser(waiting, { kind: 'agent', id: 'mira' }, null)).toBe(false);
+  waiting.missions = [...waiting.missions, { ...waiting.missions[0]!, id: 'm-crew', teamId: 'crew' }];
+  waiting.work = [missionWork('m-crew')];
+  expect(waitingForUser(waiting, { kind: 'team', id: 'crew' }, null)).toBe(true);
+  expect(waitingForUser(waiting, { kind: 'agent', id: 'mira' }, null)).toBe(false);
+  waiting.work = [{ ...missionWork(''), scope: { kind: 'group', id: 'table' } }];
+  expect(waitingForUser(waiting, { kind: 'group', id: 'table' }, null)).toBe(true);
+  expect(waitingForUser(waiting, { kind: 'agent', id: 'mira' }, null)).toBe(false);
 });
 
 /** The threads agent sessions run in: Atlas in the group, Mira alone (waiting on the user), and Mira's archived one. */
@@ -228,10 +264,23 @@ test('avatars take a short avatar or the initials, previews drop markdown', () =
   expect(previewOf('**Bold** and `code`\n\n- [a link](https://x)')).toBe('Bold and code - a link');
 });
 
-test('a read mark survives a new view of the same core', async () => {
+test('read marks refresh retained totals even when a jump crosses messages never loaded', async () => {
+  vi.useFakeTimers(); localStorage.clear();
+  const { snapshot } = directory();
+  const call = vi.fn(async (_method: string, params: { readAt?: { at: number }[] }) => ({ ...snapshot, unread: params.readAt?.some(m => m.at >= 100) ? [] : [{ scope: { kind: 'agent', id: 'mira' }, at: 0, count: 75 }] }));
+  const view = new AgentsView({ client: { call, on: () => () => {} }, core: { coreId: 'jump' } } as unknown as Store);
+  try {
+    view.start(); await view.refresh();
+    view.markRead('profile:mira', 100);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(view.snapshot?.unread).toEqual([]);
+  } finally { view.close(); vi.useRealTimers(); localStorage.clear(); }
+});
+
+test('read marks survive a return visit and distinguish cores with the same data directory', async () => {
   const { snapshot } = directory();
   localStorage.clear();
-  const store = { client: { call: vi.fn().mockResolvedValue(snapshot), on: () => () => {} }, core: { dataDir: 'D:/core' } } as unknown as Store;
+  const store = { client: { call: vi.fn().mockResolvedValue(snapshot), on: () => () => {} }, core: { coreId: 'one', dataDir: 'D:/core' } } as unknown as Store;
   const first = new AgentsView(store);
   const second = new AgentsView(store);
   try {
@@ -241,6 +290,8 @@ test('a read mark survives a new view of the same core', async () => {
     expect(first.readAt).toEqual({ 'profile:mira': 40 });
     await second.refresh();
     expect(second.readAt).toEqual({ 'profile:mira': 40 });
+    const elsewhere = new AgentsView({ client: store.client, core: { coreId: 'two', dataDir: 'D:/core' } } as unknown as Store);
+    try { await elsewhere.refresh(); expect(elsewhere.readAt).toEqual({}); } finally { elsewhere.close(); }
   } finally { first.close(); second.close(); localStorage.clear(); }
 });
 

@@ -498,7 +498,7 @@ describe('settings', () => {
     const listed = await boite(['settings']);
     expect(listed.code).toBe(0);
     expect(listed.out).toContain('agentCpuCapPercent 75 resources#limits\n');
-    expect(listed.out).toContain('listenOnLan false machines#phone (sensitive)');
+    expect(listed.out).toContain('listenOnLan false advanced#phone (sensitive)');
     expect(listed.out).toStartWith('app: no Boite app has reported yet');
     expect(listed.out).not.toContain('experiment.');
     expect(listed.out).not.toContain('subscriptionProxy');

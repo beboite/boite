@@ -44,6 +44,41 @@
   Pop $0
 !macroend
 
+; Sets OUT to 1 when FILE is absent or opens for writing, which Windows
+; refuses while a process runs from it, else to 0.
+!macro BOITE_FILE_FREE FILE OUT
+  StrCpy ${OUT} 1
+  ${If} ${FileExists} "${FILE}"
+    ClearErrors
+    FileOpen $R7 "${FILE}" a
+    ${If} ${Errors}
+      StrCpy ${OUT} 0
+    ${Else}
+      FileClose $R7
+    ${EndIf}
+  ${EndIf}
+  ClearErrors
+!macroend
+
+; Sets $R9 to 1 when nothing of this install runs: no core holds the lock of
+; DATA (a core removes it when it exits; one that crashed leaves it, and the
+; scripts check), and neither the core nor the shell executable is in use.
+; $1 holds the shell name the previous install registered, or "".
+!macro BOITE_NOTHING_RUNS DATA
+  StrCpy $R9 0
+  ${IfNot} ${FileExists} "${DATA}\core.lock"
+    !insertmacro BOITE_FILE_FREE "$INSTDIR\boite-core.exe" $R8
+    ${If} $R8 == 1
+      !insertmacro BOITE_FILE_FREE "$INSTDIR\${MAINBINARYNAME}.exe" $R8
+    ${EndIf}
+    ${If} $R8 == 1
+    ${AndIf} $1 != ""
+      !insertmacro BOITE_FILE_FREE "$INSTDIR\$1" $R8
+    ${EndIf}
+    StrCpy $R9 $R8
+  ${EndIf}
+!macroend
+
 !macro BOITE_STOP_CORE IDLE_ONLY
   !ifndef BUNDLEID
     !error "hooks.nsh: BUNDLEID is not defined where BOITE_STOP_CORE is inserted"
@@ -61,6 +96,43 @@
   Push $1
   Push $2
   StrCpy $2 "0"
+  ReadRegStr $1 SHCTX "${UNINSTKEY}" "MainBinaryName"
+
+  ; Nothing of this install runs, as after an in-app update stopped its core:
+  ; the two PowerShell scripts below are skipped. Each took about a second on
+  ; Windows 11 with nothing to stop (`Measure-Command { powershell -NoProfile
+  ; -File stop-core.ps1 }`, 2026-10-23), most of an update's installation. That update's
+  ; shell exits just after starting this installer, so a silent or passive
+  ; run gives it 3 seconds to let go of its executable.
+  Push $R6
+  Push $R7
+  Push $R8
+  Push $R9
+  StrCpy $R6 0
+  ${Do}
+    !insertmacro BOITE_NOTHING_RUNS "${BOITE_DATA_ROOT}\${BOITE_DATA_NAME}"
+    ${If} $R9 == 1
+    ${OrIf} $R6 >= 30
+      ${ExitDo}
+    ${EndIf}
+    ; A core holds the lock: no wait helps, the scripts decide.
+    ${If} ${FileExists} "${BOITE_DATA_ROOT}\${BOITE_DATA_NAME}\core.lock"
+      ${ExitDo}
+    ${EndIf}
+    ${IfNot} ${Silent}
+    ${AndIf} $PassiveMode != 1
+      ${ExitDo}
+    ${EndIf}
+    Sleep 100
+    IntOp $R6 $R6 + 1
+  ${Loop}
+  StrCpy $0 $R9
+  Pop $R9
+  Pop $R8
+  Pop $R7
+  Pop $R6
+  ; Still through the last check below: something may take the file meanwhile.
+  StrCmp $0 "1" boite_core_check
 
   InitPluginsDir
   File "/oname=$PLUGINSDIR\boite-stop-shell.ps1" "${BOITE_HOOKS_DIR}\stop-shell.ps1"
@@ -70,7 +142,6 @@
   ; from the executable this installer is about to replace. Only a shell
   ; running from this install's directory, under this build's name or the one
   ; the previous install registered (the template deletes that file later).
-  ReadRegStr $1 SHCTX "${UNINSTKEY}" "MainBinaryName"
   System::Call 'Kernel32::SetEnvironmentVariable(t "BOITE_SHELL_DIR", t "$INSTDIR") i'
   System::Call 'Kernel32::SetEnvironmentVariable(t "BOITE_SHELL_NAMES", t "${MAINBINARYNAME}.exe|$1") i'
   ; Silent and passive runs end it unasked, as the template's check does.
@@ -129,6 +200,7 @@
   ; Whatever still holds the file (a core that would not stop, a scanner):
   ; move it aside, which Windows allows for a running executable, so the new
   ; one can be written, and delete the old one at the next restart.
+  boite_core_check:
   ClearErrors
   IfFileExists "$INSTDIR\boite-core.exe" 0 boite_core_free
     FileOpen $1 "$INSTDIR\boite-core.exe" a
@@ -148,6 +220,19 @@
     boite_core_writable:
     FileClose $1
   boite_core_free:
+  ; An agent's `boite` command (boite.exe) that outlived its core holds that
+  ; file the same way: it moves aside too, whatever the admission.
+  ClearErrors
+  IfFileExists "$INSTDIR\boite.exe" 0 boite_cli_free
+    FileOpen $1 "$INSTDIR\boite.exe" a
+    IfErrors 0 boite_cli_writable
+      Delete "$INSTDIR\boite.exe.old"
+      Rename "$INSTDIR\boite.exe" "$INSTDIR\boite.exe.old"
+      Delete /REBOOTOK "$INSTDIR\boite.exe.old"
+      Goto boite_cli_free
+    boite_cli_writable:
+    FileClose $1
+  boite_cli_free:
   ClearErrors
   Pop $2
   Pop $1

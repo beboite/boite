@@ -1,15 +1,14 @@
 <script lang="ts">
   import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
-  import { tick, untrack } from 'svelte';
-  import { Brain, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, FileText, FolderKanban, Handshake, Image } from '@lucide/svelte';
-  import type { AgentConversationMessage, AgentDelivery, AgentScope, AgentWork, Attachment, ImageMimeType, Message, MessagePart, ThreadSummary } from '@boite/contracts';
-  import { chatKey, type AgentsView } from '../../lib/agents.svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
+  import { ArrowDown, Brain, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, FileText, FolderKanban, Handshake, Image } from '@lucide/svelte';
+  import type { AgentConversationMessage, AgentDelivery, AgentMessagesPage, AgentScope, AgentWork, Attachment, ImageMimeType, Message, MessagePart, ThreadSummary } from '@boite/contracts';
+  import { chatKey, unreadMessages, type AgentsView } from '../../lib/agents.svelte';
   import { fill, strings } from '../../lib/strings';
   import { avatarStatus } from '../../lib/thread-state';
   import { bytes, longDay } from '../../lib/format';
   import type { ComposerTarget } from '../../lib/composer-target';
-  import type { Choice } from '../../lib/store.svelte';
   import type { SentPrompt } from '../../lib/composer-queue';
   import Prose from '../Prose.svelte';
   import ChatFile from '../ChatFile.svelte';
@@ -26,11 +25,11 @@
    * agents' answers in the thread's answer bubbles under their picture and
    * name, a line while one of them works, and the thread's own composer at
    * the bottom (`lib/composer-target.ts`): attachments, dictation, recall,
-   * Stop and, with a single agent, its model, effort and mode chips. An agent
+   * Stop. Engine choices stay in Settings. An agent
    * shows no code: its answers carry the pictures and files it attached, and
    * its thread opens from the page's menu, not from here. Decisions
    * an agent asked for stand in the conversation they belong to. Opening it
-   * marks it read up to its newest message.
+   * starts at its first missed message and marks visible messages read.
    */
   let { view, scope, live = null }: {
     view: AgentsView;
@@ -41,34 +40,148 @@
   let recipients = $state<string[]>([]);
   let request: { signature: string; id: string } | null = null;
   let scroller = $state<HTMLElement>();
+  let disposed = false;
+  onDestroy(() => { disposed = true; });
   const labels = $derived(strings.agents);
   const group = $derived(scope.kind === 'group' ? view.snapshot?.groups.find(g => g.id === scope.id) : null);
   const agent = $derived(scope.kind === 'agent' ? view.snapshot?.profiles.find(a => a.id === scope.id) ?? null : null);
-  const messages = $derived(view.seen.messages.filter(m => m.scope.kind === scope.kind && m.scope.id === scope.id));
+  let page = $state<AgentMessagesPage | null>(null);
+  let loading = $state(false);
+  let followedSnapshot: number | undefined;
+  const held = $derived(view.seen.messages.filter(m => m.scope.kind === scope.kind && m.scope.id === scope.id));
+  const messages = $derived(page ? page.messages.map(m => held.find(h => h.id === m.id) ?? m) : held);
   const key = $derived(`message:${scope.kind}:${scope.id}`);
-  const history = $derived({ kind: 'message' as const, scopes: [scope] });
   const newest = $derived(messages.at(-1));
+  const readKey = $derived(chatKey(scope.kind === 'agent' ? 'profile' : 'group', scope.id));
+  let entry = $state<{ key: string; at: number; count: number | null; first: string | null } | null>(null);
+  let ready = $state(false);
+  let awayFromBottom = $state(false);
+  // A latest window can show our sent message while earlier replies remain unread.
+  let readGap = $state(false);
+  const firstMissed = $derived(messages.find(m => m.id === entry?.first));
+  const missedAtEntry = $derived(entry?.count ?? unreadMessages(view.snapshot, held, scope, entry?.at ?? 0));
+  const unreadTotal = $derived(unreadMessages(view.snapshot, held, scope, view.readAt?.[readKey] ?? 0));
+  const unread = $derived(messages.filter(m => m.senderId !== null && m.createdAt > (view.readAt?.[readKey] ?? 0)));
+  const missedLabel = (count: number) => fill(count === 1 ? labels.missedOne : labels.missedMany, { count: String(count) });
+  let divider = $state<HTMLElement>();
   /** Work of this conversation that waits on the user: a decision, an interruption, a failure. */
   const pending = $derived(view.snapshot?.work.filter(w => w.scope.kind === scope.kind && w.scope.id === scope.id && (['paused', 'waiting', 'interrupted', 'error'].includes(w.status) || view.seen.decisions.some(d => d.workId === w.id && d.status === 'pending'))) ?? []);
   const worker = $derived(live ? view.snapshot?.profiles.find(a => view.snapshot?.sessions.some(s => s.threadId === live.id && s.agentId === a.id)) ?? null : null);
-  $effect(() => { view.fill(key, history, messages); });
-  $effect(() => {
-    const at = newest?.createdAt;
-    if (at) untrack(() => view.markRead(chatKey(scope.kind === 'agent' ? 'profile' : 'group', scope.id), at));
+  $effect.pre(() => {
+    if (entry?.key === key) return;
+    entry = { key, at: untrack(() => view.readAt?.[readKey] ?? 0), count: null, first: null };
+    ready = false; page = null; loading = false; readGap = false; followedSnapshot = undefined;
   });
+  // One indexed window starts at the first unread reply, even on a new device.
+  $effect(() => {
+    if (!ready && !loading && entry && scroller && view.snapshot) void untrack(() => loadMessages('open'));
+  });
+  // A bounded window that reached the end can pick up new replies. Older reading
+  // windows wait for a scroll or the unread button, so no gap is ever skipped.
+  $effect(() => {
+    if (!ready || loading || !page || page.newer) return;
+    if (view.snapshot?.revision === followedSnapshot) return;
+    if (view.snapshot?.messages.some(m => m.scope.kind === scope.kind && m.scope.id === scope.id && (!newest || m.createdAt > newest.createdAt || m.createdAt === newest.createdAt && m.id > newest.id))) {
+      followedSnapshot = view.snapshot.revision;
+      void untrack(() => loadMessages('newer'));
+    }
+  });
+  async function loadMessages(direction: 'open' | 'older' | 'newer' | 'latest' | 'unread') {
+    if (loading || disposed || !scroller || !entry) return;
+    const opening = key, box = scroller, height = box.scrollHeight, top = box.scrollTop;
+    loading = true;
+    if (direction === 'open') entry = { ...entry, count: unreadMessages(view.snapshot, held, scope, entry.at) };
+    const edge = direction === 'older' ? messages[0] : direction === 'newer' ? newest : undefined;
+    const cursor = edge ? { createdAt: edge.createdAt, id: edge.id } : undefined;
+    const next = await view.readMessages({ scope, ...(direction === 'open' ? { readAt: entry.at } : direction === 'unread' ? { readAt: view.readAt?.[readKey] ?? 0 } : direction === 'older' ? { before: cursor } : direction === 'newer' ? { after: cursor } : {}) });
+    if (disposed || opening !== key || box !== scroller) return;
+    if (!next && direction !== 'open') { loading = false; return; }
+    if (direction === 'open') entry = { ...entry, first: entry.count && next ? next.messages.find(m => m.senderId !== null && m.createdAt > entry!.at)?.id ?? null : null };
+    if (next) {
+      const startsAfterRead = next.older && !!next.messages[0] && next.messages[0].createdAt > (view.readAt?.[readKey] ?? 0);
+      // Sending skips unseen replies even when the latest window overlaps this one.
+      if (direction === 'latest') readGap = unreadTotal > 0 || startsAfterRead && (readGap || !next.messages.some(m => messages.some(previous => previous.id === m.id)));
+      else if (direction === 'open' || direction === 'unread' || direction === 'older' && !startsAfterRead) readGap = false;
+      const all = direction === 'older' ? [...next.messages, ...messages] : direction === 'newer' ? [...messages, ...next.messages] : next.messages;
+      const unique = [...new Map(all.map(m => [m.id, m])).values()];
+      // Adjacent history is appended without treating it as a newly arriving reply.
+      const follow = direction === 'newer' && !page?.newer && !awayFromBottom;
+      if (direction === 'older' || direction === 'unread' || direction === 'newer' && page?.newer) awayFromBottom = true;
+      followed = unique.at(-1)?.id ?? '';
+      page = { ...next, messages: unique, older: direction === 'newer' ? page?.older ?? next.older : next.older, newer: direction === 'older' ? page?.newer ?? next.newer : next.newer };
+      if (follow) await tick().then(() => { if (!disposed && box === scroller) box.scrollTop = box.scrollHeight; });
+    }
+    await tick();
+    if (disposed || opening !== key || box !== scroller) return;
+    if (direction === 'open') {
+      if (firstMissed && divider) box.scrollTop += divider.getBoundingClientRect().top - box.getBoundingClientRect().top;
+      else box.scrollTop = box.scrollHeight;
+    } else if (direction === 'unread') {
+      const first = unread[0];
+      const row = first ? [...box.querySelectorAll<HTMLElement>('[data-message-id]')].find(row => row.dataset.messageId === first.id) : null;
+      if (row) box.scrollTop += row.getBoundingClientRect().top - box.getBoundingClientRect().top;
+      else box.scrollTop = box.scrollHeight;
+    } else if (direction === 'older') box.scrollTop = top + box.scrollHeight - height;
+    else if (direction === 'latest') box.scrollTop = box.scrollHeight;
+    followed = newest?.id ?? '';
+    ready = true; loading = false;
+    if (next || !page) readVisible();
+  }
   /**
-   * The first render and the user's own message scroll to the bottom. An agent's
+   * A user's own new message scrolls to the bottom. An agent's
    * message does only for a reader already there, measured before it is drawn;
    * someone reading older messages stays where they are.
    */
   const NEAR_BOTTOM = 80;
   let followed = '';
   $effect.pre(() => {
-    if (!newest?.id || !scroller) return;
+    if (!ready || !newest?.id || !scroller) return;
     const box = scroller;
-    const follow = followed !== key || newest.senderId === null || box.scrollHeight - box.scrollTop - box.clientHeight < NEAR_BOTTOM;
-    followed = key;
-    if (follow) void tick().then(() => { box.scrollTop = box.scrollHeight; });
+    const follow = newest.senderId === null || box.scrollHeight - box.scrollTop - box.clientHeight < NEAR_BOTTOM;
+    if (followed === newest.id) return;
+    followed = newest.id;
+    if (follow) void tick().then(() => { if (!disposed && box === scroller && ready) { box.scrollTop = box.scrollHeight; readVisible(); } });
+  });
+  /** Reading elsewhere or in a hidden tab leaves incoming messages unread. */
+  function readVisible() {
+    if (disposed) return;
+    const box = scroller;
+    if (!ready || loading || !box || !box.clientHeight || document.hidden || !page && view.error) return;
+    awayFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight >= NEAR_BOTTOM;
+    if (readGap) return;
+    const bounds = box.getBoundingClientRect();
+    let at = view.readAt?.[readKey] ?? 0;
+    for (const row of box.querySelectorAll<HTMLElement>('[data-message-id]')) {
+      const rect = row.getBoundingClientRect();
+      if (rect.top < bounds.top + box.clientHeight && rect.bottom > bounds.top) at = Math.max(at, Number(row.dataset.messageAt));
+    }
+    if (at > 0) untrack(() => view.markRead(readKey, at));
+    if (!awayFromBottom && page?.newer && !loading) void loadMessages('newer');
+  }
+  async function jumpToUnread() {
+    const box = scroller;
+    if (!box) return;
+    if (readGap) { await loadMessages('unread'); return; }
+    if (!unread.length && page?.newer) await loadMessages(unreadTotal ? 'newer' : 'latest');
+    if (disposed) return;
+    const first = unread[0];
+    const row = first ? [...box.querySelectorAll<HTMLElement>('[data-message-id]')].find(row => row.dataset.messageId === first.id) : null;
+    if (row) box.scrollTop += row.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    else box.scrollTop = box.scrollHeight;
+    readVisible();
+  }
+  // Attached pictures and the composer can resize after the initial layout.
+  $effect(() => {
+    const box = scroller;
+    const column = box?.firstElementChild;
+    if (!box || !column) return;
+    const observer = new ResizeObserver(() => {
+      if (disposed || !untrack(() => ready)) return;
+      if (!untrack(() => awayFromBottom)) box.scrollTop = box.scrollHeight;
+      readVisible();
+    });
+    observer.observe(box); observer.observe(column);
+    return () => observer.disconnect();
   });
   const profileOf = (id: string) => view.snapshot?.profiles.find(a => a.id === id);
   const nameOf = (id: string) => profileOf(id)?.name ?? id;
@@ -115,38 +228,7 @@
     send,
     stop: running ? () => void stopWork() : undefined,
     chips: group ? recipientChips : undefined,
-    // The owner picks the agent's model where a thread's is picked; a group has one per member.
-    selection: agent && view.store.owner ? { choice: { ...agent.selection, model: agent.selection.model ?? defaultModel(agent.selection), speed: null }, save: saveSelection } : undefined,
   });
-  /** An agent saved without a model runs on its account's default one, as the core resolves it: the chip names that one. */
-  function defaultModel(selection: { providerId: string; accountId: string }): string | null {
-    const models = view.store.modelsOf(selection.providerId, selection.accountId);
-    return (models.find(m => m.default) ?? models[0])?.id ?? null;
-  }
-  /**
-   * A pick from the chips, saved as the Settings tab saves the agent's model:
-   * its main route, allowed once picked, so the next piece of work runs on it.
-   * It waits in the page's save queue, so a message being sent does not drop
-   * it, and reads the agent's revision and runtime when its turn comes.
-   */
-  async function saveSelection(next: Choice): Promise<void> {
-    const agentId = agent?.id;
-    if (!agentId) return;
-    try {
-      await view.save('agents.runtime.configure', async () => {
-        const client = view.store.client;
-        const current = view.snapshot?.profiles.find(p => p.id === agentId);
-        if (!client || !current) throw new Error(strings.connection.unavailable);
-        const config = await client.call('agents.runtime.get', { agentId });
-        const model = next.model ?? config.defaultRoute.model!;
-        const route = { providerId: next.providerId, accountId: next.accountId, model, effort: next.effort, permissionMode: next.permissionMode };
-        const allowed = config.allowedRoutes.some(r => r.providerId === route.providerId && r.accountId === route.accountId && r.model === model)
-          ? config.allowedRoutes
-          : [...config.allowedRoutes, { id: secureId(), name: view.store.modelOf(route)?.name ?? model, providerId: route.providerId, accountId: route.accountId, model, effort: route.effort }];
-        return { agentId, expectedRevision: current.revision, config: { ...config, defaultRoute: route, allowedRoutes: allowed } };
-      });
-    } catch (error) { view.error = errorText(error); }
-  }
 
   async function send(text: string, attachments: Attachment[]): Promise<boolean> {
     const recipientIds = scope.kind === 'agent' ? [scope.id] : recipients;
@@ -155,7 +237,7 @@
     try {
       if (!request || request.signature !== signature) request = { signature, id: secureId() };
       const sent = await view.call('agents.message.send', { scope, text, recipientIds, requestId: request.id, ...(attachments.length ? { attachments } : {}) });
-      if (sent) { request = null; return true; }
+      if (sent) { request = null; await loadMessages('latest'); return true; }
     } catch (error) { view.error = errorText(error); }
     return false;
   }
@@ -199,6 +281,8 @@
   }
 </script>
 
+<svelte:document onvisibilitychange={readVisible} />
+
 {#snippet recipientChips()}
   {#if group}
     <div class="agent-recipients" role="group" aria-label={labels.recipients}>
@@ -214,19 +298,21 @@
 {/snippet}
 
 <section class="agent-chat" aria-label={labels.conversation}>
-  <div class="agent-chat-scroll" bind:this={scroller}>
+  <div class="agent-chat-scroll" bind:this={scroller} onscroll={readVisible}>
     <div class="agent-chat-column" data-testid="agent-transcript">
-      {#if view.hasOlder(key, 'message')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === key} onclick={() => void view.loadOlder(key, history, messages)} data-testid="agent-messages-older">{labels.loadEarlier}</button>{/if}
+      {#if !ready}<p class="agent-reading-status" role="status">{labels.loadingMissed}</p>{/if}
+      {#if page?.older || !page && view.hasOlder(key, 'message')}<button type="button" class="ghost small agent-older" disabled={loading} onclick={() => void loadMessages(page ? 'older' : 'open')} data-testid="agent-messages-older">{labels.loadEarlier}</button>{/if}
       {#each messages as message, index (message.id)}
         {@const previous = messages[index - 1]}
         {@const mine = message.senderId === null}
         {@const newDay = !previous || longDay(previous.createdAt) !== longDay(message.createdAt)}
-        {@const first = newDay || previous.senderId !== message.senderId}
+        {@const first = newDay || previous.senderId !== message.senderId || message.id === firstMissed?.id}
         {#if newDay}<p class="agent-day"><span>{longDay(message.createdAt)}</span></p>{/if}
+        {#if message.id === firstMissed?.id}<p class="agent-unread-divider" bind:this={divider} data-testid="agent-unread-divider"><span>{missedLabel(missedAtEntry)}</span></p>{/if}
         {#if mine}
           {@const failed = view.seen.deliveries.filter(d => d.messageId === message.id && (d.status === 'failed' || d.status === 'limited') && !received(d))}
           {@const prompt = promptOf(message)}
-          <article class="agent-message message from-user" class:first data-testid="agent-user-message">
+          <article class="agent-message message from-user" class:first data-message-id={message.id} data-message-at={message.createdAt} data-testid="agent-user-message">
             <span class="agent-sr-only">{labels.user}</span>
             <UserMessage store={view.store} message={prompt} turn={undefined} accepted={true} responded={receipts(message).responded} />
             {#if prompt.parts.length === 1 && message.attachments?.length}
@@ -246,7 +332,7 @@
           <!-- Taking a thread over is a moment of the conversation, marked across it the way a started thread is. -->
           {@const event = message.thread}
           {@const present = view.store.threads.some(t => t.id === event.id)}
-          <div class="agent-marker" data-testid="agent-thread-event" data-event="entrusted">
+          <div class="agent-marker" data-message-id={message.id} data-message-at={message.createdAt} data-testid="agent-thread-event" data-event="entrusted">
             <span class="rule"></span>
             {#if present}
               <button type="button" class="ghost small label" title={labels.openThread} onclick={() => void view.store.open(event.id)} data-testid="agent-thread-event-open"><Handshake size={13} strokeWidth={1.75} /><span class="ui-label">{fill(labels.threadEvent.entrusted, { name: nameOf(message.senderId!), title: event.title })}</span></button>
@@ -261,7 +347,7 @@
           {@const event = message.thread}
           {@const work = workOf(message)}
           {@const memory = memoryOf(work)}
-          <article class="agent-message message from-agent" class:first class:labelled={!!event || work?.purpose === 'notice' || planned !== null} data-event={event?.event} data-testid={event ? 'agent-thread-event' : undefined}>
+          <article class="agent-message message from-agent" class:first class:labelled={!!event || work?.purpose === 'notice' || planned !== null} data-message-id={message.id} data-message-at={message.createdAt} data-event={event?.event} data-testid={event ? 'agent-thread-event' : undefined}>
             {#if group && first}
               <header>
                 <AgentAvatar kind="profile" id={message.senderId!} name={sender?.name ?? ''} avatar={sender?.avatar} size={20} />
@@ -301,6 +387,7 @@
         </div>
       {/each}
 
+      {#if page?.newer}<button type="button" class="ghost small agent-older" disabled={loading} onclick={() => void loadMessages('newer')} data-testid="agent-messages-newer">{labels.loadLater}</button>{/if}
       {#each pending as work (work.id)}<AgentWorkCard {view} {work} compact />{/each}
       <AgentPendingQuestions {view} {scope} />
 
@@ -316,6 +403,10 @@
       {/if}
     </div>
   </div>
+
+  {#if ready && (awayFromBottom || readGap)}
+    <div class="agent-jump"><button type="button" class="chip" disabled={loading} onclick={jumpToUnread} data-testid="agent-jump-unread"><ArrowDown size={14} /><span>{unreadTotal ? missedLabel(unreadTotal) : labels.latestMessages}</span></button></div>
+  {/if}
 
   <Composer store={view.store} {target} />
 </section>

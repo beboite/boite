@@ -9,6 +9,12 @@ export type BrowserAction =
   | { kind: 'status' }
   | { kind: 'profiles' }
   /**
+   * Adds a profile kept like the default one, with its own cookies, to this
+   * machine's list: a second account signed in beside the first. A name the
+   * list already holds, in any case, answers that profile instead.
+   */
+  | { kind: 'profile-add'; name: string }
+  /**
    * `profile` is a profile's name or id, `default` or `private`; absent opens the default profile.
    * `reuse` navigates the active tab when there is one, as agent-browser's `open` does.
    */
@@ -355,6 +361,7 @@ const ACTION_CHECKS: BrowserActionChecks = {
   'download-discard': checkDownload,
   'status': checkNoInput,
   'profiles': checkNoInput,
+  'profile-add': action => browserProfileNameError(action.name),
   'screenshot': checkNoInput,
   'close': checkNoInput,
   'reset-viewport': checkNoInput,
@@ -417,6 +424,15 @@ export interface BrowserProfile { id: string; name: string }
 export function browserProfileIdError(id: unknown): string | null {
   if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) return 'a browser profile id is 1 to 40 lowercase letters, digits and `-`, starting with a letter or digit';
   return id === DEFAULT_BROWSER_PROFILE || id === PRIVATE_BROWSER_PROFILE ? `${id} is a built-in browser profile` : null;
+}
+
+/** What a profile's name must be: it is found by name, so `default` and `private` stay keywords. */
+export function browserProfileNameError(name: unknown): string | null {
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  if (!trimmed || trimmed.length > BROWSER_PROFILE_NAME_MAX || /[\u0000-\u001f]/.test(trimmed) || [DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE].includes(trimmed.toLowerCase())) {
+    return `a browser profile name is 1 to ${BROWSER_PROFILE_NAME_MAX} characters other than default or private`;
+  }
+  return null;
 }
 
 /** The profiles a settings snapshot names, and the one a tab opens in when nobody chooses. */

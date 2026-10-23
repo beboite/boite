@@ -46,6 +46,8 @@ export interface CoreInfo {
     gatewayMove?: boolean;
     /** `todos.update` takes `goalThreadId`, a card carries its goal, and a paired device reads and moves cards: the project board. */
     projectBoard?: boolean;
+    /** `group.settingsHome` and `Group.settingsHome`: one member's settings, chosen for the whole group, that the others follow. */
+    settingsHome?: boolean;
   };
   /** The fingerprint of this core's identity key: the id its group knows it by, and the one a device signs its hello for. */
   coreId?: string;

@@ -549,7 +549,12 @@ export class AgentStore {
    * Bounded by configuration, not by history: the newest page of each growing
    * kind, every unfinished work item, and what those records point to.
    */
-  snapshot(threadId?: string): AgentsSnapshot {
+  snapshot(threadId?: string, readAt?: RpcParams<'agents.snapshot'>['readAt']): AgentsSnapshot {
+    if (readAt !== undefined && !Array.isArray(readAt)) throw invalidParams('readAt: expected an array of scope and at');
+    const marks = readAt?.map((mark, i) => {
+      object(mark, `readAt[${i}]`);
+      return { scope: scope(mark.scope), at: integer(mark.at, `readAt[${i}].at`, 0, Number.MAX_SAFE_INTEGER) };
+    });
     const r = this.records;
     const session = threadId ? this.session(threadId) : null;
     const allowed = (target: AgentScope) => !session || this.canRead(session.agentId, target, session.scope);
@@ -568,6 +573,7 @@ export class AgentStore {
       tasks: r.list('task').filter(t => missions.some(m => m.id === t.missionId)),
       sessions: session ? [session] : r.list('session'),
       messages: messages.items.sort(byCreation), work, memories: memories.items.sort(byCreation),
+      ...(marks ? { unread: r.unread(marks, session?.scope) } : {}),
       ...this.related(session, messages.items, work),
       resources: r.list('resource').filter(resource => allowed(resource.scope)),
       artifacts: r.list('artifact').filter(a => missions.some(m => m.id === a.missionId)),
@@ -575,6 +581,23 @@ export class AgentStore {
       entrusted: this.entrusted.list().filter(e => !session || e.agentId === session.agentId),
       brainRoot: this.resident.brainRoot(),
     };
+  }
+
+  /** A chronological window of a conversation, under the history access policy. */
+  messages(params: RpcParams<'agents.messages'>) {
+    object(params, 'params');
+    const target = scope(params.scope);
+    const session = params.threadId === undefined ? null : this.session(params.threadId);
+    this.reader(session, 'message', [target]);
+    const limit = params.limit === undefined ? AGENT_HISTORY_PAGE : integer(params.limit, 'limit', 1, AGENT_HISTORY_MAX_PAGE);
+    if ([params.readAt, params.before, params.after].filter(v => v !== undefined).length > 1) throw invalidParams('readAt/before/after: expected only one reading position');
+    const cursor = (value: typeof params.before, field: string) => {
+      if (value === undefined) return undefined;
+      object(value, field);
+      return { createdAt: integer(value.createdAt, `${field}.createdAt`, 0, Number.MAX_SAFE_INTEGER), id: text(value.id, `${field}.id`, 160) };
+    };
+    const page = this.records.messages({ scope: target, before: cursor(params.before, 'before'), after: cursor(params.after, 'after'), readAt: params.readAt === undefined ? undefined : integer(params.readAt, 'readAt', 0, Number.MAX_SAFE_INTEGER) }, limit);
+    return { ...page, work: [], memories: [], ...this.related(session, page.messages, []) };
   }
 
   /** One page of older records, under the same session rules as the snapshot. */
@@ -616,7 +639,8 @@ export function registerPersistentAgents(core: Core): void {
   core.router.register('agents.routine.save', p => store.routines.save(p));
   core.router.register('agents.routine.run', p => store.routines.run(p));
   core.router.register('agents.context.compact', p => store.resident.compact(p.sessionId, p.requestId));
-  core.router.register('agents.snapshot', p => store.snapshot(p.threadId));
+  core.router.register('agents.snapshot', p => store.snapshot(p.threadId, p.readAt));
+  core.router.register('agents.messages', p => store.messages(p));
   core.router.register('agents.history', p => store.history(p));
   core.router.register('agents.profile.save', p => store.saveProfile(p));
   core.router.register('agents.group.save', p => store.saveGroup(p));

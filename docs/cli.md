@@ -83,7 +83,12 @@ agent's own machine. `boite browser profiles` lists the profiles the user made
 in Settings > General > Browser profiles on that machine, and
 `open <url> --profile Pro` opens a new tab in one of them, by name or id.
 `--profile private` opens a private tab that keeps nothing once the last private
-tab closes. `tab list` names each tab's profile, `tab new <url>` opens another,
+tab closes, or once the browser or Boite restarts. A second account the agent
+must keep, beside the default profile's, goes in a profile of its own:
+`boite browser profiles add "Account B"` adds one to that machine's list (a name
+already listed answers that profile), then `open <url> --profile "Account B"`.
+An agent can add a profile, never rename or delete one: that stays in Settings.
+`tab list` names each tab's profile, `tab new <url>` opens another,
 `tab <id>` makes one current and `--tab <id>` aims a single command at it. The
 agent cannot select a tab from another conversation.
 
@@ -302,7 +307,7 @@ three variables and one PATH entry, put there by
 | `BOITE_THREAD_ID`  | the thread                                       |
 | `BOITE_CORE_URL`   | the core's HTTP address                          |
 | `BOITE_AGENT_TOKEN`| a token minted for this thread, in memory only   |
-| `PATH`             | the directory holding `boite` and `boite.cmd`, first |
+| `PATH`             | the directory holding `boite` and `boite.cmd` (and `boite.exe` in an installed Windows app), first |
 
 The CLI says hello with that token and becomes the `agent` principal of that
 one thread. `AGENT_METHODS` in `packages/core/src/access.ts` lists its allowed
@@ -731,6 +736,12 @@ owns the record format, rotation, anonymization and query bounds.
 runtime and resource paths are described in [releasing](releasing.md).
 `packages/core/shims/boite` and `boite.cmd` provide POSIX and Windows launchers;
 source runs use the equivalents under `packages/core/bin/` through Bun.
+An installed Windows app also has `boite.exe` (`apps/shell/launcher`), which
+Windows finds before `boite.cmd`. A `.cmd` runs through cmd.exe, which ends the
+command at an unquoted `&`: from PowerShell, `boite browser open
+'https://a.test/?a=1&b=2' --profile private` reached the core as
+`browser open https://a.test/?a=1`. The `.exe` hands each argument over as it came;
+`scripts/ci/installed-cli-windows.test.ts` checks it from PowerShell and cmd.
 The shell supplies `BOITE_CORE_EXECUTABLE` and a resource `BOITE_CLI_DIR` for
 packaged launches. Standalone cores resolve their executable beside the shim.
 Paths with spaces are quoted. An explicit `BOITE_CLI_DIR` overrides lookup;

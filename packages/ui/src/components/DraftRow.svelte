@@ -1,7 +1,7 @@
 <script lang="ts">
   import { CircleAlert, Clock, PencilLine } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
-  import { workspace } from '../lib/workspace.svelte';
+  import { machineName, workspace } from '../lib/workspace.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
   import { longPress } from '../lib/long-press';
@@ -16,7 +16,7 @@
    */
   let { owner, entry, onopen }: { owner: Store; entry: Store['draftEntries'][number]; onopen?: () => void } = $props();
   let active = $derived(entry.active && workspace.active === owner);
-  let machine = $derived(workspace.machines.find(item => item.store === owner)?.label ?? strings.machines.local);
+  let machine = $derived.by(() => { const found = workspace.machines.find(item => item.store === owner); return found ? machineName(found) : strings.machines.local; });
   let tooltip = $derived(
     entry.queued === 'waiting' ? `${entry.text}\n${fill(strings.sidebar.draftQueued, { machine })}`
       : entry.queued === 'starting' ? `${entry.text}\n${fill(strings.sidebar.draftStarting, { machine })}`

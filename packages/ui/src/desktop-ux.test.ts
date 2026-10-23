@@ -338,7 +338,7 @@ test('the scheduler saves a valid value by itself, never sends an out-of-range o
 
 test('the LAN switch saves when it flips, like every other switch in Settings', async () => {
   await mountOnFake();
-  store.showSettings('machines');
+  store.showSettings('advanced', 'phone');
   await waitFor(() => document.querySelector('[data-testid=setting-listen-on-lan]') !== null);
   const before = store.settings?.listenOnLan ?? false;
   query<HTMLInputElement>('[data-testid=setting-listen-on-lan]').click();
@@ -593,4 +593,32 @@ test('a retry whose resend fails leaves its prompt in the box', async () => {
   await waitFor(() => sending.mock.calls.length === 1 && box.value === before.at(-1));
   expect(userTexts()).toEqual(before.slice(0, -1));
   expect(document.querySelector('[data-testid=composer-editing]')).toBeNull();
+});
+
+test('the settings bar picks the machine a page changes without moving the window, Plugins opening on this PC', async () => {
+  await mountOnFake('/?fake=1&machines=1');
+  await waitFor(() => workspace.machines.length === 2 && workspace.machines.every((machine) => machine.store.connection === 'ready'));
+  const remote = workspace.machines.find((machine) => machine.store !== store)!;
+  store.localCore = true;
+  store.core = { ...store.core!, hostname: 'DESK-PC' };
+  await workspace.select(remote.store);
+  const thread = remote.store.openThread;
+  // Plugins run where they were installed: the page opens on this PC, not on the machine the chat is on.
+  remote.store.showSettings('plugins');
+  await waitFor(() => document.querySelector('[data-testid=settings-machine]') !== null && document.querySelector('[data-testid=plugins-page]') !== null);
+  expect(query('[data-testid=settings-machine]').textContent).toContain('DESK-PC (you)');
+  // Every other page opens on the window's machine.
+  remote.store.showSettings('resources');
+  await waitFor(() => query('[data-testid=settings-machine]').textContent?.includes(remote.label) === true);
+  await remote.store.client!.call('settings.set', { muteAgents: true });
+  await store.client!.call('settings.set', { muteAgents: true });
+  query<HTMLButtonElement>('[data-testid=settings-machine]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-machine-menu]') !== null);
+  query<HTMLElement>(`[data-testid=settings-machine-menu] [data-value="${workspace.machines[0]!.id}"]`).click();
+  await waitFor(() => query('[data-testid=settings-machine]').textContent?.includes(strings.machines.youTag) === true);
+  query<HTMLInputElement>('[data-testid=setting-mute-agents]').click();
+  await waitFor(() => store.settings?.muteAgents === false);
+  expect(remote.store.settings?.muteAgents).toBe(true);
+  // The window never moved: same machine, same conversation, still on the page it showed.
+  expect([workspace.active, remote.store.openThread, remote.store.settingsTab]).toEqual([remote.store, thread, 'resources']);
 });

@@ -34,16 +34,19 @@ test('Add a device draws one QR code of the phone part, with no code to type', a
 });
 
 test('the Tailscale switch serves the core over HTTPS, the Add a device link follows it, and off undoes both', async ({ app: _app }) => {
-  store.showSettings('machines');
+  store.showSettings('advanced', 'phone');
   await waitFor(() => document.querySelector('[data-testid=tailscale-access][data-state=off]') !== null);
   expect(query('[data-testid=tailscale-state]').textContent).toContain('https://boite-pc.tail0d6070.ts.net');
   query<HTMLButtonElement>('[data-testid=tailscale-enable]').click();
-  await waitFor(() => document.querySelector('[data-testid=tailscale-access][data-state=on]') !== null);
-  expect(store.settings?.publicUrl).toBe('https://boite-pc.tail0d6070.ts.net');
-  // Turning it on mints the phone's link through the new address.
+  // Turning it on mints the phone's link through the new address, and the window goes to the group card that shows it.
   await waitFor(() => store.deviceInvite?.url.startsWith('https://boite-pc.tail0d6070.ts.net/?grant=') === true);
+  expect(store.settings?.publicUrl).toBe('https://boite-pc.tail0d6070.ts.net');
+  await waitFor(() => store.settingsTab === 'machines' && document.querySelector('[data-testid=add-device-qr] svg') !== null);
+  expect(store.settingsSection?.id).toBe('group');
   expect(document.querySelector('[data-testid=lan-reach]')).toBeNull();
 
+  store.showSettings('advanced', 'phone');
+  await waitFor(() => document.querySelector('[data-testid=tailscale-access][data-state=on]') !== null);
   query<HTMLButtonElement>('[data-testid=tailscale-disable]').click();
   await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
   query<HTMLButtonElement>('[data-testid=confirm-ok]').click();

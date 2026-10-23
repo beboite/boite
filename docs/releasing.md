@@ -192,7 +192,8 @@ compilation; distributable builds use the overlay.
 CLI `--config` paths resolve from `apps/shell`, while paths inside the configs
 resolve from `src-tauri`. A directory resource preserves its tree under the
 mapped name, giving `ui/index.html`; a glob would flatten it. Windows adds a
-separate resource overlay for the split `core/` JavaScript bundle.
+separate resource overlay for the split `core/` JavaScript bundle and
+`boite.exe`.
 
 ## Channels
 
@@ -310,6 +311,9 @@ name is `Boite`. The install is per user and asks for no elevation.
 - `artifact-retention-worker.js`, the background scan for unused deliverables.
 - `boite` and `boite.cmd`, the CLI shims the core puts on an agent's PATH; each
   invokes the adjacent core's CLI entry ([cli.md](cli.md)).
+- `boite.exe`, the same CLI without cmd.exe, which Windows finds first; built
+  from `apps/shell/launcher` by `stage-sidecar.ts`. Once the core has stopped,
+  the installer moves aside a copy an agent's command still holds.
 - `ui/`, the same build a phone gets over the pairing link.
 
 `core/` and `ui/` hold only the current build. Their file names carry a hash,

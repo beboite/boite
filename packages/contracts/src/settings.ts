@@ -150,6 +150,13 @@ export interface Settings {
    * short continue prompt (docs/usage.md). Missing reads as off.
    */
   autoResumeLimitedThreads?: boolean;
+  /**
+   * While this machine follows its group's settings home, what it keeps for
+   * itself (`SyncKey`): each entry was changed here and the copy skips it.
+   * Missing or empty: everything synced follows. Clients write it; the core
+   * reads it to leave those keys out of `settings.follow`.
+   */
+  syncOverrides?: string[];
 }
 
 /** One starred model. Accounts are named by label: an id means nothing on another machine. */
@@ -210,6 +217,13 @@ export interface SettingsRpcMethods {
   'telemetry.retryForget': { params: Record<string, never>; result: TelemetryState };
   'settings.get': { params: Record<string, never>; result: Settings };
   'settings.set': { params: Partial<Settings>; result: Settings };
+  /**
+   * The copy from the group's settings home (`Group.settingsHome`): only the
+   * synced settings this machine does not keep (`syncOverrides`) at the moment
+   * it writes, so a change saved here meanwhile from another window stays.
+   * Comes with `features.settingsHome`. Owner only.
+   */
+  'settings.follow': { params: { patch: Partial<Settings> }; result: Settings };
   /**
    * The app says its language, the experiments it has on and the names it
    * gives settings, after each hello and on every change. Agents read them

@@ -33,7 +33,7 @@ import { boundedBody, PeerGone } from './coordination-wire.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unauthorized, unavailable } from './errors.ts';
 import { advertisedAddresses, probeTailnet, tailnetAddress, ticketAddresses, type Tailnet } from './group/addresses.ts';
-import { admissionInput, checkAddress, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, homeOf, liveCores, liveDeviceKeys, liveDevices, memberOrigins, mergeRosters, groupName, peerOf, reachOf } from './group/roster.ts';
+import { admissionInput, checkAddress, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, homeOf, liveCores, liveDeviceKeys, liveDevices, memberOrigins, mergeRosters, groupName, homeGone, peerOf, reachOf } from './group/roster.ts';
 import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, SERVED_ORIGINS_MAX, type DeviceKeyEntry } from './group/device-keys.ts';
 import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
 import { boxPublic, boxSigningInput, newBoxKey, open, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
@@ -181,6 +181,8 @@ export class GroupStore {
       // Who else is in the group is the owner's to read; a device sees itself.
       devices: principal === 'owner' ? devices : devices.filter((entry) => entry.id === device),
       ...(device === undefined ? {} : { device }),
+      // A home that left the group is no home: the others keep their own settings.
+      ...(typeof roster.settingsHome === 'string' && liveCores(roster).some((core) => core.coreId === roster.settingsHome) ? { settingsHome: roster.settingsHome } : {}),
     };
   }
   // -- What the rest of the core reads off the roster.
@@ -676,6 +678,20 @@ export class GroupStore {
     return this.view('owner')!;
   }
 
+  /** The member every other one copies its settings from, or null for none. The copy is the clients' to make. */
+  settingsHome(coreId: unknown): Group {
+    const roster = this.require();
+    if (coreId !== null && (typeof coreId !== 'string' || !liveCores(roster).some((core) => core.coreId === coreId))) {
+      throw invalidParams('coreId: expected the id of a machine of this group, or null', { field: 'coreId' });
+    }
+    if ((roster.settingsHome ?? null) !== coreId) {
+      const rev = roster.settingsHomeRev ?? 0;
+      if (rev >= Number.MAX_SAFE_INTEGER) throw refused('coreId: the settings home revision has reached its limit', { field: 'coreId' });
+      this.commit({ ...roster, settingsHome: coreId, settingsHomeRev: rev + 1 });
+    }
+    return this.view('owner')!;
+  }
+
   /** This core calls the member the invitation names, proves it holds its own key, and takes the roster back. */
   async join(text: unknown): Promise<Group> {
     this.joining++;
@@ -842,7 +858,7 @@ export class GroupStore {
   async leave(): Promise<{ ok: true }> {
     const roster = this.require();
     const self = this.selfId();
-    const farewell: Roster = { ...roster, cores: roster.cores.map((core) => (core.coreId === self ? { ...core, rev: clockOf(roster) + 1, removed: true as const } : core)) };
+    const farewell: Roster = { ...roster, ...homeGone(roster, self), cores: roster.cores.map((core) => (core.coreId === self ? { ...core, rev: clockOf(roster) + 1, removed: true as const } : core)) };
     const told = Promise.allSettled(liveCores(roster)
       .filter((core) => core.coreId !== self)
       .map((core) => this.core.coordination.request(peerOf(core), 'group.sync', farewell)));
@@ -862,7 +878,7 @@ export class GroupStore {
     // The devices that machine let in stay: this one signs for them now, so taking an old computer out keeps the phone added through it.
     const deviceKeys = roster.deviceKeys?.map((device) => (device.removed || device.admit.by !== entry.coreId ? device
       : { ...device, admit: { by: this.selfId(), sig: this.core.coordination.signature(deviceAdmissionInput(roster.id, device.id, device.role)).toString('base64') }, rev }));
-    this.commit({ ...roster, cores: roster.cores.map((core) => (core === entry ? { ...core, rev, removed: true as const } : core)), ...(deviceKeys === undefined ? {} : { deviceKeys }) });
+    this.commit({ ...roster, ...homeGone(roster, entry.coreId), cores: roster.cores.map((core) => (core === entry ? { ...core, rev, removed: true as const } : core)), ...(deviceKeys === undefined ? {} : { deviceKeys }) });
     // The removed machine hears it from a member it still listens to, and leaves on its own.
     this.background(this.core.coordination.request(peerOf(entry), 'group.sync', this.require()).catch(() => undefined));
     return this.view('owner')!;

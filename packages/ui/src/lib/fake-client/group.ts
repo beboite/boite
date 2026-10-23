@@ -12,6 +12,8 @@ export interface FakeRoster {
   name: string;
   cores: GroupCore[];
   devices: GroupDevice[];
+  /** The member the others take their settings from. */
+  settingsHome?: string;
   /** Grants still good, each with its expiry. */
   invites: Map<string, number>;
 }
@@ -32,7 +34,8 @@ function view(ctx: FakeContext): Group | null {
     name: roster.name,
     self: ctx.identity.coreId,
     cores: structuredClone(roster.cores),
-    devices: ctx.bus.principal === 'owner' ? structuredClone(roster.devices) : []
+    devices: ctx.bus.principal === 'owner' ? structuredClone(roster.devices) : [],
+    ...(roster.settingsHome !== undefined && roster.cores.some(core => core.coreId === roster.settingsHome) ? { settingsHome: roster.settingsHome } : {})
   };
 }
 
@@ -77,6 +80,18 @@ export function groupMethods(ctx: FakeContext) {
       if (!name || name.length > 80) throw invalid('name: expected 1 to 80 characters', 'name');
       if (name === roster.name) return view(ctx)!;
       roster.name = name;
+      announce(roster);
+      return view(ctx)!;
+    },
+    'group.settingsHome': async (params) => {
+      const roster = required(ctx);
+      const coreId = params?.coreId;
+      if (coreId !== null && (typeof coreId !== 'string' || !roster.cores.some(core => core.coreId === coreId))) {
+        throw invalid('coreId: expected the id of a machine of this group, or null', 'coreId');
+      }
+      if ((roster.settingsHome ?? null) === coreId) return view(ctx)!;
+      if (coreId === null) delete roster.settingsHome;
+      else roster.settingsHome = coreId;
       announce(roster);
       return view(ctx)!;
     },
@@ -127,6 +142,7 @@ export function groupMethods(ctx: FakeContext) {
       const roster = required(ctx);
       roster.cores = roster.cores.filter((core) => core.coreId !== ctx.identity.coreId);
       roster.devices = roster.devices.filter((device) => !device.id.startsWith(`${ctx.identity.coreId}:`));
+      if (roster.settingsHome === ctx.identity.coreId) delete roster.settingsHome;
       ctx.roster = null;
       announce(roster, [ctx]);
       return { ok: true };
@@ -139,6 +155,8 @@ export function groupMethods(ctx: FakeContext) {
       const removed = fakeCore(coreId);
       roster.cores = roster.cores.filter((core) => core.coreId !== coreId);
       roster.devices = roster.devices.filter((device) => !device.id.startsWith(`${coreId}:`));
+      // A default machine that leaves is no default when it comes back.
+      if (roster.settingsHome === coreId) delete roster.settingsHome;
       if (removed !== undefined && removed.roster === roster) removed.roster = null;
       announce(roster, removed === undefined ? [] : [removed]);
       return view(ctx)!;

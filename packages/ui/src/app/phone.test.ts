@@ -3,7 +3,7 @@ import { flushSync } from 'svelte';
 import { confirm } from '../lib/confirm.svelte';
 import { store } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
-import { OWNER_ONLY_COMMANDS, OWNER_ONLY_IN_CHAT, OWNER_ONLY_IN_SETTINGS, menuValues, mountOnFake, paletteIds, press, query, showMobileThreads, test, waitFor } from '../test/app';
+import { OWNER_ONLY_COMMANDS, OWNER_ONLY_IN_ADVANCED, OWNER_ONLY_IN_CHAT, OWNER_ONLY_IN_SETTINGS, menuValues, mountOnFake, paletteIds, press, query, showMobileThreads, test, waitFor } from '../test/app';
 
 vi.mock('@tauri-apps/plugin-opener', () => import('../test/opener'));
 
@@ -79,10 +79,13 @@ test('a paired device is offered none of the affordances the core refuses it', a
   expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
 
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=phone-settings]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=machines-page]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).toBeNull();
   // Neither a way to add a device nor a group to join: a device changes nothing in the group.
   expect(document.querySelector('[data-testid=group-join-input]')).toBeNull();
+  store.showSettings('advanced', 'phone');
+  await waitFor(() => document.querySelector('[data-testid=phone-settings]') !== null);
+  for (const selector of OWNER_ONLY_IN_ADVANCED) expect(document.querySelector(selector)).toBeNull();
   expect(store.error).toBeNull();
 });
 
@@ -157,6 +160,9 @@ test('the desktop still has every one of them', async ({ app: _app }) => {
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=group-add-device]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).not.toBeNull();
+  store.showSettings('advanced', 'phone');
+  await waitFor(() => document.querySelector('[data-testid=phone-settings]') !== null);
+  for (const selector of OWNER_ONLY_IN_ADVANCED) expect(document.querySelector(selector)).not.toBeNull();
   store.showSettings('resources');
   await waitFor(() => document.querySelector('[data-testid=resources-page]') !== null);
   for (const id of ['setting-focus-guard', 'setting-mute-agents']) {

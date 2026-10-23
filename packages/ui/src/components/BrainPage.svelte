@@ -5,6 +5,7 @@
   import { RpcErrorCode, type BrainConfig, type BrainStatus, type RpcResult } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
   import HooksCard from './HooksCard.svelte';
+  import SyncMark from './SyncMark.svelte';
   import InfoTip from './InfoTip.svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
@@ -18,6 +19,8 @@
   let editing = $state(false);
   let selected = $state<'instructions' | 'skill' | 'plugin'>('instructions');
   let revision = 0;
+  /** Folder reads started by changes made elsewhere: only the last one lands. */
+  let folderRead = 0;
   const t = strings.brain;
   const kinds = ['instructions', 'skill', 'plugin'] as const;
   const icons = { instructions: FileText, skill: Sparkles, plugin: Puzzle };
@@ -39,6 +42,26 @@
     return () => { ++revision; };
   });
 
+  // A change made from elsewhere, the copy from the default machine included, shows here at once,
+  // and the next switch spreads the configuration the core holds, not the one this page read.
+  $effect(() => {
+    const client = store.client;
+    if (!client) return;
+    return client.on('brain.configured', (config) => {
+      if (!status) return;
+      if (!editing) path = config.path ?? '';
+      // Another folder holds other entries, problems and history: read them, not only the switches.
+      if (config.path !== status.config.path) {
+        const current = revision, read = ++folderRead;
+        const latest = () => current === revision && read === folderRead;
+        void client.call('brain.status', {}).then((next) => { if (latest()) status = next; })
+          .catch((cause) => { if (latest()) error = failure(cause); });
+        return;
+      }
+      status = { ...status, config };
+    });
+  });
+
   async function run(action: 'save' | 'refresh' | 'sync' | 'disconnect' | 'toggle' | 'auto' | 'global' | 'guide', policy?: BrainConfig['autoPull']) {
     const client = store.client;
     if (!client || busy) return;
@@ -57,6 +80,9 @@
         : action === 'sync' ? await client.call('brain.sync', {}) : await client.call('brain.status', {});
       if (current !== revision) return;
       status = next;
+      // A switch flipped on a machine that follows a home stays as it was flipped here.
+      const kept = ({ toggle: 'brain:enabled', auto: 'brain:autoPull', global: 'brain:globalInstructions', guide: 'brain:boiteGuide' } as const)[action as 'toggle'];
+      if (kept) void store.keep([kept]);
       if (action === 'save' || action === 'disconnect' || action === 'toggle') {
         path = next.config.path ?? ''; folders = null; editing = false;
       }
@@ -120,11 +146,11 @@
         {:else}<Check size={14} /><span class="ui-label">{status.lastSync ? `${t.lastSync} ${exactTime(status.lastSync)}` : t.never}</span>{/if}
       </div>
       <div class="connection-bottom">
-        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span class="ui-label">{t.enabled}</span></label>
+        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span class="ui-label">{t.enabled}</span><SyncMark {store} key="brain:enabled" /></label>
         <button class="ghost small" disabled={busy} onclick={() => { editing = !editing; path = status!.config.path!; folders = null; }} data-testid="brain-change"><span class="ui-label">{editing ? strings.common.cancel : t.change}</span></button>
       </div>
       <div class="global-instructions">
-        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.globalInstructions ?? false} disabled={busy || !status.config.enabled} data-testid="brain-global" onchange={event => { event.currentTarget.checked = status!.config.globalInstructions ?? false; void run('global'); }} /><span class="ui-label">{t.globalInstructions}</span></label>
+        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.globalInstructions ?? false} disabled={busy || !status.config.enabled} data-testid="brain-global" onchange={event => { event.currentTarget.checked = status!.config.globalInstructions ?? false; void run('global'); }} /><span class="ui-label">{t.globalInstructions}</span><SyncMark {store} key="brain:globalInstructions" /></label>
         {#if status.links?.length}
           <details class="global-links" data-testid="brain-links" open={status.links.some(link => link.state === 'blocked')}>
             <summary>{t.globalDetails}<span>{status.links.filter(link => link.state !== 'blocked').length}/{status.links.length}</span></summary>
@@ -136,12 +162,12 @@
         {/if}
       </div>
       <div class="boite-guide">
-        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.boiteGuide !== false} disabled={busy || !status.config.enabled} data-testid="brain-guide" onchange={event => { event.currentTarget.checked = status!.config.boiteGuide !== false; void run('guide'); }} /><span class="ui-label">{t.boiteGuide}</span></label>
+        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.boiteGuide !== false} disabled={busy || !status.config.enabled} data-testid="brain-guide" onchange={event => { event.currentTarget.checked = status!.config.boiteGuide !== false; void run('guide'); }} /><span class="ui-label">{t.boiteGuide}</span><SyncMark {store} key="brain:boiteGuide" /></label>
         <p>{t.boiteGuideHint}</p>
       </div>
       {#if status.git?.upstream || status.config.autoPull}
         <div class="automation">
-          <h3>{t.autoPull}</h3>
+          <h3>{t.autoPull}<SyncMark {store} key="brain:autoPull" /></h3>
           <label class="sharing"><input type="checkbox" role="switch" checked={autoPull.onStartup} disabled={busy} data-testid="brain-startup" onchange={event => { event.currentTarget.checked = autoPull.onStartup; void run('auto', { ...autoPull, onStartup: !autoPull.onStartup }); }} /><span class="ui-label">{t.onStartup}</span></label>
           <div class="interval-row">
             <label class="sharing"><input type="checkbox" role="switch" checked={autoPull.intervalMinutes > 0} disabled={busy} data-testid="brain-periodic" onchange={event => { event.currentTarget.checked = autoPull.intervalMinutes > 0; void run('auto', { ...autoPull, intervalMinutes: autoPull.intervalMinutes ? 0 : 15 }); }} /><span class="ui-label">{t.periodic}</span></label>

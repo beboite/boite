@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AgentDraft, AgentEntities, AgentEntityKind, AgentHistoryCursor, AgentScope } from '@boite/contracts';
+import type { AgentDraft, AgentEntities, AgentEntityKind, AgentHistoryCursor, AgentScope, AgentReadMark, AgentUnread, RpcParams } from '@boite/contracts';
 import { invalidParams, notFound, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { Journal } from '../journal.ts';
@@ -117,6 +117,41 @@ export class AgentsRepository {
     if (before) { clauses.push('(updated_at, id) < (?, ?)'); params.push(before.updatedAt, before.id); }
     const items = this.rows<K>(`SELECT data FROM agent_entities INDEXED BY ${index} WHERE ${clauses.join(' AND ')} ORDER BY updated_at DESC, id DESC LIMIT ?`, ...params, limit + 1);
     return { items: items.slice(0, limit), more: items.length > limit };
+  }
+
+  /** Seek through creation order, independent of later attachment updates. */
+  messages(params: RpcParams<'agents.messages'>, limit: number) {
+    const { scope, before, after, readAt } = params;
+    const sql = "FROM agent_entities INDEXED BY agent_message_reading WHERE kind = 'message' AND json_extract(data, '$.scope.kind') = ? AND json_extract(data, '$.scope.id') = ?";
+    const pivot = readAt === undefined ? null : this.rows<'message'>(`SELECT data ${sql} AND created_at > ? AND json_extract(data, '$.senderId') IS NOT NULL ORDER BY created_at, id LIMIT 1`, scope.kind, scope.id, readAt)[0];
+    const cursor = before ?? after ?? pivot;
+    const ascending = !!after || !!pivot;
+    const bound = cursor ? ` AND (created_at, id) ${before ? '<' : pivot ? '>=' : '>'} (?, ?)` : '';
+    const items = this.rows<'message'>(`SELECT data ${sql}${bound} ORDER BY created_at ${ascending ? 'ASC' : 'DESC'}, id ${ascending ? 'ASC' : 'DESC'} LIMIT ?`, scope.kind, scope.id, ...(cursor ? [cursor.createdAt, cursor.id] : []), limit);
+    if (!ascending) items.reverse();
+    // Short unread tails keep their preceding prompt within the same page budget.
+    if (pivot && items.length < limit) items.unshift(...this.rows<'message'>(`SELECT data ${sql} AND (created_at, id) < (?, ?) ORDER BY created_at DESC, id DESC LIMIT ?`, scope.kind, scope.id, pivot.createdAt, pivot.id, limit - items.length).reverse());
+    const exists = (side: '<' | '>', item: AgentEntities['message'] | undefined) => !!item && !!this.journal.db.query(`SELECT 1 ${sql} AND (created_at, id) ${side} (?, ?) LIMIT 1`).get(scope.kind, scope.id, item.createdAt, item.id);
+    return { messages: items, older: exists('<', items[0]), newer: exists('>', items.at(-1)) };
+  }
+
+  /** Count retained incoming messages without sending their bodies to the client. */
+  unread(marks: AgentReadMark[], target?: AgentScope): AgentUnread[] {
+    const positions = Object.fromEntries(marks.map(m => [`${m.scope.kind}:${m.scope.id}`, m.at]));
+    const rows = this.journal.db.query(`
+      WITH positions AS MATERIALIZED (SELECT key, value FROM json_each(?))
+      SELECT json_extract(e.data, '$.scope.kind') AS scopeKind,
+        json_extract(e.data, '$.scope.id') AS scopeId,
+        coalesce(mark.value, 0) AS at, count(*) AS count
+      FROM agent_entities e INDEXED BY agent_recent
+      LEFT JOIN positions mark ON mark.key = json_extract(e.data, '$.scope.kind') || ':' || json_extract(e.data, '$.scope.id')
+      WHERE e.kind = 'message' AND json_extract(e.data, '$.senderId') IS NOT NULL
+        AND json_extract(e.data, '$.scope.kind') IN ('agent', 'group')
+        AND e.created_at > coalesce(mark.value, 0)
+        ${target ? "AND json_extract(e.data, '$.scope.kind') = ? AND json_extract(e.data, '$.scope.id') = ?" : ''}
+      GROUP BY scopeKind, scopeId, at
+    `).all(JSON.stringify(positions), ...(target ? [target.kind, target.id] : [])) as { scopeKind: 'agent' | 'group'; scopeId: string; at: number; count: number }[];
+    return rows.map(r => ({ scope: { kind: r.scopeKind, id: r.scopeId }, at: r.at, count: r.count }));
   }
 
   create<K extends AgentEntityKind>(kind: K, value: AgentDraft<AgentEntities[K]>): AgentEntities[K] {

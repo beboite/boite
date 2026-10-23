@@ -32,8 +32,6 @@ export const fr: Translation = {
     removeBody: "Les autres machines cessent de lui faire confiance dès qu'elles l'apprennent. Une machine éteinte l'apprend à son retour. Les téléphones ajoutés sur elle restent dans le groupe.",
     leave: 'Quitter le groupe', leaveTitle: 'Quitter {group} ?',
     leaveBody: "Cette machine oublie le groupe. Les téléphones ajoutés sur cette machine quittent le groupe avec elle.",
-    syncAll: 'Garder les réglages de toutes les machines comme sur {source}',
-    syncAllHint: "Copie les limites, les protections des processus, les mises à jour des agents, les raccourcis et les options du brain vers toutes les machines du groupe, maintenant et à chaque changement, tant que cette fenêtre est ouverte. L'accès réseau et les connexions aux fournisseurs restent sur chaque machine.",
     lanHint: 'Un téléphone atteint ce lien une fois le réseau local activé et Boite redémarré.',
     reach: {
       loopback: "Ce lien ne fonctionne que sur cet ordinateur : Boite n'écoute pas encore le réseau local.",
