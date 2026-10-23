@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { workspace } from '../lib/workspace.svelte';
   import { tick, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { ChevronDown, ChevronRight, FileDown, Bug } from '@lucide/svelte';
@@ -173,10 +174,11 @@
     return store.threads.find(thread => thread.id === id)?.title ?? null;
   }
 
+  /** The thread opens on its own machine, the one this page shows, which may not be the window's. */
   function openThread(id: string) {
     const owner = store;
     onopenthread?.();
-    void owner.open(id);
+    void workspace.select(owner, id);
   }
 
   let levelItems = $derived(LOG_LEVELS.map(level => ({ id: level, label: s.atLeast[level], active: level === minLevel })));

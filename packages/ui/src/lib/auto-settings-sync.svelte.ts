@@ -2,76 +2,81 @@ import { errorText } from './errors';
 import { untrack } from 'svelte';
 import type { Machine } from './workspace.svelte';
 import type { SyncReport } from './settings-sync';
+import { GroupLinks } from './group-links.svelte';
 import { fill, strings } from './strings';
 
-const STORAGE_KEY = 'boite.settings-sync';
+/** Where the one-way copies of an earlier version were saved, one window at a time. */
+const RETIRED_KEY = 'boite.settings-sync';
 
-/** Saved one-way copies. Execution on either core never depends on this client. */
+/**
+ * Every machine of a group follows the settings home its group chose
+ * (`Group.settingsHome`): the same choice on every member, so every window
+ * shows it. A window that owns both machines makes the copy whenever the home
+ * changes and after each reconnect. Execution on either core never depends on
+ * this client.
+ */
 export class AutoSettingsSync {
-  links = $state.raw<Record<string, string>>({});
   reports = $state<Record<string, { source: string; report: SyncReport }>>({});
   busy = $state<Record<string, boolean>>({});
 
   private failures = new Map<string, string>();
   private copies = new Map<string, Promise<void>>();
+  /** The copy each target follows now, to run again on demand. */
+  private runs = new Map<string, () => void>();
 
-  constructor(private machines: () => Machine[], private key: (machine: Machine) => string) {}
+  /** `nameOf` is the name a machine goes by on screen (`machineName`), given by the workspace that imports this file. */
+  constructor(private machines: () => Machine[], private nameOf: (machine: Machine) => string = (machine) => machine.label) {}
 
+  /**
+   * The id of the member `target` takes its settings from, as its own core
+   * reports the group. Undefined when it is the home itself, when its group
+   * chose none, or when its core predates the choice.
+   */
+  homeId(target: Machine): string | undefined {
+    const group = target.store.group;
+    const home = group?.settingsHome;
+    return home && home !== group.self && group.cores.some((core) => core.coreId === home) ? home : undefined;
+  }
+
+  /** The home `target` follows, when this window is connected to it. */
   source(target: Machine): Machine | undefined {
-    const key = this.links[this.key(target)];
-    return this.machines().find(machine => this.key(machine) === key);
+    const home = this.homeId(target);
+    if (home === undefined) return undefined;
+    // The same machine may be listed twice (an address and a relay): the one that answers carries the copy.
+    const listed = this.machines().filter((machine) => machine !== target && GroupLinks.coreOf(machine) === home);
+    return listed.find((machine) => machine.store.connection === 'ready') ?? listed[0];
   }
 
-  enabled(target: Machine): boolean { return !!this.links[this.key(target)]; }
-
-  canEnable(source: Machine, target: Machine): boolean {
-    if (source === target) return false;
-    const targetKey = this.key(target);
-    let next: string | undefined = this.key(source);
-    const seen = new Set<string>();
-    while (next) {
-      if (next === targetKey || seen.has(next)) return false;
-      seen.add(next);
-      next = this.links[next];
-    }
-    return true;
+  /** The home's name for `target`, connected here or not. */
+  sourceName(target: Machine): string | undefined {
+    const home = this.homeId(target);
+    if (home === undefined) return undefined;
+    const source = this.source(target);
+    return source ? this.nameOf(source) : target.store.group?.cores.find((core) => core.coreId === home)?.name;
   }
 
-  set(target: Machine, source: Machine | null): void {
-    if (source && !this.canEnable(source, target)) return;
-    const links = { ...this.links };
-    if (source) links[this.key(target)] = this.key(source);
-    else delete links[this.key(target)];
-    this.links = links;
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(links)); } catch { /* session only */ }
+  /** A copy now, after `target` gave a setting back to its home. */
+  refresh(target: Machine): void {
+    this.runs.get(target.id)?.();
   }
 
   forget(machine: Machine): void {
-    const key = this.key(machine);
-    this.links = Object.fromEntries(Object.entries(this.links).filter(([target, source]) => target !== key && source !== key));
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.links)); } catch { /* session only */ }
     delete this.reports[machine.id];
+    delete this.busy[machine.id];
   }
 
   /** Runs for the whole window, including chat, with new copies after reconnects. */
   start(): () => void {
-    try {
-      const saved: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
-      this.links = saved && typeof saved === 'object' && !Array.isArray(saved)
-        ? Object.fromEntries(Object.entries(saved).filter(([target, source]) => typeof source === 'string' && source !== target)) : {};
-    } catch { this.links = {}; }
+    try { localStorage.removeItem(RETIRED_KEY); } catch { /* nothing kept */ }
     return $effect.root(() => {
       $effect(() => {
         const machines = this.machines();
-        const pairs = Object.entries(this.links).map(([targetKey, sourceKey]) => ({
-          target: machines.find(machine => this.key(machine) === targetKey),
-          source: machines.find(machine => this.key(machine) === sourceKey)
-        })).filter(pair => pair.source && pair.target && this.canEnable(pair.source, pair.target));
-        // Track reconnects and client replacement, without watching our own writes.
-        const ready = pairs.filter(({ source, target }) =>
-          source!.store.owner && target!.store.owner && source!.store.connection === 'ready'
-          && target!.store.connection === 'ready' && source!.store.client && target!.store.client);
-        const dispose = untrack(() => ready.map(({ source, target }) => this.follow(source!, target!)));
+        // Track reconnects, client replacement and a new home, without watching our own writes.
+        const ready = machines.map((target) => ({ target, source: this.source(target) }))
+          .filter(({ source, target }) => source !== undefined
+            && source.store.owner && target.store.owner && source.store.connection === 'ready'
+            && target.store.connection === 'ready' && source.store.client && target.store.client);
+        const dispose = untrack(() => ready.map(({ source, target }) => this.follow(source!, target)));
         return () => dispose.forEach(stop => stop());
       });
     });
@@ -99,10 +104,7 @@ export class AutoSettingsSync {
         if (stopped) return;
         do {
           pending = false;
-          const report = await sync.syncSettings(
-            { client: from, providers: source.store.providers, accounts: source.store.accounts },
-            { client: to, providers: target.store.providers, accounts: target.store.accounts }, abort.signal
-          );
+          const report = await sync.syncSettings({ client: from }, { client: to }, abort.signal);
           if (stopped) break;
           target.store.settings = report.settings;
           if (report.keybindings) target.store.keybindings = report.keybindings;
@@ -126,15 +128,17 @@ export class AutoSettingsSync {
     const schedule = () => {
       if (stopped) return;
       pending = true;
-      if (!running && timer === undefined) timer = setTimeout(() => this.enqueue(this.key(target), run), 100);
+      if (!running && timer === undefined) timer = setTimeout(() => this.enqueue(target.id, run), 100);
     };
     const off = [from.on('settings.updated', schedule), from.on('keybindings.updated', schedule), from.on('brain.configured', schedule)];
+    this.runs.set(target.id, schedule);
     schedule();
     return () => {
       stopped = true;
       abort.abort();
       if (timer !== undefined) clearTimeout(timer);
       off.forEach(stop => stop());
+      if (this.runs.get(target.id) === schedule) this.runs.delete(target.id);
     };
   }
 }

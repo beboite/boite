@@ -240,9 +240,11 @@ export const OWNER_ONLY_IN_SETTINGS = [
   '[data-testid=settings-tab-accounts]',
   '[data-testid=settings-tab-plugins]',
   '[data-testid=settings-tab-resources]',
-  '[data-testid=setting-listen-on-lan]',
   '[data-testid=group-add-device]'
 ];
+
+/** How a phone reaches this machine, on Advanced: the owner's to change. */
+export const OWNER_ONLY_IN_ADVANCED = ['[data-testid=setting-listen-on-lan]'];
 
 /** The palette ids that each end in a method a device may not call. */
 export const OWNER_ONLY_COMMANDS = ['add-project', 'trace', 'providers', 'pair'];

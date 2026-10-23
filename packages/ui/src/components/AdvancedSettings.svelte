@@ -6,12 +6,14 @@
   import { Autosave, typed } from '../lib/autosave.svelte';
   import AutoCompactSettings from './AutoCompactSettings.svelte';
   import SchedulerSettings from './SchedulerSettings.svelte';
+  import PhoneSettings from './PhoneSettings.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   /**
-   * What most people never touch: how many turns run at once, which browser
-   * origins may reach this core, and the core this window talks to.
+   * What most people never touch: how many turns run at once, how a phone
+   * reaches this machine without a server of the group in between, which
+   * browser origins may reach this core, and the core this window talks to.
    */
   let { store }: { store: Store } = $props();
 
@@ -40,6 +42,8 @@
 
   <SchedulerSettings {store} />
   <AutoCompactSettings {store} />
+
+  <PhoneSettings {store} />
 
   {#if store.owner}
     <section class="card" id="settings-origins" data-testid="browser-origins">

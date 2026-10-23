@@ -1,20 +1,17 @@
 # Desktop updates
 
-Settings, Machines and updates lists every machine once. Each row says in one
-word where its updates stand (Up to date, Update available, Updating, Update
-failed), and one Check for updates button at the top of the page reads the
-desktop app, every server and every agent again
-([machines](machines.md#the-machines-page)). The desktop card sits above the
-list and belongs to this computer, even while another machine's conversation is
-open.
-It names the release and its age, links to the changelog on GitHub and offers
-installation with a restart confirmation. Channel options show the installed
-version and let you switch channels.
-
-Manual checks and channel controls remain in Machines and updates when
-everything is current. Each remote machine keeps its own
-[server update card](server.md#updating-from-the-app) and owner-only
-[agent update controls](agent-updates.md) under its row's details.
+Settings, Machines and updates opens on one card that folds nothing: the
+version this desktop app runs, the release found with its changelog on GitHub,
+the channel (Nightly or Release), Check for updates and Update
+([machines](machines.md#the-machines-page)). The card belongs to this
+computer, even while another machine's conversation is open. Check reads the
+desktop app, every server and every agent again; every other pending update is
+listed under it by machine, and Update starts all of them. A release already
+downloaded, with nothing else waiting, makes the button Restart, which installs
+after a restart confirmation. Each machine's row below says in one word where
+its updates stand (Up to date, Update available, Updating, Update failed).
+Agent versions, with their own update and skip controls and the automatic
+update switch, are on each machine's Providers page ([agent updates](agent-updates.md)).
 
 ## Update everything
 
@@ -39,8 +36,8 @@ too. A newer release lights the dot and opens the card again. A press
 elsewhere only closes the card.
 
 On a phone the card stays closed until the button is pressed, and opens as a
-sheet. Settings, Machines and updates has the same Update all beside Check for
-updates.
+sheet. Settings, Machines and updates has the same thing as its Update button,
+beside Check for updates.
 
 Update all sends one `core.updateEverything` request to each machine, all at
 once, naming the agents and the Boite release the card showed. Each core then
@@ -77,8 +74,8 @@ updates one call each, without that ordering.
 ### The desktop app of another PC
 
 Another Windows PC of the group shows its desktop app as a Boite row under
-its name, and Settings, Machines and updates shows a Desktop app block with an
-Update button on that machine's details instead of the manual server guide.
+its name, and Settings, Machines and updates lists it under the app's own
+update, started by the same Update button.
 Only that PC's own window can run its installer, so the request goes through
 its core:
 
@@ -88,7 +85,7 @@ its core:
    the group, a phone, a browser tab or a plugin is refused by field. The core
    keeps the last report until that window's socket closes, and relays it to
    owner connections (`core.desktopUpdateChanged`, `core.desktopUpdateStatus`).
-2. Update all, or Update on the block, sends `core.updateEverything` with
+2. Update all, or Update on the Machines updates card, sends `core.updateEverything` with
    `app`, the version the report offered. The core starts the agents named,
    waits until none of them is updating, then sends `ui.appUpdate` to that
    window alone. Meanwhile the row reads Waits for work to finish.
@@ -111,9 +108,10 @@ shows no desktop row, as before.
 
 ## Boite and Boite Nightly
 
-Choose Boite for regular releases or Boite Nightly for checked daily builds
-from `main` ([CI schedule](ci.md#boite-de-nuit)). Nightlies may contain
-unfinished changes.
+Choose Release for regular releases or Nightly for checked daily builds from
+`main` ([CI schedule](ci.md#boite-de-nuit)). Nightlies may contain unfinished
+changes. Until the first stable release is published, Release stays disabled
+(`RELEASE_PUBLISHED` in `UpdatesCard.svelte`).
 
 Changing the channel immediately checks for its newest signed release and
 offers it. Returning from nightly to Boite permits a lower version. Both

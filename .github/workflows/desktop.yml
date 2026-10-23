@@ -154,7 +154,7 @@ jobs:
       - name: Windows installer regression tests
         env:
           BOITE_CI_INSTALLER_REQUIRED: '1'
-        run: bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts scripts/ci/stop-core.test.ts
+        run: bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts scripts/ci/stop-core.test.ts scripts/ci/installed-cli-windows.test.ts
       # Test shells keep their data directory, WebView2 profile included, on
       # the runner's temp drive (D:), as the E2E shards do (docs/ci.md). On C:,
       # a fresh profile's cookie database held the first document request for

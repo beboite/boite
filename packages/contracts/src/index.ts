@@ -74,6 +74,7 @@ export * from './coordination';
 export * from './group';
 export * from './delegation';
 export * from './brain';
+export * from './settings-sync';
 export * from './hooks';
 export * from './terminals';
 export * from './wire';

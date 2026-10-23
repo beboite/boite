@@ -21,7 +21,7 @@
   import { claudeKeywords, promptSegments } from '../lib/message-display';
   import { fill, strings } from '../lib/strings';
   import type { Choice, Store } from '../lib/store.svelte';
-  import { workspace } from '../lib/workspace.svelte';
+  import { machineName, workspace } from '../lib/workspace.svelte';
   import ComposerAttachments from './ComposerAttachments.svelte';
   import ComposerImageReferences from './ComposerImageReferences.svelte';
   import ComposerBar from './ComposerBar.svelte';
@@ -121,7 +121,7 @@
    * incognito draft is never kept on the device, so it waits for the machine.
    */
   let offline = $derived(!target && store.connection !== 'ready' && (thread !== null ? !store.draft : !!store.draft && !store.draft.incognito));
-  let machineLabel = $derived(workspace.machines.find((machine) => machine.store === store)?.label ?? strings.machines.local);
+  let machineLabel = $derived.by(() => { const found = workspace.machines.find((machine) => machine.store === store); return found ? machineName(found) : strings.machines.local; });
   /**
    * A question waiting for a written answer makes the box its free field: Send
    * answers it with the card's picks, the text and the attachments
