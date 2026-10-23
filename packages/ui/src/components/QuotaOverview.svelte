@@ -227,9 +227,10 @@
   .summary.reorderable { cursor: grab; }
   .summary.reorderable .name { touch-action: none; }
   .dragging .summary { cursor: grabbing; }
-  /* Two windows a line on one grid, whatever the account: the bars of every row start and end together. */
+  /* Two windows per line; a lone window uses the full row. */
   .meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
   .mini-window { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px; align-items: center; }
+  .mini-window:only-child { grid-column: 1 / -1; }
   .mini-label { width: 4.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
   .meters.stale { opacity: 0.45; }
   /* The window the headline reads. */

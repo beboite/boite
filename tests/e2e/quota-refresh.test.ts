@@ -81,6 +81,50 @@ test('limits identify the owning machine in the desktop glance and desktop and p
   }
 }, 60_000);
 
+test('a single quota window fills the row in the desktop glance and narrow tray', async () => {
+  for (const view of ['desktop', 'tray']) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width: view === 'desktop' ? 1280 : 390, height: view === 'desktop' ? 850 : 460, deviceScaleFactor: 1, mobile: false });
+    await page.navigate(`${origin}/?fake=1&open=recent${view === 'tray' ? '&view=quotas' : ''}`);
+    await page.evaluate(`(async () => {
+      const { FakeClient } = await import('/src/lib/fake-client.ts');
+      const call = FakeClient.prototype.call;
+      globalThis.quotaWindowCount = 1;
+      FakeClient.prototype.call = async function(method, params) {
+        const result = await call.call(this, method, params);
+        if (method !== 'quotas.list') return result;
+        return result.map(row => ({ ...row, windows: row.windows.slice(0, globalThis.quotaWindowCount) }));
+      };
+    })()`);
+    if (view === 'desktop') await page.click('[data-testid="nav-limits"]');
+    const refresh = `[data-testid="${view === 'tray' ? 'quota' : 'limits-glance'}-refresh"]`;
+    const meters = '[data-testid="quota-provider"][data-provider="codex"] .meters';
+    await page.waitFor(`document.querySelector('${refresh}')?.getAttribute('aria-busy') === 'false'`);
+    for (const count of [1, 2, 1]) {
+      await page.evaluate(`globalThis.quotaWindowCount = ${count}`);
+      await page.click(refresh);
+      await page.waitFor(`document.querySelector('${refresh}')?.getAttribute('aria-busy') === 'false' && document.querySelectorAll('${meters} .mini-window').length === ${count}`);
+      if (count === 1) await capture(`quota-single-window-${view}.png`);
+      const layout = await page.evaluate<{ available: number; windows: { left: number; right: number; width: number; trackRight: number }[] }>(`(() => {
+        const meters = document.querySelector('${meters}');
+        const box = meters.getBoundingClientRect();
+        return { available: box.width, windows: [...meters.children].map(window => {
+          const rect = window.getBoundingClientRect();
+          return { left: rect.left - box.left, right: rect.right - box.left, width: rect.width,
+            trackRight: window.querySelector('.track').getBoundingClientRect().right - box.left };
+        }) };
+      })()`);
+      expect(layout.windows[0]!.left).toBeCloseTo(0, 0);
+      expect(layout.windows.at(-1)!.right).toBeCloseTo(layout.available, 0);
+      expect(layout.windows.at(-1)!.trackRight).toBeCloseTo(layout.available, 0);
+      if (count === 2) {
+        expect(layout.windows[0]!.width).toBeCloseTo(layout.windows[1]!.width, 0);
+        expect(layout.windows[1]!.left).toBeGreaterThan(layout.windows[0]!.right);
+      }
+    }
+    expect(page.errors()).toEqual([]);
+  }
+}, 60_000);
+
 for (const view of ['tray', 'desktop', 'phone', 'sidebar']) {
   test(`${view} restores each quota bar as its account answers`, async () => {
     // Windows runners may request reduced motion at the OS level.
