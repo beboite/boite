@@ -53,8 +53,8 @@ describe('shouldNotify', () => {
 
 describe('finishNotifies', () => {
   const thread = (id: string, extra: Partial<ThreadSummary> = {}) => ({ id, status: 'idle', ...extra }) as ThreadSummary;
-  const turn = (threadId: string, status: Turn['status'], operation?: 'compact' | 'delegation') =>
-    ({ threadId, status, ...(operation ? { execution: { operation } } : {}) }) as Pick<Turn, 'threadId' | 'status' | 'execution'>;
+  const turn = (threadId: string, status: Turn['status'], operation?: 'compact' | 'delegation' | 'routine', quiet = false) =>
+    ({ threadId, status, ...(operation ? { execution: { operation } } : {}), ...(quiet ? { quiet: true as const } : {}) }) as Pick<Turn, 'threadId' | 'status' | 'execution' | 'quiet'>;
 
   test('a delegated agent never, its parent once the team is done', () => {
     const busy = [thread('root'), thread('child', { parentThreadId: 'root', status: 'running' })];
@@ -66,9 +66,10 @@ describe('finishNotifies', () => {
     expect(finishNotifies(idle, turn('root', 'done', 'delegation'))).toBe(true);
   });
 
-  test('a persistent agent only when it fails, compaction and stops never', () => {
+  test('a persistent agent like any thread unless its wake was quiet, compaction and stops never', () => {
     const threads = [thread('agent', { agentSessionId: 's-1', projectId: null }), thread('plain')];
-    expect(finishNotifies(threads, turn('agent', 'done'))).toBe(false);
+    expect(finishNotifies(threads, turn('agent', 'done'))).toBe(true);
+    expect(finishNotifies(threads, turn('agent', 'done', 'routine', true))).toBe(false);
     expect(finishNotifies(threads, turn('agent', 'error'))).toBe(true);
     expect(finishNotifies(threads, turn('plain', 'done', 'compact'))).toBe(false);
     expect(finishNotifies(threads, turn('plain', 'stopped'))).toBe(false);

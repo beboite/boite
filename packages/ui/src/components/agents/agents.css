@@ -38,6 +38,8 @@
 .agent-live[data-state='error'] .agent-live-text { color: var(--color-danger); }
 .agent-live-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-soft); animation: pulse 1.6s var(--ease-out-quint) infinite var(--loops); }
 .agent-live[data-state='waiting'] .agent-live-dot { background: var(--color-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 18%, transparent); }
+@media (prefers-reduced-motion: reduce) { .agent-live-dot { animation: none; } }
+html[data-motion='reduced'] .agent-live-dot { animation: none; }
 .agent-head-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 .agent-head-actions > button.active { background: var(--color-active); color: var(--color-foreground); }
 .agent-head-actions .menu .trigger.ghost { width: var(--control); height: var(--control); padding: 0; }

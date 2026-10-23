@@ -51,7 +51,7 @@ export function shouldNotify(input: NotifyDecision): boolean {
  * (`notifiesOnFinish`) applied to the threads this client holds. A thread it
  * does not hold yet keeps the old answer: a done or a failure is news.
  */
-export function finishNotifies(threads: readonly ThreadSummary[], turn: Pick<Turn, 'threadId' | 'status' | 'execution'>): boolean {
+export function finishNotifies(threads: readonly ThreadSummary[], turn: Pick<Turn, 'threadId' | 'status' | 'execution' | 'quiet'>): boolean {
   const thread = threads.find((t) => t.id === turn.threadId);
   if (thread === undefined) return turn.status === 'done' || turn.status === 'error';
   // A child waiting on its own background work is still at work: its result has not come back.

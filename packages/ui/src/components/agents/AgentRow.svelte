@@ -88,4 +88,6 @@
   [data-tone='error'] .detail { color: var(--color-danger); }
   .live-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); animation: pulse 1.6s var(--ease-out-quint) infinite var(--loops); }
   .wake { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: var(--text-xs); color: var(--color-subtle); font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+  :global(html[data-motion='reduced']) .live-dot { animation: none; }
 </style>
