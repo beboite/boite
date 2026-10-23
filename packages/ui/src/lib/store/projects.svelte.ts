@@ -76,6 +76,13 @@ export class Projects {
     } catch { /* storage unavailable: the folds last until the app closes */ }
   }
 
+  /** A project removed while this device was away leaves the folds once the machine lists its projects. */
+  pruneFolds(): void {
+    const listed = new Set(this.projects.map((p) => p.id));
+    const kept = this.collapsedProjects.filter((id) => listed.has(id));
+    if (kept.length !== this.collapsedProjects.length) this.#fold(kept);
+  }
+
   /** The folds this device left on the core that just answered. Unreadable storage keeps the ones on screen. */
   restoreFolds(): void {
     let stored: unknown;
@@ -204,6 +211,7 @@ export class Projects {
       // Another machine took this Store meanwhile: project ids can collide between machines.
       if (!this.ctx.currentClient(client, clientGeneration) || !read.active) return;
       this.projects = retainRows(this.projects, read.apply(listed, this.projects));
+      this.pruneFolds();
     } catch {
       /* the list the app holds stays */
     } finally { read.cancel(); }

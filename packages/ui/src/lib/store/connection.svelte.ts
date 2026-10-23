@@ -609,6 +609,7 @@ export class Connection {
     const primary = [
       slice(client.call('projects.list', {}), rows => {
         s.projects = retainRows(s.projects, this.ctx.projects.withPendingArchives(projectRead.apply(rows, s.projects)));
+        this.ctx.projects.pruneFolds();
         this.ctx.projects.bootListAt = Date.now();
         void this.ctx.projects.sendPendingArchives(rows);
       }, () => projectRead.cancel()),

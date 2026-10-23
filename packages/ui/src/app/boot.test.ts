@@ -94,6 +94,15 @@ test('a project folded in the sidebar is still folded after a restart', async ()
   expect(head('p-boite').getAttribute('aria-expanded')).toBe('false');
   expect(head('p-notes').getAttribute('aria-expanded')).toBe('true');
 
+  // A project removed while the app was closed leaves the stored folds once the machine lists its projects.
+  const key = Object.keys(localStorage).find((name) => name.startsWith('boite.foldedProjects.v1:'))!;
+  localStorage.setItem(key, JSON.stringify(['p-boite', 'p-gone']));
+  unmountApp();
+  store.collapsedProjects = [];
+  await mountOnFake();
+  await waitFor(() => localStorage.getItem(key) === JSON.stringify(['p-boite']));
+  expect(store.collapsedProjects).toEqual(['p-boite']);
+
   // Unfolding it is kept the same way.
   head('p-boite').click();
   await waitFor(() => head('p-boite').getAttribute('aria-expanded') === 'true');
