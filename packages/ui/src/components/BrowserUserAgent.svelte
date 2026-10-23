@@ -23,11 +23,15 @@
   async function save(event: Event): Promise<void> {
     event.preventDefault();
     if (browserUserAgentError({ mode, value })) { problem = s.userAgentInvalid; return; }
-    const { userAgent: _old, ...base } = profile;
-    const changed = { ...base, ...(value.trim() ? { userAgent: { mode, value: value.trim() } } : {}) };
+    const id = profile.id;
+    const userAgent = value.trim() ? { mode, value: value.trim() } : undefined;
     busy = true;
     try {
-      if (await browserProfiles.save(browserProfiles.list.map(one => one.id === profile.id ? changed : one))) open = false;
+      if (await browserProfiles.save(profiles => profiles.map(one => {
+        if (one.id !== id) return one;
+        const { userAgent: _old, ...base } = one;
+        return { ...base, ...(userAgent ? { userAgent } : {}) };
+      }))) open = false;
     } finally { busy = false; }
   }
 </script>
