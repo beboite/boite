@@ -138,4 +138,45 @@ test('missed messages open at their first unread reply, stay unread off screen a
   expect(await page.evaluate(`!!document.querySelector('.agents-identity [data-tone="waiting"]')`)).toBe(true);
   expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-entry-' + window.__reading.group.id + '"] [data-tone="waiting"]')`)).toBe(true);
   expect(await page.evaluate(`!!document.querySelector('[data-testid="agent-entry-' + window.__reading.mira.id + '"] [data-tone="waiting"]')`)).toBe(false);
+
+  // Sending skips unseen replies even when the entire conversation fits one window.
+  await page.evaluate(`(async () => {
+    const f = window.__reading;
+    f.short = f.fake.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection: f.mira.selection, status: 'active', tools: ['messages'] } });
+    f.shortStart = f.start + 2000000;
+    const scope = { kind: 'agent', id: f.short.id };
+    for (let i = 0; i < 25; i++) f.add('short-' + i, scope, f.short.id, f.shortStart + i * 1000, 'Review ' + (i + 1) + '\\n\\n' + 'Here are the changes for you to read. '.repeat(20));
+    await f.view.refresh();
+    f.view.store.showAgents(f.short.id);
+  })()`);
+  await page.waitFor(`!document.querySelector('.agent-reading-status') && ${firstVisible} === 'short-0'`);
+  const shortRead = await page.evaluate<number>(`window.__reading.view.readAt['profile:' + window.__reading.short.id]`);
+  await page.type('.agent-chat [data-testid="composer-input"]', 'I will read the other replies next.');
+  await page.click('.agent-chat [data-testid="composer-send"]');
+  await page.waitFor(`document.querySelector('[data-testid="agent-user-message"]')?.textContent.includes('I will read the other replies next.') && !!document.querySelector('[data-testid="agent-jump-unread"]')`);
+  expect(await page.evaluate(`window.__reading.view.readAt['profile:' + window.__reading.short.id]`)).toBe(shortRead);
+  expect(await page.evaluate(`document.querySelector('[data-testid="agent-unread-divider"]').nextElementSibling.dataset.messageId`)).toBe('short-0');
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-overlap-missed-desktop.png'));
+
+  // A delayed, failed seek disables the button and preserves the reading position.
+  await page.evaluate(`(() => {
+    const f = window.__reading, c = f.view.store.client, call = c.call.bind(c);
+    f.restoreMessages = () => { c.call = call; };
+    c.call = (method, params, ...rest) => method === 'agents.messages' && params.scope.id === f.short.id
+      ? new Promise((resolve, reject) => { f.failSeek = () => reject(new Error('Missed-message request failed')); })
+      : call(method, params, ...rest);
+    ${box}.scrollTop -= 400; ${box}.dispatchEvent(new Event('scroll'));
+  })()`);
+  const beforeSeek = await page.evaluate<number>(`${box}.scrollTop`);
+  await page.click('[data-testid="agent-jump-unread"]');
+  await page.waitFor(`typeof window.__reading.failSeek === 'function' && document.querySelector('[data-testid="agent-jump-unread"]').disabled`);
+  expect(await page.evaluate(`${box}.scrollTop`)).toBe(beforeSeek);
+  await page.evaluate(`window.__reading.failSeek(); window.__reading.restoreMessages()`);
+  await page.waitFor(`document.querySelector('.agent-error')?.textContent.includes('Missed-message request failed') && !document.querySelector('[data-testid="agent-jump-unread"]').disabled`);
+  expect(await page.evaluate(`${box}.scrollTop`)).toBe(beforeSeek);
+  expect(await page.evaluate(`window.__reading.view.readAt['profile:' + window.__reading.short.id]`)).toBe(shortRead);
+  await page.click('.agent-error button');
+  await page.click('[data-testid="agent-jump-unread"]');
+  const nextShort = await page.evaluate<string>(`'short-' + (((${shortRead} - window.__reading.shortStart) / 1000) + 1)`);
+  await page.waitFor(`${firstVisible} === ${JSON.stringify(nextShort)}`);
 }, 60_000);

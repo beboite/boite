@@ -95,11 +95,12 @@
     const cursor = edge ? { createdAt: edge.createdAt, id: edge.id } : undefined;
     const next = await view.readMessages({ scope, ...(direction === 'open' ? { readAt: entry.at } : direction === 'unread' ? { readAt: view.readAt?.[readKey] ?? 0 } : direction === 'older' ? { before: cursor } : direction === 'newer' ? { after: cursor } : {}) });
     if (disposed || opening !== key || box !== scroller) return;
-    if (direction === 'open') entry = { ...entry, first: entry.count ? (next?.messages ?? messages).find(m => m.senderId !== null && m.createdAt > entry!.at)?.id ?? null : null };
+    if (!next && direction !== 'open') { loading = false; return; }
+    if (direction === 'open') entry = { ...entry, first: entry.count && next ? next.messages.find(m => m.senderId !== null && m.createdAt > entry!.at)?.id ?? null : null };
     if (next) {
       const startsAfterRead = next.older && !!next.messages[0] && next.messages[0].createdAt > (view.readAt?.[readKey] ?? 0);
-      // Overlapping windows keep a continuous history; a disjoint tail cannot advance its read mark.
-      if (direction === 'latest') readGap = startsAfterRead && (readGap || !next.messages.some(m => messages.some(previous => previous.id === m.id)));
+      // Sending skips unseen replies even when the latest window overlaps this one.
+      if (direction === 'latest') readGap = unreadTotal > 0 || startsAfterRead && (readGap || !next.messages.some(m => messages.some(previous => previous.id === m.id)));
       else if (direction === 'open' || direction === 'unread' || direction === 'older' && !startsAfterRead) readGap = false;
       const all = direction === 'older' ? [...next.messages, ...messages] : direction === 'newer' ? [...messages, ...next.messages] : next.messages;
       const unique = [...new Map(all.map(m => [m.id, m])).values()];
@@ -398,7 +399,7 @@
   </div>
 
   {#if ready && (awayFromBottom || readGap)}
-    <div class="agent-jump"><button type="button" class="chip" onclick={jumpToUnread} data-testid="agent-jump-unread"><ArrowDown size={14} /><span>{unreadTotal ? missedLabel(unreadTotal) : labels.latestMessages}</span></button></div>
+    <div class="agent-jump"><button type="button" class="chip" disabled={loading} onclick={jumpToUnread} data-testid="agent-jump-unread"><ArrowDown size={14} /><span>{unreadTotal ? missedLabel(unreadTotal) : labels.latestMessages}</span></button></div>
   {/if}
 
   <Composer store={view.store} {target} />

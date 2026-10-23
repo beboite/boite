@@ -42,6 +42,10 @@ test('message windows seek to the first unread reply and page in both directions
     const target: AgentScope = { kind: 'agent', id: agent.id };
     const records = h.core.workforce.records;
     for (let i = 0; i < HISTORY; i++) records.create('message', { scope: target, senderId: agent.id, text: `reply ${i}`, recipientIds: [], replyTo: null, episodeId: 'window', sourceRunId: null });
+    // Exercise both scope predicates, including IDs that collide across kinds.
+    for (const scope of [{ kind: 'agent' as const, id: 'another-agent' }, { kind: 'group' as const, id: target.id }]) {
+      for (let i = 0; i < 10; i++) records.create('message', { scope, senderId: agent.id, text: `other conversation ${i}`, recipientIds: [], replyTo: null, episodeId: 'other-window', sourceRunId: null });
+    }
     // Equal creation timestamps and an attachment edit must not reorder the reading cursor.
     h.core.journal.db.exec("UPDATE agent_entities SET created_at = 1000, data = json_set(data, '$.createdAt', 1000) WHERE kind = 'message'");
     const opened = await c.call('agents.messages', { scope: target, readAt: 0, limit: 7 });
@@ -58,6 +62,18 @@ test('message windows seek to the first unread reply and page in both directions
     expect(back.messages.map(m => m.id)).toEqual(opened.messages.map(m => m.id));
     const latest = await c.call('agents.messages', { scope: target, readAt: 1000, limit: 7 });
     expect(latest.newer).toBe(false); expect(latest.older).toBe(true);
+    const visited = [...opened.messages, ...next.messages];
+    let forward = next;
+    while (forward.newer) {
+      const last = forward.messages.at(-1)!;
+      forward = await c.call('agents.messages', { scope: target, after: { createdAt: last.createdAt, id: last.id }, limit: 7 });
+      expect(forward.messages.length).toBeGreaterThan(0);
+      expect(forward.messages.length).toBeLessThanOrEqual(7);
+      visited.push(...forward.messages);
+    }
+    expect(visited).toHaveLength(HISTORY);
+    expect(new Set(visited.map(m => m.id)).size).toBe(HISTORY);
+    expect([...visited, ...back.messages, ...latest.messages].every(m => m.scope.kind === target.kind && m.scope.id === target.id)).toBe(true);
     expect(await thrown(c.call('agents.messages', { scope: target, readAt: -1 }))).toThrow('readAt');
     expect(await thrown(c.call('agents.messages', { scope: target, readAt: 0, after: { createdAt: end.createdAt, id: end.id } }))).toThrow('expected only one');
   } finally { await h.stop(); }

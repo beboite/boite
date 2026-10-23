@@ -94,7 +94,7 @@ test('opening unread messages starts at the first missed one and reads only the 
     seen: { messages: items, deliveries: [], decisions: [] },
     snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [] },
     store: useStore(), readAt: { 'profile:a-ada': items[0]!.createdAt }, markRead,
-    pending: false, loadingOlder: null, readMessages: async () => null, fill() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
+    pending: false, loadingOlder: null, readMessages: async () => ({ messages: items, work: [], memories: [], deliveries: [], decisions: [], runs: [], older: false, newer: false }), fill() {}, hasOlder: () => false, loadOlder: async () => {}, call: async () => null,
   });
   mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
   const box = document.querySelector<HTMLElement>('.agent-chat-scroll')!;
@@ -123,9 +123,10 @@ test('a previous send failure does not keep another conversation on loading', as
   expect(document.querySelector('.agent-reading-status')).toBeNull();
 });
 
-test('sending across an unloaded gap keeps missed replies unread and the entry divider at its original message', async () => {
-  const items = Array.from({ length: 120 }, (_, i) => message(`reply-${i}`, 'a-ada'));
+test.each([25, 65, 120])('sending with %i replies preserves unread messages across complete, overlapping and disjoint windows', async count => {
+  const items = Array.from({ length: count }, (_, i) => message(`reply-${i}`, 'a-ada'));
   const mine = message('my-new-message', null);
+  let failedSeek: Promise<null> | null = null;
   const view = $state({
     seen: { messages: items.slice(-50), deliveries: [], decisions: [], work: [], runs: [] },
     snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [], sessions: [], messages: items.slice(-50), unread: [{ scope, at: 0, count: items.length }], revision: 1 },
@@ -134,8 +135,9 @@ test('sending across an unloaded gap keeps missed replies unread and the entry d
     markRead(key: string, at: number) { view.readAt = { ...view.readAt, [key]: at }; },
     call: async () => mine,
     readMessages: async (p: { readAt?: number }) => {
+      if (failedSeek) return failedSeek;
       const all = p.readAt === undefined ? [...items, mine] : items;
-      const start = p.readAt === undefined ? all.length - 50 : all.findIndex(m => m.createdAt > p.readAt!);
+      const start = p.readAt === undefined ? Math.max(0, all.length - 50) : all.findIndex(m => m.createdAt > p.readAt!);
       const messages = all.slice(start, start + 50);
       view.seen.messages = [...new Map([...view.seen.messages, ...messages].map(m => [m.id, m])).values()];
       return { messages, work: [], memories: [], deliveries: [], decisions: [], runs: [], older: start > 0, newer: start + 50 < all.length };
@@ -164,12 +166,44 @@ test('sending across an unloaded gap keeps missed replies unread and the entry d
   document.querySelector<HTMLButtonElement>('[data-testid="composer-send"]')!.click(); await settle();
   expect(document.querySelector('[data-message-id="my-new-message"]')).not.toBeNull();
   expect.soft(view.readAt['profile:a-ada']).toBe(initialRead);
-  expect.soft(document.querySelector('[data-testid="agent-unread-divider"]')).toBeNull();
+  const divider = document.querySelector('[data-testid="agent-unread-divider"]');
+  if (count <= 49) expect.soft(divider?.nextElementSibling?.getAttribute('data-message-id')).toBe(items[0]!.id);
+  else expect.soft(divider).toBeNull();
   const jump = document.querySelector<HTMLButtonElement>('[data-testid="agent-jump-unread"]');
   expect(jump).not.toBeNull();
+  if (count === 120) {
+    // A failed seek must leave the current reading position available for retry.
+    let finish!: () => void;
+    failedSeek = new Promise<null>(resolve => { finish = () => resolve(null); });
+    top = 400; box.dispatchEvent(new Event('scroll')); await settle();
+    jump!.click(); await settle();
+    expect.soft(jump!.disabled).toBe(true);
+    expect.soft(top).toBe(400);
+    finish(); await settle();
+    expect.soft(top).toBe(400);
+    expect.soft(view.readAt['profile:a-ada']).toBe(initialRead);
+    expect(jump!.disabled).toBe(false);
+    failedSeek = null;
+  }
   jump!.click(); await settle();
   expect(box.querySelector('[data-message-id]')?.getAttribute('data-message-id')).toBe(items[1]!.id);
   expect(view.readAt['profile:a-ada']).toBe(items[1]!.createdAt);
+});
+
+test('a failed opening never labels the retained tail as the first missed message', async () => {
+  const view = replyView({});
+  view.snapshot!.unread = [{ scope, at: 0, count: 840 }];
+  view.error = 'Could not load missed messages';
+  const markRead = vi.fn(); view.markRead = markRead;
+  mounted = mount(AgentConversation, { target: document.body, props: { view, scope } });
+  const box = document.querySelector<HTMLElement>('.agent-chat-scroll')!;
+  Object.defineProperties(box, { clientHeight: { value: 200 }, scrollHeight: { value: 200 } });
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 200, height: 200 } as DOMRect);
+  await settle();
+  expect(document.querySelector('[data-message-id="m-reply"]')).not.toBeNull();
+  expect(document.querySelector('.agent-reading-status')).toBeNull();
+  expect(document.querySelector('[data-testid="agent-unread-divider"]')).toBeNull();
+  expect(markRead).not.toHaveBeenCalled();
 });
 
 test('an entrusted thread marker participates in reading and unread navigation', async () => {
