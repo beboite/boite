@@ -53,19 +53,27 @@ test('an async question waits in the dock above the composer, stacked, and the t
   // The composer answers the docked question until it is set aside for an ordinary prompt.
   query<HTMLButtonElement>('[data-testid=composer-reply-ignore]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-reply]') === null);
+  query<HTMLButtonElement>('[data-testid=activity-question-toggle]').click();
+  await waitFor(() => query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded') === 'false');
   await sendPrompt('[ask] two');
   await waitFor(() => document.querySelectorAll('[data-testid=activity-question]').length === 2);
+  expect(query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded')).toBe('false');
+  query<HTMLButtonElement>('[data-testid=activity-question-toggle]').click();
+  await waitFor(() => query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded') === 'true');
 
-  // The newest comes up, behind a pager; the timeline holds a line per question, no card.
-  expect(query('[data-testid=activity-question-index]').textContent).toBe('2 of 2');
+  // New arrivals leave the oldest up; the timeline holds a line per question, no card.
+  expect(query('[data-testid=activity-question-index]').textContent).toBe('1 of 2');
   expect(document.querySelectorAll('[data-testid=question-docked]').length).toBe(2);
   expect(document.querySelector('[data-testid=timeline] [data-testid=question-card]')).toBeNull();
   const visible = () => Array.from(document.querySelectorAll<HTMLElement>('[data-testid=activity-question]')).filter((el) => !el.hidden);
   expect(visible().length).toBe(1);
-  const newest = visible()[0]?.dataset.question;
+  const oldest = visible()[0]?.dataset.question;
+  query<HTMLButtonElement>('[data-testid=activity-question-next]').click();
+  await waitFor(() => query('[data-testid=activity-question-index]').textContent === '2 of 2');
+  expect(visible()[0]?.dataset.question).not.toBe(oldest);
   query<HTMLButtonElement>('[data-testid=activity-question-prev]').click();
   await waitFor(() => query('[data-testid=activity-question-index]').textContent === '1 of 2');
-  expect(visible()[0]?.dataset.question).not.toBe(newest);
+  expect(visible()[0]?.dataset.question).toBe(oldest);
 
   // Answered from the dock, it leaves it and folds to its answer in the timeline.
   const first = visible()[0]!;
