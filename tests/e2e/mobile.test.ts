@@ -303,8 +303,8 @@ test('the panel sheet, Agents and Settings keep clear of a notch and the status 
     await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
     await navigateMobile('mobile-agents');
     // The agents list opens on its tools row, the row nearest the notch: the menu holds Threads and Agents.
-    await page.waitFor(`document.querySelector('.agents-page .agents-rail .rail-head')`);
-    expect(await top('.agents-page .agents-rail .rail-head')).toBeGreaterThanOrEqual(47);
+    await page.waitFor(`document.querySelector('.agents-rail .rail-head')`);
+    expect(await top('.agents-rail .rail-head')).toBeGreaterThanOrEqual(47);
     await capture('mobile-safe-agents.png');
     await navigateMobile('mobile-settings');
     await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home] h2')`);
