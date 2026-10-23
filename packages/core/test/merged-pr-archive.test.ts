@@ -38,7 +38,7 @@ async function fixture() {
   harness.core.journal.putProject({ ...project, path: repo });
   harness.core.journal.putThread({ ...thread, cwd: checkout, branch: 'topic', pinned: false, unread: false });
   const sha = git(checkout, 'rev-parse', 'HEAD');
-  let candidates = [{ number: 7, url: 'https://github.com/example/repo/pull/7', state: 'MERGED', headRefName: 'topic', headRefOid: sha, headRepository: { name: 'repo' }, headRepositoryOwner: { login: 'example' }, isCrossRepository: false, mergedAt: '2026-10-01T12:00:00Z' }];
+  let candidates = [{ title: 'Merged change', baseRefName: 'main', number: 7, url: 'https://github.com/example/repo/pull/7', state: 'MERGED', headRefName: 'topic', headRefOid: sha, headRepository: { name: 'repo' }, headRepositoryOwner: { login: 'example' }, isCrossRepository: false, mergedAt: '2026-10-01T12:00:00Z' }];
   const spawn = harness.core.procs.spawn.bind(harness.core.procs);
   let ghGate: string | undefined;
   let hideList = false;
@@ -96,6 +96,149 @@ async function completedFamily() {
   for (const thread of [harness.core.threads.require(f.threadId), ...children]) await f.client.call('threads.markRead', { threadId: thread.id });
   return { ...f, children, runId: run.id };
 }
+
+test.each(['badge', 'linked PR'] as const)('a merge detected by the %s moves directly to Done and lets the current prompt finish', async source => {
+  const f = await fixture();
+  const core = harness.core;
+  const original = core.threads.require(f.threadId);
+  for (let index = 0; index < 300; index++) core.journal.putThread({ ...original, id: `retained-${index}`, branch: `retained-${index}`, archived: true });
+  core.journal.putThread(original); // Beyond the next periodic scan's 128 rows.
+  await service.close();
+  service = new MergedPrArchive(core, core.pullRequests); // Normal startup grace and settling delay.
+  Object.defineProperty(core, 'mergedPrArchive', { value: service });
+  let finish!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  let stops = 0;
+  restoreDriver = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    return { stop() { stops++; finish(); }, done: gate.then(() => {
+      const message = ctx.emit.startMessage('assistant');
+      ctx.emit.part(message, 0, { type: 'text', text: 'Final answer after the merge.' });
+      ctx.emit.complete(message, 'complete');
+      return { status: 'done' as const, sessionId: null, usage: null };
+    }) };
+  } });
+  const turn = await f.client.call('turns.start', { threadId: f.threadId, prompt: 'Finish reporting the merged change.' });
+  const token = core.agents.tokenFor(f.threadId);
+  const agent = await connect(harness.url, token);
+  const owned = core.procs.spawn(f.threadId, process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: f.checkout });
+  try {
+    await waitFor(() => core.threads.runner.handles.has(f.threadId));
+    if (source === 'badge') expect(await f.client.call('threads.pullRequest', { threadId: f.threadId })).toMatchObject({ state: 'MERGED' });
+    else await f.client.call('threads.linkPullRequest', { threadId: f.threadId, url: f.candidates[0]!.url });
+    await waitFor(() => core.threads.require(f.threadId).doneAt != null, 1500);
+    expect(core.threads.require(f.threadId)).toMatchObject({ archived: true, status: 'running' });
+    expect(stops).toBe(0);
+    expect(core.procs.liveCount(f.threadId)).toBe(1);
+    expect(await agent.call('agent.where', { threadId: f.threadId })).toMatchObject({ threadId: f.threadId });
+    finish();
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done');
+    const saved = await f.client.call('threads.get', { threadId: f.threadId });
+    expect(saved).toMatchObject({ archived: true, status: 'idle', archiveReason: { type: 'pr-merged', number: 7 } });
+    expect(saved.messages.flatMap(message => message.parts).some(part => part.type === 'text' && part.text === 'Final answer after the merge.')).toBe(true);
+    await waitFor(() => core.agents.authenticate(token) === null);
+    expect(stops).toBe(0);
+  } finally { finish(); agent.close(); core.procs.killTree(f.threadId); await owned.exited; }
+});
+
+test.each(['restore', 'draft'] as const)('detected merges respect a late %s during checkout validation', async change => {
+  const f = await fixture();
+  const core = harness.core;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let validating = false;
+  let validated = false;
+  const validate = core.pullRequests.validateMergedCheckout.bind(core.pullRequests);
+  const held = spyOn(core.pullRequests, 'validateMergedCheckout').mockImplementation(async (...args) => {
+    validating = true;
+    await gate;
+    return validate(...args).finally(() => { validated = true; });
+  });
+  try {
+    await f.client.call('threads.pullRequest', { threadId: f.threadId });
+    await waitFor(() => validating);
+    if (change === 'restore') core.threads.archive(f.threadId, false);
+    else core.threads.focus.set('typing-device', null, [f.threadId]);
+    release();
+    await waitFor(() => validated);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(core.threads.require(f.threadId).archived).toBe(false);
+  } finally { release(); held.mockRestore(); }
+});
+
+test('a merge observed as the last detection finishes is processed without another notification', async () => {
+  const f = await fixture();
+  const journal = harness.core.journal;
+  const read = journal.getThread.bind(journal);
+  const get = spyOn(journal, 'getThread').mockImplementation(id => {
+    if (id === 'deleted-merge-detection') {
+      // A badge result queued behind the final read runs before the drain's cleanup.
+      queueMicrotask(() => service.observe(f.threadId));
+      return null;
+    }
+    return read(id);
+  });
+  try {
+    service.observe('deleted-merge-detection');
+    await waitFor(() => harness.core.threads.require(f.threadId).archived, 1500);
+  } finally { get.mockRestore(); }
+});
+
+test('a failed detected conversation read leaves it visible and continues with the next merge', async () => {
+  const f = await fixture();
+  const core = harness.core, journal = core.journal;
+  const broken = 'unreadable-detected-thread';
+  journal.putThread({ ...core.threads.require(f.threadId), id: broken, branch: 'unreadable' });
+  const read = journal.getThread.bind(journal);
+  const warning = spyOn(core, 'log');
+  const get = spyOn(journal, 'getThread').mockImplementation(id => {
+    if (id === broken) throw new Error('fixture journal read failed');
+    return read(id);
+  });
+  try {
+    service.observe(broken);
+    service.observe(f.threadId);
+    await waitFor(() => core.threads.require(f.threadId).archived, 1500);
+    expect(warning.mock.calls.some(([, , context]) => context?.event === 'archive.detectionFailed' && context.threadId === broken)).toBe(true);
+  } finally { get.mockRestore(); warning.mockRestore(); }
+  expect(core.threads.require(broken).archived).toBe(false);
+});
+
+test('detected proof failures back off independently of history scans and retry after expiry or a thread change', async () => {
+  const f = await fixture();
+  const journal = harness.core.journal;
+  const original = harness.core.threads.require(f.threadId);
+  const proof = spyOn(harness.core.pullRequests, 'proveMerged').mockResolvedValue(null);
+  const now = Date.now.bind(Date);
+  let elapsed = 0;
+  const clock = spyOn(Date, 'now').mockImplementation(() => now() + elapsed);
+  const observe = async () => {
+    service.observe(f.threadId);
+    // A null proof settles within the detection turn, including its promise callbacks.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>(resolve => setImmediate(resolve));
+  };
+  try {
+    expect(await service.sweep()).toBe(0);
+    expect(proof).toHaveBeenCalledTimes(1);
+    elapsed = 30_000;
+    await observe(); // A scan's negative proof cannot delay newly detected work.
+    expect(proof).toHaveBeenCalledTimes(2);
+    for (let read = 0; read < 3; read++) await observe();
+    expect(proof).toHaveBeenCalledTimes(2);
+    elapsed = 60_001;
+    expect(await service.sweep()).toBe(0);
+    expect(proof).toHaveBeenCalledTimes(3);
+    await observe();
+    expect(proof).toHaveBeenCalledTimes(3);
+    elapsed = 90_001;
+    await observe();
+    expect(proof).toHaveBeenCalledTimes(4);
+    journal.putThread({ ...original, updatedAt: original.updatedAt + 1 });
+    await observe();
+    expect(proof).toHaveBeenCalledTimes(5);
+    expect(harness.core.threads.require(f.threadId).archived).toBe(false);
+  } finally { proof.mockRestore(); clock.mockRestore(); }
+});
 
 test('large archive sweeps bound hydration, yield to owner RPCs and advance beyond retained candidates', async () => {
   const f = await fixture();

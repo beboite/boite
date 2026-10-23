@@ -401,7 +401,7 @@ engines configured to stop with the shell.
 ### Merged pull request archives
 
 Projects default to `autoArchiveMergedPr: true`; the owner changes it through
-`projects.setAutoArchiveMergedPr`. The core can automatically archive an idle
+`projects.setAutoArchiveMergedPr`. The core can automatically archive a
 root conversation only for a clean linked worktree and a uniquely identified,
 merged, non-fork PR from the same repository with the exact branch tip. The
 proof takes the checkout's current branch from `git status`, not the thread's
@@ -426,19 +426,26 @@ archives and permits hiding them again when the policy is enabled.
 A shared checkout, reused branch history, ambiguous root holder, dirty tree or
 failed Git/GitHub read leaves the conversation visible.
 
-Merged conversations move to Done even while viewed or unread; their unread
-flags and retained history stay intact. Pinned threads remain visible, as do
-threads with protected client input, live processes or terminals, queued turns,
-background work, pending cards or messages, unfinished goals or loops, and active, paused or undelivered
+When a badge read or linked-PR watch detects a merge, that conversation is checked
+directly, without the startup grace, settling delay or periodic history scan.
+Failed detected proofs suppress repeated reads for a minute, independently of the
+scan. A thread update or changed PR links permit an earlier retry. A failed read
+of one conversation leaves it visible and does not stop other detected merges.
+It moves to Done even while viewed, unread or finishing its current prompt.
+The prompt and its processes keep running, its final answer is retained, and the
+Done row shows its live state until it finishes. Pinned threads remain visible,
+as do threads with protected client input, terminals, queued turns,
+pending cards or messages, unfinished goals or loops, and active, paused or undelivered
 workflows. Completed workflow and delegated children can remain as history:
 every retained child, including an archived child, must be idle with a completed
 turn and be free of the same activity and input protections. Undelivered or
 uncertain family results keep the parent visible. Fresh repository and family
 state checks precede the archive transaction. A late child turn or wake cannot
 start under an archived parent; Restore admits new work again without changing
-the children's existing archive flags. The pass starts after a 90-second startup
-grace and repeats at 60-second intervals after completion, admitting at most
-eight candidates within a 30-second budget for proof and validation.
+the children's existing archive flags. A fallback history scan catches merges
+no surface has read. It starts after a 90-second startup grace and repeats at
+60-second intervals after completion, scanning at most 128 rows and admitting
+eight idle candidates within a 30-second budget for proof and validation.
 
 Automatic archive changes visibility and records its reason; it does not stop
 work or remove a worktree or branch. An hour later the

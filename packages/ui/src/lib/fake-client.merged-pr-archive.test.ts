@@ -8,9 +8,9 @@ import { threadMethods } from './fake-client/threads';
 import { closeSideQuestions } from './fake-client/side-questions';
 let client: FakeClient;
 afterEach(() => client?.close());
-async function fixture() {
+async function fixture(delayMs = 0) {
   client?.close();
-  client = new FakeClient({ delayMs: 0 }); await client.connect();
+  client = new FakeClient({ delayMs }); await client.connect();
   const project = await client.call('projects.add', { path: '/workspace/archive-fixture' });
   const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
   const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, worktree: { branch: 'topic-fixture' }, title: 'merged fixture' });
@@ -30,6 +30,17 @@ async function completedWorkflow() {
   await client.call('threads.markRead', { threadId: f.thread.id });
   return { ...f, child };
 }
+
+test('fake badge detection moves a running prompt to Done and retains its final answer', async () => {
+  const { thread } = await fixture(50);
+  const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'Final answer after the merge.' });
+  expect(await client.call('threads.pullRequest', { threadId: thread.id })).toMatchObject({ state: 'MERGED' });
+  expect(await client.call('threads.get', { threadId: thread.id })).toMatchObject({ archived: true, status: 'running', archiveReason: { type: 'pr-merged', number: 7 } });
+  await expect.poll(async () => (await client.call('threads.get', { threadId: thread.id })).turns.find(saved => saved.id === turn.id)?.status).toBe('done');
+  const saved = await client.call('threads.get', { threadId: thread.id });
+  expect(saved).toMatchObject({ archived: true, status: 'idle' });
+  expect(saved.messages.flatMap(message => message.parts).some(part => part.type === 'text' && part.text.includes('Final answer after the merge.'))).toBe(true);
+});
 
 /** Legacy retained depth is seeded in the domain, without adding a client fixture API. */
 async function retainedDescendants() {

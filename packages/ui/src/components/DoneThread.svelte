@@ -14,6 +14,7 @@
   import { archiveKindOf } from '../lib/project-threads.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
+  import ThreadState from './ThreadState.svelte';
 
   /**
    * A done or archived conversation, drawn like a thread row: the provider,
@@ -92,7 +93,7 @@
       <span class="title ui-label">{thread.title}</span>
       <!-- The project shows below, outside the button: named here too, so two same-titled threads read apart. -->
       {#if showProject}<span class="visually-hidden">{projectName(entry.project)}</span>{/if}
-      <time datetime={new Date(archivedTime(thread)).toISOString()} title={exactTime(archivedTime(thread))}>{ago(archivedTime(thread), now)}</time>
+      {#if thread.status !== 'idle'}<ThreadState {thread} {now} away={owner.connection !== 'ready'} />{:else}<time datetime={new Date(archivedTime(thread)).toISOString()} title={exactTime(archivedTime(thread))}>{ago(archivedTime(thread), now)}</time>{/if}
     </span>
   </button>
   {#if meta}
@@ -186,11 +187,13 @@
   /* Restoring takes the time's place under the pointer, the way a thread row shows its menu. */
   .restore { position: absolute; top: 5px; right: 5px; opacity: 0; background: var(--color-surface-2); color: var(--color-muted-foreground); }
   .done-thread:hover .restore, .done-thread:focus-within .restore { opacity: 1; }
-  .done-thread:hover time, .done-thread:focus-within time { opacity: 0; }
+  .done-thread:hover time, .done-thread:focus-within time,
+  .done-thread:hover :global(.when), .done-thread:focus-within :global(.when) { opacity: 0; }
   /* No hover on a touch screen: the time stays, restoring is in the long-press menu. */
   @media (hover: none), (pointer: coarse) {
     .restore { display: none; }
-    .done-thread:hover time, .done-thread:focus-within time { opacity: 1; }
+    .done-thread:hover time, .done-thread:focus-within time,
+    .done-thread:hover :global(.when), .done-thread:focus-within :global(.when) { opacity: 1; }
   }
   @media (max-width: 720px) {
     .row { min-height: var(--touch-target); }

@@ -101,6 +101,21 @@ function mergedPullRequest(branch: string, sha: string): { calls: () => number }
 }
 
 describe('settled worktree cleanup', () => {
+  test('keeps a Done conversation checkout until its prompt finishes, even with no tracked process', async () => {
+    const project = await repoProject();
+    const thread = await worktreeThread(project, 'Finishing in Done');
+    const sha = commitWork(thread.cwd);
+    mergedPullRequest(thread.branch!, sha);
+    const journal = harness.core.journal;
+    journal.putThread({ ...journal.getThread(thread.id)!, archived: true, archivedAt: 1, doneAt: 1, status: 'running' });
+    expect(harness.core.procs.liveCount(thread.id)).toBe(0);
+    expect(await cleanup.run()).toEqual([]);
+    expect(existsSync(thread.cwd)).toBe(true);
+    journal.putThread({ ...journal.getThread(thread.id)!, status: 'idle' });
+    expect(await cleanup.run()).toEqual([expect.objectContaining({ projectId: project.id, branch: thread.branch, reason: 'pr-merged' })]);
+    expect(existsSync(thread.cwd)).toBe(false);
+  });
+
   test('removes an archived thread\'s clean worktree with its branch, and the restored thread says so', async () => {
     const project = await repoProject();
     const thread = await worktreeThread(project, 'Settled');

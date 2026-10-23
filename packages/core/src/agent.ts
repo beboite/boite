@@ -267,8 +267,8 @@ export function registerAgentMethods(core: Core): void {
   registerGitMethods(core);
   registerWorkdirMethods(core);
 
-  // A thread that is gone or archived keeps no door open: its processes are
-  // stopped with it, and a token nobody can use is a token nobody can steal.
+  // A manual archive stops its processes. Automatic merged-PR Done lets the
+  // current prompt keep using Boite until it finishes, then closes its door.
   // Forgetting the token only stops the next hello, so a socket an agent
   // already opened goes too: it used to keep claiming cards and opening
   // panels on a thread the user had put away.
@@ -282,7 +282,7 @@ export function registerAgentMethods(core: Core): void {
     if (name === 'thread.removed') shut((payload as { threadId: ThreadId }).threadId);
     if (name === 'thread.updated') {
       const thread = payload as ThreadSummary;
-      if (thread.archived) shut(thread.id);
+      if (thread.archived && !(thread.archiveReason?.type === 'pr-merged' && (thread.status === 'running' || thread.status === 'waiting'))) shut(thread.id);
     }
   });
 }
