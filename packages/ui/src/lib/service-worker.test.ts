@@ -73,7 +73,7 @@ test('a push another machine sent through this one opens its thread on that mach
 
 test('a limit alert reads in the page\'s words and its tap opens Limits on the machine that sent it', async () => {
   const sw = worker();
-  sw.cache.match.mockResolvedValue(Response.json({ limitWeekly: 'Limite hebdo : {percent} % restants', done: 'Terminé' }));
+  sw.cache.match.mockImplementation(async () => Response.json({ limitWeekly: 'Limite hebdo : {percent} % restants', done: 'Terminé' }));
   const core = 'c'.repeat(64);
   await sw.emit('push', { data: { json: () => ({ title: 'Claude · Perso', body: 'Weekly limit: 8% left', label: 'limitWeekly', values: { percent: '8' },
     threadId: null, tag: 'limit-a-seven_day', kind: 'limits', core }) } });
