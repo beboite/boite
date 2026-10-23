@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import type { AutoCompact, Settings } from '@boite/contracts';
 import type { Store } from '../lib/store.svelte';
 import AutoCompactSettings from './AutoCompactSettings.svelte';
+import KeyedHost from './AutoCompactSettings.test-host.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => {
@@ -91,4 +92,119 @@ test('no control moves while a save is on its way, so a second change never rebu
   expect(input('auto-compact-turn-end').disabled).toBe(false);
   await flip('auto-compact-turn-end', true);
   expect(store.settings.autoCompact).toEqual({ tokens: null, moments: ['turn-end', 'cache-expiry'] });
+});
+
+test('a typed size saves after a pause or when the page leaves, without waiting for the field to lose focus', async () => {
+  vi.useFakeTimers();
+  try {
+    const store = render({ tokens: 200_000, moments: ['cache-expiry'] });
+    const typeOnly = async (value: string) => {
+      const field = input('auto-compact-tokens');
+      field.value = value;
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      await settle();
+    };
+    await typeOnly('250000');
+    expect(store.saveSettings).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(store.saveSettings).toHaveBeenLastCalledWith({ autoCompact: { tokens: 250_000, moments: ['cache-expiry'] } });
+    expect(document.querySelector('[data-testid="save-status"]')?.getAttribute('data-state')).toBe('saved');
+
+    // A save on its way never takes the focus from the field being typed in.
+    let answer!: (ok: boolean) => void;
+    store.saveSettings.mockImplementationOnce((patch: Partial<Settings>) => new Promise<boolean>(resolve => {
+      answer = ok => { store.settings = { ...store.settings, ...patch }; resolve(ok); };
+    }));
+    await typeOnly('300000');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(input('auto-compact-tokens').disabled).toBe(false);
+    answer(true);
+    await settle();
+
+    // Leaving the page with a size still typed saves it.
+    await typeOnly('450000');
+    await unmount(mounted!);
+    mounted = undefined;
+    await settle();
+    expect(store.saveSettings).toHaveBeenLastCalledWith({ autoCompact: { tokens: 450_000, moments: ['cache-expiry'] } });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('retrying a refused size leaves the switch alone, and the switch clears what the field left behind', async () => {
+  const store = render({ tokens: 200_000, moments: ['cache-expiry'] });
+  const type = async (value: string) => {
+    const field = input('auto-compact-tokens');
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+  };
+  store.saveSettings.mockResolvedValueOnce(false);
+  await type('250000');
+  const status = () => document.querySelector('[data-testid="save-status"]');
+  expect(status()?.getAttribute('data-state')).toBe('error');
+  (status()!.querySelector('.reason') as HTMLElement).click();
+  await settle();
+  expect(input('auto-compact-threshold').checked).toBe(true);
+  status()!.querySelector('button')!.click();
+  await settle();
+  expect(input('auto-compact-threshold').checked).toBe(true);
+  expect(store.saveSettings).toHaveBeenLastCalledWith({ autoCompact: { tokens: 250_000, moments: ['cache-expiry'] } });
+
+  await type('500');
+  expect(status()?.getAttribute('data-state')).toBe('invalid');
+  await flip('auto-compact-threshold', false);
+  await flip('auto-compact-threshold', true);
+  expect(input('auto-compact-tokens').value).toBe('200000');
+  expect(status()).toBeNull();
+  // A size changed elsewhere shows once the switch has sent the field's.
+  store.settings = { ...store.settings, autoCompact: { tokens: 600_000, moments: ['cache-expiry'] } };
+  await settle();
+  expect(input('auto-compact-tokens').value).toBe('600000');
+});
+
+test('a size typed on one machine saves there when the settings bar switches to another', async () => {
+  const make = () => {
+    const machine = $state({ owner: true, settings: { autoCompact: { tokens: 200_000, moments: ['cache-expiry'] } } as Partial<Settings>,
+      saveSettings: vi.fn(async (patch: Partial<Settings>) => { machine.settings = { ...machine.settings, ...patch }; return true; }) });
+    return machine;
+  };
+  const first = make(), second = make();
+  const pick = $state({ store: first as unknown as Store });
+  mounted = mount(KeyedHost, { target: document.body, props: { pick } });
+  flushSync();
+  const field = input('auto-compact-tokens');
+  field.value = '250000';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  pick.store = second as unknown as Store;
+  await settle();
+  expect(first.saveSettings).toHaveBeenLastCalledWith({ autoCompact: { tokens: 250_000, moments: ['cache-expiry'] } });
+  expect(second.saveSettings).not.toHaveBeenCalled();
+});
+
+test('a size typed while a switch saves goes after it, on the rule that switch left', async () => {
+  vi.useFakeTimers();
+  try {
+    const store = render({ tokens: 200_000, moments: ['background', 'cache-expiry'] });
+    let answer!: (ok: boolean) => void;
+    store.saveSettings.mockImplementationOnce((patch: Partial<Settings>) => new Promise<boolean>(resolve => {
+      answer = ok => { store.settings = { ...store.settings, ...patch }; resolve(ok); };
+    }));
+    await flip('auto-compact-background', false);
+    const field = input('auto-compact-tokens');
+    field.value = '250000';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(store.saveSettings).toHaveBeenCalledTimes(1);
+    answer(true);
+    await settle();
+    expect(store.settings.autoCompact).toEqual({ tokens: 250_000, moments: ['cache-expiry'] });
+  } finally {
+    vi.useRealTimers();
+  }
 });
