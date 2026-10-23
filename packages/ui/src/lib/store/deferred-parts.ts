@@ -45,6 +45,8 @@ export class DeferredParts {
       if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
       if (this.ctx.client !== client || generation !== this.#visit) return null;
       const message = await fullMessage(client, this.threads.threadSnapshots(threadId), threadId, messageId, () => this.ctx.client === client && generation === this.#visit);
+      // A visit left during the walk is not a missing tool: nobody shows that card any more.
+      if (this.ctx.client !== client || generation !== this.#visit) return null;
       const part = message?.parts.find(part => part.type === 'tool' && part.toolId === toolId);
       if (part?.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${toolId} is not a tool of message ${messageId}` });
       return part;

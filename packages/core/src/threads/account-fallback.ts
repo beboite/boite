@@ -19,13 +19,14 @@ export function accountRemoved(thread: ThreadSummary): Error {
 /**
  * The account a thread of this provider runs on: `preferred` while it exists
  * and is not signed out, else the provider's other account that ranks best.
- * Null when every account of the provider is signed out or gone.
+ * Null when every account of the provider is signed out or gone, or when
+ * `allowed` refuses every other one.
  */
-export function usableAccount(core: Core, providerId: ProviderId, preferred: AccountId): Account | null {
+export function usableAccount(core: Core, providerId: ProviderId, preferred: AccountId, allowed: (id: AccountId) => boolean = () => true): Account | null {
   const own = core.journal.getAccount(preferred);
   if (own !== null && own.providerId === providerId && own.status !== 'unauthenticated') return own;
   return core.accounts.list()
-    .filter((account) => account.providerId === providerId && account.id !== preferred && account.status !== 'unauthenticated')
+    .filter((account) => account.providerId === providerId && account.id !== preferred && account.status !== 'unauthenticated' && allowed(account.id))
     .sort((a, b) => RANK[a.status] - RANK[b.status])[0] ?? null;
 }
 
@@ -44,8 +45,8 @@ export function followAgent(core: Core, thread: ThreadSummary): ThreadSummary {
   const own = core.journal.getAccount(thread.accountId);
   if (own !== null && own.status !== 'unauthenticated') return thread;
   const owner = thread.agentSessionId ? core.workforce.resident.ownerOf(thread.id) : null;
-  const found = usableAccount(core, thread.providerId, thread.accountId);
-  const other = found !== null && owner !== null && !core.workforce.resident.accountAllowed(owner, found.id) ? null : found;
+  // A bot moves to the best account the owner granted it, not only when the best one overall is granted.
+  const other = usableAccount(core, thread.providerId, thread.accountId, (id) => owner === null || core.workforce.resident.accountAllowed(owner, id));
   if (other === null) {
     if (own === null) throw accountRemoved(thread);
     return thread;
