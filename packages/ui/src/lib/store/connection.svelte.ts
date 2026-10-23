@@ -349,6 +349,8 @@ export class Connection {
     s.groupKnown = false;
     s.ungrouped = false;
     s.projects = [];
+    // The next core's folds come from storage; unreadable storage must not carry these over to its ids.
+    s.collapsedProjects = [];
     s.threads = [];
     // What the next core answers replaces these; one that cannot answer must not show the last one's.
     s.harnessUpdates = [];
