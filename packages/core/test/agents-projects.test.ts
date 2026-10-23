@@ -6,7 +6,9 @@ import { runCli } from '../src/cli.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { connect } from '../src/client.ts';
-import { NOTICE_HEADER, QUESTION_GRACE_MS } from '../src/agents/projects.ts';
+import { QUESTION_GRACE_MS } from '../src/agents/projects.ts';
+import { EVENT_HEADER } from '../src/agents/runtime.ts';
+import { makeAgent, settled } from './agent-fixture.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 
@@ -16,15 +18,15 @@ afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); for (co
 
 /**
  * An echo driver that records every prompt. It answers with its folder's name,
- * fails a prompt that says FAIL-ME, and keeps quiet on notices.
+ * fails a prompt that says FAIL-ME, and keeps quiet on events.
  */
 function answering(): Map<string, string[]> {
   const prompts = new Map<string, string[]>();
   restores.push(setDriver('echo', { protocol: 'echo', startTurn(ctx: TurnContext) {
     prompts.set(ctx.thread.id, [...(prompts.get(ctx.thread.id) ?? []), ctx.prompt]);
-    const failing = ctx.prompt.includes('FAIL-ME') && !ctx.prompt.includes(NOTICE_HEADER);
+    const failing = ctx.prompt.includes('FAIL-ME') && !ctx.prompt.includes(EVENT_HEADER);
     const id = ctx.emit.startMessage('assistant');
-    ctx.emit.part(id, 0, { type: 'text', text: ctx.prompt.includes(NOTICE_HEADER) ? '[quiet]' : `Done in ${basename(ctx.thread.cwd)}` });
+    ctx.emit.part(id, 0, { type: 'text', text: ctx.prompt.includes(EVENT_HEADER) ? '[quiet] read the events' : `Done in ${basename(ctx.thread.cwd)}` });
     ctx.emit.complete(id, 'complete');
     const result: TurnResult = failing ? { status: 'error', error: 'Asked to fail', sessionId: null, usage: null } : { status: 'done', sessionId: `session:${ctx.thread.id}`, usage: null };
     return { done: Promise.resolve(result), stop() {} };
@@ -43,11 +45,9 @@ async function setup(entrusted: ('test' | 'Other' | 'Notes')[] = ['test', 'Other
   const other = await owner.call('projects.add', { path: folder('other'), name: 'Other' });
   const outside = (await thread('Outside', notes.id)).id;
   const ids = { test: project, Other: other.id, Notes: notes.id };
-  let agent = await owner.call('agents.profile.save', { value: { name: 'Ada', domain: 'Open source', instructions: 'Keep the projects moving.', avatar: '', status: 'active', tools: ['messages'], projectIds: entrusted.map(name => ids[name]), selection: { providerId: 'echo', accountId, model: 'echo', effort: null, permissionMode: 'default' } } });
-  // Its direct conversation exists once it answered a first message.
-  await owner.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [agent.id], text: 'Hello', requestId: 'hello-ada-001' });
-  await waitFor(() => h.core.workforce.records.list('work').some(w => w.status === 'done'));
-  const self = h.core.workforce.projects.threadOf(agent.id)!;
+  const made = await makeAgent(h, owner, { projectIds: entrusted.map(name => ids[name]), selection: { providerId: 'echo', accountId, model: 'echo', effort: null, permissionMode: 'default' } });
+  let agent = made.agent;
+  const self = made.threadId;
   const run = async (args: string[], env: Record<string, string>) => {
     let out = '', err = '';
     const code = await runCli(args, { out: s => { out += s; }, err: s => { err += s; }, env, cwd: h.dataDir });
@@ -56,14 +56,25 @@ async function setup(entrusted: ('test' | 'Other' | 'Notes')[] = ['test', 'Other
     await Bun.sleep(5);
     return { code, out, err };
   };
-  /** The agent, from its own direct conversation, or the agent of another thread. */
+  /** The agent, from its own thread, or the agent of another thread. */
   const cli = (args: string[], as = self) => run(args, { BOITE_THREAD_ID: as, BOITE_CORE_URL: h.url, BOITE_AGENT_TOKEN: h.core.agents.tokenFor(as) });
   /** The owner at a terminal, reaching the core by address with the token in the environment. */
   const terminal = (args: string[]) => run([...args, '--core', h.url], { BOITE_TOKEN: h.token });
   const off = async (threadId: string) => owner.call('collaboration.configure', { threadId, config: { ...h.core.coordination.config(threadId), mode: 'off' } });
-  const entrust = async (names: ('test' | 'Other' | 'Notes')[]) => { agent = await owner.call('agents.profile.save', { id: agent.id, expectedRevision: agent.revision, value: { ...agent, projectIds: names.map(name => ids[name]) } }); return agent; };
-  const notices = () => h.core.workforce.records.list('work').filter(w => w.purpose === 'notice');
-  return { h, owner, self, worker, outside, project, notes, other, cli, terminal, off, entrust, notices, thread, agent: () => agent as AgentProfile };
+  const entrust = async (names: ('test' | 'Other' | 'Notes')[]) => {
+    const current = h.core.workforce.records.get('profile', agent.id);
+    agent = await owner.call('agents.profile.save', { id: agent.id, expectedRevision: current.revision, value: { ...current, projectIds: names.map(name => ids[name]) } });
+    return agent;
+  };
+  /** The facts waiting for the agent's next event turn. */
+  const facts = () => h.core.agentRuntime.facts(agent.id);
+  /** Makes the waiting facts due now, the way their delay running out would. */
+  const hurry = () => {
+    const pending = (h.core.agentRuntime as unknown as { pending: Map<string, { facts: { notBefore: number }[] }> }).pending.get(agent.id);
+    for (const fact of pending?.facts ?? []) fact.notBefore = 0;
+  };
+  const events = () => h.core.journal.listTurns(self).filter(t => t.execution?.operation === 'event');
+  return { h, owner, self, worker, outside, project, notes, other, cli, terminal, off, entrust, facts, hurry, events, thread, agent: () => agent as AgentProfile };
 }
 
 function lines(threadId: string, h: TestCore): string[] {
@@ -104,8 +115,8 @@ test('an agent reads and drives only the threads of the projects entrusted to it
   expect(notes.name).toBe('Notes');
 });
 
-test('its messages reach a thread as the agent\'s whatever that thread\'s settings, and the thread\'s turns come back as notices', async () => {
-  const prompts = answering(); const { h, worker, cli, off, notices } = await setup();
+test('its messages reach a thread as the agent\'s whatever that thread\'s settings, and the thread\'s turns come back as events', async () => {
+  const prompts = answering(); const { h, self, worker, cli, off, facts, hurry, events } = await setup();
   await off(worker);
   const sent = await cli(['thread', 'send', worker, 'Finish, verify and open the pull request', '--json']);
   expect(sent.err).toBe('');
@@ -121,60 +132,61 @@ test('its messages reach a thread as the agent\'s whatever that thread\'s settin
   expect(h.core.journal.listMessages(worker).filter(m => m.role === 'user')).toHaveLength(0);
   expect(h.core.coordination.get(worker).messages.find(m => m.id === letter.id)?.relation).toBe('resident');
 
-  // The thread now reports to the agent: its turn's answer arrives as a notice, after a short wait for more.
-  await waitFor(() => notices().some(w => w.prompt.includes(`Turn done in "Worker" (${worker}).`)));
-  const waiting = notices().find(w => w.prompt.includes(`(${worker})`))!;
-  expect(waiting.prompt).toContain('Done in');
-  expect(waiting.notBefore).toBeGreaterThan(Date.now());
-  h.core.workforce.records.update('work', waiting.id, waiting.revision, { ...waiting, notBefore: Date.now() });
-  h.core.workforce.changed();
-  // The agent had nothing to tell the user: a quiet answer posts nothing.
-  await waitFor(() => h.core.workforce.records.get('work', waiting.id).status === 'done');
-  const runId = h.core.workforce.records.get('work', waiting.id).runId!;
-  expect(h.core.workforce.records.find('message', 'sourceRunId', [runId])).toHaveLength(0);
+  // The thread is on the agent's desk now: its turn's answer waits as a fact, a short while for more.
+  await waitFor(() => facts().some(f => f.text.includes(`Turn done in "Worker" (${worker}).`)));
+  expect(facts().find(f => f.text.includes(`(${worker})`))!.text).toContain('Done in');
+  expect((await h.connect().then(c => c.call('agents.snapshot', {}))).watches.map(w => [w.threadId, w.origin])).toContainEqual([worker, 'followed']);
+  await Bun.sleep(700);
+  expect(events()).toHaveLength(1);
+  hurry();
+  // The agent had nothing to tell the user: its event turn is quiet and leaves the thread read.
+  await waitFor(() => events().length === 2 && settled(h, self));
+  expect(events().at(-1)!.quiet).toBe(true);
+  expect(facts()).toEqual([]);
 });
 
-test('notices: failures and questions from any thread, finished turns only from followed ones, gathered in one work item', async () => {
-  answering(); const { h, owner, worker, outside, project, thread, notices, entrust } = await setup(['test']);
-  // Held, so the notices stay pending where the test can read them.
-  h.core.workforce.setLimits({ paused: true, backgroundConcurrency: 2 });
+test('events: failures and asks from any thread, finished turns only from followed ones, gathered for one turn', async () => {
+  answering(); const { h, owner, worker, outside, project, thread, facts, entrust, agent } = await setup(['test']);
+  // Held, so the facts stay waiting where the test can read them.
+  h.core.workforce.setLimits({ paused: true });
   const quiet = (await thread('Quiet', project)).id;
   await owner.call('turns.start', { threadId: quiet, prompt: 'Build it' });
   await owner.call('turns.start', { threadId: outside, prompt: 'FAIL-ME elsewhere' });
   await waitFor(() => h.core.journal.lastCompletedAt(quiet) !== null && h.core.threads.require(outside).status !== 'running');
-  expect(notices()).toHaveLength(0);
+  expect(facts()).toHaveLength(0);
 
   await owner.call('turns.start', { threadId: worker, prompt: 'FAIL-ME please' });
-  await waitFor(() => notices().length === 1);
+  await waitFor(() => facts().length === 1);
   const asker = await connect(h.url, h.core.agents.tokenFor(quiet));
   try {
-    const before = Date.now();
     const { questionId } = await asker.call('questions.ask', { threadId: quiet, text: 'Merge now?', options: ['Yes', 'No'] });
-    await waitFor(() => notices()[0]!.prompt.includes(questionId));
-    const [pending] = notices();
-    expect(notices()).toHaveLength(1);
-    expect(pending!.prompt.startsWith(NOTICE_HEADER)).toBe(true);
-    expect(pending!.prompt).toContain(`Turn error in "Worker" (${worker})`);
-    expect(pending!.prompt).toContain('Merge now?');
-    // The failure joins at once; the question alone would have waited for the user first.
-    expect(pending!.notBefore).toBeLessThan(before + QUESTION_GRACE_MS);
-    // Taking the project back drops what the notices say about its threads, here all of it.
+    await waitFor(() => facts().some(f => f.text.includes(questionId)));
+    expect(facts().map(f => f.key)).toEqual([expect.stringMatching(/^turn:/), `ask:${questionId}`]);
+    expect(facts()[0]!.text).toContain(`Turn error in "Worker" (${worker})`);
+    expect(facts()[1]!.text).toContain('Merge now?');
+    // The ask waits for the user first: its fact is due only past the grace delay.
+    const pending = (h.core.agentRuntime as unknown as { pending: Map<string, { facts: { key: string; at: number; notBefore: number }[] }> }).pending.get(agent().id)!;
+    const ask = pending.facts.find(f => f.key === `ask:${questionId}`)!;
+    expect(ask.notBefore - ask.at).toBe(QUESTION_GRACE_MS);
+    // Taking the project back drops what the facts say about its threads, here all of it.
     await entrust(['Other']);
-    expect(h.core.workforce.records.get('work', pending!.id).status).toBe('cancelled');
+    expect(facts()).toEqual([]);
   } finally { asker.close(); }
 });
 
-test('it starts threads in its projects only, and the thread\'s first answer comes back as a notice', async () => {
-  const prompts = answering(); const { h, other, cli, notices, agent } = await setup(['Other']);
+test('it starts threads in its projects only, and the thread\'s first answer comes back as an event', async () => {
+  const prompts = answering(); const { h, owner, other, cli, facts, agent } = await setup(['Other']);
   expect((await cli(['thread', 'new', 'Notes', 'Write the notes'])).err).toContain('Notes is not entrusted to this agent');
   const started = await cli(['thread', 'new', 'Other', 'Write the release notes']);
   expect(started.err).toBe('');
+  expect(started.out).toContain('It is on your desk; each turn it ends wakes you with an event');
   const id = /thread: (\S+)/.exec(started.out)![1]!;
   expect(h.core.threads.require(id).projectId).toBe(other.id);
   await waitFor(() => (prompts.get(id) ?? []).length > 0);
   expect(prompts.get(id)![0]).toContain('started by Ada, the persistent agent the user entrusted project Other to');
   expect(h.core.workforce.projects.follows(agent().id, id)).toBe(true);
-  await waitFor(() => notices().some(w => w.prompt.includes(`(${id})`)));
+  expect((await owner.call('agents.snapshot', {})).watches.find(w => w.threadId === id)).toMatchObject({ origin: 'started', projectId: other.id });
+  await waitFor(() => facts().some(f => f.text.includes(`(${id})`)));
 });
 
 test('the agent wakes a thread whose turn failed and puts it in Done once it is', async () => {

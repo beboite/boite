@@ -4,8 +4,8 @@
  * The card is a question asked without stopping (threads/cards.ts); Apply is
  * the owner's `agents.settings.apply`, and any change to the agent, from the
  * card or from its settings page, settles the cards it answers. The outcome
- * reaches the thread that asked as a message: a persistent agent's
- * conversation hears it as new work. Shared checks live in
+ * reaches the thread that asked as a message, the way a `boite ask` answer
+ * does, on an agent's thread as on any other. Shared checks live in
  * contracts/agent-setting-requests.ts, where the in-memory client reads them.
  */
 import {
@@ -37,7 +37,7 @@ export class AgentSettingCards {
 
   close(): void { this.off(); }
 
-  /** The agent a call names, by id or name; unnamed, the agent whose conversation or subagent the thread is. */
+  /** The agent a call names, by id or name; unnamed, the agent whose thread, or whose subagent, the thread is. */
   private agentFor(threadId: string, name: string | undefined): AgentProfile {
     const live = this.store.records.list('profile').filter(agent => agent.status !== 'archived');
     if (name === undefined || name.trim() === '') {
@@ -147,7 +147,7 @@ export class AgentSettingCards {
       case 'effort': return save({ ...agent, selection: { ...agent.selection, effort: value as string | null } });
       case 'autoMemory': return configure({ ...ctx.config, autoMemory: value as boolean });
       case 'subagents': return configure({ ...ctx.config, subagents: { ...ctx.config.subagents, enabled: value as boolean } });
-      case 'maxRunMinutes': return configure({ ...ctx.config, maxRunMinutes: value as number });
+      case 'dailyBudget': return configure({ ...ctx.config, dailyBudgetUsd: value as number | null });
     }
   }
 

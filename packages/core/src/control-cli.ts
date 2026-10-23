@@ -7,7 +7,7 @@
  * environment, `core.json` or `--core` with `BOITE_TOKEN`) reaches every
  * thread through the owner methods, and a message it sends is the user's own
  * prompt. A persistent agent the owner entrusted projects to goes through
- * `resident.*` and coordination from its direct conversation: the core holds
+ * `resident.*` and coordination from its own thread: the core holds
  * it to its projects, and its messages reach a thread marked as its own, never
  * as the user's. Deleting threads and deciding permissions stay the owner's.
  */

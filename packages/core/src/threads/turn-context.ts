@@ -72,7 +72,8 @@ export class TurnContexts {
     // Without log access the guide still lists the built-in skills; only report-issue needs the logs.
     const skills = builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } });
     // Echo treats "question" as a test directive, including in injected help.
-    return agentGuide(provider.protocol !== 'echo' && settings.asyncQuestions !== false, logAccess, skills);
+    // A persistent agent's thread has no checkout of its own: no pull request to watch, no project to add.
+    return agentGuide(provider.protocol !== 'echo' && settings.asyncQuestions !== false, logAccess, skills, !!thread.agentSessionId);
   }
 
   /** The guide as a session option, for a driver that puts it in the system prompt. */
@@ -306,14 +307,14 @@ export class TurnContexts {
     // scope, and a driver keeps the callbacks of its session between turns.
     const input = resumePrompt !== undefined ? { prompt: resumePrompt, attachments: [] } : this.lastUserInput(threadId, turn.id);
     const carry = carrier(this.core, this.files, threadId, resumePrompt !== undefined ? null : turn.id, input, provider);
-    const fresh = !thread.agentSessionId && thread.sessionId === null && ((thread.sessionGeneration ?? 0) > 0 || resumePrompt !== undefined);
+    const fresh = thread.sessionId === null && ((thread.sessionGeneration ?? 0) > 0 || resumePrompt !== undefined);
     let continued = input;
     if (fresh) continued = carry();
     else if (resumePrompt === undefined && !turn.execution?.operation && !turn.execution?.automatic && !nativeCommandPrompt(input.prompt)) {
       const interrupted = stoppedInput(this.core.journal, threadId, turn.id, input, (part, place) => this.files.of(threadId, part, place));
       // The first stopped prompt may never have created a native session or
       // advanced its generation. That fresh start still needs journal history.
-      continued = !thread.agentSessionId && thread.sessionId === null && interrupted !== input ? carry() : interrupted;
+      continued = thread.sessionId === null && interrupted !== input ? carry() : interrupted;
     }
     const prepared = prepareAttachments(this.core.dataDir, continued, provider);
     const operation = turn.execution?.operation;
@@ -353,7 +354,9 @@ export class TurnContexts {
       // Every turn, not once a session: a style said once fades after a few answers.
       // Boite's own text, so the guide switch turns it off with the rest.
       const style = inject && guideEnabled && !bare && this.core.settings.get().shortAnswers !== false ? `${SHORT_ANSWERS}\n\n` : '';
-      const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id, listedSkills) : '') + guide + style;
+      // A persistent agent's identity: whole on a fresh session or once it changed, else nothing (`agents/context.ts`).
+      const agent = bare || nativeCommandPrompt(body) ? '' : this.core.workforce.contextFor(thread, sessionId, turn.id);
+      const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id, listedSkills) : '') + guide + agent + style;
       return carried.memory + prefix + (prefix ? 'User request:\n' : '') + said + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };
     return {

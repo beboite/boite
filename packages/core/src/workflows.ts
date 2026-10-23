@@ -221,7 +221,6 @@ export class Workflows {
     const root = this.core.threads.require(params.threadId);
     if (root.parentThreadId) throw refused('a workflow step or delegated agent cannot start a workflow; ask its parent');
     if (root.archived) throw refused('cannot start a workflow on an archived thread');
-    if (this.core.workforce.resident.isCompacting(root.id)) throw refused('compaction cannot start a workflow');
     const fingerprint = hash([params.plan, params.templateId ?? null]);
     const existing = this.request(root.id, params.requestId, fingerprint);
     if (existing) return this.view(existing);
@@ -686,17 +685,9 @@ export class Workflows {
     }
   }
 
-  /** One turn of the root carrying a prompt: a persistent agent's queued work, or a thread's turn. */
+  /** One turn of the root carrying a prompt, on a persistent agent's thread as on any other. */
   private handTo(root: ThreadSummary, prompt: string, display: string): void {
-    if (root.agentSessionId) {
-      const session = this.core.workforce.session(root.id);
-      this.core.workforce.records.transaction(() => {
-        this.core.delegation.reserveTurn(root.id, 'delegation');
-        // The team's current episode: a new one waits until every subagent of the root is idle.
-        this.core.workforce.resident.enqueue(session.agentId, prompt, session.scope, this.core.journal.getSetting(`delegation-episode:${root.id}`) as string | undefined);
-      });
-      this.core.workforce.changed();
-    } else this.core.threads.startTurn(root.id, prompt, [], undefined, 'delegation', undefined, undefined, display);
+    this.core.threads.startTurn(root.id, prompt, [], undefined, 'delegation', undefined, undefined, display);
   }
 
   /** A held summary goes again once the owner resumes the team. */

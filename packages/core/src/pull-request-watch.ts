@@ -128,7 +128,6 @@ export class PullRequestWatches {
     if (thread.archived) throw refused('watching a pull request needs an active conversation', { threadId });
     // A delegated agent's wake is its next turn, and that answer goes to its parent; a workflow step or a reviewer answers its run once.
     if (thread.parentThreadId && !this.core.delegation.delegated(threadId)) throw refused('a workflow step or a reviewer cannot watch a pull request: its run reads its one answer', { threadId, field: 'threadId', expected: 'a conversation or a delegated agent' });
-    if (thread.agentSessionId) throw refused('a persistent agent session takes work through Agents, not pull request watches', { threadId });
     const address = pullRequestAddress(url);
     const host = (process.env.GH_HOST ?? 'github.com').toLowerCase();
     if (address.host !== host) throw refused(`pull request host must be ${host}`, { field: 'url', expected: `https://${host}/owner/repository/pull/number` });

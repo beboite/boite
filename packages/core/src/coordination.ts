@@ -174,7 +174,8 @@ export class Coordination {
   config(threadId: string): CoordinationConfig {
     const saved = this.core.journal.getSetting(`coordination:${threadId}`) as CoordinationConfig | undefined;
     if (saved) return saved;
-    // Persistent identities have their own group and mission permissions.
+    // A persistent agent reaches the threads of its projects as theirs (`resident` letters);
+    // other agents reach it only once the owner turns its communication on.
     if (this.core.journal.getThread(threadId)?.agentSessionId) return { ...defaultCoordinationConfig(), mode: 'off', remote: false };
     return defaultCoordinationConfig();
   }
@@ -184,7 +185,6 @@ export class Coordination {
   }
   configure(threadId: string, config: CoordinationConfig): CoordinationView {
     const thread = this.core.threads.require(threadId);
-    if (thread.agentSessionId) throw refused('persistent agent sessions collaborate through their group or mission');
     if (thread.archived) throw refused('coordination requires an unarchived thread');
     if (!config || !['off', 'brief', 'team'].includes(config.mode) || typeof config.resources !== 'string' || config.resources.length > 500 || typeof config.remote !== 'boolean' || typeof config.paused !== 'boolean') throw invalidParams('config: expected mode off/brief/team, resources up to 500 characters, remote and paused booleans');
     // The owner's own choice, pause included, is never lifted by a later message.

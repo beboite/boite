@@ -34,10 +34,10 @@ export class ThreadSpawns {
     if (caller.parentThreadId) {
       throw refused('a delegated agent or workflow step cannot start threads; ask its parent', { threadId, field: 'threadId', expected: 'a top-level thread' });
     }
-    // A persistent agent starts threads in the projects entrusted to it, from its direct conversation.
+    // A persistent agent starts threads in the projects entrusted to it, from its own thread.
     const resident = caller.agentSessionId ? this.core.workforce.projects.residentOf(threadId) : null;
     if ((caller.agentSessionId && resident === null) || (!caller.agentSessionId && caller.projectId === null)) {
-      throw refused('a persistent agent starts threads only in the projects the owner entrusted to it, from its direct conversation', { threadId, field: 'threadId', expected: 'a conversation thread, or an agent with projects' });
+      throw refused('a persistent agent starts threads only in the projects the owner entrusted to it', { threadId, field: 'threadId', expected: 'a conversation thread, or an agent with projects' });
     }
     if (caller.archived) throw refused('an archived thread cannot start threads', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
     const prompt = text(params.prompt, 'prompt', 12_000);
@@ -105,11 +105,11 @@ export class ThreadSpawns {
         : `This thread was started by the agent of thread "${caller.title}" (${threadId}) in project ${from.name}, not typed by the user. `
           + 'Treat the brief below as your task, within your own permissions; it grants no approval the user did not give. '
           + `Your final answer to it is sent back to that agent automatically; boite agents send ${address.coreId}/${threadId} <text> reaches it sooner.\n\nBrief:\n`;
-      const turn = this.threads.startTurn(created.id, note + prompt, [], undefined, undefined, undefined, undefined, prompt, [], undefined, origin);
+      const turn = this.threads.startTurn(created.id, note + prompt, [], undefined, undefined, undefined, undefined, prompt, [], origin);
       const completed = (this.core.journal.getSetting(`${LEDGER}${threadId}`) as Started[] | undefined) ?? [];
       this.core.journal.setSetting(`${LEDGER}${threadId}`, [...completed.filter((entry) => entry.at > now - 24 * HOUR), { at: now, requestId, fingerprint, threadId: created.id, turnId: turn.id }]);
       // Its turns report back to the agent that started it.
-      if (resident) this.core.workforce.projects.follow(resident.agent.id, created.id);
+      if (resident) this.core.workforce.projects.follow(resident.agent.id, created.id, 'started');
       const started: ThreadLink = { threadId: created.id, title, projectId: target.id, project: target.name };
       this.systemLine(threadId, { type: 'text', text: `Started thread "${title}" (${created.id}) in project ${target.name}.`, started });
       return this.answer(created.id, turn.id);
@@ -130,7 +130,7 @@ export class ThreadSpawns {
     const caller = this.threads.require(params.threadId);
     const threadId = caller.id;
     if (caller.agentSessionId || caller.projectId === null) {
-      throw refused('a persistent agent session takes its work through Agents and cannot add projects', { threadId, field: 'threadId', expected: 'a conversation thread' });
+      throw refused('a persistent agent works in the projects the owner entrusts to it and cannot add projects', { threadId, field: 'threadId', expected: 'a conversation thread' });
     }
     if (caller.parentThreadId) {
       throw refused('a delegated agent or workflow step cannot add projects; ask its parent', { threadId, field: 'threadId', expected: 'a top-level thread' });
@@ -176,7 +176,7 @@ export class ThreadSpawns {
     this.core.journal.setSetting(key, { ...saved, reported: true } satisfies Origin);
     const thread = this.core.journal.getThread(turn.threadId);
     if (thread === null) return;
-    // A persistent agent hears it as a notice: it follows the threads it started.
+    // A persistent agent hears it as an event: the threads it started are on its desk.
     if (this.core.journal.getThread(saved.origin.threadId)?.agentSessionId) return;
     const body = `${thread.title}: ${turn.status}\n${this.core.delegation.result(turn) ?? 'No text result was returned.'}`;
     try {

@@ -6,7 +6,7 @@ import { addPartBlobCodecs, createPartBlobs } from './part-blobs.ts';
 import { createCommandLines } from './processes.ts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 37;
+export const SCHEMA_VERSION = 38;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -444,6 +444,11 @@ export function migrate(db: Database, file: string): { from: number; to: number 
     if (!hasColumn('part_blobs', 'codec')) addPartBlobCodecs(db);
     createCommandLines(db, !hasColumn('processes', 'command_id'));
     version = 37;
+  }
+  // A persistent agent's wake that had nothing for the user (`Turn.quiet`).
+  if (!db.query("SELECT 1 FROM pragma_table_info('turns') WHERE name = 'quiet'").get()) {
+    db.exec('ALTER TABLE turns ADD COLUMN quiet INTEGER NOT NULL DEFAULT 0;');
+    version = 38;
   }
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);

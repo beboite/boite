@@ -140,7 +140,7 @@ export class ThreadFocus {
   private refresh(threadId: ThreadId): void {
     if (this.closed || this.core.stopping || !this.viewed(threadId)) return;
     const thread = this.core.journal.getThread(threadId);
-    if (!thread || thread.archived || thread.agentSessionId) {
+    if (!thread || thread.archived) {
       setThreadViewed(threadId, false);
       this.prepared.delete(threadId);
       return;

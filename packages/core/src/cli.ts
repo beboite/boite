@@ -46,8 +46,7 @@ export const USAGE = `usage: boite <command> [args] [--json]
   thread move <project>          move this thread to another project (name,
                                  id or folder) when this turn ends
   thread new <project> <brief>   start a thread in a project; its first answer
-                                 comes back as an agent message
-                                 (--worktree, --title <title>)
+                                 comes back to you (--worktree, --title <title>)
   projects                       the projects added to Boite
   projects add <folder>          add an existing folder as a project, so thread
                                  new and thread move can name it (--name <name>)
@@ -132,18 +131,15 @@ ${CONTROL_HELP}
                                  the projects each opened to you
   agents ask <contact> <text>    ask a contact for an agent on a project like
                                  yours; the answer comes back as a message
-  agent context|inbox|missions   this persistent agent's authorized context
-  agent send <ids|-> <text>      post to its group or direct conversation
-  agent reply <message-id> <text>
-  agent acquire <task-id>        acquire a mission task atomically
-  agent submit <task-id> <generation> <result>
-  agent artifact <json>          title, summary, missionId, taskId, paths, commit, verification
-  agent decide <json>            prompt and options; yield until the user answers
-  agent memory [query]           search memory in this context
-  agent remember <json>          title and text, optional id and expectedRevision
-  agent routines                list this identity's scheduled work
-  agent schedule <json>          name, prompt, schedule; optional id, expectedRevision, enabled
-  --request-id <id>              reuse to retry agent, agents send|reply or delegate spawn|send
+  agent memory                   a persistent agent's MEMORY.md and its path
+  agent remember <fact>          add a dated line to MEMORY.md
+  agent routines                 its routines: schedule, next run, last outcome
+  agent schedule <json>          name, prompt, schedule; optional id and enabled
+  agent unschedule <routine-id>  remove one routine
+  agent watch|unwatch <thread-id>
+                                 put a thread of its projects on its desk, or
+                                 take one off
+  --request-id <id>              reuse to retry agents send|reply or delegate spawn|send
   delegate models                models, reasoning levels and speeds a subagent can use
   delegate spawn <brief>         start a subagent on one bounded job; its result
                                  comes back as a message (--model <provider/model>,
@@ -415,7 +411,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       print([`server: ${state.currentVersion}`, `update: ${state.phase}`, ...(state.version ? [`version: ${state.version}`] : []), ...(state.error ? [`error: ${state.error}`] : [])], state);
     },
     agent: async () => {
-      const result = await agentCommand(client, threadId, rest, parsed.requestId ?? crypto.randomUUID());
+      const result = await agentCommand(client, threadId, rest);
       print([JSON.stringify(result)], result);
     },
     attach: async () => {
@@ -500,12 +496,16 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.worktree ? { worktree: true } : {}),
           ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) as RpcParams<'agent.spawn'>['context'] }),
         });
+        // A persistent agent hears of it through events on its desk, not as a message.
+        const persistent = await client.call('agents.snapshot', { threadId }).then(snapshot => snapshot.profiles.length > 0, () => false);
         print([
           `thread: ${spawned.thread.id}`, `title: ${spawned.thread.title}`, `project: ${spawned.project}`, `cwd: ${spawned.thread.cwd}`,
           ...(spawned.thread.branch ? [`branch: ${spawned.thread.branch}`] : []),
           `agent: ${spawned.thread.providerId} ${spawned.thread.model ?? 'default'}`,
           `address: ${spawned.address.coreId}/${spawned.address.threadId}`,
-          'Its first answer comes back to you as an agent message; do not poll. boite agents send <address> <text> steers it.',
+          persistent
+            ? `It is on your desk; each turn it ends wakes you with an event, so do not poll. boite thread send ${spawned.thread.id} <text> steers it.`
+            : 'Its first answer comes back to you as an agent message; do not poll. boite agents send <address> <text> steers it.',
         ], spawned);
         return;
       }
