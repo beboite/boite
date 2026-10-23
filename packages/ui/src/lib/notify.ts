@@ -17,10 +17,10 @@
  * the core is the one that sends those.
  */
 
-import { NOTIFICATION_KINDS, notifiesOnFinish, threadBusy, type NotificationKind, type NotificationLabel, type ThreadSummary, type Turn } from '@boite/contracts';
+import { NOTIFICATION_KINDS, notifiesOnFinish, quotaAlertTitle, threadBusy, type NotificationKind, type NotificationLabel, type QuotaAlert, type ThreadSummary, type Turn } from '@boite/contracts';
 import type { Client } from './client';
 import { PUSH_ENABLED_KEY } from './pwa';
-import { strings } from './strings';
+import { fill, strings } from './strings';
 
 export const NOTIFICATIONS_STORAGE_KEY = 'boite.notifications';
 export const NOTIFICATION_MUTED_STORAGE_KEY = 'boite.notifications.muted';
@@ -133,9 +133,32 @@ export function toastFor(kind: NotifyKind, threadId: string, title: string, deta
   return { title, body, threadId };
 }
 
-/** The words a push labelled by the core is shown with, in the language this app speaks. */
+/** The words a push labelled by the core is shown with, in the language this app speaks; `sw.js` fills `{percent}`. */
 export function notificationWords(): Record<NotificationLabel, string> {
-  return { done: strings.notify.done, failed: strings.notify.failed, needsYou: strings.notify.needsYou, connected: strings.notify.connected };
+  return { done: strings.notify.done, failed: strings.notify.failed, needsYou: strings.notify.needsYou, connected: strings.notify.connected,
+    limitFiveHour: strings.notify.limitFiveHour, limitWeekly: strings.notify.limitWeekly };
+}
+
+/** What a toast about limits carries in place of a thread: a click opens Settings, Limits, on that machine. */
+const LIMITS_KEY = 'boite-limits:';
+
+export function limitsKey(machineId: string | null): string {
+  return `${LIMITS_KEY}${machineId ?? ''}`;
+}
+
+/** The machine a limits toast is about, `''` for the one serving the page; null for a thread's key. */
+export function limitsMachine(key: string): string | null {
+  return key.startsWith(LIMITS_KEY) ? key.slice(LIMITS_KEY.length) : null;
+}
+
+/**
+ * The words of the core's push (`limitNews`): the account in the title, with
+ * the model or group a scoped window names, and the period and share in the body.
+ */
+export function limitToast(alert: QuotaAlert, key: string): Toast {
+  const percent = String(Math.round(alert.window.usedPercent));
+  const body = fill(alert.period === 'weekly' ? strings.notify.limitWeekly : strings.notify.limitFiveHour, { percent });
+  return { title: quotaAlertTitle(alert), body, threadId: key };
 }
 
 /** Where `sw.js` reads them. Not a `boite-ui-` cache: those go with each new build. */

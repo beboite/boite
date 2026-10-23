@@ -65,6 +65,46 @@ estimate](#the-api-estimate)).
   under another identity, or its saved login switched by a plugin.
 - An account with nothing read yet says it is being read while a read runs.
 
+### Alerts
+
+A bell in the header of each card, a Douane entry's included, folds out the
+account's alerts: for 5 hours and for weekly, None, 80 %, 90 % or 100 % used.
+A period shows only when the account reports a window of it. The bell lights
+up in the accent colour once an alert is set, and its tooltip lists them.
+
+- `quotas.alert { accountId, period, threshold }` saves one period. `period`
+  is `fiveHour` or `weekly`, `threshold` one of `QUOTA_ALERT_THRESHOLDS` or
+  null for none; anything else is refused with the field and the expected
+  values. It takes a Boite account or a `proxy:` entry the list holds now,
+  answers every row like `quotas.configure` and broadcasts `quotas.updated`.
+  Each row carries its `alerts`. A paired phone may call it: it decides when a
+  reading the phone already sees notifies.
+- `quotaAlertPeriod` in the contracts reads the period from a window's id and
+  label: Claude's `five_hour` and `seven_day`, Codex's `5 hours` and `Weekly`,
+  OpenCode's `rolling`, Antigravity's `Gemini · 5 hours`, Douane's
+  `five-hour`, `seven-day` and `window-18000s`. A window scoped to a model or a
+  group (`Weekly · Opus`) counts for its period and names its scope in the
+  notification. Daily, monthly and credit windows have none.
+- `QuotaAlertStore` (`packages/core/src/quota-alerts.ts`) looks at every fresh
+  reading: a successful read, a Codex or Muse observation, each answer of the
+  gateway. A failed read's stale windows and a window whose reset time passed
+  never alert. A window alerts once when its used share reaches the threshold,
+  and again only after its reset time passed or it fell 10 points under. The
+  windows that alerted are kept in the journal, so a restart does not repeat
+  them. Choosing a threshold a window has already passed marks it as alerted:
+  the user is looking at it.
+- While any alert is set, the core reads the watched accounts every five
+  minutes, with no client open: one HTTP request per account, a short
+  app-server for Codex, one gateway request for Douane entries. The cache and
+  the failure backoff still apply. An account with no alert is never read for
+  it.
+- An alert is the `quotas.alerted` event and a Web Push of kind `limits`
+  ([phone](phone.md#choosing-which-notifications)): the account in the title,
+  `5-hour limit: 92% used` in the body, labelled `limitFiveHour` or
+  `limitWeekly` with `values.percent`, which the phone's words fill in its
+  language. A desktop shows a toast whatever is on screen; a click opens
+  Settings, Limits, on the machine that sent it. A tapped push opens the app.
+
 ### Gateway quotas
 
 With the Douane [subscription proxy](providers.md#subscription-proxy) enabled,

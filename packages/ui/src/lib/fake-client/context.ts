@@ -5,6 +5,7 @@ import { observeProgress } from './progress';
 import type { FakeRoster } from './group';
 import {
   type ClientPreferences,
+  type QuotaAlerts,
   DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   DEFAULT_THREAD_DONE_RETENTION_DAYS,
   PROTOCOL_VERSION,
@@ -256,6 +257,8 @@ export class FakeContext {
     errors: ['keybindings.json: "trace": "t" has no modifier: a chord needs mod, ctrl, alt or meta before its key']
   };
   readonly quotaEnabled: Record<string, boolean> = {};
+  /** What `quotas.alert` saved, per account or gateway entry. */
+  readonly quotaAlerts: Record<string, QuotaAlerts> = {};
   readonly quotaResetsUsed: Record<string, number> = {};
   scheduler: SchedulerState;
   readonly core: CoreInfo;

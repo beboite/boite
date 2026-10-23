@@ -31,6 +31,9 @@
  * quotas.list and subscriptionProxy.quotas let a phone draw the same limit bars
  * as the owner without a dashboard embed; a forced refresh reaches the
  * providers and stays the owner's, as do monitoring switches and resets.
+ * quotas.alert lets a phone choose when a window it already reads notifies;
+ * the alert check reads only the accounts that have an alert, every five
+ * minutes, the cadence the core keeps whoever set it.
  * subscriptionProxy.setEnabled lets a phone turn the owner's configured gateway
  * on or off; its kind, URLs and key stay owner-only (subscriptionProxy.configure).
  * push.kinds lets a paired device choose which kinds of notification its own

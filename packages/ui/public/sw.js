@@ -162,7 +162,8 @@ self.addEventListener('push', (event) => {
     const threadId = typeof payload.threadId === 'string' ? payload.threadId : null;
     // Sent by another machine of the group through this one: the thread is on that machine.
     const core = typeof payload.core === 'string' && /^[0-9a-f]{64}$/.test(payload.core) ? payload.core : null;
-    const body = (typeof payload.label === 'string' && await notificationWord(payload.label)) || (typeof payload.body === 'string' ? payload.body : '');
+    const word = typeof payload.label === 'string' ? fillWord(await notificationWord(payload.label), payload.values) : null;
+    const body = word || (typeof payload.body === 'string' ? payload.body : '');
     await self.registration.showNotification(typeof payload.title === 'string' ? payload.title : 'Boite', {
       body,
       icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
@@ -187,6 +188,19 @@ async function notificationWord(label) {
   } catch {
     return null;
   }
+}
+
+/** The page's words with the push's `values` in their `{name}` places; null when one is missing, so the core's body shows. */
+function fillWord(word, values) {
+  if (!word) return null;
+  let missing = false;
+  const filled = word.replace(/\{(\w+)\}/g, (_, name) => {
+    const value = values && typeof values === 'object' ? values[name] : undefined;
+    if (typeof value === 'string') return value;
+    missing = true;
+    return '';
+  });
+  return missing ? null : filled;
 }
 
 /** Set the app badge where the platform has one (iOS 16.4+ home-screen apps, desktop Chromium); a failure costs nothing. */

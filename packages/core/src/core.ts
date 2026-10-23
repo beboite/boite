@@ -410,6 +410,8 @@ export class Core {
     const recovered = this.threads.recoverStuckTurns();
     // After recovery: a thread a usage limit stopped resumes at its window's reset, across restarts.
     this.threads.limitResumes.start();
+    // Watched limits are read on their own, so an alert reaches a phone with no window open.
+    this.quotas.alerts.start();
     // What a dead core cut, and any resume planned before it died, goes on (`threads/auto-continue.ts`).
     this.threads.autoContinue.start(interrupted);
     this.threads.cards.restoreAsyncQuestions();
@@ -512,6 +514,7 @@ export class Core {
     this.threads.cacheKeepalive.close();
     this.threads.limitResumes.close();
     this.threads.autoContinue.close();
+    this.quotas.alerts.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
     return this.#drainPromise;
   }

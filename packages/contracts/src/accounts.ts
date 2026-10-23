@@ -18,6 +18,54 @@ export interface QuotaWindow {
   primary?: true;
 }
 
+/**
+ * The length of window an alert watches. Every window of that length counts:
+ * the account-wide one and any per model or group (`Weekly · Opus`).
+ */
+export type QuotaAlertPeriod = 'fiveHour' | 'weekly';
+export const QUOTA_ALERT_PERIODS: readonly QuotaAlertPeriod[] = ['fiveHour', 'weekly'];
+/** The used percentages an alert can go off at. */
+export const QUOTA_ALERT_THRESHOLDS: readonly number[] = [80, 90, 100];
+/** Per period, the used percentage that notifies; a period left out sends nothing. */
+export type QuotaAlerts = Partial<Record<QuotaAlertPeriod, number>>;
+
+/**
+ * Which period a window covers, from the ids and labels every source sends:
+ * Claude's `five_hour` and `seven_day`, Codex's `5 hours` and `Weekly`,
+ * OpenCode's `rolling`, Antigravity's `Gemini · 5 hours`, Douane's
+ * `five-hour`, `seven-day` and `window-18000s`. Null for a daily, monthly or
+ * credit window, and for a name nothing here recognizes.
+ */
+export function quotaAlertPeriod(window: Pick<QuotaWindow, 'id' | 'label'>): QuotaAlertPeriod | null {
+  const text = `${window.id} ${window.label}`.toLowerCase();
+  if (/week|seven|\b7\s*-?d|604800s/.test(text)) return 'weekly';
+  if (/five|\b5\s*-?h|rolling|18000s/.test(text)) return 'fiveHour';
+  return null;
+}
+
+/** What `quotas.alerted` says: one window of one account crossed the threshold set for its period. */
+export interface QuotaAlert {
+  accountId: AccountId;
+  providerId: ProviderId;
+  providerName: string;
+  /** The account's name as Limits shows it. */
+  label: string;
+  period: QuotaAlertPeriod;
+  threshold: number;
+  window: QuotaWindow;
+  at: Timestamp;
+}
+
+/**
+ * An alert's title, the same in a push and a toast: the account, then the
+ * model or group a scoped window names (`Weekly · Opus` gives `Opus`).
+ */
+export function quotaAlertTitle(alert: Pick<QuotaAlert, 'label' | 'providerName' | 'window'>): string {
+  const name = alert.label.includes(alert.providerName) ? alert.label : `${alert.providerName} · ${alert.label}`;
+  const scope = alert.window.label.split(' · ').filter((part) => !/week|hour|seven|\b\d+\s*-?[hd]\b/i.test(part)).join(' · ');
+  return scope ? `${name} · ${scope}` : name;
+}
+
 /** No redeemable identifiers reach the client. The core selects the next credit. */
 export interface QuotaResetCredits {
   availableCount: number;
@@ -112,6 +160,8 @@ export interface AccountQuota extends QuotaReading {
   error: string | null;
   /** Set on a subscription gateway's entry: it is not a Boite account and has no switch. */
   gateway?: AccountQuotaGateway;
+  /** The alerts set on this row, missing when none is. */
+  alerts?: QuotaAlerts;
 }
 
 export interface AccountQuotaGateway {
@@ -146,6 +196,12 @@ export interface Account {
 export interface AccountsRpcMethods {
   'quotas.list': { params: { refresh?: boolean; requestId?: string }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
+  /**
+   * The used percentage, one of `QUOTA_ALERT_THRESHOLDS`, at which a window of
+   * this period notifies; null turns that alert off. Takes an account or a
+   * gateway entry (`proxy:<provider>:<entry>`) the list holds now.
+   */
+  'quotas.alert': { params: { accountId: AccountId; period: QuotaAlertPeriod; threshold: number | null }; result: AccountQuota[] };
   /** Owner-only: consumes a banked reset after an explicit client confirmation. */
   'quotas.reset': { params: { accountId: AccountId; confirmed: true }; result: QuotaResetResult };
 
@@ -191,6 +247,8 @@ export interface AccountsRpcEvents {
   'quotas.updated': AccountQuota[];
   /** Owner-only partial result, correlated with the caller's quotas.list request. */
   'quotas.progress': { requestId: string; quota: AccountQuota };
+  /** A window crossed its alert threshold: once per window, until it resets or falls back. */
+  'quotas.alerted': QuotaAlert;
   'accounts.updated': Account;
   /** An account `accounts.remove` deleted. */
   'accounts.removed': { accountId: AccountId };

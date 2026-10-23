@@ -283,3 +283,41 @@ test('the automatic resume switch saves the setting and a refusal puts it back',
   expect(saveSettings).toHaveBeenCalledWith({ autoResumeLimitedThreads: true });
   expect(toggle.checked).toBe(false);
 });
+
+test('the bell of a card, a gateway entry included, sets an alert per period the account reports', async () => {
+  const calls: unknown[] = [];
+  const rows: AccountQuota[] = [{
+    ...quota('Claude'), accountId: 'proxy:claude:max', label: 'Claude Max', providerName: 'Claude',
+    windows: [{ id: 'five-hour', label: '5 hours', usedPercent: 40, resetsAt: null }, { id: 'credits', label: 'Credits', usedPercent: 10, resetsAt: null }],
+    gateway: { kind: 'douane', entryId: 'max', display: 'accounts', plan: null, accounts: 1, status: 'ready', credits: [] },
+  }];
+  const call = vi.fn(async (method: string, params: unknown) => {
+    if (method === 'quotas.alert') {
+      calls.push(params);
+      const { period, threshold } = params as { period: 'fiveHour'; threshold: number | null };
+      rows[0] = { ...rows[0]!, alerts: threshold === null ? undefined : { [period]: threshold } };
+      return structuredClone(rows);
+    }
+    if (method === 'quotas.list') return structuredClone(rows);
+    if (method === 'subscriptionProxy.quotas') return { status: 'ready', providers: [], updatedAt: null, checkedAt: null, error: null };
+    throw new Error(method);
+  });
+  const store = { client: { call, on: () => () => {} }, connection: 'ready', owner: false, endpointUrl: 'alert-core',
+    settings: { subscriptionProxy: { enabled: true, kind: 'douane', baseUrl: 'http://douane.test/v1', dashboardUrl: null } } } as unknown as Store;
+  mounted = mount(LimitsPage, { target: document.body, props: { store } });
+  await settle();
+  const bell = document.querySelector<HTMLButtonElement>('[data-testid="quota-alert-bell"]')!;
+  expect(bell.classList.contains('set')).toBe(false);
+  bell.click();
+  await settle();
+  // Credits have no period: the 5-hour window is the only choice.
+  expect([...document.querySelectorAll('[data-testid="quota-alerts"] .period')].map((node) => node.textContent)).toEqual([strings.quotas.alertPeriods.fiveHour]);
+  document.querySelector<HTMLButtonElement>('[data-testid="quota-alert-fiveHour-90"]')!.click();
+  await settle();
+  expect(calls).toEqual([{ accountId: 'proxy:claude:max', period: 'fiveHour', threshold: 90 }]);
+  expect(document.querySelector('[data-testid="quota-alert-fiveHour-90"]')!.getAttribute('aria-checked')).toBe('true');
+  expect(document.querySelector('[data-testid="quota-alert-bell"]')!.classList.contains('set')).toBe(true);
+  document.querySelector<HTMLButtonElement>('[data-testid="quota-alert-fiveHour-off"]')!.click();
+  await settle();
+  expect(calls.at(-1)).toEqual({ accountId: 'proxy:claude:max', period: 'fiveHour', threshold: null });
+});

@@ -36,5 +36,5 @@ test('kinds changed while another machine is shown go to the machine holding the
   }
   setPushHomeClient((address) => (address === 'https://home.test' ? home.store.client : null));
   shown.store.setNotificationKind('questions', false);
-  expect(calls).toEqual([{ on: 'home', params: { kinds: ['approvals', 'finished', 'errors'] } }]);
+  expect(calls).toEqual([{ on: 'home', params: { kinds: ['approvals', 'finished', 'errors', 'limits'] } }]);
 });

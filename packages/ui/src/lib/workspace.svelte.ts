@@ -22,7 +22,7 @@ import { threadAddress } from './chat-links';
 import { onReveal, reveal } from './reveal';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
 import { GroupLinks } from './group-links.svelte';
-import { setNotificationCore, setPushHomeClient } from './notify';
+import { limitsMachine, setNotificationCore, setPushHomeClient } from './notify';
 import { appPage } from './app-origin';
 import { bootWorkspace, byHand, hostOf, primaryMachine } from './workspace-boot';
 
@@ -648,6 +648,15 @@ export class Workspace {
   }
 
   async openNotification(key: string): Promise<void> {
+    // A limit alert names a machine and no thread: its Limits page opens.
+    const limits = limitsMachine(key);
+    if (limits !== null) {
+      const target = limits ? this.machines.find((m) => m.store.machineId === limits || m.id === limits)?.store : store;
+      if (!target) return;
+      await this.select(target);
+      target.showSettings('limits');
+      return;
+    }
     let machineId: string | null = null,
       threadId = key;
     try {

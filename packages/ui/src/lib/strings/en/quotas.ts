@@ -67,5 +67,14 @@ export const strings = {
     /** A read of the limits failed; the core's reason follows. */
     readFailed: "Couldn't read the limits: {error}",
     quit: 'Quit Boite',
+    /** The bell of an account's card and the alert choices it opens. */
+    alerts: 'Alerts',
+    alertsOf: 'Alerts for {account}',
+    alertsHint: 'A notification when a window reaches the chosen share used, once per window. The limits are read every five minutes while an alert is set.',
+    alertOff: 'Off',
+    alertAt: '{percent}%',
+    alertPeriods: { fiveHour: '5 hours', weekly: 'Weekly' },
+    alertSet: '{period} at {percent}%',
+    alertFailed: "Couldn't save the alert: {error}",
   }
 } as const;

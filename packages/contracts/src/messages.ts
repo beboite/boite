@@ -232,14 +232,15 @@ export const INITIAL_MESSAGE_PAGE = 40;
  * language it speaks: the service worker looks the label up in the words the
  * page left it, and falls back on the English body.
  */
-export type NotificationLabel = 'done' | 'failed' | 'needsYou' | 'connected';
+export type NotificationLabel = 'done' | 'failed' | 'needsYou' | 'connected' | 'limitFiveHour' | 'limitWeekly';
 /**
  * What a notification is about, the unit a device turns on or off: a
- * permission or a change to approve, a question, a finished turn, a failed one.
+ * permission or a change to approve, a question, a finished turn, a failed
+ * one, a subscription limit crossing its alert threshold.
  */
-export type NotificationKind = 'approvals' | 'questions' | 'finished' | 'errors';
+export type NotificationKind = 'approvals' | 'questions' | 'finished' | 'errors' | 'limits';
 /** Every kind, in the order the settings list them. A device that never chose gets them all. */
-export const NOTIFICATION_KINDS: readonly NotificationKind[] = ['approvals', 'questions', 'finished', 'errors'];
+export const NOTIFICATION_KINDS: readonly NotificationKind[] = ['approvals', 'questions', 'finished', 'errors', 'limits'];
 /** A Web Push payload, as the core sends it and the service worker reads it. */
 export interface PushPayload {
   title: string;
@@ -251,6 +252,8 @@ export interface PushPayload {
   kind?: NotificationKind;
   /** The app icon's count after this notification. */
   badge?: number;
+  /** What a label's words leave a place for: `{percent}` in a limit alert. */
+  values?: { percent: string };
   /**
    * The id of the machine the thread is on. Every push to a device of the
    * group carries it, direct or passed on by another member through the

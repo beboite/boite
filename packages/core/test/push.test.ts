@@ -82,7 +82,7 @@ test('a recreated push store retains its keys and delivers completed turns to th
   const deliveries: { threadId: string; body: string }[] = [];
   restarted.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
   try {
-    expect(await restarted.status(paired.id)).toEqual({ ...before, subscribed: true, kinds: ['approvals', 'questions', 'finished', 'errors'] });
+    expect(await restarted.status(paired.id)).toEqual({ ...before, subscribed: true, kinds: ['approvals', 'questions', 'finished', 'errors', 'limits'] });
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
     // The body is the start of the reply, as one line of plain text cut at a word.
@@ -383,7 +383,7 @@ test('a device that kept only approvals gets the permission push and not the fin
 test('a subscription stored before kinds existed receives every kind', async () => {
   const paired = session();
   harness.core.push.subscribe(paired.id, subscription());
-  expect((await harness.core.push.status(paired.id)).kinds).toEqual(['approvals', 'questions', 'finished', 'errors']);
+  expect((await harness.core.push.status(paired.id)).kinds).toEqual(['approvals', 'questions', 'finished', 'errors', 'limits']);
   const deliveries: { kind?: string }[] = [];
   harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
   const owner = await harness.connect();

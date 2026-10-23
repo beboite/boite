@@ -7,6 +7,8 @@ export const fr: Translation = {
     failed: 'Échec',
     openThread: 'Ouvrir la conversation',
     needsYou: 'Attend votre réponse',
-    connected: 'Les notifications fonctionnent'
+    connected: 'Les notifications fonctionnent',
+    limitFiveHour: 'Limite 5 h : {percent} % utilisés',
+    limitWeekly: 'Limite hebdo : {percent} % utilisés'
   }
 };

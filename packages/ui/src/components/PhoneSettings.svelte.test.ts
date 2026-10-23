@@ -62,12 +62,12 @@ test('the phone screen turns notifications and each kind on and off, and a devic
     component = mount(PhoneSettings, { target: document.body, props: { store, showServerSettings: false } });
     flushSync();
     const kind = (name: string) => document.querySelector<HTMLInputElement>(`[data-testid=setting-notification-kind-${name}]`)!;
-    expect(['approvals', 'questions', 'finished', 'errors'].map((name) => kind(name).checked)).toEqual([true, true, true, true]);
+    expect(['approvals', 'questions', 'finished', 'errors', 'limits'].map((name) => kind(name).checked)).toEqual([true, true, true, true, true]);
     kind('finished').click();
     flushSync();
     expect(kind('finished').checked).toBe(false);
     expect(JSON.parse(localStorage.getItem('boite.notifications.muted')!)).toEqual(['finished']);
-    expect(calls.at(-1)).toEqual({ kinds: ['approvals', 'questions', 'errors'] });
+    expect(calls.at(-1)).toEqual({ kinds: ['approvals', 'questions', 'errors', 'limits'] });
     // The main switch off dims the kinds and stops the pushes too.
     document.querySelector<HTMLInputElement>('[data-testid=phone-notifications]')!.click();
     flushSync();

@@ -2,7 +2,8 @@
   import { workspace } from '../lib/workspace.svelte';
   import { untrack } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
-  import { subscriptionProxyName, type AccountQuota } from '@boite/contracts';
+  import { subscriptionProxyName, type AccountQuota, type QuotaAlertPeriod } from '@boite/contracts';
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageLimits from './UsageLimits.svelte';
@@ -91,6 +92,13 @@
     if (!ok) input.checked = store.settings?.autoResumeLimitedThreads === true;
   }
 
+  /** A device may set alerts too: they decide when a window it already reads notifies. */
+  async function alert(accountId: string, period: QuotaAlertPeriod, threshold: number | null) {
+    if (!store.client) return;
+    try { await reader.alert(store.client, accountId, period, threshold); }
+    catch (error) { store.error = fill(strings.quotas.alertFailed, { error: errorText(error) }); }
+  }
+
   async function monitor(accountId: string, enabled: boolean) {
     if (!store.client) return;
     try { await reader.configure(store.client, accountId, enabled); }
@@ -132,7 +140,7 @@
     {#each gatewayGroups as group (group.providerId)}
       <section class="gateway-group" data-testid="gateway-quotas" data-provider={group.providerId}>
         <h2 class="group-head"><ProviderLogo providerId={group.providerId} size={16} /><span class="ui-label">{group.name}</span><small class="ui-label">{fill(strings.subscriptionProxy.via, { name: proxyName })}</small></h2>
-        <UsageLimits rows={group.rows} {store} loading={reader.busy} completed={reader.landed} />
+        <UsageLimits rows={group.rows} {store} loading={reader.busy} completed={reader.landed} onalert={alert} />
       </section>
     {/each}
     {#if gateway.state?.status === 'ready' && gatewayGroups.length === 0 && shown !== null}
@@ -154,7 +162,7 @@
       {#if store.owner}<button type="button" onclick={() => workspace.active.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
     </div>{/if}
   {:else}
-    {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.busy} completed={reader.landed} />{/if}
+    {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.busy} completed={reader.landed} onalert={alert} />{/if}
     {#if store.owner}<section class="card tracked" data-testid="limits-tracked">
       <h2 class="ui-label-box"><span class="ui-label">{strings.quotas.tracked}</span><InfoTip topic={strings.quotas.tracked} text={strings.quotas.trackedHint} /></h2>
       {#each tracked as row (row.accountId)}

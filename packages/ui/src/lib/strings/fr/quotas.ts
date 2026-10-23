@@ -3,6 +3,14 @@ import type { Translation } from '../../i18n.svelte';
 export const fr: Translation = {
 
   quotas: {
+    alerts: 'Alertes',
+    alertsOf: 'Alertes de {account}',
+    alertsHint: "Une notification quand une fenêtre atteint la part utilisée choisie, une fois par fenêtre. Les limites sont relues toutes les cinq minutes tant qu'une alerte est réglée.",
+    alertOff: 'Aucune',
+    alertAt: '{percent} %',
+    alertPeriods: { fiveHour: '5 heures', weekly: 'Hebdomadaire' },
+    alertSet: '{period} à {percent} %',
+    alertFailed: "Impossible d'enregistrer l'alerte : {error}",
     machineAccounts: 'Limites des comptes de {machine}',
     outdated: 'Mettez à jour Boite sur cette machine pour voir ses limites sur cet appareil.',
     usingCredits: 'Crédits utilisés',
