@@ -172,6 +172,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // spending a reset stay the owner's (core access.ts).
   'quotas.list',
   'subscriptionProxy.quotas',
+  // When a window the device already reads notifies. It reads no provider itself:
+  // the core's alert check keeps its own five-minute cadence (core access.ts).
+  'quotas.alert',
   // Switching the gateway the owner configured on or off, from the Limits tab. The kind,
   // URLs and key stay the owner's: a phone only picks between two routes the owner set up.
   'subscriptionProxy.setEnabled',
@@ -201,6 +204,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'permission.requested', 'permission.resolved', 'question.asked', 'question.answered',
   'scheduler.updated', 'accounts.updated', 'accounts.removed',
   'quotas.updated', 'quotas.progress', 'subscriptionProxy.quotasUpdated', // What quotas.list and subscriptionProxy.quotas answer.
+  'quotas.alerted', // One window of a row quotas.list already answers the device.
   'settings.updated', 'keybindings.updated', 'sessions.updated',
   'group.updated', // Invalidation only; group.get applies the device read policy.
   'providers.updated', 'providers.installProgress', 'providers.probed',

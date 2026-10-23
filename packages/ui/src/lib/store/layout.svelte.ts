@@ -1,4 +1,4 @@
-import { parseGroupRelayUrl, type ThreadId } from '@boite/contracts';
+import { parseGroupRelayUrl, type QuotaAlert, type ThreadId } from '@boite/contracts';
 import { appPage } from '../app-origin';
 import { servesThisPage } from '../endpoint';
 import {
@@ -10,14 +10,18 @@ import {
   readNotificationKinds,
   readNotifications,
   requestNotificationPermission,
+  sameKinds,
   sendNotification,
   shouldNotify,
   toastFor,
+  limitToast,
+  limitsKey,
   writeNotificationKinds,
   writeNotifications,
   type NotifyKind
 } from '../notify';
 import { PUSH_ENABLED_KEY } from '../pwa';
+import type { Client } from '../client';
 import { experimentOn } from '../experiments.svelte';
 import type { DropKind } from '../native-drop';
 import { clampSidebar, SIDEBAR_DEFAULT, writeLayout } from '../prefs';
@@ -185,6 +189,21 @@ export class Layout {
     })();
   }
 
+  /**
+   * A limit alert, whatever is on screen: it belongs to no thread. A click
+   * opens Settings, Limits, on the machine that sent it.
+   */
+  notifyLimit(alert: QuotaAlert): void {
+    if (!readNotifications() || !readNotificationKinds().includes('limits')) return;
+    const s = this.ctx.store;
+    const origin = s.endpointUrl ? new URL(s.endpointUrl).origin : undefined;
+    void (async () => {
+      const core = origin !== undefined && origin !== location.origin ? notificationCore(s) : undefined;
+      if (await pushCovers(origin, core !== undefined && s.group !== null)) return;
+      await sendNotification({ ...limitToast(alert, limitsKey(s.machineId)), origin, ...(core === undefined ? {} : { core }) });
+    })();
+  }
+
   /** The switch of the Background card; the platform prompt comes with the first turn-on. */
   async setNotifications(enabled: boolean): Promise<void> {
     this.notifications = enabled;
@@ -218,6 +237,24 @@ export class Layout {
     const home = readPushHome();
     const client = home !== null ? pushHomeClient(home) : this.mayHoldPush() ? this.ctx.store.client : null;
     void client?.call('push.kinds', { kinds: pushKinds() }).catch(() => undefined);
+  }
+
+  /**
+   * On a paired device, once its core answers: a subscription saved before a
+   * kind existed (Limits) lacks it, so the device's choice is sent again. The
+   * Phone app settings do the same when they open.
+   */
+  checkPushKinds(client: Pick<Client, 'call'>): void {
+    try {
+      if (localStorage.getItem(PUSH_ENABLED_KEY) !== 'on') return;
+    } catch {
+      return;
+    }
+    const home = readPushHome();
+    if (home !== null ? home !== (this.ctx.store.endpointUrl ?? '') : !this.mayHoldPush()) return;
+    void client.call('push.status', {}).then((result) => {
+      if (result.subscribed && !sameKinds(result.kinds ?? [], pushKinds())) return client.call('push.kinds', { kinds: pushKinds() });
+    }).catch(() => undefined);
   }
 
   /** The shown machine is one this page subscribes on: the one serving it, or any on the phone app's page. */

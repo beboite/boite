@@ -64,6 +64,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           if (s.owner && !s.localCore) { void ctx.serverUpdater.load(); void ctx.serverUpdater.loadDesktop(); }
           void s.reload();
           ctx.terminals.reconnected(client);
+          if (!s.owner) layout.checkPushKinds(client);
         }
       })
     );
@@ -172,6 +173,8 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
 
   on('turn.started', (turn) => threads.upsertTurn(turn.threadId, turn));
+  // A subscription window crossed the alert set on its account.
+  on('quotas.alerted', (alert) => layout.notifyLimit(alert));
   on('turn.finished', (turn) => {
     threads.upsertTurn(turn.threadId, turn);
     // A stop is the user's own doing, and a delegated agent's result or a

@@ -648,7 +648,8 @@ English body, which stays the fallback until the page has run once.
 Each device chooses the kinds it gets, all on by default: Approvals
 (permission requests, plan approvals, settings and agent settings cards asking
 to apply a change), Questions (an agent's questions, `boite ask`, a delegated
-agent's), Finished and Errors. The rows sit under the notifications switch, in
+agent's), Finished, Errors and Limits (the alerts set on an account in
+Settings, Limits, [usage](usage.md#alerts)). The rows sit under the notifications switch, in
 General on the desktop and in App & notifications on the phone, and dim while
 the switch is off. The choice lives in the page's `localStorage`: the kinds
 turned off under `boite.notifications.muted`, so a kind added later starts on.
