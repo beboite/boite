@@ -31,6 +31,7 @@ export const strings = {
     done: 'Done',
     engine: 'Background work', engineHint: 'Closing this page leaves bots working on the connected core.',
     pauseWakes: 'Pause every bot', pauseWakesHint: 'No routine or event wakes a bot on this core. You can still write to them.',
+    openFailed: 'This bot could not be opened. Pick one in the list or try again.',
     offline: 'Bots could not be loaded from this machine. Reconnect or update its core.', retry: 'Retry',
     stale: 'Connection lost. This is the last received state. Work may still be running on the host.',
     status: 'Status', settings: 'Settings', createAction: 'Create', rolePlaceholder: 'Research, implementation or review',
