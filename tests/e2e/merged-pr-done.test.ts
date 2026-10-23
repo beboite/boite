@@ -12,9 +12,11 @@ afterAll(async () => { await server?.close(); }, 30_000);
 
 for (const width of [1280, 390]) {
   test(`a detected merge moves a running prompt to Done and retains its answer at ${width}px`, async () => {
-    const page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&stream=tokens`, windowSize: { width, height: width < 720 ? 844 : 900 } });
+    const page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&stream=tokens`, windowSize: { width, height: width < 720 ? 844 : 900 },
+      args:['--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4', '--renderer-process-limit=1', '--js-flags=--max-old-space-size=128'] });
     try {
       await page.waitFor('globalThis.__boiteTest?.workspace.active?.connection === "ready"');
+      expect(await page.evaluate(`matchMedia('(hover: hover) and (pointer: fine)').matches`)).toBe(true);
       if (width < 720) await mobileAction(page, 'mobile-conversations');
       await showThreadView(page, 'projects', width < 720 ? 'mobile-' : '');
       const threadId = await page.evaluate<string>(`(async () => {
@@ -48,6 +50,29 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate(`document.querySelector('${done} [data-testid="done-thread-pr"]')?.dataset.state`)).toBe('MERGED');
       await page.settleAnimations();
       await page.screenshot(join(import.meta.dir, '.artifacts', `merged-pr-running-done-${width}.png`));
+      await page.evaluate(`document.querySelector('${done} [data-testid="done-thread-open"]').focus()`);
+      await page.settleAnimations();
+      expect(await page.evaluate(`getComputedStyle(document.querySelector('${done} [data-testid="thread-state"]')).opacity`)).toBe('0');
+      expect(await page.evaluate(`getComputedStyle(document.querySelector('${done} [data-testid="done-thread-restore"]')).opacity`)).toBe('1');
+      if (width >= 720) {
+        const point = await page.evaluate<{x:number; y:number}>(`(() => {
+          document.activeElement.blur();
+          const box = document.querySelector('${done} [data-testid="done-thread-open"]').getBoundingClientRect();
+          return {x:box.x + box.width / 2, y:box.y + 12};
+        })()`);
+        await page.send('Input.dispatchMouseEvent', {type:'mouseMoved', ...point});
+        expect(await page.evaluate(`document.querySelector('${done}').matches(':hover')`)).toBe(true);
+        expect(await page.evaluate(`getComputedStyle(document.querySelector('${done} [data-testid="thread-state"]')).opacity`)).toBe('0');
+        await page.screenshot(join(import.meta.dir, '.artifacts', `merged-pr-restore-hover-${width}.png`));
+        await page.send('Input.dispatchMouseEvent', {type:'mouseMoved', x:width - 1, y:1});
+      } else {
+        await page.send('Emulation.setTouchEmulationEnabled', {enabled:true, maxTouchPoints:1});
+        expect(await page.evaluate(`matchMedia('(hover: none)').matches && matchMedia('(pointer: coarse)').matches`)).toBe(true);
+        expect(await page.evaluate(`getComputedStyle(document.querySelector('${done} [data-testid="thread-state"]')).opacity`)).toBe('1');
+        expect(await page.evaluate(`getComputedStyle(document.querySelector('${done} [data-testid="done-thread-restore"]')).display`)).toBe('none');
+        await page.screenshot(join(import.meta.dir, '.artifacts', `merged-pr-running-touch-${width}.png`));
+      }
+      await page.evaluate('document.activeElement.blur()');
       await page.waitFor(`globalThis.__boiteTest.workspace.active.client.call('threads.get', {threadId:${JSON.stringify(threadId)}}).then(t => t.status === 'idle')`, 20_000);
       const saved = await page.evaluate<{ archived: boolean; final: boolean }>(`globalThis.__boiteTest.workspace.active.client.call('threads.get', {threadId:${JSON.stringify(threadId)}}).then(t => ({archived:t.archived, final:t.messages.some(m => m.role === 'assistant' && m.parts.some(p => p.type === 'text' && p.text.endsWith('Final merge report retained.')))}))`);
       expect(saved).toEqual({ archived: true, final: true });

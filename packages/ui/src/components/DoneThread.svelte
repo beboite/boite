@@ -187,11 +187,13 @@
   /* Restoring takes the time's place under the pointer, the way a thread row shows its menu. */
   .restore { position: absolute; top: 5px; right: 5px; opacity: 0; background: var(--color-surface-2); color: var(--color-muted-foreground); }
   .done-thread:hover .restore, .done-thread:focus-within .restore { opacity: 1; }
-  .done-thread:hover time, .done-thread:focus-within time { opacity: 0; }
+  .done-thread:hover time, .done-thread:focus-within time,
+  .done-thread:hover :global(.when), .done-thread:focus-within :global(.when) { opacity: 0; }
   /* No hover on a touch screen: the time stays, restoring is in the long-press menu. */
   @media (hover: none), (pointer: coarse) {
     .restore { display: none; }
-    .done-thread:hover time, .done-thread:focus-within time { opacity: 1; }
+    .done-thread:hover time, .done-thread:focus-within time,
+    .done-thread:hover :global(.when), .done-thread:focus-within :global(.when) { opacity: 1; }
   }
   @media (max-width: 720px) {
     .row { min-height: var(--touch-target); }

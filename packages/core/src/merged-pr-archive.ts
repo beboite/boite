@@ -43,7 +43,11 @@ export class MergedPrArchive {
   observe(threadId: string): void {
     if (this.closed) return;
     this.detected.add(threadId);
-    this.detection ??= this.drainDetected().finally(() => { this.detection = null; });
+    this.detection ??= this.drainDetected().finally(() => {
+      this.detection = null;
+      const next = this.detected.values().next().value;
+      if (next !== undefined) this.observe(next);
+    });
   }
   private async drainDetected(): Promise<void> {
     // Coalesce badge and linked-PR notifications, and leave their RPC free to return.

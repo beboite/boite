@@ -165,6 +165,24 @@ test.each(['restore', 'draft'] as const)('detected merges respect a late %s duri
   } finally { release(); held.mockRestore(); }
 });
 
+test('a merge observed as the last detection finishes is processed without another notification', async () => {
+  const f = await fixture();
+  const journal = harness.core.journal;
+  const read = journal.getThread.bind(journal);
+  const get = spyOn(journal, 'getThread').mockImplementation(id => {
+    if (id === 'deleted-merge-detection') {
+      // A badge result queued behind the final read runs before the drain's cleanup.
+      queueMicrotask(() => service.observe(f.threadId));
+      return null;
+    }
+    return read(id);
+  });
+  try {
+    service.observe('deleted-merge-detection');
+    await waitFor(() => harness.core.threads.require(f.threadId).archived, 1500);
+  } finally { get.mockRestore(); }
+});
+
 test('a failed detected conversation read leaves it visible and continues with the next merge', async () => {
   const f = await fixture();
   const core = harness.core, journal = core.journal;
