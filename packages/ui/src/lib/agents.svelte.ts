@@ -3,6 +3,7 @@ import type { AgentProfile, AgentStatus, AgentsSnapshot, RpcParams, RpcResult, A
 import type { Store } from './store.svelte';
 import { strings } from './strings';
 import { experimentOn } from './experiments.svelte';
+import { noteUpkeep } from './agent-upkeep';
 
 /**
  * A persistent agent is a thread with an identity: its conversation is its
@@ -64,6 +65,30 @@ export function liveStep(status: AgentStatus | null, thread: ThreadSummary | nul
   return status?.activity ?? null;
 }
 
+/** What the agent's thread waits on: the question it asked, else the permission it needs. */
+export function waitingOn(store: Pick<Store, 'pendingQuestions' | 'pendingPermissions'>, threadId: string | null | undefined): string | null {
+  if (!threadId) return null;
+  const question = store.pendingQuestions.find(q => q.threadId === threadId);
+  if (question) return question.text.split('\n')[0]!.trim();
+  const permission = store.pendingPermissions.find(p => p.threadId === threadId);
+  return permission ? permission.description ?? permission.toolName : null;
+}
+
+/**
+ * How the agent stands this second, for its header and its desk. Its
+ * thread's own row wins over the snapshot: it moves with every event, the
+ * snapshot at most once a second.
+ */
+export function liveState(agent: Pick<AgentProfile, 'status'>, status: AgentStatus | null, thread: Pick<ThreadSummary, 'status'> | null | undefined, waiting: boolean): AgentStatus['state'] {
+  if (agent.status === 'archived') return 'archived';
+  if (thread?.status === 'running') return 'working';
+  if (thread?.status === 'queued') return 'queued';
+  if (thread?.status === 'waiting' || waiting) return 'waiting';
+  if (status?.state === 'error' || status?.problem) return 'error';
+  if (agent.status === 'paused') return 'paused';
+  return status?.state === 'working' || status?.state === 'queued' || status?.state === 'waiting' ? status.state : 'idle';
+}
+
 /**
  * Opens an agent's thread on the machine that owns it: the core hands the
  * thread (making it again if it was lost), and the store opens it the usual
@@ -84,6 +109,20 @@ export async function openAgent(store: Store, agentId: string): Promise<string |
   lastAgent.set(store, agentId);
   await store.open(threadId);
   return threadId;
+}
+
+const DESK_SEEN_KEY = 'boite:agent-desk-seen';
+/**
+ * Whether this is the first time this device shows the agent: its desk opens
+ * by itself then, once, on a wide window. Remembered per agent in
+ * `localStorage`, the newest 200.
+ */
+export function firstDeskVisit(agentId: string): boolean {
+  let seen: string[] = [];
+  try { const stored = JSON.parse(localStorage.getItem(DESK_SEEN_KEY) ?? '[]'); if (Array.isArray(stored)) seen = stored.filter((id): id is string => typeof id === 'string'); } catch { /* A damaged list starts over. */ }
+  if (seen.includes(agentId)) return false;
+  try { localStorage.setItem(DESK_SEEN_KEY, JSON.stringify([...seen, agentId].slice(-200))); } catch { /* Storage full or off: the desk opens again next time. */ }
+  return true;
 }
 
 /** The agent each machine last showed, reopened when the user comes back to the Agents page. */
@@ -170,7 +209,7 @@ export class AgentsView {
         this.dirty = false;
         const client = this.client;
         const snapshot = await client?.call('agents.snapshot', {});
-        if (snapshot && !this.disposed && client === this.store.client) { this.snapshot = snapshot; this.loadError = ''; }
+        if (snapshot && !this.disposed && client === this.store.client) { this.snapshot = snapshot; this.loadError = ''; noteUpkeep(snapshot); }
       }
     } catch (error) { if (!this.disposed) this.loadError = errorText(error); }
   }

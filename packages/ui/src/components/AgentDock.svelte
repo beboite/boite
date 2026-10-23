@@ -6,10 +6,15 @@
   import StatusMark from './StatusMark.svelte';
   import { threadTone } from '../lib/thread-state';
   import Elapsed from './Elapsed.svelte';
+  import { upkeepThreads } from '../lib/agent-upkeep';
 
   let { store, threadId }: { store: Store; threadId: string } = $props();
-  /** At work in a turn, or waiting on its own background work: either way its result has not come back. */
-  let active = $derived((store.delegation?.agents ?? []).filter(agent => threadBusy(agent.thread)));
+  /**
+   * At work in a turn, or waiting on its own background work: either way its
+   * result has not come back. A persistent agent's memory pass is the core's
+   * upkeep, not a subagent it sent.
+   */
+  let active = $derived((store.delegation?.agents ?? []).filter(agent => threadBusy(agent.thread) && !upkeepThreads.has(agent.thread.id)));
   let native = $derived((store.delegation?.nativeAgents ?? []).filter(agent => agent.status === 'running'));
   let runs = $derived(store.workflowsOf(threadId).filter(run => run.status === 'running'));
   let count = $derived(active.length + native.length);

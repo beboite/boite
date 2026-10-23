@@ -11,6 +11,8 @@ import type { Store } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
 import { RightPanelStore } from '../lib/right-panel.svelte';
 import AgentMessagesSurface from './AgentMessagesSurface.svelte';
+import { AgentsView, openAgent } from '../lib/agents.svelte';
+import { setExperiment } from '../lib/experiments';
 
 /**
  * jsdom has no layout, so the three numbers the window is computed from are
@@ -229,6 +231,60 @@ test('cache pings are one quiet line between the turns they sit in, with no answ
   expect(document.querySelectorAll('[data-testid="message"]')).toHaveLength(2);
   expect(document.querySelector('[data-testid="timeline"]')?.textContent).not.toContain('ok');
   expect(document.querySelector('[data-testid="message-system"]')).toBeNull();
+});
+
+test('an agent thread folds a finished turn\'s steps behind one row and a quiet wake to one line, each opening on a click', async ({ ready }) => {
+  setExperiment('resident-agents', true);
+  onTestFinished(() => setExperiment('resident-agents', false));
+  const { store: owner } = await ready({ delayMs: 0, agentsDemo: true });
+  const view = AgentsView.of(owner);
+  await view.refresh();
+  const mira = view.snapshot!.profiles.find(p => p.name === 'Mira')!;
+  await openAgent(owner, mira.id);
+  stubLayout(1200);
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: owner.openThread!.id, messages: owner.openThread!.messages } });
+  flushSync();
+  const timeline = () => document.querySelector('[data-testid="timeline"]')!.textContent ?? '';
+  const folds = () => [...document.querySelectorAll<HTMLElement>('[data-testid="turn-fold"]')];
+  // Its evening routine had nothing to report: one line, its opening and its two calls folded inside.
+  const quiet = folds().find(fold => fold.dataset.kind === 'quiet')!;
+  expect(quiet.textContent).toContain('Nothing to report · 4 issues, 2 pull requests, nothing new · 2 steps');
+  expect(document.querySelector('[data-testid="wake-marker"]')).toBeNull();
+  expect(timeline()).not.toContain('Nothing needs you tonight');
+  expect(document.querySelectorAll('[data-testid="tool-group"], [data-testid="tool-card"]')).toHaveLength(0);
+  // Its last memory pass is one line under the answer it followed.
+  const pass = document.querySelector<HTMLElement>('[data-testid="memory-pass"]')!;
+  expect(pass.textContent).toContain('Memory updated · Noted that the welcome screen fits in three lines on a phone.');
+  expect(pass.closest('article')?.previousElementSibling?.textContent).toContain('Noted in my memory');
+  quiet.querySelector('button')!.click();
+  flushSync();
+  expect(document.querySelector('[data-testid="wake-marker"]')?.textContent).toContain('Routine · Evening review');
+  expect(timeline()).toContain('Nothing needs you tonight');
+  expect(document.querySelectorAll('[data-testid="tool-group"], [data-testid="tool-card"]').length).toBeGreaterThan(0);
+  quiet.querySelector('button')!.click();
+  flushSync();
+  await unmount(running);
+
+  // Nova's event turn: its four calls and the narration between them behind "Worked", its answer as its message.
+  const nova = view.snapshot!.profiles.find(p => p.name === 'Nova')!;
+  await openAgent(owner, nova.id);
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: owner.openThread!.id, messages: owner.openThread!.messages } });
+  flushSync();
+  const worked = folds().filter(fold => fold.dataset.kind === 'worked');
+  // Its answers are signed with its name, not the provider's.
+  expect([...document.querySelectorAll('[data-testid="message-model"]')].map(node => node.textContent?.trim())).toContain('Nova');
+  expect(timeline()).not.toMatch(/^Echo|\bEcho\b/);
+  expect(worked.map(fold => fold.textContent?.trim())).toEqual(['Worked 2 min · 2 steps', 'Worked 2 min · 4 steps']);
+  expect(timeline()).toContain('The login fix opened PR #482');
+  expect(timeline()).not.toContain('The e2e job fails; its log names the redirect test.');
+  // The running turn keeps its steps open and live.
+  expect(timeline()).toContain('Checking the release branch first');
+  expect(document.querySelectorAll('[data-testid="tool-group"], [data-testid="tool-card"]').length).toBeGreaterThan(0);
+  worked[1]!.querySelector('button')!.click();
+  flushSync();
+  expect(timeline()).toContain('The e2e job fails; its log names the redirect test.');
+  worked[1]!.querySelector('button')!.click();
+  flushSync();
 });
 
 test.for([false, true])('the outline rail is left of the bubbles on a desktop and not drawn on a phone (phone: %s)', async (phone, { createStore }) => {

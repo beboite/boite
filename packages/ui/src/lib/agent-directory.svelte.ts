@@ -1,6 +1,7 @@
 import { threadActive, type AgentEntrustment, type AgentProfile, type AgentsSnapshot, type ThreadSummary } from '@boite/contracts';
 import { experimentOn } from './experiments.svelte';
 import type { Store } from './store.svelte';
+import { noteUpkeep } from './agent-upkeep';
 
 /** A thread an agent is busy in right now: a turn running, queued, or waiting on the user. */
 export function agentThreadLive(thread: ThreadSummary): boolean {
@@ -96,7 +97,7 @@ export class AgentDirectory {
     this.loading = true;
     try {
       const snapshot = await client.call('agents.snapshot', {});
-      if (client === this.client) this.snapshot = snapshot;
+      if (client === this.client) { this.snapshot = snapshot; noteUpkeep(snapshot); }
     } catch {
       // An older core without agents, or a dropped connection: the rows keep their provider logo.
     } finally {

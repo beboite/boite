@@ -39,6 +39,8 @@ export interface AgentRunner {
   settle?: (threadId: string) => void;
   /** A question or a permission waits on the user in that thread. */
   waiting?: (threadId: string) => boolean;
+  /** The oldest question waiting in that thread, as a desk card answers it. */
+  question?: (threadId: string) => AgentWatch['question'];
   /** Starts the thread's goal, or removes it with `null`. */
   goal?: (threadId: string, objective: string | null) => void;
   /** Whether a folder on this core already holds files: a brain never moves into one, it takes the next name. */
@@ -68,6 +70,10 @@ export class FakeAgents {
   /** The problem an agent cannot run past, as the core reports a provider that left. */
   private problems = new Map<string, string>();
   private unread = new Map<string, number>();
+  /** What each agent's turns cost today, API-equivalent dollars: the fake runs no model to count it. */
+  private spend = new Map<string, number>();
+  /** Each agent's last memory pass, as the core reports it: the fake runs none. */
+  private passes = new Map<string, NonNullable<AgentStatus['memory']>>();
   /** The folder the owner chose for brains, null for the default. */
   private brainFolder: string | null = null;
   /** Each agent's folder under a chosen root, named after it the first time it was placed there. */
@@ -176,6 +182,9 @@ export class FakeAgents {
   seedProblem(agentId: string, problem: string): void { this.problems.set(agentId, problem); }
   /** How many answers the list counts missed while the thread is unread; one by default. */
   seedUnread(agentId: string, count: number): void { this.unread.set(agentId, count); }
+  seedSpend(agentId: string, usd: number): void { this.spend.set(agentId, usd); }
+  seedMemoryPass(agentId: string, pass: NonNullable<AgentStatus['memory']>): void { this.passes.set(agentId, pass); }
+  seedRuntime(agentId: string, change: Partial<AgentRuntimeConfig>): void { this.configs.set(agentId, { ...this.runtime(agentId), ...change }); }
 
   private makeThread(agent: AgentProfile): string {
     const sessionId = this.nextId('session');
@@ -216,7 +225,8 @@ export class FakeAgents {
       nextWake: next ? { at: next.nextAt!, routineId: next.id, label: next.name } : null,
       unread: thread?.unread ? this.unread.get(agent.id) ?? 1 : 0,
       last: lastMessage ? { text: lastText.slice(0, 200), at: lastMessage.createdAt } : null,
-      today: { turns: today.length, wakes: wakes.length, quiet: wakes.filter(t => this.quiet.has(t.id)).length, costUsd: 0 },
+      today: { turns: today.length, wakes: wakes.length, quiet: wakes.filter(t => this.quiet.has(t.id)).length, costUsd: this.spend.get(agent.id) ?? 0 },
+      memory: this.passes.get(agent.id) ?? null,
     };
   }
   private watchOf(watch: AgentWatch): AgentWatch {
@@ -225,7 +235,10 @@ export class FakeAgents {
     const waiting = thread.status === 'waiting' || (this.runner?.waiting?.(watch.threadId) ?? false);
     const state: AgentWatch['state'] = thread.archived ? 'archived' : thread.status === 'running' ? 'working' : thread.status === 'queued' ? 'queued'
       : waiting ? 'needs-you' : thread.turns?.at(-1)?.status === 'error' ? 'failed' : thread.doneAt ? 'done' : 'idle';
-    return { ...structuredClone(watch), title: thread.title, projectId: thread.projectId, state, lastActivityAt: thread.updatedAt ?? watch.lastActivityAt };
+    const question = state === 'needs-you' ? this.runner?.question?.(watch.threadId) ?? null : null;
+    // A stall holds while the turn runs; the core clears it when the turn speaks again or ends.
+    const stalledSince = state === 'working' ? watch.stalledSince : null;
+    return { ...structuredClone(watch), title: thread.title, projectId: thread.projectId, state, question, stalledSince, lastActivityAt: thread.updatedAt ?? watch.lastActivityAt };
   }
   snapshot(threadId?: string): AgentsSnapshot {
     // An agent's own thread reads its own agent only.

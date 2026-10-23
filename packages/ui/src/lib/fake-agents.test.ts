@@ -1,6 +1,7 @@
 import { expect, vi } from 'vitest';
 import type { AgentProfile, Message } from '@boite/contracts';
 import { test } from '../test/fake-client';
+import { deskState } from './agent-desk';
 import { FakeAgents } from './fake-agents';
 
 const selection = { providerId: 'echo', accountId: 'a-echo', model: null, effort: null, permissionMode: 'default' as const };
@@ -72,7 +73,11 @@ test('the demo has an agent at work on a live step, one waiting on a login and o
   expect(by('Iris').state).toBe('waiting');
   expect(by('Mira')).toMatchObject({ state: 'idle', nextWake: expect.objectContaining({ label: 'Evening review' }), unread: 1 });
   const nova = snapshot.profiles.find(p => p.name === 'Nova')!;
-  expect(snapshot.watches.filter(w => w.agentId === nova.id).map(w => w.pullRequest?.number ?? null).sort()).toEqual([482, null]);
+  // Its desk holds every state a desk card has, the question answerable in place.
+  const desk = snapshot.watches.filter(w => w.agentId === nova.id);
+  expect(desk.map(w => deskState(w)).sort()).toEqual(['merged', 'needs-you', 'review', 'stalled', 'working']);
+  expect(desk.find(w => w.state === 'needs-you')?.question?.options).toEqual(['Lucide', 'Phosphor']);
+  expect(desk.find(w => w.pullRequest?.number === 482)?.pullRequest?.checks).toBe('failing');
   // Stop ends the live step as the core stops a turn.
   await client.call('turns.stop', { threadId: by('Nova').threadId! });
   await vi.waitFor(async () => expect((await client.call('agents.snapshot', {})).status.find(s => s.agentId === nova.id)!.state).toBe('idle'));

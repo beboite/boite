@@ -19,12 +19,15 @@ import { CONTACTS_RAIL_WIDTH, contactsRail } from './contacts-rail.svelte';
 /**
  * `browser` is a page in this desktop's own webview, the user's browser.
  * `agent-browser` watches the headless browser the conversation's agent drives
- * on the machine that runs it, from any client.
+ * on the machine that runs it, from any client. `desk` is a persistent
+ * agent's desk, beside its own thread: what it does now, its work, routines,
+ * memory and day.
  */
-export type SurfaceKind = 'agents' | 'messages' | 'trace' | 'browser' | 'agent-browser' | 'changes' | 'files' | 'file' | 'tasks' | 'device';
+export type SurfaceKind = 'desk' | 'agents' | 'messages' | 'trace' | 'browser' | 'agent-browser' | 'changes' | 'files' | 'file' | 'tasks' | 'device';
 
 /** Every kind a stored layout may name, and what `parse` checks a blob against. */
 export const SURFACE_KINDS: readonly SurfaceKind[] = [
+  'desk',
   'agents',
   'messages',
   'trace',
@@ -41,7 +44,7 @@ export const SURFACE_KINDS: readonly SurfaceKind[] = [
  * The kinds that get one tab and no more: asking for them again brings the tab
  * that exists forward. A browser page and a file are the two that multiply.
  */
-const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'messages', 'trace', 'agent-browser', 'changes', 'files', 'tasks', 'device'];
+const SINGLETON_KINDS: readonly SurfaceKind[] = ['desk', 'agents', 'messages', 'trace', 'agent-browser', 'changes', 'files', 'tasks', 'device'];
 
 export interface Surface {
   id: string;

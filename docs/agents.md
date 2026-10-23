@@ -41,13 +41,27 @@ the step it is on (`AgentStatus.activity`) while it works, what it waits on,
 else its next routine or Idle. A `problem` shows as a warning with its fix.
 The header menu holds Settings, Brain, Pause or Resume and Archive. A routine
 or event turn opens with a compact system line (its label and time); a quiet
-turn folds to one line that expands to the whole turn.
+turn folds to one line, `Nothing to report · <reason> · N steps`, that expands
+to the whole turn. A finished turn that made calls folds them, with the
+reasoning and the narration between them, behind one `Worked 3 min · 14 steps`
+row above its answer, so the answer reads as the agent's message; the summary
+under it then keeps only when it finished. A running turn stays open and live.
+The folds are the client's (`lib/agent-turns.ts`); opening one lasts until the
+app reloads. The agent's last memory pass (`AgentStatus.memory`) is one line
+under the answer it followed, and its child conversation is left out of the
+subagent dock and of the gate that holds a finished turn's notification while
+its children work.
 
-The desk is a surface of the thread's right panel. It shows what the agent is
-doing now, its watched threads as cards (title, project, state, pull request
-and checks, the pending question with its options to answer in place), its
-routines, its memory and AGENTS.md, and today's turns, wakes, quiet ones and
-spend against the daily budget.
+The desk is a surface of the thread's right panel (`desk`), opened by the
+header's desk button and, the first time this device shows an agent on a wide
+window, by itself. It shows what the agent is doing now (the step its turn is
+on, the time it has run, its last four calls live, else what it waits on or its
+next wake with a countdown), its watched threads as cards (title, project,
+state, pull request and checks, how long a stalled turn has been silent, the
+pending question with its options to answer in place; a card opens its thread,
+its cross takes it off the desk), its routines, its memory with its last pass
+and AGENTS.md, and today's turns, wakes, quiet ones and spend against the daily
+budget as a meter.
 
 A new agent needs a name and what it does; its robot, model and projects come
 filled in. Creating it opens its thread, where its introduction runs live.
