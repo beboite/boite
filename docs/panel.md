@@ -86,7 +86,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 
 | Surface  | Tab      | What it shows                                                                 |
 | -------- | -------- | ----------------------------------------------------------------------------- |
-| Desk     | one      | a persistent agent's desk, beside its own thread only: now, work, routines, memory, today; see [agents.md](agents.md) |
+| Desk     | one      | a bot's desk, beside its own thread only: now, work, routines, memory, today; see [bots.md](bots.md) |
 | Browser  | one      | the conversation's browser, the one its agent drives: a webview of the Windows desktop app on its own core, frames from the thread's machine elsewhere, covered until Show except a tab the owner opens there; see [browser.md](browser.md) |
 | Preview  | many     | a `boite preview` page, in a shell child webview with persistent cookies, where preview comments pick elements; test fixtures use an iframe |
 | Changes  | one      | `git.status` of the working directory, a file's diff on click                 |

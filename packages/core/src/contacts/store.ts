@@ -280,14 +280,14 @@ export class ContactStore {
     return shown;
   }
 
-  /** A contact by name (any case) or core id; the agent's `boite agents ask` takes either. */
+  /** A contact by name (any case) or core id; the agent's `boite threads ask` takes either. */
   private named(value: unknown): StoredContact {
-    if (typeof value !== 'string' || !value.trim()) throw invalidParams('contact: expected the name or core id of a contact; see boite agents contacts', { field: 'contact' });
+    if (typeof value !== 'string' || !value.trim()) throw invalidParams('contact: expected the name or core id of a contact; see boite threads contacts', { field: 'contact' });
     const wanted = value.trim().toLowerCase();
     const contacts = this.list();
     const found = contacts.find(contact => contact.coreId === wanted)
       ?? contacts.filter(contact => contact.name.toLowerCase() === wanted || contact.name.replace(/\s+/g, '-').toLowerCase() === wanted)[0];
-    if (!found) throw invalidParams(`contact: ${value} is not one of this core's contacts; see boite agents contacts`, { field: 'contact' });
+    if (!found) throw invalidParams(`contact: ${value} is not one of this core's contacts; see boite threads contacts`, { field: 'contact' });
     return found;
   }
 

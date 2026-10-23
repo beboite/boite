@@ -109,14 +109,14 @@ test('a discussion asks to entrust projects to an agent; the owner unticks one a
   await owner.call('turns.start', { threadId: worker, prompt: 'Prepare the release' });
   await waitFor(() => h.core.journal.listTurns(worker).some(t => t.status === 'done'));
 
-  const listed = await run(['settings', 'agent', 'projects', '--agent', 'ada'], worker);
-  expect(listed.out).toContain('agent: Ada');
+  const listed = await run(['settings', 'bot', 'projects', '--bot', 'ada'], worker);
+  expect(listed.out).toContain('bot: Ada');
   expect(listed.out).toContain('projects []');
   expect(listed.out).toContain('Notes');
   // A discussion is no agent's conversation: it names the agent.
-  expect((await run(['settings', 'agent'], worker)).err).toContain("this thread is no agent's conversation; name one: Ada");
+  expect((await run(['settings', 'bot'], worker)).err).toContain("this thread is no bot's conversation; name one: Ada");
 
-  const asked = await run(['settings', 'agent', 'request', 'projects', '+Notes', '+Other', '--agent', 'Ada', '--why', 'Ada should watch the release projects.'], worker);
+  const asked = await run(['settings', 'bot', 'request', 'projects', '+Notes', '+Other', '--bot', 'Ada', '--why', 'Ada should watch the release projects.'], worker);
   expect(asked.code).toBe(0);
   expect(asked.out).toContain("change: Ada's projects [] ->");
   const [card] = cards(worker);
@@ -143,9 +143,9 @@ test("an agent asks about its own settings from its thread; a change from its se
   const heard = (text: string) => (prompts.get(self) ?? []).some(p => p.includes(text));
 
   // Its own thread names no agent; its context block says how to ask.
-  expect(prompts.get(self)![0]).toContain('boite settings agent request <key> <value> --why <reason>');
-  expect((await run(['settings', 'agent', 'request', 'dailyBudget', '2', '--why', 'Releases cost me two dollars.'], self)).code).toBe(0);
-  expect((await run(['settings', 'agent', 'request', 'effort', 'high', '--why', 'Reviews need more thought.'], self)).code).toBe(0);
+  expect(prompts.get(self)![0]).toContain('boite settings bot request <key> <value> --why <reason>');
+  expect((await run(['settings', 'bot', 'request', 'dailyBudget', '2', '--why', 'Releases cost me two dollars.'], self)).code).toBe(0);
+  expect((await run(['settings', 'bot', 'request', 'effort', 'high', '--why', 'Reviews need more thought.'], self)).code).toBe(0);
   expect((await run(['settings', 'agent', 'request', 'model', 'gpt-nothing', '--why', 'Try it.'], self)).err).toContain('the provider does not offer this model');
   const [budget, effort] = cards(self);
   expect(budget!.agentSetting).toMatchObject({ key: 'dailyBudget', previous: null, value: 2 });

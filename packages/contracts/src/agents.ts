@@ -208,7 +208,7 @@ export interface AgentsRpcMethods {
   'agents.runtime.get': { params: { agentId: string }; result: AgentRuntimeConfig };
   'agents.runtime.configure': { params: { agentId: string; expectedRevision: number; config: AgentRuntimeConfig }; result: AgentProfile };
   'agents.accounts.set': { params: { grants: AgentAccountGrant[] }; result: AgentAccountGrant[] };
-  /** `threadId`: an agent reads its own brain from its thread (`boite agent memory`). */
+  /** `threadId`: an agent reads its own brain from its thread (`boite bot memory`). */
   'agents.brain.get': { params: { agentId: string; threadId?: string }; result: AgentBrain };
   'agents.brain.save': { params: { agentId: string; expectedRevision: string; instructions: string; memory: string }; result: AgentBrain };
   /**
@@ -217,7 +217,7 @@ export interface AgentsRpcMethods {
    * holds files refuses the whole change before anything moves. Owner only.
    */
   'agents.brain.root': { params: { path: string | null }; result: AgentBrainRoot };
-  /** Adds a line to the agent's MEMORY.md, from its own thread (`boite agent remember`) or the owner. */
+  /** Adds a line to the agent's MEMORY.md, from its own thread (`boite bot remember`) or the owner. */
   'agents.memory.note': { params: { threadId?: string; agentId?: string; text: string }; result: AgentBrain };
   'agents.routine.save': { params: AgentSave<AgentRoutine> & { threadId?: string }; result: AgentRoutine };
   'agents.routine.remove': { params: { routineId: string; threadId?: string }; result: { removed: true } };
@@ -234,7 +234,7 @@ export interface AgentsRpcMethods {
   'agents.entrust': { params: { threadId: string; agentId: string | null; objective?: string }; result: AgentEntrustment | null };
   /**
    * An agent's settings a card may propose a change to, with their values and
-   * choices (`boite settings agent`). Any thread reads them; a persistent
+   * choices (`boite settings bot`). Any thread reads them; a persistent
    * agent's thread reads its own without naming it.
    */
   'agents.settings.read': { params: AgentSettingsReadParams; result: AgentSettingsReading };

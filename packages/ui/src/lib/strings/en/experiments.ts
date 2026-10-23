@@ -33,8 +33,8 @@ export const strings = {
       hint: 'A clock beside the context meter counting down how long the provider keeps the conversation cached'
     },
     residentAgents: {
-      title: 'Agents',
-      hint: 'Resident agents with their own brain, missions and routines, from the sidebar. Agents you already made keep running while this is off'
+      title: 'Bots',
+      hint: 'Bots: persistent agents with their own brain, memory and routines, from the sidebar. Bots you already made keep running while this is off'
     },
     edgeScrollbars: {
       title: 'Edge scrollbars',

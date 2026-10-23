@@ -123,6 +123,8 @@ and assertions when making the suite faster.
 - [Restart handoff](docs/restart-handoff.md): the 30 second wait before an update
   stops a turn, and how the next core resumes it.
 - [Workflows](docs/workflows.md): JSON plans of delegated steps and their graph.
+- [Bots](docs/bots.md): Boite's persistent agents, each a thread with a name,
+  memory, routines and a desk, their `boite bot` commands and their guide.
 - [Model switching](docs/model-switching.md) and [context](docs/context.md):
   session reuse, queued turns and compaction.
 - [Phone](docs/phone.md), [Android app](docs/android.md) and [server](docs/server.md):

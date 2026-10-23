@@ -222,7 +222,7 @@ export class ThreadMove {
   private check(thread: ThreadSummary, projectId: ProjectId, stopBackground: boolean | undefined, phase: Phase): Project {
     const threadId = thread.id;
     if (thread.agentSessionId || thread.projectId === null) {
-      throw refused('a persistent agent\'s thread stays its own and cannot move to a project', { threadId, field: 'threadId', expected: 'a conversation thread' });
+      throw refused('a bot\'s thread stays its own and cannot move to a project', { threadId, field: 'threadId', expected: 'a conversation thread' });
     }
     if (thread.parentThreadId) {
       throw refused('a sub-thread moves with its parent; move the parent thread instead', {

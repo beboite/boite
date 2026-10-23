@@ -135,7 +135,7 @@ test('an agent holds at most 50 routines with short names and prompts, and its c
   expect(h.core.workforce.records.list('routine')).toHaveLength(AGENT_ROUTINES_MAX);
   const block = agentContext(h.core, current()).text;
   const section = block.slice(block.indexOf('Your routines:'), block.indexOf('\n\n', block.indexOf('Your routines:')));
-  const more = section.match(/\n(\d+) more: boite agent routines$/);
+  const more = section.match(/\n(\d+) more: boite bot routines$/);
   expect(more).not.toBeNull();
   expect(section.length - more![0].length).toBeLessThanOrEqual('Your routines:\n'.length + ROUTINES_TEXT_MAX);
   expect(section.split('\n').filter(line => line.startsWith('- ')).length + Number(more![1])).toBe(AGENT_ROUTINES_MAX);

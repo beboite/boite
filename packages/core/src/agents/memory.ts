@@ -39,7 +39,7 @@ type Pass = NonNullable<AgentStatus['memory']>;
 export const MEMORY_PASS_MAX_MS = 10 * 60_000;
 const ASKED_MAX = 6_000;
 const ANSWERED_MAX = 8_000;
-/** What one `boite agent remember` line may hold. */
+/** What one `boite bot remember` line may hold. */
 export const NOTE_MAX = 1_000;
 /** A rewrite that keeps less than this share of a file past `SHRINK_FLOOR` characters is refused as a loss, not a summary. */
 const SHRINK_KEEP = 0.3;
@@ -60,7 +60,7 @@ function cut(text: string, max: number, fromEnd = false): string {
 
 export function memoryPrompt(agent: Pick<AgentProfile, 'name'>, memory: string, asked: string, answered: string, today: string): string {
   return [
-    `You keep the long-term memory of ${agent.name}, a persistent agent who works for the user. You are not ${agent.name} and you do not continue its work: you only maintain its MEMORY.md, the notes it reads at the start of every conversation.`,
+    `You keep the long-term memory of ${agent.name}, a bot (a persistent agent) who works for the user. You are not ${agent.name} and you do not continue its work: you only maintain its MEMORY.md, the notes it reads at the start of every conversation.`,
     `Rewrite MEMORY.md from the exchange below so the next conversation starts knowing what matters:
 - keep durable facts: who the user is, their preferences and corrections, the people, accounts and projects they named and where each stands, decisions taken, promises and follow-ups still open, each with the date it was learned (YYYY-MM-DD);
 - correct or remove lines this exchange made wrong or finished, and merge duplicates;
@@ -245,7 +245,7 @@ export class MemoryKeeper {
   }
 
   /**
-   * `boite agent remember`: a dated line at the end of MEMORY.md. Refused
+   * `boite bot remember`: a dated line at the end of MEMORY.md. Refused
    * once the file would pass `AGENT_MEMORY_MAX`, so nothing is written that a
    * turn would not read.
    */

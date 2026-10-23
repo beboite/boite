@@ -293,7 +293,7 @@ each wake is its next turn, and that turn's answer goes to its parent as a
 result. Its watches end when it is stopped (its own Stop, `boite delegate
 stop`, its turn failing) and when its parent stops, is archived or is
 removed. Workflow steps and goal reviewers cannot watch: their run or their
-goal owns the work. A persistent agent's thread watches like a conversation.
+goal owns the work. A bot's thread watches like a conversation.
 At most 10 PRs per conversation.
 
 ## How an agent finds the core
@@ -342,10 +342,23 @@ and `thread new` need no `--thread` from a terminal. There they use the owner
 methods: `thread send` is the owner's own prompt, queued behind a running turn,
 and `thread new` copies the agent of `--thread`, else of the project's most
 recent thread (`--model` replaces the model). Inside the thread of
-a [persistent agent](agents.md#projects-entrusted-to-an-agent) the same words
-reach the threads of the projects the owner entrusted to it, through
-`resident.*`, and its messages reach them as that agent's letters, never as the
+a [bot](bots.md#projects-entrusted-to-a-bot) the same words
+reach the threads of the projects the owner entrusted to it and the threads
+it started in any project, through `resident.*`, and its messages reach them as that bot's letters, never as the
 user's. Deleting a thread and deciding a tool permission stay the owner's.
+
+`boite threads` (or `boite threads list`) is one listing of the threads the
+caller may see, with `--project <p>`, `--archived` and the machine of each:
+the owner sees every top-level thread of this core, a bot the threads of its
+projects then the rest of its desk (`desk=started|entrusted|followed`), and
+any other thread what coordination lets it reach here and on linked machines
+(open threads only; `--archived` is refused there).
+
+The old spellings still work and print nothing more: `boite agents <x>` is
+`boite threads <x>`, `boite agent <x>` is `boite bot <x>`, `boite settings
+agent` is `boite settings bot` and `--agent <name>` is `--bot <name>`. Bots'
+brains and the user's notes name them; `boite help` shows only the new ones
+(`canonicalCommand` in `cli-args.ts`).
 
 ## Commands
 
@@ -355,14 +368,14 @@ boite thread move <project>      move this thread to another project (name, id o
                                  folder) when this turn ends
 boite thread new <project> <brief> [--worktree] [--title <title>] [context flags]
                                  start a thread in a project; its first answer
-                                 comes back as an agent message
+                                 comes back as a message
 boite projects                   the projects added to Boite
 boite projects add <folder> [--name <name>]
                                  add an existing folder as a project
 boite projects archive|unarchive|remove <project>
                                  the owner's; removing leaves the folder on disk
-boite threads [--project <p>] [--archived]
-                                 every thread as the owner, an agent's projects'
+boite threads [list] [--project <p>] [--archived]
+                                 the threads you may see and their machine
 boite thread show <id>           state, pending questions and permissions, last answer
 boite thread send <id> <text>    the owner's prompt, or the agent's letter
 boite thread done <id>           put a thread that is not at work in Done
@@ -387,21 +400,21 @@ boite status                     git status: branch, upstream, one row per chang
 boite ask <question> [option ...] [--multiple] [--open <url>]
 boite task list|add <text>|start <id>|done <id>|remove <id>|clear
 boite todo list|add <text>|claim <id>
-boite agents list|inbox
-boite agents find <words>
-boite agents read <agent> [--last <n>] [--before <ms>]
-boite agents send <agent> <text> [--wait] [--timeout <s>]
-boite agents reply <message-id> <text> [--wait] [--timeout <s>]
-boite agents log <agent>
-boite agents wait [agent] [--timeout <s>]
-boite agents contacts
-boite agents ask <contact> <text> [--wait] [--timeout <s>]
-boite agent memory
-boite agent remember <fact>
-boite agent routines
-boite agent schedule <json>
-boite agent unschedule <routine-id>
-boite agent watch|unwatch <thread-id>
+boite threads inbox
+boite threads find <words>
+boite threads read <thread> [--last <n>] [--before <ms>]
+boite threads send <thread> <text> [--wait] [--timeout <s>]
+boite threads reply <message-id> <text> [--wait] [--timeout <s>]
+boite threads log <thread>
+boite threads wait [thread] [--timeout <s>]
+boite threads contacts
+boite threads ask <contact> <text> [--wait] [--timeout <s>]
+boite bot memory
+boite bot remember <fact>
+boite bot routines
+boite bot schedule <json>
+boite bot unschedule <routine-id>
+boite bot watch|unwatch <thread-id>
 boite delegate models|profiles|list
 boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [context flags]
 boite delegate send <thread-id> <text>
@@ -427,8 +440,7 @@ Coordination commands are documented in [coordination](coordination.md#agent-com
 child controls in [delegation](delegation.md#agent-commands), and plan/output
 commands in [workflows](workflows.md#commands).
 
-Persistent agents with the `routines` tool enabled can schedule work from their
-direct conversation. `agent schedule` accepts `name`, `prompt`, and `schedule`,
+Bots schedule work from their own conversation. `bot schedule` accepts `name`, `prompt`, and `schedule`,
 for example `{"kind":"daily","time":"09:00","timezone":"Europe/Paris"}`.
 Other schedules use `{"kind":"interval","everyMinutes":60}` or
 `{"kind":"once","at":1790240400000}` with a Unix timestamp in milliseconds.
@@ -465,7 +477,7 @@ project folder or, with `--worktree`, on a new `boite/` branch of its own.
 The title is `--title` or the brief's first line. The CLI prints its thread ID, title,
 project, working directory, provider/model
 and coordination address. Its first answer returns automatically; later steering
-uses `agents send`.
+uses `threads send`.
 
 The agent there reads a note before the brief: which thread's agent started
 it, that the user did not type it, and that it grants no approval the user
@@ -473,7 +485,7 @@ did not give. When that first turn ends, its final answer, or its failure,
 goes back to the starter as an [agent coordination](coordination.md) message
 from the new thread, capped at 4,000 characters, and wakes an idle starter. Later turns
 report nothing by themselves; the two agents
-use `agents send` and `agents reply` like any pair of conversations. Both
+use `threads send` and `threads reply` like any pair of conversations. Both
 timelines show a line linking the other thread: "Started by the agent of ..."
 above the first prompt, "The agent started ..." in the starter.
 
@@ -482,9 +494,9 @@ Pause refuses, and a thread restricted to its own project cannot start one
 elsewhere. There is no hourly limit. A thread an agent started cannot start another
 until the user has
 written in it, so agents cannot chain threads on their own. Delegated
-children and workflow steps are refused, and a persistent agent's thread starts
-threads only in the projects entrusted to it, where they land on its
-[desk](agents.md#the-desk). A retry
+children and workflow steps are refused, and a bot's thread starts
+threads in any project, where they land on its [desk](bots.md#the-desk) and
+stay its own to drive. A retry
 with the same `--request-id` returns the thread already started.
 
 `projects` prints one row per project: its id, name and folder, `(this
@@ -503,7 +515,7 @@ Registering a folder gives the agent no file access its process lacked. It
 reaches outside the thread's project, so the Communication settings decide as
 they do for `thread new` elsewhere: Off, Pause and a thread restricted to its
 own project refuse it. There is no hourly limit. A thread an agent started
-adds none until the user has written in it, and delegated children, workflow steps and persistent agents'
+adds none until the user has written in it, and delegated children, workflow steps and bots'
 threads are refused.
 
 `view` publishes one HTML page as an [inline view](chat-files.md#inline-views):
@@ -622,46 +634,46 @@ one value, a provider login (`accounts#provider-claude`) or a device to add
 `opened: the user opened Settings at <page>`; Dismiss sends `dismissed`. The
 MCP tools `boite_settings` and `boite_settings_request` do the same.
 
-`settings agent [key]` reads a persistent agent's settings a card may change:
+`settings bot [key]` reads a bot's settings a card may change:
 `projects` (those entrusted to it), `model`, `effort`, `autoMemory` (the memory
-pass), `subagents` and `dailyBudget` (dollars a day, or `null` for none). It prints the agent's name, each value
-and, for projects, models and efforts, the choices. `--agent <name or id>`
-names the agent; in an agent's own conversation it defaults to that agent.
-`settings agent request <key> <value> --why <text>` draws the card. `projects`
+pass), `subagents` and `dailyBudget` (dollars a day, or `null` for none). It prints the bot's name, each value
+and, for projects, models and efforts, the choices. `--bot <name or id>`
+names the bot; in a bot's own conversation it defaults to that bot.
+`settings bot request <key> <value> --why <text>` draws the card. `projects`
 takes `+name -name` edits or a whole list (`Notes,Other`, or JSON), resolved
 by name or id and stored as ids; the other keys read their value as `settings
-request` does. The refusals are the same, plus an unknown or ambiguous agent
-(the refusal lists them) and a model the agent's policy does not allow.
+request` does. The refusals are the same, plus an unknown or ambiguous bot
+(the refusal lists them) and a model the bot's policy does not allow.
 
-The card names the agent and the change; for projects, each project added or
+The card names the bot and the change; for projects, each project added or
 removed has a tick the owner can clear before Apply. Apply calls
-`agents.settings.apply`, owner only, which writes through the agent's own
-settings checks. Any change to the agent, from the card or from its settings
-page, settles every card it answers; a card about an agent that is archived or
-removed closes unanswered. The asking thread reads `applied: <agent>'s <key>
-is now <value>`, `changed: the user set <agent>'s <key> to <value>, not
-<proposed>` or `refused: <agent>'s <key> stays <value>`, projects by name
+`agents.settings.apply`, owner only, which writes through the bot's own
+settings checks. Any change to the bot, from the card or from its settings
+page, settles every card it answers; a card about a bot that is archived or
+removed closes unanswered. The asking thread reads `applied: <bot>'s <key>
+is now <value>`, `changed: the user set <bot>'s <key> to <value>, not
+<proposed>` or `refused: <bot>'s <key> stays <value>`, projects by name
 (`are` and `stay` for them).
 
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).
 
 [Agent coordination](coordination.md) is on by default for ordinary
-conversations, across projects and linked machines. The owner can turn it off
-or restrict it to one project. `agents find`, `agents read` and the directory
+conversations and bots, across projects and linked machines. The owner can turn it off
+or restrict it to one project. `threads find`, `threads read` and the directory
 reach only those contacts. Replies preserve their message reference and
 authenticated sender identity.
 
-The singular `agent` commands belong to [persistent agents](agents.md), not
-ordinary thread coordination, and work only from an agent's own thread.
-`agent memory` prints MEMORY.md and its path; `agent remember <fact>` adds a
-dated line to it. `agent routines` lists its routines, `agent schedule <json>`
-saves one (`name`, `prompt`, `schedule`, with `id` to edit one and `enabled`),
-`agent unschedule <routine-id>` removes one. `agent watch|unwatch <thread-id>`
-puts a thread of its projects on its desk or takes one off. Use `--json` to
+The `bot` commands belong to [bots](bots.md), not ordinary thread
+coordination, and work only from a bot's own thread. `bot memory` prints
+MEMORY.md and its path; `bot remember <fact>` adds a dated line to it. `bot
+routines` lists its routines, `bot schedule <json>` saves one (`name`,
+`prompt`, `schedule`, with `id` to edit one and `enabled`), `bot unschedule
+<routine-id>` removes one. `bot watch|unwatch <thread-id>` puts a thread of
+its projects on its desk or takes one off. Use `--json` to
 preserve the structured result.
 Pass `--request-id <stable-id>` when retrying a send after a lost response. The
-flag covers `agents send`, `agents reply`, `delegate spawn` and `delegate
+flag covers `threads send`, `threads reply`, `delegate spawn` and `delegate
 send`: a retry with the id of a call that already landed returns that letter
 or child instead of making a second one. Without the flag each call gets a
 fresh id.

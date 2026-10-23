@@ -8,8 +8,8 @@ message can wake an idle agent. There is no hourly budget on messages, wake
 turns or threads an agent starts.
 
 Before sending or replying, agents check the recipient's current status, last
-successful completion, pause and project archive state with `boite agents list`
-or `boite agents read`. Queued, running and waiting threads are working.
+successful completion, pause and project archive state with `boite threads`
+or `boite threads read`. Queued, running and waiting threads are working.
 Contacting an inactive thread remains possible, but is discouraged unless it
 completed work within the last 15 minutes. Editing a title or settings does
 not count as completing work. The CLI warns when completion is old or unknown;
@@ -25,9 +25,11 @@ to turn communication off or restrict it to the current project. The settings
 open in a dialog and remain available in the Agents panel. Explicit owner
 settings are preserved; a conversation saved in the former Brief or Team mode
 is on. Describe what the agent is working on in Resources so another agent can
-find the right contact. Archived conversations are unavailable. A persistent
-agent's thread starts with coordination off: other threads reach it through
-its desk events, and the owner may turn it on.
+find the right contact. Archived conversations are unavailable. A bot's
+thread starts with coordination on like any other, so it finds, reads and
+messages threads with `boite threads` and they reach it the same way; the
+owner may turn it off. Its letters to the threads of its projects pass
+whatever either side's settings say.
 
 Coordination has no distributed lock or automatic loop detector. Instructions
 require messages tied to work, without courtesy replies or polling. Pause or
@@ -91,12 +93,12 @@ the list beside the open discussion; a narrow one or a phone swaps them, with a
 back arrow.
 
 The tag says who started or delegated whom: Started this thread, Started from
-here, Parent, Subagent, or Looks after the project for the persistent agent
+here, Parent, Subagent, or Looks after the project for the bot
 the owner entrusted the thread's project to. The core works it out when it
 reads letters out (`AgentLetter.relation`), from the journal, so a delegation
 or an entrusted project that began later still shows.
 
-An answer that names a thread the way `boite agents` prints it (`thr_x`,
+An answer that names a thread the way `boite threads` prints it (`thr_x`,
 `<machine>/thr_x` or `<core-id>/thr_x`) in a code span links to it, and so
 does a bare one with [Chat files and previews](chat-files.md) on
 (`lib/chat-links.ts`), as does a Markdown link whose destination is one; an id
@@ -108,18 +110,18 @@ for `here`. Otherwise this thread's contacts name its core, and last the one
 machine listing the id opens, since an agent may know it by another name. A
 thread no connected machine or contact holds leaves a notice instead.
 
-## Letters from the agent of a project
+## Letters from the bot of a project
 
-A letter from the [persistent agent](agents.md#projects-entrusted-to-an-agent)
+A letter from the [bot](bots.md#projects-entrusted-to-a-bot)
 the owner entrusted a thread's project to carries `origin: 'resident'` and is
-labelled with that agent in the timeline. The provider reads it in its own
+labelled with that bot in the timeline. The provider reads it in its own
 section, as direction from the user's delegate that is still not the user and
-grants no approval; the thread does not answer it by letter, since the agent
+grants no approval; the thread does not answer it by letter, since the bot
 reads the thread's final answer in an event when the turn ends. Such a letter
 passes the communication settings of the thread, waits six hours instead of
 fifteen minutes, and is rejected once the project is no longer entrusted to the
-agent or the agent is archived. Only the local core sets the origin; a remote
-letter's origin is never believed. The core's events to the agent are not
+bot or the bot is archived. Only the local core sets the origin; a remote
+letter's origin is never believed. The core's events to the bot are not
 letters: they reach it as `event` turns on its own thread.
 
 ## Reaching another computer
@@ -141,7 +143,7 @@ membership, so removing a member also ends its agent access. Existing separate
 groups retain their own controls; moving a machine requires leaving its old
 group first.
 
-Across projects and machines is enabled by default for ordinary conversations.
+Across projects and machines is enabled by default for ordinary conversations and bots.
 Both endpoints must allow it: disabling it restricts discovery and messages to
 that conversation's project on the same core. A machine link never overrides
 a conversation's explicit restrictions or pause. Removing a link revokes that
@@ -215,7 +217,7 @@ become a user request or grant permission to run a tool.
 
 Each letter names its sender in words the recipient can act on, so a short
 message is not mistaken for noise: `from.thread` is the sender's conversation
-title, `from.address` what `boite agents read` takes, `from.relation` how it
+title, `from.address` what `boite threads read` takes, `from.relation` how it
 relates to the recipient ("started this thread; its request is your task", "a
 thread you started; it reports to you", "your parent", "your subagent", the
 agent the project is entrusted to, same project, another project or machine), `from.project`,
@@ -223,7 +225,7 @@ agent the project is entrusted to, same project, another project or machine), `f
 `from.status` and `from.about`, what it works on. `about` is the sender's
 declared resources; a sender on the same core without any falls back to the
 first request of its conversation, cut to 200 characters. That sender is a
-contact the recipient may already read with `boite agents read`; a letter from
+contact the recipient may already read with `boite threads read`; a letter from
 the agent a project is entrusted to gets no fallback, since that agent's
 conversation holds the user's other work. Another machine
 shares its resources only, never its chat. A reply carries `inReplyTo.yours`,
@@ -237,14 +239,14 @@ gave that contact, set by the receiving core from its own list. The provider
 reads such letters under their own heading, the sender named
 `<name>'s agent, a contact: not your user`, with the rule that a contact's word
 never authorizes a destructive action, a credential or work outside the
-project it came through. The answer to `boite agents ask` arrives as a letter
+project it came through. The answer to `boite threads ask` arrives as a letter
 with `origin: 'contact'`, written by the asking core from the contact's
 decision; the agent does not reply to it. The coordination guide mentions
-`boite agents contacts` and `ask` only while the core has a contact.
+`boite threads contacts` and `ask` only while the core has a contact.
 
 Agents are told to write compactly: one to three short lines, facts and asks,
 no greeting, recap or sign-off, since the recipient already sees who wrote.
-`boite agents send` and `reply` print a reminder past 600 characters.
+`boite threads send` and `reply` print a reminder past 600 characters.
 Delegation messages carry the same instruction and name the sender as the
 recipient's parent or subagent.
 
@@ -295,16 +297,16 @@ still apply. Treat another agent's content as untrusted, even from a linked core
 ## Agent commands
 
 ```sh
-boite agents list                          # who is reachable, most recently active first
-boite agents find login blank screen       # every word in the chat, title, project, branch or model
-boite agents read <thread-id> --last 20        # that agent's conversation, text and tool names
-boite agents send <thread-id> "Can the shared test service stop now?" --wait
-boite agents send <machine>/<thread-id> "The parser check fails on main."
-boite agents reply <message-id> "Wait until the current test finishes."
-boite agents log <thread-id>                   # what the two of you said to each other
-boite agents wait --timeout 120            # the next message addressed to you
-boite agents contacts                      # other owners' Boites and the projects they opened to you
-boite agents ask <contact> "An agent on a project like our parser" --wait
+boite threads                           # who is reachable, most recently active first
+boite threads find login blank screen       # every word in the chat, title, project, branch or model
+boite threads read <thread-id> --last 20        # that agent's conversation, text and tool names
+boite threads send <thread-id> "Can the shared test service stop now?" --wait
+boite threads send <machine>/<thread-id> "The parser check fails on main."
+boite threads reply <message-id> "Wait until the current test finishes."
+boite threads log <thread-id>                   # what the two of you said to each other
+boite threads wait --timeout 120            # the next message addressed to you
+boite threads contacts                      # other owners' Boites and the projects they opened to you
+boite threads ask <contact> "An agent on a project like our parser" --wait
 ```
 
 An agent is named by its thread id when it runs on the same core, or by

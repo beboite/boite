@@ -485,7 +485,7 @@ export class ThreadStore {
   async remove(threadId: ThreadId): Promise<void> {
     const root = this.require(threadId);
     if (root.agentSessionId || root.parentThreadId) {
-      throw refused('threadId: delete a conversation from its parent; a persistent agent\'s thread goes when the agent is archived', { threadId, field: 'threadId', expected: 'a top-level conversation without agentSessionId' });
+      throw refused('threadId: delete a conversation from its parent; a bot\'s thread goes when the bot is archived', { threadId, field: 'threadId', expected: 'a top-level conversation without agentSessionId' });
     }
     if (this.removing.has(threadId)) throw refused('threadId: this conversation is already being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
     const family = this.core.journal.listThreads().filter(t => t.id === threadId || t.parentThreadId === threadId);

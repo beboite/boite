@@ -108,7 +108,7 @@ review and done. A click opens the board in the project's last conversation.
 These are this core's cards and stay on it: the contact sees none of them
 until shared projects sync their board.
 
-An agent asks a contact for help with `boite agents ask <contact> "<text>"`
+An agent asks a contact for help with `boite threads ask <contact> "<text>"`
 (`collaboration.ask`): "an agent on a project like X". The request carries the
 agent's git remote when its checkout has one. On the contact's side it waits
 in the Contacts page: the owner accepts by opening one project, or refuses with

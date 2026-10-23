@@ -62,7 +62,7 @@ test('agents communicate by default, respect explicit restrictions and cannot ch
   } finally { agent.close(); }
 });
 
-test('default discovery excludes archived threads and persistent agent sessions', async () => {
+test('default discovery excludes archived threads and reaches a bot\'s thread like any other', async () => {
   const { h, owner, a, b } = await setup();
   h.core.threads.archive(b, true);
   const projectId = h.core.threads.require(b).projectId!;
@@ -71,9 +71,14 @@ test('default discovery excludes archived threads and persistent agent sessions'
   expect(h.core.journal.getProject(projectId)?.archived).toBe(true);
   const resident = (await echoThread(h, owner, 'Persistent session')).threadId;
   h.core.journal.putThread({ ...h.core.threads.require(resident), projectId: null, agentSessionId: 'resident-test' });
-  expect((await h.core.coordination.directory(a)).agents).toEqual([]);
-  expect(h.core.coordination.get(resident).config.mode).toBe('off');
-  expect(await thrown(send(h, a, dest(h, resident)))).toThrow('across projects');
+  // A bot's thread starts on, across projects, so it and the threads find and message each other.
+  expect(h.core.coordination.get(resident).config).toEqual({ mode: 'brief', resources: '', remote: true, paused: false });
+  expect((await h.core.coordination.directory(a)).agents.map(contact => contact.threadId)).toEqual([resident]);
+  expect((await h.core.coordination.directory(resident)).agents.map(contact => contact.threadId)).toEqual([a]);
+  expect((await send(h, a, dest(h, resident))).status).not.toBe('rejected');
+  expect((await send(h, resident, dest(h, a))).status).not.toBe('rejected');
+  // The owner may still turn it off.
+  h.core.coordination.configure(resident, { ...brief, mode: 'off' });
   expect(await thrown(send(h, resident, dest(h, a)))).toThrow('disabled');
 });
 
@@ -361,7 +366,8 @@ test('restart pauses pending work while existing idle threads stay reachable and
   try {
     expect(restartConfigIds).toEqual([a, b, ...recovering, archived, resident, ...pending.map(item => item.threadId)]);
     expect(reopened.coordination.config(archived).paused).toBe(true);
-    expect(reopened.coordination.config(resident)).toEqual({ mode: 'off', resources: '', remote: false, paused: false });
+    // A bot's waiting thread starts on and pauses on restart like any thread with pending work.
+    expect(reopened.coordination.config(resident)).toEqual({ mode: 'brief', resources: '', remote: true, paused: true });
     expect(reopened.journal.getSetting(`coordination:${deleted}`)).toBeUndefined();
     for (const item of pending) {
       expect(reopened.coordination.get(item.threadId).config.paused).toBe(true);

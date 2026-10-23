@@ -52,7 +52,7 @@ export class AgentEntrustments {
     const thread = this.core.journal.getThread(threadId);
     if (!thread || thread.archived) throw refused('threadId: expected an existing, unarchived thread');
     if (thread.parentThreadId) throw refused('threadId: expected a top-level thread, not a delegated child');
-    if (thread.agentSessionId) throw refused('threadId: expected an ordinary thread, not a persistent agent session');
+    if (thread.agentSessionId) throw refused('threadId: expected an ordinary thread, not a bot\'s thread');
     if (thread.projectId === null) throw refused('threadId: expected a thread that belongs to a project');
     const agentId = text(params.agentId, 'agentId', 160);
     if (this.profile(agentId)?.status !== 'active') throw refused('agentId: expected an active agent');

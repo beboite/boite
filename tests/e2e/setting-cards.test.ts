@@ -39,7 +39,7 @@ test('an agent reads the app\'s language and experiments, and its card turns an 
   // What \`boite settings\` reads: French, the experiment off, under the name the French page gives it.
   const read = await page.evaluate(`window.__boiteTest.workspace.active.client.call('agent.settings', { threadId: ${JSON.stringify(thread)} })`) as { app: { language: string }; settings: { key: string; value: unknown; label?: string }[] };
   expect(read.app.language).toBe('fr');
-  expect(read.settings.find(reading => reading.key === 'experiment.resident-agents')).toMatchObject({ value: false, label: 'Agents' });
+  expect(read.settings.find(reading => reading.key === 'experiment.resident-agents')).toMatchObject({ value: false, label: 'Bots' });
   expect(read.settings.find(reading => reading.key === 'experiments')).toBeUndefined();
 
   await page.evaluate(`window.__boiteTest.workspace.active.client.call('turns.start', { threadId: ${JSON.stringify(thread)}, prompt: 'show me the agents [settings-experiment]' })`);

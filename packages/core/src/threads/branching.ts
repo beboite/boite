@@ -180,7 +180,7 @@ export class ThreadBranching {
   async fork(threadId: ThreadId, messageId: MessageId, worktree: boolean): Promise<ThreadSummary> {
     const source = this.threads.require(threadId);
     if (source.agentSessionId || source.projectId === null) {
-      throw refused('a persistent agent\'s thread has no project to fork into', { threadId, field: 'threadId', expected: 'a conversation thread' });
+      throw refused('a bot\'s thread has no project to fork into', { threadId, field: 'threadId', expected: 'a conversation thread' });
     }
     if (source.incognito) {
       throw refused('an incognito conversation cannot be forked: a copy would outlive it', { threadId, field: 'threadId', expected: 'a conversation that is not incognito' });

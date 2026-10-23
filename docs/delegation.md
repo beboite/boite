@@ -26,7 +26,7 @@ permissions, process trace and usage. It inherits the parent's project,
 checkout and permission mode at creation. Profiles can use any installed,
 runnable provider and account. Native provider subagents are separate from
 these Boite subagents, and appear in their own section of the tab. The global
-Persistent agents page holds agents with their own identity, memory and
+Bots page holds bots: agents with their own identity, memory and
 routines, each in a thread of its own; it is not the list of children of a
 conversation. Enable it in Settings >
 Experiments to reveal its bottom-left launcher, which opens a dedicated
@@ -152,7 +152,7 @@ provider session carries a short guide: the commands, `--model`, `--effort` and
 and the rule that results come back as messages. Later turns carry it again
 when the request is about handing work out (delegation, subagents, parallel
 work, a workflow) or the team is paused. A child receives one line naming its
-parent and how to report a blocker. Persistent agents keep their own setting, which starts off. Only the
+parent and how to report a blocker. Bots keep their own setting, which starts off. Only the
 owner can configure profiles or turn delegation off; the parent agent resumes
 the pauses listed under [Stop, pause and resume](#stop-pause-and-resume). A
 paired phone can inspect and stop an enabled team.

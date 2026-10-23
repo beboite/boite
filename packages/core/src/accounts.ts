@@ -168,7 +168,7 @@ export class AccountStore {
         const config = this.core.workforce.resident.config(agent.id);
         return agent.selection.accountId === accountId || [...config.allowedRoutes, ...config.subagents.profiles].some(route => route.accountId === accountId);
       })) {
-        throw refused('this account is used by a persistent agent; choose another account on its profile first', { accountId });
+        throw refused('this account is used by a bot; choose another account in its settings first', { accountId });
       }
     };
     // A conversation that only names the account keeps it by name and asks for

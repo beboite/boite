@@ -18,7 +18,7 @@
 - [Agent coordination](coordination.md): messages between agents, machine links and limits.
 - [Groups](groups.md): machines that connect to each other, their phones, Tailscale addresses and trust.
 - [Contacts](contacts.md): another owner's Boite linked over Tailscale, the projects each side opens and requests between their agents.
-- [Persistent agents](agents.md): an agent as a thread with an identity, its wakes, quiet turns, context block, memory, desk, routines, budget, status and migration.
+- [Bots](bots.md): Boite's persistent agents, a thread with an identity: the CLI, the guide, its wakes, quiet turns, context block, memory, desk, routines, budget, status and migration.
 - [Subagents](delegation.md): child conversations on by default, model profiles, live steering and usage.
 - [Workflows](workflows.md): JSON plans of delegated steps, fan-out, conditions, templates and the graph.
 - [Context modes](context-modes.md): starting a conversation without the user's instruction files, guides, MCP servers or hooks, with rules of its own.
@@ -30,7 +30,7 @@
 - [The agent's browser](browser.md): the headless browser an agent drives on its machine, watched from any device.
 - [Devices](devices.md): iOS Simulators and Android emulators the agent opens in the Device panel.
 - [Chat files and previews](chat-files.md): files an agent publishes, file links, inline previews, and the pages an agent draws in its answer.
-- [Experiments](experiments.md): browser comments, resident agents, edge scrollbars, load on press and other unfinished switches.
+- [Experiments](experiments.md): browser comments, bots, edge scrollbars, load on press and other unfinished switches.
 - [The thread terminal](terminal.md): the shell under the chat, and sign-ins that need one.
 - [The project board](board.md): the project's todos in four columns in the terminal's drawer, a card started as a `/goal2`.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.

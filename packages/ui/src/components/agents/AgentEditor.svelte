@@ -33,8 +33,11 @@
   } = $props();
   const initial = untrack(() => ({ record }));
   const profile = initial.record;
-  /** A new agent starts on the first available account of the machine it will run on, with that account's default model. */
-  function defaultSelection(on: Store, permissionMode: ExecutionSelection['permissionMode'] = 'default'): ExecutionSelection {
+  /**
+   * A new bot starts on the first available account of the machine it will run on, with that account's default model,
+   * free to act: full access, the mode a thread calls Auto. The owner may still pick another.
+   */
+  function defaultSelection(on: Store, permissionMode: ExecutionSelection['permissionMode'] = 'bypassPermissions'): ExecutionSelection {
     const account = on.accounts.find(a => on.providerOf(a.providerId)?.available);
     const models = account ? on.modelsOf(account.providerId, account.id) : [];
     return { providerId: account?.providerId ?? '', accountId: account?.id ?? '', model: models.find(m => m.default)?.id ?? models[0]?.id ?? null, effort: null, permissionMode };

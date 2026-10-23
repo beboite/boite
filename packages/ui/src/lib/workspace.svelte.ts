@@ -672,7 +672,7 @@ export class Workspace {
   }
 
   /**
-   * A thread an answer names the way `boite agents` prints it: `thr_x`,
+   * A thread an answer names the way `boite threads` prints it: `thr_x`,
    * `<machine>/thr_x` or `<core-id>/thr_x`, read in `from` on `owner`.
    * A connected machine that lists the thread opens it: the owner's when no
    * machine is named, the one named, only the owner for `here`. Otherwise the

@@ -49,7 +49,7 @@ test('refuses threads and agents that cannot be entrusted', async () => {
   h.core.journal.putThread({ ...thread, id: 'loose', projectId: null });
   for (const [params, error] of [
     [{ threadId: 'child', agentId: agent.id }, 'delegated child'],
-    [{ threadId: 'session', agentId: agent.id }, 'persistent agent session'],
+    [{ threadId: 'session', agentId: agent.id }, "not a bot's thread"],
     [{ threadId: 'archived', agentId: agent.id }, 'unarchived'],
     [{ threadId: 'missing', agentId: agent.id }, 'existing'],
     [{ threadId: 'loose', agentId: agent.id }, 'project'],

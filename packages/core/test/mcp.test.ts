@@ -129,10 +129,10 @@ test('actual CLI stdio negotiates, lists schemas, reads scoped tools and rejects
     expect(projects.result.structuredContent.result.items).toHaveLength(1);
     const settings = await transport.rpc('tools/call', { name: 'boite_settings', arguments: {} });
     expect(settings.result.structuredContent.result.settings.find((reading: any) => reading.key === 'agentCpuCapPercent')).toMatchObject({ value: 75, page: 'resources' });
-    // A thread that is no agent's conversation names the agent; the refusal lists them.
+    // A thread that is no bot's conversation names the bot; the refusal lists them.
     const agentSettings = await transport.rpc('tools/call', { name: 'boite_agent_settings', arguments: {} });
     expect(agentSettings.result.isError).toBe(true);
-    expect(JSON.stringify(agentSettings.result.structuredContent)).toContain("this thread is no agent's conversation");
+    expect(JSON.stringify(agentSettings.result.structuredContent)).toContain("this thread is no bot's conversation");
     const settled = await transport.rpc('tools/call', { name: 'boite_delegate_wait', arguments: { timeoutMs: 0 } });
     expect(settled.result.structuredContent.result.state).toBe('settled');
     for (const [name, args] of [
