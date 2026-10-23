@@ -108,9 +108,9 @@ export const strings = {
     moveShow: 'Show what the agent was told',
     moveHide: 'Hide what the agent was told',
     wake: { routine: 'Routine', event: 'Woken up' },
-    wakeShow: 'Show what the agent read',
-    wakeHide: 'Hide what the agent read',
-    /** A persistent agent's finished turn: its steps folded above its answer, or a wake that had nothing for the user. */
+    wakeShow: 'Show what the bot read',
+    wakeHide: 'Hide what the bot read',
+    /** A bot's finished turn: its steps folded above its answer, or a wake that had nothing for the user. */
     fold: {
       worked: 'Worked {time}', workedBare: 'Worked',
       stepOne: '1 step', stepMany: '{count} steps',

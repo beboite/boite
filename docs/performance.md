@@ -708,7 +708,7 @@ them in its cache. A link that asks to save data, or reads as 3G or slower,
 skips that prefetch and fetches each one when it opens (`lib/prefetch.ts`). The
 tour is prefetched only for a device that has not seen it.
 
-Settings, the Agents page with its first snapshot (behind its experiment) and,
+Settings, the Bots page with its first snapshot (behind its experiment) and,
 for the owner, the terminal's xterm modules are fetched in the same idle pass.
 The Agents view lives as long as its machine's store: a return visit draws the
 last snapshot at once and refreshes it, and nothing follows `agents.changed`

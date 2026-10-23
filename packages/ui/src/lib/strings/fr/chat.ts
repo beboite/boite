@@ -94,8 +94,8 @@ export const fr: Translation = {
     moveShow: "Voir ce qui a été dit à l'agent",
     moveHide: "Masquer ce qui a été dit à l'agent",
     wake: { routine: 'Routine', event: 'Réveil' },
-    wakeShow: "Voir ce que l'agent a lu",
-    wakeHide: "Masquer ce que l'agent a lu",
+    wakeShow: "Voir ce que le bot a lu",
+    wakeHide: "Masquer ce que le bot a lu",
     fold: {
       worked: 'A travaillé {time}', workedBare: 'A travaillé',
       stepOne: '1 étape', stepMany: '{count} étapes',

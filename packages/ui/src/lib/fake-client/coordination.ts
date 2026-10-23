@@ -43,8 +43,9 @@ export function migratePeer(ctx: FakeContext, coreId: string): void {
   ctx.peers.delete(coreId);
 }
 
+/** A bot's thread starts on like any other, as on the real core (`coordination.ts`). */
 export function coordinationConfig(ctx: FakeContext, threadId: ThreadId): CoordinationConfig {
-  if (ctx.thread(threadId).agentSessionId) return { ...defaultCoordinationConfig(), mode: 'off', remote: false };
+  ctx.thread(threadId);
   return ctx.coordination.get(threadId) ?? defaultCoordinationConfig();
 }
 
@@ -54,7 +55,7 @@ function starterOf(thread: Thread): ThreadId | undefined {
   return undefined;
 }
 
-/** Whether `peer` is the session of an active persistent agent the owner entrusted `self`'s project to. */
+/** Whether `peer` is the session of an active bot the owner entrusted `self`'s project to. */
 function residentOver(ctx: FakeContext, peer: Thread, self: Thread): boolean {
   if (!peer.agentSessionId || self.agentSessionId || self.projectId === null) return false;
   const snapshot = ctx.agents.snapshot();
@@ -164,7 +165,7 @@ export function coordinationMethods(ctx: FakeContext) {
     'collaboration.configure': async (params) => {
       const { threadId, config } = params;
       const thread = ctx.thread(threadId);
-      if (thread.agentSessionId || thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coordination requires an unarchived ordinary thread' });
+      if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coordination requires an unarchived thread' });
       if (!['off', 'brief', 'team'].includes(config.mode) || typeof config.resources !== 'string' || config.resources.length > 500 || typeof config.remote !== 'boolean' || typeof config.paused !== 'boolean') {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'config: expected mode, resources, remote and paused' });
       }
@@ -265,7 +266,7 @@ export function coordinationMethods(ctx: FakeContext) {
     },
     'collaboration.read': async (params) => {
       const found = reachable(ctx, params.threadId).find(entry => entry.contact.coreId === params.target.coreId && entry.contact.threadId === params.target.threadId);
-      if (!found) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `target: ${params.target.threadId} is not a contact this thread may reach; see boite agents list` });
+      if (!found) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `target: ${params.target.threadId} is not a contact this thread may reach; see boite threads` });
       if (found.core !== ctx && !reads(found.core, ctx.identity.coreId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents on this machine are not allowed to read conversations; enable their access in Machines on the destination' });
       const limit = params.limit ?? 30;
       const entries = chatOf(found.core.thread(found.contact.threadId)).filter(entry => (params.before === undefined || entry.at < params.before) && (entry.text.length > 0 || entry.tools.length > 0));

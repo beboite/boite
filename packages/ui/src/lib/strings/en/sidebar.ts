@@ -18,11 +18,11 @@ export const strings = {
     laterProjectsHint: 'Conversations you archived to pick up later, in projects with nothing else open.',
     idleProjectsHint: 'Nothing to do here: no open or set-aside conversation. Choose one to start a thread.',
     groupingOptions: 'Display options',
-    /** The sidebar's top switch between the thread list and the Agents page. */
-    surface: 'Threads or agents',
+    /** The sidebar's top switch between the thread list and the Bots page. */
+    surface: 'Threads or bots',
     threads: 'Threads',
-    agents: 'Agents',
-    /** The count beside Threads or Agents in that switch: what works now, and whether something there needs the user. */
+    agents: 'Bots',
+    /** The count beside Threads or Bots in that switch: what works now, and whether something there needs the user. */
     surfaceWorking: '{count} at work',
     surfaceWaiting: '{count} at work, something needs you',
     surfaceSubagentsOne: 'and 1 subagent',

@@ -456,7 +456,7 @@ Manual archive and deletion keep their explicit clearing behavior.
 
 `threads.move { threadId, projectId, stopBackground? }` moves a root and its
 children to another project on the same machine. Desktop drag and the desktop
-or phone menu call the same RPC. Sub-threads and resident agent sessions cannot
+or phone menu call the same RPC. Sub-threads and bot sessions cannot
 move independently. Unknown, unchanged, archived or missing targets are refused.
 A target project that was archived becomes visible again.
 

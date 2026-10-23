@@ -68,7 +68,7 @@ test('a user message on an agent thread is an ordinary turn: queued, steered, st
 
 test('an agent thread is never deleted; archiving the agent archives it and the agent comes back with it', async () => {
   const { agent, threadId } = await makeAgent(h, client);
-  expect(await thrown(client.call('threads.remove', { threadId }))).toThrow('persistent agent');
+  expect(await thrown(client.call('threads.remove', { threadId }))).toThrow("a bot's thread goes when the bot is archived");
   const archived = await client.call('agents.profile.save', { id: agent.id, expectedRevision: agent.revision, value: { ...agent, status: 'archived' } });
   expect(h.core.threads.require(threadId).archived).toBe(true);
   expect((await client.call('agents.snapshot', {})).status[0]!.state).toBe('archived');
@@ -100,13 +100,13 @@ test('an agent thread reads its own snapshot and nothing of another agent; an or
   } finally { own.close(); }
   const { threadId: ordinary } = await echoThread(h, client);
   const plain = await connect(h.url, h.core.agents.tokenFor(ordinary));
-  try { expect(await thrown(plain.call('agents.snapshot', { threadId: ordinary }))).toThrow("no persistent agent's thread"); }
+  try { expect(await thrown(plain.call('agents.snapshot', { threadId: ordinary }))).toThrow("no bot's thread"); }
   finally { plain.close(); }
 });
 
 test('an unused provider account still belongs to its persistent profile', async () => {
   await makeAgent(h, client);
-  expect(await thrown(client.call('accounts.remove', { accountId: echoAccount(h) }))).toThrow('persistent agent');
+  expect(await thrown(client.call('accounts.remove', { accountId: echoAccount(h) }))).toThrow('this account is used by a bot');
 });
 
 test('a paired phone lists agents, opens one and talks to it with turns.start', async () => {

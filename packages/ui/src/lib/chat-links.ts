@@ -52,7 +52,7 @@ export function fileLike(text: string): boolean {
 }
 
 /**
- * A thread as `boite agents` names it: `thr_x`, `<machine>/thr_x` or
+ * A thread as `boite threads` names it: `thr_x`, `<machine>/thr_x` or
  * `<core-id>/thr_x`.
  */
 const THREAD_ID = 'thr_[0-9a-z]{12,32}';

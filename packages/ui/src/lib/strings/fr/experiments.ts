@@ -35,8 +35,8 @@ export const fr: Translation = {
       hint: 'Une horloge à côté de la jauge de contexte, qui décompte le temps pendant lequel le provider garde la conversation en cache'
     },
     residentAgents: {
-      title: 'Agents',
-      hint: 'Des agents résidents avec leur propre brain, leurs missions et leurs routines, depuis la barre latérale. Les agents déjà créés continuent de tourner quand ceci est désactivé'
+      title: 'Bots',
+      hint: 'Des bots : des agents permanents avec leur propre brain, leur mémoire et leurs routines, depuis la barre latérale. Les bots déjà créés continuent de tourner quand ceci est désactivé'
     },
     edgeScrollbars: {
       title: 'Barres de défilement au bord',

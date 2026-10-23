@@ -13,7 +13,7 @@ import { fill, strings } from './strings';
  * Entrusting a thread to an agent from the thread's own menus, the way a move
  * is picked: one row in the row, title and phone menus ("Entrust to an
  * agent", or "Take it back" once entrusted), then a menu of the agents.
- * `agents.entrust` does the rest in the core (docs/agents.md).
+ * `agents.entrust` does the rest in the core (docs/bots.md).
  */
 
 type Entrustable = Pick<ThreadSummary, 'id'> & Movable;

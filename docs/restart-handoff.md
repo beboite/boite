@@ -73,9 +73,9 @@ agent resumes them with `boite delegate resume`
 ([delegation](delegation.md#stop-pause-and-resume),
 [workflows](workflows.md#failure-stop-and-restart)).
 
-Compactions and coordination wakes are excluded. A persistent agent's thread
+Compactions and coordination wakes are excluded. A bot's thread
 resumes like any conversation; a wake that was waiting for its thread to be
-free survives the restart ([persistent agents](agents.md#wakes)).
+free survives the restart ([bots](bots.md#wakes)).
 Native processes and terminals follow the ordinary [shutdown limits](trace.md#linux-and-macos).
 
 ## Turns that stop before their answer

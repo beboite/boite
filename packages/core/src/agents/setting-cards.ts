@@ -43,15 +43,15 @@ export class AgentSettingCards {
     if (name === undefined || name.trim() === '') {
       const own = this.store.resident.ownerOf(threadId);
       if (own !== null) return this.store.records.get('profile', own);
-      throw refused(`agent: this thread is no agent's conversation; name one: ${live.map(agent => agent.name).join(', ') || 'there are no agents yet'}`, { field: 'agent' });
+      throw refused(`agent: this thread is no bot's conversation; name one: ${live.map(agent => agent.name).join(', ') || 'there are no bots yet'}`, { field: 'agent' });
     }
     const wanted = name.trim();
     const byId = live.find(agent => agent.id === wanted);
     if (byId !== undefined) return byId;
     const named = live.filter(agent => agent.name.toLowerCase() === wanted.toLowerCase());
     if (named.length === 1) return named[0]!;
-    if (named.length > 1) throw refused(`agent: ${named.length} agents are named ${JSON.stringify(wanted)}; name it by id: ${named.map(agent => agent.id).join(', ')}`, { field: 'agent' });
-    throw refused(`agent: no agent ${JSON.stringify(wanted)}; the agents are ${live.map(agent => agent.name).join(', ') || 'none yet'}`, { field: 'agent', expected: live.map(agent => agent.name) });
+    if (named.length > 1) throw refused(`agent: ${named.length} bots are named ${JSON.stringify(wanted)}; name it by id: ${named.map(agent => agent.id).join(', ')}`, { field: 'agent' });
+    throw refused(`agent: no bot ${JSON.stringify(wanted)}; the bots are ${live.map(agent => agent.name).join(', ') || 'none yet'}`, { field: 'agent', expected: live.map(agent => agent.name) });
   }
 
   private context(agent: AgentProfile): AgentSettingContext {

@@ -181,7 +181,7 @@ function archiveMemories(core: Core, store: AgentStore, agentId: string, all: re
     const target = join(brain.path, MEMORY_ARCHIVE);
     if (!existsSync(target)) {
       const body = memories.map(memory => `## ${memory.title ?? 'Note'} (${new Date(memory.createdAt).toISOString().slice(0, 10)})\n\n${(memory.text ?? '').trim()}\n`).join('\n');
-      createBrainFile(store.resident.brainRoot().path, target, `# Older notes\n\nWhat this agent noted before its memory became MEMORY.md alone. Read it when it matters; nothing here is sent by itself.\n\n${body}`);
+      createBrainFile(store.resident.brainRoot().path, target, `# Older notes\n\nWhat this bot noted before its memory became MEMORY.md alone. Read it when it matters; nothing here is sent by itself.\n\n${body}`);
     }
   }
   core.journal.setSetting(`${ARCHIVED}${agentId}`, { at: Date.now(), count: memories.length });

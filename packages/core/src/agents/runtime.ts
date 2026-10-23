@@ -209,10 +209,10 @@ export class AgentRuntime {
     const key = `${agent.id}:${source}`;
     if (held === null && over === null) { this.told.delete(key); return; }
     const why = held === 'inactive' ? `${agent.name} is archived`
-      : held === 'paused' ? (agent.status === 'paused' ? `${agent.name} is paused` : 'agents are paused')
+      : held === 'paused' ? (agent.status === 'paused' ? `${agent.name} is paused` : 'bots are paused')
         : `today's turns cost $${over!.spent.toFixed(2)}, past the daily budget of $${over!.budget.toFixed(2)}`;
     const after = source === 'resume' ? 'It was dropped.' : held === 'inactive' ? 'It will not run.' : over ? 'It runs tomorrow, or once the budget is raised.'
-      : agent.status === 'paused' ? `It runs once ${agent.name} resumes.` : 'It runs once agents resume.';
+      : agent.status === 'paused' ? `It runs once ${agent.name} resumes.` : 'It runs once bots resume.';
     const text = `Held ${SOURCE_TEXT[source]}: ${why}. ${after}`;
     if (!this.told.has(key)) {
       this.told.add(key);

@@ -570,7 +570,7 @@ Finished turns, errors, permission requests and questions trigger notifications
 through the shared core event bus. Stopped turns do not, and neither do the
 turns under a thread that are not news of their own: a delegated agent's turns
 (its parent's next turn reports the result), a parent's turn that ends while
-its agents still work, a persistent agent's quiet wake (a routine or event turn
+its agents still work, a bot's quiet wake (a routine or event turn
 that ended with `[quiet]`) and a context compaction. Permission
 requests and questions notify whichever thread asks. A desktop toast follows
 the same rule, from `notifiesOnFinish` in the contracts. A click opens the

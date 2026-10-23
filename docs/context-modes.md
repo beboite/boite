@@ -70,9 +70,9 @@ than start with them anyway.
 
 The core has one mode of its own that no request asks for:
 `TOOL_FREE_CONTEXT`, no instruction file, guide, MCP server, hook or built-in
-tool (an empty `tools` list). The memory pass of a persistent agent runs in it
-([agents](agents.md)). Claude honours all of it; Codex and pi leave out what
-their command line can (see the memory pass in [agents](agents.md)), the
+tool (an empty `tools` list). The memory pass of a bot runs in it
+([bots](bots.md)). Claude honours all of it; Codex and pi leave out what
+their command line can (see the memory pass in [bots](bots.md)), the
 thread's `plan` mode restricts the rest, and any tool such a thread asks
 for is denied without a card.
 

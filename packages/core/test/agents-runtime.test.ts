@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import type { CoreClient } from '../src/client.ts';
 import { notifiesOnFinish } from '@boite/contracts';
 import { isAgentHeld } from '../src/agents/runtime.ts';
+import { agentGuide, BOT_GUIDE } from '../src/agent-guide.ts';
+import { agentContext } from '../src/agents/context.ts';
 import { costing, makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -15,7 +17,7 @@ let restore: (() => void) | undefined;
 beforeEach(async () => { h = await startTestCore(); client = await h.connect(); });
 afterEach(async () => { restore?.(); restore = undefined; await h.stop(); });
 
-const BLOCK = 'Boite: who you are, as a persistent agent.';
+const BLOCK = 'Boite: who you are, as a bot.';
 
 function routine(agentId: string, over: Partial<AgentRoutine> = {}) {
   return client.call('agents.routine.save', { value: {
@@ -31,6 +33,38 @@ function due(routineId: string): void {
 const read = (routineId: string) => h.core.workforce.records.get('routine', routineId);
 /** What a thread's system lines say. */
 const lines = (threadId: string) => h.core.journal.listMessages(threadId).filter(m => m.role === 'system').flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : []));
+
+test('a bot\'s Boite guide is the thread guide less the project-bound commands, ending with the bot section; its block carries that section only with the guide off', async () => {
+  const bot = agentGuide(true, false, [], true);
+  const thread = agentGuide(true, false, [], false);
+  expect(bot).toEndWith(`${BOT_GUIDE}\n\n`);
+  expect(thread).not.toContain(BOT_GUIDE);
+  for (const command of ['boite pr link <url>', 'boite pr watch', 'boite ask', 'boite settings [bot]', 'boite attach', 'boite browser']) expect(bot).toContain(command);
+  for (const projectBound of ['boite where', 'Stay in the checkout', 'boite todo', 'projects add']) {
+    expect(thread).toContain(projectBound);
+    expect(bot).not.toContain(projectBound);
+  }
+  for (const own of ['[quiet]', 'boite bot remember', 'boite bot schedule', 'boite bot watch|unwatch', 'boite settings bot request', '--open <url>']) expect(BOT_GUIDE).toContain(own);
+
+  // The test core starts with the Boite guide off; a bot first meets it on.
+  await client.call('brain.configure', { path: null, enabled: false, boiteGuide: true });
+  const driver = scripted(() => ({ text: 'Hello.' })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const first = (driver.prompts.get(threadId) ?? [])[0]!;
+  // The guide says it once, the block not again.
+  expect(first).toContain('boite pr watch');
+  expect(first.split(BOT_GUIDE).length - 1).toBe(1);
+  expect(first).toContain(BLOCK);
+  expect(agentContext(h.core, agent).text).not.toContain(BOT_GUIDE);
+  // With the Boite guide off, the block is where a bot still learns how it works, and it goes again.
+  expect(agentContext(h.core, agent, false).text).toContain(BOT_GUIDE);
+  await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
+  await client.call('turns.start', { threadId, prompt: 'Still there?' });
+  await waitFor(() => (driver.prompts.get(threadId) ?? []).length === 2 && settled(h, threadId));
+  const second = driver.prompts.get(threadId)![1]!;
+  expect(second).toContain(BLOCK);
+  expect(second.split(BOT_GUIDE).length - 1).toBe(1);
+});
 
 test('the context block is sent once, then again only once MEMORY.md changes or the session is fresh', async () => {
   const driver = scripted(() => ({ text: 'Noted.' })); restore = driver.restore;
@@ -177,7 +211,7 @@ test('a turn the core starts by itself meets the pause and the budget: held with
   await Bun.sleep(700);
   expect(turns()).toBe(before);
   const held = () => lines(threadId).filter(text => text.startsWith('Held the turn its background work asked for'));
-  expect(held()).toEqual(['Held the turn its background work asked for: agents are paused. It runs once agents resume.']);
+  expect(held()).toEqual(['Held the turn its background work asked for: bots are paused. It runs once bots resume.']);
   // Every other way the core starts a turn by itself meets the same gate.
   for (const [operation, requestId] of [['coordination'], ['delegation'], ['pull-request'], ['resume', 'auto-continue_trn_x']] as const) {
     let error: unknown = null;
@@ -185,7 +219,7 @@ test('a turn the core starts by itself meets the pause and the budget: held with
     expect(isAgentHeld(error)).toBe(true);
   }
   await Bun.sleep(10);
-  expect(lines(threadId)).toContain('Held the automatic resume: agents are paused. It was dropped.');
+  expect(lines(threadId)).toContain('Held the automatic resume: bots are paused. It was dropped.');
   // The user's own message runs through the pause and the spent budget.
   await client.call('turns.start', { threadId, prompt: 'Still there?' });
   await waitFor(() => turns() === before + 1 && settled(h, threadId));

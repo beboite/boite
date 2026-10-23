@@ -139,11 +139,11 @@ function contactOf(state: ContactsState, coreId: unknown): Contact {
 
 /** A contact by name (any case, spaces as hyphens) or core id, as the core's `named` finds it. */
 function named(state: ContactsState, value: unknown): Contact {
-  if (typeof value !== 'string' || !value.trim()) throw invalid('contact: expected the name or core id of a contact; see boite agents contacts', 'contact');
+  if (typeof value !== 'string' || !value.trim()) throw invalid('contact: expected the name or core id of a contact; see boite threads contacts', 'contact');
   const wanted = value.trim().toLowerCase();
   const found = state.contacts.find(contact => contact.coreId === wanted)
     ?? state.contacts.find(contact => contact.name.toLowerCase() === wanted || contact.name.replace(/\s+/g, '-').toLowerCase() === wanted);
-  if (!found) throw invalid(`contact: ${value} is not one of this core's contacts; see boite agents contacts`, 'contact');
+  if (!found) throw invalid(`contact: ${value} is not one of this core's contacts; see boite threads contacts`, 'contact');
   return found;
 }
 

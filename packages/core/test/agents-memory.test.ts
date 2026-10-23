@@ -112,7 +112,7 @@ test('a quiet wake starts no pass; a pass that runs past the cap or drops most o
   expect(passes(h, threadId)).toHaveLength(count);
 });
 
-test('boite agent remember adds a dated line, and is refused once MEMORY.md is full', async () => {
+test('boite bot remember adds a dated line, and is refused once MEMORY.md is full', async () => {
   script(() => 'SUMMARY: no change');
   const h = await startTestCore(); cores.push(h);
   const client = await h.connect();
@@ -122,7 +122,7 @@ test('boite agent remember adds a dated line, and is refused once MEMORY.md is f
   const brain = h.core.workforce.resident.brain(agent.id);
   h.core.workforce.resident.saveBrain({ agentId: agent.id, expectedRevision: brain.revision, instructions: brain.instructions, memory: 'x'.repeat(AGENT_MEMORY_MAX - 5) });
   expect(await thrown(client.call('agents.memory.note', { agentId: agent.id, text: 'One more' }))).toThrow(`of ${AGENT_MEMORY_MAX} characters`);
-  expect(await thrown(client.call('agents.memory.note', { threadId: 'thr_nobody', text: 'x' }))).toThrow("no persistent agent's thread");
+  expect(await thrown(client.call('agents.memory.note', { threadId: 'thr_nobody', text: 'x' }))).toThrow("no bot's thread");
   expect(threadId).toBeTruthy();
 });
 

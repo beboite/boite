@@ -36,9 +36,9 @@ const UNREAD = 'agents:unread:';
 
 /** The first turn of a new agent: it introduces itself and schedules what its instructions call for. */
 export const INTRO_PROMPT = 'You were just created. Introduce yourself to the user in two sentences. Read your instructions and create the routines they call for '
-  + '(for example "check every day" means a daily routine, with `boite agent schedule`), then say what you will do and when.';
+  + '(for example "check every day" means a daily routine, with `boite bot schedule`), then say what you will do and when.';
 /** The turn after the owner changed an agent's instructions. */
-export const INSTRUCTIONS_PROMPT = 'The user changed your instructions. Check that your routines still match them (`boite agent routines`, `boite agent schedule`, `boite agent unschedule`) '
+export const INSTRUCTIONS_PROMPT = 'The user changed your instructions. Check that your routines still match them (`boite bot routines`, `boite bot schedule`, `boite bot unschedule`) '
   + 'and tell the user in one or two lines what changes for them.';
 
 interface ContextSent { hash: string; sessionGeneration: number; turnId: string }
@@ -131,7 +131,7 @@ export class AgentStore {
   /** The agent of a thread an agent calls from, or the refusal naming what was expected. */
   private callerAgent(threadId: string, method: string): AgentProfile {
     const agent = this.agentOfThread(threadId);
-    if (!agent) throw refused(`${method}: ${threadId} is no persistent agent's thread`, { field: 'threadId', expected: 'the thread of a persistent agent' });
+    if (!agent) throw refused(`${method}: ${threadId} is no bot's thread`, { field: 'threadId', expected: 'the thread of a bot' });
     return agent;
   }
   /** An agent named by the owner, or the one whose thread calls. */
@@ -206,7 +206,7 @@ export class AgentStore {
     const projectIds = ids(v.projectIds ?? [], 'projectIds', 50);
     for (const id of projectIds) {
       const project = this.core.projects.require(id);
-      if (project.kind === 'drafts') throw refused('projectIds: drafts are the user\'s scratch space and cannot be entrusted to an agent');
+      if (project.kind === 'drafts') throw refused('projectIds: drafts are the user\'s scratch space and cannot be entrusted to a bot');
     }
     // Profiles saved by older cores also carry `tools`: an edit drops it.
     const value = {
@@ -260,7 +260,9 @@ export class AgentStore {
     const key = `${CONTEXT}${thread.id}`;
     const sent = this.core.journal.getSetting(key) as ContextSent | undefined;
     const generation = thread.sessionGeneration ?? 0;
-    const block = agentContextIf(this.core, agent, hash => sessionId === null || !sent || sent.hash !== hash || sent.sessionGeneration !== generation);
+    // The bot section of the Boite guide (`agent-guide.ts`) comes in the block while that guide is off.
+    const guided = (thread.contextMode == null || thread.contextMode.guides) && this.core.brain.config().boiteGuide !== false;
+    const block = agentContextIf(this.core, agent, hash => sessionId === null || !sent || sent.hash !== hash || sent.sessionGeneration !== generation, guided);
     if (!block) return '';
     this.core.journal.setSetting(key, { hash: block.hash, sessionGeneration: generation, turnId } satisfies ContextSent);
     return block.text;

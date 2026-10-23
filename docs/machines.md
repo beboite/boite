@@ -410,7 +410,7 @@ Reconnecting clears the capability check so an updated core is detected.
 ## Back and forward
 
 On a desktop, a mouse's back and forward buttons walk the views this window
-showed, in order: a thread, a draft, a settings tab or the Agents page, on
+showed, in order: a thread, a draft, a settings tab or the Bots page, on
 whichever machine each one was. Back from a thread on another machine returns
 to that machine as well as to the view. A view opened after going back replaces
 what was ahead of it, as in a browser.

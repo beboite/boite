@@ -15,7 +15,7 @@ export const PROBED_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'acp', 'code
 export function agentProvider(core: Core, agent: Pick<AgentProfile, 'name' | 'selection'>): ProviderDescriptor {
   const provider = core.providers.get(agent.selection.providerId);
   if (provider !== undefined) return provider;
-  throw refused(`selection.providerId: ${agent.name} runs on ${agent.selection.providerId}, which is not installed here; choose another model for this agent`, {
+  throw refused(`selection.providerId: ${agent.name} runs on ${agent.selection.providerId}, which is not installed here; choose another model for this bot`, {
     field: 'selection.providerId', providerId: agent.selection.providerId, expected: 'an installed provider',
   });
 }

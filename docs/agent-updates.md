@@ -175,7 +175,7 @@ their own pause. Before any turn has paused, the update waits for the current
 tool calls with no deadline. Past the limit, the paused turns go on with
 `Resumed: the <agent> update waits for other turns`, no turn is paused again,
 and the update runs at the first moment no turn of the agent runs. This covers a turn whose tool call
-waits on another turn of the same agent, such as `boite agents send --wait`,
+waits on another turn of the same agent, such as `boite threads send --wait`,
 which would otherwise never let the update start.
 
 Stop during a pause ends the turn as stopped and the update goes on. A core
@@ -214,7 +214,7 @@ agent gets the continuation `boite delegate resume` sends, unless its owner
 paused the team; its parent still hears the interruption. A conversation of
 the user's own resumes like background work that ended without waking it
 ([auto-continue](restart-handoff.md#turns-that-stop-before-their-answer)). A
-turn paused for the update reads it in its resume note. A persistent agent's
+turn paused for the update reads it in its resume note. A bot's
 thread resumes like a conversation of the user's.
 
 ## Restarts

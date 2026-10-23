@@ -137,3 +137,25 @@ test('an agent\'s identity and model, edited side by side in its Settings tab, b
   expect(document.querySelector<HTMLElement>('[data-testid=agent-editor] [data-testid=save-status]')?.dataset.state).toBe('invalid');
   expect(profile().name).toBe('Ada Lovelace');
 });
+
+test('a new bot is free to act: it is created with full access unless the owner picks another mode', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  const view = new AgentsView(store);
+  await view.refresh();
+  let created: AgentProfile | null = null;
+  const editor = mount(AgentEditor, { target: document.body, props: { view, ondone: (agent: AgentProfile) => { created = agent; }, oncancel: () => {} } });
+  cleanup = async () => { await unmount(editor); view.close(); store.detach(); client.close(); };
+  await idle();
+  expect(document.querySelector('[data-testid=agent-runtime]')?.textContent).toContain('Full access');
+  const name = document.querySelector<HTMLInputElement>('[data-testid=agent-name]')!;
+  name.value = 'Nova';
+  name.dispatchEvent(new Event('input', { bubbles: true }));
+  await idle();
+  document.querySelector<HTMLButtonElement>('[data-testid=agent-save]')!.click();
+  await idle();
+  await vi.waitFor(() => expect(created).not.toBeNull());
+  expect(created!.selection.permissionMode).toBe('bypassPermissions');
+});

@@ -175,9 +175,8 @@ export class Coordination {
   config(threadId: string): CoordinationConfig {
     const saved = this.core.journal.getSetting(`coordination:${threadId}`) as CoordinationConfig | undefined;
     if (saved) return saved;
-    // A persistent agent reaches the threads of its projects as theirs (`resident` letters);
-    // other agents reach it only once the owner turns its communication on.
-    if (this.core.journal.getThread(threadId)?.agentSessionId) return { ...defaultCoordinationConfig(), mode: 'off', remote: false };
+    // A bot's thread starts on like any other: it finds, reads and messages threads without the owner turning it on,
+    // and still reaches the threads of its projects as theirs (`resident` letters) whatever this says.
     return defaultCoordinationConfig();
   }
   private saveConfig(threadId: string, config: CoordinationConfig): void {
@@ -396,7 +395,7 @@ export class Coordination {
     if (this.core.threads.require(threadId).archived || (config.mode === 'off' && !resident)) throw refused('coordination is disabled for this thread');
     if (to.coreId === this.self('').coreId) {
       const contact = (resident ? this.contact(to.threadId, true) : undefined) ?? this.localReach(threadId).find(a => same(a, to)) ?? (to.threadId === threadId ? this.contact(threadId) : undefined);
-      if (!contact) throw refused(`target: ${to.threadId} is not a contact this thread may reach; see boite agents list`);
+      if (!contact) throw refused(`target: ${to.threadId} is not a contact this thread may reach; see boite threads`);
       return { contact, ...transcript(this.core.journal.db, to.threadId, limit, before, id => this.core.journal.streamingMessage(id)) };
     }
     const peer = this.trusted().find(p => p.coreId === to.coreId);
@@ -516,7 +515,7 @@ export class Coordination {
     if (letter.to.coreId !== this.self('').coreId) throw refused('message belongs to another core');
     // Only this core marks a letter as a persistent agent's, and only while the project is entrusted to it. A remote origin is never believed.
     const resident = !peer && this.core.workforce.projects.over(letter.from.threadId, letter.to.threadId) !== null;
-    if (!peer && letter.origin === 'resident' && !resident) throw refused('the project is no longer entrusted to this agent');
+    if (!peer && letter.origin === 'resident' && !resident) throw refused('the project is no longer entrusted to this bot');
     // A contact reaches the projects opened to it and the threads that wrote to it, nothing else: an unknown thread reads the same.
     const contact = peer ? this.core.contacts.find(peer.coreId) : undefined;
     if (contact && !this.core.contacts.mayReach(contact.coreId, letter.to.threadId)) throw refused('letter.to: not a thread of a project opened to you');
@@ -567,7 +566,7 @@ export class Coordination {
   /** Letters an agent wrote to threads it no longer looks after go nowhere. */
   residentRevoked(agentThreadId: string): void {
     const pending = this.rows("status IN ('queued', 'received') AND json_extract(data, '$.origin') = 'resident'").map(row => JSON.parse(row.data) as AgentLetter);
-    for (const letter of pending.filter(l => l.from.threadId === agentThreadId && this.core.workforce.projects.over(agentThreadId, l.to.threadId) === null)) this.update(letter, 'rejected', 'The project is no longer entrusted to this agent');
+    for (const letter of pending.filter(l => l.from.threadId === agentThreadId && this.core.workforce.projects.over(agentThreadId, l.to.threadId) === null)) this.update(letter, 'rejected', 'The project is no longer entrusted to this bot');
   }
 
   /**
@@ -580,7 +579,7 @@ export class Coordination {
     if (!thread || thread.archived) return;
     const list = threads.slice(0, 20).map(entry => `${JSON.stringify(entry.title)} (${entry.machine.replace(/\s+/g, '-')}/${entry.threadId}${entry.status === 'idle' ? '' : `, ${entry.status}`})`);
     const body = request.status === 'accepted'
-      ? `${name} opened its project ${JSON.stringify(request.project?.name ?? '')} to you. ${list.length ? `Its agents: ${list.join('; ')}.` : 'No agent of it can be reached yet.'} Write to one with boite agents send <contact>/<thread-id> <text>; boite agents list shows them.`
+      ? `${name} opened its project ${JSON.stringify(request.project?.name ?? '')} to you. ${list.length ? `Its threads: ${list.join('; ')}.` : 'No thread of it can be reached yet.'} Write to one with boite threads send <contact>/<thread-id> <text>; boite threads shows them.`
       : `${name} refused your request: ${request.reason ?? 'no reason given'}`;
     const now = Date.now();
     const from: AgentContact = { coreId: request.coreId, threadId: request.id, title: `Answer to your request to ${name}`.slice(0, 200), machine: name, resources: '', status: 'idle', mode: 'brief' };

@@ -372,7 +372,7 @@ export class FakeAgents {
     this.brains.set(p.agentId, saved);
     return structuredClone(saved);
   }
-  /** `boite agent remember`: a dated line at the end of MEMORY.md. */
+  /** `boite bot remember`: a dated line at the end of MEMORY.md. */
   private note(p: RpcParams<'agents.memory.note'>): RpcResult<'agents.memory.note'> {
     const agentId = p.agentId ?? (p.threadId ? this.ownerOf(p.threadId) : null);
     if (!agentId) this.refuse('agentId: expected an agent, or the thread of one');

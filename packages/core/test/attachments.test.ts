@@ -23,7 +23,7 @@ test('files reach the driver as persistent host paths and remain in history', as
   const messages = harness.core.journal.listMessages(threadId);
   expect(messages[0]!.parts).toContainEqual({ type: 'file', name: file.name, mimeType: file.mimeType, data: file.data });
   const reply = messages.filter(m => m.role === 'assistant').flatMap(m => m.parts).filter(p => p.type === 'text').map(p => p.text).join('');
-  expect(reply).toContain('boite agents send');
+  expect(reply).toContain('boite threads send');
   const referenceLine = reply.split('\n').find(line => line.startsWith('{"name":"report.pdf"'));
   expect(referenceLine).toBeDefined();
   const reference = JSON.parse(referenceLine!);
