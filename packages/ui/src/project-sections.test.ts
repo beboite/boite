@@ -102,7 +102,7 @@ test('a project whose every conversation is at work sits on top, and moves down 
   setThread(build.id, { status: 'running', unread: false });
   await waitFor(() => card('[data-testid=working-projects]', busy.id) !== null);
   document.querySelector<HTMLButtonElement>('[data-testid=working-projects-toggle]')!.click();
-  await waitFor(() => document.querySelector('#sidebar-working-projects')?.classList.contains('open') === false);
+  await waitFor(() => document.querySelector('[data-testid=working-projects] .disclosure-fold')?.classList.contains('open') === false);
   const toggle = document.querySelector<HTMLElement>('[data-testid=working-projects-toggle]')!;
   expect([toggle.getAttribute('aria-expanded'), toggle.querySelector('.fold-count')?.textContent]).toEqual(['false', '1']);
 });

@@ -3,7 +3,7 @@
   import WindowList from './WindowList.svelte';
   import MobileMenu from './MobileMenu.svelte';
   import ThreadHeader from './ThreadHeader.svelte';
-  import { Activity, Archive, ArrowLeft, ArrowUpDown, ChevronDown, Ellipsis, Folder, FolderPlus, LoaderCircle, MessageSquare, Plus, Radar, Search, X } from '@lucide/svelte';
+  import { Activity, ArrowLeft, ArrowUpDown, ChevronDown, Ellipsis, Folder, FolderPlus, MessageSquare, Plus, Radar, Search, X } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import MobileConnect from './MobileConnect.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -25,7 +25,7 @@
   import RecentDone from './RecentDone.svelte';
   import ProjectThreadCounters from './ProjectThreadCounters.svelte';
   import ProjectShelf from './ProjectShelf.svelte';
-  import FoldHeader from './FoldHeader.svelte';
+  import ProjectCardsSection from './ProjectCardsSection.svelte';
   import DraftRow from './DraftRow.svelte';
   import GroupLabel from './GroupLabel.svelte';
   import ProjectTile from './ProjectTile.svelte';
@@ -297,26 +297,10 @@
       {/snippet}
       {#if query}{@render projectRows(groups)}
       {:else}
-        {#if sections.working.length > 0}
-          <section class="section working" data-testid="working-projects">
-            <FoldHeader label={strings.sidebar.workingProjects} count={sections.working.length} open={projectThreadView.workingOpen} controls="mobile-working-projects"
-              testid="working-projects-toggle" hint={strings.sidebar.workingProjectsHint} onclick={() => (projectThreadView.workingOpen = !projectThreadView.workingOpen)}>
-              {#snippet icon()}<span class="section-glyph working"><LoaderCircle size={14} aria-hidden="true" /></span>{/snippet}
-            </FoldHeader>
-            <div id="mobile-working-projects" class="disclosure-fold" class:open={projectThreadView.workingOpen} inert={!projectThreadView.workingOpen}><div>{@render projectRows(sections.working)}</div></div>
-          </section>
-        {/if}
+        {#if sections.working.length > 0}<ProjectCardsSection kind="working" count={sections.working.length}>{@render projectRows(sections.working)}</ProjectCardsSection>{/if}
         {@render projectRows(sections.open)}
         {#if groups.length > 0 && sections.working.length + sections.open.length === 0}<p class="empty">{strings.sidebar.noActiveProjects}</p>{/if}
-        {#if sections.later.length > 0}
-          <section class="section later" data-testid="later-projects">
-            <FoldHeader label={strings.sidebar.laterProjects} count={sections.later.length} open={projectThreadView.laterOpen} controls="mobile-later-projects"
-              testid="later-projects-toggle" hint={strings.sidebar.laterProjectsHint} onclick={() => (projectThreadView.laterOpen = !projectThreadView.laterOpen)}>
-              {#snippet icon()}<span class="section-glyph"><Archive size={14} aria-hidden="true" /></span>{/snippet}
-            </FoldHeader>
-            <div id="mobile-later-projects" class="disclosure-fold" class:open={projectThreadView.laterOpen} inert={!projectThreadView.laterOpen}><div>{@render projectRows(sections.later, true)}</div></div>
-          </section>
-        {/if}
+        {#if sections.later.length > 0}<ProjectCardsSection kind="later" count={sections.later.length}>{@render projectRows(sections.later, true)}</ProjectCardsSection>{/if}
         <ProjectShelf projects={sections.idle} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
         <ProjectShelf kind="archived" projects={shelved} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
         {@render contacts()}
@@ -401,11 +385,6 @@
     .list-heading { padding: 8px 0 14px; }
     p { font-size: var(--text-sm); }
     .project-group { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); margin-bottom: 12px; overflow: hidden; }
-    /* The sections of cards: at work on top, under a line that sets it apart from the open projects; set aside above the folds. */
-    .section.working { margin-bottom: 12px; border-bottom: 1px solid var(--color-border); }
-    .section.later { border-top: 1px solid var(--color-border); }
-    .section-glyph { display: inline-flex; flex: none; }
-    .section-glyph.working { color: var(--color-accent); }
     .project-heading { display: flex; align-items: center; padding: 8px 12px; gap: 8px; background: var(--color-surface-2); color: var(--color-muted-foreground); border-bottom: 1px solid var(--color-border); }
     .project-heading h2 { margin: 0; flex: 1; min-width: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
     .project-heading span { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }

@@ -2,7 +2,7 @@
   import { tick, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import WindowList from './WindowList.svelte';
-  import { Archive, ChevronRight, Ellipsis, FolderX, GripVertical, LoaderCircle, FolderPlus } from '@lucide/svelte';
+  import { ChevronRight, Ellipsis, FolderX, GripVertical, LoaderCircle, FolderPlus } from '@lucide/svelte';
   import type { Project, ThreadId } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -24,7 +24,7 @@
   import RecentDone from './RecentDone.svelte';
   import ProjectThreadCounters from './ProjectThreadCounters.svelte';
   import ProjectShelf from './ProjectShelf.svelte';
-  import FoldHeader from './FoldHeader.svelte';
+  import ProjectCardsSection from './ProjectCardsSection.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import AgentAvatar from './agents/AgentAvatar.svelte';
@@ -289,29 +289,17 @@
       {/snippet}
       <!-- Idle projects sit as compact rows in their fold below, so Alt+digit and reordering count only the cards. -->
       {#if sections.working.length > 0}
-        <section class="section working" data-testid="working-projects">
-          <FoldHeader label={strings.sidebar.workingProjects} count={sections.working.length} open={projectThreadView.workingOpen} controls="sidebar-working-projects"
-            testid="working-projects-toggle" hint={strings.sidebar.workingProjectsHint} onclick={() => (projectThreadView.workingOpen = !projectThreadView.workingOpen)}>
-            {#snippet icon()}<span class="section-glyph working"><LoaderCircle size={14} aria-hidden="true" /></span>{/snippet}
-          </FoldHeader>
-          <div id="sidebar-working-projects" class="disclosure-fold" class:open={projectThreadView.workingOpen} inert={!projectThreadView.workingOpen}><div class="cards">
-            {#each sections.working as entry (projectKey(entry))}{@render card(entry, sections.working, 'working')}{/each}
-          </div></div>
-        </section>
+        <ProjectCardsSection kind="working" count={sections.working.length}>
+          {#each sections.working as entry (projectKey(entry))}{@render card(entry, sections.working, 'working')}{/each}
+        </ProjectCardsSection>
       {/if}
       {#each sections.open as entry (projectKey(entry))}{@render card(entry, sections.open, 'open')}{/each}
       {#if groups.length > 0 && sections.working.length + sections.open.length === 0}<p class="none">{strings.sidebar.noActiveProjects}</p>{/if}
       <div class="project-folds">
         {#if sections.later.length > 0}
-          <section class="section later" data-testid="later-projects">
-            <FoldHeader label={strings.sidebar.laterProjects} count={sections.later.length} open={projectThreadView.laterOpen} controls="sidebar-later-projects"
-              testid="later-projects-toggle" hint={strings.sidebar.laterProjectsHint} onclick={() => (projectThreadView.laterOpen = !projectThreadView.laterOpen)}>
-              {#snippet icon()}<span class="section-glyph"><Archive size={14} aria-hidden="true" /></span>{/snippet}
-            </FoldHeader>
-            <div id="sidebar-later-projects" class="disclosure-fold" class:open={projectThreadView.laterOpen} inert={!projectThreadView.laterOpen}><div class="cards">
-              {#each sections.later as entry (projectKey(entry))}{@render card(entry, sections.later, 'later')}{/each}
-            </div></div>
-          </section>
+          <ProjectCardsSection kind="later" count={sections.later.length}>
+            {#each sections.later as entry (projectKey(entry))}{@render card(entry, sections.later, 'later')}{/each}
+          </ProjectCardsSection>
         {/if}
         <ProjectShelf projects={sections.idle} {multi} {now} {scrollRoot} onrows={rows => idleRows = rows} />
         <ProjectShelf kind="archived" projects={shelved} {multi} {now} {scrollRoot} />
@@ -340,12 +328,6 @@
   }
   .recent-folds { margin-top: auto; padding-top: 12px; }
   .project-folds { margin-top: auto; }
-  /* The sections of cards: at work on top, under a line that sets it apart from the open projects; set aside in the folds below. */
-  .section.working { margin-bottom: 10px; border-bottom: 1px solid var(--color-border); }
-  .section.later { border-top: 1px solid var(--color-border); }
-  .section .cards { padding: 2px 0 0; }
-  .section-glyph { display: inline-flex; flex: none; }
-  .section-glyph.working { color: var(--color-accent); }
   .project {
     margin-bottom: 10px;
     padding: 4px;
