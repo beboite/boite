@@ -311,11 +311,12 @@ export class FakeContext {
       this.settlingAgentCards = true;
       queueMicrotask(() => { this.settlingAgentCards = false; settleAgentSettings(this); });
     }, {
-      create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),
-      start: (threadId, prompt, agent, attachments) => { Object.assign(this.thread(threadId), agent.selection); return this.startTurn(threadId, prompt, attachments); },
-      prompt: (threadId, turnId) => this.thread(threadId).messages.find(m => m.turnId === turnId && m.role === 'user')?.id,
-      stop: threadId => { void this.stopTurn(threadId); },
+      create: (agent, sessionId) => createAgentSession(this, agent, sessionId),
+      // A wake runs on the thread like a turn the user started; one already running refuses it, as the composer's queue would wait.
+      wake: (threadId, prompt, operation, label) => this.startTurn(threadId, prompt, [], operation, undefined, undefined, [], false, label),
       thread: threadId => this.threads.get(threadId),
+      settle: threadId => { const thread = this.threads.get(threadId); if (thread?.unread) { thread.unread = false; this.touch(thread); } },
+      waiting: threadId => [...this.pendingQuestions.values()].some(q => q.request.threadId === threadId) || [...this.pendingPermissions.values()].some(p => p.request.threadId === threadId),
       goal: (threadId, objective) => {
         const methods = activityMethods(this);
         void (objective === null ? methods['threads.activity.control']({ threadId, kind: 'goal', action: 'remove' }) : methods['threads.activity.set']({ threadId, goal: { objective } })).catch(() => {});

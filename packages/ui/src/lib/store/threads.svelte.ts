@@ -26,6 +26,7 @@ import { RpcErrorCode, threadActive } from '@boite/contracts';
 import { RpcFailure, wasDropped } from '../client';
 import { wasClosed } from '../rpc-error';
 import { strings } from '../strings';
+import { experimentOn } from '../experiments.svelte';
 import { archiveWhile, keepArchived, pinWhile } from './optimistic';
 
 /** What a rewind hands back to the composer: the removed message's content, and how the agent forgets it. */
@@ -99,6 +100,20 @@ export class Threads {
     } catch (error) {
       if (this.ctx.currentClient(client, generation) && this.openThread?.id === threadId) this.ctx.fail(error);
     }
+  }
+
+  /**
+   * The ordinary thread the chat last showed: switching from the Agents page
+   * back to the thread list comes back to it rather than to the agent's thread.
+   */
+  lastChatThreadId: ThreadId | null = null;
+
+  /**
+   * Where a thread opens: a persistent agent's own thread on the Agents page,
+   * beside the agents list, every other one in the chat.
+   */
+  pageOf(thread: Pick<ThreadSummary, 'agentSessionId'>): 'chat' | 'agents' {
+    return thread.agentSessionId && experimentOn('resident-agents') ? 'agents' : 'chat';
   }
 
   invalidateNavigation(): number {
@@ -464,9 +479,10 @@ export class Threads {
     }
     this.openThread = thread;
     if (navigate) {
-      s.page = 'chat';
+      s.page = this.pageOf(thread);
       s.sidebarOpen = false;
       if (thread.projectId) this.ctx.projects.rememberProject(thread.projectId);
+      if (s.page === 'chat') this.lastChatThreadId = thread.id;
     }
     if (workbench.tracedThreadId !== thread.id) s.trace = [];
     else if (refreshTrace && s.traceWatched) void s.refreshTrace();
@@ -503,8 +519,9 @@ export class Threads {
       this.ctx.requests.keepRequestsOf(threadId);
     }
     if (navigate) {
-      s.page = 'chat';
+      s.page = this.openThread ? this.pageOf(this.openThread) : 'chat';
       s.sidebarOpen = false;
+      if (s.page === 'chat' && this.openThread) this.lastChatThreadId = this.openThread.id;
       const projectId = this.openThread?.projectId;
       if (projectId) this.ctx.projects.rememberProject(projectId);
     }

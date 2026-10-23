@@ -46,7 +46,7 @@ export async function stopTurn(ctx: FakeContext, threadId: ThreadId): Promise<bo
   return stopped;
 }
 
-export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact' | 'delegation', activityKind?: 'goal' | 'loop', queuedTurn?: Turn, previewReferences: PreviewReference[] = [], automatic = false): Turn {
+export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: FakeOperation, activityKind?: 'goal' | 'loop', queuedTurn?: Turn, previewReferences: PreviewReference[] = [], automatic = false, label?: string): Turn {
   // The real transport serializes Svelte proxies before they reach the core.
   previewReferences = JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[];
   const thread = ctx.thread(threadId);
@@ -82,7 +82,7 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
     role: automatic ? 'system' : 'user',
     // The images ride after the text, the order the core journals them in.
     parts: [
-      userPart(thread, prompt, previewReferences, automatic, activityKind, moved),
+      userPart(thread, prompt, previewReferences, automatic, activityKind, moved, label),
       ...attachments.map(attachmentPart)
     ],
     state: 'complete',
@@ -125,7 +125,13 @@ function refuseTurn(ctx: FakeContext, thread: Thread, queuedTurn?: Turn): RpcFai
   return null;
 }
 
-function turnExecution(thread: Thread, operation: 'compact' | 'delegation' | undefined, automatic: boolean): NonNullable<Turn['execution']> {
+/**
+ * The operations the fake core opens by itself: a compaction, a delegated
+ * child's turn, and a persistent agent's wakes, labelled in its conversation.
+ */
+type FakeOperation = 'compact' | 'delegation' | 'routine' | 'event';
+
+function turnExecution(thread: Thread, operation: FakeOperation | undefined, automatic: boolean): NonNullable<Turn['execution']> {
   return {
     providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
     effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
@@ -135,12 +141,13 @@ function turnExecution(thread: Thread, operation: 'compact' | 'delegation' | und
   };
 }
 
-function userPart(thread: Thread, prompt: string, previewReferences: PreviewReference[], automatic: boolean, activityKind: 'goal' | 'loop' | undefined, moved: Thread['moveNote'] | undefined): MessagePart {
+function userPart(thread: Thread, prompt: string, previewReferences: PreviewReference[], automatic: boolean, activityKind: 'goal' | 'loop' | undefined, moved: Thread['moveNote'] | undefined, label?: string): MessagePart {
   const part: Extract<MessagePart, { type: 'text' }> = {
     type: 'text',
     text: activityKind ? activityPrompt(thread, activityKind, prompt) : previewPrompt(prompt, previewReferences),
   };
   if (automatic) part.displayText = 'Automatic compaction';
+  if (label) part.displayText = label;
   if (previewReferences.length) {
     part.displayText = prompt;
     part.previewReferences = structuredClone(previewReferences);

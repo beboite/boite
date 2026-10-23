@@ -10,6 +10,7 @@
   import { chatPrefs } from '../lib/chat-prefs.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import AgentMessageGroup from './AgentMessageGroup.svelte';
+  import WakeMarker from './WakeMarker.svelte';
   import { agentMailFor, groupAgentMail, withAgentMail } from '../lib/agent-mail';
   import DelegationActivity from './DelegationActivity.svelte';
   import { teamLaunches } from '../lib/delegation-progress';
@@ -724,11 +725,13 @@
   }
 
   /**
-   * Edit, retry and fork go through the core's rewind and fork, which a
-   * persistent agent's session refuses, and only on a thread at rest: a turn
-   * still running is stopped first (Escape).
+   * Edit and retry go through the core's rewind, fork through its fork, and
+   * only on a thread at rest: a turn still running is stopped first (Escape).
+   * A persistent agent's thread rewinds like any other, but has no project to
+   * fork into.
    */
-  const branchable = $derived(store.openThread?.id === threadId && !store.openThread.agentSessionId && store.openThread.projectId !== null);
+  const branchable = $derived(store.openThread?.id === threadId && (!!store.openThread.agentSessionId || store.openThread.projectId !== null));
+  const forkable = $derived(branchable && !store.openThread?.agentSessionId);
   // A prompt still waiting in the queue would run after the edit, on the rewound thread, as would an edit started under a prompt still on its way to the core.
   const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0 && !store.composerStates[threadId]?.sending);
 
@@ -778,7 +781,7 @@
           data-role={group ? 'agent-mail' : message.role} data-turn={message.turnId}
         >
           {#if row.failures}
-            <FailedAttempts {store} {threadId} messages={row.failures} turns={shownTurns} {signedOut} canFork={!narrow.current && branchable && !store.openThread?.incognito} reveal={failureTarget} oninspect={inspectFailures} />
+            <FailedAttempts {store} {threadId} messages={row.failures} turns={shownTurns} {signedOut} canFork={!narrow.current && forkable && !store.openThread?.incognito} reveal={failureTarget} oninspect={inspectFailures} />
           {:else if launches.has(message.id)}
             <DelegationActivity {store} agents={launches.get(message.id)!.agents} />
           {:else if workflowRows.has(message.id)}
@@ -792,6 +795,8 @@
             <MoveMarker notice={movedBy(message)!} />
           {:else if startedFrom(message)}
             <SpawnMarker {store} link={startedFrom(message)!} direction="to" />
+          {:else if message.role !== 'assistant' && (turn?.execution?.operation === 'routine' || turn?.execution?.operation === 'event')}
+            <WakeMarker {message} kind={turn.execution.operation} />
           {:else if message.role === 'user'}
             <UserMessage {store} {message} {turn} accepted={!!turn} responded={progress.responded(message.turnId)} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />
           {:else}
@@ -806,7 +811,7 @@
                 <MessageActions
                   text={() => turnAnswer(messages, turn.id)}
                   retry={atRest && store.openThread?.turns.at(-1)?.id === turn.id ? () => void retry(turn.id) : undefined}
-                  fork={!narrow.current && branchable && !store.openThread?.incognito && source && source.state !== 'streaming' ? (worktree) => void store.fork(source.id, { worktree }) : undefined}
+                  fork={!narrow.current && forkable && !store.openThread?.incognito && source && source.state !== 'streaming' ? (worktree) => void store.fork(source.id, { worktree }) : undefined}
                 />
               {/snippet}
             </MessageTurnSummary>

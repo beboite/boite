@@ -11,7 +11,6 @@
   import Composer from './Composer.svelte';
   import FolderGoneNotice from './FolderGoneNotice.svelte';
   import AgentDock from './AgentDock.svelte';
-  import AgentOwnerBar from './AgentOwnerBar.svelte';
   import ProjectChoice from './ProjectChoice.svelte';
   import MessageList from './MessageList.svelte';
   import ThreadLoading from './ThreadLoading.svelte';
@@ -24,7 +23,8 @@
   import DoneThreadNotice from './DoneThreadNotice.svelte';
   import WorktreeGoneNotice from './WorktreeGoneNotice.svelte';
 
-  let { store }: { store: Store } = $props();
+  /** `locked`: the conversation reads but takes nothing more, said in place of the composer (an archived agent's). */
+  let { store, locked = null }: { store: Store; locked?: string | null } = $props();
 
   let thread = $derived(store.openThread);
   /**
@@ -152,13 +152,10 @@
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
     {#if thread}<ThreadRecovery {store} /><ThreadRetry {store} />{/if}
-    {#if thread?.agentSessionId}
-      <AgentOwnerBar {store} {thread} />
-    {:else}
-      {#if store.openProject?.missing === true}<FolderGoneNotice {store} project={store.openProject} />{/if}
-      {#if thread?.worktreeRemoved}<WorktreeGoneNotice removal={thread.worktreeRemoved} archived={thread.archived} />{/if}
-      {#if thread?.archived}<DoneThreadNotice {store} threadId={thread.id} />{:else}<Composer {store} centered={!thread && !sending} />{/if}
-    {/if}
+    {#if store.openProject?.missing === true && !thread?.agentSessionId}<FolderGoneNotice {store} project={store.openProject} />{/if}
+    {#if thread?.worktreeRemoved}<WorktreeGoneNotice removal={thread.worktreeRemoved} archived={thread.archived} />{/if}
+    {#if locked}<p class="locked" data-testid="chat-locked">{locked}</p>
+    {:else if thread?.archived}<DoneThreadNotice {store} threadId={thread.id} />{:else}<Composer {store} centered={!thread && !sending} />{/if}
 
     <!-- The draft's heading and composer are one block in the middle of the
          column: the body above and this tail below share the free space. -->
@@ -194,6 +191,18 @@
   .machine { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
   .machine :global(svg) { flex: none; color: var(--color-muted-foreground); }
   .machine .ui-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .locked {
+    width: min(calc(100% - 40px), var(--content));
+    margin: 0 auto 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    color: var(--color-muted-foreground);
+    font-size: var(--text-sm);
+    text-align: center;
+  }
+
   .none {
     margin: auto;
     padding: 40px;
