@@ -48,12 +48,22 @@ class BrowserProfiles {
     return findBrowserProfile(this.list, wanted);
   }
 
-  /** Saves the whole list with its default, which falls back to `default` once its profile is gone. */
-  save(profiles: BrowserProfile[], defaultId = this.defaultId): Promise<boolean> {
+  #saving: Promise<unknown> = Promise.resolve();
+
+  /** Applies each edit to the list left by the previous save, on the source that received it. */
+  save(change: (profiles: BrowserProfile[]) => BrowserProfile[] | null, defaultId?: string): Promise<boolean> {
     const source = this.source;
     if (!source) return Promise.resolve(false);
-    const kept = profiles.some((profile) => profile.id === defaultId) ? defaultId : DEFAULT_BROWSER_PROFILE;
-    return source.saveSettings({ browserProfiles: profiles, browserDefaultProfile: kept });
+    const saved = this.#saving.then(() => {
+      const current = browserProfilesOf(source.settings);
+      const profiles = change(current.profiles);
+      if (!profiles) return false;
+      const chosen = defaultId ?? current.defaultId;
+      const kept = profiles.some((profile) => profile.id === chosen) ? chosen : DEFAULT_BROWSER_PROFILE;
+      return source.saveSettings({ browserProfiles: profiles, browserDefaultProfile: kept });
+    });
+    this.#saving = saved.catch(() => {});
+    return saved;
   }
 }
 

@@ -72,7 +72,10 @@ for (const width of [1280, 390]) {
         await showThreadView(page, 'recent', prefix);
         await page.waitFor(`document.querySelector('${row(merged)}')`);
         await option('merged');
-        expect(await page.evaluate('globalThis.__boiteTest.workspace.machines[0].store.client.sweepMergedPrArchives()')).toBe(1);
+        // A badge can detect the merge before the fallback sweep runs.
+        await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.client.call('threads.pullRequest', {threadId:${JSON.stringify(merged)}})`);
+        await page.evaluate('globalThis.__boiteTest.workspace.machines[0].store.client.sweepMergedPrArchives()');
+        expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.client.call('threads.get', {threadId:${JSON.stringify(merged)}}).then(t => ({archived:t.archived, reason:t.archiveReason?.type}))`)).toEqual({archived:true, reason:'pr-merged'});
         await page.waitFor(`!document.querySelector('${row(merged)}')`);
         await page.click(id(`${prefix}project-filter`));
         await page.evaluate(`Array.from(document.querySelectorAll('${id(`${prefix}project-filter-menu`)} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-boite'])).click()`);

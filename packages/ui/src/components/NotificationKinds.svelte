@@ -1,19 +1,19 @@
 <script lang="ts">
-  import { Bell, CircleAlert, CircleCheck, MessageCircleQuestionMark, ShieldCheck } from '@lucide/svelte';
+  import { Bell, CircleAlert, CircleCheck, Gauge, MessageCircleQuestionMark, ShieldCheck } from '@lucide/svelte';
   import { NOTIFICATION_KINDS, type NotificationKind } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import InfoTip from './InfoTip.svelte';
 
   /**
-   * Which notifications this device gets: on the desktop the four kinds under
+   * Which notifications this device gets: on the desktop the five kinds under
    * the General page's switch, on the phone the switch itself then the kinds.
    * The kinds dim while the switch is off. The choice is this device's, and a
    * device with Web Push hands it to its core (`Layout.setNotificationKind`).
    */
   let { store, mobile = false }: { store: Store; mobile?: boolean } = $props();
   const uid = $props.id();
-  const icons = { approvals: ShieldCheck, questions: MessageCircleQuestionMark, finished: CircleCheck, errors: CircleAlert } satisfies Record<NotificationKind, unknown>;
+  const icons = { approvals: ShieldCheck, questions: MessageCircleQuestionMark, finished: CircleCheck, errors: CircleAlert, limits: Gauge } satisfies Record<NotificationKind, unknown>;
 </script>
 
 <div class="kinds" class:mobile class:off={!store.notifications} data-testid="notification-kinds">
@@ -30,7 +30,7 @@
     <label for="{uid}-{kind}" class={mobile ? 'row kind' : 'switch-row kind'}>
       <Icon size={mobile ? 20 : 16} />
       <span class="text ui-label-box">
-        <span class="ui-label" id="{uid}-{kind}-name">{strings.settings.notificationKinds[kind]}</span>{#if kind === 'approvals'}<InfoTip topic={strings.settings.notificationKinds.approvals} text={strings.settings.notificationKindsHint} />{/if}
+        <span class="ui-label" id="{uid}-{kind}-name">{strings.settings.notificationKinds[kind]}</span>{#if kind === 'approvals'}<InfoTip topic={strings.settings.notificationKinds.approvals} text={strings.settings.notificationKindsHint} />{:else if kind === 'limits'}<InfoTip topic={strings.settings.notificationKinds.limits} text={strings.settings.notificationKindsLimitsHint} />{/if}
       </span>
       <input id="{uid}-{kind}" aria-labelledby="{uid}-{kind}-name" type="checkbox" role="switch" data-testid="setting-notification-kind-{kind}"
         checked={store.notificationKinds.includes(kind)} disabled={!store.notifications}

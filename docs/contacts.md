@@ -19,6 +19,14 @@ and keeps one link open, and the inviter's requests to the invitee travel on
 that link: Tailscale quarantines a shared machine, which answers connections
 but opens none, and the invitee exposes nothing.
 
+A share only reaches another tailscale.com tailnet. A Headscale tailnet, or a
+machine without Tailscale, never meets the inviter's coordination server:
+it can neither resolve nor reach the inviter's tailnet name. For such an
+invitee the inviter opens Boite's contact routes to the internet through
+Tailscale Funnel instead (below). Only the inviter must be reachable, so
+between a Headscale owner and a tailscale.com owner, the tailscale.com owner
+invites. A Headscale inviter can only invite someone on its own tailnet.
+
 1. The inviter's **Invite a contact** (`contacts.invite`) makes a one-time link
    valid 24 hours: `boite://contact#` then the inviter's core id, signing
    key, sealing key, machine name, tailnet URL, a one-time token and the
@@ -26,11 +34,17 @@ but opens none, and the invitee exposes nothing.
    (`contacts.tailscaleKey`), the core creates the share itself
    (`POST /api/v2/device/{id}/device-invites`, single use); without one the
    invitation says so and the owner shares the machine from the Tailscale
-   admin console. The page offers two buttons: **Not on my Tailscale** does
-   the above, **Already on my Tailscale** (`contacts.invite` with
+   admin console. The page offers three buttons: **On another Tailscale**
+   does the above, **Already on my Tailscale** (`contacts.invite` with
    `share: false`) is for an invitee on the same tailnet, or one this
    machine is already shared with: no share is made or asked for, the link
    carries none and the invitee's Join card offers no share to accept.
+   **Elsewhere** (`internet: true`) is for an invitee on another network:
+   the link names `https://<machine>.<tailnet>.ts.net:8443`, Boite's contact
+   routes on Tailscale Funnel, and carries no share. On a tailnet whose names
+   are not under `ts.net` (Headscale) **On another Tailscale** and
+   **Elsewhere** are off, a line says the other owner invites, and the core
+   refuses both with that reason.
    While invitations are open the page counts them beside **Cancel them**
    (`contacts.cancelInvites`), which spends every one unused: a link sent
    too widely, or one that leaked, creates no contact any more, and the
@@ -83,11 +97,43 @@ or error carries it, and the core sends it to `api.tailscale.com` only.
 The inviter's core listens on its tailnet address while it hosts a contact or
 has an invitation out, as it does in a group, and closes that listener once
 the last invitation expires or the last hosted contact goes. A core with no
-contact and no invitation opens nothing and runs no timer. **The tailnet policy decides which ports a shared user
-reaches**: without a rule, assume every port of the shared machine. The
-Contacts page reads the policy with the API key and says `restricted`, `open`
-or `unknown`; when `open`, it gives the lines that limit `autogroup:shared` to
-Boite's port. Boite never writes the policy.
+contact and no invitation opens nothing and runs no timer. **The tailnet
+policy decides which ports a shared user reaches**: without a rule, assume
+every port of the shared machine. The Contacts page reads the policy with the
+API key and says `restricted`, `open` or `unknown`; when `open`, it gives the
+lines that limit `autogroup:shared` to Boite's port. Boite never writes the
+policy.
+
+## Funnel, for another network
+
+**Elsewhere** runs the Tailscale CLI (`contacts/funnel.ts`): `funnel --bg
+--https=<port> --set-path=<route> http://127.0.0.1:<port><route>` for
+the three routes a contact dials, `/contacts/join`,
+`/coordination/contact/link` and `/agent-messages`. Nothing else of the core
+is on the internet: not the UI, the owner RPC or the pairing routes. Funnel
+opens a whole port, so the mounts take 8443, or 10000 when 8443 serves
+something else, and never 443, which the phone's `tailscale serve` uses; with
+both taken the invitation is refused. A node without the `funnel` node
+attribute, HTTPS certificates or a running Tailscale is refused with what to
+do, and the Funnel consent page when the CLI printed one
+(`data.actionUrl`); the CLI's own words never reach a client. Every request on
+these routes is signed and sealed as on the tailnet, with TLS instead of
+WireGuard under it. Requests Funnel hands over come from loopback, marked
+`Tailscale-Funnel-Request` with the sender in `X-Forwarded-For`, both set by
+tailscaled: the refusal quota counts them under that sender
+(`strangerAddress` in `server.ts`).
+
+The journal keeps `contacts:funnel`, the loopback targets the mounts may
+proxy to, while they may be up. An invitation holds the mounts until its
+token is saved, so a refused invitation made at the same time never takes
+them down. Once no contact is hosted and no invitation is out, `serve
+--https=<port> --set-path=<route> off` removes them, and only them; the
+record is cleared after every removal succeeded, else the next release or
+start tries again. A core that comes back on another port moves the mounts a
+hosted contact still dials to its new port, on the same public origin, and
+removes old ones left anywhere else, or all of them when nothing needs them. A client shows **Elsewhere**
+only when `contacts.get` answers `internet: true`: an older core reads only
+`share` and would share the machine instead.
 
 ## Projects and requests
 
@@ -185,15 +231,24 @@ gets on Tailscale later listens there after a restart.
 
 ## Code and tests
 
-`packages/core/src/contacts/`: `store.ts` (contacts, invitations, the link,
-requests and the RPC methods), `join.ts` (both sides of a join),
-`invite.ts` (the link format), `words.ts`
+`packages/core/src/contacts/`: `store.ts` (contacts, the link, requests and
+the RPC methods), `invitations.ts` (making an invitation and the origin it
+names), `funnel.ts` (the routes on Tailscale Funnel), `join.ts` (both sides
+of a join), `invite.ts` (the link format), `words.ts`
 (fingerprint words), `tier.ts`, `git-remote.ts` (read from the git config
 files, no process), `concierge.ts` and `tailscale.ts`. `contacts.*` are
 owner-only; agents call `collaboration.contacts` and `collaboration.ask`.
 `packages/core/test/contacts.test.ts` links two cores over loopback, and
 `contacts-parts.test.ts` covers the pieces, the Tailscale client against a
-stubbed `fetch`.
+stubbed `fetch`. `contacts-funnel.test.ts` drives the Funnel mounts through
+the fake CLI (`test/fixtures/fake-tailscale.ts`), and `magic-dns.test.ts`
+the tailnet name lookup against a resolver on loopback.
+
+This machine's tailnet name is the PTR record of its tailnet address at
+100.100.100.100, asked as one UDP datagram (`group/magic-dns.ts`). On Windows
+`node:dns` answered that question from the system resolver, which names the
+machine by its bare host name, so a Windows core had no tailnet name and
+refused every invitation.
 
 ## Not yet
 

@@ -934,3 +934,24 @@ test('a notification another machine sent opens its thread there once connected,
   expect(await newer).toBe(true);
   expect(w.active).toBe(b);
 });
+
+test('a tapped limit alert opens Limits on the machine it names, unless the user moved on while it connects', async () => {
+  const { w, a, b } = await setup();
+  const remote = w.machines.find((machine) => machine.store === b)!;
+  const pc = 'd'.repeat(64);
+  await w.select(a, 't-scheduler');
+  const waiting = w.openLimits(pc);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  remote.coreId = pc;
+  await waiting;
+  expect([w.active === b, b.page, b.settingsTab]).toEqual([true, 'settings', 'limits']);
+
+  // The user opens a conversation while the machine is still connecting: the tap leaves them there.
+  await w.select(a, 't-scheduler');
+  remote.coreId = undefined;
+  const stale = w.openLimits(pc);
+  await a.open(a.threads.find((thread) => thread.id !== 't-scheduler')!.id);
+  remote.coreId = pc;
+  await stale;
+  expect([w.active === a, a.page]).toEqual([true, 'chat']);
+});

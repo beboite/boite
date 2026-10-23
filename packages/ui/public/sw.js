@@ -162,12 +162,14 @@ self.addEventListener('push', (event) => {
     const threadId = typeof payload.threadId === 'string' ? payload.threadId : null;
     // Sent by another machine of the group through this one: the thread is on that machine.
     const core = typeof payload.core === 'string' && /^[0-9a-f]{64}$/.test(payload.core) ? payload.core : null;
-    const body = (typeof payload.label === 'string' && await notificationWord(payload.label)) || (typeof payload.body === 'string' ? payload.body : '');
+    const word = typeof payload.label === 'string' ? fillWord(await notificationWord(payload.label), payload.values) : null;
+    const body = word || (typeof payload.body === 'string' ? payload.body : '');
     await self.registration.showNotification(typeof payload.title === 'string' ? payload.title : 'Boite', {
       body,
       icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
       tag: threadId ? (core ? `thread-${core}-${threadId}` : `thread-${threadId}`) : typeof payload.tag === 'string' ? payload.tag : 'boite-update',
-      data: core ? { threadId, core } : { threadId }
+      // A limit alert belongs to no thread: its tap opens Limits on the machine that sent it.
+      data: payload.kind === 'limits' ? (core ? { limits: true, core } : { limits: true }) : core ? { threadId, core } : { threadId }
     });
     // The icon's count of threads waiting for the user, as the core counted it when it sent this.
     await setBadge(payload.badge);
@@ -189,6 +191,19 @@ async function notificationWord(label) {
   }
 }
 
+/** The page's words with the push's `values` in their `{name}` places; null when one is missing, so the core's body shows. */
+function fillWord(word, values) {
+  if (!word) return null;
+  let missing = false;
+  const filled = word.replace(/\{(\w+)\}/g, (_, name) => {
+    const value = values && typeof values === 'object' ? values[name] : undefined;
+    if (typeof value === 'string') return value;
+    missing = true;
+    return '';
+  });
+  return missing ? null : filled;
+}
+
 /** Set the app badge where the platform has one (iOS 16.4+ home-screen apps, desktop Chromium); a failure costs nothing. */
 async function setBadge(count) {
   const nav = self.navigator;
@@ -207,6 +222,12 @@ self.addEventListener('notificationclick', (event) => {
   // A page's notice about a machine with no group id: the open window finds the thread by its own key for it.
   const key = typeof event.notification.data?.key === 'string' && event.notification.data.key.length <= 600 ? event.notification.data.key : null;
   const url = new URL('/', self.location.origin);
+  if (event.notification.data?.limits === true) {
+    url.searchParams.set('limits', '1');
+    if (typeof core === 'string') url.searchParams.set('member', core);
+    event.waitUntil(openOrTell(url, { type: 'boite.open-limits', ...(typeof core === 'string' ? { core } : {}) }));
+    return;
+  }
   if (typeof threadId === 'string') url.searchParams.set('thread', threadId);
   if (typeof threadId === 'string' && typeof core === 'string') url.searchParams.set('member', core);
   // Opened with no window, or one refusing focus: the boot reads the machine from the key (`takeNotificationTarget`).
@@ -221,6 +242,15 @@ self.addEventListener('notificationclick', (event) => {
     } else await self.clients.openWindow(url.href);
   })());
 });
+
+/** Hands an open window of this origin the message, else opens the address, which says the same at boot. */
+async function openOrTell(url, message) {
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const existing = windows.find(client => new URL(client.url).origin === url.origin);
+  if (!existing) { await self.clients.openWindow(url.href); return; }
+  existing.postMessage(message);
+  try { await existing.focus(); } catch { await self.clients.openWindow(url.href); }
+}
 
 /**
  * A file under `/assets/` carries its content hash in its name, so the copy in

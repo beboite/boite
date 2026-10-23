@@ -286,7 +286,7 @@ test('changing a Store endpoint drops the previous machine composer and element 
   }
 });
 
-test('changing a Store endpoint drops the previous machine updates, todos, resources and trace', async ({ store, client }) => {
+test('changing a Store endpoint drops the previous machine updates, todos, resources, trace and folds', async ({ store, client }) => {
   const saved = Object.entries(localStorage);
   const connect = vi.spyOn(store, 'connect').mockResolvedValue();
   const open = vi.spyOn(store, 'openWhereLeft').mockResolvedValue();
@@ -294,12 +294,15 @@ test('changing a Store endpoint drops the previous machine updates, todos, resou
   store.todos = { 'p-boite': [{ id: 'todo-1' }] } as never;
   store.resources = [{ threadId: 't-trace' }] as never;
   store.trace = [{ pid: 1 }] as never;
+  // Project ids can collide between machines: a fold of the last one must not fold the next one's project.
+  store.collapsedProjects = ['p-boite'];
   try {
     await store.connectTo('https://second.test', 'fixture-token');
     expect(store.harnessUpdates).toEqual([]);
     expect(store.todos).toEqual({});
     expect(store.resources).toEqual([]);
     expect(store.trace).toEqual([]);
+    expect(store.collapsedProjects).toEqual([]);
   } finally {
     connect.mockRestore(); open.mockRestore();
     store.client?.close(); store.detach(); client.close();

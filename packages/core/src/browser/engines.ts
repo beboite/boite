@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { PRIVATE_BROWSER_PROFILE } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
-import { findChromium, readSavedCookies } from './chromium.ts';
+import { findChromium, profileIdentity, readSavedCookies } from './chromium.ts';
 import { restoreMissingCookies, saveCookies } from './saved-cookies.ts';
 import { BrowserIdentities, startChromium, type Started } from './launch.ts';
 import type { BrowserHost } from './host.ts';
@@ -42,12 +42,17 @@ export class BrowserEngines {
       : join(this.core.dataDir, 'browser', profile);
   }
 
-  /** While the desktop app hosts, a new tab opens in its webviews; tabs already open stay where they are. */
+  /** A profile keeps one engine, including while its User-Agent or the attached host changes. */
   get(profile: string): Promise<Engine> {
-    const key = this.host.attached ? `host:${profile}` : profile;
+    const current = this.pending.get(profile) ?? this.pending.get(`host:${profile}`);
+    if (current) return current.then(engine => this.#closing.has(engine) ? engine.exited.then(() => this.get(profile)) : engine);
+    // A webview has no per-profile process flags. Custom identities use Chromium
+    // so its workers and popups inherit the same User-Agent as its pages.
+    const hosted = this.host.attached && !this.#userAgent(profile);
+    const key = hosted ? `host:${profile}` : profile;
     let engine = this.pending.get(key);
     if (!engine) {
-      engine = this.launch(profile, true, this.host.attached);
+      engine = this.launch(profile, true, hosted);
       this.pending.set(key, engine);
       engine.then(started => {
         void started.exited.then(() => this.lost(started));
@@ -55,6 +60,10 @@ export class BrowserEngines {
       }, () => { if (this.pending.get(key) === engine) this.pending.delete(key); });
     }
     return engine;
+  }
+
+  #userAgent(profile: string) {
+    return this.core.settings.get().browserProfiles?.find(one => one.id === profile)?.userAgent;
   }
 
   async #launchHosted(profile: string): Promise<Engine> {
@@ -96,7 +105,10 @@ export class BrowserEngines {
 
   async #launchLocal(profile: string, identify: boolean, found: ReturnType<typeof findChromium>): Promise<Engine> {
     if (found.path === null) throw refused(`the agent browser cannot start on ${this.machine}: ${found.reason}`);
-    const identity = identify ? await this.#identities.of(found.path) : null;
+    const native = identify ? await this.#identities.of(found.path) : null;
+    const setting = identify ? this.#userAgent(profile) : undefined;
+    if (setting && !native) throw refused(`the User-Agent of browser profile ${profile} cannot be set because Chromium's identity could not be read`);
+    const identity = native ? profileIdentity(native, setting) : null;
     const dir = this.profileDir(profile);
     let started: Started;
     try { started = await this.#start(found.path, dir, identity?.userAgent); }
@@ -147,10 +159,6 @@ export class BrowserEngines {
 
   async shut(engine: Engine): Promise<void> {
     this.#closing.add(engine);
-    if (this.pending.has(engine.key)) {
-      const current = await this.pending.get(engine.key)!.catch(() => null);
-      if (current === engine) this.pending.delete(engine.key);
-    }
     this.#stopTimers(engine);
     await this.saveCookies(engine);
     // A clean close lets the browser write its own files; the kill is for one that does not end.

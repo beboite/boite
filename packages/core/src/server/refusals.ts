@@ -23,6 +23,9 @@
  * Requests from this machine are not counted: a reverse proxy puts every
  * remote peer behind the one loopback address, and counting there would let
  * one stranger lock every honest machine out. A proxy has its own limits.
+ * Tailscale Funnel is the exception: tailscaled names the sender of what it
+ * hands over, and those requests count under it (`strangerAddress` in
+ * `server.ts`).
  */
 
 export const REFUSALS_PER_MINUTE = 60;

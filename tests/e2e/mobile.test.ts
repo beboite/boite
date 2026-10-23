@@ -43,19 +43,20 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
-test('phone settings hold this phone and the machine, the same for a paired device, with no remote administration', async () => {
+test('phone settings expose browser profiles only to owners and keep remote administration hidden', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
   await navigateMobile('mobile-settings');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
   const rows = `[...document.querySelectorAll('[data-testid=mobile-settings-home] .row')].map(row => row.dataset.testid)`;
-  const expected = ['mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy', 'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-archived'];
+  const expected = ['mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy', 'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-browser-profiles', 'mobile-settings-archived'];
   expect(await page.evaluate<string[]>(rows)).toEqual(expected);
   expect(await page.evaluate(`document.querySelector('[data-testid=settings-tab-resources]') === null && document.querySelector('[data-testid=settings-tab-keyboard]') === null`)).toBe(true);
   await page.evaluate(`(() => { const store=__boiteTest.workspace.active; store.client.becomes('session'); store.principal='session'; })()`);
   await page.waitFor(`__boiteTest.workspace.active.owner === false`);
-  expect(await page.evaluate<string[]>(rows)).toEqual(expected);
+  expect(await page.evaluate<string[]>(rows)).toEqual(expected.filter(row => row !== 'mobile-settings-browser-profiles'));
   await page.evaluate(`(() => { const store=__boiteTest.workspace.active; store.client.becomes('owner'); store.principal='owner'; })()`);
   await page.waitFor(`__boiteTest.workspace.active.owner === true`);
+  expect(await page.evaluate<string[]>(rows)).toEqual(expected);
   await capture('phone-settings-home-dark.png');
   await page.click('[data-testid=mobile-settings-phone]');
   await page.waitFor(`document.querySelector('[data-testid=phone-settings]')`);

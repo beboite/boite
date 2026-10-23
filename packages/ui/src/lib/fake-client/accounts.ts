@@ -1,5 +1,5 @@
 /** Accounts, their quotas and the fake sign-in a login runs. */
-import { RpcErrorCode, subscriptionProxyOf, threadActive, type Account, type AccountQuota, type GatewayQuotaEntry, type QuotaWindow, type RpcEvents, type SubscriptionProxyQuotas } from '@boite/contracts';
+import { QUOTA_ALERT_MAX, QUOTA_ALERT_PERIODS, quotaAlertThresholds, RpcErrorCode, subscriptionProxyOf, threadActive, type Account, type AccountQuota, type QuotaAlerts, type GatewayQuotaEntry, type QuotaWindow, type RpcEvents, type SubscriptionProxyQuotas } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { sessionStatus } from './checks';
 import { DATA_DIR } from './shared';
@@ -55,7 +55,7 @@ function gatewayRows(state: SubscriptionProxyQuotas): AccountQuota[] {
 }
 
 function quotas(ctx: FakeContext): AccountQuota[] {
-  return [...accountQuotas(ctx), ...gatewayRows(gatewayQuotas(ctx))];
+  return [...accountQuotas(ctx), ...gatewayRows(gatewayQuotas(ctx))].map(row => ctx.quotaAlerts[row.accountId] ? { ...row, alerts: { ...ctx.quotaAlerts[row.accountId] } } : row);
 }
 
 function accountQuotas(ctx: FakeContext): AccountQuota[] {
@@ -161,6 +161,21 @@ export function accountMethods(ctx: FakeContext) {
       const rows = quotas(ctx);
       ctx.emit('quotas.updated', rows);
       return { outcome, quota: rows.find(row => row.accountId === account.id)! };
+    },
+    'quotas.alert': async (params) => {
+      if (!QUOTA_ALERT_PERIODS.includes(params.period)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams,
+        message: `quotas.alert period must be one of ${QUOTA_ALERT_PERIODS.join(', ')}`, data: { field: 'period', expected: QUOTA_ALERT_PERIODS } });
+      const thresholds = quotaAlertThresholds(params.thresholds);
+      if (thresholds === null) throw new RpcFailure({ code: RpcErrorCode.InvalidParams,
+        message: `quotas.alert thresholds must be a list of at most ${QUOTA_ALERT_MAX} whole percentages left, from 0 to 99`, data: { field: 'thresholds', expected: `at most ${QUOTA_ALERT_MAX} integers from 0 to 99` } });
+      if (!quotas(ctx).some(row => row.accountId === params.accountId) && !(thresholds.length === 0 && ctx.quotaAlerts[params.accountId])) throw new RpcFailure({ code: RpcErrorCode.InvalidParams,
+        message: `quotas.alert accountId ${params.accountId} is not a row quotas.list returns`, data: { field: 'accountId' } });
+      const alerts: QuotaAlerts = { ...ctx.quotaAlerts[params.accountId] };
+      if (thresholds.length) alerts[params.period] = thresholds;
+      else delete alerts[params.period];
+      if (Object.keys(alerts).length) ctx.quotaAlerts[params.accountId] = alerts;
+      else delete ctx.quotaAlerts[params.accountId];
+      const rows = quotas(ctx); ctx.emit('quotas.updated', rows); return rows;
     },
     'quotas.configure': async (params) => {
       ctx.quotaEnabled[params.accountId] = params.enabled;

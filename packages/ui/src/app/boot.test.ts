@@ -79,6 +79,40 @@ test('the app opens on a new thread in the project last worked in', async () => 
   expect(store.page).toBe('settings');
 });
 
+test('a project folded in the sidebar is still folded after a restart', async () => {
+  await mountOnFake();
+  const head = (id: string) => query<HTMLButtonElement>(`[data-testid=project-row][data-project-id="${id}"]`);
+  await waitFor(() => document.querySelector('[data-testid=project-row][data-project-id="p-boite"]') !== null);
+  head('p-boite').click();
+  await waitFor(() => head('p-boite').getAttribute('aria-expanded') === 'false');
+
+  unmountApp();
+  // A new process starts with nothing in memory; only the device's storage is left.
+  store.collapsedProjects = [];
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-testid=project-row][data-project-id="p-boite"]') !== null);
+  expect(head('p-boite').getAttribute('aria-expanded')).toBe('false');
+  expect(head('p-notes').getAttribute('aria-expanded')).toBe('true');
+
+  // A project removed while the app was closed leaves the stored folds once the machine lists its projects.
+  const key = Object.keys(localStorage).find((name) => name.startsWith('boite.foldedProjects.v1:'))!;
+  localStorage.setItem(key, JSON.stringify(['p-boite', 'p-gone']));
+  unmountApp();
+  store.collapsedProjects = [];
+  await mountOnFake();
+  await waitFor(() => localStorage.getItem(key) === JSON.stringify(['p-boite']));
+  expect(store.collapsedProjects).toEqual(['p-boite']);
+
+  // Unfolding it is kept the same way.
+  head('p-boite').click();
+  await waitFor(() => head('p-boite').getAttribute('aria-expanded') === 'true');
+  unmountApp();
+  store.collapsedProjects = ['p-boite'];
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-testid=project-row][data-project-id="p-boite"]') !== null);
+  expect(head('p-boite').getAttribute('aria-expanded')).toBe('true');
+});
+
 test('a notification link opens its thread on boot, with no landing draft first', async () => {
   const drafted = vi.spyOn(store, 'startDraft');
   try {

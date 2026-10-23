@@ -19,6 +19,7 @@
   import BrainPage from './BrainPage.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
   import WorktreesCard from './WorktreesCard.svelte';
+  import BrowserProfilesCard from './BrowserProfilesCard.svelte';
   import AutoCompactSettings from './AutoCompactSettings.svelte';
   import InfoTip from './InfoTip.svelte';
   import { tick, type Snippet } from 'svelte';
@@ -39,15 +40,17 @@
    */
   let archivePage = $derived(store.settingsTab === 'general' && store.settingsSection?.id === 'archived');
   let worktreesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'worktrees');
+  let browserProfilesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'browser-profiles');
   /** The one card of the desktop's Advanced page that is about conversations, not about the machine. */
   let compactPage = $derived(store.owner && store.settingsTab === 'advanced' && store.settingsSection?.id === 'auto-compact');
   let page = $derived((store.owner && (store.settingsTab === 'brain' || store.settingsTab === 'resources' || store.settingsTab === 'diagnostics')) || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'task-manager' || store.settingsTab === 'experiments'
-    ? store.settingsTab : phone ? 'phone' : privacy ? 'privacy' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : compactPage ? 'auto-compact' : 'home');
+    ? store.settingsTab : phone ? 'phone' : privacy ? 'privacy' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : browserProfilesPage ? 'browser-profiles' : compactPage ? 'auto-compact' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
     : page === 'privacy' ? strings.mobile.settingsPrivacy
     : page === 'archived' ? strings.settings.archived.heading
     : page === 'worktrees' ? strings.settings.worktrees.heading
+    : page === 'browser-profiles' ? strings.browserProfiles.heading
     : page === 'auto-compact' ? strings.settings.autoCompact
     : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance
     : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits
@@ -110,6 +113,11 @@
           <button class="ghost row" data-testid="settings-tab-voice" onclick={() => store.showSettings('voice')}>
             <Mic size={20} /><span class="ui-label">{strings.speech.heading}</span><ChevronRight size={18} />
           </button>
+          {#if store.owner}
+            <button class="ghost row" data-testid="mobile-settings-browser-profiles" onclick={() => store.showSettings('general', 'browser-profiles')}>
+              <Monitor size={20} /><span class="ui-label">{strings.browserProfiles.heading}</span><ChevronRight size={18} />
+            </button>
+          {/if}
           <button class="ghost row" data-testid="mobile-settings-archived" onclick={() => store.showSettings('general', 'archived')}>
             <ArchiveRestore size={20} /><span class="ui-label">{strings.settings.archived.heading}</span><ChevronRight size={18} />
           </button>
@@ -160,6 +168,8 @@
         <DiagnosticsPage store={target} {onopenthread} />
       {:else if page === 'worktrees'}
         <div class="page"><WorktreesCard store={target} /></div>
+      {:else if page === 'browser-profiles'}
+        <div class="page"><BrowserProfilesCard /></div>
       {:else if page === 'auto-compact'}
         <div class="page"><AutoCompactSettings store={target} /></div>
       {:else if page === 'archived'}

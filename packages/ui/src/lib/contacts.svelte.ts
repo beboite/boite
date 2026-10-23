@@ -8,6 +8,7 @@
 import type { Contact, ContactInvite, ContactRequest, ContactSettings, ContactsState, ContactTailscale, ProjectId } from '@boite/contracts';
 import { untrack } from 'svelte';
 import { errorText } from './errors';
+import { strings } from './strings';
 import type { Store } from './store.svelte';
 import { workspace, type Machine } from './workspace.svelte';
 
@@ -148,11 +149,19 @@ export class ContactsView {
   }
 
   /**
-   * `share` false: the invitee already reaches this machine on Tailscale, so
-   * the link alone does. True once this call made the invitation now shown.
+   * `tailnet`: the invitee already reaches this machine on Tailscale, so the
+   * link alone does. `share`: the link also shares this machine with another
+   * tailscale.com tailnet. `internet`: the invitee is on another network and
+   * the link reaches this machine through Tailscale Funnel. True once this
+   * call made the invitation now shown.
    */
-  async createInvite(share = true): Promise<boolean> {
-    const invite = await this.#run('invite', () => this.#connected().call('contacts.invite', { share }));
+  async createInvite(reach: InviteReach = 'share'): Promise<boolean> {
+    const params = reach === 'internet' ? { internet: true } : { share: reach === 'share' };
+    const invite = await this.#run('invite', async () => {
+      // An older core would answer `internet` with a share of this machine: never sent there.
+      if (reach === 'internet' && this.state?.internet !== true) throw new Error(strings.contacts.invite.internetOld);
+      return this.#connected().call('contacts.invite', params);
+    });
     if (invite) this.invite = invite;
     return invite !== null;
   }
@@ -220,6 +229,9 @@ export function contactRows(views: readonly MachineContacts[]): ContactRow[] {
 }
 
 /** Opens a contact's page, or the page that adds one, on the machine that holds it. */
+/** Where the invitee is, seen from this machine: what an invitation must carry to reach it. */
+export type InviteReach = 'tailnet' | 'share' | 'internet';
+
 export async function openContact(owner: Store, coreId: string | null): Promise<void> {
   if (workspace.active !== owner) await workspace.select(owner);
   owner.showHome(coreId);

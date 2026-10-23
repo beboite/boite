@@ -3,6 +3,18 @@ import type { Translation } from '../../i18n.svelte';
 export const fr: Translation = {
 
   quotas: {
+    alerts: 'Alertes',
+    alertsOf: 'Alertes de {account}',
+    alertsHint: "Une notification chaque fois qu'une fenêtre descend à une part restante choisie, une fois par fenêtre. Choisissez-en plusieurs ou ajoutez la vôtre. Les limites sont relues toutes les cinq minutes tant qu'une alerte est réglée.",
+    alertsLeft: '% restant',
+    alertAt: '{percent} %',
+    alertCustom: 'Autre',
+    alertCustomLabel: 'Part restante personnalisée, de 0 à 99',
+    alertCustomPlaceholder: '0-99',
+    alertRemove: 'Retirer {percent} %',
+    alertPeriods: { fiveHour: '5 heures', weekly: 'Hebdomadaire' },
+    alertSet: '{period} : {percents} restants',
+    alertFailed: "Impossible d'enregistrer l'alerte : {error}",
     machineAccounts: 'Limites des comptes de {machine}',
     outdated: 'Mettez à jour Boite sur cette machine pour voir ses limites sur cet appareil.',
     usingCredits: 'Crédits utilisés',

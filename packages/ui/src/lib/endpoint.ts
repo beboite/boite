@@ -86,21 +86,24 @@ export function linkedCore(): string | null {
  * (`member`, since `?core=` is a pairing link's address of a core). Taken off
  * at once, so a reload during the boot does not jump there again.
  */
-export function takeNotificationTarget(): { thread: string | null; member: string | null; key: string | null } {
+export function takeNotificationTarget(): { thread: string | null; member: string | null; key: string | null; limits: boolean } {
   const query = new URLSearchParams(window.location.search);
   const thread = query.get('thread');
   const member = query.get('member');
   const key = query.get('key');
-  if (thread !== null || member !== null || key !== null) {
+  const limits = query.get('limits') === '1';
+  if (thread !== null || member !== null || key !== null || query.has('limits')) {
     const url = new URL(window.location.href);
     url.searchParams.delete('thread');
     url.searchParams.delete('member');
     url.searchParams.delete('key');
+    url.searchParams.delete('limits');
     window.history.replaceState(window.history.state, '', url);
   }
-  const memberId = thread && member !== null && /^[0-9a-f]{64}$/.test(member) ? member : null;
+  // A limit alert names a machine and no thread.
+  const memberId = (thread || limits) && member !== null && /^[0-9a-f]{64}$/.test(member) ? member : null;
   // `key` is a page notice's machine and thread (`openNotification`), for a machine with no group id.
-  return { thread: thread || null, member: memberId, key: thread && memberId === null && key && key.length <= 600 ? key : null };
+  return { thread: thread || null, member: memberId, key: thread && memberId === null && key && key.length <= 600 ? key : null, limits };
 }
 
 /**
