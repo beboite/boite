@@ -176,9 +176,9 @@ export class AgentStore {
   /** A fact for the agent's next event turn, gathered with the others (`AgentRuntime.fact`). */
   fact(agentId: string, fact: AgentFact): boolean { return this.core.agentRuntime.fact(agentId, fact); }
 
-  /** Starts a wake now, or holds it until the thread is free or the pause ends. */
+  /** Starts a wake now, or holds it until the thread is free or the pause ends, the agent's own included. */
   private wakeSoon(agent: AgentProfile, key: string, label: string, prompt: string): void {
-    if (agent.status !== 'active') return;
+    if (agent.status === 'archived') return;
     if (this.core.agentRuntime.wake(agent.id, { kind: 'event', label, prompt, requestId: `${key}-${agent.revision}-${agent.id.slice(-40)}` }) === null) this.core.agentRuntime.queue(agent.id, key, { label, prompt });
   }
 
@@ -418,13 +418,9 @@ export class AgentStore {
   }
   /** The last finished turn whose answer the user reads: not quiet, not housekeeping. */
   private answered(threadId: string): Turn | null {
-    const rows = this.core.journal.db.query("SELECT id FROM turns WHERE thread_id = ? AND status = 'done' ORDER BY rowid DESC LIMIT 50").all(threadId) as { id: string }[];
-    for (const { id } of rows) {
-      const turn = this.core.journal.getTurn(id);
-      const operation = turn?.execution?.operation;
-      if (turn && !turn.quiet && operation !== 'compact' && operation !== 'keepalive') return turn;
-    }
-    return null;
+    const row = this.core.journal.db.query(`SELECT id FROM turns WHERE thread_id = ? AND status = 'done' AND COALESCE(quiet, 0) = 0
+      AND COALESCE(json_extract(execution, '$.operation'), '') NOT IN ('compact', 'keepalive') ORDER BY rowid DESC LIMIT 1`).get(threadId) as { id: string } | null;
+    return row ? this.core.journal.getTurn(row.id) : null;
   }
 
   /**

@@ -177,3 +177,40 @@ test('subagents are on by default on any granted model; listed profiles restrict
   await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: listed.revision, config: { ...runtime, subagents: { ...runtime.subagents, anyModel: false } } });
   expect(h.core.workforce.resident.allowed(agent.id, other, true)).toBe(false);
 });
+
+test('every exchange that ends while a pass runs reaches the next pass', async () => {
+  const driver = script(() => 'SUMMARY: no change');
+  const { h, threadId, ask } = await setup();
+  await waitFor(() => driver.held.length === 1);
+  for (const fact of ['FACT_ALPHA', 'FACT_BRAVO', 'FACT_CHARLIE']) {
+    const before = turnsOf(h, threadId).length;
+    await ask(`Remember ${fact}.`);
+    await waitFor(() => turnsOf(h, threadId).length === before + 1 && settled(h, threadId));
+  }
+  driver.release();
+  await waitFor(() => passes(h, threadId).length === 2 && driver.held.length === 1);
+  const second = driver.prompts.get(passes(h, threadId).find(t => !t.archived)!.id)![0]!;
+  for (const fact of ['FACT_ALPHA', 'FACT_BRAVO', 'FACT_CHARLIE']) expect(second).toContain(fact);
+  driver.release();
+  await waitFor(() => !h.core.workforce.memory.busy());
+  expect(passes(h, threadId)).toHaveLength(2);
+});
+
+test('a running memory pass never holds back the notification of the answer the user reads', async () => {
+  const driver = script(() => 'SUMMARY: no change');
+  const { h, threadId, ask } = await setup();
+  await waitFor(() => driver.held.length === 1);
+  const told: string[] = [];
+  const push = h.core.push as unknown as { notify: (threadId: string) => void; reachable: () => boolean };
+  push.reachable = () => true;
+  push.notify = id => { told.push(id); };
+  const before = turnsOf(h, threadId).length;
+  await ask('When is the release?');
+  await waitFor(() => turnsOf(h, threadId).length === before + 1 && settled(h, threadId));
+  await Bun.sleep(50);
+  expect(told).toEqual([threadId]);
+  driver.release();
+  await waitFor(() => driver.held.length === 1);
+  driver.release();
+  await waitFor(() => !h.core.workforce.memory.busy());
+});

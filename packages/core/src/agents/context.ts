@@ -132,7 +132,7 @@ export function agentContext(core: Core, agent: AgentProfile): { text: string; h
     HOW_YOU_WORK,
   ].filter(Boolean).join('\n\n');
   const hash = createHash('sha256').update(JSON.stringify([
-    persona, brain.instructions, memory, existsSync(archive), skills, routines.map(r => [r.id, r.name, r.schedule, r.enabled]), projects, OWN_SETTINGS, HOW_YOU_WORK,
+    brain.path, persona, brain.instructions, memory, existsSync(archive), skills, routines.map(r => [r.id, r.name, r.schedule, r.enabled]), projects, OWN_SETTINGS, HOW_YOU_WORK,
   ])).digest('hex');
   return { text: `${text}\n\n`, hash };
 }

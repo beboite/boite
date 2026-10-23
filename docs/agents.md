@@ -195,8 +195,10 @@ threads) when the agent's subagent policy allows it, else on the agent's own
 model. The core writes the file, so the pass needs no tools. It keeps the old
 file when the owner edited it meanwhile, when the answer passes
 `AGENT_MEMORY_MAX`, or when it would drop most of a file past 1,500
-characters. The next turn never waits for it; one pass runs per agent at a
-time, and a pass still running after ten minutes is stopped. The agent's
+characters. The next turn never waits for it, and its notification never
+waits for the pass either. One pass runs per agent at a time; every exchange
+that ends meanwhile joins the next one, and a pass still running after ten
+minutes is stopped. The agent's
 settings turn it off (`autoMemory`).
 
 ## The desk

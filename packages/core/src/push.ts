@@ -147,6 +147,8 @@ export class PushStore {
       .query('SELECT id, status FROM threads WHERE parent_thread_id = ?')
       .all(threadId) as { id: string; status: string }[];
     return rows.filter(row => {
+      // A persistent agent's memory pass is Boite's own housekeeping: the answer it follows is already the news.
+      if (this.core.workforce?.memory.owns(row.id)) return false;
       if (row.status === 'queued' || row.status === 'running' || row.status === 'waiting') return true;
       const live = this.core.threads.agentState.background.get(row.id) ?? [];
       if (live.length > 0) return true;

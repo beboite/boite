@@ -183,7 +183,10 @@ export class AgentProjects {
     const kept = new Set(others.filter(([id]) => !this.open(id) || ++open <= WATCHES_MAX).map(([id]) => id));
     // Saved oldest first, so the order of the entries breaks ties within one millisecond.
     const follows = Object.fromEntries(Object.entries(saved).filter(([id]) => kept.has(id)));
-    this.write(agentId, { ...follows, [threadId]: { ...previous, at: now, origin: previous?.origin ?? origin } });
+    // A new follow records the pull request as it stands, so its merge or failing checks are news.
+    const thread = previous ? null : this.core.journal.getThread(threadId);
+    const pr = thread ? { pr: deskPullRequest(this.core, thread) } : {};
+    this.write(agentId, { ...follows, [threadId]: { ...previous, ...pr, at: now, origin: previous?.origin ?? origin } });
   }
   unfollow(agentId: string, threadId: ThreadId): boolean {
     const saved = this.saved(agentId);
