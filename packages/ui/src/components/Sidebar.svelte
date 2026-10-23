@@ -75,11 +75,17 @@
       return next && before && next.key !== before.key && next.activity > before.activity;
     });
     previousLeaders = now.map(next => next && { key: next.key, activity: next.activity });
-    // Follow a new prompt in the selected project; removing rows keeps the reading position.
+    // Follow a new prompt in the selected project; removing rows keeps the reading position. Leading the list, it brings
+    // the list to its top; leading the open cards under a Working section, its card comes into view, wherever that is.
     if (promoted && workspace.view === 'projects' && projectView.order === 'recent'
       && untrack(() => promoted.entry.machine.store === workspace.active && promoted.entry.project.id === store.openProject?.id)) {
-      savedScroll = 0;
-      void tick().then(() => { if (scrollRoot && leaders().some(leader => leader && projectKey(leader) === promoted.key)) scrollRoot.scrollTop = 0; });
+      const first = now[0]?.key === promoted.key;
+      if (first) savedScroll = 0;
+      void tick().then(() => {
+        if (!scrollRoot || !leaders().some(leader => leader && projectKey(leader) === promoted.key)) return;
+        if (first) scrollRoot.scrollTop = 0;
+        else [...scrollRoot.querySelectorAll<HTMLElement>('section[data-testid=project]')].find(card => card.dataset['projectKey'] === promoted.key)?.scrollIntoView({ block: 'nearest' });
+      });
     }
   });
   let shelved = $derived(all.filter(({ project }) => project.archived === true));
