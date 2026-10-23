@@ -97,12 +97,16 @@
     if (!id || !threadId || narrow.current) return;
     untrack(() => { if (firstDeskVisit(id) && !store.panel.isOpen && store.panel.surfaces.length === 0) store.panel.open('desk'); });
   });
+  /** The desktop's default agent was opened, or gave way to one named on the way in. */
+  let tried = false;
   // A link from elsewhere (a thread an agent runs, a settings card) names the agent to open.
   $effect(() => {
     const target = store.agentsTarget;
     if (!target) return;
     untrack(() => {
       store.agentsTarget = null;
+      // The named agent is this visit's choice: the default below gives way to it.
+      tried = true;
       focus = null;
       listShown = false;
       if (target.agentId === agent?.id && thread) { pane = target.pane ?? null; return; }
@@ -115,7 +119,6 @@
    * this machine, else the one that spoke last. Asked once per visit, so an
    * agent that cannot be opened leaves the card alone.
    */
-  let tried = false;
   $effect(() => {
     if (narrow.current || focus || thread || !snapshot || !rows.length || store.agentsTarget || tried) return;
     tried = true;

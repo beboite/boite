@@ -126,16 +126,17 @@ export class FakeAgents {
   open(): void {}
 
   /**
-   * A turn ended somewhere: on an agent's thread, a routine or event turn whose
-   * last text block opens with `[quiet]` folds and leaves nothing unread, and a
-   * routine's last occurrence takes the outcome.
+   * A turn ended somewhere: on an agent's thread, a done routine or event turn
+   * whose final text block opens or ends with a `[quiet]` line folds and
+   * leaves nothing unread, as the core's `quietText`, and a routine's last
+   * occurrence takes the outcome.
    */
-  finished(turn: Turn, answer: string): void {
+  finished(turn: Turn, finalText: string): void {
     const agentId = this.ownerOf(turn.threadId);
     if (!agentId) return;
     const operation = turn.execution?.operation;
-    const last = answer.trim().split(/\n\s*\n/).at(-1)?.trim() ?? '';
-    const quiet = (operation === 'routine' || operation === 'event') && turn.status === 'done' && QUIET.test(last.split('\n').at(-1)?.trim() ?? '');
+    const text = finalText.trim();
+    const quiet = (operation === 'routine' || operation === 'event') && turn.status === 'done' && (QUIET.test(text) || QUIET.test(text.split('\n').at(-1)?.trim() ?? ''));
     if (quiet) {
       this.quiet.add(turn.id);
       // As the core's turn settlement: the turn says it was quiet, and it leaves nothing unread.

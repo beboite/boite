@@ -89,14 +89,21 @@ export function liveState(agent: Pick<AgentProfile, 'status'>, status: AgentStat
   return status?.state === 'working' || status?.state === 'queued' || status?.state === 'waiting' ? status.state : 'idle';
 }
 
+/** The newest `openAgent` per machine: an older answer arriving after it opens nothing. */
+const agentOpens = new WeakMap<Store, number>();
+
 /**
  * Opens an agent's thread on the machine that owns it: the core hands the
  * thread (making it again if it was lost), and the store opens it the usual
- * way, which lands on the Agents page.
+ * way, which lands on the Agents page. A newer open, another thread or
+ * another page asked meanwhile wins over it.
  */
 export async function openAgent(store: Store, agentId: string): Promise<string | null> {
   const client = store.client;
   if (!client) return null;
+  const request = (agentOpens.get(store) ?? 0) + 1;
+  agentOpens.set(store, request);
+  const navigation = store.navigationGeneration;
   const known = threadOfAgent(AgentsView.of(store).snapshot, agentId);
   let threadId = known;
   try {
@@ -105,7 +112,7 @@ export async function openAgent(store: Store, agentId: string): Promise<string |
     // An older core without `agents.open` still lists the thread in its sessions.
     if (!known) { store.error = errorText(error); return null; }
   }
-  if (!threadId || store.client !== client) return null;
+  if (!threadId || store.client !== client || agentOpens.get(store) !== request || store.navigationGeneration !== navigation) return null;
   lastAgent.set(store, agentId);
   await store.open(threadId);
   return threadId;
@@ -209,7 +216,7 @@ export class AgentsView {
         this.dirty = false;
         const client = this.client;
         const snapshot = await client?.call('agents.snapshot', {});
-        if (snapshot && !this.disposed && client === this.store.client) { this.snapshot = snapshot; this.loadError = ''; noteUpkeep(snapshot); }
+        if (snapshot && !this.disposed && client === this.store.client) { this.snapshot = snapshot; this.loadError = ''; noteUpkeep(this.store, snapshot); }
       }
     } catch (error) { if (!this.disposed) this.loadError = errorText(error); }
   }

@@ -97,7 +97,7 @@ export class AgentDirectory {
     this.loading = true;
     try {
       const snapshot = await client.call('agents.snapshot', {});
-      if (client === this.client) { this.snapshot = snapshot; noteUpkeep(snapshot); }
+      if (client === this.client) { this.snapshot = snapshot; noteUpkeep(this.store, snapshot); }
     } catch {
       // An older core without agents, or a dropped connection: the rows keep their provider logo.
     } finally {

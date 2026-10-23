@@ -69,17 +69,22 @@ export function finalText(messages: readonly Message[]): string | null {
 
 /**
  * What a quiet wake checked, or null when the turn is not one: a routine or
- * event turn, settled, that the core marked quiet or whose final text block
- * opens or ends with a `[quiet] <what it checked>` line.
+ * event turn, done, that the core marked quiet or whose final text block
+ * opens or ends with a `[quiet] <what it checked>` line. A wake that failed or
+ * was stopped after writing its marker is not quiet, as in the core: its
+ * failure stays in view.
  */
 export function quietReason(turn: Pick<Turn, 'status' | 'execution' | 'quiet'>, messages: readonly Message[]): string | null {
   const operation = turn.execution?.operation;
-  if ((operation !== 'routine' && operation !== 'event') || !settled(turn)) return null;
+  if ((operation !== 'routine' && operation !== 'event') || turn.status !== 'done') return null;
   const lines = (finalText(messages) ?? '').split('\n').map(line => line.trim()).filter(Boolean);
   const line = [lines[0], lines.at(-1)].find(line => line !== undefined && QUIET.test(line));
   if (line) return QUIET.exec(line)![1]!.trim();
   return turn.quiet ? '' : null;
 }
+
+/** A turn's last step: the message holding it, the part, and the message's index in the timeline. */
+type Step = { message: Message; index: number; at: number };
 
 /** What the fold rows and the trimmed messages were last time: a row that did not change keeps its object, so the list measures nothing again. */
 export class TurnFolds {
@@ -115,16 +120,14 @@ export class TurnFolds {
 
     const out: Message[] = [];
     const placed = new Set<string>();
-    /** Where each folded turn's last step sits: what comes after it is the answer. */
-    const lastStep = new Map<string, { message: Message; index: number }>();
-    for (const [, fold] of folds) {
-      for (const message of byTurn.get(fold.turnId) ?? []) {
-        if (message.role !== 'assistant') continue;
-        const index = message.parts.findLastIndex(isStep);
-        if (index >= 0) lastStep.set(fold.turnId, { message, index });
-      }
-    }
-    for (const message of timeline) {
+    /** Where each folded turn's last step sits, its part and its place in the timeline: what comes after it is the answer. */
+    const lastStep = new Map<string, Step>();
+    timeline.forEach((message, at) => {
+      if (message.role !== 'assistant' || !folds.has(FOLD_PREFIX + message.turnId)) return;
+      const index = message.parts.findLastIndex(isStep);
+      if (index >= 0) lastStep.set(message.turnId, { message, index, at });
+    });
+    for (const [at, message] of timeline.entries()) {
       const fold = folds.get(FOLD_PREFIX + message.turnId);
       if (!fold) { out.push(message); continue; }
       const id = FOLD_PREFIX + fold.turnId;
@@ -133,7 +136,7 @@ export class TurnFolds {
       if (here && !placed.has(id)) { placed.add(id); out.push(this.#row(id, fold, message)); }
       if (fold.open) { out.push(message); continue; }
       if (fold.kind === 'quiet' || message.role !== 'assistant') { if (fold.kind !== 'quiet') out.push(message); continue; }
-      const kept = this.#trim(message, lastStep.get(fold.turnId));
+      const kept = this.#trim(message, at, lastStep.get(fold.turnId));
       if (kept) out.push(kept);
     }
     return out;
@@ -149,9 +152,9 @@ export class TurnFolds {
   }
 
   /** The message with its steps left out: the calls, the reasoning and the narration before the last of them. */
-  #trim(message: Message, last: { message: Message; index: number } | undefined): Message | null {
-    // Messages after the one holding the last step are all answer.
-    const cut = last?.message === message ? last.index : last && message.createdAt <= last.message.createdAt ? message.parts.length : -1;
+  #trim(message: Message, at: number, last: Step | undefined): Message | null {
+    // Messages after the one holding the last step are all answer, by their order: two can share a millisecond.
+    const cut = last?.message === message ? last.index : last && at < last.at ? message.parts.length : -1;
     const parts = message.parts.filter((part, index) => index > cut || !(isStep(part) || narration(part)));
     if (parts.length === message.parts.length) return message;
     if (parts.length === 0) return null;

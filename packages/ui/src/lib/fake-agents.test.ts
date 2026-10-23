@@ -53,6 +53,21 @@ test('a routine run is a routine turn on the agent\'s thread, and a quiet answer
   expect((await client.call('agents.snapshot', {})).routines).toEqual([]);
 });
 
+test('a routine whose final text block opens with [quiet] is quiet in the fake as in the core, whatever follows the marker', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0 });
+  const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  const { threadId } = await client.call('agents.open', { agentId: agent.id });
+  await vi.waitFor(async () => expect((await client.call('threads.get', { threadId })).status).toBe('idle'));
+  const routine = await client.call('agents.routine.save', { value: { agentId: agent.id, name: 'Inbox', prompt: '[quiet] inbox empty\nNothing needs attention.', schedule: { kind: 'daily', time: '20:00', timezone: 'UTC' }, enabled: true, nextAt: null, lastTurnId: null, lastScheduledAt: null } });
+  const { turnId } = await client.call('agents.routine.run', { routineId: routine.id, requestId: 'run-inbox-1' });
+  await vi.waitFor(async () => expect((await client.call('threads.get', { threadId })).turns.find(t => t.id === turnId)?.status).toBe('done'));
+  await vi.waitFor(async () => expect((await client.call('agents.snapshot', {})).routines[0]!.lastTurnId).toBe(turnId));
+  expect((await client.call('agents.snapshot', {})).routines[0]!.lastOutcome).toBe('quiet');
+  const thread = await client.call('threads.get', { threadId });
+  expect(thread.turns.find(t => t.id === turnId)?.quiet).toBe(true);
+  expect(thread.unread).toBe(false);
+});
+
 test('remember appends a dated line to MEMORY.md, and a desk keeps the threads put on it with their own state', async ({ ready }) => {
   const { client } = await ready({ delayMs: 0 });
   const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
