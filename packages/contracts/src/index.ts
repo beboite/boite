@@ -191,7 +191,7 @@ export {
   type SettingsReading,
 } from './setting-requests.ts';
 export {
-  AGENT_PROJECTS_MAX, AGENT_RUN_MINUTES, AGENT_SETTING_KEYS, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,
+  AGENT_DAILY_BUDGET, AGENT_PROJECTS_MAX, AGENT_SETTING_KEYS, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,
   normalizeAgentSetting, settledAgentSetting,
   type AgentSettingApplyParams, type AgentSettingAsk, type AgentSettingChoice, type AgentSettingContext, type AgentSettingKey, type AgentSettingReading,
   type AgentSettingRequestCheck, type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams,

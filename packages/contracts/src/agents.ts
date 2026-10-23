@@ -191,7 +191,8 @@ export interface AgentsRpcMethods {
   'agents.runtime.get': { params: { agentId: string }; result: AgentRuntimeConfig };
   'agents.runtime.configure': { params: { agentId: string; expectedRevision: number; config: AgentRuntimeConfig }; result: AgentProfile };
   'agents.accounts.set': { params: { grants: AgentAccountGrant[] }; result: AgentAccountGrant[] };
-  'agents.brain.get': { params: { agentId: string }; result: AgentBrain };
+  /** `threadId`: an agent reads its own brain from its thread (`boite agent memory`). */
+  'agents.brain.get': { params: { agentId: string; threadId?: string }; result: AgentBrain };
   'agents.brain.save': { params: { agentId: string; expectedRevision: string; instructions: string; memory: string }; result: AgentBrain };
   /**
    * Choose the folder agents' brains live under, or null for the default.
@@ -203,7 +204,7 @@ export interface AgentsRpcMethods {
   'agents.memory.note': { params: { threadId?: string; agentId?: string; text: string }; result: AgentBrain };
   'agents.routine.save': { params: AgentSave<AgentRoutine> & { threadId?: string }; result: AgentRoutine };
   'agents.routine.remove': { params: { routineId: string; threadId?: string }; result: { removed: true } };
-  /** Runs a routine now, as a turn on the agent's thread (queued behind one already running). */
+  /** Runs a routine now, as a turn on the agent's thread. Refused while that thread has a turn in flight. */
   'agents.routine.run': { params: { routineId: string; requestId: string }; result: { turnId: string } };
   /** Puts a thread on the agent's desk or takes it off. From the agent's thread or the owner. */
   'agents.watch': { params: { threadId?: string; agentId?: string; watchThreadId: string; watched: boolean }; result: AgentWatch | null };

@@ -60,6 +60,13 @@ export interface Turn {
    * finished before it was recorded.
    */
   agentTotals?: { costUsd: number; tokens: number } | null;
+  /**
+   * A persistent agent's `routine` or `event` turn that had nothing for the
+   * user: the final text block of its last answer opened, or ended, with a line
+   * `[quiet] <what it checked>`. It leaves the thread read, sends no
+   * notification and starts no memory pass; clients fold it to one line.
+   */
+  quiet?: true;
 }
 
 /**
@@ -112,21 +119,21 @@ export function threadActive(status: ThreadStatus): boolean {
  * Whether a finished turn is worth a notification, for the core's Web Push and
  * a client's own toast alike. A delegated agent's result goes to its parent,
  * whose next turn reports it; a parent's turn that ends while `activeChildren`
- * of its agents still work is not the answer yet; a persistent agent's work is
- * read in the agents inbox, so only its failures notify; compacting the
- * context is housekeeping. A stop is the user's own doing. Requests that wait
- * for an answer are notified whatever the thread.
+ * of its agents still work is not the answer yet; a persistent agent's quiet
+ * wake had nothing to say; compacting the context is housekeeping. A stop is
+ * the user's own doing. Requests that wait for an answer are notified whatever
+ * the thread.
  */
 export function notifiesOnFinish(
-  thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'>,
-  turn: Pick<Turn, 'status' | 'execution'>,
+  thread: Pick<ThreadSummary, 'parentThreadId'>,
+  turn: Pick<Turn, 'status' | 'execution' | 'quiet'>,
   activeChildren: number,
 ): boolean {
   if (turn.status !== 'done' && turn.status !== 'error') return false;
   if (thread.parentThreadId) return false;
   if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return false;
   if (turn.status === 'error') return true;
-  if (thread.agentSessionId) return false;
+  if (turn.quiet) return false;
   return activeChildren === 0;
 }
 

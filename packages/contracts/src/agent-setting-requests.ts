@@ -4,16 +4,16 @@ import { SETTING_REASON_MAX, sameSetting } from './setting-requests.ts';
 
 /*
  * A thread, or a persistent agent about itself, asking the user to change one
- * of an agent's settings: entrust it a project, run it on another model, let
- * its work last longer. The same flow as a settings card (setting-requests.ts):
+ * of an agent's settings: entrust it a project, run it on another model, give
+ * it a daily budget. The same flow as a settings card (setting-requests.ts):
  * a card asked without stopping, whose Apply is the owner's
  * (`agents.settings.apply`). The core settles the card once the value moves,
  * from the card or from the agent's own settings, and the outcome reaches the
- * thread that asked as a message, so a persistent agent hears it as new work.
+ * thread that asked as a message, the way a `boite ask` answer does.
  */
 
 /** The settings a card may propose, each drawn where the agent's settings show it. */
-export const AGENT_SETTING_KEYS = ['projects', 'model', 'effort', 'autoMemory', 'subagents', 'maxRunMinutes'] as const;
+export const AGENT_SETTING_KEYS = ['projects', 'model', 'effort', 'autoMemory', 'subagents', 'dailyBudget'] as const;
 export type AgentSettingKey = (typeof AGENT_SETTING_KEYS)[number];
 
 export function isAgentSettingKey(key: unknown): key is AgentSettingKey {
@@ -22,8 +22,8 @@ export function isAgentSettingKey(key: unknown): key is AgentSettingKey {
 
 /** The most projects one agent holds, as `agents.profile.save` allows. */
 export const AGENT_PROJECTS_MAX = 50;
-/** The bounds `agents.runtime.configure` puts on `maxRunMinutes`. */
-export const AGENT_RUN_MINUTES = { min: 1, max: 120 } as const;
+/** The bounds `agents.runtime.configure` puts on `dailyBudgetUsd`, in API-equivalent dollars; null is no cap. */
+export const AGENT_DAILY_BUDGET = { min: 0.01, max: 10_000 } as const;
 
 /** What an agent setting card carries beside the question's text, which is the reason. */
 export interface AgentSettingAsk {
@@ -31,7 +31,7 @@ export interface AgentSettingAsk {
   /** The agent's name when the card was asked: a thread has no agents snapshot to read it from. */
   agentName: string;
   key: AgentSettingKey;
-  /** The proposed value: project ids sorted, a model id, an effort or null, a boolean, minutes. */
+  /** The proposed value: project ids sorted, a model id, an effort or null, a boolean, dollars a day or null. */
   value: unknown;
   /** The value when the card was asked. It settles once the setting leaves it. */
   previous: unknown;
@@ -86,7 +86,7 @@ export function agentSettingValue(profile: AgentProfile, config: AgentRuntimeCon
     case 'effort': return profile.selection.effort;
     case 'autoMemory': return config.autoMemory !== false;
     case 'subagents': return config.subagents.enabled;
-    case 'maxRunMinutes': return config.maxRunMinutes;
+    case 'dailyBudget': return config.dailyBudgetUsd ?? null;
   }
 }
 
@@ -138,10 +138,10 @@ export function normalizeAgentSetting(key: AgentSettingKey, raw: unknown, ctx: A
     case 'effort': return raw === null || typeof raw === 'string' ? ctx.effort(raw === null ? null : raw.trim() || null) : { ok: false, message: 'effort: expected a reasoning level or null' };
     case 'autoMemory':
     case 'subagents': return typeof raw === 'boolean' ? { ok: true, value: raw } : { ok: false, message: `${key}: expected true or false` };
-    case 'maxRunMinutes':
-      return Number.isInteger(raw) && (raw as number) >= AGENT_RUN_MINUTES.min && (raw as number) <= AGENT_RUN_MINUTES.max
-        ? { ok: true, value: raw }
-        : { ok: false, message: `maxRunMinutes: expected a whole number of minutes from ${AGENT_RUN_MINUTES.min} to ${AGENT_RUN_MINUTES.max}` };
+    case 'dailyBudget':
+      return raw === null || (typeof raw === 'number' && Number.isFinite(raw) && raw >= AGENT_DAILY_BUDGET.min && raw <= AGENT_DAILY_BUDGET.max)
+        ? { ok: true, value: raw === null ? null : Math.round(raw * 100) / 100 }
+        : { ok: false, message: `dailyBudget: expected dollars a day from ${AGENT_DAILY_BUDGET.min} to ${AGENT_DAILY_BUDGET.max}, or null for no cap` };
   }
 }
 
@@ -178,7 +178,8 @@ export function checkAgentSettingRequest(params: Pick<AgentSettingRequestParams,
  * closes it unanswered: `close`.
  */
 export function settledAgentSetting(setting: AgentSettingAsk, profile: AgentProfile | null, config: AgentRuntimeConfig | null): QuestionAnswer | 'close' | null {
-  if (profile === null || config === null || profile.status === 'archived') return 'close';
+  // A card asked about a key this core no longer has (`maxRunMinutes`) closes unanswered.
+  if (profile === null || config === null || profile.status === 'archived' || !isAgentSettingKey(setting.key)) return 'close';
   const now = agentSettingValue(profile, config, setting.key);
   if (sameSetting(now, setting.previous)) return null;
   return { optionIds: [sameSetting(now, setting.value) ? 'applied' : 'changed'], value: now };
