@@ -89,8 +89,9 @@ export class Projects {
   async openWhereLeft(): Promise<void> {
     const s = this.ctx.store;
     if (!s.visible || s.page !== 'chat') return;
-    if (s.openThread || this.draft) return;
-    const live = s.threads.filter((t) => !t.archived && !t.parentThreadId && !this.#inArchivedProject(t.projectId));
+    // An agent's own thread belongs to the Agents page: the chat starts from the threads around it.
+    if ((s.openThread && !s.openThread.agentSessionId) || this.draft) return;
+    const live = s.threads.filter((t) => !t.archived && !t.parentThreadId && !t.agentSessionId && !this.#inArchivedProject(t.projectId));
     const recent = [...live].sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (recent) {
       await s.open(recent.id);

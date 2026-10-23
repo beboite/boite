@@ -78,7 +78,7 @@
     if (!ready || !schedule || !agent) return;
     // An edit keeps a paused routine paused; a single date that already ran is armed again by its new date.
     const enabled = initial.routine ? initial.routine.enabled || spent(initial.routine) : true;
-    const value = { agentId: agent.id, name: name.trim() || routineName(prompt), prompt: prompt.trim(), schedule, enabled, nextAt: null, lastWorkId: initial.routine?.lastWorkId ?? null, lastScheduledAt: initial.routine?.lastScheduledAt ?? null };
+    const value = { agentId: agent.id, name: name.trim() || routineName(prompt), prompt: prompt.trim(), schedule, enabled, nextAt: null, lastTurnId: initial.routine?.lastTurnId ?? null, lastScheduledAt: initial.routine?.lastScheduledAt ?? null, lastOutcome: initial.routine?.lastOutcome ?? null };
     const saved = await view.call('agents.routine.save', initial.routine ? { id: initial.routine.id, expectedRevision: initial.routine.revision, value } : { value });
     if (saved) ondone(saved);
   }

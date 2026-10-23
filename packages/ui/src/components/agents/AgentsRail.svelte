@@ -1,11 +1,9 @@
 <script lang="ts">
-  import { Plus, Search, Settings2, UserRoundPlus, Users, X } from '@lucide/svelte';
-  import type { AgentsSnapshot, ThreadSummary } from '@boite/contracts';
-  import { agentsFilter, chatKey, previewOf, waitingForUser, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentsView } from '../../lib/agents.svelte';
-  import { type MenuItem } from '../../lib/menu';
-  import { fill, strings } from '../../lib/strings';
+  import { Plus, Search, Settings2, X } from '@lucide/svelte';
+  import type { AgentStatus, ThreadSummary } from '@boite/contracts';
+  import { agentRows, agentsFilter, faceOf, liveStep, previewOf, type AgentRowData, type AgentsView } from '../../lib/agents.svelte';
+  import { strings } from '../../lib/strings';
   import { workspace, type Machine } from '../../lib/workspace.svelte';
-  import Menu from '../Menu.svelte';
   import RailFrame from '../RailFrame.svelte';
   import RailHead from '../RailHead.svelte';
   import MachineStatus from '../MachineStatus.svelte';
@@ -14,26 +12,29 @@
   import { minuteClock } from '../../lib/clock.svelte';
 
   /**
-   * The conversations with agents, listed the way a messenger lists its chats
-   * in the thread list's own frame and head (`RailFrame`, `RailHead`): one
-   * card of rows, each with its picture, its name, missed-message count and
-   * the last thing said. An agent's current question marks its picture;
-   * what it asks is in its conversation. Like the thread list, it holds every
-   * connected machine's agents, newest first, each row with its machine's icon
-   * once there are two; the foot's machine button narrows it to one.
+   * The agents, listed the way a messenger lists its chats in the thread
+   * list's own frame and head (`RailFrame`, `RailHead`): one card of rows,
+   * each with its robot by state, its name, what it does this second or the
+   * last thing it said, the missed answers or the time, and its next wake.
+   * Like the thread list, it holds every connected machine's agents, newest
+   * first, each row with its machine's icon once there are two; the foot's
+   * machine button narrows it to one.
    */
-  type MachineChats = { machine: Machine; view: AgentsView; chats: AgentChat[]; live: Map<string, ThreadSummary> };
-  let { view, lists, filter, active, onfocus, oncreate }: {
+  type MachineAgents = { machine: Machine; view: AgentsView };
+  let { view, lists, filter, active, onopen, oncreate, onengine, engine = false }: {
     /** The page's machine: the one a new agent and the engine settings belong to. */
     view: AgentsView;
-    /** Each listed machine's conversations, the page's own first. */
-    lists: MachineChats[];
+    /** Each listed machine's agents, the page's own first. */
+    lists: MachineAgents[];
     /** The machine the list is narrowed to, null for all. */
     filter: string | null;
-    /** The row the open page belongs to, `kind:id`, on the page's machine. */
+    /** The agent whose thread is open, on the page's machine. */
     active: string | null;
-    onfocus: (focus: AgentFocus) => void;
-    oncreate: (kind: AgentEntryKind) => void;
+    onopen: (machine: Machine, agentId: string) => void;
+    oncreate: () => void;
+    onengine: () => void;
+    /** The engine settings are what the card shows. */
+    engine?: boolean;
   } = $props();
 
   const labels = $derived(strings.agents);
@@ -44,41 +45,33 @@
   const multi = $derived(workspace.machinesOr(view.store).length > 1);
   const needle = $derived(query.trim().toLowerCase());
   const rows = $derived(lists
-    .flatMap(list => list.chats.filter(c => !needle || c.name.toLowerCase().includes(needle)).map(chat => ({ ...list, chat })))
-    .sort((a, b) => b.chat.at - a.chat.at || a.chat.name.localeCompare(b.chat.name)));
-  /** A search also reaches what the list leaves out: archived agents and missions. */
-  const found = $derived(needle ? lists.flatMap(({ machine, view: owner }) => {
-    const snapshot = owner.snapshot;
-    if (!snapshot) return [];
-    return [
-      ...snapshot.profiles.filter(a => a.status === 'archived' && a.name.toLowerCase().includes(needle)).map(a => ({ machine, view: owner, kind: 'profile' as const, id: a.id, name: a.name, avatar: a.avatar, state: labels.archived })),
-      ...snapshot.missions.filter(m => m.title.toLowerCase().includes(needle)).map(m => ({ machine, view: owner, kind: 'mission' as const, id: m.id, name: m.title, avatar: '', state: labels[m.status] }))
-    ];
-  }) : []);
-  const createItems = $derived<MenuItem[]>([{ id: 'profile', label: labels.newTitle.profile, glyph: UserRoundPlus }, { id: 'group', label: labels.newTitle.group, glyph: Users }]);
+    .flatMap(list => agentRows(list.view.snapshot).filter(row => !needle || row.profile.name.toLowerCase().includes(needle)).map(row => ({ ...list, row })))
+    .sort((a, b) => b.row.at - a.row.at || a.row.profile.name.localeCompare(b.row.profile.name)));
+  /** A search also reaches what the list leaves out: archived agents. */
+  const found = $derived(needle ? lists.flatMap(({ machine, view: owner }) =>
+    (owner.snapshot?.profiles ?? []).filter(a => a.status === 'archived' && a.name.toLowerCase().includes(needle)).map(profile => ({ machine, profile }))) : []);
 
-  function memberList(snapshot: AgentsSnapshot | null, chat: AgentChat) {
-    const profiles = snapshot?.profiles ?? [];
-    return chat.members.flatMap(id => profiles.find(a => a.id === id) ?? []);
+  /** The thread's row, live between two snapshots, when this client holds it. */
+  function threadOf(machine: Machine, status: AgentStatus | null): ThreadSummary | null {
+    return status?.threadId ? machine.store.threads.find(t => t.id === status.threadId) ?? null : null;
   }
-  /** The last thing said, the way a messenger previews a chat; a new agent shows what it is for. */
-  function detail(snapshot: AgentsSnapshot | null, chat: AgentChat): string {
-    const name = (id: string | null) => snapshot?.profiles.find(a => a.id === id)?.name ?? '';
-    const last = chat.last;
-    if (last) {
-      const text = last.thread ? fill(labels.threadEvent[last.thread.event], { name: name(last.senderId), title: last.thread.title }) : previewOf(last.text);
-      const sender = last.senderId === null ? labels.user : chat.kind === 'profile' ? '' : name(last.senderId);
-      return sender ? fill(labels.previewFrom, { name: sender, text }) : text;
-    }
-    if (chat.kind === 'profile') return snapshot?.profiles.find(a => a.id === chat.id)?.domain ?? '';
-    return memberList(snapshot, chat).map(a => a.name).join(', ');
+  /** How the row stands: its thread's row first, the snapshot's status else. */
+  function toneOf(row: AgentRowData, thread: ThreadSummary | null): 'idle' | 'working' | 'waiting' | 'error' {
+    if (row.profile.status === 'paused') return 'idle';
+    if (thread?.status === 'running' || thread?.status === 'queued') return 'working';
+    if (thread?.status === 'waiting') return 'waiting';
+    const state = row.status?.state;
+    if (state === 'working' || state === 'queued') return 'working';
+    if (state === 'waiting') return 'waiting';
+    return state === 'error' || row.status?.problem ? 'error' : 'idle';
   }
-  /** A row of the page's machine opens in place; another machine's opens the page there. */
-  function openRow(machine: Machine, kind: AgentEntryKind, id: string) {
-    // Read now: the page, and the row's values with it, is drawn again for the other machine.
-    const target = machine.store;
-    if (target === view.store) onfocus({ kind, id });
-    else void workspace.select(target).then(() => target.showAgents(id, undefined, kind));
+  /** What it does this second, what it waits on, else the last thing it said; a new agent shows what it is for. */
+  function detailOf(row: AgentRowData, thread: ThreadSummary | null, tone: ReturnType<typeof toneOf>): string {
+    if (row.profile.status === 'paused') return labels.state.paused;
+    if (tone === 'working') return liveStep(row.status, thread) ?? labels.state.working;
+    if (tone === 'waiting') return labels.state.waiting;
+    if (tone === 'error') return row.status?.problem ?? labels.state.error;
+    return row.status?.last ? previewOf(row.status.last.text) : row.profile.domain;
   }
   /** Narrowing to another machine moves the page there, so a new agent is created where the list shows. */
   function narrow(id: string | null) {
@@ -97,7 +90,7 @@
       {#snippet actions()}
         <button type="button" class="ghost icon small" bind:this={searchToggle} class:active={searching} aria-pressed={searching} title={labels.search} aria-label={labels.search} onclick={() => (searching ? closeSearch() : (searching = true))} data-testid="agents-search-toggle"><Search size={16} /></button>
         {#if view.store.owner}
-          <Menu placement="bottom" align="end" variant="ghost" label={labels.create} testid="agents-create" items={createItems} onpick={id => oncreate(id as AgentEntryKind)}><Plus size={16} /></Menu>
+          <button type="button" class="ghost icon small" title={labels.newAgent} aria-label={labels.newAgent} onclick={oncreate} data-testid="agents-create"><Plus size={16} /></button>
         {/if}
       {/snippet}
     </RailHead>
@@ -115,21 +108,23 @@
 
   {#if rows.length}
     <section class="agents-card" aria-label={labels.heading}>
-      {#each rows as { machine, view: owner, chat, live } (JSON.stringify([machine.id, chat.kind, chat.id]))}
-        {@const key = chatKey(chat.kind, chat.id)}
-        {@const thread = live.get(key) ?? null}
-        {@const waiting = waitingForUser(owner.snapshot, chat.scope ?? { kind: 'team', id: chat.id }, thread)}
-        <AgentRow title={chat.name} open={owner === view && active === key} unread={chat.unread} away={machine.store.connection !== 'ready'} at={chat.at} {now} detail={detail(owner.snapshot, chat)} machine={multi ? machine : undefined} testid="agent-entry-{chat.id}" onclick={() => openRow(machine, chat.kind, chat.id)}>
-          {#snippet picture()}<AgentAvatar kind={chat.kind} id={chat.id} name={chat.name} avatar={chat.avatar} members={memberList(owner.snapshot, chat)} status={waiting ? 'waiting' : thread ? 'running' : 'idle'} size={22} />{/snippet}
+      {#each rows as { machine, view: owner, row } (JSON.stringify([machine.id, row.profile.id]))}
+        {@const thread = threadOf(machine, row.status)}
+        {@const tone = toneOf(row, thread)}
+        <AgentRow title={row.profile.name} open={owner === view && active === row.profile.id} unread={row.status?.unread ?? 0} away={machine.store.connection !== 'ready'}
+          at={row.status?.last?.at ?? 0} {now} {tone} detail={detailOf(row, thread, tone)}
+          wake={tone === 'idle' && row.profile.status === 'active' && row.status?.nextWake ? row.status.nextWake : null}
+          machine={multi ? machine : undefined} testid="agent-entry-{row.profile.id}" onclick={() => onopen(machine, row.profile.id)}>
+          {#snippet picture()}<AgentAvatar kind="profile" id={row.profile.id} name={row.profile.name} avatar={row.profile.avatar} status={faceOf(tone === 'working' ? 'working' : tone === 'waiting' ? 'waiting' : 'idle')} size={30} />{/snippet}
         </AgentRow>
       {/each}
     </section>
   {/if}
   {#if found.length}
     <section class="agents-card">
-      {#each found as entry (JSON.stringify([entry.machine.id, entry.kind, entry.id]))}
-        <AgentRow title={entry.name} at={0} {now} detail={entry.state} machine={multi ? entry.machine : undefined} testid="agent-entry-{entry.id}" onclick={() => openRow(entry.machine, entry.kind, entry.id)}>
-          {#snippet picture()}<AgentAvatar kind={entry.kind} id={entry.id} name={entry.name} avatar={entry.avatar} size={22} />{/snippet}
+      {#each found as entry (JSON.stringify([entry.machine.id, entry.profile.id]))}
+        <AgentRow title={entry.profile.name} at={0} {now} detail={labels.state.archived} machine={multi ? entry.machine : undefined} testid="agent-entry-{entry.profile.id}" onclick={() => onopen(entry.machine, entry.profile.id)}>
+          {#snippet picture()}<AgentAvatar kind="profile" id={entry.profile.id} name={entry.profile.name} avatar={entry.profile.avatar} size={30} />{/snippet}
           {#snippet aside()}{/snippet}
         </AgentRow>
       {/each}
@@ -143,6 +138,6 @@
   {/snippet}
 
   {#snippet foot()}
-    {#if view.store.owner}<button type="button" class="ghost icon" class:active={active === 'engine'} title={labels.engineSettings} aria-label={labels.engineSettings} onclick={() => onfocus({ kind: 'engine' })} data-testid="agents-engine"><Settings2 size={16} /></button>{/if}
+    {#if view.store.owner}<button type="button" class="ghost icon" class:active={engine} title={labels.engineSettings} aria-label={labels.engineSettings} onclick={onengine} data-testid="agents-engine"><Settings2 size={16} /></button>{/if}
   {/snippet}
 </RailFrame>

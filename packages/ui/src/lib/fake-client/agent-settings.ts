@@ -98,7 +98,7 @@ function write(ctx: FakeContext, agent: AgentProfile, key: AgentSettingAsk['key'
     case 'effort': return ctx.agents.writeSetting(agent.id, { selection: { ...agent.selection, effort: value as string | null } });
     case 'autoMemory': return ctx.agents.writeSetting(agent.id, { config: { ...config, autoMemory: value as boolean } });
     case 'subagents': return ctx.agents.writeSetting(agent.id, { config: { ...config, subagents: { ...config.subagents, enabled: value as boolean } } });
-    case 'maxRunMinutes': return ctx.agents.writeSetting(agent.id, { config: { ...config, maxRunMinutes: value as number } });
+    case 'dailyBudget': return ctx.agents.writeSetting(agent.id, { config: { ...config, dailyBudgetUsd: value as number | null } });
   }
 }
 

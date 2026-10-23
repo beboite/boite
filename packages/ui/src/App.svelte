@@ -366,8 +366,14 @@
     else scrim.hide();
   });
 
+  /**
+   * The thread the right panel belongs to: the chat's open thread, or on the
+   * Agents page the agent's own; an ordinary thread left open behind the
+   * Agents page has no panel there.
+   */
+  const panelThread = $derived(store.page === 'agents' ? (store.openThread?.agentSessionId ? store.openThread : null) : store.openThread);
   $effect(() => {
-    if (store.panelOpen && store.openThread) panelSlot.show();
+    if (store.panelOpen && panelThread) panelSlot.show();
     else panelSlot.hide();
   });
   $effect(() => {
@@ -564,7 +570,7 @@
   {/if}
   <TitleBar {store} />
 
-  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={store.page === 'chat' && rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
+  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={(store.page === 'chat' || store.page === 'agents') && rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
     {#if !booted}
       <p class="empty boot" class:long={compacting}>{compacting ? strings.app.compacting : strings.app.loading}</p>
     {:else if wideRecovery}
@@ -585,7 +591,14 @@
         </div>
       {/if}
     {:else if store.page === 'agents' && experimentOn('resident-agents')}
+      <!-- The chat's layout with the agents list for its column: an agent's conversation is its thread, and the panel beside it that thread's. -->
       {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
+      {#if panelSlot.shown && panelThread && deferred.RightPanel}
+        {@const RightPanel = deferred.RightPanel}
+        {#key store}
+          <RightPanel {store} panel={store.panel} closing={panelSlot.closing} attach={panelSlot.attach} onexit={panelSlot.end} />
+        {/key}
+      {/if}
     {:else if store.page === 'settings'}
       {#if SettingsShell}<SettingsShell {store} onopenthread={() => { mobileScreen = 'chat'; }} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}

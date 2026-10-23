@@ -4,7 +4,7 @@ import { dismissMergedPr } from './merged-pr-archive';
 import { assertIdleFamily } from './completion';
 import { isThreadTerminal, protectedThreadIdsError, threadActive } from '@boite/contracts';
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
-import { DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
 import { recoverTurn } from './recovery';
 import { RpcFailure } from '../client';
@@ -56,14 +56,11 @@ function writeFakeFork(ctx: FakeContext, source: Thread, kept: Message[], placed
   return structuredClone(toSummary(thread));
 }
 
-export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string, work: AgentWork): string {
-  const mission = work.scope.kind === 'mission' ? ctx.agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
-  const project = ctx.projects.find(p => p.id === mission?.projectId);
-  const placed = project ? fakeWorktree(project.path, `${agent.name} ${mission?.title ?? ''}`, undefined, ctx.settings.worktreeStorage, project.id) : null;
-  if (project && placed) registerFakeWorktree(ctx, project.id, placed);
+/** A persistent agent's own thread: projectless, in its workspace folder, titled with its name. */
+export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string): string {
   const now = Date.now();
-  const thread: Thread = { id: `t-${++ctx.seq}`, projectId: project?.id ?? null, agentSessionId: sessionId, ...agent.selection,
-    title: agent.name, titleSource: 'user', speed: null, cwd: placed?.path ?? `${DATA_DIR}/agent-workspaces/${agent.id}/${work.scope.id}`, branch: placed?.branch ?? null,
+  const thread: Thread = { id: `t-${++ctx.seq}`, projectId: null, agentSessionId: sessionId, ...agent.selection,
+    title: agent.name, titleSource: 'user', speed: null, cwd: `${DATA_DIR}/agent-workspaces/${agent.id}/agent-${agent.id}`, branch: null,
     status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null,
     createdAt: now, updatedAt: now, messages: [], messagesBefore: null, turns: [], commands: [] };
   ctx.threads.set(thread.id, thread);
@@ -609,7 +606,6 @@ export function threadMethods(ctx: FakeContext) {
       return { ok: true };
     },
     'turns.start': async (params) => {
-      if (ctx.thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions accept work through Agents');
       requireFakeCwd(ctx, ctx.thread(params.threadId));
       const referenceError = previewReferencesError(params.previewReferences ?? [], params.prompt);
       if (referenceError) throw new RpcFailure({ code: RpcErrorCode.Refused, message: referenceError });
@@ -665,7 +661,6 @@ export function threadMethods(ctx: FakeContext) {
     // has no native transcript, so every rewind and fork is the seeded path.
     'threads.rewind': async (params) => {
       const thread = ctx.thread(params.threadId);
-      if (thread.agentSessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a persistent agent session takes its work through Agents and cannot be rewound', data: { threadId: thread.id, field: 'threadId', expected: 'a conversation thread' } });
       if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot rewind an archived thread', data: { threadId: thread.id, field: 'threadId', expected: 'a thread that is not archived' } });
       if (threadActive(thread.status) || ctx.inFlight.has(thread.id)) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread has a turn running or queued; stop it before editing a message', data: { threadId: thread.id, reason: 'turn-in-flight', status: thread.status, expected: 'an idle thread' } });

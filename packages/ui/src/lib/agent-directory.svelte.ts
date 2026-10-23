@@ -153,10 +153,10 @@ export class AgentDirectory {
   }
 
   /**
-   * Every agent busy on this machine: a turn under way in its thread, or work
-   * that waits on the user (a decision it asked for) even after its turn
-   * ended. The one waiting on the user comes first, then the longest running.
-   * `waiting` says the user has something to answer.
+   * Every agent busy on this machine: a turn under way in its thread, or one
+   * that waits on the user (a question or a permission). The one waiting on
+   * the user comes first, then the longest running. `waiting` says the user
+   * has something to answer.
    */
   get atWork(): AgentAtWork[] {
     const snapshot = this.snapshot;
@@ -167,15 +167,15 @@ export class AgentDirectory {
       const agent = this.ownerOf(thread);
       if (agent) byThread.set(thread.id, { agent, thread, waiting: thread.status === 'waiting' });
     }
-    for (const work of snapshot.work) {
-      if (work.status !== 'waiting' && work.status !== 'running') continue;
-      const run = work.runId ? snapshot.runs.find(r => r.id === work.runId) : undefined;
-      const thread = run ? this.store.threads.find(t => t.id === run.threadId) : undefined;
-      const agent = snapshot.profiles.find(a => a.id === work.agentId);
+    // A machine whose rows this client has not read yet still says who works, from the agents' own status.
+    for (const status of snapshot.status ?? []) {
+      if (!status.threadId || byThread.has(status.threadId)) continue;
+      if (status.state !== 'working' && status.state !== 'queued' && status.state !== 'waiting') continue;
+      const thread = this.store.threads.find(t => t.id === status.threadId);
+      const agent = snapshot.profiles.find(a => a.id === status.agentId);
       if (!thread || !agent || thread.archived) continue;
-      const held = byThread.get(thread.id);
-      if (work.status === 'waiting') byThread.set(thread.id, { agent, thread: { ...thread, status: 'waiting' }, waiting: true });
-      else if (!held) byThread.set(thread.id, { agent, thread: { ...thread, status: 'running', runningSince: thread.runningSince ?? run?.startedAt ?? null }, waiting: false });
+      const waiting = status.state === 'waiting';
+      byThread.set(thread.id, { agent, thread: { ...thread, status: waiting ? 'waiting' : 'running' }, waiting });
     }
     return [...byThread.values()].sort((a, b) => Number(b.waiting) - Number(a.waiting) || (a.thread.runningSince ?? 0) - (b.thread.runningSince ?? 0));
   }

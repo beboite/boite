@@ -20,7 +20,8 @@ export const strings = {
     none: 'None',
     noProjects: 'No project',
     defaultEffort: 'Default',
-    minutes: '{count} min',
+    dollars: '${amount} a day',
+    noCap: 'No cap',
     /** A plain question a persistent agent asked without stopping, shown in its conversation. */
     send: 'Send',
     keys: {
@@ -29,7 +30,7 @@ export const strings = {
       effort: 'Reasoning effort',
       autoMemory: 'Update memory after each task',
       subagents: 'Subagents',
-      maxRunMinutes: 'Maximum minutes per execution',
+      dailyBudget: 'Daily budget for its own wakes',
     },
   }
 } as const;
