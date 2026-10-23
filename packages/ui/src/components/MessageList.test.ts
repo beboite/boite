@@ -233,7 +233,7 @@ test('cache pings are one quiet line between the turns they sit in, with no answ
   expect(document.querySelector('[data-testid="message-system"]')).toBeNull();
 });
 
-test('an agent thread folds a finished turn\'s steps behind one row and a quiet wake to one line, each opening on a click', async ({ ready }) => {
+test('an agent thread folds a finished turn\'s steps behind the count on its summary line and a quiet wake to one line, each opening on a click', async ({ ready }) => {
   setExperiment('resident-agents', true);
   onTestFinished(() => setExperiment('resident-agents', false));
   const { store: owner } = await ready({ delayMs: 0, agentsDemo: true });
@@ -252,10 +252,10 @@ test('an agent thread folds a finished turn\'s steps behind one row and a quiet 
   expect(document.querySelector('[data-testid="wake-marker"]')).toBeNull();
   expect(timeline()).not.toContain('Nothing needs you tonight');
   expect(document.querySelectorAll('[data-testid="tool-group"], [data-testid="tool-card"]')).toHaveLength(0);
-  // Its last memory pass is one line under the answer it followed.
+  // Its last memory pass is a mark on the summary line of the answer it followed, its summary in the tooltip.
   const pass = document.querySelector<HTMLElement>('[data-testid="memory-pass"]')!;
-  expect(pass.textContent).toContain('Memory updated · Noted that the welcome screen fits in three lines on a phone.');
-  expect(pass.closest('article')?.previousElementSibling?.textContent).toContain('Noted in my memory');
+  expect(pass.title).toBe('Memory updated · Noted that the welcome screen fits in three lines on a phone.');
+  expect(pass.closest('article')?.textContent).toContain('Noted in my memory');
   quiet.querySelector('button')!.click();
   flushSync();
   expect(document.querySelector('[data-testid="wake-marker"]')?.textContent).toContain('Routine · Evening review');
@@ -270,21 +270,26 @@ test('an agent thread folds a finished turn\'s steps behind one row and a quiet 
   await openAgent(owner, nova.id);
   running = mount(MessageList, { target: document.body, props: { store: owner, threadId: owner.openThread!.id, messages: owner.openThread!.messages } });
   flushSync();
-  const worked = folds().filter(fold => fold.dataset.kind === 'worked');
+  // No row above the answer: the summary line under it counts the steps, with the time it worked and when it finished.
+  expect(folds().filter(fold => fold.dataset.kind === 'worked')).toHaveLength(0);
+  const worked = [...document.querySelectorAll<HTMLElement>('[data-testid="turn-steps"]')];
   // Its answers are signed with its name, not the provider's.
   expect([...document.querySelectorAll('[data-testid="message-model"]')].map(node => node.textContent?.trim())).toContain('Nova');
   expect(timeline()).not.toMatch(/^Echo|\bEcho\b/);
-  expect(worked.map(fold => fold.textContent?.trim())).toEqual(['Worked 2 min · 2 steps', 'Worked 2 min · 4 steps']);
+  expect(worked.map(button => button.textContent?.trim())).toEqual(['2 steps', '4 steps']);
+  expect(worked[1]!.closest('[data-testid="turn-summary"]')?.textContent).toMatch(/Worked for 2m 0\ds.*done/);
   expect(timeline()).toContain('The login fix opened PR #482');
   expect(timeline()).not.toContain('The e2e job fails; its log names the redirect test.');
   // The running turn keeps its steps open and live.
   expect(timeline()).toContain('Checking the release branch first');
   expect(document.querySelectorAll('[data-testid="tool-group"], [data-testid="tool-card"]').length).toBeGreaterThan(0);
-  worked[1]!.querySelector('button')!.click();
+  worked[1]!.click();
   flushSync();
   expect(timeline()).toContain('The e2e job fails; its log names the redirect test.');
-  worked[1]!.querySelector('button')!.click();
+  expect(document.querySelectorAll<HTMLElement>('[data-testid="turn-steps"]')[1]?.getAttribute('aria-expanded')).toBe('true');
+  document.querySelectorAll<HTMLElement>('[data-testid="turn-steps"]')[1]!.click();
   flushSync();
+  expect(timeline()).not.toContain('The e2e job fails; its log names the redirect test.');
 });
 
 test.for([false, true])('the outline rail is left of the bubbles on a desktop and not drawn on a phone (phone: %s)', async (phone, { createStore }) => {

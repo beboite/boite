@@ -7,8 +7,8 @@
   import MachineIcon from '../MachineIcon.svelte';
 
   /**
-   * An agent in the list, the way a messenger draws a chat: its robot, its
-   * name, and under it what it does this second while it works, what it waits
+   * An agent in the list, the way a messenger draws a chat: its robot in its
+   * ring, its name, and under it what it does this second while it works, what it waits
    * on, else the last thing it said. On the right the missed answers or the
    * time of the last one, and the next wake as a small clock while it rests.
    */
@@ -56,7 +56,6 @@
     </span>
     {#if detail || wake}
       <span class="detail-line">
-        {#if tone === 'working'}<span class="live-dot" aria-hidden="true"></span>{/if}
         <span class="detail" data-testid="agent-row-detail">{detail}</span>
         {#if wake}<span class="wake" title={fill(strings.agents.nextWake, { name: wake.label, when: exactTime(wake.at) })} data-testid="agent-row-wake"><Clock3 size={11} strokeWidth={2} />{wakeText}</span>{/if}
       </span>
@@ -65,14 +64,15 @@
 </div>
 
 <style>
-  .agent-row { position: relative; border-radius: var(--radius-md); transition: background var(--dur-2) var(--ease-out-quint); }
+  .agent-row { position: relative; border-radius: var(--radius-md); transition: background var(--dur-2) var(--ease-out-quint), box-shadow var(--dur-2) var(--ease-out-quint); }
   .agent-row:hover { background: var(--color-hover); }
-  .agent-row.open { background: var(--color-active); }
+  /* The open row lifts: the active fill and the card shadow. */
+  .agent-row.open { background: var(--color-active); box-shadow: var(--shadow-e1); }
   .row { display: flex; flex-direction: column; align-items: stretch; width: 100%; height: auto; min-height: var(--row); padding: 8px 10px; gap: 3px; background: transparent; }
   .row:hover:not(:disabled) { background: transparent; }
   .row:active:not(:disabled) { transform: none; }
-  .headline { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .picture { display: inline-flex; flex: none; }
+  .headline { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .picture { display: inline-flex; flex: none; margin: 2px; }
   .machine { display: inline-flex; align-items: center; flex: none; color: var(--color-muted-foreground); }
   .machine.offline { color: var(--color-danger); }
   .title { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); font-weight: 500; }
@@ -80,14 +80,12 @@
   .unread-count { flex: none; min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; border-radius: 999px; background: var(--color-accent); color: var(--color-accent-ink); font-size: var(--text-xs); font-weight: 600; }
   .when { flex: none; color: var(--color-subtle); font-size: var(--text-xs); }
   /* Under the name: the picture's width and its gap to the left, so the line starts under the name. */
-  .detail-line { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 38px; }
-  .on-machine .detail-line { padding-left: 59px; }
+  .detail-line { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 44px; }
+  .on-machine .detail-line { padding-left: 67px; }
   .detail { flex: 1; min-width: 0; text-align: left; font-size: var(--text-xs); color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  [data-tone='working'] .detail { color: var(--color-accent); }
+  /* Hue says status only: the waiting line in the live colour, a failure in danger; work reads in the foreground, its ring breathing beside it. */
+  [data-tone='working'] .detail { color: var(--color-foreground); }
   [data-tone='waiting'] .detail { color: var(--color-live); }
   [data-tone='error'] .detail { color: var(--color-danger); }
-  .live-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); animation: pulse 1.6s var(--ease-out-quint) infinite var(--loops); }
   .wake { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: var(--text-xs); color: var(--color-subtle); font-variant-numeric: tabular-nums; }
-  @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
-  :global(html[data-motion='reduced']) .live-dot { animation: none; }
 </style>

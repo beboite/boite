@@ -69,6 +69,7 @@ export const strings = {
       pr: { open: 'PR #{number}', draft: 'Draft #{number}', merged: 'PR #{number} merged', closed: 'PR #{number} closed' },
       checks: { pending: 'checks running', passing: 'checks pass', failing: 'checks failing' },
       origin: { started: 'It started this', entrusted: 'Entrusted to it', followed: 'It follows this' },
+      memoryMore: 'Show all', memoryLess: 'Show less',
       memoryEmpty: 'Nothing noted yet. It writes here what it learns.',
       memoryPass: { running: 'Updating now', done: 'Updated {when}', unchanged: 'Checked {when}, nothing to change', error: 'Update failed {when}' },
       ways: 'Ways of working', waysEmpty: 'No AGENTS.md yet.',

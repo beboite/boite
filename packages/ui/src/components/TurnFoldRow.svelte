@@ -5,10 +5,10 @@
   import { strings } from '../lib/strings';
 
   /**
-   * One row in place of what a persistent agent's finished turn did on the
-   * way to its answer ("Worked 3 min · 14 steps"), or in place of a whole
-   * wake that had nothing for the user ("Nothing to report · <what it
-   * checked> · 3 steps"). A click opens the turn as it ran, a second folds it.
+   * One thin divider in place of a whole wake that had nothing for the user
+   * ("Nothing to report · <what it checked> · 3 steps"), its wake's icon and
+   * its time on it. A click opens the turn as it ran, a second folds it. A
+   * worked turn has no row: its count sits on the line under its answer.
    */
   let { fold, at, wake }: { fold: TurnFold; at: number; wake?: 'routine' | 'event' } = $props();
   const t = $derived(strings.chat.fold);
@@ -22,7 +22,7 @@
 </script>
 
 <div class="turn-fold" data-kind={fold.kind} data-open={fold.open} data-testid="turn-fold">
-  {#if quiet}<span class="rule"></span>{/if}
+  <span class="rule"></span>
   <button type="button" class="ghost small row" aria-expanded={fold.open} title={hint} onclick={toggle} data-testid="turn-fold-toggle">
     <span class="glyph" aria-hidden="true">
       {#if quiet}
@@ -35,20 +35,21 @@
     {#if quiet}<time datetime={new Date(at).toISOString()} title={fullTime(at)}>{clockTime(at)}</time>{/if}
     <span class="fold-caret" class:open={fold.open} aria-hidden="true"><ChevronRight size={12} /></span>
   </button>
-  {#if quiet}<span class="rule"></span>{/if}
+  <span class="rule"></span>
 </div>
 
 <style>
+  /* A thin divider across the column, the words on it: no pill, no box. */
   .turn-fold {
     align-self: stretch;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
+    margin: 4px 0;
     min-width: 0;
     font-size: var(--text-xs);
     color: var(--color-muted-foreground);
   }
-  .turn-fold[data-kind='quiet'] { margin: 4px 0; }
   .rule { flex: 1; min-width: 12px; height: 1px; background: var(--color-border); }
   .row {
     flex: 0 1 auto;
@@ -58,21 +59,17 @@
     gap: 6px;
     height: auto;
     min-height: var(--control-sm);
-    padding: 2px 10px 2px 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-full);
-    background: var(--color-surface);
+    padding: 2px 4px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
     color: var(--color-muted-foreground);
     font-size: var(--text-xs);
     font-weight: 500;
-    transition: background-color var(--dur-2) var(--ease-out-quint), border-color var(--dur-2) var(--ease-out-quint), color var(--dur-2) var(--ease-out-quint);
+    transition: color var(--dur-2) var(--ease-out-quint);
   }
-  .row:hover, .row:focus-visible { color: var(--color-foreground); border-color: var(--color-edge); }
-  .turn-fold[data-kind='worked'] .row { border-style: dashed; }
-  .turn-fold[data-kind='worked'][data-open='true'] .row { border-style: solid; }
-  .glyph { display: inline-flex; color: var(--color-accent); }
-  .turn-fold[data-kind='quiet'] .glyph { color: var(--color-subtle); }
+  .row:hover, .row:focus-visible { color: var(--color-foreground); background: none; }
+  .glyph { display: inline-flex; color: var(--color-subtle); }
   .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .turn-fold[data-kind='quiet'] .text { color: var(--color-muted-foreground); }
   time { flex: none; color: var(--color-subtle); font-variant-numeric: tabular-nums; }
 </style>

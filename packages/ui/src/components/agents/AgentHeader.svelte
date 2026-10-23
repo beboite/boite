@@ -13,9 +13,10 @@
   import AgentAvatar from './AgentAvatar.svelte';
 
   /**
-   * The top of an agent's conversation: its robot, its name and one live line
-   * that says what it does this second (the step its turn is on, with the
-   * time it has run), what it waits on, or when it next wakes. Beside it the
+   * The top of an agent's conversation: its robot in its ring (breathing
+   * while it works), its name and one live line that says what it does this
+   * second (the step its turn is on, with the time it has run), what it waits
+   * on, or when it next wakes. Beside it the
    * desk toggle and a menu with its settings, its brain, pause and archive. A
    * problem that keeps it from running shows under it with the way to fix it.
    */
@@ -76,18 +77,16 @@
     <button type="button" class="ghost icon agent-mobile-back" aria-label={labels.list} title={labels.list} onclick={onback} data-testid="agent-back"><ArrowLeft size={18} strokeWidth={1.75} /></button>
   {/if}
   <button type="button" class="ghost agent-head-identity" onclick={() => onpane('settings')} aria-label={fill(labels.settingsOf, { name: agent.name })}>
-    <span class="agent-head-robot"><AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} status={faceOf(state)} size={38} /></span>
+    <span class="agent-head-robot"><AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} status={faceOf(state)} size={36} ring /></span>
     <span class="agent-head-text">
       <strong>{agent.name}</strong>
       <span class="agent-live" data-state={state} aria-live="polite" data-testid="agent-live">
         {#if state === 'working'}
-          <span class="agent-live-dot" aria-hidden="true"></span>
           <span class="agent-live-text">{step ?? labels.state.working}</span>
           {#if since !== null}<span class="agent-live-time">· <Elapsed startedAt={since} finishedAt={null} active /></span>{/if}
         {:else if state === 'queued'}
           <span class="agent-live-text">{labels.state.queued}</span>
         {:else if state === 'waiting'}
-          <span class="agent-live-dot" aria-hidden="true"></span>
           <span class="agent-live-text">{pending ? fill(labels.waitingOn, { what: pending }) : labels.state.waiting}</span>
         {:else if state === 'error'}
           <span class="agent-live-text">{labels.state.error}</span>

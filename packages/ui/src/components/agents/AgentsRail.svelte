@@ -115,7 +115,7 @@
           at={row.status?.last?.at ?? 0} {now} {tone} detail={detailOf(row, thread, tone)}
           wake={tone === 'idle' && row.profile.status === 'active' && row.status?.nextWake ? row.status.nextWake : null}
           machine={multi ? machine : undefined} testid="agent-entry-{row.profile.id}" onclick={() => onopen(machine, row.profile.id)}>
-          {#snippet picture()}<AgentAvatar kind="profile" id={row.profile.id} name={row.profile.name} avatar={row.profile.avatar} status={faceOf(tone === 'working' ? 'working' : tone === 'waiting' ? 'waiting' : 'idle')} size={30} />{/snippet}
+          {#snippet picture()}<AgentAvatar kind="profile" id={row.profile.id} name={row.profile.name} avatar={row.profile.avatar} status={faceOf(tone === 'working' ? 'working' : tone === 'waiting' ? 'waiting' : 'idle')} size={30} ring />{/snippet}
         </AgentRow>
       {/each}
     </section>

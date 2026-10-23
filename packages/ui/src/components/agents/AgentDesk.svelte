@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { Brain, Check, ChevronRight, LoaderCircle, Pencil, TriangleAlert } from '@lucide/svelte';
+  import { Brain, Check, ChevronDown, ChevronRight, LoaderCircle, Pencil, TriangleAlert } from '@lucide/svelte';
   import type { AgentBrain, AgentWatch } from '@boite/contracts';
   import { AgentsView, agentOfThread, faceOf, liveState, liveStep, statusOf, waitingOn } from '../../lib/agents.svelte';
   import { budgetMeter, deskOrder, dollars, runningTurn, turnSteps } from '../../lib/agent-desk';
@@ -22,11 +22,13 @@
 
   /**
    * A persistent agent's desk, the right panel's surface beside its thread:
-   * the place that shows it works. Now is the step its running turn is on,
-   * live, with the time it has run and the calls so far, else what it waits
-   * on or when it next wakes. Work is the threads on its desk, each a card
-   * that answers its question in place, opens its thread or leaves the desk.
-   * Then its routines, its memory and its day against its budget.
+   * one calm, dense panel that shows it works. Now on top: its robot in its
+   * ring, the step its running turn is on in large type, the time it has run
+   * ticking and its last calls on a slim timeline; else what it waits on or
+   * when it next wakes. Then the threads on its desk as rows, each answering
+   * its question in place, opening its thread or leaving the desk; its
+   * routines as rows with their next time; its memory as a short preview; its
+   * day as a line of numbers over a slim budget bar.
    */
   let { store }: { store: Store } = $props();
   const view = AgentsView.of(untrack(() => store));
@@ -56,6 +58,8 @@
   let brain = $state<AgentBrain | null>(null);
   let budget = $state<number | null>(null);
   let editing = $state(false);
+  /** The memory preview shows two lines until opened. */
+  let memoryOpen = $state(false);
   const revision = $derived(view.snapshot?.revision ?? 0);
   $effect(() => {
     const id = agent?.id, client = store.client;
@@ -92,104 +96,107 @@
     <p class="agent-empty">{strings.app.loading}</p>
   {:else}
     <section class="desk-now" data-state={standing} data-testid="desk-now" aria-live="polite">
-      <span class="desk-now-robot"><AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} status={faceOf(standing)} size={56} /></span>
-      <div class="desk-now-text">
-        <span class="desk-label">{t.now}</span>
-        {#if standing === 'working'}
-          {#key step}<strong class="desk-now-line" data-testid="desk-now-step">{step ?? strings.agents.state.working}</strong>{/key}
-          <span class="desk-now-meta">
-            {#if since !== null}<Elapsed startedAt={since} finishedAt={null} active />{/if}
-            {#if steps.length}<span>· {steps.length === 1 ? t.stepOne : fill(t.stepMany, { count: String(steps.length) })}</span>{/if}
-          </span>
-        {:else if standing === 'waiting' || standing === 'queued'}
-          <strong class="desk-now-line">{standing === 'queued' ? strings.agents.state.queued : pending ?? strings.agents.state.waiting}</strong>
-          <span class="desk-now-meta">{t.waitingHint}</span>
-        {:else if standing === 'error'}
-          <strong class="desk-now-line">{status?.problem ?? strings.agents.state.error}</strong>
-        {:else if standing === 'paused' || standing === 'archived'}
-          <strong class="desk-now-line">{strings.agents.state[standing]}</strong>
-          {#if standing === 'paused'}<span class="desk-now-meta">{t.pausedHint}</span>{/if}
-        {:else if status?.nextWake}
-          <strong class="desk-now-line">{status.nextWake.label}</strong>
-          <span class="desk-now-meta">{dateTime(status.nextWake.at, now)} · {fill(t.nextIn, { time: workedTime(Math.max(60_000, status.nextWake.at - now)) })}</span>
-        {:else}
-          <strong class="desk-now-line">{t.idle}</strong>
-          <span class="desk-now-meta">{t.idleHint}</span>
-        {/if}
-      </div>
-    </section>
-    {#if recent.length}
-      <ol class="desk-steps" data-testid="desk-steps">
-        {#each recent as part (part.toolId)}
-          {@const line = toolLine(part)}
-          <li data-status={part.status}>
-            <span class="desk-step-mark" aria-hidden="true">
-              {#if part.status === 'running'}<LoaderCircle size={13} strokeWidth={1.75} />{:else if part.status === 'error'}<TriangleAlert size={13} strokeWidth={1.75} />{:else}<Check size={13} strokeWidth={1.75} />{/if}
+      <div class="desk-now-head">
+        <span class="desk-now-robot"><AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} status={faceOf(standing)} size={40} ring /></span>
+        <div class="desk-now-text">
+          {#if standing === 'working'}
+            {#key step}<strong class="desk-now-line" data-testid="desk-now-step">{step ?? strings.agents.state.working}</strong>{/key}
+            <span class="desk-now-meta">
+              {#if since !== null}<Elapsed startedAt={since} finishedAt={null} active />{/if}
+              {#if steps.length}<span>· {steps.length === 1 ? t.stepOne : fill(t.stepMany, { count: String(steps.length) })}</span>{/if}
             </span>
-            <span class="desk-step-text" class:mono={line.mono} title={line.title}>{line.text}</span>
-          </li>
-        {/each}
-      </ol>
-    {/if}
+          {:else if standing === 'waiting' || standing === 'queued'}
+            <strong class="desk-now-line">{standing === 'queued' ? strings.agents.state.queued : pending ?? strings.agents.state.waiting}</strong>
+            <span class="desk-now-meta">{t.waitingHint}</span>
+          {:else if standing === 'error'}
+            <strong class="desk-now-line">{status?.problem ?? strings.agents.state.error}</strong>
+          {:else if standing === 'paused' || standing === 'archived'}
+            <strong class="desk-now-line">{strings.agents.state[standing]}</strong>
+            {#if standing === 'paused'}<span class="desk-now-meta">{t.pausedHint}</span>{/if}
+          {:else if status?.nextWake}
+            <strong class="desk-now-line">{status.nextWake.label}</strong>
+            <span class="desk-now-meta">{dateTime(status.nextWake.at, now)} · {fill(t.nextIn, { time: workedTime(Math.max(60_000, status.nextWake.at - now)) })}</span>
+          {:else}
+            <strong class="desk-now-line">{t.idle}</strong>
+            <span class="desk-now-meta">{t.idleHint}</span>
+          {/if}
+        </div>
+      </div>
+      {#if recent.length}
+        <ol class="desk-steps" data-testid="desk-steps">
+          {#each recent as part (part.toolId)}
+            {@const line = toolLine(part)}
+            <li data-status={part.status}>
+              <span class="desk-step-mark" aria-hidden="true">
+                {#if part.status === 'running'}<LoaderCircle size={12} strokeWidth={1.75} />{:else if part.status === 'error'}<TriangleAlert size={12} strokeWidth={1.75} />{:else}<Check size={12} strokeWidth={1.75} />{/if}
+              </span>
+              <span class="desk-step-text" class:mono={line.mono} title={line.title}>{line.text}</span>
+            </li>
+          {/each}
+        </ol>
+      {/if}
+    </section>
 
     {#if view.error}<p class="agent-error desk-error" role="alert">{view.error}</p>{/if}
 
     <section class="desk-section" data-testid="desk-work">
       <header class="desk-head"><h3>{t.work}</h3>{#if watches.length}<span class="desk-count">{watches.length}</span>{/if}</header>
-      {#each watches as watch (watch.threadId)}
-        <DeskCard {watch} {now} project={store.projects.find(p => p.id === watch.projectId) ?? null}
-          onopen={() => void store.open(watch.threadId)}
-          ondrop={store.owner ? () => void drop(watch) : undefined}
-          onanswer={option => answer(watch, option)} />
-      {:else}
-        <p class="desk-empty">{t.workEmpty}</p>
-      {/each}
+      <div class="desk-rows">
+        {#each watches as watch (watch.threadId)}
+          <DeskCard {watch} {now} project={store.projects.find(p => p.id === watch.projectId) ?? null}
+            onopen={() => void store.open(watch.threadId)}
+            ondrop={store.owner ? () => void drop(watch) : undefined}
+            onanswer={option => answer(watch, option)} />
+        {:else}
+          <p class="desk-empty">{t.workEmpty}</p>
+        {/each}
+      </div>
     </section>
 
     <section class="desk-section desk-schedule" data-testid="desk-schedule">
-      <AgentRoutines {view} agentId={agent.id} />
+      <AgentRoutines {view} agentId={agent.id} compact />
     </section>
 
     <section class="desk-section" data-testid="desk-memory">
       <header class="desk-head">
         <h3>{t.memory}</h3>
-        {#if store.owner && brain && !editing}<button type="button" class="ghost small" onclick={() => { editing = true; }} data-testid="desk-memory-edit"><Pencil size={13} strokeWidth={1.75} />{strings.agents.edit}</button>{/if}
+        {#if store.owner && brain && !editing}<button type="button" class="ghost small icon" title={strings.agents.edit} aria-label={strings.agents.edit} onclick={() => { editing = true; }} data-testid="desk-memory-edit"><Pencil size={13} strokeWidth={1.75} /></button>{/if}
       </header>
       {#if status?.memory}
         {@const pass = status.memory}
-        <p class="desk-memory-pass" data-status={pass.status} data-testid="desk-memory-pass">
-          <Brain size={13} strokeWidth={1.75} />
+        <p class="desk-memory-pass" data-status={pass.status} data-testid="desk-memory-pass" title={pass.summary ?? undefined}>
+          <Brain size={12} strokeWidth={1.75} />
           <span class="desk-memory-pass-when">{pass.status === 'running' ? t.memoryPass.running : fill(t.memoryPass[pass.status], { when: relativeTime(pass.at, now) })}</span>
-          {#if pass.summary && pass.status !== 'running'}<span class="desk-memory-pass-summary">{pass.summary}</span>{/if}
+          {#if pass.summary && pass.status !== 'running'}<span class="desk-memory-pass-summary">· {pass.summary}</span>{/if}
         </p>
       {/if}
       {#if editing}
         <AgentBrainEditor {view} agentId={agent.id} ondone={saved => { brain = saved; editing = false; }} oncancel={() => { editing = false; }} />
       {:else if brain}
         {#if brain.memory.trim()}
-          <div class="desk-memory" data-testid="desk-memory-text"><Prose text={brain.memory} {store} threadId={thread?.id} /></div>
+          <div class="desk-memory" class:open={memoryOpen} data-testid="desk-memory-text"><Prose text={brain.memory} {store} threadId={thread?.id} /></div>
+          <button type="button" class="ghost small desk-memory-more" aria-expanded={memoryOpen} onclick={() => { memoryOpen = !memoryOpen; }} data-testid="desk-memory-more">
+            <ChevronDown size={12} class="fold-caret {memoryOpen ? 'open' : ''}" />{memoryOpen ? t.memoryLess : t.memoryMore}
+          </button>
         {:else}
           <p class="desk-empty">{t.memoryEmpty}</p>
         {/if}
         <details class="desk-ways">
-          <summary><ChevronRight size={13} class="fold-caret" />{t.ways} <code>AGENTS.md</code></summary>
-          {#if brain.instructions.trim()}<div class="desk-memory"><Prose text={brain.instructions} {store} threadId={thread?.id} /></div>{:else}<p class="desk-empty">{t.waysEmpty}</p>{/if}
+          <summary><ChevronRight size={12} class="fold-caret" />{t.ways} <code>AGENTS.md</code></summary>
+          {#if brain.instructions.trim()}<div class="desk-memory open"><Prose text={brain.instructions} {store} threadId={thread?.id} /></div>{:else}<p class="desk-empty">{t.waysEmpty}</p>{/if}
         </details>
       {/if}
     </section>
 
     <section class="desk-section" data-testid="desk-today">
       <header class="desk-head"><h3>{t.today}</h3></header>
-      <div class="desk-stats">
-        <div class="desk-stat"><strong>{today.turns}</strong><span>{t.turns}</span></div>
-        <div class="desk-stat"><strong>{today.wakes}</strong><span>{t.wakes}</span></div>
-        <div class="desk-stat"><strong>{today.quiet}</strong><span>{t.quiet}</span></div>
-      </div>
       <div class="desk-budget" data-reached={meter?.reached ?? false} data-testid="desk-budget">
-        <div class="desk-budget-line">
-          <span>{t.spent}</span>
-          <strong>{meter ? fill(t.spentOf, { spent: dollars(today.costUsd), budget: dollars(budget!) }) : `${dollars(today.costUsd)} · ${t.noCap}`}</strong>
-        </div>
+        <p class="desk-today-line">
+          <span class="desk-stat"><strong>{today.turns}</strong> {t.turns.toLowerCase()}</span>
+          <span class="desk-stat"><strong>{today.wakes}</strong> {t.wakes.toLowerCase()}</span>
+          <span class="desk-stat"><strong>{today.quiet}</strong> {t.quiet.toLowerCase()}</span>
+          <span class="desk-spent" title={t.spent}>{meter ? fill(t.spentOf, { spent: dollars(today.costUsd), budget: dollars(budget!) }) : `${dollars(today.costUsd)} · ${t.noCap}`}</span>
+        </p>
         {#if meter}
           <div class="desk-meter" role="meter" aria-valuemin={0} aria-valuemax={budget!} aria-valuenow={today.costUsd} aria-label={t.spent}><span style:width="{Math.round(meter.ratio * 100)}%"></span></div>
           {#if meter.reached}<p class="desk-budget-note">{t.budgetReached}</p>{/if}

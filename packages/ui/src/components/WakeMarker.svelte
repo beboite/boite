@@ -8,9 +8,9 @@
   /**
    * A turn the core started on a persistent agent's thread by itself: a
    * routine came due, or something happened on its desk or in its projects.
-   * It opens with one compact line, the label the core gave it, its icon and
-   * its time, in place of a prompt bubble the user never wrote. The prompt the
-   * agent read unfolds under it.
+   * It opens with one thin divider across the column, the label the core
+   * gave it, its icon and its time on it, in place of a prompt bubble the
+   * user never wrote. The prompt the agent read unfolds under it.
    */
   let { message, kind }: { message: Message; kind: 'routine' | 'event' } = $props();
   let open = $state(false);
@@ -41,7 +41,7 @@
     align-self: stretch;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     margin: 4px 0;
     font-size: var(--text-xs);
     color: var(--color-muted-foreground);
@@ -55,18 +55,20 @@
     gap: 6px;
     height: auto;
     min-height: var(--control-sm);
-    padding: 2px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-full);
-    background: var(--color-surface);
+    padding: 2px 4px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
     color: var(--color-muted-foreground);
     font-size: var(--text-xs);
     font-weight: 500;
   }
   .label:disabled { opacity: 1; cursor: default; }
-  .wake[data-kind='routine'] .label :global(svg) { color: var(--color-accent); }
+  .label:hover:not(:disabled), .label:focus-visible { background: none; }
+  .label:hover:not(:disabled) .text, .label:focus-visible .text { color: var(--color-foreground); }
+  .label :global(svg) { color: var(--color-subtle); }
   .wake[data-kind='event'] .label :global(svg) { color: var(--color-live); }
-  .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); }
+  .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); transition: color var(--dur-2) var(--ease-out-quint); }
   time { flex: none; color: var(--color-subtle); font-variant-numeric: tabular-nums; }
   .fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-3) var(--ease-out-quint); }
   .fold.open { grid-template-rows: 1fr; }

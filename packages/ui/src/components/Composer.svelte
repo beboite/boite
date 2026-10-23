@@ -4,6 +4,7 @@
   import { restorePreviewMentions } from '../lib/preview-mentions';
   import { runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, skillSlashItems, slashCompletion, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
+  import { AgentsView, agentOfThread } from '../lib/agents.svelte';
   import { attachFiles, receiveDroppedFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { fitHeight, selfSizing } from '../lib/composer-size';
@@ -141,12 +142,17 @@
       !(composer?.sending && (composer.editing || reply !== null || !thread))
   );
 
+  /** A persistent agent's own thread: the box is addressed to it by name, and its model, effort and mode live in its settings, not on chips. */
+  const bot = $derived(thread?.agentSessionId ? agentOfThread(AgentsView.of(store).snapshot, thread.id)?.name ?? null : null);
+
   // A new conversation asks what the user wants done; one under way names who reads the message.
   let placeholder = $derived(
     target
       ? target.placeholder
       : reply
       ? strings.composer.replyPlaceholder
+      : bot
+      ? fill(strings.composer.placeholderBot, { name: bot })
       : offline
       ? fill(thread ? strings.composer.placeholderOffline : strings.composer.placeholderOfflineDraft, { machine: machineLabel })
       : !thread && store.draft
@@ -797,7 +803,7 @@
       </div>
     {/if}
 
-    <ComposerBar bind:this={toolbar} {store} {key} {target} {provider} {canSend} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
+    <ComposerBar bind:this={toolbar} {store} {key} {target} {bot} {provider} {canSend} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
       onsubmit={() => void submit()}
       onfiles={(files) => void take(files)}
       onpreview={(text, status, error) => { speechPreview = text; speechStatus = status; speechError = error; }}

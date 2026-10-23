@@ -39,29 +39,39 @@ conversation full screen, with the desk and the browser in its panel.
 The header of an agent's thread shows its robot, its name and one live line:
 the step it is on (`AgentStatus.activity`) while it works, what it waits on,
 else its next routine or Idle. A `problem` shows as a warning with its fix.
-The header menu holds Settings, Brain, Pause or Resume and Archive. A routine
-or event turn opens with a compact system line (its label and time); a quiet
-turn, done (a failed or stopped wake keeps its error in view), folds to one line, `Nothing to report · <reason> · N steps`, that expands
-to the whole turn. A finished turn that made calls folds them, with the
-reasoning and the narration between them, behind one `Worked 3 min · 14 steps`
-row above its answer, so the answer reads as the agent's message; the summary
-under it then keeps only when it finished. A running turn stays open and live.
-The folds are the client's (`lib/agent-turns.ts`); opening one lasts until the
-app reloads. The agent's last memory pass (`AgentStatus.memory`) is one line
-under the answer it followed, and its child conversation is left out of the
-subagent dock and of the gate that holds a finished turn's notification while
-its children work; the client keeps those ids per machine (`lib/agent-upkeep.ts`).
+The header menu holds Settings, Brain, Pause or Resume and Archive. The robot
+wears a thin ring in its own colour, in the header and in the list, that
+breathes while the agent works; hue elsewhere says status only. A routine
+or event turn opens with a thin divider across the column (its icon, label and
+time); a quiet turn, done (a failed or stopped wake keeps its error in view),
+folds to one such divider, `Nothing to report · <reason> · N steps`, that
+expands to the whole turn. A finished turn that made calls folds them, with the
+reasoning and the narration between them, out of the column, so the answer
+reads as the agent's message; the quiet line under the answer carries the time
+it worked, when it finished, the count (`4 steps`, a click opens them above the
+answer) and, when a memory pass followed, a small brain mark whose tooltip says
+what changed. A running turn stays open and live. The folds are the client's
+(`lib/agent-turns.ts`); opening one lasts until the app reloads. The agent's
+last memory pass (`AgentStatus.memory`) marks the answer it followed, and its
+child conversation is left out of the subagent dock and of the gate that holds
+a finished turn's notification while its children work; the client keeps those
+ids per machine (`lib/agent-upkeep.ts`). The composer of an agent's thread is
+addressed to it by name and shows no model, effort or mode chips: those are
+its settings.
 
 The desk is a surface of the thread's right panel (`desk`), opened by the
 header's desk button and, the first time this device shows an agent on a wide
 window, by itself. It shows what the agent is doing now (the step its turn is
-on, the time it has run, its last four calls live, else what it waits on or its
-next wake with a countdown), its watched threads as cards (title, project,
-state, pull request and checks, how long a stalled turn has been silent, the
-pending question with its options to answer in place; a card opens its thread,
-its cross takes it off the desk), its routines, its memory with its last pass
-and AGENTS.md, and today's turns, wakes, quiet ones and spend against the daily
-budget as a meter.
+on in large type, the time it has run ticking, its last four calls on a slim
+timeline, else what it waits on or its next wake with a countdown), then under
+small sentence-case labels its watched threads as rows (a status dot that
+breathes while the thread works or waits on the user, title, time, one meta
+line with state, project, pull request and checks, how long a stalled turn has
+been silent; a needs-you row opens its question with its options to answer in
+place; a row opens its thread, its cross, shown on hover and focus, takes it
+off the desk), its routines as rows with their next time and their actions as
+icons, its memory as a two-line preview with its last pass and AGENTS.md, and
+today's turns, wakes and quiet ones on one line over a slim budget bar.
 
 A new agent needs a name and what it does; its robot, model and projects come
 filled in. Creating it opens its thread, where its introduction runs live.

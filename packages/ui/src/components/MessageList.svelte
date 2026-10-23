@@ -11,8 +11,8 @@
   import MessageOutline from './MessageOutline.svelte';
   import AgentMessageGroup from './AgentMessageGroup.svelte';
   import WakeMarker from './WakeMarker.svelte';
-  import AgentTurnRow from './AgentTurnRow.svelte';
-  import { AgentTimeline, FOLD_PREFIX, memoryPassOf } from '../lib/agent-turns';
+  import TurnFoldRow from './TurnFoldRow.svelte';
+  import { AgentTimeline, FOLD_PREFIX, memoryPassOf, openedTurns } from '../lib/agent-turns';
   import { groupTimeline } from '../lib/timeline-group';
   import { agentMailFor } from '../lib/agent-mail';
   import DelegationActivity from './DelegationActivity.svelte';
@@ -99,7 +99,8 @@
   const views = $derived.by(() => (shownViews = turnViews(grouped.timeline, shownViews)));
   /** A finished turn's published files go after its answer, its pages after them; Boite's cache pings are one line; an agent's own thread folds its finished turns (`lib/agent-turns.ts`). */
   const agentTimeline = new AgentTimeline();
-  const shaped = $derived(agentTimeline.build(quietKeepalives(placeViews(filesLast(grouped.timeline, shownTurns), shownTurns, views), shownTurns), shownTurns, memoryPassOf(store, threadId)));
+  const memoryPass = $derived(memoryPassOf(store, threadId));
+  const shaped = $derived(agentTimeline.build(quietKeepalives(placeViews(filesLast(grouped.timeline, shownTurns), shownTurns, views), shownTurns), shownTurns, memoryPass));
   const timeline = $derived(shaped.timeline);
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
@@ -762,8 +763,8 @@
         {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
         {@const source = group || viewPart(message) || publishedFile(message) ? messages.findLast(current => current.turnId === message.turnId) : message}
-        {@const agentRow = shaped.rows.get(message.id)}
-        {@const closes = row.last && !agentRow && turn !== undefined && turn.execution?.operation !== 'keepalive' && lastInTurn.get(turn.id) === message.id}
+        {@const quietFold = shaped.folds.get(message.id)}
+        {@const closes = row.last && !quietFold && turn !== undefined && turn.execution?.operation !== 'keepalive' && lastInTurn.get(turn.id) === message.id}
         {@const joined = seam(rows[view.start + index - 1], row)}
         <article
           use:track={{ row, joined }}
@@ -776,8 +777,8 @@
         >
           {#if row.failures}
             <FailedAttempts {store} {threadId} messages={row.failures} turns={shownTurns} {signedOut} canFork={!narrow.current && forkable && !store.openThread?.incognito} reveal={failureTarget} oninspect={inspectFailures} />
-          {:else if agentRow}
-            <AgentTurnRow {store} row={agentRow} {turn} at={message.createdAt} />
+          {:else if quietFold}
+            <TurnFoldRow fold={quietFold} at={message.createdAt} wake={turn?.execution?.operation === 'routine' || turn?.execution?.operation === 'event' ? turn.execution.operation : undefined} />
           {:else if launches.has(message.id)}
             <DelegationActivity {store} agents={launches.get(message.id)!.agents} />
           {:else if workflowRows.has(message.id)}
@@ -802,7 +803,10 @@
           {#if turn && closes}
             {@const files = filesOf(turn)}
             {#if files}<TurnFiles {store} {...files} loadDiffs={() => Promise.all(files.deferred.map(source => store.loadToolOutput(threadId, source.messageId, source.toolId))).then(() => {})} />{/if}
-            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id} timed={!shaped.rows.has(FOLD_PREFIX + turn.id)}>
+            {@const steps = shaped.folds.get(FOLD_PREFIX + turn.id)}
+            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id}
+              steps={steps?.kind === 'worked' ? { count: steps.steps, open: steps.open, toggle: () => { if (openedTurns.has(turn.id)) openedTurns.delete(turn.id); else openedTurns.add(turn.id); } } : undefined}
+              memory={shaped.memoryTurnId === turn.id && memoryPass ? { pass: memoryPass, open: () => store.panel.open('desk') } : undefined}>
               {#snippet actions()}
                 <MessageActions
                   text={() => turnAnswer(messages, turn.id)}

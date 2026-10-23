@@ -7,10 +7,10 @@ import type { Store } from './store.svelte';
 /**
  * How a persistent agent's thread reads like a message app: a finished turn
  * shows its answer, its steps (the calls, the reasoning and the narration
- * between them) folded behind one "Worked 3 min · 14 steps" row above it,
- * and a wake that had nothing for the user folds whole to one "Nothing to
- * report" line. A running turn stays open and live. Either row opens again
- * on a click, and the turn reads as it ran.
+ * between them) folded away, the count on the quiet line under the answer
+ * ("2 min · 4 steps"), and a wake that had nothing for the user folds whole
+ * to one "Nothing to report" line. A running turn stays open and live. A
+ * click on the count or the line opens the turn as it ran.
  */
 
 /** The id a fold row takes in the timeline: the prefix, then its turn. */
@@ -94,10 +94,10 @@ export class TurnFolds {
   folds: ReadonlyMap<string, TurnFold> = new Map();
 
   /**
-   * `timeline` with each finished turn folded: a fold row before its first
-   * answer and the steps left out of its messages, or a quiet wake down to
-   * its row alone. The turns in `opened` keep every message, under their row.
-   * The same array comes back when nothing folds.
+   * `timeline` with each finished turn folded: the steps left out of its
+   * messages (the summary line under the answer carries the count), or a
+   * quiet wake down to one row alone. The turns in `opened` keep every
+   * message. The same array comes back when nothing folds.
    */
   build(timeline: readonly Message[], turns: readonly Turn[], opened: ReadonlySet<string>): Message[] {
     const folds = new Map<string, TurnFold>();
@@ -131,9 +131,8 @@ export class TurnFolds {
       const fold = folds.get(FOLD_PREFIX + message.turnId);
       if (!fold) { out.push(message); continue; }
       const id = FOLD_PREFIX + fold.turnId;
-      // A quiet wake's row comes before its opening line; a worked row before its first answer.
-      const here = fold.kind === 'quiet' || message.role === 'assistant';
-      if (here && !placed.has(id)) { placed.add(id); out.push(this.#row(id, fold, message)); }
+      // A quiet wake's row comes before its opening line; a worked turn gets no row, its count sits under the answer.
+      if (fold.kind === 'quiet' && !placed.has(id)) { placed.add(id); out.push(this.#row(id, fold, message)); }
       if (fold.open) { out.push(message); continue; }
       if (fold.kind === 'quiet' || message.role !== 'assistant') { if (fold.kind !== 'quiet') out.push(message); continue; }
       const kept = this.#trim(message, at, lastStep.get(fold.turnId));
@@ -169,8 +168,6 @@ export class TurnFolds {
 
 /** An agent's last memory pass, as its status reports it. */
 export type MemoryPass = NonNullable<AgentStatus['memory']>;
-/** The id of the line a memory pass draws under the answer it followed. */
-export const MEMORY_PREFIX = 'memory-pass:';
 
 /**
  * The turn a memory pass followed: the last one that ended before it with an
@@ -187,42 +184,21 @@ export function memoryTurn(turns: readonly Turn[], pass: Pick<MemoryPass, 'at'>)
   return best?.id ?? null;
 }
 
-/** `timeline` with one line after the last message of the turn the pass followed, kept as one object while the pass stands still. */
-export class MemoryLines {
-  #row: { key: string; message: Message } | null = null;
-  place(timeline: readonly Message[], turns: readonly Turn[], pass: MemoryPass | null | undefined): Message[] {
-    const turnId = pass ? memoryTurn(turns, pass) : null;
-    const at = turnId ? timeline.findLastIndex(message => message.turnId === turnId) : -1;
-    if (!pass || at < 0) return timeline as Message[];
-    const anchor = timeline[at]!;
-    const key = `${pass.threadId}|${pass.status}|${pass.summary}|${pass.at}|${anchor.id}`;
-    if (this.#row?.key !== key) {
-      this.#row = { key, message: { id: MEMORY_PREFIX + pass.threadId, threadId: anchor.threadId, turnId: MEMORY_PREFIX + pass.threadId, role: 'system', parts: [], state: 'complete', createdAt: anchor.createdAt } };
-    }
-    return [...timeline.slice(0, at + 1), this.#row.message, ...timeline.slice(at + 1)];
-  }
-}
-
 /** The last memory pass of the agent whose own thread this is, null before its first; undefined for any other thread. */
 export function memoryPassOf(store: Store, threadId: string): MemoryPass | null | undefined {
   if (store.openThread?.id !== threadId || !store.openThread.agentSessionId) return undefined;
   return AgentsView.of(store).snapshot?.status?.find(status => status.threadId === threadId)?.memory ?? null;
 }
 
-/** A row an agent's thread adds to its timeline: a fold, or its memory pass's line. */
-export type AgentRow = { kind: 'fold'; fold: TurnFold } | { kind: 'memory'; pass: MemoryPass };
-const NO_ROWS: ReadonlyMap<string, AgentRow> = new Map();
+const NO_FOLDS: ReadonlyMap<string, TurnFold> = new Map();
 
-/** A persistent agent's thread as it reads: its finished turns folded, then its last memory pass under the answer it followed. */
+/** A persistent agent's thread as it reads: its finished turns folded, and the turn its last memory pass followed, whose summary line carries the mark. */
 export class AgentTimeline {
   #folds = new TurnFolds();
-  #memory = new MemoryLines();
   /** `pass` undefined: not an agent's own thread, and the timeline stays as it is. */
-  build(timeline: Message[], turns: readonly Turn[], pass: MemoryPass | null | undefined): { timeline: Message[]; rows: ReadonlyMap<string, AgentRow> } {
-    if (pass === undefined) return { timeline, rows: NO_ROWS };
-    const shaped = this.#memory.place(this.#folds.build(timeline, turns, openedTurns), turns, pass);
-    const rows = new Map<string, AgentRow>([...this.#folds.folds].map(([id, fold]) => [id, { kind: 'fold', fold }]));
-    if (pass) rows.set(MEMORY_PREFIX + pass.threadId, { kind: 'memory', pass });
-    return { timeline: shaped, rows };
+  build(timeline: Message[], turns: readonly Turn[], pass: MemoryPass | null | undefined): { timeline: Message[]; folds: ReadonlyMap<string, TurnFold>; memoryTurnId: string | null } {
+    if (pass === undefined) return { timeline, folds: NO_FOLDS, memoryTurnId: null };
+    const shaped = this.#folds.build(timeline, turns, openedTurns);
+    return { timeline: shaped, folds: this.#folds.folds, memoryTurnId: pass ? memoryTurn(turns, pass) : null };
   }
 }

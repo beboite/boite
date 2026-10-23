@@ -23,6 +23,7 @@ export const fr: Translation = {
     cacheCancel: 'Garder le réglage',
     options: 'Options du message',
     placeholder: 'Message à {provider} dans {project}',
+    placeholderBot: 'Écrire à {name}',
     placeholderNoProject: "Message à l'agent",
     placeholderNew: 'Que voulez-vous faire ?',
     placeholderOffline: '{machine} est hors ligne : les messages attendent ici et partent à sa reconnexion',
