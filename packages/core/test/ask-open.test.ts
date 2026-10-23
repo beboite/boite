@@ -44,3 +44,26 @@ test('a paired phone opens the page of a pending question in the conversation it
     expect(opened).toHaveLength(1);
   } finally { phone.close(); }
 });
+
+test('opening a question page again brings back the tab it opened, and opens a new one once that tab is closed', async () => {
+  h = await startTestCore();
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  await owner.call('turns.start', { threadId, prompt: 'hello' });
+  await waitFor(() => h.core.journal.lastTurn(threadId) !== null);
+  const { questionId } = await owner.call('questions.ask', { threadId, text: 'dash.example: to read the deploy logs', options: ['Signed in', 'Skip'], open: 'https://dash.example/login' });
+  const calls: string[] = [];
+  let tabs = [] as { tabId: string; url: string; title: string; profile: string; active: boolean }[];
+  h.core.browser.command = (async ({ tabId, action }: { tabId?: string; action: { kind: string; url?: string } }) => {
+    calls.push(action.kind === 'open' ? `open ${action.url}` : `${action.kind} ${tabId}`);
+    if (action.kind === 'open') tabs = [{ tabId: 'tab-1', url: 'https://dash.example/sso', title: 'Sign in', profile: 'default', active: true }];
+    return { tabId: action.kind === 'open' ? 'tab-1' : tabId, value: { ok: true } };
+  }) as unknown as typeof h.core.browser.command;
+  h.core.browser.status = (() => ({ live: tabs.length > 0, tabs, available: true })) as typeof h.core.browser.status;
+  await owner.call('questions.openPage', { threadId, questionId });
+  await owner.call('questions.openPage', { threadId, questionId });
+  expect(calls).toEqual(['open https://dash.example/login', 'activate tab-1']);
+  tabs = [];
+  await owner.call('questions.openPage', { threadId, questionId });
+  expect(calls).toEqual(['open https://dash.example/login', 'activate tab-1', 'open https://dash.example/login']);
+});

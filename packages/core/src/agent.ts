@@ -249,13 +249,25 @@ export function registerAgentMethods(core: Core): void {
   });
   // The page a pending question carries, for whoever answers it: a paired phone
   // names a question, never a surface, and only in the conversation it watches.
+  // Opening it again brings back the tab it opened, wherever its sign-in led it.
+  const pageTabs = new Map<string, string>();
   core.router.register('questions.openPage', async (params, { connection }) => {
     const thread = core.threads.require(params.threadId);
     if (connection.identity.principal !== 'owner' && (thread.archived || !connection.subscriptions.has(thread.id))) throw refused('subscribe to the active conversation before opening its page');
     const url = core.threads.listQuestions(thread.id).find((question) => question.id === params.questionId)?.open?.url;
     if (url === undefined) throw refused(`questions.openPage: ${params.questionId} is not a pending question with a page`, { questionId: params.questionId });
     const surface = checkSurface(thread.cwd, { kind: 'browser', url });
-    if (surface.kind === 'browser') await core.browser.command({ threadId: thread.id, action: { kind: 'open', url: surface.url } });
+    if (surface.kind !== 'browser') return { ok: true } as const;
+    const key = `${thread.id}:${params.questionId}`, opened = pageTabs.get(key);
+    if (opened !== undefined && core.browser.status({ threadId: thread.id }).tabs.some((tab) => tab.tabId === opened)) {
+      await core.browser.command({ threadId: thread.id, tabId: opened, action: { kind: 'activate' } });
+      return { ok: true } as const;
+    }
+    const reply = await core.browser.command({ threadId: thread.id, action: { kind: 'open', url: surface.url } });
+    if (reply.tabId !== undefined) {
+      pageTabs.set(key, reply.tabId);
+      if (pageTabs.size > 500) pageTabs.delete(pageTabs.keys().next().value!);
+    }
     return { ok: true } as const;
   });
   core.router.register('threads.tasks.set', (params) => setTasks(core, params));
