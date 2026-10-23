@@ -325,7 +325,8 @@ When the owner takes the project back, those follows leave the desk with the
 facts they gathered, and the desk rows, the facts and the context block check
 the bot's projects again each time they are read or delivered. A thread the
 owner entrusted to the bot or watched for it (`owner` in the saved follow)
-stays: that is the owner's own grant, until the owner takes the thread back.
+stays: that is the owner's own grant, and an entrusted one lasts until its
+entrustment ends.
 
 Each row is read from the thread itself, never from what the bot said:
 `state` is `needs-you` (a pending question or permission), `working`,
@@ -374,14 +375,15 @@ verified result, unless another objective is given), the bot's name and
 instructions join each of its turns, the thread goes on the bot's desk and a
 line in the bot's thread says so. A goal done or blocked is an event for the
 bot; a met goal ends the entrustment, a blocker keeps it so the user's answer
-resumes the goal. Taking the thread back removes the goal without a message
-and the owner's grant with it: the thread leaves the bot's desk and the bot
-loses the access the entrustment gave, unless it still reaches the thread
-another way. A thread it started stays as `started`, a thread of a project
-entrusted to it stays as `followed`. Entrusting the thread to another bot
-takes it from the first the same way. Archiving or removing the thread ends
-the entrustment. The snapshot carries the
-list as `entrusted`.
+resumes the goal. Taking the thread back removes the goal without a message.
+However the entrustment ends (a met goal, a take-back, the thread archived or
+removed, the thread entrusted to another bot), the owner's grant ends with it
+(`AgentProjects.release`): the bot loses the access the entrustment gave. A
+watch it had before the entrustment, followed or started, stays as it was;
+the one the entrustment made stays only when the thread's project is
+entrusted to the bot, as `followed`, and otherwise leaves the desk. The news
+of a met goal still reaches the bot. The snapshot carries the list as
+`entrusted`.
 
 ## Asking to change a bot's settings
 

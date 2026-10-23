@@ -85,11 +85,12 @@ test('the desk holds a thread it started, one entrusted to it and one it watches
   expect(started.err).toBe('');
   const startedId = /thread: (\S+)/.exec(started.out)![1]!;
   const entrusted = (await thread('Fix the login')).id;
-  await owner.call('agents.entrust', { threadId: entrusted, agentId: agent.id, objective: 'Make the login work' });
+  // Its goal holds its turn: a met goal would end the entrustment and take the thread off the desk.
+  await owner.call('agents.entrust', { threadId: entrusted, agentId: agent.id, objective: 'HOLD until the login works' });
   const review = (await thread('Review the docs')).id;
   expect((await cli(['agent', 'watch', review])).code).toBe(0);
   await owner.call('turns.start', { threadId: review, prompt: 'Read the docs' });
-  await waitFor(() => settled(h, startedId) && settled(h, entrusted) && settled(h, review) && turnsOf(h, review).length === 1);
+  await waitFor(() => settled(h, startedId) && settled(h, review) && turnsOf(h, review).length === 1);
 
   const rows = (await owner.call('agents.snapshot', {})).watches;
   expect(rows.map(w => [w.threadId, w.origin])).toEqual(expect.arrayContaining([[startedId, 'started'], [entrusted, 'entrusted'], [review, 'followed']]));
@@ -329,7 +330,8 @@ test('a project taken back takes the follows the agent made through it, their fa
   const watched = (await thread('Watched by the owner')).id;
   try {
     await own.call('agents.watch', { threadId: self, agentId: agent.id, watchThreadId: worker, watched: true });
-    await owner.call('agents.entrust', { threadId: entrusted, agentId: agent.id });
+    // Still entrusted when the project goes back: its goal holds its turn.
+    await owner.call('agents.entrust', { threadId: entrusted, agentId: agent.id, objective: 'HOLD until the login works' });
     await owner.call('agents.watch', { agentId: agent.id, watchThreadId: watched, watched: true });
     await owner.call('turns.start', { threadId: worker, prompt: 'Before' });
     await waitFor(() => facts().some(f => f.text.includes(worker)));

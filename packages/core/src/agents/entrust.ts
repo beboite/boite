@@ -83,8 +83,10 @@ export class AgentEntrustments {
   }
 
   private drop(threadId: string): void {
-    if (!this.of(threadId)) return;
-    this.write(this.list().filter(entry => entry.threadId !== threadId));
+    const entry = this.of(threadId);
+    if (!entry) return;
+    this.write(this.list().filter(other => other.threadId !== threadId));
+    this.release(entry);
     this.store.changed();
   }
 
@@ -97,10 +99,12 @@ export class AgentEntrustments {
     const entry = this.of(event.threadId);
     if (!entry) return;
     const thread = this.core.journal.getThread(event.threadId);
-    if (event.outcome === 'complete') this.write(this.list().filter(other => other.threadId !== entry.threadId));
+    const over = event.outcome === 'complete';
+    if (over) { this.write(this.list().filter(other => other.threadId !== entry.threadId)); this.release(entry); }
     const what = `Entrusted thread ${entry.threadId}, titled ${quoted(thread?.title ?? '')}: goal ${EVENTS[event.outcome]}.`;
     if (event.outcome === 'stopped') this.core.agentRuntime.line(entry.agentId, what);
-    else this.core.agentRuntime.fact(entry.agentId, { key: `goal:${entry.threadId}:${event.outcome}:${Date.now()}`, text: `${what}\nIts final answer: ${quoted(event.text.slice(0, ANSWER_LIMIT))}`, threadIds: [entry.threadId] });
+    // The news of a met goal is the entrustment's last word: it reaches the bot though the grant ended with it.
+    else this.core.agentRuntime.fact(entry.agentId, { key: `goal:${entry.threadId}:${event.outcome}:${Date.now()}`, text: `${what}\nIts final answer: ${quoted(event.text.slice(0, ANSWER_LIMIT))}`, threadIds: over ? [] : [entry.threadId] });
     this.store.changed();
   }
 

@@ -157,7 +157,15 @@ export class FakeAgents {
     const entry = this.entrusted.find(e => e.threadId === turn.threadId);
     const goal = this.runner?.thread?.(turn.threadId)?.activity?.goal;
     if (!entry || was !== 'active' || !goal || goal.status === 'active') return;
-    if (goal.status === 'complete') this.entrusted = this.entrusted.filter(e => e !== entry);
+    if (goal.status === 'complete') { this.entrusted = this.entrusted.filter(e => e !== entry); this.release(entry.agentId, entry.threadId); }
+    this.bump();
+  }
+  /** An archived or removed thread ends its entrustment and the grant with it, as in the core. */
+  threadEnded(threadId: string): void {
+    const entry = this.entrusted.find(e => e.threadId === threadId);
+    if (!entry) return;
+    this.entrusted = this.entrusted.filter(e => e !== entry);
+    this.release(entry.agentId, threadId);
     this.bump();
   }
 
@@ -256,8 +264,7 @@ export class FakeAgents {
       watches: mine(this.watches).filter(w => own !== null || desk === undefined || w.agentId === desk).map(watch => this.watchOf(watch)).sort((a, b) => Number(['done', 'archived'].includes(a.state)) - Number(['done', 'archived'].includes(b.state)) || b.lastActivityAt - a.lastActivityAt),
       accountGrants: this.grants,
       limits: this.limits,
-      // The core ends an entrustment when its thread is archived or removed.
-      entrusted: mine(this.entrusted).filter(e => { const thread = this.runner?.thread?.(e.threadId); return !!thread && !thread.archived; }),
+      entrusted: mine(this.entrusted),
       brainRoot: this.brainRoot(),
     });
   }
@@ -466,12 +473,15 @@ export class FakeAgents {
     this.bump();
     return { ...entry };
   }
-  /** The owner's grant ends: the watch stays only where the bot reaches the thread another way (it started it, or its project is the bot's). */
+  /**
+   * An entrustment ended: the grant goes. A watch the bot had before stays as it
+   * was; the one the entrustment made stays only where its project is the bot's.
+   */
   private release(agentId: string, threadId: string): void {
     const projectId = this.runner?.thread?.(threadId)?.projectId ?? null;
     const reaches = projectId !== null && (this.profiles.get(agentId)?.projectIds ?? []).includes(projectId);
-    this.watches = this.watches.flatMap(w => w.agentId !== agentId || w.threadId !== threadId || w.origin === 'started' ? [w]
-      : reaches ? [{ ...w, origin: w.origin === 'entrusted' ? 'followed' as const : w.origin }] : []);
+    this.watches = this.watches.flatMap(w => w.agentId !== agentId || w.threadId !== threadId || w.origin !== 'entrusted' ? [w]
+      : reaches ? [{ ...w, origin: 'followed' as const }] : []);
   }
   private once<T>(requestId: string, value: unknown, run: () => T): T {
     if (!/^[A-Za-z0-9_-]{8,128}$/.test(requestId)) this.refuse('requestId: expected 8 to 128 letters, numbers, underscores or hyphens');

@@ -466,6 +466,8 @@ export class FakeContext {
       } as RpcEvents[E];
     }
     observeLog(this, event, payload);
+    if (event === 'thread.removed') this.agents.threadEnded((payload as RpcEvents['thread.removed']).threadId);
+    if (event === 'thread.updated' && (payload as RpcEvents['thread.updated']).archived) this.agents.threadEnded((payload as RpcEvents['thread.updated']).id);
     if (event === 'turn.finished') {
       const turn = payload as Turn;
       const agentThread = this.threads.get(turn.threadId);
