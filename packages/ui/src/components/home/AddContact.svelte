@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onDestroy, tick, untrack } from 'svelte';
-  import { Check, Copy, ExternalLink, Link2, Share2, TriangleAlert } from '@lucide/svelte';
+  import { Check, Copy, ExternalLink, Globe, Link2, Share2, TriangleAlert } from '@lucide/svelte';
   import { inviteShare } from '../../lib/contact-link';
-  import { copyText, type ContactsView } from '../../lib/contacts.svelte';
+  import { copyText, type ContactsView, type InviteReach } from '../../lib/contacts.svelte';
   import { clockTime } from '../../lib/format';
   import { fill, strings } from '../../lib/strings';
   import InfoTip from '../InfoTip.svelte';
@@ -11,8 +11,11 @@
   /**
    * The two ways a contact starts, as two Settings rows. Invite makes a
    * one-time link and copies it at once, for someone already on the owner's
-   * Tailscale (the link alone) or not (the link and a share of this machine);
-   * its expiry and how the Tailscale share went show under the row. Join takes the link another owner sent and
+   * Tailscale (the link alone), on another tailscale.com tailnet (the link and
+   * a share of this machine) or elsewhere (the link names this machine's
+   * contact routes on Tailscale Funnel); its expiry and how the share went
+   * show under the row. A tailnet outside tailscale.com (Headscale) can do
+   * neither of the last two: they stay off and a line says who invites whom. Join takes the link another owner sent and
    * then shows the eight words to compare with them. A link that shares the
    * inviter through Tailscale, pasted where no API key can accept it, first
    * offers the share to accept by hand.
@@ -31,14 +34,20 @@
     clearTimeout(timer);
     timer = setTimeout(() => { copied = false; }, 1500);
   }
-  async function invite(share: boolean) {
+  async function invite(reach: InviteReach) {
     // A failed call leaves the last link shown, made for another kind of invitee: never copied in its place.
-    if (!(await view.createInvite(share))) return;
+    if (!(await view.createInvite(reach))) return;
     await tick();
     await copy();
   }
   // A new invitation is not the one just copied.
   $effect(() => { void view.invite; untrack(() => { copied = false; }); });
+
+  // Only tailscale.com shares a machine between tailnets or opens Funnel.
+  const selfHosted = $derived.by(() => {
+    const fqdn = view.state?.tailscale.fqdn;
+    return typeof fqdn === 'string' && !fqdn.endsWith('.ts.net');
+  });
 
   let pasted = $state('');
   const shareStep = $derived(view.state?.tailscale.apiKey === true ? null : inviteShare(pasted));
@@ -53,6 +62,7 @@
   <span class="text">
     <span class="ui-label-box"><span class="ui-label">{labels.invite.title}</span><InfoTip topic={labels.invite.title} text={labels.invite.tip} /></span>
     <span class="hint">{labels.invite.pick}</span>
+    {#if selfHosted}<span class="hint" data-testid="contact-invite-self-hosted">{labels.invite.selfHosted}</span>{/if}
     {#if (view.state?.invitations ?? 0) > 0}
       <span class="open hint" data-testid="contact-invites-open">
         {fill(labels.invite.open, { count: String(view.state?.invitations) })}
@@ -62,11 +72,14 @@
     {/if}
   </span>
   <span class="invite-actions">
-    <button type="button" disabled={view.isBusy('invite')} title={labels.invite.tailnetTip} onclick={() => void invite(false)} data-testid="contact-invite-tailnet">
+    <button type="button" disabled={view.isBusy('invite')} title={labels.invite.tailnetTip} onclick={() => void invite('tailnet')} data-testid="contact-invite-tailnet">
       <Link2 size={14} /><span class="ui-label">{labels.invite.tailnet}</span>
     </button>
-    <button type="button" disabled={view.isBusy('invite')} title={labels.invite.createTip} onclick={() => void invite(true)} data-testid="contact-invite-create">
+    <button type="button" disabled={view.isBusy('invite') || selfHosted} title={labels.invite.createTip} onclick={() => void invite('share')} data-testid="contact-invite-create">
       <Share2 size={14} /><span class="ui-label">{labels.invite.create}</span>
+    </button>
+    <button type="button" disabled={view.isBusy('invite') || selfHosted} title={labels.invite.internetTip} onclick={() => void invite('internet')} data-testid="contact-invite-internet">
+      <Globe size={14} /><span class="ui-label">{labels.invite.internet}</span>
     </button>
   </span>
 </div>
@@ -84,6 +97,8 @@
       {fill(labels.invite.expires, { time: clockTime(made.expiresAt) })}
       {#if made.share.status === 'created'}
         · <a class="share ok" href={made.share.url} target="_blank" rel="noreferrer" data-testid="contact-invite-share" data-status="created"><Check size={12} strokeWidth={2.25} />{labels.invite.shared}</a>
+      {:else if made.via === 'internet'}
+        · <span data-testid="contact-invite-share" data-status="funnel">{labels.invite.funnel}</span>
       {:else if made.share.status === 'none'}
         · <span data-testid="contact-invite-share" data-status="none">{labels.invite.noShare}</span>
       {/if}

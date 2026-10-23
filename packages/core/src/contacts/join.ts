@@ -56,7 +56,10 @@ async function spendInvite(store: ContactStore, core: Core, invite: Invitation, 
       body: sealed.body,
     });
   } catch {
-    throw unavailable(`could not reach ${invite.machine} at ${invite.url}: accept its Tailscale share, then join again`);
+    // An https origin is the inviter's Funnel: no share to accept, the inviter's side is down.
+    throw unavailable(invite.url.startsWith('https:')
+      ? `could not reach ${invite.machine} at ${invite.url}: its Boite or its Tailscale Funnel is off; ask the inviter to check, then join again`
+      : `could not reach ${invite.machine} at ${invite.url}: accept its Tailscale share, or ask for an invitation for another network, then join again`);
   }
   const raw = await boundedBody(response.body, JOIN_BODY_MAX).catch(() => '');
   if (response.headers.get('x-boite-signature') !== SEALED) throw refused(`${invite.machine} refused the join (${response.status}: ${raw.slice(0, 200)})`);

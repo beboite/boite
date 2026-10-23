@@ -227,6 +227,12 @@ export interface ContactInvite {
    * Tailscale (same tailnet, or shared before), so nothing was shared.
    */
   share: { status: 'created'; url: string } | { status: 'manual'; reason: string } | { status: 'none' };
+  /**
+   * How the invitee reaches this machine: `tailnet` by its tailnet name, or
+   * `internet` by its contact routes on Tailscale Funnel. Absent from older
+   * cores, which only make `tailnet` links.
+   */
+  via?: 'tailnet' | 'internet';
 }
 /**
  * A contact asks for an agent on a project of this core ("a project like X"),
@@ -341,9 +347,11 @@ export interface CoordinationRpcMethods {
   /**
    * A one-time invitation, valid 24 hours. Creates the Tailscale share when an
    * API key is stored, unless `share` is false: the invitee already reaches
-   * this machine on Tailscale. Owner only.
+   * this machine on Tailscale. `internet`: the invitee is on another network
+   * (Headscale, none), so the link names Boite's contact routes on Tailscale
+   * Funnel and shares nothing. Owner only.
    */
-  'contacts.invite': { params: { share?: boolean }; result: ContactInvite };
+  'contacts.invite': { params: { share?: boolean; internet?: boolean }; result: ContactInvite };
   /**
    * Spends every open invitation unused: a link already sent, or one that
    * leaked, joins nothing any more. Contacts already joined stay. Owner only.

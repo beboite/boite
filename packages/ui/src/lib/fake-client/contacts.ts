@@ -162,20 +162,28 @@ export function contactMethods(ctx: FakeContext) {
     'contacts.get': async () => structuredClone(stateOf(ctx)),
     'contacts.invite': async (params) => {
       if (params?.share !== undefined && typeof params.share !== 'boolean') throw invalid('share: expected true or false', 'share');
+      if (params?.internet !== undefined && typeof params.internet !== 'boolean') throw invalid('internet: expected true or false', 'internet');
       const state = stateOf(ctx);
+      const fqdn = state.tailscale.fqdn ?? 'boite-pc';
+      // Like the core: only a tailscale.com tailnet shares a machine or opens Funnel.
+      if ((params?.share !== false || params?.internet === true) && !fqdn.endsWith('.ts.net')) {
+        throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `contacts.invite: ${fqdn} is on a tailnet that cannot share a machine with another one (Headscale); for someone on another network, ask them to invite you, or add them to your tailnet and invite them as already on it` });
+      }
       const token = `fake-contact-${++ctx.seq}`;
-      // Like the core: an invitee already on Tailscale gets the link alone.
-      const share: ContactInvite['share'] = params?.share === false ? { status: 'none' }
+      const internet = params?.internet === true;
+      // Like the core: an invitee already on Tailscale, or reached through Funnel, gets the link alone.
+      const share: ContactInvite['share'] = params?.share === false || internet ? { status: 'none' }
         : state.tailscale.apiKey ? { status: 'created', url: `https://login.tailscale.com/admin/invite/${token}` }
         : { status: 'manual', reason: 'No Tailscale API key is stored: share this machine from the admin console.' };
-      const url = `http://${state.tailscale.fqdn ?? 'boite-pc'}:8777`;
+      const url = internet ? `https://${fqdn}:8443` : `http://${fqdn}:8777`;
       tokensOf(ctx).add(token);
       state.invitations = tokensOf(ctx).size;
       changed();
       return {
         link: encodeInvite({ v: 1, c: state.self.coreId, m: state.self.machine, u: url, t: token, e: ctx.now() + INVITE_TTL, s: share.status === 'created' ? share.url : null }),
         expiresAt: ctx.now() + DAY,
-        share
+        share,
+        via: internet ? 'internet' : 'tailnet'
       };
     },
     'contacts.cancelInvites': async () => {
@@ -205,7 +213,7 @@ export function contactMethods(ctx: FakeContext) {
       opened.set(ctx, seen);
       if (share !== null && !state.tailscale.apiKey && !seen.has(share)) {
         seen.add(share);
-        throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `could not reach ${machine} at ${String(card.u)}: accept its Tailscale share, then join again` });
+        throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `could not reach ${machine} at ${String(card.u)}: accept its Tailscale share, or ask for an invitation for another network, then join again` });
       }
       // Like the core: an inviter on this page spends the token, or refuses one used, cancelled or expired.
       const inviter = fakeCore(coreId);

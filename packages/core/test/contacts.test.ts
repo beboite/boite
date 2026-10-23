@@ -7,6 +7,7 @@ import type { CoreClient } from '../src/client.ts';
 import { decodeInvite, tokenHash } from '../src/contacts/invite.ts';
 import { CONTACT_JOIN_ROUTE, JOIN_INPUT } from '../src/contacts/join.ts';
 import { CONTACT_LINK_ROUTE } from '../src/contacts/store.ts';
+import { unavailable } from '../src/errors.ts';
 import { pack, seal, SEALED } from '../src/group/seal.ts';
 import { newToken } from '../src/ids.ts';
 import { Refusals, REFUSALS_PER_MINUTE } from '../src/server/refusals.ts';
@@ -475,6 +476,48 @@ test('an invitation for someone already on this Tailscale carries no share, asks
   // Without the flag the owner is told to share the machine, as before.
   expect((await hostClient.call('contacts.invite', {})).share.status).toBe('manual');
   expect(await thrown(hostClient.call('contacts.invite', { share: 'no' as never }))).toThrow('share: expected true or false');
+}, 30000);
+
+test('an invitation for another network names the contact routes on Funnel, shares nothing, joins over them, and Funnel comes down with the last contact', async () => {
+  const host = await startTestCore();
+  const guest = await startTestCore();
+  cores.push(host, guest);
+  // Funnel's public origin stands in as the host's loopback URL; a tailnet name is never asked for.
+  host.core.contacts.selfUrl = async () => { throw new Error('the tailnet name was asked for'); };
+  host.core.contacts.internetUrl = async () => host.url;
+  let closed = 0;
+  (host.core.contacts.funnel as unknown as { close: () => Promise<void> }).close = async () => { closed += 1; };
+  const hostClient = await host.connect();
+  const guestClient = await guest.connect();
+  const invite = await hostClient.call('contacts.invite', { internet: true });
+  expect(invite).toMatchObject({ share: { status: 'none' }, via: 'internet' });
+  expect(decodeInvite(invite.link)).toMatchObject({ url: host.url, share: null });
+  expect(host.core.journal.getSetting('contacts:funnel')).toBe(true);
+  const guestId = guest.core.coordination.card().coreId;
+  expect((await guestClient.call('contacts.join', { link: invite.link })).url).toBe(host.url);
+  await waitFor(() => host.core.contacts.linked(guestId));
+  expect(closed).toBe(0);
+  // Without a contact hosted or an invitation out, nothing needs the routes on the internet.
+  await hostClient.call('contacts.remove', { coreId: guestId });
+  await waitFor(() => closed === 1);
+  expect(host.core.journal.getSetting('contacts:funnel')).toBe(false);
+  // A refused Funnel makes no invitation, and whatever it mounted comes down with it.
+  host.core.contacts.internetUrl = async () => { throw unavailable('contacts.invite: Funnel refused'); };
+  expect(await thrown(hostClient.call('contacts.invite', { internet: true }))).toThrow('Funnel refused');
+  expect((await hostClient.call('contacts.get', {})).invitations).toBe(0);
+  await waitFor(() => closed === 2);
+  expect(await thrown(hostClient.call('contacts.invite', { internet: 'yes' as never }))).toThrow('internet: expected true or false');
+}, 30000);
+
+test('a tailnet outside tailscale.com invites someone already on it, and refuses to share this machine with another tailnet', async () => {
+  const harness = await startTestCore();
+  cores.push(harness);
+  harness.core.contacts.tailscaleState = async () => ({ fqdn: 'boite.net.example.com', apiKey: false, policy: 'unknown' });
+  expect(await thrown(harness.core.contacts.invite(true))).toThrow('cannot share a machine with another one (Headscale)');
+  const invite = await harness.core.contacts.invite(false);
+  expect(decodeInvite(invite.link).url).toBe(`http://boite.net.example.com:${harness.core.boundEndpoint().port}`);
+  harness.core.contacts.tailscaleState = async () => ({ fqdn: null, apiKey: false, policy: 'unknown' });
+  expect(await thrown(harness.core.contacts.invite(false))).toThrow('contacts.invite:');
 }, 30000);
 
 test('cancelled invitations join nothing, and the tailnet listener closes with the last one', async () => {
