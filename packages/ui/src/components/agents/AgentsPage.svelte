@@ -3,7 +3,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { ArrowLeft, Bot, Brain, CalendarClock, Ellipsis, History, MessageSquare, Settings2, SquareArrowOutUpRight, Target, Users } from '@lucide/svelte';
   import type { AgentScope } from '@boite/contracts';
-  import { AgentsView, agentsFilter, chatKey, chatsOf, missionHome, missionPreset, missionsOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentSelection } from '../../lib/agents.svelte';
+  import { AgentsView, agentsFilter, chatKey, chatsOf, missionHome, missionPreset, missionsOf, waitingForUser, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentSelection } from '../../lib/agents.svelte';
   import { mobileOverlay } from '../../lib/mobile-history';
   import type { Store } from '../../lib/store.svelte';
   import { fill, strings } from '../../lib/strings';
@@ -126,9 +126,10 @@
   });
   const panes = $derived([...layout.main, ...layout.more]);
   const current = $derived(pane && panes.includes(pane) ? pane : panes[0]!);
+  const waiting = $derived(waitingForUser(snapshot, selected ? { kind: selected.kind === 'profile' ? 'agent' : selected.kind, id: selected.id } : null, liveHere));
   const status = $derived.by<{ text: string; tone?: 'running' | 'waiting' }>(() => {
     if (mission) return { text: labels[mission.status], tone: mission.status === 'active' ? 'running' : mission.status === 'review' || mission.status === 'waiting' ? 'waiting' : undefined };
-    if (liveHere?.status === 'waiting' || chat?.status === 'waiting') return { text: strings.sidebar.state.waiting, tone: 'waiting' };
+    if (waiting) return { text: strings.sidebar.state.waiting, tone: 'waiting' };
     if (liveHere || chat?.status === 'running') return { text: labels.running, tone: 'running' };
     if (profile?.status === 'archived') return { text: labels.archived };
     if (profile?.status === 'paused' || chat?.status === 'paused') return { text: labels.paused };
@@ -262,7 +263,7 @@
       <header class="agents-detail-head">
         {#if narrow.current || parent}{@render backButton(backLabel)}{/if}
         <button type="button" class="ghost agents-identity" onclick={() => { pane = null; }} aria-label={title}>
-          <AgentAvatar kind={selected.kind} id={selected.id} name={title} avatar={profile?.avatar} {members} status={avatarStatus(liveHere?.status)} size={32} />
+          <AgentAvatar kind={selected.kind} id={selected.id} name={title} avatar={profile?.avatar} {members} status={waiting ? 'waiting' : avatarStatus(liveHere?.status)} size={32} />
           <span class="agents-identity-text">
             <strong>{title}</strong>
             <small data-status={status.tone}>{status.text}</small>

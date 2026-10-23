@@ -72,6 +72,7 @@ export const fr: Translation = {
     stopEngine: 'Arrêter ce moteur', stopEngineBody: 'Arrête les travaux et déconnecte les clients. Les exécutions commencées demanderont une vérification avant reprise. Rouvrez Boite sur la machine hôte pour redémarrer le moteur.',
     createAgent: 'Créer un agent', noAgents: 'Aucun agent pour l’instant', noAgentsOn: 'Aucun agent sur {machine} pour l’instant', more: 'Plus', noMatch: 'Aucun résultat',
     noMessagesYet: 'Aucun message pour l’instant', noMissions: 'Aucune mission pour l’instant', previewFrom: '{name} : {text}', unread: '{count} non lus',
+    missedOne: '1 message manqué', missedMany: '{count} messages manqués', latestMessages: 'Derniers messages', loadLater: 'Charger la suite', loadingMissed: 'Chargement des messages manqués',
     backToChat: 'Retour à la discussion', backTo: 'Retour à {name}', editRoles: 'Modifier les rôles', startChat: 'Démarrer la discussion',
     asks: '{name} vous demande',
     planned: 'Tâches planifiées', plannedResult: 'Tâche planifiée',
