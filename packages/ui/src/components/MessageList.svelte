@@ -46,7 +46,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { MessageReveal } from '../lib/message-reveal.svelte';
   import { placeViews, turnViews, viewPart } from '../lib/inline-view';
-  import { filesLast, firstAssistantByTurn, publishedFile, quietKeepalives } from '../lib/message-order';
+  import { filesLast, firstAssistantByTurn, firstByTurn, publishedFile, quietKeepalives } from '../lib/message-order';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -702,12 +702,7 @@
   const firstAssistantInTurn = $derived(firstAssistantByTurn(messages));
   /** The last row of each turn: a later message of the same turn replaces an earlier one. */
   const lastInTurn = $derived(new Map(timeline.map((message): [string, string] => [message.turnId, message.id])));
-  /** The first message of each turn: on a wake turn, the prompt it opened with. A line Boite adds to that turn later is not a second wake. */
-  const firstInTurn = $derived.by(() => {
-    const first = new Map<string, string>();
-    for (const message of messages) if (!first.has(message.turnId)) first.set(message.turnId, message.id);
-    return first;
-  });
+  const firstInTurn = $derived(firstByTurn(messages));
   /** Each turn's answers, rebuilt when a message comes or goes, never on a part or a delta. */
   const answers = $derived(answersByTurn(messages));
   const fileCache = new TurnFileCache();
