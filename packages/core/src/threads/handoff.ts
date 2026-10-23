@@ -6,11 +6,14 @@ import { STOP_DEADLINE } from './turn-runner.ts';
 
 /**
  * `graceMs`: how long a running tool call may take to finish before its turn is
- * stopped anyway. `maxAgeMs`: past it the next core resumes nothing, so a
- * machine left off for a day does not start paid work by itself. Mutable so a
- * test can shorten them.
+ * stopped anyway. `longToolMs`: a tool call already running this long when the
+ * restart starts is not waited for: one that outlasted the grace once rarely
+ * ends within it, and two updates of 2026-10-22 each waited the whole 30
+ * seconds on such a call (a nine minute script, a polling loop) before cutting
+ * it, from `core.handoff.started` to `core.shutdown.started` in the core's log. `maxAgeMs`: past it the next core resumes nothing, so a machine left off
+ * for a day does not start paid work by itself. Mutable so a test can shorten them.
  */
-export const HANDOFF = { graceMs: 30_000, maxAgeMs: 3_600_000 };
+export const HANDOFF = { graceMs: 30_000, longToolMs: 30_000, maxAgeMs: 3_600_000 };
 
 /** The journal setting the stopping core leaves for the next one. */
 const KEY = 'restart-handoff';
@@ -41,8 +44,8 @@ function isRecord(value: unknown): value is HandoffRecord {
  * the wait still hands its turns over.
  */
 export class RestartHandoff {
-  /** Tool calls in flight per thread, as `messageId:partIndex`. */
-  private readonly tools = new Map<ThreadId, Set<string>>();
+  /** Tool calls in flight per thread, as `messageId:partIndex`, with when each started. */
+  private readonly tools = new Map<ThreadId, Map<string, number>>();
   /** What this core hands over, once `begin` ran. */
   private entries: Map<TurnId, Entry> | null = null;
   /** Running turns still to end before this core may exit. */
@@ -144,7 +147,12 @@ export class RestartHandoff {
     // A stop the runner could not settle either must not hold the restart.
     timers.push(setTimeout(() => this.settle?.(), graceMs + STOP_DEADLINE.ms + STOP_DEADLINE.forceMs + 1_000));
     for (const timer of timers) timer.unref?.();
-    for (const [turnId, threadId] of this.pending) this.stopWhenBetweenTools(turnId, threadId);
+    const now = Date.now();
+    for (const [turnId, threadId] of this.pending) {
+      const running = [...this.tools.get(threadId)?.values() ?? []];
+      if (running.length > 0 && running.every(startedAt => now - startedAt >= HANDOFF.longToolMs)) this.stop(turnId, threadId);
+      else this.stopWhenBetweenTools(turnId, threadId);
+    }
     return promise;
   }
 
@@ -287,9 +295,9 @@ export class RestartHandoff {
       const { threadId, messageId, partIndex, part } = payload as RpcEvents['message.part'];
       if (part.type !== 'tool') return;
       const key = `${messageId}:${partIndex}`;
-      const running = this.tools.get(threadId) ?? new Set<string>();
-      if (part.status === 'running') running.add(key);
-      else running.delete(key);
+      const running = this.tools.get(threadId) ?? new Map<string, number>();
+      if (part.status !== 'running') running.delete(key);
+      else if (!running.has(key)) running.set(key, typeof part.startedAt === 'number' ? part.startedAt : Date.now());
       if (running.size > 0) this.tools.set(threadId, running);
       else this.tools.delete(threadId);
       if (this.entries === null || running.size > 0) return;
