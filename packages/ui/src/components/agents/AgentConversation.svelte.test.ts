@@ -38,11 +38,14 @@ let at = Date.parse('2026-09-20T10:00:00Z');
 const message = (id: string, senderId: string | null) => ({ id, scope, senderId, recipientIds: [], text: id, createdAt: at += 60_000 });
 
 test.each([
-  { evidence: 'before execution', startedAt: null, replied: false, delivery: true },
-  { evidence: 'after execution started', startedAt: 1, replied: false, delivery: true },
-  { evidence: 'with a reply outside the current page', startedAt: null, replied: true, delivery: true },
-  { evidence: 'with a reply outside the page and no delivery record', startedAt: null, replied: true, delivery: false },
-])('a failed delivery reports receipt $evidence', async ({ startedAt, replied, delivery }) => {
+  { evidence: 'before execution', startedAt: null, reply: null, delivery: true },
+  { evidence: 'after execution started', startedAt: 1, reply: null, delivery: true },
+  { evidence: 'with a reply outside the current page', startedAt: null, reply: 'outside', delivery: true },
+  { evidence: 'with a reply outside the page and no delivery record', startedAt: null, reply: 'outside', delivery: false },
+  { evidence: 'with a reply retained after a window gap', startedAt: null, reply: 'retained', delivery: true },
+  { evidence: 'with a retained reply and no delivery record', startedAt: null, reply: 'retained', delivery: false },
+])('a failed delivery reports receipt $evidence', async ({ startedAt, reply, delivery }) => {
+  const replied = reply !== null;
   const work = { id: 'w-timeout', revision: 3, agentId: scope.id, scope, status: 'paused', runId: 'r-timeout', error: 'Execution time limit reached.' };
   const call = vi.fn(async () => null);
   const sent = message('m-timeout', null);
@@ -51,15 +54,22 @@ test.each([
     deliveries: delivery ? [{ id: 'd-timeout', messageId: sent.id, agentId: scope.id, workId: work.id, status: 'failed' }] : [],
     decisions: [], runs: replied ? [] : [{ id: work.runId, workId: work.id, startedAt, threadId: 't-timeout' }], work: [work],
   };
-  const view = {
+  const view = $state({
     seen,
     snapshot: { profiles: [{ id: scope.id, name: 'Ada', avatar: '', selection: { accountId: 'acc-ada' } }], groups: [], work: [work], sessions: [] },
-    readMessages: async () => ({ ...seen, messages: [sent], memories: [], older: false, newer: replied }),
+    readMessages: async () => ({ ...seen, messages: reply === 'retained' ? seen.messages : [sent], memories: [], older: false, newer: replied }),
     store: useStore(), pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
-  };
+  });
   mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
   await settle();
-  if (replied) expect(document.querySelector('[data-message-id="m-reply"]')).toBeNull();
+  if (reply === 'outside') expect(document.querySelector('[data-message-id="m-reply"]')).toBeNull();
+  if (reply === 'retained') {
+    expect(document.querySelector('[data-testid="receipt-responded"]')?.classList.contains('received')).toBe(true);
+    // A disjoint snapshot clears seen messages while the reader's page stays open.
+    view.seen.messages = [];
+    await settle();
+    expect(document.querySelector('[data-message-id="m-reply"]')).not.toBeNull();
+  }
   const received = startedAt !== null || replied;
   expect(document.querySelector('.from-user .failed')?.textContent ?? null).toBe(received ? null : 'Ada did not get it');
   expect(document.querySelector('[data-testid="receipt-responded"]')?.classList.contains('received')).toBe(received);
