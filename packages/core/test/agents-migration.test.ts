@@ -88,6 +88,8 @@ test('agents of a hidden-thread core come back as their threads, once, whatever 
       const archive = readFileSync(join(brain.path, MEMORY_ARCHIVE), 'utf8');
       expect(archive).toContain('## Prefers short answers (2023-11-14)\n\nThe user wants one line.');
       expect(archive).not.toContain('Group finding');
+      // Archived once: a restart that ran the step again would append the entry a second time.
+      expect(archive.match(/## Prefers short answers/g)).toHaveLength(1);
       expect(brain.memory).toBe('');
       expect(existsSync(join(h.core.workforce.resident.brain(BOTS).path, MEMORY_ARCHIVE))).toBe(false);
       expect(h.core.journal.getSetting('agents:attachments:agt_message_old')).toBeUndefined();

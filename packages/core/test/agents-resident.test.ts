@@ -151,7 +151,8 @@ test('a once routine that ran stays done: resuming it fires nothing, a new date 
   const resumed = await client.call('agents.routine.save', { id: done.id, expectedRevision: done.revision, value: { ...done, enabled: true } });
   expect(resumed.nextAt).toBeNull();
   const routineTurns = () => turnsOf(h, threadId).filter(t => t.execution?.operation === 'routine').length;
-  await Bun.sleep(700);
+  // Two ticks of the scheduler, no waiting on its timer: a resumed once routine reads as nothing due.
+  h.core.workforce.routines.tick(); h.core.workforce.routines.tick();
   expect(routineTurns()).toBe(1);
   const at = Date.now() + 3_600_000;
   expect((await client.call('agents.routine.save', { id: resumed.id, expectedRevision: resumed.revision, value: { ...resumed, schedule: { kind: 'once', at } } })).nextAt).toBe(at);

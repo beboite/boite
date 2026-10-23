@@ -256,7 +256,8 @@ export class FakeAgents {
       watches: mine(this.watches).filter(w => own !== null || desk === undefined || w.agentId === desk).map(watch => this.watchOf(watch)).sort((a, b) => Number(['done', 'archived'].includes(a.state)) - Number(['done', 'archived'].includes(b.state)) || b.lastActivityAt - a.lastActivityAt),
       accountGrants: this.grants,
       limits: this.limits,
-      entrusted: mine(this.entrusted),
+      // The core ends an entrustment when its thread is archived or removed.
+      entrusted: mine(this.entrusted).filter(e => { const thread = this.runner?.thread?.(e.threadId); return !!thread && !thread.archived; }),
       brainRoot: this.brainRoot(),
     });
   }
@@ -380,6 +381,7 @@ export class FakeAgents {
     const brain = this.getBrain(agentId);
     const line = `- ${new Date().toISOString().slice(0, 10)}: ${p.text.trim()}`;
     const saved = { ...brain, memory: brain.memory ? `${brain.memory.trimEnd()}\n${line}` : line, revision: String(Number(brain.revision) + 1) };
+    if (saved.memory.length > AGENT_MEMORY_MAX) this.refuse(`text: MEMORY.md holds ${brain.memory.length} of ${AGENT_MEMORY_MAX} characters; rewrite it shorter before adding to it`);
     this.brains.set(agentId, saved);
     this.bump();
     return structuredClone(saved);
@@ -455,9 +457,8 @@ export class FakeAgents {
     this.runner?.goal?.(p.threadId, objective);
     const entry: AgentEntrustment = { threadId: p.threadId, agentId: agent.id, objective, at: Date.now() };
     this.entrusted = [...this.entrusted.filter(e => e.threadId !== p.threadId), entry];
-    // It joins the agent's desk, as the core puts an entrusted thread there.
-    this.watches = this.watches.filter(w => w.threadId !== p.threadId);
-    this.watches.push({ agentId: agent.id, threadId: p.threadId, title: thread.title, projectId: thread.projectId, origin: 'entrusted', since: entry.at, state: 'idle', stalledSince: null, lastActivityAt: entry.at, pullRequest: null, question: null });
+    // It joins the agent's desk, as the core puts an entrusted thread there: the first origin stays, and other bots' desks keep it.
+    if (!this.watches.some(w => w.agentId === agent.id && w.threadId === p.threadId)) this.watches.push({ agentId: agent.id, threadId: p.threadId, title: thread.title, projectId: thread.projectId, origin: 'entrusted', since: entry.at, state: 'idle', stalledSince: null, lastActivityAt: entry.at, pullRequest: null, question: null });
     this.bump();
     return { ...entry };
   }
