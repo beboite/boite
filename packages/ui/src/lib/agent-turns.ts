@@ -1,6 +1,8 @@
 import { SvelteSet } from 'svelte/reactivity';
 import type { AgentStatus, Message, MessagePart, Turn } from '@boite/contracts';
 import { fill, strings } from './strings';
+import { AgentsView } from './agents.svelte';
+import type { Store } from './store.svelte';
 
 /**
  * How a persistent agent's thread reads like a message app: a finished turn
@@ -195,5 +197,29 @@ export class MemoryLines {
       this.#row = { key, message: { id: MEMORY_PREFIX + pass.threadId, threadId: anchor.threadId, turnId: MEMORY_PREFIX + pass.threadId, role: 'system', parts: [], state: 'complete', createdAt: anchor.createdAt } };
     }
     return [...timeline.slice(0, at + 1), this.#row.message, ...timeline.slice(at + 1)];
+  }
+}
+
+/** The last memory pass of the agent whose own thread this is, null before its first; undefined for any other thread. */
+export function memoryPassOf(store: Store, threadId: string): MemoryPass | null | undefined {
+  if (store.openThread?.id !== threadId || !store.openThread.agentSessionId) return undefined;
+  return AgentsView.of(store).snapshot?.status?.find(status => status.threadId === threadId)?.memory ?? null;
+}
+
+/** A row an agent's thread adds to its timeline: a fold, or its memory pass's line. */
+export type AgentRow = { kind: 'fold'; fold: TurnFold } | { kind: 'memory'; pass: MemoryPass };
+const NO_ROWS: ReadonlyMap<string, AgentRow> = new Map();
+
+/** A persistent agent's thread as it reads: its finished turns folded, then its last memory pass under the answer it followed. */
+export class AgentTimeline {
+  #folds = new TurnFolds();
+  #memory = new MemoryLines();
+  /** `pass` undefined: not an agent's own thread, and the timeline stays as it is. */
+  build(timeline: Message[], turns: readonly Turn[], pass: MemoryPass | null | undefined): { timeline: Message[]; rows: ReadonlyMap<string, AgentRow> } {
+    if (pass === undefined) return { timeline, rows: NO_ROWS };
+    const shaped = this.#memory.place(this.#folds.build(timeline, turns, openedTurns), turns, pass);
+    const rows = new Map<string, AgentRow>([...this.#folds.folds].map(([id, fold]) => [id, { kind: 'fold', fold }]));
+    if (pass) rows.set(MEMORY_PREFIX + pass.threadId, { kind: 'memory', pass });
+    return { timeline: shaped, rows };
   }
 }
