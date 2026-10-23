@@ -28,8 +28,11 @@ is on. Describe what the agent is working on in Resources so another agent can
 find the right contact. Archived conversations are unavailable. A bot's
 thread starts with coordination on like any other, so it finds, reads and
 messages threads with `boite threads` and they reach it the same way; the
-owner may turn it off. Its letters to the threads of its projects pass
-whatever either side's settings say.
+owner may turn it off. Its letters to the threads of its projects still go
+when its own thread is Off, and reach a recipient that is Off, paused or
+restricted to its own project. A Pause on the bot's own thread refuses them,
+and an archived recipient or a project no longer entrusted to the bot rejects
+them.
 
 Coordination has no distributed lock or automatic loop detector. Instructions
 require messages tied to work, without courtesy replies or polling. Pause or
@@ -79,7 +82,7 @@ place and last words. Opening one shows the back and forth: what reaches this
 thread's agent sits on the right in the accent color, like the user's prompts;
 its own letters sit on the left, like its answers. A delegation prompt the user
 typed sits on the right under "You", a subagent's result is labelled "Result",
-and the letters of the agent the project is entrusted to keep that agent's color
+and the letters of the bot the project is entrusted to keep that bot's color
 and name on the left. Letters of one
 side a few minutes apart share one time stamp, a silence of twenty minutes gets
 a line of its own, and a reply to a letter other than the one just before it
@@ -118,7 +121,9 @@ labelled with that bot in the timeline. The provider reads it in its own
 section, as direction from the user's delegate that is still not the user and
 grants no approval; the thread does not answer it by letter, since the bot
 reads the thread's final answer in an event when the turn ends. Such a letter
-passes the communication settings of the thread, waits six hours instead of
+passes the communication settings of the thread, Off, Pause and the
+own-project restriction included, and the Off of the bot's own thread; a Pause
+on the bot's thread refuses it. It waits six hours instead of
 fifteen minutes, and is rejected once the project is no longer entrusted to the
 bot or the bot is archived. Only the local core sets the origin; a remote
 letter's origin is never believed. The core's events to the bot are not
@@ -220,14 +225,15 @@ message is not mistaken for noise: `from.thread` is the sender's conversation
 title, `from.address` what `boite threads read` takes, `from.relation` how it
 relates to the recipient ("started this thread; its request is your task", "a
 thread you started; it reports to you", "your parent", "your subagent", the
-agent the project is entrusted to, same project, another project or machine), `from.project`,
+the bot the project is entrusted to, same project, another project or machine), `from.project`,
 `from.machine` when it is elsewhere, `from.agent`, `from.branch`,
 `from.status` and `from.about`, what it works on. `about` is the sender's
 declared resources; a sender on the same core without any falls back to the
 first request of its conversation, cut to 200 characters. That sender is a
 contact the recipient may already read with `boite threads read`; a letter from
-the agent a project is entrusted to gets no fallback, since that agent's
-conversation holds the user's other work. Another machine
+the bot a project is entrusted to gets no fallback, since the bot's thread
+holds its work across all its projects and opens with its creation, not with
+the task the letter is about. Another machine
 shares its resources only, never its chat. A reply carries `inReplyTo.yours`,
 the start of the recipient's own message it answers. The core id hash, the
 mode and the timestamps stay out. When the context is still unclear, the

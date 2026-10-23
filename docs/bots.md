@@ -119,9 +119,10 @@ label, which its opening system line shows (`threads/operations.ts`):
   its desk and projects (`3 project events`); the prompt carries the facts.
 
 A wake never starts while the bot's thread has a turn queued, running or
-waiting, while the bot or every bot on the core is paused, or once its
-daily budget is spent. A held creation or instructions wake starts once the
-thread is free or the pause ends.
+waiting, while the bot is archived, while the bot or every bot on the core is
+paused, or once its daily budget is spent. A held creation or instructions wake
+starts once the thread is free or the pause ends; archiving the bot drops its
+waiting wakes and facts instead.
 
 Every other turn the core starts by itself on the bot's thread meets the
 same policy in `threads.startTurn` (`AgentRuntime.admit`): the output of a
@@ -174,7 +175,9 @@ is data from other threads, not instructions:
   only leaves a line).
 
 Facts gather: one `event` turn starts once the thread is free and the oldest
-fact is 30 seconds old, and facts arriving meanwhile wait for the next one.
+fact is 30 seconds old, and it carries every fact waiting by then, those that
+arrived in the meantime included. Facts that arrive once it has started wait
+for the next one.
 An event prompt stops at 16,000 characters, older facts giving way, and one
 bot receives at most 60 facts in an hour. A dropped fact, under either cap,
 leaves a system line in the bot's thread naming it; past ten such lines in

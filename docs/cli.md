@@ -348,11 +348,15 @@ it started in any project, through `resident.*`, and its messages reach them as 
 user's. Deleting a thread and deciding a tool permission stay the owner's.
 
 `boite threads` (or `boite threads list`) is one listing of the threads the
-caller may see, with `--project <p>`, `--archived` and the machine of each:
-the owner sees every top-level thread of this core, a bot the threads of its
-projects then the rest of its desk (`desk=started|entrusted|followed`), and
-any other thread what coordination lets it reach here and on linked machines
-(open threads only; `--archived` is refused there).
+caller may see, with `--project <p>`, `--archived` and the machine of each.
+The owner sees every top-level thread of this core. A bot sees the threads of
+the projects entrusted to it, then the threads on its desk that are not among
+them; each of those desk lines ends with `desk=started` (the bot started it),
+`desk=entrusted` (the owner entrusted that thread to it) or `desk=followed`
+(it wrote to it, answered for it or watches it). With `--archived`, the owner
+and a bot see the archived threads instead of the open ones. Any other thread
+sees the open threads coordination lets it reach, here and on linked machines,
+and its `--archived` is refused.
 
 The old spellings still work and print nothing more: `boite agents <x>` is
 `boite threads <x>`, `boite agent <x>` is `boite bot <x>`, `boite settings
@@ -494,9 +498,11 @@ Pause refuses, and a thread restricted to its own project cannot start one
 elsewhere. There is no hourly limit. A thread an agent started cannot start another
 until the user has
 written in it, so agents cannot chain threads on their own. Delegated
-children and workflow steps are refused, and a bot's thread starts
-threads in any project, where they land on its [desk](bots.md#the-desk) and
-stay its own to drive. A retry
+children and workflow steps are refused. A bot's thread is not bound by
+these settings: Off, Pause and the own-project restriction do not refuse it,
+so it starts threads in any project, where they land on its
+[desk](bots.md#the-desk) and stay its own to drive; an archived bot starts
+none. A retry
 with the same `--request-id` returns the thread already started.
 
 `projects` prints one row per project: its id, name and folder, `(this
