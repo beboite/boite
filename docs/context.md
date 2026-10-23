@@ -205,7 +205,9 @@ the current task and progress. Only a click expands it; updates and disclosure
 do not resize the timeline. An asynchronous question (`boite ask`, or Codex's
 `delivery: "async"`) waits on top of that overlay with the same answer controls
 as a blocking one. Several stack behind a pager ("2 of 3"), each keeping what
-was picked while another shows, and a new one comes up open. The timeline keeps
+was picked while another shows. The oldest pending question opens first; new
+arrivals keep the current question and its folded state. Answering or skipping
+the current question brings up the oldest remaining one. The timeline keeps
 one line where it was asked, and a click on it brings that question up. While
 a question is open there, the timeline's bottom margin grows to the overlay's
 height so the last answer stays above it; `tests/e2e/composer-activity.test.ts`

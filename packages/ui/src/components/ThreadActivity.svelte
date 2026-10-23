@@ -37,26 +37,23 @@
    * is answered in the child's own conversation.
    */
   let children = $derived(new Map(store.openThread ? store.threads.filter((row) => row.parentThreadId === store.openThread?.id && !row.archived).map((row) => [row.id, row] as const) : []));
-  let asked = $derived(store.openThread ? store.pendingQuestions.filter((question) => (question.async === true && question.threadId === store.openThread?.id) || children.has(question.threadId)) : []);
+  let asked = $derived(store.openThread ? store.pendingQuestions.filter((question) => (question.async === true && question.threadId === store.openThread?.id) || children.has(question.threadId)).sort((a, b) => a.createdAt - b.createdAt) : []);
   let waits = $derived(store.pendingPermissions.filter((request) => children.has(request.threadId)));
   let shownId = $state<string | null>(null);
   let shown = $derived(asked.find((question) => question.id === shownId) ?? asked[0]);
   let at = $derived(shown ? asked.indexOf(shown) : 0);
   let questionOpen = $state(true);
   let inline = $derived(asked.length > 0 || waits.length > 0);
-  // A new question comes up open, even over one the user folded, and so does
-  // another thread's: the dock stays mounted while the open thread changes, and
-  // a count would miss a question that replaces another.
-  let seen = new Set<string>();
+  // Start with the oldest pending question. New arrivals keep the current
+  // question, its answers and its folded state; explicit navigation still wins.
+  // The dock stays mounted when switching threads, so reset its selection then.
   let seenThread: string | undefined;
   $effect(() => {
     const thread = store.openThread?.id;
-    const fresh = asked.filter((question) => !seen.has(question.id));
-    if (thread !== seenThread || fresh.length > 0) {
-      shownId = (fresh.at(-1) ?? asked.at(-1))?.id ?? null;
+    if (thread !== seenThread || !asked.some((question) => question.id === shownId)) {
+      shownId = asked[0]?.id ?? null;
       questionOpen = true;
     }
-    seen = new Set(asked.map((question) => question.id));
     seenThread = thread;
   });
   // The timeline's line for a docked question brings that one up.
