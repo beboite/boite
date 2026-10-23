@@ -1,277 +1,206 @@
-import { expect, spyOn, test } from 'bun:test';
-import type { AgentProfile } from '@boite/contracts';
-import { quietAgent as quiet, startTestCore, waitFor } from './harness.ts';
-import { connect } from '../src/client.ts';
-import { Core } from '../src/core.ts';
-import { thrown } from './settle.ts';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
+import type { AgentRoutine } from '@boite/contracts';
+import type { CoreClient } from '../src/client.ts';
+import { notifiesOnFinish } from '@boite/contracts';
+import { costing, makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
+import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
-test('a time-limited agent keeps its message receipt through resume and cancellation', async () => {
-  const h = await startTestCore();
-  try {
-    const client = await h.connect();
-    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Worker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
-    await quiet(client, agent);
-    const message = await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [], text: '[sleep:60000]', attachments: [{ kind: 'file', mimeType: 'text/plain', name: 'notes.txt', data: Buffer.from('Keep this receipt.').toString('base64') }], requestId: 'receipt_timeout_001' });
-    await waitFor(() => h.core.workforce.records.list('run').some(r => r.status === 'running'));
-    const run = h.core.workforce.records.list('run')[0]!;
-    h.core.workforce.records.update('run', run.id, run.revision, { ...run, startedAt: Date.now() - 61 * 60000 });
-    await waitFor(() => h.core.workforce.records.get('work', run.workId).status === 'paused');
-    await waitFor(() => h.core.scheduler.state().running.length === 0);
-    const paused = h.core.workforce.records.get('work', run.workId);
-    expect(paused.error).toBe('Execution time limit reached.');
-    const delivery = () => h.core.workforce.records.find('delivery', 'messageId', [message.id])[0]!;
-    expect(delivery().status).toBe('included');
-    expect(h.core.journal.getSetting(`agents:attachments:${message.id}`)).toBeDefined();
+let h: TestCore;
+let client: CoreClient;
+let restore: (() => void) | undefined;
+beforeEach(async () => { h = await startTestCore(); client = await h.connect(); });
+afterEach(async () => { restore?.(); restore = undefined; await h.stop(); });
 
-    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
-    const resumed = await client.call('agents.work.control', { workId: paused.id, expectedRevision: paused.revision, action: 'resume' });
-    expect(delivery().status).toBe('included');
-    expect(resumed.status).toBe('pending');
-    await client.call('agents.work.control', { workId: resumed.id, expectedRevision: resumed.revision, action: 'cancel' });
-    expect(delivery().status).toBe('included');
-    expect(h.core.journal.getSetting(`agents:attachments:${message.id}`)).toBeUndefined();
-  } finally { await h.stop(); }
-}, 15000);
+const BLOCK = 'Boite: who you are, as a persistent agent.';
 
-test('declared shared write resources serialize agents until the holder stops', async () => {
-  const h = await startTestCore();
-  try {
-    const client = await h.connect();
-    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agents: AgentProfile[] = [];
-    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
-    for (const name of ['First', 'Second']) {
-      const agent = await client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
-      agents.push(agent);
-      const scope = { kind: 'agent' as const, id: agent.id };
-      await client.call('agents.resource.save', { value: { scope, name: 'Shared files', kind: 'directory', value: h.dataDir, access: 'write' } });
-      await client.call('agents.message.send', { scope, recipientIds: [], text: '[sleep:60000]', requestId: `shared_resource_${name}` });
-    }
-    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: false });
-    await waitFor(() => h.core.workforce.records.list('run').some(r => r.status === 'running'));
-    // An unrelated event makes the runtime reconsider the second item while the lock is held.
-    h.core.workforce.changed();
-    await client.call('agents.snapshot', {});
-    expect(h.core.workforce.records.list('run')).toHaveLength(1);
-    const work = h.core.workforce.records.list('work')[0]!;
-    await client.call('agents.work.control', { workId: work.id, expectedRevision: work.revision, action: 'cancel' });
-    await waitFor(() => h.core.workforce.records.list('run').some(r => r.agentId === agents[1]!.id && r.status === 'running'));
-    expect(h.core.workforce.records.list('run').filter(r => r.status === 'running')).toHaveLength(1);
-  } finally { await h.stop(); }
+function routine(agentId: string, over: Partial<AgentRoutine> = {}) {
+  return client.call('agents.routine.save', { value: {
+    agentId, name: 'Check the PRs', prompt: 'Look at the open pull requests', schedule: { kind: 'interval', everyMinutes: 60 }, enabled: true,
+    nextAt: null, lastTurnId: null, lastScheduledAt: null, ...over,
+  } });
+}
+/** Makes a routine due now, the way time would. */
+function due(routineId: string): void {
+  const current = h.core.workforce.records.get('routine', routineId);
+  h.core.workforce.records.update('routine', current.id, current.revision, { ...current, nextAt: Date.now() - 1000 });
+}
+const read = (routineId: string) => h.core.workforce.records.get('routine', routineId);
+/** What a thread's system lines say. */
+const lines = (threadId: string) => h.core.journal.listMessages(threadId).filter(m => m.role === 'system').flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : []));
+
+test('the context block is sent once, then again only once MEMORY.md changes or the session is fresh', async () => {
+  const driver = scripted(() => ({ text: 'Noted.' })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client, { instructions: 'Answer about releases.' });
+  const sent = () => driver.prompts.get(threadId) ?? [];
+  // The introduction opened a fresh session: it carried the block, with the persona.
+  expect(sent()[0]).toContain(BLOCK);
+  expect(sent()[0]).toContain('You are Ada, Open source.\nAnswer about releases.');
+  expect(sent()[0]).toContain('[quiet]');
+  await client.call('turns.start', { threadId, prompt: 'First question?' });
+  await waitFor(() => sent().length === 2 && settled(h, threadId));
+  expect(sent()[1]).not.toContain(BLOCK);
+  expect(sent()[1]).toContain('First question?');
+
+  await client.call('agents.memory.note', { agentId: agent.id, text: 'The release is on Friday.' });
+  await client.call('turns.start', { threadId, prompt: 'Second question?' });
+  await waitFor(() => sent().length === 3 && settled(h, threadId));
+  expect(sent()[2]).toContain(BLOCK);
+  expect(sent()[2]).toMatch(/- \d{4}-\d{2}-\d{2} The release is on Friday\./);
+
+  await client.call('turns.start', { threadId, prompt: 'Third question?' });
+  await waitFor(() => sent().length === 4 && settled(h, threadId));
+  expect(sent()[3]).not.toContain(BLOCK);
+
+  // A fresh native session (a compaction, an account switch) hears it again, with the journal's history.
+  const thread = h.core.threads.require(threadId);
+  h.core.journal.putThread({ ...thread, sessionId: null, sessionGeneration: (thread.sessionGeneration ?? 0) + 1 });
+  await client.call('turns.start', { threadId, prompt: 'Fourth question?' });
+  await waitFor(() => sent().length === 5 && settled(h, threadId));
+  expect(sent()[4]).toContain(BLOCK);
+  expect(sent()[4]).toContain('Third question?');
 });
 
-test('a decision continuation consumes the same group turn allowance', async () => {
-  const h = await startTestCore();
-  try {
-    const client = await h.connect();
-    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Worker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['decisions'] } });
-    const group = await client.call('agents.group.save', { value: { name: 'One turn', memberIds: [agent.id], mode: 'round', maxTurns: 1, maxTurnsPerAgent: 1, paused: false } });
-    await client.call('agents.message.send', { scope: { kind: 'group', id: group.id }, text: '[sleep:60000]', recipientIds: [], requestId: 'group_decision_001' });
-    await waitFor(() => h.core.workforce.records.list('run').some(r => r.status === 'running'));
-    const run = h.core.workforce.records.list('run')[0]!;
-    const worker = await connect(h.url, h.core.agents.tokenFor(run.threadId));
-    const decision = await worker.call('agents.decision.request', { threadId: run.threadId, prompt: 'Continue?', options: [], requestId: 'group_decision_002' });
-    await waitFor(() => h.core.scheduler.state().running.length === 0);
-    await client.call('agents.decision.answer', { decisionId: decision.id, expectedRevision: decision.revision, answer: 'Continue' });
-    await waitFor(() => h.core.workforce.records.list('work').some(w => w.status === 'paused'));
-    expect(h.core.workforce.records.list('run')).toHaveLength(1);
-    expect(h.core.workforce.records.list('work').at(-1)?.error).toContain('Group turn limit');
-    worker.close();
-  } finally { await h.stop(); }
+test('a due routine wakes the agent with a routine turn and records how it ended', async () => {
+  const { agent, threadId } = await makeAgent(h, client);
+  const saved = await routine(agent.id);
+  expect(saved.nextAt).toBeGreaterThan(Date.now());
+  due(saved.id);
+  await waitFor(() => read(saved.id).lastTurnId !== null);
+  const turnId = read(saved.id).lastTurnId!;
+  const turn = h.core.journal.getTurn(turnId)!;
+  expect(turn.execution?.operation).toBe('routine');
+  const line = h.core.journal.listMessages(threadId).find(m => m.turnId === turnId && m.role === 'system')!;
+  expect(line.parts[0]).toMatchObject({ text: 'Look at the open pull requests', displayText: 'Routine · Check the PRs' });
+  await waitFor(() => read(saved.id).lastOutcome === 'done');
+  expect(read(saved.id).nextAt).toBeGreaterThan(Date.now() + 50 * 60_000);
+  const status = (await client.call('agents.snapshot', {})).status[0]!;
+  expect(status.nextWake).toMatchObject({ routineId: saved.id, label: 'Check the PRs' });
+  expect(status.today.wakes).toBe(2);
 });
 
-test('autonomous groups take bounded turns and paused groups retain their deliveries', async () => {
-  const h = await startTestCore();
-  try {
-    const client = await h.connect();
-    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agents = [];
-    for (const name of ['Researcher', 'Reviewer']) agents.push(await client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } }));
-    // The subagent guide would fill the echo driver's 2,000-token window and add compactions to the count.
-    for (const agent of agents) await quiet(client, agent);
-    const group = await client.call('agents.group.save', { value: { name: 'Ideas', memberIds: agents.map(a => a.id), mode: 'autonomous', maxTurns: 3, maxTurnsPerAgent: 2, paused: true } });
-    await client.call('agents.message.send', { scope: { kind: 'group', id: group.id }, recipientIds: [agents[0]!.id], text: 'Discuss the design', requestId: 'bounded_001' });
-    expect(h.core.workforce.records.list('work')).toHaveLength(1);
-    await client.call('agents.group.save', { id: group.id, expectedRevision: group.revision, value: { ...group, paused: false } });
-    await waitFor(() => h.core.workforce.records.list('work').filter(w => w.status === 'done').length === 3, 10000);
-    const snapshot = await client.call('agents.snapshot', {});
-    expect(snapshot.work).toHaveLength(3);
-    expect(snapshot.messages.filter(m => m.senderId !== null).map(m => m.senderId)).toEqual([agents[0]!.id, agents[1]!.id, agents[0]!.id]);
-    expect(snapshot.deliveries.at(-1)?.status).toBe('limited');
-  } finally { await h.stop(); }
-}, 15000);
+test('a failed occurrence never blocks the next; a running one skips the next and still moves on', async () => {
+  let fail = true;
+  const driver = scripted(ctx => ctx.prompt.includes('Look at the open') ? { text: 'Checked.', status: fail ? 'error' : 'done', hold: ctx.prompt.includes('HOLD') } : { text: 'Hello.' });
+  restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const saved = await routine(agent.id);
+  due(saved.id);
+  await waitFor(() => read(saved.id).lastOutcome === 'error');
+  const failed = read(saved.id).lastTurnId;
+  fail = false;
+  due(saved.id);
+  await waitFor(() => read(saved.id).lastOutcome === 'done' && read(saved.id).lastTurnId !== failed);
 
-test('a persistent agent answers without a project and keeps group contexts separate', async () => {
-  const h = await startTestCore();
-  try {
-    const client = await h.connect();
-    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Researcher', domain: '', instructions: 'Be concise.', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages', 'memory'] } });
-    const group = await client.call('agents.group.save', { value: { name: 'Ideas', memberIds: [agent.id], mode: 'mentions', maxTurns: 6, maxTurnsPerAgent: 2, paused: false } });
-    await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [agent.id], text: 'private greeting', requestId: 'direct_001' });
-    await client.call('agents.message.send', { scope: { kind: 'group', id: group.id }, recipientIds: [agent.id], text: 'shared greeting', requestId: 'shared_001' });
-    await waitFor(() => h.core.workforce.records.list('work').filter(w => w.status === 'done').length === 2, 10000);
-    const snapshot = await client.call('agents.snapshot', {});
-    expect(snapshot.sessions).toHaveLength(2);
-    expect(new Set(snapshot.sessions.map(s => s.threadId)).size).toBe(2);
-    expect(snapshot.messages.filter(m => m.senderId === agent.id)).toHaveLength(2);
-    expect(snapshot.deliveries.every(d => d.status === 'processed')).toBe(true);
-    expect(h.core.journal.listProjects()).toEqual([]);
-    const groupRun = snapshot.runs.find(r => snapshot.sessions.find(s => s.threadId === r.threadId)?.scope.kind === 'group')!;
-    expect('instructions' in groupRun.context).toBe(false);
-    expect(h.core.workforce.records.get('run', groupRun.id).context.instructions).not.toContain('private greeting');
-    const thread = h.core.threads.require(groupRun.threadId);
-    expect(thread.projectId).toBeNull();
-    expect(await thrown(client.call('turns.start', { threadId: thread.id, prompt: 'bypass scheduling' }))).toThrow('persistent');
-    expect((await client.call('agent.where', { threadId: thread.id })).projectId).toBeNull();
-    expect(await thrown(client.call('todos.list', { threadId: thread.id }))).toThrow('no project');
-  } finally { await h.stop(); }
+  // An occurrence still running when the next comes due: that next one only moves the time on.
+  const long = await routine(agent.id, { name: 'Long', prompt: 'Look at the open HOLD' });
+  due(long.id);
+  await waitFor(() => read(long.id).lastTurnId !== null && h.core.threads.require(threadId).status === 'running');
+  const running = read(long.id).lastTurnId;
+  due(long.id);
+  await waitFor(() => read(long.id).nextAt! > Date.now());
+  expect(read(long.id).lastTurnId).toBe(running);
+  expect(turnsOf(h, threadId).filter(t => t.execution?.operation === 'routine')).toHaveLength(3);
+  driver.release();
+  await waitFor(() => read(long.id).lastOutcome === 'done');
 });
 
-test('an agent saved on the retired Antigravity CLI loads and waits for another model', async () => {
-  const h = await startTestCore();
-  let next: Core | null = null;
-  try {
-    const client = await h.connect();
-    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const saved = await client.call('agents.profile.save', { value: { name: 'Old', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
-    // As an older Boite left it: on the CLI's provider and its default account.
-    h.core.journal.putAccount({ id: 'acc_agy', providerId: 'antigravity-cli', label: 'Default', isolationDir: null, status: 'ok', identity: null, createdAt: 1 });
-    h.core.workforce.records.update('profile', saved.id, saved.revision, { ...saved, selection: { ...saved.selection, providerId: 'antigravity-cli', accountId: 'acc_agy', model: 'default' } });
-    client.close();
-    await h.server.stop();
-    await h.core.close();
+test('a quiet event leaves the thread read, notifies nobody and skips the memory pass; one with news does not', async () => {
+  const driver = scripted(ctx => ({ text: ctx.prompt.includes('nothing new') ? 'Checked the two PRs.\n[quiet] both green' : ctx.prompt.includes('You keep the long-term memory') ? 'SUMMARY: no change' : 'PR 12 failed its checks.' }));
+  restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client, {}, false);
+  // No memory pass of the introduction is left running.
+  await waitFor(() => h.core.workforce.memory.busy() === false, 10_000);
+  h.core.threads.markRead(threadId);
+  const passes = () => h.core.journal.listThreads().filter(t => t.parentThreadId === threadId).length;
+  const before = passes();
 
-    next = new Core({ dataDir: h.dataDir, token: h.token });
-    const agent = next.workforce.snapshot().profiles.find(profile => profile.id === saved.id)!;
-    expect(agent.selection.providerId).toBe('antigravity-cli');
-    next.workforce.send({ scope: { kind: 'agent', id: agent.id }, recipientIds: [agent.id], text: 'still there?', requestId: 'retired_provider_01' });
-    await waitFor(() => next!.workforce.records.list('work').some(work => work.agentId === agent.id && work.status === 'paused'), 10000);
-    const work = next.workforce.records.list('work').find(entry => entry.agentId === agent.id)!;
-    expect(work.error).toContain('choose another model for this agent');
-    expect(next.workforce.records.list('session').filter(session => session.agentId === agent.id)).toEqual([]);
-    // The owner picks another model: the save checks it as any choice.
-    const moved = next.workforce.saveProfile({ id: agent.id, expectedRevision: agent.revision, value: { ...agent, selection: { ...agent.selection, providerId: 'echo', accountId: account.id, model: null } } });
-    expect(moved.selection.providerId).toBe('echo');
-  } finally { await next?.close(); await h.stop(); }
+  const quiet = h.core.agentRuntime.wake(agent.id, { kind: 'event', label: '2 project events', prompt: 'nothing new on the desk' })!;
+  expect(quiet).not.toBeNull();
+  await waitFor(() => settled(h, threadId) && h.core.journal.getTurn(quiet.id)?.status === 'done');
+  const finished = h.core.journal.getTurn(quiet.id)!;
+  expect(finished.quiet).toBe(true);
+  expect(h.core.threads.require(threadId).unread).toBe(false);
+  expect(notifiesOnFinish(h.core.threads.require(threadId), finished, 0)).toBe(false);
+  await Bun.sleep(300);
+  expect(passes()).toBe(before);
+  const status = (await client.call('agents.snapshot', {})).status[0]!;
+  expect(status.unread).toBe(0);
+  expect(status.today.quiet).toBe(1);
+  expect(status.last?.text).not.toContain('[quiet]');
+
+  const news = h.core.agentRuntime.wake(agent.id, { kind: 'event', label: '1 project event', prompt: 'a PR failed' })!;
+  await waitFor(() => h.core.journal.getTurn(news.id)?.status === 'done');
+  const told = h.core.journal.getTurn(news.id)!;
+  expect(told.quiet).toBeUndefined();
+  expect(h.core.threads.require(threadId).unread).toBe(true);
+  expect(notifiesOnFinish(h.core.threads.require(threadId), told, 0)).toBe(true);
+  await waitFor(() => passes() === before + 1);
+  expect((await client.call('agents.snapshot', {})).status[0]).toMatchObject({ unread: 1, last: { text: 'PR 12 failed its checks.' } });
 });
 
-test('an idle agent runtime reads nothing until a record changes, then starts the new work', async () => {
-  const h = await startTestCore();
-  try {
-    const client = await h.connect();
-    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const r = h.core.workforce.records;
-    const statusReads = spyOn(r, 'withStatus');
-    const listReads = spyOn(r, 'list');
-    const settingReads = spyOn(h.core.journal, 'getSetting');
-    const limitReads = () => settingReads.mock.calls.filter(call => call[0] === 'agents:limits').length;
-    // A tick or two settle it, then three more at 500 ms find it quiet.
-    await new Promise(resolve => setTimeout(resolve, 1200));
-    const before = { status: statusReads.mock.calls.length, list: listReads.mock.calls.length, limits: limitReads() };
-    await new Promise(resolve => setTimeout(resolve, 1600));
-    expect(statusReads.mock.calls.length).toBe(before.status);
-    expect(listReads.mock.calls.length).toBe(before.list);
-    expect(limitReads()).toBe(before.limits);
-    const agent = await client.call('agents.profile.save', { value: { name: 'Quiet', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
-    await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [], text: 'Wake up', requestId: 'quiet_runtime_wake' });
-    await waitFor(() => r.list('run').some(run => run.status === 'done'));
-  } finally { await h.stop(); }
+test('past its daily budget a wake is skipped with one line, and the user\'s messages still run', async () => {
+  const driver = scripted(() => ({ text: 'Done.', usage: costing(0.5) })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const runtime = await client.call('agents.runtime.get', { agentId: agent.id });
+  await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...runtime, dailyBudgetUsd: 0.4 } });
+  expect(h.core.workforce.resident.config(agent.id).dailyBudgetUsd).toBe(0.4);
+  // The introduction spent $0.50 already.
+  const saved = await routine(agent.id);
+  due(saved.id);
+  await waitFor(() => read(saved.id).lastOutcome === 'skipped');
+  expect(read(saved.id).nextAt).toBeGreaterThan(Date.now());
+  expect(h.core.agentRuntime.wake(agent.id, { kind: 'event', label: '1 project event', prompt: 'a fact' })).toBeNull();
+  expect(lines(threadId).filter(text => text.includes('past the daily budget of $0.40'))).toHaveLength(1);
+  const before = turnsOf(h, threadId).length;
+  await client.call('turns.start', { threadId, prompt: 'Still there?' });
+  await waitFor(() => turnsOf(h, threadId).length === before + 1 && settled(h, threadId));
+  expect(turnsOf(h, threadId).at(-1)!.status).toBe('done');
+  expect((await client.call('agents.snapshot', {})).status[0]!.today.costUsd).toBe(1);
 });
 
-test('what the user attaches to an agent message reaches its turn and stays out of the snapshot', async () => {
-  const h = await startTestCore();
-  try {
-    const client = await h.connect();
-    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Looker', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
-    const scope = { kind: 'agent' as const, id: agent.id };
-    const sleeper = await client.call('agents.profile.save', { value: { name: 'Sleeper', domain: '', instructions: '', avatar: '', selection: agent.selection, status: 'active', tools: ['messages'] } });
-    const sleeping = { kind: 'agent' as const, id: sleeper.id };
-    const picture = { kind: 'image' as const, mimeType: 'image/png' as const, data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', name: 'pixel.png' };
-    const notes = { kind: 'file' as const, mimeType: 'text/plain', data: Buffer.from('two lines\nof notes').toString('base64'), name: 'notes.txt' };
-    // While a turn that took them runs, a later turn of the same work (a decision's continuation) gets none.
-    const slow = await client.call('agents.message.send', { scope: sleeping, recipientIds: [], text: '[sleep:60000]', attachments: [notes], requestId: 'attach_slow' });
-    await waitFor(() => h.core.workforce.records.list('work').some(w => w.messageId === slow.id && w.status === 'running'));
-    const running = h.core.workforce.records.list('work').find(w => w.messageId === slow.id)!;
-    expect(h.core.journal.getSetting(`agents:attachments:${slow.id}`)).toBeDefined();
-    expect(h.core.workforce.attachmentsFor({ ...running, prompt: 'Decision on: which one?' })).toEqual([]);
-    const thread = h.core.workforce.records.list('run').find(r => r.workId === running.id)!.threadId;
-    const worker = await connect(h.url, h.core.agents.tokenFor(thread));
-    // An agent speaks in words: its own messages carry no attachments.
-    expect(await thrown(worker.call('agents.message.send', { threadId: thread, scope: sleeping, recipientIds: [], text: 'mine', attachments: [notes], requestId: 'attach_002' }))).toThrow(/attachments/);
-    worker.close();
-    // Cancelled, the work frees them.
-    await client.call('agents.work.control', { workId: running.id, expectedRevision: h.core.workforce.records.get('work', running.id).revision, action: 'cancel' });
-    expect(h.core.journal.getSetting(`agents:attachments:${slow.id}`)).toBeUndefined();
-
-    // Pictures alone make a message, as they make a prompt.
-    const sent = await client.call('agents.message.send', { scope, recipientIds: [], text: '', attachments: [picture, notes], requestId: 'attach_001' });
-    expect(sent.attachments).toEqual([{ kind: 'image', mimeType: 'image/png', name: 'pixel.png', bytes: 70 }, { kind: 'file', mimeType: 'text/plain', name: 'notes.txt', bytes: 18 }]);
-    expect(JSON.stringify(await client.call('agents.snapshot', {}))).not.toContain(picture.data);
-    await waitFor(() => h.core.workforce.records.list('work').some(w => w.messageId === sent.id && w.status === 'done'));
-    const run = h.core.workforce.records.list('run').find(r => r.agentId === agent.id)!;
-    const prompt = [...h.core.journal.walkTurnMessages(run.threadId, run.turnId!)].find(m => m.role === 'user')!;
-    expect(prompt.parts.filter(p => p.type === 'image').length).toBe(1);
-    expect(prompt.parts.some(p => p.type === 'file' && p.name === 'notes.txt')).toBe(true);
-    // Once every recipient took them, the bytes leave the core's settings.
-    expect(h.core.journal.getSetting(`agents:attachments:${sent.id}`)).toBeUndefined();
-    // The conversation reads them where the turn keeps them, as a thread reads its own pictures.
-    const taken = h.core.workforce.records.get('message', sent.id).attachments!;
-    expect(taken.map(a => a.source)).toEqual([0, 1].map(at => ({ threadId: run.threadId, messageId: prompt.id, partIndex: at + 1 })));
-    expect((await client.call('messages.attachment', { threadId: run.threadId, messageId: prompt.id, partIndex: 1 })).data).toBe(picture.data);
-  } finally { await h.stop(); }
+test('a paused agent skips its routine and moves on, and still answers the user', async () => {
+  const { agent, threadId } = await makeAgent(h, client);
+  const paused = await client.call('agents.profile.save', { id: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, value: { ...agent, status: 'paused' } });
+  const saved = await routine(agent.id);
+  due(saved.id);
+  await waitFor(() => read(saved.id).lastOutcome === 'skipped');
+  expect(read(saved.id).lastTurnId).toBeNull();
+  const before = turnsOf(h, threadId).length;
+  await client.call('turns.start', { threadId, prompt: 'Are you there?' });
+  await waitFor(() => turnsOf(h, threadId).length === before + 1 && settled(h, threadId));
+  expect(turnsOf(h, threadId).at(-1)!.status).toBe('done');
+  expect(paused.status).toBe('paused');
 });
 
-test('attachments survive a resume before the turn, and leave once no delivery can run', async () => {
-  const h = await startTestCore();
-  try {
-    const client = await h.connect();
-    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const selection = { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const };
-    const agent = await client.call('agents.profile.save', { value: { name: 'Looker', domain: '', instructions: '', avatar: '', selection, status: 'active', tools: ['messages'] } });
-    const scope = { kind: 'agent' as const, id: agent.id };
-    const notes = (text: string) => ({ kind: 'file' as const, mimeType: 'text/plain', data: Buffer.from(text).toString('base64'), name: 'notes.txt' });
-    const held = (id: string) => h.core.journal.getSetting(`agents:attachments:${id}`);
-    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
+test('facts gather into one event turn once the thread is free and the first is old enough', async () => {
+  const driver = scripted(ctx => ({ text: 'Seen.', hold: ctx.prompt.includes('Hold on') })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  await client.call('turns.start', { threadId, prompt: 'Hold on' });
+  await waitFor(() => h.core.threads.require(threadId).status === 'running');
+  expect(h.core.agentRuntime.fact(agent.id, { key: 'turn:one', text: 'Thread one finished.', delay: 0 })).toBe(true);
+  expect(h.core.agentRuntime.fact(agent.id, { key: 'turn:two', text: 'Thread two finished.', delay: 0 })).toBe(true);
+  expect(h.core.agentRuntime.fact(agent.id, { key: 'turn:two', text: 'again' })).toBe(false);
+  await Bun.sleep(700);
+  expect(turnsOf(h, threadId).filter(t => t.execution?.operation === 'event')).toHaveLength(1);
+  driver.release();
+  await waitFor(() => turnsOf(h, threadId).filter(t => t.execution?.operation === 'event').length === 2 && settled(h, threadId));
+  const event = turnsOf(h, threadId).at(-1)!;
+  const line = h.core.journal.listMessages(threadId).find(m => m.turnId === event.id && m.role === 'system')!;
+  expect(line.parts[0]).toMatchObject({ displayText: '2 project events' });
+  expect(line.parts[0]!.type === 'text' && line.parts[0]!.text).toContain('- [turn:one] Thread one finished.\n- [turn:two] Thread two finished.');
+  expect(h.core.agentRuntime.facts(agent.id)).toEqual([]);
+});
 
-    // Paused and resumed before it ever ran: the resume rewrites the prompt, the file still goes.
-    const first = await client.call('agents.message.send', { scope, recipientIds: [], text: 'read this', attachments: [notes('first')], requestId: 'attach_resume' });
-    let work = h.core.workforce.records.list('work')[0]!;
-    work = await client.call('agents.work.control', { workId: work.id, expectedRevision: work.revision, action: 'pause' });
-    await client.call('agents.work.control', { workId: work.id, expectedRevision: work.revision, action: 'resume' });
-    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: false });
-    await waitFor(() => h.core.workforce.records.get('work', work.id).status === 'done').catch(e => { console.log('WORK', JSON.stringify(h.core.workforce.records.get('work', work.id))); throw e; });
-    const run = h.core.workforce.records.list('run')[0]!;
-    const prompt = [...h.core.journal.walkTurnMessages(run.threadId, run.turnId!)].find(m => m.role === 'user')!;
-    expect(prompt.parts.some(p => p.type === 'file' && p.name === 'notes.txt')).toBe(true);
-    expect(held(first.id)).toBeUndefined();
-
-    // The same request id with other bytes of the same size is another message, refused.
-    expect(await thrown(client.call('agents.message.send', { scope, recipientIds: [], text: 'read this', attachments: [notes('other')], requestId: 'attach_resume' }))).toThrow(/different input/);
-
-    // A group message nobody receives keeps no bytes.
-    const quiet = await client.call('agents.group.save', { value: { name: 'Quiet', memberIds: [agent.id], mode: 'mentions', maxTurns: 4, maxTurnsPerAgent: 2, paused: false } });
-    const unheard = await client.call('agents.message.send', { scope: { kind: 'group', id: quiet.id }, recipientIds: [], text: 'fyi', attachments: [notes('fyi')], requestId: 'attach_nobody' });
-    expect(unheard.recipientIds).toEqual([]);
-    expect(held(unheard.id)).toBeUndefined();
-
-    // A reply past the group's turn limit: every delivery is limited, so nothing will ever take them.
-    const tight = await client.call('agents.group.save', { value: { name: 'Tight', memberIds: [agent.id], mode: 'round', maxTurns: 1, maxTurnsPerAgent: 1, paused: true } });
-    const opener = await client.call('agents.message.send', { scope: { kind: 'group', id: tight.id }, recipientIds: [], text: 'one turn', requestId: 'attach_opener' });
-    const over = await client.call('agents.message.send', { scope: { kind: 'group', id: tight.id }, recipientIds: [], text: 'one more', replyTo: opener.id, attachments: [notes('over')], requestId: 'attach_limited' });
-    expect(h.core.workforce.records.find('delivery', 'messageId', [over.id]).map(d => d.status)).toEqual(['limited']);
-    expect(held(over.id)).toBeUndefined();
-
-    // An agent archived before its turn: the work is cancelled and the bytes go with it.
-    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
-    const late = await client.call('agents.message.send', { scope, recipientIds: [], text: 'later', attachments: [notes('later')], requestId: 'attach_archived' });
-    const profile = h.core.workforce.records.get('profile', agent.id);
-    await client.call('agents.profile.save', { id: profile.id, expectedRevision: profile.revision, value: { ...profile, status: 'archived' } });
-    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: false });
-    await waitFor(() => h.core.workforce.records.list('work').some(w => w.messageId === late.id && w.status === 'cancelled'));
-    expect(held(late.id)).toBeUndefined();
-  } finally { await h.stop(); }
+test('changed instructions wake the agent once to review its routines', async () => {
+  const { agent, threadId } = await makeAgent(h, client);
+  const current = h.core.workforce.records.get('profile', agent.id);
+  await client.call('agents.profile.save', { id: agent.id, expectedRevision: current.revision, value: { ...current, instructions: 'Check every day at 9.' } });
+  await waitFor(() => turnsOf(h, threadId).filter(t => t.execution?.operation === 'event').length === 2 && settled(h, threadId));
+  const turn = turnsOf(h, threadId).at(-1)!;
+  expect(h.core.journal.listMessages(threadId).find(m => m.turnId === turn.id && m.role === 'system')!.parts[0]).toMatchObject({ displayText: 'Instructions changed' });
+  // A save that leaves the instructions as they were wakes nothing.
+  const again = h.core.workforce.records.get('profile', agent.id);
+  await client.call('agents.profile.save', { id: agent.id, expectedRevision: again.revision, value: { ...again, domain: 'Releases' } });
+  await Bun.sleep(700);
+  expect(turnsOf(h, threadId).filter(t => t.execution?.operation === 'event')).toHaveLength(2);
 });

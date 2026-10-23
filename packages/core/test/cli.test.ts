@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_ENV, AGENT_HISTORY_PAGE } from '@boite/contracts';
+import { AGENT_ENV } from '@boite/contracts';
 import { runCli, splitLine } from '../src/cli.ts';
 import type { CliIo } from '../src/cli.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnResult } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
+import { makeAgent } from './agent-fixture.ts';
 import type { TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 
@@ -151,40 +152,40 @@ test('a send retried with the same --request-id is the same letter, and without 
   expect(received.n).toBe(2);
 });
 
-test('persistent agent CLI uses its own context, durable memory and idempotent decision requests', async () => {
+test('a persistent agent reads its memory, notes facts, keeps its routines and its desk from its own thread', async () => {
   const client = await harness.connect();
-  const account = harness.core.accounts.list().find(a => a.providerId === 'echo')!;
-  const agent = await client.call('agents.profile.save', { value: { name: 'CLI worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['memory', 'decisions', 'messages'], selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
-  await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, text: '[sleep:60000]', recipientIds: [], requestId: 'cli_agent_start_001' });
-  await waitFor(() => harness.core.workforce.records.list('run').some(r => r.status === 'running'));
-  threadId = harness.core.workforce.records.list('run')[0]!.threadId;
-  cwd = harness.core.threads.require(threadId).cwd;
-  const context = await boite(['agent', 'context', '--json']);
-  expect(context.code).toBe(0);
-  expect(JSON.parse(context.out).sessions[0].threadId).toBe(threadId);
-  const remembered = await boite(['agent', 'remember', JSON.stringify({ title: 'A finding', text: 'Keep prototypes small.' }), '--json']);
-  expect(remembered.code).toBe(0);
-  // Push the finding and the first message out of the snapshot's window: search and reply page back to them.
-  const scope = { kind: 'agent' as const, id: agent.id };
-  const opening = harness.core.workforce.records.list('message')[0]!;
-  for (let i = 0; i < AGENT_HISTORY_PAGE + 5; i++) {
-    harness.core.workforce.records.create('memory', { scope, title: `Filler ${i}`, text: 'unrelated', sourceScopes: [scope], sourceRunId: null, expiresAt: null });
-    harness.core.workforce.records.create('message', { scope, senderId: null, text: `filler ${i}`, recipientIds: [], replyTo: null, episodeId: 'filler', sourceRunId: null });
-  }
-  const bounded = JSON.parse((await boite(['agent', 'context', '--json'])).out);
-  expect(bounded.memories).toHaveLength(AGENT_HISTORY_PAGE);
-  expect(bounded.messages.some((m: { id: string }) => m.id === opening.id)).toBe(false);
-  const found = await boite(['agent', 'memory', 'prototypes', '--json']);
-  expect(JSON.parse(found.out)).toHaveLength(1);
-  const replied = await boite(['agent', 'reply', opening.id, 'Noted', '--json']);
-  expect(replied.code).toBe(0);
-  expect(JSON.parse(replied.out).replyTo).toBe(opening.id);
-  const args = ['agent', 'decide', JSON.stringify({ prompt: 'Which prototype?', options: ['Puzzle', 'Simulation'] }), '--request-id', 'cli_agent_decision_001', '--json'];
-  const first = await boite(args);
-  expect(first.code).toBe(0);
-  await waitFor(() => harness.core.scheduler.state().running.length === 0);
-  expect(await boite(args)).toEqual(first);
-  expect(harness.core.workforce.records.list('decision')).toHaveLength(1);
+  const worker = threadId;
+  const project = harness.core.threads.require(worker).projectId!;
+  const { agent, threadId: own } = await makeAgent(harness, client, { projectIds: [project] });
+  threadId = own;
+  cwd = harness.core.threads.require(own).cwd;
+  const noted = await boite(['agent', 'remember', 'Keep', 'prototypes', 'small.', '--json']);
+  expect(noted.code).toBe(0);
+  expect(JSON.parse(noted.out).noted).toBe('Keep prototypes small.');
+  expect(JSON.parse((await boite(['agent', 'memory', '--json'])).out).text).toContain('Keep prototypes small.');
+
+  const scheduled = await boite(['agent', 'schedule', JSON.stringify({ name: 'Morning', prompt: 'Read the news', schedule: { kind: 'interval', everyMinutes: 60 } }), '--json']);
+  expect(scheduled.code).toBe(0);
+  const routine = JSON.parse(scheduled.out) as { id: string; agentId: string };
+  expect(routine.agentId).toBe(agent.id);
+  const renamed = await boite(['agent', 'schedule', JSON.stringify({ id: routine.id, name: 'Early', prompt: 'Read the news', schedule: { kind: 'interval', everyMinutes: 30 } }), '--json']);
+  expect(JSON.parse(renamed.out)).toMatchObject({ id: routine.id, name: 'Early', schedule: { everyMinutes: 30 } });
+  expect((JSON.parse((await boite(['agent', 'routines', '--json'])).out) as { id: string }[]).map(r => r.id)).toEqual([routine.id]);
+  expect((await boite(['agent', 'unschedule', routine.id])).code).toBe(0);
+  expect(harness.core.workforce.records.list('routine')).toEqual([]);
+
+  expect((await boite(['agent', 'watch', worker])).code).toBe(0);
+  expect((await client.call('agents.snapshot', {})).watches.map(w => w.threadId)).toEqual([worker]);
+  expect((await boite(['agent', 'unwatch', worker])).code).toBe(0);
+  expect((await client.call('agents.snapshot', {})).watches).toEqual([]);
+  mkdirSync(join(harness.dataDir, 'elsewhere'), { recursive: true });
+  const elsewhere = await client.call('projects.add', { path: join(harness.dataDir, 'elsewhere'), name: 'Elsewhere' });
+  const outside = await client.call('threads.create', { projectId: elsewhere.id, providerId: 'echo', accountId: harness.core.threads.require(worker).accountId, title: 'Outside' });
+  expect((await boite(['agent', 'watch', outside.id])).err).toContain('is not in a project entrusted to Ada');
+  expect((await boite(['agent', 'inbox'])).err).toContain('agent expects memory, remember, routines, schedule, unschedule, watch or unwatch');
+  // An ordinary thread is no agent's.
+  threadId = worker;
+  expect((await boite(['agent', 'routines'])).err).toContain("no persistent agent's thread");
 });
 
 describe('usage', () => {

@@ -108,9 +108,9 @@ test('a phone hears of a team\'s final answer and a persistent agent\'s failures
   const agent = { ...root, id: 'push_agent', projectId: null, agentSessionId: 'push_session' };
   harness.core.journal.putThread(child);
   harness.core.journal.putThread(agent);
-  const finish = (threadId: string, status: Turn['status'], operation?: TurnExecution['operation']) => {
+  const finish = (threadId: string, status: Turn['status'], operation?: TurnExecution['operation'], quiet = false) => {
     const execution = { providerId: root.providerId, accountId: root.accountId, model: null, effort: null, permissionMode: root.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0, ...(operation ? { operation } : {}) };
-    harness.core.bus.emit('turn.finished', { id: `turn_${deliveries.length}_${Math.random()}`, threadId, status, queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null, execution });
+    harness.core.bus.emit('turn.finished', { id: `turn_${deliveries.length}_${Math.random()}`, threadId, status, queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null, execution, ...(quiet ? { quiet: true as const } : {}) });
   };
 
   finish(child.id, 'done');
@@ -118,7 +118,8 @@ test('a phone hears of a team\'s final answer and a persistent agent\'s failures
   // The parent handed the work out and yields while its agents still run.
   finish(rootId, 'done');
   finish(rootId, 'done', 'compact');
-  finish(agent.id, 'done');
+  // A persistent agent's wake that had nothing to say.
+  finish(agent.id, 'done', 'routine', true);
   // A child blocked on a question still reaches the phone.
   harness.core.bus.emit('question.asked', { id: 'push_question', threadId: child.id, text: 'Which `branch` should I use?' } as RpcEvents['question.asked']);
   await waitFor(() => deliveries.length === 1);
