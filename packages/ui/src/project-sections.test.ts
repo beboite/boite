@@ -141,19 +141,24 @@ test('a project whose only conversations were archived by hand shows them under 
   await waitFor(() => document.querySelector('[data-testid=later-projects]') === null && card('[data-testid=sidebar]', paused.id) !== null);
 });
 
-test('without idle grouping, set-aside and idle projects stay open cards while projects at work keep the top', () => {
-  const entry = (id: string, threads: Partial<ThreadSummary>[], counts: Partial<Project> = {}): ProjectEntry => ({
+test('an unsent new draft keeps its project among the open ones; without idle grouping, set-aside and idle projects stay open cards', () => {
+  const entry = (id: string, threads: Partial<ThreadSummary>[], counts: Partial<Project> = {}, drafts: { projectId: string; text: string }[] = []): ProjectEntry => ({
     machine: {
       id: 'local', label: 'local',
       store: {
         threadsOf: () => threads.map((t, i) => ({ id: `${id}-${i}`, status: 'idle', pinned: false, ...t })),
-        subagents: () => null, composerStates: {}, draft: null, draftEntries: []
+        subagents: () => null, composerStates: {}, draft: null, draftEntries: drafts
       }
     } as never,
     project: { id, name: id, path: `/${id}`, createdAt: 0, ...counts }
   });
-  const entries = [entry('busy', [{ status: 'running' }]), entry('open', [{}]), entry('paused', [], { archivedThreads: 2 }), entry('quiet', [], { archivedThreads: 1, doneThreads: 1 })];
+  const entries = [
+    entry('busy', [{ status: 'running' }]),
+    // A prompt typed for a new conversation waits on the user: a folded Working section must not hide it.
+    entry('drafting', [{ status: 'running' }], {}, [{ projectId: 'drafting', text: 'Unsent new conversation' }]),
+    entry('open', [{}]), entry('paused', [], { archivedThreads: 2 }), entry('quiet', [], { archivedThreads: 1, doneThreads: 1 })
+  ];
   const ids = (sections: Record<string, ProjectEntry[]>) => Object.fromEntries(Object.entries(sections).map(([key, list]) => [key, list.map((e) => e.project.id)]));
-  expect(ids(projectSections(entries, true))).toEqual({ working: ['busy'], open: ['open'], later: ['paused'], idle: ['quiet'] });
-  expect(ids(projectSections(entries, false))).toEqual({ working: ['busy'], open: ['open', 'paused', 'quiet'], later: [], idle: [] });
+  expect(ids(projectSections(entries, true))).toEqual({ working: ['busy'], open: ['drafting', 'open'], later: ['paused'], idle: ['quiet'] });
+  expect(ids(projectSections(entries, false))).toEqual({ working: ['busy'], open: ['drafting', 'open', 'paused', 'quiet'], later: [], idle: [] });
 });

@@ -322,8 +322,8 @@ opens its menu, and restoring sits in the time's place under the pointer.
 
 Projects lists projects in sections (`projectSections` in
 `lib/project-threads.svelte.ts`), on desktop and phone. Working, on top, holds
-the projects whose every conversation is at work with no pin or unsent text, so
-nothing there waits on the user; a project leaves it as soon as one conversation
+the projects whose every conversation is at work with no pin or unsent text, in
+a conversation or a new draft, so nothing there waits on the user; a project leaves it as soon as one conversation
 needs the user, and the section goes with its last project. The open projects
 follow: any other conversation or a draft. Each project header has separate
 Working, Done and Archived counters. When working grouping is enabled, its counter toggles

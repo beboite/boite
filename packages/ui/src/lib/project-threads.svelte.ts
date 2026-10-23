@@ -69,14 +69,16 @@ export function activeProject(entry: ProjectEntry): boolean {
 }
 
 /**
- * Working: every conversation it holds is at work and none carries a pin or unsent text, so nothing there waits on the user.
+ * Working: every conversation it holds is at work and nothing there holds the user's input (a pin, unsent text in a
+ * conversation or in a new draft), so a folded section never hides what waits on the user.
  * Open: any other conversation or draft. Later: nothing open, but conversations archived by hand to pick up again.
  * Idle: none of these, at most a done history.
  */
 export function projectSection(entry: ProjectEntry): ProjectSection {
   const store = entry.machine.store;
   const threads = store.threadsOf(entry.project.id);
-  if (threads.length > 0 && threads.every(thread => groupWorkingThread(store, thread))) return 'working';
+  if (threads.length > 0 && threads.every(thread => groupWorkingThread(store, thread))
+    && !store.draftEntries.some(draft => draft.projectId === entry.project.id)) return 'working';
   if (activeProject(entry)) return 'open';
   return archiveCount(entry.project, 'archived') > 0 ? 'later' : 'idle';
 }
