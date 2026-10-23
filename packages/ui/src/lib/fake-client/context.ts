@@ -470,7 +470,9 @@ export class FakeContext {
       const turn = payload as Turn;
       const agentThread = this.threads.get(turn.threadId);
       const answer = () => agentThread?.messages.filter(m => m.turnId === turn.id && m.role === 'assistant').flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n') ?? '';
-      if (agentThread?.agentSessionId) this.agents.finished(turn, answer());
+      // The final text block, as the core reads it for `[quiet]`.
+      const finalText = () => agentThread?.messages.filter(m => m.turnId === turn.id && m.role === 'assistant').flatMap(m => m.parts.flatMap(p => p.type === 'text' && p.text.trim() ? [p.text] : [])).at(-1) ?? '';
+      if (agentThread?.agentSessionId) this.agents.finished(turn, finalText());
       const goal = agentThread?.activity?.goal?.status;
       finishActivityTurn(this, turn);
       this.agents.goalEnded(turn, goal, answer);

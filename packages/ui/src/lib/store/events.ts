@@ -3,6 +3,7 @@ import type { Client, EventHandler } from '../client';
 import { noteThisComputer } from '../device';
 import { noteQuestionAsked } from '../question-reply.svelte';
 import { finishNotifies } from '../notify';
+import { upkeepOf } from '../agent-upkeep';
 import { resetPullRequestSupport } from '../pull-request';
 import { revealRequested } from '../reveal';
 import { appUpdateRequested } from '../desktop-update.svelte';
@@ -176,7 +177,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     threads.upsertTurn(turn.threadId, turn);
     // A stop is the user's own doing, and a delegated agent's result or a
     // persistent agent's routine work is not news of its own.
-    if (!finishNotifies(s.threads, turn)) return;
+    if (!finishNotifies(s.threads, turn, upkeepOf(s))) return;
     // The start of the reply, as the core's push says it. An error's own text
     // is often a stack or a provider's JSON: the thread shows it, not the toast.
     if (turn.status === 'done') layout.notify('finished', turn.threadId, () => lastReply(turn.threadId, turn.id));

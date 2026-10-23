@@ -41,7 +41,7 @@ the step it is on (`AgentStatus.activity`) while it works, what it waits on,
 else its next routine or Idle. A `problem` shows as a warning with its fix.
 The header menu holds Settings, Brain, Pause or Resume and Archive. A routine
 or event turn opens with a compact system line (its label and time); a quiet
-turn folds to one line, `Nothing to report · <reason> · N steps`, that expands
+turn, done (a failed or stopped wake keeps its error in view), folds to one line, `Nothing to report · <reason> · N steps`, that expands
 to the whole turn. A finished turn that made calls folds them, with the
 reasoning and the narration between them, behind one `Worked 3 min · 14 steps`
 row above its answer, so the answer reads as the agent's message; the summary
@@ -50,7 +50,7 @@ The folds are the client's (`lib/agent-turns.ts`); opening one lasts until the
 app reloads. The agent's last memory pass (`AgentStatus.memory`) is one line
 under the answer it followed, and its child conversation is left out of the
 subagent dock and of the gate that holds a finished turn's notification while
-its children work.
+its children work; the client keeps those ids per machine (`lib/agent-upkeep.ts`).
 
 The desk is a surface of the thread's right panel (`desk`), opened by the
 header's desk button and, the first time this device shows an agent on a wide

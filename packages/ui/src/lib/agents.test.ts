@@ -47,6 +47,26 @@ test('background updates preserve a mutation error and a changed client gets a n
   } finally { view.close(); }
 });
 
+test('the newest agent open wins over an older one answered last, and a navigation meanwhile drops it', async () => {
+  const answers = new Map<string, (value: { threadId: string }) => void>();
+  const call = vi.fn((_method: string, params: { agentId: string }) => new Promise(resolve => { answers.set(params.agentId, resolve); }));
+  const open = vi.fn(async (_threadId: string) => {});
+  const store = { client: { call, on: () => () => {} }, open, navigationGeneration: 0 } as unknown as Store & { navigationGeneration: number };
+  const a = openAgent(store, 'a');
+  const b = openAgent(store, 'b');
+  answers.get('b')!({ threadId: 'thread-b' });
+  await b;
+  answers.get('a')!({ threadId: 'thread-a' });
+  await a;
+  expect(open.mock.calls.map(([threadId]) => threadId)).toEqual(['thread-b']);
+  // Another thread or page opened while it waited: the agent's thread does not take the screen back.
+  const c = openAgent(store, 'c');
+  store.navigationGeneration++;
+  answers.get('c')!({ threadId: 'thread-c' });
+  await c;
+  expect(open.mock.calls.map(([threadId]) => threadId)).toEqual(['thread-b']);
+});
+
 test('two users of one view keep it listening until the last one leaves', async () => {
   const off = vi.fn();
   const client = { call: vi.fn().mockResolvedValue(new FakeAgents(() => {}).snapshot()), on: vi.fn(() => off) };

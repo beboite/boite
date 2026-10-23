@@ -75,6 +75,9 @@ describe('finishNotifies', () => {
     expect(finishNotifies(threads, turn('plain', 'stopped'))).toBe(false);
     expect(finishNotifies(threads, turn('plain', 'done'))).toBe(true);
     expect(finishNotifies(threads, turn('unknown', 'done'))).toBe(true);
+    // A thread this client does not hold yet keeps the turn's own exclusions: a quiet wake or a compaction is no news.
+    expect(finishNotifies([], turn('agent', 'done', 'routine', true))).toBe(false);
+    expect(finishNotifies([], turn('unknown', 'done', 'compact'))).toBe(false);
   });
 
   test('a persistent agent\'s memory pass never holds back the answer it follows, a subagent still does', () => {

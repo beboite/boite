@@ -18,6 +18,11 @@ test('a quiet wake reads its reason from a [quiet] line opening or closing its f
   expect(quietReason(routine('r', { quiet: true }), answer('Done.'))).toBe('');
   expect(quietReason(turn('u'), answer('[quiet] a user turn is never quiet'))).toBeNull();
   expect(quietReason(routine('r', { status: 'running', finishedAt: null }), answer('[quiet] not yet'))).toBeNull();
+  // A wake that failed or was stopped after writing its marker is not "Nothing to report": its error stays in view.
+  const failed = [message('a', 'r', 'assistant', [text('[quiet] checked'), { type: 'error', message: 'provider failed' }])];
+  expect(quietReason(routine('r', { status: 'error' }), failed)).toBeNull();
+  expect(quietReason(routine('r', { status: 'stopped' }), failed)).toBeNull();
+  expect(new TurnFolds().build(failed, [routine('r', { status: 'error' })], new Set())).toBe(failed);
 });
 
 test('a finished agent turn folds its calls and narration behind one row above its answer; a running turn and an opened one keep every step', () => {
@@ -57,6 +62,15 @@ test('a turn split over several answers folds the earlier ones whole and keeps w
   const folded = folds.build([message('u', 'w', 'user', [text('Check')]), first, second], [turn('w')], new Set());
   expect(folded.map(m => m.id)).toEqual(['u', `${FOLD_PREFIX}w`, 'a2']);
   expect(folded[2]!.parts).toEqual([text('All three pass.')]);
+});
+
+test('an answer stamped in the same millisecond as the last call still shows under the fold: the timeline order decides', () => {
+  const folds = new TurnFolds();
+  const work = message('a1', 'w', 'assistant', [call('c1')], 50);
+  const answer = message('a2', 'w', 'assistant', [text('The deployment failed. Please sign in.')], 50);
+  const folded = folds.build([work, answer], [turn('w')], new Set());
+  expect(folded.map(m => m.id)).toEqual([`${FOLD_PREFIX}w`, 'a2']);
+  expect(folded[1]!.parts).toEqual([text('The deployment failed. Please sign in.')]);
 });
 
 test('a quiet wake folds whole, its opening line included, to one "Nothing to report" row that opens the turn again', () => {
