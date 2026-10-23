@@ -320,29 +320,37 @@ and opens the pull request. A done or archived row reads like a thread row
 has no menu button: a right click, or a long press on a phone (`lib/long-press.ts`),
 opens its menu, and restoring sits in the time's place under the pointer.
 
-Projects shows projects with any active conversation or a draft, including
-projects whose conversations are all working. Each project header has separate
+Projects lists projects in sections (`projectSections` in
+`lib/project-threads.svelte.ts`), on desktop and phone. Working, on top, exists
+only while working grouping is enabled (off by default) and holds the projects whose every conversation is at work with no pin or unsent text, in
+a conversation or a new draft, so nothing there waits on the user; a project leaves it as soon as one conversation
+needs the user, and the section goes with its last project. The open projects
+follow: any other conversation or a draft. Each project header has separate
 Working, Done and Archived counters. When working grouping is enabled, its counter toggles
 that list; Done toggles completed history and Archived the manual archives. All lists start closed. Working
 includes running, queued and background work. Pins and unsent
 drafts stay visible while Working is folded and appear once when expanded;
 questions and failures stay in the main list. Done and Archived read only that project's
 archived summaries when expanded, with the same reading and restore actions as
-Recent. One closed fold below the main list, on desktop and phone, holds every
-project the list leaves out (`ProjectShelf.svelte`, its rows in `ProjectShelfRows.svelte`,
-loaded at the first opening or once the list has drawn): idle ones, empty or with
-every conversation archived, then archived projects, a step quieter and marked
-with the archive glyph. It reads Idle projects or Archived projects while it holds
-one kind, Other projects once it holds both. Choosing an idle row starts a draft
+Recent. Set aside, below the open projects, holds the projects with nothing open
+but conversations archived by hand: archiving is how work is put away to pick up
+later, so those projects keep a card whose body is that list, drawn at once and
+read like open rows, with no Archived pill while the card is unfolded. Working
+and Set aside start open; their headers fold them for the session.
+Two closed folds below, on desktop and phone, hold the projects with no card
+(`ProjectShelf.svelte`, its rows in `ProjectShelfRows.svelte`, loaded at the
+first opening or once the list has drawn): Idle projects, with nothing to do,
+at most a done history, then Archived projects, a step quieter. Choosing an idle row starts a draft
 there; choosing an archived row restores the project, then starts a draft. Under
 the pointer a row archives (idle) or restores and removes (archived) without
 opening anything; its full menu opens with a right click or a long press, and an
 idle row takes a dragged thread. An idle project
-with done or archived conversations shows those counts on its row; each unfolds
+with done conversations shows that count on its row, which unfolds
 that history under it. Creating or restoring a conversation or starting a draft
-returns its project to the main list.
+returns its project to the open cards. In the custom order a project moves among
+the cards of its own section.
 Group idle projects, in settings and the Display options panel, can be disabled
-to keep every project in its normal order. Both grouping preferences persist on
+to keep every project but the Working ones as open cards, in their normal order. Both grouping preferences persist on
 the device. Expansion follows the owning project between desktop and phone for
 the current session. Phone search exposes matching
 working conversations even when their counter is closed.

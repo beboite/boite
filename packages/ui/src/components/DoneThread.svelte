@@ -11,6 +11,7 @@
   import { fill, strings } from '../lib/strings';
   import { workspace } from '../lib/workspace.svelte';
   import { longPress } from '../lib/long-press';
+  import { archiveKindOf } from '../lib/project-threads.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
 
@@ -40,6 +41,8 @@
     : thread.pullRequest ?? null);
   const prLabel = $derived(pr ? fill(pr.state === 'MERGED' ? strings.sidebar.prMerged : pr.state === 'CLOSED' ? strings.sidebar.prClosed : strings.sidebar.prOpen, { number: String(pr.number) }) : '');
   const meta = $derived(showProject || pr !== null);
+  /** Archived by hand, not finished: work left to pick up reads as plainly as an open row. */
+  const pending = $derived(archiveKindOf(thread) === 'archived');
 
   function restore(): void {
     void lock.restore(owner, thread.id);
@@ -79,7 +82,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="done-thread" class:open class:meta data-testid="done-thread" data-thread-id={thread.id} data-machine-id={entry.machine.id} oncontextmenu={menu} use:longPress>
+<div class="done-thread" class:open class:meta class:pending data-testid="done-thread" data-thread-id={thread.id} data-machine-id={entry.machine.id} oncontextmenu={menu} use:longPress>
   <button type="button" class="ghost row" data-testid="done-thread-open" title={thread.title} disabled={deleting} onclick={select}>
     <span class="headline">
       {#if showMachine}
@@ -147,7 +150,8 @@
     transition: color var(--dur-2) var(--ease-out-quint);
   }
   .done-thread:hover .title, .done-thread:focus-within .title, .done-thread.open .title { color: var(--color-foreground); }
-  .done-thread:hover .provider, .done-thread:focus-within .provider { opacity: 1; }
+  .done-thread:hover .provider, .done-thread:focus-within .provider, .pending .provider { opacity: 1; }
+  .pending .title { color: var(--color-foreground); }
   time { flex: none; color: var(--color-subtle); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
   .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .metadata {

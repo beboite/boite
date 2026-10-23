@@ -6,6 +6,8 @@ import { compareThreads } from './thread-order';
 export type ProjectThreadKind = 'working' | 'done' | 'archived';
 /** The two kinds of row in the fold under the project list: projects with no open conversation, and projects put out of the list. */
 export type ProjectShelfKind = 'idle' | 'archived';
+/** Where the Projects view lists a project: at work at the top, open, set aside, or in the idle fold. */
+export type ProjectSection = 'working' | 'open' | 'later' | 'idle';
 /** Archived conversations split in two: done ones (marked done, PR merged) leave after a delay, the others wait to be picked up again. */
 export type ArchiveKind = 'done' | 'archived';
 
@@ -25,8 +27,12 @@ export class ProjectThreadView {
   working = $state<string[]>([]);
   done = $state<string[]>([]);
   archived = $state<string[]>([]);
-  /** The fold of idle and archived projects starts closed and stays as left, across desktop and phone, for this session. */
+  /** The folds of idle and of archived projects start closed and stay as left, across desktop and phone, for this session. */
   shelfOpen = $state(false);
+  archivedShelfOpen = $state(false);
+  /** The sections of projects at work and set aside start open, as they hold work. */
+  workingOpen = $state(true);
+  laterOpen = $state(true);
 
   isOpen(entry: ProjectEntry, kind: ProjectThreadKind): boolean {
     if (kind === 'working' && !recentPreferences.groupWorking) return false;
@@ -60,6 +66,35 @@ export function activeProject(entry: ProjectEntry): boolean {
   return store.threadsOf(entry.project.id).length > 0
     || store.draft?.projectId === entry.project.id
     || store.draftEntries.some(draft => draft.projectId === entry.project.id);
+}
+
+/**
+ * Working: every conversation it holds is at work and nothing there holds the user's input (a pin, unsent text in a
+ * conversation or in a new draft), so a folded section never hides what waits on the user.
+ * Open: any other conversation or draft. Later: nothing open, but conversations archived by hand to pick up again.
+ * Idle: none of these, at most a done history.
+ */
+export function projectSection(entry: ProjectEntry): ProjectSection {
+  const store = entry.machine.store;
+  const threads = store.threadsOf(entry.project.id);
+  if (threads.length > 0 && threads.every(thread => groupWorkingThread(store, thread))
+    && !store.draftEntries.some(draft => draft.projectId === entry.project.id)) return 'working';
+  if (activeProject(entry)) return 'open';
+  return archiveCount(entry.project, 'archived') > 0 ? 'later' : 'idle';
+}
+
+/**
+ * The listed projects split by section, each in the order it came in. Without working grouping, projects at work stay
+ * open cards; without idle grouping, set-aside and idle projects do too.
+ */
+export function projectSections(entries: readonly ProjectEntry[], groupIdle: boolean, groupWorking: boolean): Record<ProjectSection, ProjectEntry[]> {
+  const sections: Record<ProjectSection, ProjectEntry[]> = { working: [], open: [], later: [], idle: [] };
+  for (const entry of entries) {
+    const section = projectSection(entry);
+    const grouped = section === 'working' ? groupWorking : groupIdle;
+    sections[grouped ? section : 'open'].push(entry);
+  }
+  return sections;
 }
 
 /** Protected working rows stay visible while folded and appear only once when unfolded. */
