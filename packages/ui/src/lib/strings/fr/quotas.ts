@@ -8,6 +8,7 @@ export const fr: Translation = {
     pinnedTitle: 'Quotas du modèle',
     pinnedEmpty: 'Aucun quota disponible pour le fournisseur de ce modèle.',
     position: 'Déplacer la carte de quotas',
+    dragHint: 'Glissez vers un coin ou la barre latérale. Utilisez les flèches pour déplacer, Début pour ancrer.',
     positions: { 'top-left': 'En haut à gauche', 'top-right': 'En haut à droite', 'bottom-left': 'En bas à gauche', 'bottom-right': 'En bas à droite', dock: 'Ancrer sous les conversations' },
     alerts: 'Alertes',
     alertsOf: 'Alertes de {account}',

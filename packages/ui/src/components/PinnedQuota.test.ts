@@ -93,3 +93,21 @@ test('a wallet quota is displayed without claiming the reading is unavailable', 
   expect(document.querySelector('[data-testid=quota-credits]')).not.toBeNull();
   expect(document.body.textContent).not.toContain(strings.quotas.noReading);
 });
+
+test('the focused card keeps keyboard placement without a move button', async () => {
+  const f = fixture();
+  mounted = mount(PinnedQuota, { target: document.body, props: { store: f.store } });
+  await settle();
+  const card = document.querySelector<HTMLElement>('[data-testid=pinned-quota]')!;
+  expect(document.querySelector('[data-testid=pinned-quota-position]')).toBeNull();
+  expect(card.tabIndex).toBe(0);
+  card.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  await settle();
+  expect(pinnedQuotas.current.position).toBe('bottom-right');
+  card.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+  await settle();
+  expect(pinnedQuotas.current.position).toBe('top-right');
+  card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+  await settle();
+  expect(pinnedQuotas.current.position).toBe('dock');
+});

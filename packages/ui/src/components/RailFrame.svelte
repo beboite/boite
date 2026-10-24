@@ -58,7 +58,7 @@
 
   let rail = $state<HTMLElement | undefined>(undefined);
   const phone = new MediaQuery('(max-width: 720px)');
-  let dockVisible = $derived(phone.current ? store.sidebarOpen : !store.sidebarCollapsed);
+  let dockVisible = $derived(phone.current ? kind === 'sidebar' && store.sidebarOpen : !store.sidebarCollapsed);
   let folded: boolean | undefined;
   /**
    * Whether this list was folded since it was drawn. Only then does its
@@ -112,13 +112,14 @@
   style:--sidebar-width={`${store.sidebarWidth}px`}
   aria-label={label}
   data-testid={testid}
+  data-quota-dock-target=""
 >
   <div class="views">{@render head()}</div>
   {@render subhead?.()}
   <div class="scroll" data-project-list={kind === 'sidebar' ? '' : undefined} bind:this={scroller} {onscroll}>
     {@render children()}
   </div>
-  {#if kind === 'sidebar' && store.page === 'chat' && dockVisible && experimentOn('pinned-quotas') && pinnedQuotas.current.pinned && pinnedQuotas.current.position === 'dock'}
+  {#if (store.page === 'chat' || store.page === 'agents') && dockVisible && experimentOn('pinned-quotas') && pinnedQuotas.current.pinned && pinnedQuotas.wantsDock(store)}
     <Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} dock />{/snippet}</Deferred>
   {/if}
   <div class="foot">

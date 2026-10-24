@@ -886,10 +886,13 @@ ownership and duplication, not an automatic split.
 Settings, Experiments, Pinned model quotas adds a pin to Account limits and
 the Limits page. The card follows the open conversation's model provider,
 including every matching Douane account, and offers four conversation corners
-or a dock below the thread list. The dock reserves space above the sidebar
-controls; the list keeps its own scroll. Where the dock is unavailable (folded
-sidebar, phone chat or bot conversation), the card falls back to the
-conversation. Pin and placement are device preferences under
+or a dock below the thread or bot list. Drag the card from outside its buttons
+to a corner or the sidebar; arrow keys move a focused card and Home docks it.
+When the reading column leaves too little margin for the card, it docks
+automatically without changing the saved corner. The dock reserves space above
+the sidebar controls; the list keeps its own scroll. Where the sidebar is
+unavailable, a narrow conversation reserves space below the messages instead
+of covering them. Pin and placement are device preferences under
 `boite.pinned-quotas.v1`. Reads share the other quota views'
 cache and events; only an owner refresh forces the providers to read again.
 

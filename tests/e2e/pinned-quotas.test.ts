@@ -22,7 +22,7 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 60_000);
 
-async function boot(width = 1440, machines = false, agents = false) {
+async function boot(width = 2000, machines = false, agents = false) {
   await page.send('Emulation.setDeviceMetricsOverride', { width, height: width === 390 ? 844 : 1000, deviceScaleFactor: 1, mobile: width === 390 });
   await page.send('Emulation.setTouchEmulationEnabled', { enabled: width === 390, maxTouchPoints: 1 });
   await page.evaluate(`localStorage.removeItem('boite.experiments'); localStorage.removeItem('boite.pinned-quotas.v1'); localStorage.removeItem('boite.quotas')`);
@@ -75,9 +75,19 @@ async function enableAndPin() {
 }
 
 async function move(value: string) {
-  await page.click(position);
-  await page.click(`[data-testid="pinned-quota-position-menu"] [data-value="${value}"]`);
-  await page.waitFor(`document.querySelector('${card}')?.dataset.position === '${value}' && !document.querySelector('[data-testid="pinned-quota-position-menu"]')`);
+  const points = await page.evaluate<{ x: number; y: number; endX: number; endY: number }>(`(() => {
+    const q = document.querySelector('${card} header strong').getBoundingClientRect();
+    const b = document.querySelector('${value === 'dock' ? '[data-quota-dock-target]' : '[data-testid="chat"] .discussion'}').getBoundingClientRect();
+    return { x: q.x + 20, y: q.y + q.height / 2,
+      endX: ${value === 'dock' || value.endsWith('left') ? 'b.left + 50' : 'b.right - 50'},
+      endY: ${value === 'dock' || value.startsWith('top') ? 'b.top + 80' : 'b.bottom - 50'} };
+  })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: points.x, y: points.y });
+  await page.waitFor('document.hasFocus()');
+  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: points.x, y: points.y, button: 'left', buttons: 1, clickCount: 1 });
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: points.endX, y: points.endY, buttons: 1 });
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: points.endX, y: points.endY, button: 'left', clickCount: 1 });
+  await page.waitFor(`document.querySelector('${card}')?.dataset.position === '${value}' && JSON.parse(localStorage.getItem('boite.pinned-quotas.v1')).position === '${value}'`);
   await page.settleAnimations();
 }
 
@@ -136,8 +146,51 @@ test('Settings enables pinning, and all Claude gateway accounts share a transluc
   expect(page.errors()).toEqual([]);
 }, 60_000);
 
+test('a narrow reading margin docks automatically and a wider chat restores the chosen corner', async () => {
+  await boot(1440);
+  await enableAndPin();
+  await page.settleAnimations();
+  expect(await page.evaluate(`document.querySelector('${card}').classList.contains('docked')`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${card}').getBoundingClientRect().height`)).toBeLessThan(165);
+  expect(await page.evaluate(`document.querySelector('${card}').getBoundingClientRect().right <= document.querySelector('[data-testid=chat]').getBoundingClientRect().left`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${position}')`)).toBeNull();
+  await capture('auto-dock');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 2000, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`document.querySelector('${card}')?.dataset.position === 'bottom-left'`);
+  expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.pinned-quotas.v1')).position`)).toBe('bottom-left');
+  await page.evaluate(`document.documentElement.dataset.chatWidth = 'full'`);
+  await page.waitFor(`document.querySelector('${card}')?.classList.contains('docked')`);
+  await page.evaluate(`delete document.documentElement.dataset.chatWidth`);
+  await page.waitFor(`document.querySelector('${card}')?.dataset.position === 'bottom-left'`);
+  expect(page.errors()).toEqual([]);
+}, 60_000);
+
+test('dragging account content moves the card while a drag starting on refresh does not', async () => {
+  await boot(2000);
+  await enableAndPin();
+  const points = await page.evaluate<{ x: number; y: number; endX: number; endY: number }>(`(() => {
+    const q = document.querySelector('${account} .account').getBoundingClientRect();
+    const b = document.querySelector('[data-testid="chat"] .discussion').getBoundingClientRect();
+    return { x: q.x + 45, y: q.y + q.height / 2, endX: b.right - 50, endY: b.top + 50 };
+  })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: points.x, y: points.y });
+  await page.waitFor('document.hasFocus()');
+  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: points.x, y: points.y, button: 'left', buttons: 1, clickCount: 1 });
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: points.endX, y: points.endY, buttons: 1 });
+  expect(await page.evaluate(`document.querySelector('${card}').matches(':popover-open')`)).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'pinned-quotas-dragging.png'));
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: points.endX, y: points.endY, button: 'left', clickCount: 1 });
+  expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.pinned-quotas.v1')).position`)).toBe('top-right');
+  const refresh = await page.evaluate<{ x: number; y: number }>(`(() => { const b = document.querySelector('[data-testid="pinned-quota-refresh"]').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...refresh, button: 'left', buttons: 1, clickCount: 1 });
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: points.x, y: points.y, buttons: 1 });
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: points.x, y: points.y, button: 'left', clickCount: 1 });
+  expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.pinned-quotas.v1')).position`)).toBe('top-right');
+  expect(page.errors()).toEqual([]);
+}, 60_000);
+
 test('dock reserves rail space above the foot and leaves the final thread reachable by scrolling', async () => {
-  await boot();
+  await boot(1440);
   await enableAndPin();
   await page.evaluate(`(() => {
     const store = globalThis.__boiteTest.workspace.active;
@@ -171,7 +224,7 @@ test('dock reserves rail space above the foot and leaves the final thread reacha
   expect(page.errors()).toEqual([]);
 }, 60_000);
 
-test('a saved dock preference falls back to the chat in bot conversations and returns to the sidebar', async () => {
+test('a saved dock preference uses the bot sidebar and reserves space in a phone conversation', async () => {
   await boot(1440, false, true);
   await enableAndPin();
   await move('dock');
@@ -190,11 +243,11 @@ test('a saved dock preference falls back to the chat in bot conversations and re
     await page.send('Emulation.setDeviceMetricsOverride', { width, height: width === 390 ? 844 : 1000, deviceScaleFactor: 1, mobile: width === 390 });
     await page.send('Emulation.setTouchEmulationEnabled', { enabled: width === 390, maxTouchPoints: 1 });
     await page.settleAnimations();
-    expect(await page.evaluate(`document.querySelector('.agents-main ${card}')?.checkVisibility() === true`)).toBe(true);
+    expect(await page.evaluate(`document.querySelector('${width === 390 ? '.agents-main' : '.agents-rail'} ${card}')?.checkVisibility() === true`)).toBe(true);
     expect(await page.evaluate(`document.querySelectorAll('${card}').length`)).toBe(1);
-    expect(await page.evaluate(`document.querySelector('${card}')?.dataset.position`)).toBe('bottom-left');
+    expect(await page.evaluate(`document.querySelector('${card}')?.dataset.position`)).toBe(width === 390 ? 'bottom-left' : 'dock');
     expect(await page.evaluate(`document.querySelectorAll('${account}').length`)).toBe(2);
-    expect(await fitsConversation()).toBe(true);
+    if (width === 390) expect(await fitsConversation()).toBe(true);
     expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.pinned-quotas.v1')).position`)).toBe('dock');
     await page.evaluate(`globalThis.__boiteTest.setTheme('dark')`);
     await page.settleAnimations();
@@ -268,6 +321,7 @@ test('the phone keeps the pinned card above the composer without overflow, inclu
   await page.settleAnimations();
   expect(await fitsConversation()).toBe(true);
   expect(await page.evaluate(`Number(getComputedStyle(document.querySelector('${phoneCard}')).opacity)`)).toBe(1);
+  expect(await page.evaluate(`document.querySelector('[data-testid=chat] .timeline').getBoundingClientRect().bottom <= document.querySelector('${phoneCard}').getBoundingClientRect().top`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${phoneCard} .body').scrollWidth <= document.querySelector('${phoneCard} .body').clientWidth`)).toBe(true);
   await page.evaluate('globalThis.__boiteTest.workspace.active.sidebarOpen = true');
   await page.waitFor(`document.querySelectorAll('${card}').length === 1 && document.querySelector('${card}')?.dataset.position === 'dock'`);
