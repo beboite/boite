@@ -8,6 +8,7 @@
   import { agentSettingLabel, agentSettingValueText, editedProjects, projectName, projectsDelta } from '../lib/agent-setting-requests';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import AgentAvatar from './agents/AgentAvatar.svelte';
 
   /**
    * A card asking the user to change one setting of a persistent agent
@@ -97,13 +98,15 @@
   function subject(given: QuestionAnswer | null): string {
     const outcome = given?.optionIds[0];
     const shown = outcome === 'applied' || outcome === 'changed' ? given?.value ?? setting.value : setting.previous;
+    // A picture is a code no one reads: the row names the setting alone.
+    if (setting.key === 'avatar') return `${setting.agentName} · ${agentSettingLabel(setting.key)}`;
     return `${setting.agentName} · ${agentSettingLabel(setting.key)}: ${value(shown)}`;
   }
 </script>
 
 <!-- An answer this client just sent clears the pending list before the card's answer arrives: it stays busy until then. -->
 {#if answer !== null || (!pending && !busy)}
-  <div class="agent-setting-card resolved" data-testid="agent-setting-card" data-state={answer === null ? 'closed' : 'answered'} data-outcome={answer?.optionIds[0]} title={text}>
+  <div class="agent-setting-card resolved" data-testid="agent-setting-card" data-state={answer === null ? 'closed' : 'answered'} data-outcome={answer?.optionIds[0]} data-key={setting.key} title={text}>
     <span class="glyph"><Bot size={15} strokeWidth={1.75} /></span>
     <span class="verdict ui-label" data-testid="agent-setting-verdict">{answer === null ? words.closed : verdict(answer)}</span>
     <span class="given ui-label" data-testid="agent-setting-subject">{subject(answer)}</span>
@@ -135,12 +138,26 @@
     {:else}
       <div class="delta" data-testid="agent-setting-delta">
         <span class="name">{agentSettingLabel(setting.key)}</span>
-        <span class="values">
-          <span class="old" data-testid="agent-setting-previous">{value(setting.previous)}</span>
-          <ArrowRight size={14} strokeWidth={1.75} aria-label={words.to} />
-          <span class="new" data-testid="agent-setting-proposed">{value(setting.value)}</span>
-        </span>
+        {#if setting.key === 'avatar'}
+          <span class="values">
+            <span class="picture old" data-testid="agent-setting-previous"><AgentAvatar kind="profile" id={setting.agentId} name={setting.agentName} avatar={String(setting.previous ?? '')} size={28} /></span>
+            <ArrowRight size={14} strokeWidth={1.75} aria-label={words.to} />
+            <span class="picture" data-testid="agent-setting-proposed"><AgentAvatar kind="profile" id={setting.agentId} name={setting.agentName} avatar={String(setting.value ?? '')} size={28} /></span>
+          </span>
+        {:else}
+          <span class="values">
+            <span class="old" data-testid="agent-setting-previous">{value(setting.previous)}</span>
+            <ArrowRight size={14} strokeWidth={1.75} aria-label={words.to} />
+            <span class="new" data-testid="agent-setting-proposed">{value(setting.value)}</span>
+          </span>
+        {/if}
       </div>
+      {#if setting.key === 'instructions' && typeof setting.value === 'string' && setting.value !== ''}
+        <div class="proposed-text">
+          <span class="place ui-label">{words.proposedText}</span>
+          <p class="text" data-testid="agent-setting-text">{setting.value}</p>
+        </div>
+      {/if}
     {/if}
     {#if !store.owner}
       <p class="hint" data-testid="agent-setting-guest-hint">{words.guestHint}</p>
@@ -201,6 +218,21 @@
   .values { display: inline-flex; align-items: center; gap: 8px; color: var(--color-subtle); min-width: 0; }
   .old { color: var(--color-muted-foreground); text-decoration: line-through; overflow-wrap: anywhere; }
   .new { color: var(--color-accent); font-weight: 600; overflow-wrap: anywhere; }
+
+  .picture { display: inline-flex; }
+  .picture.old { opacity: 0.55; }
+  .proposed-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .proposed-text .text {
+    margin: 0;
+    max-height: 12lh;
+    overflow: auto;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-2);
+    font-size: var(--text-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
 
   .rows { display: flex; flex-direction: column; gap: 2px; }
   .row {

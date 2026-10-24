@@ -105,11 +105,14 @@ ${CONTROL_HELP}
                                  for what is not one value: a provider login,
                                  a pairing (pages: ${SETTINGS_PAGES.join(', ')})
   settings bot [key]             a bot's settings a card may change:
-                                 ${AGENT_SETTING_KEYS.join(', ')}
+                                 ${AGENT_SETTING_KEYS.slice(0, 5).join(', ')},
+                                 ${AGENT_SETTING_KEYS.slice(5).join(', ')}
                                  (--bot <name>; yours in your own conversation)
   settings bot request <key> <value> --why <text>
-                                 a card asking the user to change one, such as
-                                 projects +boite -old or a list; the outcome
+                                 a card asking the user to change one, for you
+                                 or --bot <name>: name Ada, status paused,
+                                 projects +boite -old, instructions with
+                                 --instructions-file <path>; the outcome
                                  arrives as a message (applied, changed, refused)
   settings bot create <name>     create the bot the user asked for, at once,
                                  on your own route or --model <provider/model>
@@ -291,11 +294,13 @@ export function settingValue(raw: string): unknown {
 }
 
 /**
- * A bot setting as typed: `projects` takes `+name -name` edits or a list
- * (`a,b`, `a b` or JSON), the other keys a value as `settingValue` reads it.
+ * A bot setting as typed: the text keys take the words as they are, so a
+ * name such as `007` stays text; `projects` takes `+name -name` edits or a
+ * list (`a,b`, `a b` or JSON), the other keys a value as `settingValue` reads it.
  */
 export function agentSettingArg(key: string, tokens: string[]): unknown {
   const raw = tokens.join(' ').trim();
+  if (['name', 'domain', 'instructions', 'avatar', 'status'].includes(key)) return raw;
   if (key !== 'projects') return settingValue(raw);
   if (raw.startsWith('[') || raw.startsWith('{')) return settingValue(raw);
   const items = raw.split(/[\s,]+/).filter(item => item.length > 0);
@@ -303,6 +308,11 @@ export function agentSettingArg(key: string, tokens: string[]): unknown {
   if (edits.length === 0) return items;
   if (edits.length !== items.length) throw new Usage('settings bot request projects takes +name -name edits or a list, not both');
   return { add: edits.filter(item => item.startsWith('+')).map(item => item.slice(1)), remove: edits.filter(item => item.startsWith('-')).map(item => item.slice(1)) };
+}
+
+/** A bot's instructions run to thousands of characters: a listing shows their start; one key or --json gives them whole. */
+function clipped(text: string, max = 160): string {
+  return text.length > max ? `${text.slice(0, max - 1)}… (${text.length} characters)` : text;
 }
 
 /** `resources#limits` into a page and a card. */
@@ -622,12 +632,14 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         if (rest[1] === 'request') {
           if (parsed.why === undefined || parsed.why.trim().length === 0) throw new Usage('settings bot request needs --why <text>, the reason the user reads on the card');
           const key = want(2, `a key: ${AGENT_SETTING_KEYS.join(', ')}`);
-          if (rest.length < 4) throw new Usage('settings bot request needs a value after the key');
-          const asked = await client.call('agents.settings.request', { threadId, reason: parsed.why, key, value: agentSettingArg(key, rest.slice(3)), ...agent });
+          const fromFile = key === 'instructions' && parsed.instructionsFile !== undefined;
+          if (fromFile ? rest.length > 3 : rest.length < 4) throw new Usage(fromFile ? 'settings bot request instructions takes the text or --instructions-file <path>, not both' : 'settings bot request needs a value after the key');
+          const value = fromFile ? readRules(parsed.instructionsFile!) : agentSettingArg(key, rest.slice(3));
+          const asked = await client.call('agents.settings.request', { threadId, reason: parsed.why, key, value, ...agent });
           const setting = asked.setting;
           print([
             `requested: ${asked.questionId}`,
-            `change: ${setting.agentName}'s ${setting.key} ${JSON.stringify(setting.previous)} -> ${JSON.stringify(setting.value)}`,
+            `change: ${setting.agentName}'s ${setting.key} ${clipped(JSON.stringify(setting.previous))} -> ${clipped(JSON.stringify(setting.value))}`,
             'card: Apply, or the user changes it in the bot\'s settings',
             'Keep working. The outcome arrives as a message quoting your reason; without one, nothing changed.',
           ], asked);
@@ -637,7 +649,10 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const read = await client.call('agents.settings.read', { threadId, ...agent });
         const shown = rest[1] === undefined ? read.settings : read.settings.filter(reading => reading.key === rest[1]);
         if (shown.length === 0) throw new Usage(`settings bot: unknown key ${rest[1]}; the keys are ${AGENT_SETTING_KEYS.join(', ')}`);
-        const named = (reading: (typeof shown)[number], value: unknown): string => JSON.stringify(reading.key === 'projects' && Array.isArray(value) ? value.map(id => reading.choices?.find(choice => choice.id === id)?.label ?? id) : value ?? null);
+        const named = (reading: (typeof shown)[number], value: unknown): string => {
+          const text = JSON.stringify(reading.key === 'projects' && Array.isArray(value) ? value.map(id => reading.choices?.find(choice => choice.id === id)?.label ?? id) : value ?? null);
+          return rest[1] === undefined ? clipped(text) : text;
+        };
         print([
           `bot: ${read.agentName} (${read.agentId})`,
           ...shown.map(reading => `${reading.key} ${named(reading, reading.value)}${reading.choices?.length ? `\n    choices: ${reading.choices.map(choice => choice.label === choice.id ? choice.id : `${choice.label} (${choice.id})`).join(', ')}` : ''}`),

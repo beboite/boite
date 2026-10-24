@@ -143,7 +143,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['questions.list', 'read pending question cards on its own thread without creating another card; answers remain the user\'s'],
   ['agent.settings', 'the settings it may ask the user about, with their values and pages; credentials, accounts and browser profiles are not among them'],
   ['settings.request', 'a settings card on its own thread proposing a change or pointing at a page; only the owner applies it, through settings.set'],
-  ['agents.settings.read', 'the settings of one of the owner\'s agents a card may propose to change (projects, model, effort, memory pass, subagents, daily budget), so it reads before it proposes; never their brains or conversations'],
+  ['agents.settings.read', 'the settings of one of the owner\'s agents a card may propose to change (name, domain, instructions, avatar, status, projects, model, effort, memory pass, subagents, daily budget), so it reads before it proposes; never their brains or conversations'],
   ['agents.settings.request', 'a card on its own thread proposing a change to one agent setting; only the owner applies it, through agents.settings.apply'],
   ['agents.create', 'creating the bot the user asked its thread for, as the Bots page would, without a card: the owner chose to let threads set bots up on their own (2026-10-24)'],
   ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],

@@ -7,7 +7,7 @@
  * `agents/create.ts`.
  */
 import {
-  AGENT_SETTING_KEYS, RpcErrorCode, agentSettingValue, checkAgentCreate, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
+  AGENT_SETTING_KEYS, AGENT_STATUSES, RpcErrorCode, agentSettingValue, checkAgentCreate, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
   type AgentCreateContext, type AgentProfile, type AgentSelection, type AgentSettingAsk, type AgentSettingContext, type AgentSettingReading, type AgentSettingRequestParams,
   type DelegationConfig, type RpcParams, type RpcResult, type Thread, type Turn,
 } from '@boite/contracts';
@@ -48,6 +48,7 @@ function context(ctx: FakeContext, agent: AgentProfile): AgentSettingContext {
     profile: agent,
     config,
     projects: ctx.projects.filter(project => project.kind !== 'drafts').map(project => ({ id: project.id, label: project.name })),
+    bots: ctx.agents.liveProfiles(),
     model: model => {
       if (!models().some(entry => entry.id === model)) return { ok: false, message: 'the provider does not offer this model' };
       // The same test `agents.profile.save` makes once the owner set a policy.
@@ -93,6 +94,11 @@ export function settleAgentSettings(ctx: FakeContext, agentId?: string): void {
 function write(ctx: FakeContext, agent: AgentProfile, key: AgentSettingAsk['key'], value: unknown): AgentProfile {
   const config = ctx.agents.configOf(agent.id);
   switch (key) {
+    case 'name':
+    case 'domain':
+    case 'instructions':
+    case 'avatar': return ctx.agents.writeSetting(agent.id, { profile: { [key]: value as string } });
+    case 'status': return ctx.agents.writeSetting(agent.id, { profile: { status: value as AgentProfile['status'] } });
     case 'projects': return ctx.agents.writeSetting(agent.id, { projectIds: value as string[] });
     case 'model': {
       // A level the new model lacks goes back to its default rather than refusing the change.
@@ -154,6 +160,7 @@ export function agentSettingMethods(ctx: FakeContext): Handlers {
       const model = models.find(entry => entry.id === agent.selection.model);
       const settings = AGENT_SETTING_KEYS.map((key): AgentSettingReading => {
         const value = agentSettingValue(agent, checks.config, key);
+        if (key === 'status') return { key, value, choices: AGENT_STATUSES.map(status => ({ id: status, label: status })) };
         if (key === 'projects') return { key, value, choices: [...checks.projects] };
         if (key === 'model') return { key, value, choices: models.filter(entry => checks.model(entry.id).ok).map(entry => ({ id: entry.id, label: entry.name })) };
         if (key === 'effort' && model?.effort?.levels.length) return { key, value, choices: model.effort.levels.map(level => ({ id: level.id, label: level.label })) };
@@ -178,8 +185,9 @@ export function agentSettingMethods(ctx: FakeContext): Handlers {
       if (!agent) throw refused(`unknown profile ${setting.agentId}`);
       if (agent.status === 'archived') throw refused(`agents.settings.apply: ${agent.name} is archived`, { field: 'questionId' });
       let value = setting.value;
-      if (params.value !== undefined) {
-        const normalized = normalizeAgentSetting(setting.key, params.value, context(ctx, agent));
+      // As the core: a name is checked again, another card may have given it away since.
+      if (params.value !== undefined || setting.key === 'name') {
+        const normalized = normalizeAgentSetting(setting.key, params.value ?? setting.value, context(ctx, agent));
         if (!normalized.ok) throw refused(normalized.message, { field: 'value', key: setting.key });
         value = normalized.value;
       }
