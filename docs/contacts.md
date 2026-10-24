@@ -260,8 +260,9 @@ service is in `contacts/board.ts`, with its protocol in [board.md](board.md#shar
 Host-owned compute admission and the workflow adapter are implemented in
 `contacts/compute.ts` and `workflows/shared-compute.ts`. Compute admits only
 tool-free echo until a host-enforced execution boundary is installed. File
-enforcement and the activity reviewer are implemented; human letters, fake
-handlers and UI remain integration work.
+enforcement, activity review, attested human letters and the Client/Store/fake
+transport are implemented. Components, group-relay integration and final
+multi-core/UI validation remain integration work.
 `packages/contracts/src/shared-projects.ts` declares the vocabulary;
 `coordination.ts` retains the existing contact types. A core must not advertise
 `features.sharedProjects: 1` until its enforcing handlers exist. A contact
@@ -281,8 +282,9 @@ declined offers leave the existing unilateral lookup path available. Once an
 association is active, or has been revoked, lookups to that contact use the
 source project's exact active associations; unscoped peer directory/search/read
 requests are refused. This prevents a revoked association falling back to a
-broader legacy query. Agent letters still use the existing delivery path; their
-association scope belongs to the human-letter/delivery integration.
+broader legacy query. Human and agent letters use the existing delivery path
+with the exact source/destination association; receipt and deferred delivery
+both recheck current authority.
 
 Journal schema 39 keeps associations, content-bound operation receipts,
 the durable control outbox and the local grant fingerprint. Grant or project
@@ -514,7 +516,8 @@ idempotent receipt as agent mail, then attests `origin: 'contact-human'`.
 An agent cannot call it or supply its provenance. The receiver assigns its
 own contact name and association scope. Human contact, contact agent, local
 delegation `user` origin and actual owner prompt remain distinct in provider
-input and the timeline. A contact human has no invented model/tier; agent mail
+input and letter data. Component rendering is a separate integration step.
+A contact human has no invented model/tier; agent mail
 continues to obey `minTier`. Require negotiated human-letter support, never
 fall back to an owner prompt on an older peer. None of these external letters
 answers an approval or changes host settings.
@@ -670,10 +673,9 @@ or disagreement never unblocks the immediate deterministic file/tool decision.
 All new owner methods still validate the selected owning Store/core. The
 device allowlist is in `packages/contracts/src/access.ts`; the agent method
 allowlist remains in `packages/core/src/access.ts`. Neither allowlist enables
-the reserved methods at the contract stage. All new RPCs default to owner-only
-and remain unregistered; the new event is neither emitted nor allowlisted.
-The following rows for new methods describe intended permissions, installed
-only alongside enforcing handlers and scoped subscriptions.
+unimplemented methods. These handlers and connection-scoped invalidations are
+registered, with the explicit permissions below. New RPCs otherwise default
+to owner-only.
 
 | Methods | Owner | Paired device | Agent with its own `threadId` |
 | --- | --- | --- | --- |
@@ -688,18 +690,18 @@ only alongside enforcing handlers and scoped subscriptions.
 | Existing `files.list/read`, `git.status/diff` | Local scope | Existing project/credential guards and HEAD diff only | Own thread; shared policy applies additionally |
 | Existing `artifacts.publish/view/preview`; `artifacts.read` | Local scope | Published snapshot read only | Own thread only; no contact file/preview authority |
 | `sharedProjects.list/get/threads/search/read/subscribe` | Source project scope | Same scope | Own associated project; reads still need readThreads |
-| `sharedBoard.get/apply` | Association + board consent | Planned: same; every board action | Planned: own association, add/edit/claim; no remove/Done/reopen Done |
-| `sharedCompute.models/list/get/send/cancel` | Host jobs or source scope | Planned: follow/steer/cancel existing jobs, no admission | Planned: own source jobs; no host policy or permission answers |
-| `sharedCompute.start` | Explicit host opt-in and supported protection | Denied | Planned: own source project, current grant and host-approved route |
+| `sharedBoard.get/apply/start` | Association + board consent, start uses its local reserved worker | Same; every board action | Own association, add/edit/claim/start; no remove/Done/reopen Done |
+| `sharedCompute.models/list/get/send/cancel` | Host jobs or source scope | Follow/steer/cancel existing jobs, no admission | Own source jobs; no host policy or permission answers |
+| `sharedCompute.start` | Explicit host opt-in and supported protection | Denied | Own source project, current grant and host-approved route |
 | `sharedAccess.get` | Sanitized scoped activity, including historical revocations | Same | Live own association metadata only |
 | `sharedAccess.overrides/override/revokeOverride` | Host only, exact local paths | Denied | Denied |
 | `sharedAccess.reviewConfig` | Host only, inference account and settings | Denied | Denied |
-| `contacts.sendHuman` | Attested human, allowed contact destination | Planned: same | Denied |
+| `contacts.sendHuman` | Attested human, allowed contact destination | Same | Denied |
 | `sharedProjects.changed` | Explicit connection subscription | Same subscription | Own thread + association, invalidation only |
 
 Agents never receive all shared-project events. The server needs an explicit
-shared-scope filter as well as `AGENT_EVENTS`, and then the client/fake step
-adds that event and the planned methods with reasons. A signed contact request
+shared-scope filter as well as `AGENT_EVENTS`; `sharedProjects.subscribe` owns
+that connection's exact source/association lease. A signed contact request
 uses the peer method subset, never these owner/device/agent WebSocket roles.
 
 ### Acceptance matrix and implementation ownership
@@ -724,12 +726,36 @@ contracts. UI paths are under `packages/ui/src/`. Verify exact source names
 when implementing: the table identifies the present integration boundaries,
 not new services to create automatically.
 
-The real/fake parity work belongs to `client_transport`: implement every new
-RPC in `packages/ui/src/lib/fake-client/`, extend `FakeMethods` exhaustiveness,
-owning Stores, events/reconnect and the shared scenarios in
-`tests/contract/scenarios.ts`. `Client.call` is already generic. The core and
-fake contract runners are `packages/core/test/contract.test.ts` and
-`packages/ui/src/lib/fake-client.contract.test.ts`. No temporary known
-divergence may stand in for a required capability. Integrate the reviewed
+### Client transport
+
+`Client.call` is generic over the domain contracts. The fake dispatch table
+exhaustively implements the shared-project, board, compute, protection and
+human-letter RPCs in `lib/fake-client/shared-*.ts`. Fake cores must join and
+grant projects explicitly; compute fixtures register repository/base identity
+with `setSharedRepository`, then finish captured jobs with `finishSharedCompute`.
+Neither fixture accepts caller-supplied result provenance through RPC. The
+fake is an in-memory behavioral fixture, not a provider process sandbox.
+Captured fixture file reads deny secret names/content and honor the exact
+host job override; real file identities, links and streaming tickets are
+validated by the core tests.
+
+Each owning Store exposes `store.shared`: `load(threadId)`, `watch(scope,
+surfaces)`, `view(scope)`, typed `call`, `read` and `sendHuman`. Pass canonical
+project/thread refs intact and use `threadKey(ref)` for identity. Public relay
+addresses stay separate; a foreign thread ID never selects a local Store.
+Only watched scopes subscribe, with one active read and one coalesced trailing
+read. Board pages apply contiguous revisions and tombstones; a gap reloads the
+snapshot. Access invalidation rereads the displayed page so delayed review
+verdicts appear even without a new access event. Reconnect drops cached results
+and leases, retaining only live consumer intent. Revocation clears that scope's
+threads, board, jobs and access page and releases its subscription.
+
+`tests/contract/shared-projects.ts` runs the same association, read refusal,
+board receipt/update/delete, human provenance, host policy and revoke scenario
+through `packages/core/test/contract.test.ts` and
+`packages/ui/src/lib/fake-client.contract.test.ts`. Additional fake/Store tests
+exercise duplicate IDs on two machines, offline board edits/cancellation,
+agent/phone rights, secret-text projection, exact overrides and reconnect races.
+No temporary known divergence stands in for a required capability. Integrate the reviewed
 #755 and #756 commits rather than copying their routing implementations;
 reconcile their shared contact/peer/docs edits before final validation.

@@ -560,6 +560,7 @@ export class Connection {
   /** Retire leases when a connection ends, including a reconnect on the same client. */
   invalidateReads(): void {
     this.#readEpoch++;
+    this.ctx.shared?.disconnected();
     this.reloading?.release();
     this.ctx.requests.cancelReads();
     this.ctx.threadReads.clear();

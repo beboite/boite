@@ -20,6 +20,7 @@ async function env(): Promise<ContractEnv> {
   await client.connect();
   let folders = 0;
   return {
+    newContact:env,
     call: (method, params) => client.call(method, params),
     on: (event, handler) => client.on(event, handler),
     // The fake has no disk: any folder exists, except under one named `missing`.

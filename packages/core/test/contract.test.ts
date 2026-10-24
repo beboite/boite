@@ -15,6 +15,7 @@ import { thrown } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
+const peers:TestCore[]=[];
 
 beforeAll(async () => {
   harness = await startTestCore();
@@ -22,15 +23,18 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  for (const peer of peers.splice(0)) await peer.stop();
   await harness.stop();
 });
 
-function env(): ContractEnv {
+function env(host=harness, owner=client): ContractEnv {
+  host.core.contacts.selfUrl=async()=>host.url;
   return {
-    call: (method, params) => client.call(method, params),
-    on: (event, handler) => client.on(event, handler),
-    newFolder: async () => mkdtempSync(join(harness.dataDir, 'project-')),
-    missingFolder: () => join(harness.dataDir, 'missing', 'folder'),
+    newContact:async()=>{const peer=await startTestCore();peers.push(peer);return env(peer,await peer.connect());},
+    call: (method, params) => owner.call(method, params),
+    on: (event, handler) => owner.on(event, handler),
+    newFolder: async () => mkdtempSync(join(host.dataDir, 'project-')),
+    missingFolder: () => join(host.dataDir, 'missing', 'folder'),
     removeFolder: async (path) => rmSync(path, { recursive: true, force: true }),
     otherCase: (path) => (process.platform === 'win32' ? path.toUpperCase() : null),
   };

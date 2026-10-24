@@ -566,7 +566,7 @@ export class ContactStore {
     }));
     const contact = this.find(coreId);
     const rawCaps = (payload as { capabilities?: { sharedProjects?: unknown; humanLetters?: unknown } }).capabilities;
-    const capabilities = rawCaps?.sharedProjects === 1 ? { sharedProjects: 1 as const } : {};
+    const capabilities = { ...(rawCaps?.sharedProjects === 1 ? { sharedProjects: 1 as const } : {}), ...(rawCaps?.humanLetters === 1 ? { humanLetters: 1 as const } : {}) };
     if (contact && (JSON.stringify(contact.offers) !== JSON.stringify(checked) || JSON.stringify(contact.capabilities) !== JSON.stringify(capabilities))) this.mutate(coreId, entry => { entry.offers = checked; entry.capabilities = capabilities; });
     return { ok: true };
   }
@@ -648,7 +648,7 @@ export class ContactStore {
     if (!contact) return;
     if (contact.syncPending) {
       const version = contact.syncPending;
-      try { await this.core.coordination.request(peer(), 'contact.sync', { offers: this.offersFor(contact), capabilities: { sharedProjects: 1 } }); }
+      try { await this.core.coordination.request(peer(), 'contact.sync', { offers: this.offersFor(contact), capabilities: { sharedProjects: 1, humanLetters: 1 } }); }
       catch (error) { if (!(error instanceof PeerRefusal)) throw error; }
       if (this.find(coreId)?.syncPending === version) this.mutate(coreId, entry => { delete entry.syncPending; });
     }

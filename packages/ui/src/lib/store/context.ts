@@ -1,3 +1,4 @@
+import { SharedProjects } from './shared-projects.svelte';
 import { DisplayImages } from './display-images';
 import { RpcFailure, type Client } from '../client';
 import { errorText } from '../errors';
@@ -45,6 +46,7 @@ export class StoreContext {
     this.#client = client;
   }
 
+  readonly shared: SharedProjects;
   readonly connection: Connection;
   readonly pairing: Pairing;
   readonly layout: Layout;
@@ -68,6 +70,7 @@ export class StoreContext {
 
   constructor(readonly store: Store) {
     this.connection = new Connection(this);
+    this.shared = new SharedProjects(this);
     this.pairing = new Pairing(this);
     this.layout = new Layout(this);
     this.settings = new CoreSettings(this);

@@ -11,6 +11,8 @@ import { address, coordinationGuide, coordinationUrl, LETTER_TTL_MS, letterPromp
 import { senderContext, withRelations } from './coordination-relation.ts';
 import { boundedBody, firstAnswer, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer, type Envelope, type Operation } from './coordination-wire.ts';
 import { checkTailnetName } from './contacts/invite.ts';
+import { outgoingContact, incomingContact } from './contacts/human-letters.ts';
+import type { Connection } from './router.ts';
 import { projectCoordination } from './contacts/project-coordination.ts';
 import { pack, SEALED } from './group/seal.ts';
 import type { Core } from './core.ts';
@@ -452,7 +454,7 @@ export class Coordination {
     }
     return false;
   }
-  async send(params: RpcParams<'collaboration.send'>): Promise<AgentLetter> {
+  async send(params: RpcParams<'collaboration.send'>, human = false, connection?: Connection): Promise<AgentLetter> {
     const to = address(params.to, 'to');
     const local = to.coreId === this.self('').coreId;
     const resident = local ? this.core.workforce.projects.over(params.threadId, to.threadId) : null;
@@ -461,7 +463,7 @@ export class Coordination {
     if (config.paused) throw refused('coordination paused by the owner');
     const body = text(params.text, 'text');
     const requestId = text(params.requestId, 'requestId', 128);
-    const fingerprint = createHash('sha256').update(JSON.stringify([to, body, params.replyTo ?? null])).digest('hex');
+    const fingerprint = createHash('sha256').update(JSON.stringify([to, body, params.replyTo ?? null, ...(human ? ['contact-human'] : [])])).digest('hex');
     const existing = this.core.journal.db.query('SELECT data, fingerprint FROM coordination_letters WHERE thread_id = ? AND request_id = ?').get(params.threadId, requestId) as Row | null;
     if (existing) {
       if (existing.fingerprint !== fingerprint) throw refused('requestId already used for different content');
@@ -481,7 +483,7 @@ export class Coordination {
       if (!config.remote) throw refused('cross-machine coordination is disabled for this thread');
       const peer = this.trusted().find(p => p.coreId === to.coreId);
       if (!peer) throw refused('destination machine is not trusted for coordination');
-      if (this.core.contacts.has(to.coreId)) this.core.contacts.checkSendTier(params.threadId);
+      if (!human && this.core.contacts.has(to.coreId)) this.core.contacts.checkSendTier(params.threadId);
       // No directory round trip on send: a disconnected recipient can receive after reconnect.
       toTitle = to.threadId;
       toMachine = peer.name;
@@ -492,11 +494,14 @@ export class Coordination {
       const letter = JSON.parse(previous.data) as AgentLetter;
       if (!same(letter.from, to) || !same(letter.to, from)) throw refused('replyTo must name an incoming message from this recipient');
     }
-    // Recheck budgets after all validation, before the synchronous durable write.
+    const provenance = await outgoingContact(this.core, from, to, human, connection);
+    this.contact(params.threadId, resident !== null); if (this.config(params.threadId).paused) throw refused('coordination paused by the owner');
+    const raced = this.rows('thread_id = ? AND request_id = ?', params.threadId, requestId)[0];
+    if (raced) { if (raced.fingerprint !== fingerprint) throw refused('requestId already used for different content'); return JSON.parse(raced.data) as AgentLetter; }
     const createdAt = Date.now();
     const contact = this.core.contacts.find(to.coreId);
     const letter: AgentLetter = { ...(resident ? { origin: 'resident' as const } : {}), id: randomUUID(), from, to, toTitle, toProject, toMachine, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + (resident ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS), status: 'queued', error: null,
-      ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}) };
+      ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}), ...provenance };
     this.core.journal.append({ type: 'coordination.sent', threadId: from.threadId, version: 1, payload: letter }, () => this.put(letter, 'out', from.threadId, requestId, fingerprint));
     // It may hear back from that contact for a while, even outside the projects opened to it.
     if (contact) this.core.contacts.noteSent(from.threadId, contact.coreId);
@@ -524,21 +529,21 @@ export class Coordination {
     const config = this.config(target.threadId);
     const from = peer ? checkRemoteContact(letter.from, peer) : this.contact(letter.from.threadId, resident);
     if (peer && !config.remote) throw refused('recipient has not enabled cross-machine coordination');
-    if (contact) this.core.contacts.checkAttestedTier(from.agent);
+    const provenance = incomingContact(this.core, { ...letter, from }, peer);
     for (const row of this.rows('id = ?', letter.id)) {
       const known = JSON.parse(row.data) as AgentLetter;
-      if (!same(known.from, from) || !same(known.to, target) || known.text !== letter.text || known.replyTo !== letter.replyTo) throw refused('message id already used for different content');
+      if (!same(known.from, from) || !same(known.to, target) || known.text !== letter.text || known.replyTo !== letter.replyTo || (known.origin === 'contact-human') !== (letter.origin === 'contact-human')) throw refused('message id already used for different content');
     }
     const existing = this.find(letter.id, 'in');
     if (existing) {
-      if (!same(existing.from, from) || !same(existing.to, target) || existing.text !== letter.text || existing.replyTo !== letter.replyTo) throw refused('message id already used for different content');
+      if (!same(existing.from, from) || !same(existing.to, target) || existing.text !== letter.text || existing.replyTo !== letter.replyTo || (existing.origin === 'contact-human') !== (letter.origin === 'contact-human')) throw refused('message id already used for different content');
       return existing;
     }
     if (!Number.isSafeInteger(letter.createdAt) || !Number.isSafeInteger(letter.expiresAt) || letter.createdAt > Date.now() + 60_000 || letter.expiresAt <= Date.now() || letter.expiresAt > letter.createdAt + (resident ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS)) throw refused('message expired or timestamps invalid');
     const origin = resident ? 'resident' as const : undefined;
     const accepted: AgentLetter = { ...(origin ? { origin } : {}), id: letter.id, from, to: this.self(target.threadId), toTitle: target.title, toProject: target.project, toMachine: target.machine, text: text(letter.text, 'letter.text'), replyTo: letter.replyTo === null ? null : text(letter.replyTo, 'letter.replyTo', 100), createdAt: Date.now(), expiresAt: letter.expiresAt, status: 'received', error: null,
       // The name this owner gave the contact, never the sender's word.
-      ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}) };
+      ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}), ...provenance };
     this.core.journal.append({ type: 'coordination.received', threadId: target.threadId, version: 1, payload: accepted }, () => this.put(accepted, 'in', target.threadId));
     this.core.threads.runner.noteMail(target.threadId, accepted.createdAt);
     this.resumeForAgent(target.threadId);
@@ -641,6 +646,7 @@ export class Coordination {
     if (recipient.mode === 'off' || recipient.paused) return false;
     if (letter.from.coreId !== this.self('').coreId) {
       if (!recipient.remote || !this.trusted().some(peer => peer.coreId === letter.from.coreId)) return false;
+      try { incomingContact(this.core, letter, this.trusted().find(p => p.coreId === letter.from.coreId)); } catch { return false; }
       return !this.core.contacts.has(letter.from.coreId) || this.core.contacts.mayReach(letter.from.coreId, letter.to.threadId);
     }
     const sender = this.config(letter.from.threadId);
