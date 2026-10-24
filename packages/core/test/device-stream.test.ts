@@ -170,7 +170,8 @@ describe('the Device panel live stream', () => {
       expect((await owner.call('devices.clipboard', { threadId, deviceId: PHONE, copy: 'copy' })).text).toBe('héllo 👋');
       await input(phone, { kind: 'clipboard', text: 'copié' });
       expect((await phone.call('devices.clipboard', { threadId, deviceId: PHONE })).text).toBe('copié');
-      await waitFor(() => sdk.controls().length >= 14);
+      // The second clipboard read may reach the device after the swipe's last moves: wait for it, not for a count of controls.
+      await waitFor(() => sdk.controls().filter((control) => control.type === 'getClipboard').length >= 2);
       const controls = sdk.controls();
       const at = (x: number, y: number) => ({ x, y, width: 144, height: 320 });
       expect(controls.slice(0, 12)).toEqual([

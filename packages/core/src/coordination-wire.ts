@@ -9,7 +9,9 @@ import { invalidParams } from './errors.ts';
 import { openResponse, SEALED, unpack, type Sealing } from './group/seal.ts';
 
 /** What one core asks another. */
-export type Operation = 'directory' | 'deliver' | 'receipt' | 'search' | 'read' | 'group.sync' | 'group.push' | 'contact.sync' | 'contact.ask' | 'contact.answer' | 'contact.route';
+export type Operation = 'directory' | 'deliver' | 'receipt' | 'search' | 'read' | 'group.sync' | 'group.push' | 'contact.sync' | 'contact.ask' | 'contact.answer' | 'contact.route'
+  /** Between members of a group, for a contact one of them is linked to (`contacts/members.ts`). */
+  | 'relay.project' | 'relay.mirror' | 'relay.in' | 'relay.out';
 /** A request as signed: who asks whom, when, once, for what. */
 export type Envelope = { from: string; to: string; at: number; nonce: string; operation: Operation; payload: unknown };
 export const MAX_BODY = 262_144;

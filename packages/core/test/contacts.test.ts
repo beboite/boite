@@ -315,7 +315,7 @@ test('revoke rejects letters waiting for the closed project, queued wakes includ
   await hostClient.call('contacts.revoke', { coreId: guestId, projectId: open.id });
   for (const id of [letter.id, queued.id]) expect(letters(host, hostThread).find(entry => entry.id === id)).toMatchObject({ status: 'rejected', error: 'Project closed to this contact' });
   expect(host.core.coordination.prepareWake(hostThread, 'turn_late')).toBe(false);
-  expect(host.core.contacts.mayReach(guestId, hostThread)).toBe(false);
+  expect(host.core.contacts.reach.mayReach(guestId, hostThread)).toBe(false);
   const late = await send('Still there?');
   await waitFor(() => letters(guest, guestThread).find(entry => entry.id === late.id)?.status === 'rejected', 10000);
   expect(letters(guest, guestThread).find(entry => entry.id === late.id)?.error).toContain('not a thread of a project opened to you');
