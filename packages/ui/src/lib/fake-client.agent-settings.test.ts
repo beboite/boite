@@ -71,3 +71,29 @@ test('fake agent setting cards settle from the agent\'s own settings, and the [a
   expect(read).toContain(`> ${card!.text}\n\napplied: Mira's projects are now ["notes"]`);
   expect(read).toContain('> Quicker answers\n\nchanged: the user set Mira\'s effort to "high", not "low"');
 });
+
+test("fake agents.create: the core's refusals, then the bot made at once on the thread's route with full access", async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  await agent(client);
+  const { id: threadId } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  const live = async () => (await client.call('agents.snapshot', {})).profiles.map((profile) => profile.name);
+
+  await expect(client.call('agents.create', { threadId, name: 'mira' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'name' } });
+  await expect(client.call('agents.create', { threadId, name: 'Scribe', projects: ['nowhere'] })).rejects.toMatchObject({ data: { field: 'projects' } });
+  await expect(client.call('agents.create', { threadId, name: 'Scribe', model: 'gpt-9' })).rejects.toMatchObject({ data: { field: 'model' } });
+  // A model that is not text is refused, not read as omitted (which would take the thread's route).
+  await expect(client.call('agents.create', { threadId, name: 'Scribe', model: 123 as unknown as string })).rejects.toMatchObject({ data: { field: 'model' } });
+  expect(await live()).not.toContain('Scribe');
+
+  // Bounds hold on the trimmed text, as the name's do.
+  const { agent: scribe, threadId: conversation } = await client.call('agents.create', { threadId, name: 'Scribe', domain: ` ${'d'.repeat(500)} `, effort: 'high', projects: ['notes'] });
+  expect(scribe).toMatchObject({ name: 'Scribe', domain: 'd'.repeat(500), status: 'active', projectIds: ['p-notes'], selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: 'high', permissionMode: 'bypassPermissions' } });
+  expect(conversation).not.toBeNull();
+  expect(await client.call('questions.list', { threadId })).toEqual([]);
+
+  // A thread on its provider's default model gives the bot the model marked default, not the first listed.
+  const { models } = await client.call('providers.probe', { providerId: 'claude', accountId: 'a-claude-main' });
+  const onDefault = await client.call('threads.create', { projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main' });
+  expect(models[0]!.default).not.toBe(true);
+  expect((await client.call('agents.create', { threadId: onDefault.id, name: 'Herald' })).agent.selection.model).toBe(models.find((model) => model.default === true)!.id);
+});

@@ -189,3 +189,32 @@ test('an agent whose stored model its provider no longer lists still takes a pro
   expect(await thrown(owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), selection: { ...profile().selection, model: 'echo/other' } } })))
     .toThrow('the provider does not offer this model');
 });
+
+test('a discussion creates the bot the user asked for, without a card, and reads its conversation', async () => {
+  const { h, owner, prompts, worker, notes, run } = await setup();
+  const bots = () => h.core.workforce.records.list('profile').map(p => p.name);
+  const manual = join(h.dataDir, 'manual.md');
+  await Bun.write(manual, 'Write the release notes.');
+
+  // A taken name, an unknown project or model is refused and creates nothing.
+  expect((await run(['settings', 'bot', 'create', 'ada'], worker)).err).toContain('a bot named "Ada" already exists');
+  expect((await run(['settings', 'bot', 'create', 'Herald', '--project', 'Nowhere'], worker)).err).toContain('no project "Nowhere"');
+  expect((await run(['settings', 'bot', 'create', 'Herald', '--model', 'gpt-nothing'], worker)).err).toContain('no installed model matches "gpt-nothing"');
+  expect(bots()).not.toContain('Herald');
+
+  const created = await run(['settings', 'bot', 'create', 'Herald', '--project', 'Notes', '--domain', 'release communication', '--instructions-file', manual], worker);
+  expect(created.err).toBe('');
+  const bot = h.core.workforce.records.list('profile').find(p => p.name === 'Herald')!;
+  // The thread's own route, with full access as the Bots page creates a bot; no card asked the user.
+  expect(bot).toMatchObject({ status: 'active', domain: 'release communication', instructions: 'Write the release notes.', projectIds: [notes.id], selection: { providerId: 'echo', effort: null, permissionMode: 'bypassPermissions' } });
+  expect(h.core.threads.listQuestions(worker)).toHaveLength(0);
+  const botThread = h.core.workforce.sessionOf(bot.id)!.threadId;
+  expect(created.out).toContain(`created: Herald (${bot.id})`);
+  expect(created.out).toContain(`boite threads send ${botThread} <text>`);
+  // Its first turn introduces it, as a bot made on the Bots page.
+  await waitFor(() => (prompts.get(botThread) ?? []).length > 0);
+  expect((await run(['settings', 'bot', 'create', 'herald'], worker)).err).toContain('a bot named "Herald" already exists');
+
+  // The owner may call it too.
+  expect((await owner.call('agents.create', { threadId: worker, name: 'Scout' })).agent.name).toBe('Scout');
+});
