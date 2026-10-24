@@ -661,23 +661,18 @@ is now <value>`, `changed: the user set <bot>'s <key> to <value>, not
 <proposed>` or `refused: <bot>'s <key> stays <value>`, projects by name
 (`are` and `stay` for them).
 
-`settings bot create <name> --why <text>` asks the user to create a bot, for
-a thread the user told to set one up. The bot runs on the asking thread's own
+`settings bot create <name>` creates a bot at once, for a thread the user told
+to set one up; no card asks the user. The bot runs on the calling thread's own
 route unless `--model <provider/model>` names another (resolved as `delegate
 spawn --model` does, from every installed model), at its model's default
 effort unless `--effort` names one, with full access like a bot made on the
-Agents page. `--domain <text>` is its role, `--instructions-file <path>` its
+Bots page. `--domain <text>` is its role, `--instructions-file <path>` its
 instructions (32,000 characters at most) and `--project a,b` the projects
 entrusted to it, by name or id. A name a live bot already has, any case, is
-refused with that bot's id, as is a second open card for the same name in the
-thread. The card shows the bot as it will be created; Create calls
-`agents.settings.apply`, owner only, and settles the card with the new bot's
-id. A bot of that name made on the Agents page meanwhile settles it too. The
-asking thread then reads `created: the bot <name> (<id>) exists and introduces
-itself in its own conversation.`, the bot's thread to reach it with `boite
-threads send` and the commands that read and change its settings; Refuse sends
-`refused: no bot <name> was created`. The MCP tool `boite_bot_create` does the
-same.
+refused with that bot's id, as are an unknown model or project. It prints
+`created: <name> (<id>)`, its route, its projects and its conversation, to
+reach it with `boite threads send`; the bot then introduces itself there. The
+MCP tool `boite_bot_create` does the same.
 
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).

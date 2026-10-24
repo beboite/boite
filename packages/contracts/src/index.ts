@@ -197,9 +197,9 @@ export {
   type AgentSettingRequestCheck, type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams,
 } from './agent-setting-requests.ts';
 export {
-  AGENT_DOMAIN_MAX, AGENT_INSTRUCTIONS_MAX, AGENT_NAME_MAX, agentCreateAnswerText, checkAgentCreateRequest, settledAgentCreate,
-  type AgentCreateAsk, type AgentCreateContext, type AgentCreateRequestCheck, type AgentCreateRequestParams,
-} from './agent-create-requests.ts';
+  AGENT_DOMAIN_MAX, AGENT_INSTRUCTIONS_MAX, AGENT_NAME_MAX, checkAgentCreate,
+  type AgentCreateCheck, type AgentCreateContext, type AgentCreateParams, type AgentCreateResult, type AgentCreation,
+} from './agent-create.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier, type SpeechBackend } from './speech-models.ts';
 
 export { sideQuestionSnapshot } from './side-question-snapshot.ts';

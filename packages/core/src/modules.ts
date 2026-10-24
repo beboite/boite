@@ -1,6 +1,7 @@
 import { registerJournalInspection } from './journal/integrity.ts';
 import type { Core } from './core.ts';
 import { registerPersistentAgents } from './agents/store.ts';
+import { createAgent } from './agents/create.ts';
 import { registerAccountMethods } from './accounts.ts';
 import { registerHookMethods } from './hooks.ts';
 import { registerAgentMethods } from './agent.ts';
@@ -101,9 +102,9 @@ export function registerModules(core: Core): void {
     return core.delegation.spawn(params);
   });
   // A bot's model resolves as a subagent's: read the lists a named model needs first.
-  core.router.register('agents.settings.create', async params => {
+  core.router.register('agents.create', async params => {
     await core.delegation.prepareRoutes(params.threadId, probe, [typeof params.model === 'string' ? params.model : undefined]);
-    return core.workforce.settingCards.create(params);
+    return createAgent(core, core.workforce, params);
   });
   core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));
   // The agent's own stop leaves a pause it may lift; the owner's, one only the owner's next message releases.

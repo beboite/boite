@@ -110,12 +110,11 @@ ${CONTROL_HELP}
                                  a card asking the user to change one, such as
                                  projects +boite -old or a list; the outcome
                                  arrives as a message (applied, changed, refused)
-  settings bot create <name> --why <text>
-                                 a card asking the user to create a bot, on
-                                 your own route or --model <provider/model>
+  settings bot create <name>     create the bot the user asked for, at once,
+                                 on your own route or --model <provider/model>
                                  (--effort, --project a,b, --domain <text>,
-                                 --instructions-file <path>); the outcome
-                                 arrives as a message with its conversation
+                                 --instructions-file <path>); prints its id
+                                 and conversation
   task list                      the agent's task list
   task add <text>                add a task (id t1, t2, ...)
   task start|done|remove <id>    move or drop one task
@@ -597,24 +596,24 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       if (action === 'bot') {
         const agent = parsed.bot === undefined ? {} : { agent: parsed.bot };
         if (rest[1] === 'create') {
-          if (parsed.why === undefined || parsed.why.trim().length === 0) throw new Usage('settings bot create needs --why <text>, the reason the user reads on the card');
           if (rest.length !== 3) throw new Usage('settings bot create takes one name; quote a name with spaces');
-          const asked = await client.call('agents.settings.create', {
-            threadId, reason: parsed.why, name: rest[2]!,
+          const created = await client.call('agents.create', {
+            threadId, name: rest[2]!,
             ...(parsed.domain === undefined ? {} : { domain: parsed.domain }),
             ...(parsed.instructionsFile === undefined ? {} : { instructions: readRules(parsed.instructionsFile) }),
             ...(parsed.model === undefined ? {} : { model: parsed.model }),
             ...(parsed.effort === undefined ? {} : { effort: parsed.effort }),
             ...(parsed.project === undefined ? {} : { projects: parsed.project.split(',').map(name => name.trim()).filter(Boolean) }),
           });
-          const { selection } = asked.create;
+          const { agent: bot, threadId: conversation } = created;
+          const { selection } = bot;
           print([
-            `requested: ${asked.questionId}`,
-            `bot: ${asked.create.name} on ${selection.providerId}/${selection.model ?? 'default'}${selection.effort === null ? '' : ` (${selection.effort})`}`,
-            ...(asked.create.projectIds.length ? [`projects: ${asked.create.projectIds.join(', ')}`] : []),
-            'card: the user creates it in one click, or refuses',
-            'Keep working. The outcome arrives as a message quoting your reason, with the bot\'s id and conversation; without one, nothing was created.',
-          ], asked);
+            `created: ${bot.name} (${bot.id})`,
+            `route: ${selection.providerId}/${selection.model ?? 'default'}${selection.effort === null ? '' : ` (${selection.effort})`}`,
+            ...(bot.projectIds?.length ? [`projects: ${bot.projectIds.join(', ')}`] : []),
+            ...(conversation === null ? [] : [`conversation: ${conversation}; boite threads send ${conversation} <text> writes to it`]),
+            'It introduces itself and schedules what its instructions call for.',
+          ], created);
           return;
         }
         if (rest[1] === 'request') {

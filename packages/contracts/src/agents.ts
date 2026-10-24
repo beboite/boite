@@ -1,6 +1,6 @@
 import type { DelegationConfig, DelegationProfile, PermissionMode, RequestId } from './index';
 import type { AgentSettingApplyParams, AgentSettingAsk, AgentSettingRequestParams, AgentSettingsReading, AgentSettingsReadParams } from './agent-setting-requests';
-import type { AgentCreateAsk, AgentCreateRequestParams } from './agent-create-requests';
+import type { AgentCreateParams, AgentCreateResult } from './agent-create';
 
 /**
  * A persistent agent is a thread with an identity. Its conversation is its own
@@ -204,6 +204,14 @@ export interface AgentsRpcMethods {
    * call for. Editing the instructions wakes it once to review its routines.
    */
   'agents.profile.save': { params: AgentSave<AgentProfile>; result: AgentProfile };
+  /**
+   * A thread creates a bot the user asked for (`boite settings bot create`),
+   * as `agents.profile.save` creates one from the Bots page, with full access.
+   * The model resolves as for `boite delegate`; omitted, the bot runs on the
+   * calling thread's own route. Refused for a name a bot already holds, an
+   * unknown model or project, or drafts.
+   */
+  'agents.create': { params: AgentCreateParams; result: AgentCreateResult };
   /** The agent's thread, created again if it was lost. */
   'agents.open': { params: { agentId: string }; result: { threadId: string } };
   'agents.runtime.get': { params: { agentId: string }; result: AgentRuntimeConfig };
@@ -248,21 +256,7 @@ export interface AgentsRpcMethods {
    * settings; the thread reads `applied`, `changed` or `refused`.
    */
   'agents.settings.request': { params: AgentSettingRequestParams; result: { questionId: RequestId; setting: AgentSettingAsk } };
-  /**
-   * A card on the caller's thread asking the user to create a bot (`boite
-   * settings bot create`), asked without stopping, with `reason` as its text.
-   * The model resolves as for `boite delegate`; omitted, the bot runs on the
-   * thread's own route. Refused for a name a bot already holds or a card
-   * already open proposes, an unknown model or project, or drafts. Apply is
-   * `agents.settings.apply`; the card settles once a bot of that name exists,
-   * and the thread reads `created` with its id and conversation, or `refused`.
-   */
-  'agents.settings.create': { params: AgentCreateRequestParams; result: { questionId: RequestId; create: AgentCreateAsk } };
-  /**
-   * Apply a pending agent setting card, or the user's edit of it, or create the
-   * bot a creation card proposes (`value` is ignored there). Owner only, like
-   * `agents.profile.save`.
-   */
+  /** Apply a pending agent setting card, or the user's edit of it. Owner only, like `agents.profile.save`. */
   'agents.settings.apply': { params: AgentSettingApplyParams; result: AgentProfile };
 }
 export interface AgentsRpcEvents {

@@ -1,5 +1,5 @@
 /** Permission requests and questions: asked by a turn, answered by the user. */
-import { RpcErrorCode, agentCreateAnswerText, agentSettingAnswerText, checkClientPreferences, checkSettingRequest, settledExperiment, type ClientPreferences, type ExperimentId, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentCreateAsk, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { RpcErrorCode, agentSettingAnswerText, checkClientPreferences, checkSettingRequest, settledExperiment, type ClientPreferences, type ExperimentId, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { checkAnswer, checkAsk } from './checks';
 import { QUESTION_OPTIONS, QUESTION_TEXT } from './conversation';
@@ -108,7 +108,6 @@ export function settleQuestion(
       ...(request.async === true ? { async: true } : {}),
       ...(request.setting === undefined ? {} : { setting: request.setting }),
       ...(request.agentSetting === undefined ? {} : { agentSetting: request.agentSetting }),
-      ...(request.agentCreate === undefined ? {} : { agentCreate: request.agentCreate }),
       ...(request.open === undefined ? {} : { open: request.open }),
       answer
     }
@@ -133,11 +132,6 @@ export function askSetting(ctx: FakeContext, thread: Thread, turn: Turn, reason:
 /** The core's `AgentSettingCards.request`: an agent setting card, drawn and answered like any card asked without stopping. */
 export function askAgentSetting(ctx: FakeContext, thread: Thread, turn: Turn, reason: string, options: QuestionOption[], agentSetting: AgentSettingAsk): string {
   return drawAsync(ctx, thread, turn, null, { text: reason, options, allowText: false, multiple: false, agentSetting });
-}
-
-/** The core's `AgentSettingCards.create`: a card proposing a new bot, drawn and answered like any card asked without stopping. */
-export function askAgentCreate(ctx: FakeContext, thread: Thread, turn: Turn, reason: string, options: QuestionOption[], agentCreate: AgentCreateAsk): string {
-  return drawAsync(ctx, thread, turn, null, { text: reason, options, allowText: false, multiple: false, agentCreate });
 }
 
 /** As the core's `AgentSettingCards.answerText`: what the asking thread reads, projects by name. */
@@ -177,7 +171,7 @@ function drawAsync(
   thread: Thread,
   turn: Turn,
   running: Message | null,
-  asked: { text: string; options: QuestionOption[]; allowText: boolean; multiple: boolean; setting?: SettingAsk; agentSetting?: AgentSettingAsk; agentCreate?: AgentCreateAsk; open?: { url: string } }
+  asked: { text: string; options: QuestionOption[]; allowText: boolean; multiple: boolean; setting?: SettingAsk; agentSetting?: AgentSettingAsk; open?: { url: string } }
 ): string {
   const questionId = `qst-${++ctx.seq}`;
   const text = asked.text;
@@ -206,12 +200,6 @@ function drawAsync(
       }
       if (asked.agentSetting) {
         holdAnswer(ctx, thread, `> ${text}\n\n${agentSettingText(ctx, asked.agentSetting, answer)}`);
-        return;
-      }
-      if (asked.agentCreate) {
-        // As the core's `AgentSettingCards.createAnswerText`: the new bot's conversation, to talk to it.
-        const botThread = typeof answer.value === 'string' ? ctx.agents.conversationOf(answer.value) : null;
-        holdAnswer(ctx, thread, `> ${text}\n\n${agentCreateAnswerText(asked.agentCreate, answer, botThread)}`);
         return;
       }
       const picked = answer.optionIds.map((id) => asked.options.find((option) => option.id === id)?.label ?? id).join(', ');

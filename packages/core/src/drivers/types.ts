@@ -15,7 +15,6 @@ import type {
   QuestionAnswer,
   QuestionOption,
   SettingAsk,
-  AgentCreateAsk,
   AgentSettingAsk,
   RequestId,
   ThreadId,
@@ -72,8 +71,6 @@ export interface QuestionAsk {
   setting?: SettingAsk;
   /** An agent setting card (`agents.settings.request`), always asynchronous. */
   agentSetting?: AgentSettingAsk;
-  /** A bot creation card (`agents.settings.create`), always asynchronous. */
-  agentCreate?: AgentCreateAsk;
   /** A page the card opens (`boite ask --open`). */
   open?: { url: string };
 }

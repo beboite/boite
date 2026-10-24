@@ -52,7 +52,7 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
     'Write a file reference as inline code, `path:line`: a click opens it in the panel.',
     VIEW_GUIDE_LINE,
     ...(asyncQuestions ? ['`boite ask [--open <url>] "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval. Login wall: `--open <url>`, the site and why, options "Signed in" Skip; never in chat.'] : []),
-    '`boite settings [bot] [request|open|create]` reads Boite settings or a bot\'s, or puts a card in chat for the user to change one or create a bot.',
+    '`boite settings [bot] [request|open|create]` reads Boite settings or a bot\'s, puts a card in chat for the user to change one, or creates the bot the user asked for.',
     bot
       ? 'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps.'
       : 'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps. `boite todo list|add <text>|claim <id>` manages project todos; claim marks work done for user confirmation.',

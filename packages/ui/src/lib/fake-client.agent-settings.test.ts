@@ -72,39 +72,28 @@ test('fake agent setting cards settle from the agent\'s own settings, and the [a
   expect(read).toContain('> Quicker answers\n\nchanged: the user set Mira\'s effort to "high", not "low"');
 });
 
-test('fake bot creation cards: the core\'s refusals, a phone cannot create, and a bot made on the Agents page settles the card', async ({ createClient }) => {
+test("fake agents.create: the core's refusals, then the bot made at once on the thread's route with full access", async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   await agent(client);
   const { id: threadId } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
-  await client.call('turns.start', { threadId, prompt: 'hello' });
-  await client.settled();
+  const live = async () => (await client.call('agents.snapshot', {})).profiles.map((profile) => profile.name);
 
-  await expect(client.call('agents.settings.create', { threadId, name: 'mira', reason: 'r' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'name' } });
-  await expect(client.call('agents.settings.create', { threadId, name: 'Scribe', projects: ['nowhere'], reason: 'r' })).rejects.toMatchObject({ data: { field: 'projects' } });
-  await expect(client.call('agents.settings.create', { threadId, name: 'Scribe', model: 'gpt-9', reason: 'r' })).rejects.toMatchObject({ data: { field: 'model' } });
-  await expect(client.call('agents.settings.create', { threadId, name: 'Scribe', reason: '' })).rejects.toMatchObject({ data: { field: 'reason' } });
+  await expect(client.call('agents.create', { threadId, name: 'mira' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'name' } });
+  await expect(client.call('agents.create', { threadId, name: 'Scribe', projects: ['nowhere'] })).rejects.toMatchObject({ data: { field: 'projects' } });
+  await expect(client.call('agents.create', { threadId, name: 'Scribe', model: 'gpt-9' })).rejects.toMatchObject({ data: { field: 'model' } });
   // A model that is not text is refused, not read as omitted (which would take the thread's route).
-  await expect(client.call('agents.settings.create', { threadId, name: 'Scribe', model: 123 as unknown as string, reason: 'r' })).rejects.toMatchObject({ data: { field: 'model' } });
+  await expect(client.call('agents.create', { threadId, name: 'Scribe', model: 123 as unknown as string })).rejects.toMatchObject({ data: { field: 'model' } });
+  expect(await live()).not.toContain('Scribe');
 
   // Bounds hold on the trimmed text, as the name's do.
-  const { questionId, create } = await client.call('agents.settings.create', { threadId, name: 'Scribe', domain: ` ${'d'.repeat(500)} `, effort: 'high', reason: 'Notes of every meeting' });
-  // The thread's own route, the effort asked, full access as the Agents page gives.
-  expect(create).toEqual({ name: 'Scribe', domain: 'd'.repeat(500), instructions: '', projectIds: [], selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: 'high', permissionMode: 'bypassPermissions' } });
-  // A thread on its provider's default model proposes the model marked default, not the first listed.
+  const { agent: scribe, threadId: conversation } = await client.call('agents.create', { threadId, name: 'Scribe', domain: ` ${'d'.repeat(500)} `, effort: 'high', projects: ['notes'] });
+  expect(scribe).toMatchObject({ name: 'Scribe', domain: 'd'.repeat(500), status: 'active', projectIds: ['p-notes'], selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: 'high', permissionMode: 'bypassPermissions' } });
+  expect(conversation).not.toBeNull();
+  expect(await client.call('questions.list', { threadId })).toEqual([]);
+
+  // A thread on its provider's default model gives the bot the model marked default, not the first listed.
   const { models } = await client.call('providers.probe', { providerId: 'claude', accountId: 'a-claude-main' });
   const onDefault = await client.call('threads.create', { projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main' });
-  await client.call('turns.start', { threadId: onDefault.id, prompt: 'hello' });
-  await client.settled();
   expect(models[0]!.default).not.toBe(true);
-  expect((await client.call('agents.settings.create', { threadId: onDefault.id, name: 'Herald', reason: 'r' })).create.selection.model).toBe(models.find(model => model.default === true)!.id);
-  await expect(client.call('agents.settings.create', { threadId, name: 'scribe', reason: 'again' })).rejects.toMatchObject({ data: { field: 'name' } });
-  const phone = await createClient({ delayMs: 0, principal: 'session' });
-  await expect(phone.call('agents.settings.apply', { threadId, questionId })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
-
-  const scribe = await agent(client, 'scribe');
-  await client.settled();
-  expect(await client.call('questions.list', { threadId })).toEqual([]);
-  const part = (await client.call('threads.get', { threadId })).messages.flatMap((message) => message.parts).find((entry) => entry.type === 'question');
-  expect(part).toMatchObject({ agentCreate: create, answer: { optionIds: ['created'], value: scribe.id } });
-  await expect(client.call('agents.settings.apply', { threadId, questionId })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
+  expect((await client.call('agents.create', { threadId: onDefault.id, name: 'Herald' })).agent.selection.model).toBe(models.find((model) => model.default === true)!.id);
 });
