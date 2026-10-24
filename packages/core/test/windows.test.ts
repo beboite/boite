@@ -108,7 +108,7 @@ describe('window capture', () => {
     const shot = await agent.call('windows.screenshot', { threadId, target: { process: 'unity' } });
     await answered;
     expect(shot).toMatchObject({ windowId: '101', process: 'Unity.exe', width: 64, height: 40, source: { width: 64, height: 40 } });
-    expect(shot.path.startsWith(join(harness.dataDir, 'window-temp', threadId))).toBe(true);
+    expect(shot.path.startsWith(realpathSync(join(harness.dataDir, 'window-temp', threadId)))).toBe(true);
     expect(pngSize(readFileSync(shot.path))).toEqual({ width: 64, height: 40 });
     expect(parts('window_consent').map(part => part.answer)).toEqual(['once']);
     const [card] = parts('window_capture');
@@ -175,10 +175,12 @@ describe('window capture', () => {
     expect(await thrown(agent.call('windows.screenshot', { threadId, target: { id: '101' } }))).toThrow('a contact\'s letter is part of this turn');
     const other = await echoThread(harness, owner, 'other');
     expect(await thrown(agent.call('windows.list', { threadId: other.threadId }))).toThrow(`windows.list is for thread ${threadId}`);
-    expect(await thrown(agent.call('windows.consent', { threadId, requestId: 'req_x', answer: 'always' }))).toThrow();
-    expect(await thrown(agent.call('windows.allowlist', { projectId }))).toThrow();
-    expect(await thrown(agent.call('windows.revoke', { projectId, path: UNITY }))).toThrow();
-    expect(await thrown(agent.call('windows.frame', { threadId, windowId: '101' }))).toThrow();
+    // The gate's own words: an unknown request or a closed panel would refuse too.
+    const notAgents = 'is not one of the agent\'s methods';
+    expect(await thrown(agent.call('windows.consent', { threadId, requestId: 'req_x', answer: 'always' }))).toThrow(`windows.consent ${notAgents}`);
+    expect(await thrown(agent.call('windows.allowlist', { projectId }))).toThrow(`windows.allowlist ${notAgents}`);
+    expect(await thrown(agent.call('windows.revoke', { projectId, path: UNITY }))).toThrow(`windows.revoke ${notAgents}`);
+    expect(await thrown(agent.call('windows.frame', { threadId, windowId: '101' }))).toThrow(`windows.frame ${notAgents}`);
   });
 
   test('output must be a new .png inside the conversation, its project or its temporary folder', async () => {
@@ -249,6 +251,37 @@ describe('window capture', () => {
     await Bun.sleep(2100);
     expect(await thrown(owner.call('windows.frame', { threadId, windowId: '101' }))).toThrow('is gone');
     expect((await emptied).watch).toBeNull();
+  });
+
+  test('a clip asked while a screenshot card waits gets a card of its own', async () => {
+    type Consent = Extract<MessagePart, { type: 'window_consent' }>;
+    const card = () => owner.next('message.started', message => message.parts[0]?.type === 'window_consent', 5000).then(message => message.parts[0] as Consent);
+    const first = card();
+    const shot = agent.call('windows.screenshot', { threadId, target: { id: '101' } });
+    const screenshotCard = await first;
+    const second = card();
+    const clip = thrown(agent.call('windows.clip', { threadId, target: { id: '101' }, seconds: 0.5, fps: 2 }));
+    const clipCard = await second;
+    expect([screenshotCard.kind, clipCard.kind]).toEqual(['screenshot', 'clip']);
+    await owner.call('windows.consent', { threadId, requestId: screenshotCard.requestId, answer: 'once' });
+    await shot;
+    // Allowing the screenshot let nothing else through.
+    await owner.call('windows.consent', { threadId, requestId: clipCard.requestId, answer: 'refuse' });
+    expect(await clip).toThrow('the owner refused the capture of Unity.exe');
+  });
+
+  test('two first frames open one capture session, and the panel stops once its app joins Never capture', async () => {
+    const answered = owner.next('message.started', message => message.parts[0]?.type === 'window_consent', 5000)
+      .then(message => owner.call('windows.consent', { threadId, requestId: (message.parts[0] as { requestId: string }).requestId, answer: 'once' }));
+    await agent.call('windows.watch', { threadId, target: { id: '101' } });
+    await answered;
+    // A phone and a desktop asking at once.
+    await Promise.all([owner.call('windows.frame', { threadId, windowId: '101' }), owner.call('windows.frame', { threadId, windowId: '101' })]);
+    expect(fake.opened).toEqual(['101']);
+    await owner.call('settings.set', { windowCaptureExclusions: ['unity'] } as never);
+    expect(await thrown(owner.call('windows.frame', { threadId, windowId: '101' }))).toThrow('Unity.exe is excluded from capture');
+    expect(fake.closed()).toBe(1);
+    expect((await owner.call('windows.list', { threadId })).watch).toBeNull();
   });
 });
 

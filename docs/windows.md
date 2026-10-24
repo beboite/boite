@@ -40,12 +40,15 @@ boite window close
     with its number and time.
   - The sheet fits `--max` across, or 8192 pixels with `--max 0`.
 - Without `--output`, the file goes to the conversation's temporary folder
-  (`<temp>/boite-windows/<thread-id>/`). An `--output` must be:
+  (`<temp>/boite-windows/<thread-id>/`), created for this user only. A folder
+  there that is a link or belongs to another user is refused. An `--output`
+  must be:
   - a new `.png` file;
   - in a folder that, once links are followed, sits inside the conversation's
     folder, its project or that temporary folder.
 
-  The core writes the file. The image goes nowhere else.
+  The core writes the file, after checking again that its folder still
+  resolves to the same place. The image goes nowhere else.
 - `watch` opens the window in the conversation's Window panel. `close`
   empties the panel.
 
@@ -62,6 +65,8 @@ The checks run in this order. The first one that fails refuses the capture:
      `LockApp.exe`, `CredentialUIBroker.exe`, `consent.exe`);
    - any name or full executable path listed in the
      `windowCaptureExclusions` setting (Settings, General, Never capture).
+     An app added there while the panel shows it closes the panel on the next
+     frame.
 
    `WINDOW_CAPTURE_EXCLUDED` in `packages/contracts/src/windows.ts` holds the
    built-in list.
@@ -81,7 +86,8 @@ The checks run in this order. The first one that fails refuses the capture:
      - **Always for this project** adds the app to the list.
      - **Refuse**, or no answer in time, refuses the capture.
    - Phones get a push notification for the card.
-   - Two captures of the same app share one card.
+   - Two captures of the same kind (screenshot, clip or watch) of the same app
+     share one card.
 
 Every capture leaves a `window_capture` item in the conversation, with a JPEG
 thumbnail of at most 320 pixels. This applies to screenshots, clips and the
@@ -174,7 +180,10 @@ On an X11 session, the backend uses libX11 through `bun:ffi`
 
 - It lists `_NET_CLIENT_LIST`, or the root's mapped children when no window
   manager runs.
-- It reads `_NET_WM_PID` and `/proc/<pid>/exe`.
+- It reads `_NET_WM_PID` and `/proc/<pid>/exe`. A window whose
+  `WM_CLIENT_MACHINE` names another host (forwarded with `ssh -X`) gets no
+  PID or executable, since that PID belongs to another machine: it cannot be
+  allowed, so it is refused.
 - With libXcomposite, it reads the window's own pixmap, so a covered window
   comes out whole. Without it, `XGetImage` returns whatever lies on top.
 - An X error such as `BadWindow` is turned into "gone" instead of ending the

@@ -36,7 +36,7 @@ import {
   type WindowTarget,
   type WindowWatch,
 } from '@boite/contracts';
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Core } from '../core.ts';
@@ -104,7 +104,7 @@ export class DesktopWindows {
   #backend?: Promise<WindowCapture | { unavailable: string }>;
   readonly #watches = new Map<string, Watch>();
   readonly #streams = new Map<string, Stream>();
-  /** By request id, and by `threadId\npath` so two captures of one app share one card. */
+  /** By request id, and by `threadId\nkind\npath` so two captures of one kind of one app share one card. */
   readonly #consents = new Map<string, Consent>();
   #tableReady = false;
   #closed = false;
@@ -213,6 +213,10 @@ export class DesktopWindows {
     if ((watch.grant === 'always' || watch.grant === 'allowed') && !this.#allowedPaths(thread.projectId).has(pathKey(watch.path))) {
       this.#close(threadId, 'its app was taken off the project\'s list');
       throw refused(`${watch.process} is no longer allowed in this project`, { windowId });
+    }
+    if (this.#excluded(watch)) {
+      this.#close(threadId, 'its app was added to Never capture');
+      throw refused(`${watch.process} is excluded from capture`, { windowId });
     }
     const backend = await this.#load();
     if ('unavailable' in backend) throw refused(backend.unavailable);
@@ -375,7 +379,7 @@ export class DesktopWindows {
     };
   }
 
-  #excluded(window: NativeWindow): boolean {
+  #excluded(window: { process: string; path: string }): boolean {
     const name = appName(window.process);
     // Exclusions fold case on every system: a near match excludes too much, never too little.
     const path = window.path.toLowerCase();
@@ -389,7 +393,8 @@ export class DesktopWindows {
   // --- consent ------------------------------------------------------------
 
   async #ask(thread: ThreadSummary, window: NativeWindow, kind: WindowCaptureKind): Promise<Grant> {
-    const key = `${thread.id}\n${pathKey(window.path)}`;
+    // Only the same kind shares a card: an answer to "a screenshot" never lets a clip or a live view through.
+    const key = `${thread.id}\n${kind}\n${pathKey(window.path)}`;
     const waiting = this.#consents.get(key);
     if (waiting) return waiting.promise;
     const turn = this.#core.journal.runningTurn(thread.id) ?? this.#core.journal.lastTurn(thread.id);
@@ -513,10 +518,7 @@ export class DesktopWindows {
    */
   #output(thread: ThreadSummary, output: string | undefined): string {
     const temp = join(this.#tempRoot, thread.id);
-    if (output === undefined) {
-      mkdirSync(temp, { recursive: true, mode: 0o700 });
-      return join(temp, `window-${new Date().toISOString().replace(/[:.]/g, '-')}-${newId('').slice(-6)}.png`);
-    }
+    if (output === undefined) return join(this.#temp(thread), `window-${new Date().toISOString().replace(/[:.]/g, '-')}-${newId('').slice(-6)}.png`);
     if (typeof output !== 'string' || output.length > 1024 || /\p{Cc}/u.test(output) || !isAbsolute(output) || !output.toLowerCase().endsWith('.png')) {
       throw invalidParams('output must be an absolute path to a new .png file', { field: 'output' });
     }
@@ -525,7 +527,7 @@ export class DesktopWindows {
       const project = this.#core.journal.getProject(thread.projectId);
       if (project) roots.push(project.path);
     }
-    if (output.startsWith(temp)) mkdirSync(temp, { recursive: true, mode: 0o700 });
+    if (output.startsWith(temp)) this.#temp(thread);
     let folder: string;
     try {
       folder = realpathSync(dirname(resolve(output)));
@@ -542,7 +544,27 @@ export class DesktopWindows {
     return join(folder, basename(output));
   }
 
+  /**
+   * The conversation's temporary folder, real path. On a shared /tmp another
+   * user could create it first, or put a link there: both are refused.
+   */
+  #temp(thread: ThreadSummary): string {
+    const temp = join(this.#tempRoot, thread.id);
+    mkdirSync(temp, { recursive: true, mode: 0o700 });
+    for (const folder of [this.#tempRoot, temp]) {
+      const stat = lstatSync(folder);
+      if (!stat.isDirectory() || (process.getuid !== undefined && stat.uid !== process.getuid())) {
+        throw refused(`${folder} is not a folder of this user's: remove it and capture again`, { field: 'output' });
+      }
+    }
+    return realpathSync(temp);
+  }
+
   #write(path: string, bytes: Uint8Array): void {
+    // The folder was checked before the owner answered, up to 10 minutes ago: one swapped for a link since is refused.
+    let folder: string | undefined;
+    try { folder = realpathSync(dirname(path)); } catch { /* removed since */ }
+    if (folder !== dirname(path)) throw refused(`${dirname(path)} changed while the capture waited: capture again`, { field: 'output' });
     try {
       writeFileSync(path, bytes, { flag: 'wx' });
     } catch (error) {
@@ -554,17 +576,20 @@ export class DesktopWindows {
   // --- the Window panel ---------------------------------------------------
 
   async #stream(thread: ThreadSummary, backend: WindowCapture, watch: Watch): Promise<Stream> {
-    let stream = this.#streams.get(thread.id);
+    let stream = this.#currentStream(thread.id, watch);
     const now = Date.now();
-    if (stream && stream.windowId !== watch.windowId) { this.#stopStream(thread.id); stream = undefined; }
     if (!stream || now - stream.checkedAt > STREAM_RECHECK_MS) {
       // A window id can be reused once its window closes: the panel shows only the app it was opened on.
       const window = (await backend.list()).find(candidate => candidate.id === watch.windowId);
+      // The panel may have closed or moved to another window during the wait.
+      if (this.#watches.get(thread.id) !== watch) throw refused(`window ${watch.windowId} is not open in this conversation's Window panel`, { windowId: watch.windowId });
       if (!window || window.pid !== watch.pid || pathKey(window.path) !== pathKey(watch.path)) {
         this.#close(thread.id, 'the window closed');
         throw refused(`window ${watch.windowId} of ${watch.process} is gone`, { windowId: watch.windowId, code: 'gone' });
       }
       if (window.minimized) throw refused('window minimized: restore it first', { windowId: watch.windowId, code: 'minimized' });
+      // Another viewer may have started the stream during the wait: a second one would never be closed.
+      stream = this.#currentStream(thread.id, watch);
       if (stream) stream.checkedAt = now;
     }
     if (stream) {
@@ -580,6 +605,13 @@ export class DesktopWindows {
     void this.#pixels(() => started.frames.next(), watch)
       .then(pixels => this.#card(thread, 'stream', { id: watch.windowId, process: watch.process }, pixels, pixels, {}))
       .catch(() => undefined);
+    return stream;
+  }
+
+  /** The thread's stream when it shows the watched window; a stream of another window stops. */
+  #currentStream(threadId: string, watch: Watch): Stream | undefined {
+    const stream = this.#streams.get(threadId);
+    if (stream && stream.windowId !== watch.windowId) { this.#stopStream(threadId); return undefined; }
     return stream;
   }
 

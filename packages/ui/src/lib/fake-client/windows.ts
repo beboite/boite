@@ -257,7 +257,8 @@ export function windowsMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       const window = WINDOWS.find(one => one.id === windowId);
       if (!window) throw refusal('the window closed', { windowId });
       if (window.minimized) throw refusal(`${window.process} is minimized; restore it to see it`, { windowId });
-      const size = fit(window.width, window.height, maxWidth ?? window.width);
+      // The core's default: 1280 on the longest side.
+      const size = fit(window.width, window.height, maxWidth ?? 1280);
       const tick = Math.floor(Date.now() / 1000);
       const id = `wf-${windowId}-${tick}-${size.width}-${quality}`;
       if (!streamed.has(threadId)) {

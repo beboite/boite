@@ -154,3 +154,21 @@ test('the allowed apps list removes an app only after the confirmation', async (
   expect(calls).toHaveBeenCalledWith('windows.revoke', { projectId: 'p-boite', path: expect.stringMatching(/Unity\.exe$/i) });
   expect($('window-allowlist-empty')).not.toBeNull();
 });
+
+test('the allowed apps list reads again when a project is added, and on Refresh after an Always answered elsewhere', async () => {
+  apps.push(mount(WindowAllowlistCard, { target: document.body, props: { store } })); await settle();
+  const calls = vi.spyOn(client, 'call');
+  const project = await store.addProject('C:/Dev/Fresh', { navigate: false }); await settle();
+  expect(calls).toHaveBeenCalledWith('windows.allowlist', { projectId: project!.id });
+
+  let posted: Extract<MessagePart, { type: 'window_consent' }> | undefined;
+  const off = client.on('message.part', ({ part }) => { if (part?.type === 'window_consent') posted = part; });
+  const watching = client.call('windows.watch', { threadId: thread, target: { process: 'blender.exe' } });
+  await settle();
+  off();
+  await client.call('windows.consent', { threadId: thread, requestId: posted!.requestId, answer: 'always' });
+  await watching;
+  expect(document.body.textContent).not.toContain('blender.exe');
+  $<HTMLButtonElement>('window-allowlist-refresh')!.click(); await settle();
+  expect(document.body.textContent).toContain('blender.exe');
+});

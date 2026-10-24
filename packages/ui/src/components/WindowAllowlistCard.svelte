@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { RefreshCw } from '@lucide/svelte';
+  import { untrack } from 'svelte';
   import { errorText } from '../lib/errors';
   import type { AllowedWindowApp, Project, ProjectId } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
@@ -19,13 +21,15 @@
   /** Null until read; per project, its apps or why they could not be read. */
   let lists = $state<Record<ProjectId, AllowedWindowApp[] | string> | null>(null);
   let busy = $state(false);
-  let asked = false;
+  let loads = 0;
+  /** A project added or removed reads the lists again; an Always answered elsewhere waits for Refresh. */
+  const projectIds = $derived(projects.map((p) => p.id).join('\n'));
   const shown = $derived(lists === null ? [] : projects.filter((p) => { const list = lists?.[p.id]; return typeof list === 'string' || (list?.length ?? 0) > 0; }));
 
   $effect(() => {
-    if (asked || !store.owner || store.connection !== 'ready') return;
-    asked = true;
-    void load();
+    void projectIds;
+    if (!store.owner || store.connection !== 'ready') return;
+    untrack(() => void load());
   });
 
   async function read(project: Project): Promise<AllowedWindowApp[] | string> {
@@ -37,8 +41,10 @@
   }
 
   async function load() {
+    const at = ++loads;
     const results = await Promise.all(projects.map(async (p) => [p.id, await read(p)] as const));
-    lists = Object.fromEntries(results);
+    // Only the latest reading lands: an earlier one may answer last.
+    if (at === loads) lists = Object.fromEntries(results);
   }
 
   async function remove(project: Project, app: AllowedWindowApp) {
@@ -64,7 +70,7 @@
 
 {#if store.owner}
   <section class="card" id="settings-windows" data-testid="window-allowlist">
-    <h2 class="ui-label-box"><span class="ui-label">{s.allowedHeading}</span><InfoTip topic={s.allowedHeading} text={s.allowedIntro} /></h2>
+    <h2 class="ui-label-box"><span class="ui-label">{s.allowedHeading}</span><InfoTip topic={s.allowedHeading} text={s.allowedIntro} /><button type="button" class="ghost icon" disabled={busy} onclick={() => void load()} aria-label={strings.common.refresh} title={strings.common.refresh} data-testid="window-allowlist-refresh"><RefreshCw size={15} /></button></h2>
     {#if lists !== null && shown.length === 0}
       <p class="muted" data-testid="window-allowlist-empty">{s.allowedEmpty}</p>
     {/if}

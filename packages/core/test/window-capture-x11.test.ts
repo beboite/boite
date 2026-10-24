@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { dlopen, FFIType } from 'bun:ffi';
 import { readlinkSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { basename } from 'node:path';
 import { createPosixPlatform } from '../src/platform/posix.ts';
 import type { WindowCapture, WindowPixels } from '../src/platform/types.ts';
@@ -146,6 +147,17 @@ describe.skipIf(process.platform !== 'linux' || !process.env.DISPLAY)('X11 windo
     });
   });
 
+  test('a window forwarded from another host (ssh -X) gets no pid or executable from this /proc', async () => {
+    const forwarded = await makeWindow(400, 50, 60, 40, GREEN, 'Boîte forwarded');
+    const elsewhere = Buffer.from('elsewhere.invalid');
+    x11.XChangeProperty(display, forwarded, 36, 31, 8, 0, elsewhere, elsewhere.length);
+    const here = Buffer.from(hostname());
+    x11.XChangeProperty(display, covered, 36, 31, 8, 0, here, here.length);
+    x11.XSync(display, 0);
+    const windows = await platformCapture.list();
+    expect(windows.find(window => window.id === String(forwarded))).toMatchObject({ pid: 0, path: '', process: '' });
+    expect(windows.find(window => window.id === String(covered))).toMatchObject({ pid: process.pid, path: readlinkSync('/proc/self/exe') });
+  });
   test('captures a covered window at its size, with its own pixels when Composite is there', async () => {
     const picture = await platformCapture.capture(String(covered));
     const seen = { via: picture.via, width: picture.width, height: picture.height, bytes: picture.bgra.length, centre: pixel(picture, 100, 75), blank: isBlank(picture) };

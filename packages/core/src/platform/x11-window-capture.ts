@@ -19,6 +19,7 @@
  */
 import { CFunction, dlopen, FFIType, JSCallback, read, toArrayBuffer, type Pointer } from 'bun:ffi';
 import { readlinkSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { basename } from 'node:path';
 import type { NativeWindow, WindowCapture, WindowFrames, WindowPixels } from './types.ts';
 import { goneError, minimizedError, WindowCaptureError } from './window-pixels.ts';
@@ -57,7 +58,7 @@ function loadComposite() {
 type X11 = ReturnType<typeof loadX11>;
 type Composite = ReturnType<typeof loadComposite>;
 
-const XA_ATOM = 4, XA_CARDINAL = 6, XA_WINDOW = 33, XA_WM_NAME = 39, XA_WM_CLASS = 67;
+const XA_ATOM = 4, XA_CARDINAL = 6, XA_WINDOW = 33, XA_WM_CLIENT_MACHINE = 36, XA_WM_NAME = 39, XA_WM_CLASS = 67;
 const ANY_PROPERTY_TYPE = 0;
 const INPUT_OUTPUT = 1, IS_VIEWABLE = 2, ICONIC_STATE = 3;
 const Z_PIXMAP = 2;
@@ -222,6 +223,12 @@ function text(property: Property | null, utf8Type: number): string | null {
   return decoder.decode(property.bytes).replace(/\0+$/, '');
 }
 
+/** Whether WM_CLIENT_MACHINE names this host, short or fully qualified. */
+function thisHost(machine: string): boolean {
+  const [a, b] = [machine.toLowerCase(), hostname().toLowerCase()];
+  return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+}
+
 function executable(pid: number): string {
   if (pid <= 0) return '';
   try { return readlinkSync(`/proc/${pid}/exe`); } catch { return ''; }
@@ -267,7 +274,10 @@ export class X11WindowCapture implements WindowCapture {
       // No window manager: what a person sees is every mapped child of the root but popups.
       if (!managed && (!attributes.inputOutput || !attributes.viewable || attributes.overrideRedirect)) continue;
       const pidProperty = this.property(window, this.atoms.pid, XA_CARDINAL);
-      const pid = (pidProperty && longs(pidProperty)[0]) || 0;
+      // _NET_WM_PID is a process of the host in WM_CLIENT_MACHINE: a window forwarded from another
+      // machine (ssh -X) has no program here, and the service refuses a window with no path.
+      const machine = text(this.property(window, XA_WM_CLIENT_MACHINE, ANY_PROPERTY_TYPE), this.atoms.utf8);
+      const pid = (!machine || thisHost(machine)) ? ((pidProperty && longs(pidProperty)[0]) || 0) : 0;
       const path = executable(pid);
       const title = text(this.property(window, this.atoms.netName, this.atoms.utf8), this.atoms.utf8)
         ?? text(this.property(window, XA_WM_NAME, ANY_PROPERTY_TYPE), this.atoms.utf8) ?? '';
