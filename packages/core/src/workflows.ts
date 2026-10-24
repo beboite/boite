@@ -103,6 +103,10 @@ export class Workflows {
   active(rootId: string): boolean {
     return this.core.journal.db.query("SELECT 1 FROM workflow_runs WHERE root_id = ? AND status IN ('running', 'paused') LIMIT 1").get(rootId) !== null;
   }
+  /** Whether a run of the conversation is at work now; a paused one waits for a resume that putting it away cancels. */
+  atWork(rootId: string): boolean {
+    return this.core.journal.db.query("SELECT 1 FROM workflow_runs WHERE root_id = ? AND status = 'running' LIMIT 1").get(rootId) !== null;
+  }
 
   // -- records ---------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode } from '@boite/contracts';
 import type { DelegationConfig, Turn, WorkflowPlan, WorkflowRun } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
@@ -9,6 +9,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { runCli } from '../src/cli.ts';
 import { startServer } from '../src/server.ts';
+import { assertIdleFamily } from '../src/threads/completion.ts';
 import { HANDOFF } from '../src/threads/handoff.ts';
 import { AGENT_ENV } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -631,6 +632,23 @@ test('a paused run lets its running steps end, and is done once every step is', 
   await owner.call('workflows.control', { threadId, runId: one.id, action: 'pause' });
   [...held.values()][0]!('A done');
   expect((await settled(h, threadId, one.id)).status).toBe('done');
+});
+
+test('Mark done waits for a running run and stops a paused one, which expiry still keeps', async () => {
+  const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', profile: 'fast', task: 'a' }, { id: 'b', profile: 'fast', task: 'b {{a}}' }] }, requestId: 'done' });
+  await waitFor(() => held.size === 1);
+  expect(await owner.call('threads.archive', { threadId, onlyIfIdle: true }).catch(error => error)).toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'pause' });
+  [...held.values()][0]!('A done');
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'done' && h.core.threads.require(threadId).status === 'idle');
+  // The Curio Shop case: a run paused days ago refused Done with "a workflow is still running".
+  expect(() => assertIdleFamily(h.core, threadId)).toThrow('a workflow is still running');
+  expect((await owner.call('threads.archive', { threadId, onlyIfIdle: true })).archived).toBe(true);
+  expect(h.core.workflows.get(threadId, run.id)).toMatchObject({ status: 'stopped', error: 'The thread was archived.' });
+  await Bun.sleep(20);
+  expect(held.size).toBe(0);
 });
 
 test('completed steps keep their summary while the team is paused and deliver once resumed', async () => {
