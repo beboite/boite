@@ -1,10 +1,14 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { MessagesSquare, Play, Plus } from '@lucide/svelte';
-  import type { ThreadId, Todo } from '@boite/contracts';
+  import type { SharedBoardCommand, SharedProjectThread, ThreadId, Todo } from '@boite/contracts';
   import { BOARD_COLUMNS, cardColumn, type BoardColumn } from '../lib/board';
   import { separator, type MenuItem } from '../lib/menu';
   import { fill, strings } from '../lib/strings';
+  import { experimentOn } from '../lib/experiments.svelte';
+  import { errorText } from '../lib/errors';
+  import { secureId } from '../lib/secure-id';
+  import { sameSharedProject, sharedTodo } from '../lib/shared-ui';
   import type { Store } from '../lib/store.svelte';
   import GoalChecklist from './GoalChecklist.svelte';
   import InfoTip from './InfoTip.svelte';
@@ -26,7 +30,12 @@
   const COLUMNS = BOARD_COLUMNS;
 
   let projectId = $derived(store.openThread?.projectId ?? null);
-  let todos = $derived(projectId ? store.todos[projectId] ?? [] : []);
+  let sharedProjectId = $derived(store.shared.boards[threadId]);
+  let scope = $derived(sharedProjectId ? {threadId, sharedProjectId} : null);
+  let shared = $derived(scope ? store.shared.view(scope) : undefined);
+  let projects = $derived((store.shared.projects[threadId] ?? []).filter(p => p.shared.state === 'active'));
+  let todos = $derived(scope ? (shared?.board ?? []).map(card => sharedTodo(card, projectId ?? '', scope!.sharedProjectId)) : (projectId ? store.todos[projectId] ?? [] : []).filter(todo => !todo.shared));
+  let error = $state('');
   /** Cards whose conversation is being made: they sit In progress from the drop. */
   let starting = $state<string[]>([]);
   let unfolded = $state<string[]>([]);
@@ -36,10 +45,35 @@
   let draft = $state('');
   let board = $state<HTMLElement | undefined>(undefined);
   let page = $state(0);
+  let selected = $state<SharedProjectThread | null>(null);
+  type BoardEdit = {kind: 'update'; text?: string; status?: Todo['status']} | {kind: 'release'; claimId: string} | {kind: 'remove'};
 
   $effect(() => {
     if (projectId) untrack(() => void store.loadTodos(threadId));
   });
+  $effect(() => {
+    if (experimentOn('contacts') && store.connection === 'ready') untrack(() => { void store.shared.load(threadId).catch(e => { error = errorText(e); }); });
+  });
+  $effect(() => { const captured = scope; if (captured) return untrack(() => store.shared.watch(captured, ['board', 'threads'])); });
+  async function apply(todo: Todo, command: BoardEdit) {
+    if (!scope) return;
+    const receipt = await store.shared.call('sharedBoard.apply', {...scope, command: {...command, cardId: todo.id, requestId: secureId()} as SharedBoardCommand});
+    if (!['applied', 'queued'].includes(receipt.outcome)) throw new Error(strings.shared.conflict);
+  }
+
+  function localWorker(todo: Todo): boolean {
+    return !todo.shared || Boolean(shared?.project && todo.shared.card.assignment && sameSharedProject(todo.shared.card.assignment.worker.project, shared.project.local));
+  }
+
+  function foreignWorker(todo: Todo): SharedProjectThread | undefined {
+    const worker = todo.shared?.card.assignment?.worker;
+    return worker ? shared?.threads.find(row => store.shared.threadKey(row.ref) === store.shared.threadKey(worker)) : undefined;
+  }
+
+  async function resume(todo: Todo): Promise<void> {
+    if (scope && todo.shared?.card.assignment && localWorker(todo)) await store.shared.call('sharedBoard.start', {...scope, threadId: todo.shared.card.assignment.worker.threadId, cardId: todo.id, claimId: todo.shared.card.assignment.claimId});
+    else if (!scope) await store.resumeCardGoal(threadId, todo);
+  }
 
   function columnOf(todo: Todo): Column {
     return starting.includes(todo.id) ? 'doing' : cardColumn(todo);
@@ -55,6 +89,18 @@
   async function move(todo: Todo, to: Column): Promise<void> {
     if (columnOf(todo) === to) return;
     if (narrow) goTo(COLUMNS.indexOf(to));
+    if (scope && todo.shared) {
+      error = '';
+      starting = [...starting, todo.id];
+      try {
+        if (to === 'doing' && !todo.shared.card.assignment) await store.shared.startCard(scope, todo.shared.card);
+        else if (to === 'doing' && localWorker(todo) && ['reserved', 'uncertain'].includes(todo.shared.card.assignment!.state)) await resume(todo);
+        else if (to === 'todo' && todo.shared.card.assignment) await apply(todo, {kind: 'release', claimId: todo.shared.card.assignment.claimId});
+        else await apply(todo, {kind: 'update', status: to === 'done' ? 'done' : to === 'review' ? 'claimed' : 'open'});
+      } catch (e) { error = errorText(e); }
+      finally { starting = starting.filter(id => id !== todo.id); }
+      return;
+    }
     if (to === 'doing' && !todo.goalThreadId) {
       starting = [...starting, todo.id];
       try { await store.startCardGoal(threadId, todo); }
@@ -68,9 +114,9 @@
   function actions(todo: Todo): MenuItem[] {
     const here = columnOf(todo);
     return [
-      ...COLUMNS.filter((column) => column !== here).map((column) => ({ id: `move:${column}`, label: fill(strings.board.moveTo, { column: strings.board.columns[column] }) })),
-      ...(todo.goalThreadId ? [separator('sep-thread'), ...(stalled(todo) ? [{ id: 'resume', label: strings.board.resume, glyph: Play }] : []),
-        { id: 'open', label: strings.board.openThread, glyph: MessagesSquare }] : []),
+      ...COLUMNS.filter((column) => column !== here).map((column) => ({ id: `move:${column}`, label: fill(strings.board.moveTo, { column: strings.board.columns[column] }), disabled: Boolean(scope && !shared?.authorityAvailable && (column === 'doing' || column === 'todo' && todo.shared?.card.assignment)) })),
+      ...(todo.goalThreadId ? [separator('sep-thread'), ...(stalled(todo) && localWorker(todo) ? [{ id: 'resume', label: strings.board.resume, glyph: Play }] : []),
+        { id: 'open', label: strings.board.openThread, glyph: MessagesSquare, disabled: !localWorker(todo) && !foreignWorker(todo) }] : []),
       separator('sep-remove'),
       { id: 'remove', label: strings.board.remove, danger: true }
     ];
@@ -78,13 +124,19 @@
 
   function pick(todo: Todo, id: string): void {
     if (id.startsWith('move:')) void move(todo, id.slice(5) as Column);
-    else if (id === 'open' && todo.goalThreadId) void store.open(todo.goalThreadId);
-    else if (id === 'resume') void store.resumeCardGoal(threadId, todo);
-    else if (id === 'remove') void store.removeTodo(threadId, todo.id);
+    else if (id === 'open' && todo.goalThreadId) { if (localWorker(todo)) void store.open(todo.goalThreadId); else selected = foreignWorker(todo) ?? null; }
+    else if (id === 'resume') void resume(todo).catch(e => { error = errorText(e); });
+    else if (id === 'remove') { if (scope) void apply(todo, {kind: 'remove'}).catch(e => { error = errorText(e); }); else void store.removeTodo(threadId, todo.id); }
   }
 
   /** The agent on a card's goal: its model, the machine it runs on, and whether a turn is running. */
   function agentOf(todo: Todo): { providerId: string; label: string; running: boolean } | null {
+    if (todo.shared?.card.assignment) {
+      const assignment = todo.shared.card.assignment, project = shared?.project;
+      const own = project && sameSharedProject(assignment.worker.project, project.local);
+      const info = assignment.workerInfo;
+      return {providerId: info?.agent.split(' ')[0] ?? '', label: [own ? strings.shared.you : project?.contact.name, info?.machine, info?.agent].filter(Boolean).join(' · '), running: assignment.state === 'running'};
+    }
     const thread = todo.goalThreadId ? store.threads.find((entry) => entry.id === todo.goalThreadId) : undefined;
     if (!thread) return null;
     const model = thread.model ? store.providers.find((provider) => provider.id === thread.providerId)?.models.find((entry) => entry.id === thread.model)?.name ?? thread.model : null;
@@ -95,8 +147,14 @@
   async function add(): Promise<void> {
     const text = draft.trim();
     if (!text) { adding = false; return; }
-    draft = '';
-    await store.addTodo(threadId, text);
+    error = '';
+    try {
+      if (scope) {
+        const receipt = await store.shared.call('sharedBoard.apply', {...scope, command: {kind: 'add', text, cardId: secureId(), requestId: secureId()}});
+        if (!['applied', 'queued'].includes(receipt.outcome)) throw new Error(strings.shared.conflict);
+      } else await store.addTodo(threadId, text);
+      draft = '';
+    } catch (e) { error = errorText(e); }
   }
 
   function toggle(todo: Todo): void {
@@ -127,6 +185,17 @@
   }
 </script>
 
+{#if projects.length || scope}
+  <div class="sharing" data-testid="board-sharing">
+    <Menu items={[{id: '', label: strings.shared.local}, ...projects.map(p => ({id: p.shared.id, label: fill(strings.shared.with, {name: p.contact.name})}))]} label={strings.shared.board} testid="board-sharing-menu" onpick={id => { store.shared.boards[threadId] = id || undefined; }}>
+      <span>{scope ? fill(strings.shared.with, {name: shared?.project?.contact.name ?? ''}) : strings.shared.local}</span>
+    </Menu>
+    {#if scope && shared?.project?.shared.state === 'revoked'}<span>{strings.shared.state.revoked}</span>
+    {:else if scope && !shared?.project?.shared.access.every(a => a.board)}<span>{strings.shared.boardWaiting}</span>
+    {:else if scope && !shared?.authorityAvailable}<span role="status">{strings.shared.authorityUnavailable}</span>{/if}
+  </div>
+{/if}
+{#if error || shared?.error}<p class="board-error" role="alert" data-testid="board-error">{error || shared?.error}</p>{/if}
 <div class="board" class:pager={narrow} bind:this={board} onscroll={narrow ? onScroll : undefined} data-testid="project-board">
   {#each columns as { column, cards } (column)}
     <section class="column" class:over={over === column} data-column={column} data-testid="board-column"
@@ -166,6 +235,8 @@
                 {#if agent.running}<span class="running" aria-hidden="true"></span>{/if}
               </span>
             {/if}
+            {#if todo.shared?.card.pending}<span class="state muted ui-label">{strings.shared.queued}</span>{/if}
+            {#if todo.shared?.card.assignment?.state === 'reserved' || todo.shared?.card.assignment?.state === 'uncertain'}<span class="state muted ui-label">{todo.shared.card.assignment.state === 'reserved' ? strings.shared.reserved : strings.shared.uncertain}</span>{/if}
             {#if listed.length > 0}
               <div class="progress-row" data-testid="board-card-progress">
                 <progress max={listed.length} value={ticked} aria-hidden="true"></progress>
@@ -187,7 +258,7 @@
           </li>
         {/each}
       </ul>
-      {#if column === 'todo'}
+      {#if column === 'todo' && (!scope || shared?.project?.shared.state === 'active' && shared.project.shared.access.every(a => a.board))}
         {#if adding}
           <form class="add-form" onsubmit={(event) => { event.preventDefault(); void add(); }}>
             <input class="add-input" bind:value={draft} placeholder={strings.board.addPlaceholder} aria-label={strings.board.add} data-testid="board-add-input"
@@ -214,7 +285,12 @@
   </div>
 {/if}
 
+{#if selected && scope}{#await import('./shared/SharedThreadDialog.svelte') then module}<module.default {store} {scope} target={selected} onclose={() => { selected = null; }} />{/await}{/if}
+
 <style>
+  .sharing { display: flex; gap: 8px; align-items: center; padding: 2px 12px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .sharing > span { min-width: 0; overflow-wrap: anywhere; }
+  .board-error { padding: 0 12px; margin: 4px 0; font-size: var(--text-xs); color: var(--color-danger); }
   .board {
     flex: 1;
     min-height: 0;

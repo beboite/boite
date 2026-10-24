@@ -2,6 +2,7 @@
 import type { AgentTranscript, RpcMethodName, RpcParams, RpcResult, SharedAccessPage, SharedBoardCard, SharedBoardPage, SharedComputeJob, SharedProjectScope, SharedProjectThread, SharedProjectView } from '@boite/contracts';
 import type { Client } from '../client';
 import { secureId } from '../secure-id';
+import { strings } from '../strings';
 import type { StoreContext } from './context';
 
 export type SharedMethod = Extract<RpcMethodName, `sharedProjects.${string}` | `sharedBoard.${string}` | `sharedCompute.${string}` | `sharedAccess.${string}` | 'contacts.sendHuman'>;
@@ -30,8 +31,12 @@ interface Watch {
   accessAfter?: string;
 }
 const scopeKey = (p: SharedProjectScope) => JSON.stringify([p.threadId, p.sharedProjectId]);
+const MUTATIONS: ReadonlySet<SharedMethod> = new Set(['sharedProjects.decide', 'sharedProjects.revoke', 'sharedProjects.configure',
+  'sharedBoard.apply', 'sharedBoard.start', 'sharedCompute.start', 'sharedCompute.send', 'sharedCompute.cancel', 'sharedAccess.override', 'sharedAccess.revokeOverride']);
 
 export class SharedProjects {
+  /** Drawer selection belongs to this machine, scoped by its local conversation. */
+  boards = $state<Record<string, string | undefined>>({});
   projects = $state<Record<string, SharedProjectView[]>>({});
   scopes = $state<Record<string, SharedScopeView>>({});
   readonly #watches = new Map<string, Watch>();
@@ -196,10 +201,33 @@ export class SharedProjects {
     const client = this.#client(), epoch = this.#epoch;
     const result = await client.call(method, params);
     if (client !== this.ctx.client || epoch !== this.#epoch) throw new Error('This machine connection changed.');
-    if ('sharedProjectId' in params) this.changed(params as {sharedProjectId: string; threadId?: string});
+    if (MUTATIONS.has(method) && 'sharedProjectId' in params) this.changed(params as {sharedProjectId: string; threadId?: string});
     return result;
   }
   read(params: RpcParams<'sharedProjects.read'>): Promise<AgentTranscript> { return this.call('sharedProjects.read', params); }
+  /** Claim before starting a new goal. A losing claimant removes only the empty worker it just created. */
+  async startCard(scope: SharedProjectScope, card: SharedBoardCard): Promise<void> {
+    const client = this.#client(), epoch = this.#epoch, store = this.ctx.store;
+    const from = store.openThread?.id === scope.threadId ? store.openThread : store.threads.find(t => t.id === scope.threadId);
+    const project = this.view(scope)?.project;
+    if (!from?.projectId || !project || card.assignment) throw new Error(strings.shared.conflict);
+    const worker = await client.call('threads.create', {projectId: from.projectId, providerId: from.providerId, accountId: from.accountId,
+      permissionMode: from.permissionMode, effort: from.effort, speed: from.speed ?? null, ...(from.model ? {model: from.model} : {}), ...(from.branch ? {worktree: {}} : {}), title: card.text.slice(0, 60)});
+    // Always finish against the captured owning client. A later machine selection cannot redirect this claim.
+    let discard = false;
+    try {
+      if (client !== this.ctx.client || epoch !== this.#epoch) { discard = true; throw new Error(strings.shared.offline); }
+      const receipt = await client.call('sharedBoard.apply', {...scope, command: {kind: 'claim', cardId: card.id, expectedRevision: card.revision,
+        requestId: secureId(), worker: {project: project.local, threadId: worker.id, address: {coreId: project.local.ownerCoreId, threadId: worker.id}}}});
+      const reserved = receipt.outcome === 'applied' && receipt.card?.assignment !== null;
+      if (!reserved || !receipt.card?.assignment) { discard = true; throw new Error(strings.shared.conflict); }
+      await client.call('sharedBoard.start', {...scope, threadId: worker.id, cardId: card.id, claimId: receipt.card.assignment.claimId});
+    } finally {
+      // A refused/lost start can be inspected and retried. Never delete a reserved worker after an uncertain submission.
+      if (discard) await client.call('threads.remove', {threadId: worker.id}).catch(() => undefined);
+      this.changed(scope);
+    }
+  }
   sendHuman(params: Omit<RpcParams<'contacts.sendHuman'>, 'requestId'> & {requestId?: string}) {
     return this.call('contacts.sendHuman', {...params, requestId: params.requestId ?? secureId()});
   }

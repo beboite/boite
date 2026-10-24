@@ -65,3 +65,14 @@ test('revocation retires the scope and a delayed same-page access verdict trigge
   expect(sa.shared.view(as)?.threads).toEqual([]);expect(sa.shared.view(as)?.access).toBeNull();
   expect(a.sharedSubscriptions).toEqual([]);spy.mockRestore();
 });
+
+test('read-only shared calls do not invalidate their own watched view', async () => {
+  const {sa, as} = await setup();
+  releases.push(sa.shared.watch(as, ['threads']));
+  await vi.waitFor(() => expect(sa.shared.view(as)?.threads.length).toBeGreaterThan(1));
+  const refresh = vi.spyOn(sa.shared, 'refresh');
+  await sa.shared.call('sharedProjects.get', as);
+  await sa.shared.call('sharedAccess.reviewConfig', {sharedProjectId: as.sharedProjectId});
+  await sa.shared.call('sharedAccess.overrides', {sharedProjectId: as.sharedProjectId});
+  expect(refresh).not.toHaveBeenCalled();
+});

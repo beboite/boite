@@ -13,6 +13,7 @@
   import ProjectTile from '../ProjectTile.svelte';
   import FingerprintWords from './FingerprintWords.svelte';
   import RequestCard from './RequestCard.svelte';
+  import SharedAssociations from '../shared/SharedAssociations.svelte';
 
   /**
    * One contact, picked in the thread list: its name (a click renames it) and
@@ -151,6 +152,7 @@
       <button type="button" class="ghost icon" aria-label={fill(labels.closeProject, { project: name })} title={fill(labels.closeProject, { project: name })}
         data-testid="contact-revoke-{grant.projectId}" onclick={() => void stopSharing(grant.projectId, name)}><X size={15} /></button>
     </div>
+    <SharedAssociations store={view.store} {contact} projectId={grant.projectId} />
   {:else}
     <p class="hint none">{labels.nothingOpen}</p>
   {/each}

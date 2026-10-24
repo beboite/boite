@@ -13,6 +13,7 @@
     placement = 'top',
     variant = 'chip',
     switches = false,
+    disabled = false,
     label,
     testid,
     children
@@ -26,6 +27,7 @@
     variant?: 'chip' | 'ghost' | 'text';
     /** Show persistent toggles with switches and keep the menu open while adjusting them. */
     switches?: boolean;
+    disabled?: boolean;
     label: string;
     testid?: string;
     children: Snippet;
@@ -47,11 +49,12 @@
 
   function toggle(event: MouseEvent) {
     event.stopPropagation();
+    if (disabled) return;
     popover.toggle();
   }
 
   function pick(item: MenuItem) {
-    if (item.disabled) return;
+    if (disabled || item.disabled) return;
     if (!switches || item.checked === undefined) popover.hide();
     onpick(item.id);
   }
@@ -64,6 +67,7 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    if (disabled) return;
     if (event.key === 'Escape') {
       if (!popover.open) return;
       event.stopPropagation();
@@ -113,6 +117,7 @@
     title={label}
     data-testid={testid}
     bind:this={trigger}
+    {disabled}
     onclick={toggle}
     {onkeydown}
   >
