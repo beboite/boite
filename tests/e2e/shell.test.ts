@@ -1101,10 +1101,6 @@ shellTest('native preview references attach to the composer and highlight from s
   let url = '';
   let child: BrowserPage | undefined;
   try {
-    await page.click(testid('nav-settings'));
-    await page.click(testid('settings-tab-experiments'));
-    await page.click(testid('experiment-preview-comments'));
-    await page.click(testid('settings-back'));
     await page.type(testid('composer-input'), 'Make clearer.');
     await page.evaluate(`(() => { const input = document.querySelector('${testid('composer-input')}'); input.setSelectionRange(5, 5); input.dispatchEvent(new Event('select')); })()`);
     await core.call('artifacts.preview', { threadId: thread.id, path: 'preview-fixture.html' });

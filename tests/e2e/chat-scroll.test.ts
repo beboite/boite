@@ -411,7 +411,9 @@ test('a row growing above a reader just off the bottom leaves the reader there',
   // The last row growing below moves no scroll position; a notch down into the 80 px still takes the bottom back.
   await page.evaluate(`(() => { const grown = document.createElement('div'); grown.style.height = '100px'; [...document.querySelectorAll('${timeline} [data-mid]')].at(-1).firstElementChild.append(grown); })()`);
   await page.waitFor(`${gap} > 120`);
-  await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
+  // Grown below the fold with no scrollbar to redraw (edge scrollbars), headless Chrome on Windows can leave the
+  // compositor its old scroll range, and the notch stopped at the old bottom. A drawn frame hands it the new one.
+  await page.send('Page.captureScreenshot', { format: 'jpeg', quality: 1 });
   await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: 70 });
   await page.waitFor(`!document.querySelector('${jump}')`, 2_000);
 }, 30_000);
