@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import type { TelemetryState, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams as invalid } from './errors.ts';
-import { enhancedDetails, publicOsVersion, type EnhancedDetails } from '../../contracts/src/telemetry.ts';
+import { enhancedDetails, publicOsVersion, subagentDetails, type EnhancedDetails } from '../../contracts/src/telemetry.ts';
 
-const EVENTS = ['ping', 'first_run', 'app_launched', 'session_ended', 'project_added', 'thread_spawned', 'turn_finished'] as const;
+const EVENTS = ['ping', 'first_run', 'app_launched', 'session_ended', 'project_added', 'thread_spawned', 'turn_finished', 'subagent_started'] as const;
 type EventName = typeof EVENTS[number];
 const PROVIDERS = ['claude', 'codex', 'opencode', 'opencode-v2', 'pi', 'grok', 'antigravity', 'muse'];
 const MODES = ['off', 'basic', 'enhanced'] as const;
@@ -97,7 +97,7 @@ export function telemetryEvent(name: EventName, version: string, fields: Record<
     arch: ['x64', 'arm64', 'ia32'].includes(process.arch) ? process.arch : 'other',
     client_ts: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
   };
-  if (name === 'thread_spawned' || name === 'turn_finished') {
+  if (name === 'thread_spawned' || name === 'turn_finished' || name === 'subagent_started') {
     event.provider = PROVIDERS.includes(String(fields.provider)) ? String(fields.provider) : 'other';
   }
   if (name === 'turn_finished') {
@@ -155,6 +155,13 @@ export class Telemetry {
     this.unsubscribe = core.bus.onAny((name, payload) => {
       if (name === 'project.added') this.track('project_added');
       if (name === 'thread.created') this.track('thread_spawned', { provider: (payload as { providerId: string }).providerId });
+      if (name === 'turn.started' && this.consent.mode === 'enhanced') {
+        const turn = payload as Turn;
+        const execution = turn.execution;
+        if (execution && execution.operation !== 'compact' && execution.operation !== 'keepalive' && core.journal.getThread(turn.threadId)?.parentThreadId) {
+          this.track('subagent_started', { provider: execution.providerId, model: execution.model, effort: execution.effort, speed: execution.speed });
+        }
+      }
       if (name === 'turn.finished') {
         const turn = payload as Turn;
         this.track('turn_finished', {
@@ -228,8 +235,10 @@ export class Telemetry {
 
   track(name: EventName, fields: Record<string, unknown> = {}): void {
     if (this.closed || !this.endpoint || this.consent.mode === 'off' || !EVENTS.includes(name)) return;
+    if (name === 'subagent_started' && this.consent.mode !== 'enhanced') return;
     const event = telemetryEvent(name, this.core.version, fields);
     if (this.consent.mode === 'enhanced' && name === 'turn_finished') Object.assign(event, enhancedDetails(fields));
+    if (name === 'subagent_started') Object.assign(event, subagentDetails(fields));
     this.queue.push(event);
     if (this.queue.length > 200) this.queue.shift();
   }
