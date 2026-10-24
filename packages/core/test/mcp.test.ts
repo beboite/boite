@@ -119,7 +119,7 @@ test('actual CLI stdio negotiates, lists schemas, reads scoped tools and rejects
     expect(initialized.result.serverInfo.name).toBe('boite');
     transport.notify('notifications/initialized');
     const listed = await transport.rpc('tools/list', {});
-    expect(listed.result.tools.length).toBe(23);
+    expect(listed.result.tools.length).toBe(24);
     expect(listed.result.tools.find((tool: any) => tool.name === 'boite_where').inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
     const where = await transport.rpc('tools/call', { name: 'boite_where', arguments: {} });
     expect(where.result.structuredContent.result.threadId).toBe(threadId);
