@@ -145,7 +145,7 @@ export class Coordination {
     const canonical = parsed.export({ type: 'spki', format: 'pem' }).toString();
     const coreId = createHash('sha256').update(canonical).digest('hex');
     if (coreId !== peer.coreId || coreId === this.self('').coreId) throw invalidParams('peer.coreId: expected the other machine public key fingerprint');
-    if (this.core.contacts.has(coreId)) throw refused('peer.coreId: that core is a contact; contacts are linked in Contacts');
+    if (this.core.contacts.isContact(coreId)) throw refused('peer.coreId: that core is a contact; contacts are linked in Contacts');
     for (const field of ['readThreads', 'viaClient'] as const) if (peer[field] !== undefined && typeof peer[field] !== 'boolean') throw invalidParams(`peer.${field}: expected a boolean`);
     const previous = this.peers().find(p => p.coreId === coreId);
     const checked = { coreId, name: text(peer.name, 'peer.name', 100), url: coordinationUrl(peer.url), publicKey: canonical,
@@ -480,7 +480,7 @@ export class Coordination {
       if (!config.remote) throw refused('cross-machine coordination is disabled for this thread');
       const peer = this.trusted().find(p => p.coreId === to.coreId);
       if (!peer) throw refused('destination machine is not trusted for coordination');
-      if (this.core.contacts.has(to.coreId)) this.core.contacts.checkSendTier(params.threadId);
+      if (this.core.contacts.isContact(to.coreId)) this.core.contacts.checkSendTier(params.threadId, to.coreId);
       // No directory round trip on send: a disconnected recipient can receive after reconnect.
       toTitle = to.threadId;
       toMachine = peer.name;
@@ -493,7 +493,7 @@ export class Coordination {
     }
     // Recheck budgets after all validation, before the synchronous durable write.
     const createdAt = Date.now();
-    const contact = this.core.contacts.find(to.coreId);
+    const contact = this.core.contacts.known(to.coreId);
     const letter: AgentLetter = { ...(resident ? { origin: 'resident' as const } : {}), id: randomUUID(), from, to, toTitle, toProject, toMachine, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + (resident ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS), status: 'queued', error: null,
       ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}) };
     this.core.journal.append({ type: 'coordination.sent', threadId: from.threadId, version: 1, payload: letter }, () => this.put(letter, 'out', from.threadId, requestId, fingerprint));
@@ -517,13 +517,13 @@ export class Coordination {
     const resident = !peer && this.core.workforce.projects.over(letter.from.threadId, letter.to.threadId) !== null;
     if (!peer && letter.origin === 'resident' && !resident) throw refused('the project is no longer entrusted to this bot');
     // A contact reaches the projects opened to it and the threads that wrote to it, nothing else: an unknown thread reads the same.
-    const contact = peer ? this.core.contacts.find(peer.coreId) : undefined;
+    const contact = peer ? this.core.contacts.known(peer.coreId) : undefined;
     if (contact && !this.core.contacts.mayReach(contact.coreId, letter.to.threadId)) throw refused('letter.to: not a thread of a project opened to you');
     const target = this.contact(letter.to.threadId, resident);
     const config = this.config(target.threadId);
     const from = peer ? checkRemoteContact(letter.from, peer) : this.contact(letter.from.threadId, resident);
     if (peer && !config.remote) throw refused('recipient has not enabled cross-machine coordination');
-    if (contact) this.core.contacts.checkAttestedTier(from.agent);
+    if (contact) this.core.contacts.checkAttestedTier(from.agent, contact.coreId);
     for (const row of this.rows('id = ?', letter.id)) {
       const known = JSON.parse(row.data) as AgentLetter;
       if (!same(known.from, from) || !same(known.to, target) || known.text !== letter.text || known.replyTo !== letter.replyTo) throw refused('message id already used for different content');
@@ -607,7 +607,7 @@ export class Coordination {
 
   instructions(threadId: string): string {
     const config = this.config(threadId);
-    return config.mode === 'off' ? '' : coordinationGuide(config.paused, config.remote && this.core.contacts.list().length > 0);
+    return config.mode === 'off' ? '' : coordinationGuide(config.paused, config.remote && (this.core.contacts.list().length > 0 || this.core.contacts.members.relayed().length > 0));
   }
 
   /** Hook delivery: one batch at a provider's next safe tool boundary. */
@@ -640,7 +640,7 @@ export class Coordination {
     if (recipient.mode === 'off' || recipient.paused) return false;
     if (letter.from.coreId !== this.self('').coreId) {
       if (!recipient.remote || !this.trusted().some(peer => peer.coreId === letter.from.coreId)) return false;
-      return !this.core.contacts.has(letter.from.coreId) || this.core.contacts.mayReach(letter.from.coreId, letter.to.threadId);
+      return !this.core.contacts.isContact(letter.from.coreId) || this.core.contacts.mayReach(letter.from.coreId, letter.to.threadId);
     }
     const sender = this.config(letter.from.threadId);
     if (sender.mode === 'off') return false;
@@ -807,6 +807,12 @@ export class Coordination {
    */
   private async exchange(peer: CoordinationPeer, operation: Operation, payload: unknown): Promise<unknown> {
     this.identityKey();
+    // A contact another member of the group holds is asked through that member.
+    if (this.core.contacts.isRelayPeer(peer)) {
+      const via = this.core.contacts.members.via(peer.coreId);
+      if (!via) throw unavailable(`${peer.name} is linked to a machine that left this group`);
+      return this.core.contacts.members.send(via, peer.coreId, operation, payload);
+    }
     // Signed and sealed anew for every address tried, the owner's app included: the same request sent twice
     // is a replay at a machine both addresses lead to, refused there, and every operation bears being asked twice.
     const routes = this.core.group.routes(peer.coreId);
@@ -884,7 +890,7 @@ export function registerCoordination(core: Core): void {
   core.router.register('collaboration.untrust', p => core.coordination.untrust(p.coreId));
   core.router.register('collaboration.bridge.register', (p, ctx) => {
     // A contact's route is the link its own core keeps, never an owner app.
-    if (core.contacts.has(p.coreId) || !core.coordination.trusted().some(peer => peer.coreId === p.coreId)) throw refused('coreId: expected a machine trusted for coordination');
+    if (core.contacts.isContact(p.coreId) || !core.coordination.trusted().some(peer => peer.coreId === p.coreId)) throw refused('coreId: expected a machine trusted for coordination');
     return core.coordination.bridge.register(p.coreId, p.enabled, ctx.connection);
   });
   core.router.register('collaboration.bridge.forward', p => core.coordination.forward(p));

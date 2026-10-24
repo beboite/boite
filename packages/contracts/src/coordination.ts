@@ -177,12 +177,20 @@ export interface CoordinationBridgeResponse { status: number; body: string; sign
  * read as 2. `modelTier` in the core decides from the provider and model id.
  */
 export type ModelTier = 1 | 2 | 3;
-/** A project this core opened to a contact: the contact's agents reach its threads. */
+/**
+ * A project this core opened to a contact: the contact's agents reach its
+ * threads. The project may live on another machine of this core's group,
+ * which this core answers for: the contact never sees that machine.
+ */
 export interface ContactGrant {
   projectId: ProjectId;
   /** Agents of the contact may read this project's conversations, text and tool names. Off by default. */
   readThreads: boolean;
   grantedAt: Timestamp;
+  /** The core id of the group member that holds the project. Missing: this core's own project. */
+  machine?: string;
+  /** The project's name on that member when it was opened: this core cannot read the member's projects. Set with `machine`. */
+  name?: string;
 }
 /** A project the contact opened to this core, as the contact's core announced it. */
 export interface ContactOffer { projectId: ProjectId; name: string }
@@ -367,10 +375,14 @@ export interface CoordinationRpcMethods {
   'contacts.join': { params: { link: string }; result: Contact };
   /** Rename a contact or mark it trusted. Owner only. */
   'contacts.update': { params: { coreId: string; name?: string; trusted?: boolean }; result: Contact };
-  /** Open a project to a contact, or change its read grant. Owner only. */
-  'contacts.grant': { params: { coreId: string; projectId: ProjectId; readThreads?: boolean }; result: Contact };
-  /** Close a project to a contact: its pending letters to that project are rejected. Owner only. */
-  'contacts.revoke': { params: { coreId: string; projectId: ProjectId }; result: Contact };
+  /**
+   * Open a project to a contact, or change its read grant. `machine`: the core
+   * id of the group member that holds the project, asked for its name; missing
+   * or this core's own id for a project of this core. Owner only.
+   */
+  'contacts.grant': { params: { coreId: string; projectId: ProjectId; readThreads?: boolean; machine?: string }; result: Contact };
+  /** Close a project to a contact: its pending letters to that project are rejected. `machine` as for `contacts.grant`. Owner only. */
+  'contacts.revoke': { params: { coreId: string; projectId: ProjectId; machine?: string }; result: Contact };
   /** Forget a contact: every grant ends, pending letters are rejected and the link closes. Owner only. */
   'contacts.remove': { params: { coreId: string }; result: { ok: true } };
   /** Accept a request by opening `projectId`, or refuse it with a reason sent back to the asking agent. Owner only. */
