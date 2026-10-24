@@ -3,12 +3,12 @@
   import { Eye, Pencil, Plus, SquareKanban, Trash2, X } from '@lucide/svelte';
   import type { Contact, Project, ProjectId } from '@boite/contracts';
   import { BOARD_COLUMNS, columnCounts } from '../../lib/board';
-  import { initialsOf, splitRequests, watchContacts, type ContactsView } from '../../lib/contacts.svelte';
+  import { grantKey, initialsOf, splitRequests, watchContacts, type ContactsView } from '../../lib/contacts.svelte';
   import { confirm } from '../../lib/confirm.svelte';
   import { ago, projectName } from '../../lib/format';
   import type { Store } from '../../lib/store.svelte';
   import { fill, strings } from '../../lib/strings';
-  import { workspace } from '../../lib/workspace.svelte';
+  import { workspace, type Machine } from '../../lib/workspace.svelte';
   import InfoTip from '../InfoTip.svelte';
   import MachineIcon from '../MachineIcon.svelte';
   import ProjectChoice from '../ProjectChoice.svelte';
@@ -34,20 +34,39 @@
     const linked = entry.view.state?.contacts.find(candidate => candidate.coreId === contact.coreId);
     return linked ? [{ ...entry, contact: linked }] : [];
   }));
-  const shareMachines = $derived(links.filter(entry => entry.machine.store.connection === 'ready').map(entry => entry.machine));
-  const shared = $derived(links.flatMap(entry => entry.contact.grants.map(grant => ({
-    ...entry, grant,
-    project: entry.machine.store.projects.find(project => project.id === grant.projectId),
-    board: entry.machine.store.projectBoardThread(grant.projectId)
-  }))));
+  /** A machine of a linked machine's group: the linked one answers the contact for its projects (`docs/contacts.md`). */
+  function linkFor(machine: Machine): (typeof links)[number] | undefined {
+    const direct = links.find(entry => entry.machine.store === machine.store);
+    if (direct) return direct;
+    const group = machine.store.group;
+    if (!group?.self) return undefined;
+    const grouped = links.filter(entry => entry.machine.store.group?.id === group.id && entry.machine.store.connection === 'ready');
+    return grouped.find(entry => entry.view === view) ?? grouped[0];
+  }
+  const shareMachines = $derived(machines.filter(machine => machine.store.connection === 'ready' && linkFor(machine) !== undefined));
+  /** A grant names the member that holds its project; none, the linked machine itself. */
+  function homeOf(entry: (typeof links)[number], machineId: string | undefined): Machine | undefined {
+    return machineId ? machines.find(machine => machine.store.group?.self === machineId) : entry.machine;
+  }
+  const shared = $derived(links.flatMap(entry => entry.contact.grants.map(grant => {
+    const home = homeOf(entry, grant.machine);
+    return {
+      ...entry, grant, home,
+      project: home?.store.projects.find(project => project.id === grant.projectId),
+      board: home?.store.projectBoardThread(grant.projectId) ?? null
+    };
+  })));
   function unshared(owner: Store): Project[] {
-    const linked = links.find(entry => entry.machine.store === owner)?.contact;
-    return linked ? owner.projects.filter(project => project.kind !== 'drafts' && !project.archived && !linked.grants.some(grant => grant.projectId === project.id)) : [];
+    const machine = machines.find(entry => entry.store === owner);
+    if (!machine || !linkFor(machine)) return [];
+    return owner.projects.filter(project => project.kind !== 'drafts' && !project.archived && !shared.some(entry => entry.home?.store === owner && entry.grant.projectId === project.id));
   }
   async function share(owner: Store, project: Project) {
-    const target = links.find(entry => entry.machine.store === owner)?.view;
-    if (!target || owner.connection !== 'ready') return;
-    await target.grant(contact.coreId, project.id);
+    const machine = machines.find(entry => entry.store === owner);
+    const link = machine ? linkFor(machine) : undefined;
+    if (!link || owner.connection !== 'ready' || link.machine.store.connection !== 'ready') return;
+    const target = link.view;
+    await target.grant(contact.coreId, project.id, undefined, link.machine.store === owner ? undefined : owner.group?.self);
     // Errors from another machine belong on the page where the action started.
     view.error = target.error;
   }
@@ -58,9 +77,10 @@
    */
   const read = new WeakMap<Store, Set<ProjectId>>();
   $effect(() => {
-    for (const { machine } of links) if (machine.store.connection !== 'ready') read.delete(machine.store);
-    for (const { machine, grant, board } of shared) {
-      const owner = machine.store;
+    for (const machine of machines) if (machine.store.connection !== 'ready') read.delete(machine.store);
+    for (const { home, grant, board } of shared) {
+      if (!home) continue;
+      const owner = home.store;
       if (owner.connection !== 'ready' || !board) continue;
       let loaded = read.get(owner);
       if (!loaded) { loaded = new Set(); read.set(owner, loaded); }
@@ -99,7 +119,7 @@
   function nameOf(project: Project | undefined, projectId: string): string {
     return project ? projectName(project) : projectId;
   }
-  async function stopSharing(owner: ContactsView, projectId: string, name: string) {
+  async function stopSharing(owner: ContactsView, projectId: string, machine: string | undefined, name: string) {
     const ok = await confirm.ask({
       title: fill(labels.closeTitle, { project: name, name: contact.name }),
       body: fill(labels.closeBody, { name: contact.name }),
@@ -107,10 +127,10 @@
       cancelLabel: labels.requests.cancel,
       danger: true
     });
-    if (ok) { await owner.revoke(contact.coreId, projectId); view.error = owner.error; }
+    if (ok) { await owner.revoke(contact.coreId, projectId, machine); view.error = owner.error; }
   }
-  async function readAccess(owner: ContactsView, projectId: string, checked: boolean) {
-    await owner.grant(contact.coreId, projectId, checked);
+  async function readAccess(owner: ContactsView, projectId: string, machine: string | undefined, checked: boolean) {
+    await owner.grant(contact.coreId, projectId, checked, machine);
     view.error = owner.error;
   }
   async function openBoard(owner: Store, projectId: ProjectId) {
@@ -160,15 +180,16 @@
 
 <section class="card" data-testid="contact-shared">
   <h2>{fill(labels.youShare, { name: contact.name })}</h2>
-  {#each shared as { grant, project, machine, view: owner, board } (JSON.stringify([machine.id, grant.projectId]))}
-    {@const name = nameOf(project, grant.projectId)}
-    <div class="switch-row grant" data-testid="contact-grant-{grant.projectId}" data-machine-id={machine.id}>
-      <span class="text project">{#if project}<ProjectTile {project} store={machine.store} />{/if}<span class="ui-label">{name}</span>{#if machines.length > 1}<span class="machine"><MachineIcon icon={machine.icon} os={machine.store.core?.os} size={12} /><span class="ui-label">{machine.label}</span></span>{/if}</span>
-      {#if board}
-        {@const counts = columnCounts(machine.store.todos[grant.projectId] ?? [])}
+  {#each shared as { grant, project, machine, home, view: owner, board } (JSON.stringify([machine.id, grant.machine ?? null, grant.projectId]))}
+    {@const name = nameOf(project, grant.name ?? grant.projectId)}
+    {@const busy = machine.store.connection !== 'ready' || owner.isBusy(grantKey(contact.coreId, grant.projectId, grant.machine))}
+    <div class="switch-row grant" data-testid="contact-grant-{grant.projectId}" data-machine-id={home?.id ?? grant.machine}>
+      <span class="text project">{#if project && home}<ProjectTile {project} store={home.store} />{/if}<span class="ui-label">{name}</span>{#if home && machines.length > 1}<span class="machine"><MachineIcon icon={home.icon} os={home.store.core?.os} size={12} /><span class="ui-label">{home.label}</span></span>{/if}</span>
+      {#if board && home}
+        {@const counts = columnCounts(home.store.todos[grant.projectId] ?? [])}
         {@const summary = BOARD_COLUMNS.map(column => `${strings.board.columns[column]} ${counts[column]}`).join(', ')}
         <button type="button" class="ghost board" title={`${fill(labels.board, { project: name })}: ${summary}`} aria-label={`${fill(labels.board, { project: name })}: ${summary}`}
-          data-testid="contact-board-{grant.projectId}" onclick={() => void openBoard(machine.store, grant.projectId)}>
+          data-testid="contact-board-{grant.projectId}" onclick={() => void openBoard(home.store, grant.projectId)}>
           <SquareKanban size={14} strokeWidth={2} aria-hidden="true" />
           {#each BOARD_COLUMNS as column (column)}<span class="tally" data-column={column} class:zero={counts[column] === 0}>{counts[column]}</span>{/each}
         </button>
@@ -176,12 +197,12 @@
       <label class="read" title={labels.readTip}>
         <Eye size={14} strokeWidth={2} aria-hidden="true" /><span class="ui-label">{labels.read}</span>
         <input type="checkbox" role="switch" checked={grant.readThreads} aria-label={fill(labels.readLabel, { name: contact.name, project: name })}
-          disabled={machine.store.connection !== 'ready' || owner.isBusy(`grant:${contact.coreId}:${grant.projectId}`)} data-testid="contact-read-{grant.projectId}"
-          onchange={event => void readAccess(owner, grant.projectId, event.currentTarget.checked)} />
+          disabled={busy} data-testid="contact-read-{grant.projectId}"
+          onchange={event => void readAccess(owner, grant.projectId, grant.machine, event.currentTarget.checked)} />
       </label>
       <button type="button" class="ghost icon" aria-label={fill(labels.closeProject, { project: name })} title={fill(labels.closeProject, { project: name })}
-        disabled={machine.store.connection !== 'ready' || owner.isBusy(`grant:${contact.coreId}:${grant.projectId}`)}
-        data-testid="contact-revoke-{grant.projectId}" onclick={() => void stopSharing(owner, grant.projectId, name)}><X size={15} /></button>
+        disabled={busy}
+        data-testid="contact-revoke-{grant.projectId}" onclick={() => void stopSharing(owner, grant.projectId, grant.machine, name)}><X size={15} /></button>
     </div>
   {:else}
     <p class="hint none">{labels.nothingOpen}</p>

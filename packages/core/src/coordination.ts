@@ -149,7 +149,7 @@ export class Coordination {
     const canonical = parsed.export({ type: 'spki', format: 'pem' }).toString();
     const coreId = createHash('sha256').update(canonical).digest('hex');
     if (coreId !== peer.coreId || coreId === this.self('').coreId) throw invalidParams('peer.coreId: expected the other machine public key fingerprint');
-    if (this.core.contacts.has(coreId)) throw refused('peer.coreId: that core is a contact; contacts are linked in Contacts');
+    if (this.core.contacts.isContact(coreId)) throw refused('peer.coreId: that core is a contact; contacts are linked in Contacts');
     for (const field of ['readThreads', 'viaClient'] as const) if (peer[field] !== undefined && typeof peer[field] !== 'boolean') throw invalidParams(`peer.${field}: expected a boolean`);
     const previous = this.peers().find(p => p.coreId === coreId);
     const checked = { coreId, name: text(peer.name, 'peer.name', 100), url: coordinationUrl(peer.url), publicKey: canonical,
@@ -281,7 +281,7 @@ export class Coordination {
    * each still under its own settings (on, and open to other machines).
    */
   contactDirectory(coreId: string): AgentContact[] {
-    return this.core.contacts.granted(coreId).filter(projectId => this.core.journal.getProject(projectId) !== null)
+    return this.core.contacts.reach.granted(coreId).filter(projectId => this.core.journal.getProject(projectId) !== null)
       .flatMap(projectId => this.localDirectory(projectId)).filter(contact => this.config(contact.threadId).remote)
       .sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0)).slice(0, 100);
   }
@@ -478,7 +478,7 @@ export class Coordination {
       const peer = this.trusted().find(p => p.coreId === to.coreId);
       const route = peer ? undefined : await this.mailboxes.resolve(params.threadId, to.coreId);
       if (!peer && !route) throw refused('destination machine is not trusted for coordination');
-      if (this.core.contacts.has(to.coreId) || route) this.core.contacts.checkSendTier(params.threadId);
+      if (this.core.contacts.isContact(to.coreId) || route) this.core.contacts.reach.checkSendTier(params.threadId, to.coreId);
       // Route discovery awaited another core; the source's latest settings win.
       from = this.contact(params.threadId, resident !== null);
       if (!this.config(params.threadId).remote || this.config(params.threadId).paused) throw refused('coordination permissions changed; retry the send');
@@ -494,12 +494,12 @@ export class Coordination {
     }
     // Recheck budgets after all validation, before the synchronous durable write.
     const createdAt = Date.now();
-    const contact = this.core.contacts.find(to.coreId) ?? this.mailboxes.route(params.threadId, to.coreId);
+    const contact = this.core.contacts.known(to.coreId) ?? this.mailboxes.route(params.threadId, to.coreId);
     const letter: AgentLetter = { ...(resident ? { origin: 'resident' as const } : {}), id: randomUUID(), from, to, toTitle, toProject, toMachine, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + (resident ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS), status: 'queued', error: null,
       ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}) };
     this.core.journal.append({ type: 'coordination.sent', threadId: from.threadId, version: 1, payload: letter }, () => this.put(letter, 'out', from.threadId, requestId, fingerprint));
     // It may hear back from that contact for a while, even outside the projects opened to it.
-    if (contact && this.core.contacts.has(contact.coreId)) this.core.contacts.noteSent(from.threadId, contact.coreId);
+    if (contact && this.core.contacts.isContact(contact.coreId)) this.core.contacts.reach.noteSent(from.threadId, contact.coreId);
     this.core.threads.runner.noteMail(from.threadId, letter.createdAt);
     // The thread's turns now report back to the agent that wrote to it.
     if (resident) this.core.workforce.projects.follow(resident.id, to.threadId);
@@ -522,13 +522,13 @@ export class Coordination {
     const resident = !peer && this.core.workforce.projects.over(letter.from.threadId, letter.to.threadId) !== null;
     if (!peer && letter.origin === 'resident' && !resident) throw refused('the project is no longer entrusted to this bot');
     // A contact reaches the projects opened to it and the threads that wrote to it, nothing else: an unknown thread reads the same.
-    const contact = routed ?? (peer ? this.core.contacts.find(peer.coreId) : undefined);
-    if (contact && !routed && !this.core.contacts.mayReach(contact.coreId, letter.to.threadId)) throw refused('letter.to: not a thread of a project opened to you');
+    const contact = routed ?? (peer ? this.core.contacts.known(peer.coreId) : undefined);
+    if (contact && !routed && !this.core.contacts.reach.mayReach(contact.coreId, letter.to.threadId)) throw refused('letter.to: not a thread of a project opened to you');
     const target = this.contact(letter.to.threadId, resident);
     const config = this.config(target.threadId);
     const from = peer ? checkRemoteContact(letter.from, peer) : this.contact(letter.from.threadId, resident);
     if (peer && !config.remote) throw refused('recipient has not enabled cross-machine coordination');
-    if (contact && !(routed && letter.origin === 'contact')) this.core.contacts.checkAttestedTier(from.agent);
+    if (contact && !(routed && letter.origin === 'contact')) this.core.contacts.reach.checkAttestedTier(from.agent, contact.coreId);
     for (const row of this.rows('id = ?', letter.id)) {
       const known = JSON.parse(row.data) as AgentLetter;
       if (!same(known.from, from) || !same(known.to, target) || known.text !== letter.text || known.replyTo !== letter.replyTo) throw refused('message id already used for different content');
@@ -600,7 +600,7 @@ export class Coordination {
 
   /** A project closed to a contact: its letters waiting for threads it no longer reaches go nowhere. */
   rejectContactLetters(coreId: string, reason: string): void {
-    const unreachable = (letter: AgentLetter): boolean => letter.from.coreId === coreId && !this.core.contacts.mayReach(coreId, letter.to.threadId);
+    const unreachable = (letter: AgentLetter): boolean => letter.from.coreId === coreId && !this.core.contacts.reach.mayReach(coreId, letter.to.threadId);
     // A wake already queued for such a letter is stopped, and finds nothing left to deliver if it starts anyway.
     const queued = this.rows("direction = 'in' AND status = 'uncertain'").map(row => JSON.parse(row.data) as AgentLetter)
       .filter(letter => letter.error === 'Queued for provider delivery' && unreachable(letter));
@@ -662,7 +662,7 @@ export class Coordination {
       const routed = this.mailboxes.mayReceive(letter);
       if (routed !== null) return routed;
       if (!this.trusted().some(peer => peer.coreId === letter.from.coreId)) return false;
-      return !this.core.contacts.has(letter.from.coreId) || this.core.contacts.mayReach(letter.from.coreId, letter.to.threadId);
+      return !this.core.contacts.isContact(letter.from.coreId) || this.core.contacts.reach.mayReach(letter.from.coreId, letter.to.threadId);
     }
     const sender = this.config(letter.from.threadId);
     if (sender.mode === 'off') return false;
@@ -832,6 +832,8 @@ export class Coordination {
    */
   private async exchange(peer: CoordinationPeer, operation: Operation, payload: unknown): Promise<unknown> {
     this.identityKey();
+    // A contact another member of the group holds is asked through that member.
+    if (this.core.contacts.isRelayPeer(peer)) return this.core.contacts.members.send(peer, operation, payload);
     // Signed and sealed anew for every address tried, the owner's app included: the same request sent twice
     // is a replay at a machine both addresses lead to, refused there, and every operation bears being asked twice.
     const routes = this.core.group.routes(peer.coreId);

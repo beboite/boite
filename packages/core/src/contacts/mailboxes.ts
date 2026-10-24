@@ -11,7 +11,7 @@ import { checkRemoteContact, checkTranscript, checkMatchExtras } from '../coordi
 import { address, LETTER_TTL_MS, RESIDENT_LETTER_TTL_MS, same, text } from '../coordination-letter.ts';
 import { PeerRefusal, type Operation } from '../coordination-wire.ts';
 import { refused, unavailable, messageOf, RpcFailure } from '../errors.ts';
-import { REPLY_WINDOW_MS } from './store.ts';
+import { REPLY_WINDOW_MS } from './reach.ts';
 import { checkNormalizedRemote, gitRemoteOf } from './git-remote.ts';
 
 type ContactSummary = RpcResult<'collaboration.contacts'>[number];
@@ -92,9 +92,12 @@ export class ContactMailboxes {
     this.source(threadId);
     const result = [...local];
     for (const { via, contact, admission } of replies.flat()) {
-      if (contact.coreId === this.self() || this.core.coordination.trusted().some(peer => peer.coreId === contact.coreId) || result.some(entry => entry.coreId === contact.coreId)) continue;
+      // A contact that opened this core's projects through that member is listed already, and still asked through a mailbox.
+      const relayed = this.core.coordination.trusted().find(peer => peer.coreId === contact.coreId);
+      if (contact.coreId === this.self() || (relayed && !this.core.contacts.isRelayPeer(relayed))) continue;
+      if (this.route(threadId, contact.coreId) && result.some(entry => entry.coreId === contact.coreId)) continue;
       this.remember(threadId, via, contact, admission);
-      result.push(contact);
+      if (!result.some(entry => entry.coreId === contact.coreId)) result.push(contact);
     }
     return result;
   }
@@ -151,7 +154,7 @@ export class ContactMailboxes {
     const route = this.route(letter.from.threadId, letter.to.coreId);
     if (!route) throw refused('route: the group contact route is no longer available');
     const from = this.source(letter.from.threadId, letter.status === 'queued');
-    try { this.core.contacts.checkSendTier(letter.from.threadId); }
+    try { this.core.contacts.reach.checkSendTier(letter.from.threadId); }
     catch (error) { throw new PeerRefusal(messageOf(error)); }
     const answer = await this.request(route, { action: 'deliver', from, letter, receipt: letter.status !== 'queued' }) as AgentLetter | { retry: true };
     if ('retry' in answer) throw unavailable('The contact is unreachable; retrying until expiry');
@@ -180,7 +183,7 @@ export class ContactMailboxes {
     const route = this.route(params.threadId, found[0]!.coreId);
     if (!route) throw refused('route: the group contact route is no longer available');
     const from = this.source(params.threadId, true);
-    this.core.contacts.checkSendTier(params.threadId);
+    this.core.contacts.reach.checkSendTier(params.threadId);
     const gitRemote = gitRemoteOf(this.core.threads.require(params.threadId).cwd);
     const answer = await this.request(route, { action: 'ask', from, coreId: route.coreId, id: randomUUID(), text: text(params.text, 'text'), ...(gitRemote ? { gitRemote } : {}) }) as ContactRequest;
     this.source(params.threadId);
@@ -220,7 +223,7 @@ export class ContactMailboxes {
       return answer;
     }
     if (p.action === 'ask') {
-      this.core.contacts.checkAttestedTier(from.agent);
+      this.core.contacts.reach.checkAttestedTier(from.agent);
       const contact = this.contact(text(p.coreId, 'route.coreId', 100));
       const box = this.mailbox(from, contact);
       const id = text(p.id, 'route.ask.id', 100);
@@ -234,7 +237,7 @@ export class ContactMailboxes {
     if (p.action !== 'deliver') throw refused('route.action: expected contacts, lookup, ask, deliver or return');
     const canonical = p.letter!;
     if (!same(address(canonical.from, 'letter.from'), from)) throw refused('letter.from: expected the authenticated initiating conversation');
-    this.core.contacts.checkAttestedTier(from.agent);
+    this.core.contacts.reach.checkAttestedTier(from.agent);
     this.timestamps(canonical, LETTER_TTL_MS);
     const contact = this.contact(address(canonical.to, 'letter.to').coreId);
     const box = this.mailbox(from, contact, canonical.createdAt);
@@ -286,7 +289,7 @@ export class ContactMailboxes {
     if (!box || letter.to.coreId !== this.self()) throw refused('letter.to: unknown contact mailbox');
     this.valid(box);
     const from = checkRemoteContact(letter.from, this.contact(peer.coreId));
-    this.core.contacts.checkAttestedTier(from.agent);
+    this.core.contacts.reach.checkAttestedTier(from.agent);
     this.timestamps(letter, LETTER_TTL_MS);
     if (letter.replyTo !== null && !this.rows("mailbox = ? AND direction = 'out' AND id = ?", box.id, letter.replyTo).length) throw refused('replyTo: expected a letter sent from this contact mailbox');
     const accepted: AgentLetter = { ...letter, from, text: text(letter.text, 'letter.text'), status: 'received', error: null, contact: { coreId: box.coreId, name: box.name } };

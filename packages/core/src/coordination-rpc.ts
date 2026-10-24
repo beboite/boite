@@ -17,7 +17,7 @@ export function registerCoordination(core: Core): void {
   core.router.register('collaboration.untrust', p => core.coordination.untrust(p.coreId));
   core.router.register('collaboration.bridge.register', (p, ctx) => {
     // A contact's route is the link its own core keeps, never an owner app.
-    if (core.contacts.has(p.coreId) || !core.coordination.trusted().some(peer => peer.coreId === p.coreId)) throw refused('coreId: expected a machine trusted for coordination');
+    if (core.contacts.isContact(p.coreId) || !core.coordination.trusted().some(peer => peer.coreId === p.coreId)) throw refused('coreId: expected a machine trusted for coordination');
     return core.coordination.bridge.register(p.coreId, p.enabled, ctx.connection);
   });
   core.router.register('collaboration.bridge.forward', p => core.coordination.forward(p));

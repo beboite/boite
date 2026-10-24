@@ -171,6 +171,8 @@ export function contactMethods(ctx: FakeContext) {
     const reciprocal = remote && stateOf(remote).contacts.find(entry => entry.coreId === ctx.identity.coreId);
     if (!reciprocal) return;
     reciprocal.offers = contact.grants.flatMap(grant => {
+      // Like the core: a member's project is offered under the name it gave at the grant.
+      if (grant.machine) return [{ projectId: grant.projectId, name: grant.name ?? grant.projectId }];
       const project = ctx.projects.find(entry => entry.id === grant.projectId && !entry.archived);
       return project ? [{ projectId: project.id, name: project.name }] : [];
     });
@@ -180,6 +182,20 @@ export function contactMethods(ctx: FakeContext) {
     const found = ctx.projects.find(entry => entry.id === projectId);
     if (!found || found.archived) throw invalid('projectId: expected an unarchived project of this core', 'projectId');
     return found;
+  };
+  /** Like the core's `members.member`: another machine of this core's group, or undefined for this core. */
+  const memberOf = (value: unknown): string | undefined => {
+    if (value === undefined || value === null || value === '' || value === ctx.identity.coreId) return undefined;
+    const coreId = text(value, 'machine', 100);
+    if (!ctx.roster?.cores.some(core => core.coreId === coreId)) throw invalid('machine: expected the core id of a machine of this core\'s group', 'machine');
+    return coreId;
+  };
+  /** The member answers for its own project, as the core asks it over the group. */
+  const memberProject = (coreId: string, projectId: unknown): { id: string; name: string } => {
+    const found = fakeCore(coreId)?.projects.find(entry => entry.id === projectId);
+    const name = ctx.roster?.cores.find(core => core.coreId === coreId)?.name ?? coreId;
+    if (!found || found.archived || found.kind === 'drafts') throw invalid(`projectId: ${name} says no unarchived project ${String(projectId)}`, 'projectId');
+    return { id: found.id, name: found.name };
   };
   return {
     'contacts.get': async () => structuredClone(stateOf(ctx)),
@@ -285,21 +301,23 @@ export function contactMethods(ctx: FakeContext) {
       return structuredClone(contact);
     },
     'contacts.grant': async (params) => {
+      if (params?.readThreads !== undefined && typeof params.readThreads !== 'boolean') throw invalid('readThreads: expected true or false', 'readThreads');
+      const machine = memberOf(params?.machine);
       const contact = contactOf(stateOf(ctx), params?.coreId);
-      const opened = project(params.projectId);
-      if (params.readThreads !== undefined && typeof params.readThreads !== 'boolean') throw invalid('readThreads: expected true or false', 'readThreads');
-      const grant = contact.grants.find(entry => entry.projectId === opened.id);
-      if (grant) grant.readThreads = params.readThreads ?? grant.readThreads;
-      else contact.grants.push({ projectId: opened.id, readThreads: params.readThreads ?? false, grantedAt: ctx.now() });
+      const opened = machine === undefined ? project(params.projectId) : memberProject(machine, params.projectId);
+      const grant = contact.grants.find(entry => entry.projectId === opened.id && entry.machine === machine);
+      if (grant) Object.assign(grant, { readThreads: params.readThreads ?? grant.readThreads, ...(machine === undefined ? {} : { name: opened.name }) });
+      else contact.grants.push({ projectId: opened.id, readThreads: params.readThreads ?? false, grantedAt: ctx.now(), ...(machine === undefined ? {} : { machine, name: opened.name }) });
       offers(contact);
       changed();
       return structuredClone(contact);
     },
     'contacts.revoke': async (params) => {
       if (typeof params?.projectId !== 'string') throw invalid('projectId: expected a project id', 'projectId');
-      // Like the core: closing a project that was not open answers the contact as it is.
+      // Like the core: closing a project that was not open answers the contact as it is, and a machine that left may still be named.
+      const machine = params.machine === undefined || params.machine === '' || params.machine === ctx.identity.coreId ? undefined : text(params.machine, 'machine', 100);
       const contact = contactOf(stateOf(ctx), params.coreId);
-      contact.grants = contact.grants.filter(entry => entry.projectId !== params.projectId);
+      contact.grants = contact.grants.filter(entry => entry.projectId !== params.projectId || entry.machine !== machine);
       offers(contact);
       changed();
       return structuredClone(contact);
@@ -328,7 +346,7 @@ export function contactMethods(ctx: FakeContext) {
       if (params.accept) {
         const opened = project(params.projectId);
         const contact = state.contacts.find(entry => entry.coreId === request.coreId);
-        if (contact && !contact.grants.some(entry => entry.projectId === opened.id)) contact.grants.push({ projectId: opened.id, readThreads: false, grantedAt: ctx.now() });
+        if (contact && !contact.grants.some(entry => entry.projectId === opened.id && !entry.machine)) contact.grants.push({ projectId: opened.id, readThreads: false, grantedAt: ctx.now() });
         if (contact) offers(contact);
         request.status = 'accepted';
         request.project = { id: opened.id, name: opened.name };
