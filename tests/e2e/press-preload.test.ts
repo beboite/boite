@@ -32,12 +32,9 @@ beforeAll(async () => {
   const port = await freePort();
   server = await startUi(port);
   url = `http://127.0.0.1:${port}/?fake=1&open=recent&rtt=${RTT_MS}`;
+  // `BrowserPage.launch` tells every page it is driven, as the guard expects to see.
   page = await BrowserPage.launch({ url, windowSize: { width: 1280, height: 900 } });
-  // This harness's Chrome leaves navigator.webdriver false where Playwright's
-  // sets it: every page is told it is driven, as the guard expects to see.
-  await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => true, configurable: true });` });
   await page.waitFor('document.querySelector("[data-testid=thread-row]")', 30_000);
-  await page.evaluate(`localStorage.setItem('boite.experiments', '["press-preload"]')`);
   await load();
 }, 90_000);
 
