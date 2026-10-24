@@ -66,6 +66,43 @@ test('a routed ask returns its decision to the initiating thread, including afte
   expect(b.core.journal.listThreads()).toHaveLength(0);
 }, 30000);
 
+test('ask refuses a differently-cased direct core id without treating it as a group route', async () => {
+  const { a, c, ci, source } = await routed();
+  await a.core.contacts.join((await c.core.contacts.invite(false)).link);
+  const error = await thrown(a.core.coordination.mailboxes.ask({ threadId: source, contact: ci.toUpperCase(), text: 'An agent for this project' }));
+  expect(error).toThrow('contact: expected one unambiguous contact');
+});
+
+test('ask refuses a group route removed while contacts are being discovered', async () => {
+  const { a, bi, ci, source } = await routed();
+  const contacts = a.core.coordination.mailboxes.contacts.bind(a.core.coordination.mailboxes);
+  a.core.coordination.mailboxes.contacts = async threadId => {
+    const result = await contacts(threadId);
+    a.core.group.remove(bi);
+    return result;
+  };
+  expect(await thrown(a.core.coordination.mailboxes.ask({ threadId: source, contact: ci, text: 'An agent for this project' }))).toThrow('route: the group contact route is no longer available');
+});
+
+test.each(['remote disabled', 'archived', 'group removed'] as const)('routed read withholds a deferred transcript when the source is %s', async change => {
+  const { a, b, c, bi, ci, source, recipient } = await routed();
+  c.core.contacts.grant({ coreId: bi, projectId: c.core.threads.require(recipient).projectId!, readThreads: true });
+  const started = Promise.withResolvers<void>(), released = Promise.withResolvers<void>();
+  const request = b.core.coordination.request.bind(b.core.coordination);
+  b.core.coordination.request = async (peer, operation, payload) => {
+    const answer = await request(peer, operation, payload);
+    if (operation === 'read') { started.resolve(); await released.promise; }
+    return answer;
+  };
+  const pending = thrown(a.core.coordination.read(source, { coreId: ci, threadId: recipient }));
+  await started.promise;
+  if (change === 'group removed') a.core.group.remove(bi);
+  else if (change === 'archived') a.core.threads.archive(source, true);
+  else a.core.coordination.configure(source, { ...a.core.coordination.config(source), remote: false });
+  released.resolve();
+  expect(await pending).toThrow(change === 'group removed' ? 'current member' : 'coordination permissions changed');
+});
+
 test('gateway model tiers, source communication and contact removal still reject routed work', async () => {
   const { a, b, c, bi, ci, source, recipient } = await routed();
   await a.core.coordination.directory(source);

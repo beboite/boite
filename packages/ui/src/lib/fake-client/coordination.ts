@@ -63,7 +63,7 @@ export function fakeContactRoutes(ctx: FakeContext): { gateway: FakeContext; con
   return result;
 }
 
-const routeTo = (source: FakeContext, coreId: string) => fakeContactRoutes(source).find(row => row.contact.coreId === coreId);
+const routeTo = (source: FakeContext, coreId: string) => trusts(source, coreId) ? undefined : fakeContactRoutes(source).find(row => row.contact.coreId === coreId);
 function openedTo(destination: FakeContext, gateway: FakeContext, thread: Thread, read = false): boolean {
   const grant = fakeContacts(destination)?.contacts.find(contact => contact.coreId === gateway.identity.coreId)?.grants.find(grant => grant.projectId === thread.projectId);
   return grant !== undefined && (!read || grant.readThreads);
@@ -208,6 +208,7 @@ function reachable(ctx: FakeContext, threadId: ThreadId): { contact: AgentContac
     }
   }
   if (sourceConfig.remote) for (const { gateway, contact } of fakeContactRoutes(ctx)) {
+    if (trusts(ctx, contact.coreId)) continue;
     const target = cores.get(contact.coreId);
     if (!target) continue;
     for (const thread of target.threads.values()) {
@@ -225,9 +226,16 @@ function deliverPending(ctx: FakeContext, threadId: ThreadId): void {
   if (thread.archived || config.mode === 'off' || config.paused || ['waiting', 'queued'].includes(thread.status)) return;
   for (const letter of ctx.letters.get(threadId) ?? []) {
     if (letter.status !== 'received' || letter.to.coreId !== ctx.identity.coreId || letter.to.threadId !== threadId) continue;
-    if (letter.expiresAt <= ctx.now()) { letter.status = 'expired'; continue; }
-    if (letter.origin === 'contact') { letter.status = 'delivered'; ctx.emit('collaboration.changed', { threadId }); continue; }
     const forwarding = deliveredFrom.get(letter);
+    if (letter.expiresAt <= ctx.now()) {
+      letter.status = 'expired';
+      if (forwarding) {
+        forwarding.canonical.status = 'expired';
+        forwarding.source.emit('collaboration.changed', { threadId: forwarding.thread.id });
+      }
+      continue;
+    }
+    if (letter.origin === 'contact') { letter.status = 'delivered'; ctx.emit('collaboration.changed', { threadId }); continue; }
     const sender = forwarding?.source ?? cores.get(letter.from.coreId);
     const source = forwarding?.thread ?? sender?.threads.get(letter.from.threadId);
     if (!sender || !source) continue;
@@ -317,7 +325,7 @@ export function coordinationMethods(ctx: FakeContext) {
       }
       if (route || box) {
         checkContactTier(ctx, source);
-        contactStates.get(route?.gateway ?? box!.gateway)?.check(source);
+        contactStates.get(box?.gateway ?? route!.gateway)?.check(source);
         contactStates.get(destination!)?.check(source);
         if (!box && !openedTo(destination!, route!.gateway, target)) throw rejected('letter.to: not a thread of a project opened to you');
       }

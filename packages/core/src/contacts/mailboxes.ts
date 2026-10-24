@@ -175,9 +175,10 @@ export class ContactMailboxes {
     if (local) return this.core.contacts.ask(params);
     const contacts = await this.contacts(params.threadId);
     const wanted = input.toLowerCase();
-    const found = contacts.filter(contact => contact.coreId === wanted || contact.name.toLowerCase() === wanted || contact.name.replace(/\s+/g, '-').toLowerCase() === wanted);
+    const found = contacts.filter(contact => contact.coreId === input || contact.name.toLowerCase() === wanted || contact.name.replace(/\s+/g, '-').toLowerCase() === wanted);
     if (found.length !== 1) throw refused('contact: expected one unambiguous contact from boite threads contacts');
-    const route = this.route(params.threadId, found[0]!.coreId)!;
+    const route = this.route(params.threadId, found[0]!.coreId);
+    if (!route) throw refused('route: the group contact route is no longer available');
     const from = this.source(params.threadId, true);
     this.core.contacts.checkSendTier(params.threadId);
     const gitRemote = gitRemoteOf(this.core.threads.require(params.threadId).cwd);
