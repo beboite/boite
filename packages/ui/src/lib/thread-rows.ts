@@ -80,15 +80,21 @@ export function reconcileRows(held: readonly ThreadSummary[], fresh: ThreadSumma
   });
 }
 
-/** The live top-level threads of each project, in one pass over the rows. */
+/** Project conversations include work delegated by a bot; ordinary helpers stay under their parent. */
+export function projectThread(thread: ThreadSummary, parent?: ThreadSummary): boolean {
+  return thread.projectId !== null && !thread.agentSessionId && (!thread.parentThreadId || thread.parentIsBot === true || !!parent?.agentSessionId);
+}
+
+/** The live project conversations, indexed once per change of the rows. */
 export function threadsByProject(threads: readonly ThreadSummary[]): Map<ProjectId, ThreadSummary[]> {
   const groups = new Map<ProjectId, ThreadSummary[]>();
+  const bots = new Map(threads.filter(thread => thread.agentSessionId).map(thread => [thread.id, thread]));
   for (const thread of threads) {
     // An incognito conversation stays off the lists: it lives on its own screen only.
-    if (thread.archived || thread.parentThreadId || thread.projectId === null || thread.incognito) continue;
-    const group = groups.get(thread.projectId);
+    if (thread.archived || thread.incognito || !projectThread(thread, bots.get(thread.parentThreadId ?? ''))) continue;
+    const group = groups.get(thread.projectId!);
     if (group) group.push(thread);
-    else groups.set(thread.projectId, [thread]);
+    else groups.set(thread.projectId!, [thread]);
   }
   return groups;
 }

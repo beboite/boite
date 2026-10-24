@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { flushSync } from 'svelte';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
-import { unlistedPanels } from './thread-rows';
+import { threadsByProject, unlistedPanels } from './thread-rows';
 import { moveBlocked } from './thread-move.svelte';
 
 async function ready(): Promise<{ store: Store; client: FakeClient }> {
@@ -12,6 +12,23 @@ async function ready(): Promise<{ store: Store; client: FakeClient }> {
   await store.connect();
   return { store, client };
 }
+
+test('project work delegated by a bot is listed while conversation helpers stay under their parent', async () => {
+  const { store, client } = await ready();
+  try {
+    const sample = store.threads[0]!;
+    const bot = { ...sample, id: 'bot', agentSessionId: 'bot-session', projectId: null };
+    const child = { ...sample, id: 'bot-work', parentThreadId: bot.id, archived: false, status: 'running' as const };
+    const ordinary = { ...sample, id: 'ordinary', parentThreadId: null, archived: false };
+    const helper = { ...child, id: 'helper', parentThreadId: ordinary.id };
+    const privateChild = { ...child, id: 'personal', projectId: null };
+    const hidden = [{ ...child, id: 'archived', archived: true }, { ...child, id: 'incognito', incognito: true as const }];
+    const grouped = threadsByProject([bot, child, ordinary, helper, privateChild, ...hidden]);
+    expect(grouped.get(sample.projectId!)?.map(thread => thread.id)).toEqual([child.id, ordinary.id]);
+    expect(grouped.has(null as never)).toBe(false);
+    expect(threadsByProject([{ ...child, parentIsBot: true }]).get(sample.projectId!)?.map(thread => thread.id)).toEqual([child.id]);
+  } finally { store.detach(); client.close(); }
+});
 
 test('a load tick patches its row and leaves the project lists alone', async () => {
   const { store, client } = await ready();

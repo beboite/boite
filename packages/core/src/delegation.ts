@@ -16,6 +16,7 @@ import { delegatedResultPage, DelegationWaits } from './delegation/results.ts';
 import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
 import { permissionWake, questionWake, worktreeLine } from './delegation/messages.ts';
 import { ChildWorktrees } from './delegation/worktrees.ts';
+import { childProject } from './delegation/projects.ts';
 import { Retirements } from './delegation/retirement.ts';
 import { pauseHold, pauseOver } from './delegation/pauses.ts';
 import { dropRestartCuts, recordRestartCut, resumeRestartCuts } from './delegation/restart.ts';
@@ -291,10 +292,11 @@ export class Delegation {
     const title = params.title === undefined ? task.split('\n')[0]!.slice(0, 80) : text(params.title, 'title', 120);
     if (params.worktree !== undefined && typeof params.worktree !== 'boolean') throw invalidParams('worktree: expected true, false or absent');
     const worktree = params.worktree === true;
+    const project = params.project === undefined ? undefined : text(params.project, 'project', 4096);
     const request: RouteRequest = { profileId: params.profileId ?? null, ...(params.model === undefined ? {} : { model: text(params.model, 'model', 256) }), ...(params.effort === undefined ? {} : { effort: text(params.effort, 'effort', 32) }), ...(params.speed === undefined ? {} : { speed: text(params.speed, 'speed', 64) }) };
     // A request id from before routes keeps its fingerprint: profile, task and title only.
     // A spawn that names a context mode adds it, so a request id from before keeps its fingerprint.
-    const fingerprint = hash([...(request.model === undefined && request.effort === undefined && request.speed === undefined ? [params.profileId, task, title] : [request, task, title]), ...(params.context === undefined ? [] : [params.context]), ...(worktree ? ['worktree'] : [])]);
+    const fingerprint = hash([...(request.model === undefined && request.effort === undefined && request.speed === undefined ? [params.profileId, task, title] : [request, task, title]), ...(params.context === undefined ? [] : [params.context]), ...(worktree ? ['worktree'] : []), ...(project === undefined ? [] : [{ project }])]);
     const existing = this.core.journal.db.query('SELECT * FROM delegated_agents WHERE root_id = ? AND request_id = ?').get(parent.id, requestId) as AgentRow | null;
     if (existing) {
       if (existing.fingerprint !== fingerprint) throw refused('requestId already used for different content');
@@ -312,11 +314,12 @@ export class Delegation {
     const id = this.createChild(parent, profile, title, childId => {
       row.thread_id = childId;
       this.core.journal.db.query('INSERT INTO delegated_agents VALUES (?, ?, ?, ?, ?, ?)').run(childId, parent.id, requestId, fingerprint, profile.id, task);
-    }, params.context, worktree);
+    }, params.context, worktree, undefined, project);
     const own = this.worktrees.get(id);
+    const child = this.core.threads.require(id);
     const checkout = own
-      ? `You work in a git worktree of your own at ${own.path} on branch ${own.branch}, made from the parent's HEAD; the parent's uncommitted edits are not in it. Commit your work on that branch before your final answer: the parent merges the branch.`
-      : 'You share its checkout: change only the files your task names and never undo another agent\'s edits.';
+      ? `You work in a git worktree of your own at ${own.path} on branch ${own.branch}, made from ${parent.projectId === child.projectId ? "the parent's" : "the project's"} HEAD; uncommitted edits are not in it. Commit your work on that branch before your final answer: the parent merges the branch.`
+      : `You work in ${child.cwd}. You share its checkout: change only the files your task names and never undo another agent's edits.`;
     try {
       this.core.threads.startTurn(id, `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. ${checkout} You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
     } catch (error) {
@@ -371,8 +374,9 @@ export class Delegation {
 
   /**
    * An ordinary child thread on a profile, or on the parent's own route for a
-   * workflow step that names none, in the parent's checkout and permission
-   * mode, on the route's speed tier or none: never the parent's. The tier is
+   * workflow step that names none, in the parent's permission mode and its
+   * checkout, or a bot's entrusted project. It uses the route's speed tier or
+   * none: never the parent's. The tier is
    * checked here, whoever built the route. `record` runs in the same
    * transaction. `worktree` gives it a git worktree of its own instead of the
    * parent's checkout: its branch and folder now, the worktree itself before
@@ -381,23 +385,25 @@ export class Delegation {
    * pass that runs no tool; each driver honours what it can of the mode.
    */
   createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void, context?: unknown, worktree = false,
-    fixed?: { contextMode: ThreadContextMode; permissionMode: PermissionMode }): string {
+    fixed?: { contextMode: ThreadContextMode; permissionMode: PermissionMode }, project?: string): string {
     const id = newId('thr_');
     const { speed: asked, ...route } = profile;
     if (asked != null && route.model === null) throw invalidParams(SPEED_NEEDS_MODEL);
     const provider = this.core.providers.require(route.providerId);
     const speed = checkSpeed(provider, route.accountId, route.model, asked ?? null);
     const contextMode = fixed ? { ...fixed.contextMode, tools: fixed.contextMode.tools === null ? null : [...fixed.contextMode.tools] } : checkContext(provider, context);
-    const planned = worktree ? this.worktrees.plan(parent, id) : null;
+    // Fixed memory passes keep the bot's personal workspace, even with one entrusted project.
+    const workspace = fixed ? parent : childProject(this.core, parent, project);
+    const planned = worktree ? this.worktrees.plan(workspace, id) : null;
     this.core.journal.db.transaction(() => {
-      if (parent.projectId === null) {
+      if (workspace.projectId === null) {
         const now = Date.now();
         const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...route, speed, id, contextMode, ...(fixed ? { permissionMode: fixed.permissionMode } : {}),
           title, titleSource: 'user', status: 'idle', sessionId: null, sessionGeneration: 0, selectionVersion: 0,
           context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
         this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
         this.core.bus.emit('thread.created', child);
-      } else this.core.threads.create({ projectId: parent.projectId, providerId: route.providerId, accountId: route.accountId, model: route.model ?? undefined, effort: route.effort, speed, title, cwd: planned?.path ?? parent.cwd, permissionMode: parent.permissionMode, ...(context === undefined ? {} : { context: context as RpcParams<'threads.create'>['context'] }) }, { id, branch: planned?.branch ?? parent.branch, parentThreadId: parent.id });
+      } else this.core.threads.create({ projectId: workspace.projectId, providerId: route.providerId, accountId: route.accountId, model: route.model ?? undefined, effort: route.effort, speed, title, cwd: planned?.path ?? workspace.cwd, permissionMode: parent.permissionMode, ...(context === undefined ? {} : { context: context as RpcParams<'threads.create'>['context'] }) }, { id, branch: planned?.branch ?? workspace.branch, parentThreadId: parent.id });
       if (planned) this.worktrees.record(id, planned);
       record(id);
       const child = this.core.threads.require(id);

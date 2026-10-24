@@ -14,6 +14,7 @@ type Print = (lines: string[], value: unknown) => void;
 
 export interface DelegateOptions {
   requestId?: string;
+  project?: string;
   timeout?: number;
   title?: string;
   model?: string;
@@ -170,6 +171,7 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
       const task = requiredText(rest, start, 'delegate spawn needs a brief: boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>]', false);
       const agent = await client.call('delegation.spawn', {
         threadId, task, requestId,
+        ...(options.project === undefined ? {} : { project: options.project }),
         ...(profileId === undefined ? {} : { profileId }),
         ...(options.model === undefined ? {} : { model: options.model }),
         ...(options.effort === undefined ? {} : { effort: options.effort }),
@@ -182,7 +184,8 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
         `agent: ${agent.thread.id}`,
         `model: ${routeOf(agent)}`,
         `status: ${agent.thread.status}`,
-        ...(agent.worktree ? [`worktree: ${agent.worktree.path} on branch ${agent.worktree.branch}, made from your HEAD when it starts; your uncommitted edits are not in it`] : []),
+        ...(agent.thread.projectId === null ? [] : [`project: ${agent.thread.projectId}`, `cwd: ${agent.thread.cwd}`]),
+        ...(agent.worktree ? [`worktree: ${agent.worktree.path} on branch ${agent.worktree.branch}, made from the source checkout's HEAD when it starts; uncommitted edits are not in it`] : []),
         'Its result comes back to you as a message. Keep working or end your turn; do not poll.',
       ], agent);
       return;

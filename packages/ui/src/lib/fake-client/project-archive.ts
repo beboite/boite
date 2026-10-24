@@ -3,11 +3,12 @@ import { RpcErrorCode, type Project } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { pathKey } from './checks';
 import type { FakeContext } from './context';
+import { projectThread } from '../thread-rows';
 
 /** A project as the core answers it: the stored row plus its counts of archived and done threads, sub-threads left out. */
 export function describedProject(ctx: FakeContext, project: Project): Project {
   const { archivedThreads: _stale, doneThreads: _staleDone, missing: _was, ...row } = project;
-  const archived = [...ctx.threads.values()].filter((t) => t.projectId === project.id && t.archived && !t.parentThreadId);
+  const archived = [...ctx.threads.values()].filter(t => t.projectId === project.id && t.archived && projectThread(t, ctx.threads.get(t.parentThreadId ?? '')));
   const archivedThreads = archived.length;
   const doneThreads = archived.filter((t) => t.doneAt != null).length;
   const missing = ctx.goneFolders.has(pathKey(project.path));
