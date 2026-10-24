@@ -98,7 +98,7 @@ export async function archivedThreads(store: Store, projectId?: ProjectId): Prom
   const all = await client.call('threads.list', projectId ? { projectId, includeArchived: true } : { includeArchived: true });
   const parents = new Map([...store.threads, ...all].map(thread => [thread.id, thread]));
   return all.filter(t => t.archived && !t.incognito && (projectId === undefined || t.projectId === projectId)
-    && projectThread(t, parents.get(t.parentThreadId ?? ''))).sort((a, b) => archivedTime(b) - archivedTime(a));
+    && (!t.parentThreadId || projectThread(t, parents.get(t.parentThreadId)))).sort((a, b) => archivedTime(b) - archivedTime(a));
 }
 
 /** Takes a thread out of the archive; its row comes back in the sidebar. */

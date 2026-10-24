@@ -32,6 +32,31 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
+test('the settings archive keeps bot workers across live updates and restores the personal bot', async () => {
+  const { store, client } = await ready();
+  const bot = await client.call('agents.profile.save', { value: {
+    name: 'Scout', domain: '', instructions: '', avatar: '', status: 'active', projectIds: ['p-boite'],
+    selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null, permissionMode: 'default' },
+  } });
+  const { threadId } = await client.call('agents.open', { agentId: bot.id });
+  const child = await client.call('delegation.spawn', { threadId, task: 'Inspect the project', requestId: 'archive-worker' });
+  await client.call('delegation.wait', { threadId, agentId: child.thread.id, timeoutMs: 5000 });
+  await client.call('threads.archive', { threadId: child.thread.id, onlyIfIdle: true });
+  await client.call('threads.archive', { threadId });
+  running = mount(ArchivedThreads, { target: document.body, props: { store, eager: true } });
+  await settle();
+  const row = (id: string) => document.querySelector<HTMLElement>(`[data-testid=archived-list] [data-thread-id="${id}"]`);
+  expect(row(child.thread.id)).not.toBeNull();
+  await client.call('threads.update', { threadId: child.thread.id, title: 'Updated project result' });
+  await settle();
+  expect(row(child.thread.id)?.textContent).toContain('Updated project result');
+  expect(row(threadId)?.textContent).toContain('Scout');
+  row(threadId)!.querySelector<HTMLButtonElement>('[data-testid=archived-restore]')!.click();
+  await settle();
+  expect((await client.call('threads.get', { threadId })).archived).toBe(false);
+  expect(row(threadId)?.querySelector('[data-testid=archived-open]')).toBeTruthy();
+});
+
 test('the mounted settings archive shows merged PR identity/time, reloads reason and restores the retained conversation', async () => {
   const { store, client } = await ready();
   const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;

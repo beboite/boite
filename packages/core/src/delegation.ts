@@ -319,7 +319,7 @@ export class Delegation {
     const child = this.core.threads.require(id);
     const checkout = own
       ? `You work in a git worktree of your own at ${own.path} on branch ${own.branch}, made from ${parent.projectId === child.projectId ? "the parent's" : "the project's"} HEAD; uncommitted edits are not in it. Commit your work on that branch before your final answer: the parent merges the branch.`
-      : `You work in ${child.cwd}. You share its checkout: change only the files your task names and never undo another agent's edits.`;
+      : `You work in ${child.cwd}. You share that checkout: change only the files your task names and never undo another agent's edits.`;
     try {
       this.core.threads.startTurn(id, `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. ${checkout} You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
     } catch (error) {

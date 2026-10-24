@@ -40,7 +40,12 @@ test('a bot project worker remains in Done and project counts after its bot is a
   expect((await client.call('projects.list', {})).find(p => p.id === 'p-boite')?.doneThreads).toBe(1);
   await client.call('threads.archive', { threadId });
   store.threads = [];
-  expect((await archivedThreads(store, 'p-boite')).map(t => t.id)).toContain(child.thread.id);
+  const global = await archivedThreads(store);
+  expect(global.find(t => t.id === threadId)).toMatchObject({ projectId: null, archived: true });
+  expect(global.map(t => t.id)).toContain(child.thread.id);
+  const project = (await archivedThreads(store, 'p-boite')).map(t => t.id);
+  expect(project).toContain(child.thread.id);
+  expect(project).not.toContain(threadId);
   await client.call('threads.archive', { threadId: child.thread.id, archived: false });
   expect((await client.call('projects.list', {})).find(p => p.id === 'p-boite')?.doneThreads).toBeUndefined();
 });
