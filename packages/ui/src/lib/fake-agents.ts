@@ -124,10 +124,10 @@ export class FakeAgents {
   /** The agent whose own thread this is, as the core's `resident.ownerOf`. */
   ownerOf(threadId: string): string | null { return [...this.sessions.values()].find(s => s.threadId === threadId)?.agentId ?? null; }
   /** An applied agent setting card, written as the agent's settings would. */
-  writeSetting(agentId: string, change: { selection?: AgentSelection; projectIds?: string[]; config?: AgentRuntimeConfig }): AgentProfile {
+  writeSetting(agentId: string, change: { profile?: Partial<Pick<AgentProfile, 'name' | 'domain' | 'instructions' | 'avatar' | 'status'>>; selection?: AgentSelection; projectIds?: string[]; config?: AgentRuntimeConfig }): AgentProfile {
     const agent = this.profile(agentId);
     if (change.config) this.configs.set(agentId, structuredClone(change.config));
-    return this.saveProfile({ id: agent.id, expectedRevision: agent.revision, value: { ...agent, ...(change.selection ? { selection: change.selection } : {}), ...(change.projectIds ? { projectIds: change.projectIds } : {}) } }, false);
+    return this.saveProfile({ id: agent.id, expectedRevision: agent.revision, value: { ...agent, ...change.profile, ...(change.selection ? { selection: change.selection } : {}), ...(change.projectIds ? { projectIds: change.projectIds } : {}) } }, false);
   }
   close(): void {}
   open(): void {}

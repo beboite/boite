@@ -139,3 +139,31 @@ test('an archived agent closes its card without an answer', async () => {
     client.close();
   }
 });
+
+test('an instructions card shows the proposed text; an archive card applied reads applied, not closed', async () => {
+  const { client, store, agent } = await setup();
+  try {
+    const rules = 'Guard the release.\nCheck every gate.';
+    const { questionId } = await client.call('agents.settings.request', { threadId: 't-trace', agent: agent.id, key: 'instructions', value: rules, reason: 'The user gave me rules' });
+    card(store, await asked(store, questionId));
+    expect(query('[data-testid=agent-setting-previous]').textContent).toBe('None');
+    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe(`${rules.length} characters`);
+    expect(query('[data-testid=agent-setting-text]').textContent).toBe(rules);
+    query<HTMLButtonElement>('[data-testid=agent-setting-apply]').click();
+    await vi.waitFor(() => expect(store.pendingQuestions.some((question) => question.id === questionId)).toBe(false));
+
+    await unmount(mounted!);
+    const archive = await client.call('agents.settings.request', { threadId: 't-trace', agent: 'Mira', key: 'status', value: 'archived', reason: 'Mira is no longer needed' });
+    card(store, await asked(store, archive.questionId));
+    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe('Archived');
+    query<HTMLButtonElement>('[data-testid=agent-setting-apply]').click();
+    await vi.waitFor(() => expect(store.pendingQuestions.some((question) => question.id === archive.questionId)).toBe(false));
+    expect((await client.call('agents.snapshot', {})).profiles.find((profile) => profile.id === agent.id)?.status).toBe('archived');
+    await verdictRow(store, archive.questionId);
+    expect(query('[data-testid=agent-setting-card]').getAttribute('data-outcome')).toBe('applied');
+    expect(query('[data-testid=agent-setting-subject]').textContent).toBe('Mira · Status: Archived');
+  } finally {
+    store.detach();
+    client.close();
+  }
+});

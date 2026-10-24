@@ -646,15 +646,20 @@ one value, a provider login (`accounts#provider-claude`) or a device to add
 `opened: the user opened Settings at <page>`; Dismiss sends `dismissed`. The
 MCP tools `boite_settings` and `boite_settings_request` do the same.
 
-`settings bot [key]` reads a bot's settings a card may change:
-`projects` (those entrusted to it), `model`, `effort`, `autoMemory` (the memory
-pass), `subagents` and `dailyBudget` (dollars a day, or `null` for none). It prints the bot's name, each value
-and, for projects, models and efforts, the choices. `--bot <name or id>`
+`settings bot [key]` reads a bot's settings a card may change: `name`,
+`domain` (its role), `instructions`, `avatar`, `status` (`active`, `paused`,
+`archived`), `projects` (those entrusted to it), `model`, `effort`,
+`autoMemory` (the memory pass), `subagents` and `dailyBudget` (dollars a day,
+or `null` for none). It prints the bot's name, each value and, for status,
+projects, models and efforts, the choices; the listing cuts long instructions
+to their start, one key or `--json` prints them whole. `--bot <name or id>`
 names the bot; in a bot's own conversation it defaults to that bot.
-`settings bot request <key> <value> --why <text>` draws the card. `projects`
-takes `+name -name` edits or a whole list (`Notes,Other`, or JSON), resolved
-by name or id and stored as ids; the other keys read their value as `settings
-request` does. The refusals are the same, plus an unknown or ambiguous bot
+`settings bot request <key> <value> --why <text>` draws the card. `name`,
+`domain`, `instructions`, `avatar` and `status` take the words as typed
+(`name Gargouille (Sécurité)`), and `instructions --instructions-file <path>`
+reads a file; `projects` takes `+name -name` edits or a whole list
+(`Notes,Other`, or JSON), resolved by name or id and stored as ids; the other
+keys read their value as `settings request` does. The refusals are the same, plus an unknown or ambiguous bot
 (the refusal lists them) and a model the bot's policy does not allow.
 
 The card names the bot and the change; for projects, each project added or

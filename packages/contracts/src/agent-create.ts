@@ -1,6 +1,6 @@
 import type { AgentProfile, AgentSelection } from './agents.ts';
 import type { ThreadId } from './index.ts';
-import { agentProjectIds, type AgentSettingChoice } from './agent-setting-requests.ts';
+import { AGENT_DOMAIN_MAX, AGENT_INSTRUCTIONS_MAX, AGENT_NAME_MAX, agentProjectIds, type AgentSettingChoice } from './agent-setting-requests.ts';
 
 /*
  * A thread creating a bot the user asked for (`agents.create`): it checks the
@@ -8,11 +8,6 @@ import { agentProjectIds, type AgentSettingChoice } from './agent-setting-reques
  * with no card in between. Changing a bot afterwards stays the owner's
  * (`agents.settings.request` draws a card).
  */
-
-/** The bounds `agents.profile.save` puts on a bot's name, domain and instructions. */
-export const AGENT_NAME_MAX = 100;
-export const AGENT_DOMAIN_MAX = 500;
-export const AGENT_INSTRUCTIONS_MAX = 32000;
 
 /** A bot as `agents.create` will save it. */
 export interface AgentCreation {
