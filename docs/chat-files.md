@@ -123,7 +123,10 @@ one line: the command, and that a request for a visual or a schema calls for
 it. `boite view help` prints the rest, read only by an agent about to write a
 page: the layout rules, the app's look and its kit, the theme variables, how
 to animate and what the publish checks. Both texts are `VIEW_GUIDE_LINE` and `VIEW_HELP` in
-`packages/contracts/src/view.ts`, beside the code they describe.
+`packages/contracts/src/view.ts`, beside the code they describe. The next line of
+the guide sends a simple schema to a Mermaid block in the answer instead
+([diagrams and formulas](diagrams-and-formulas.md)), so a page is for what
+moves or answers the reader.
 
 One file is one visual. Several visuals are several files, each published
 with its own command. The help and the command's output tell the agent to

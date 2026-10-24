@@ -185,8 +185,28 @@ function offlineParts(): Plugin {
   };
 }
 
+/**
+ * KaTeX's stylesheet names each face three times, woff2, woff and ttf. Every
+ * browser Boite runs on reads woff2 (`src/lib/browser-floor.ts`), so the
+ * other two would only add a megabyte of fonts to the build that nothing
+ * fetches. Formulas load the stylesheet on demand (`src/lib/math-render.ts`).
+ */
+function katexWoff2(): Plugin {
+  return {
+    name: 'boite-katex-woff2',
+    // Before Vite's own CSS plugin, which turns each url() into an emitted file.
+    enforce: 'pre',
+    transform(code, id) {
+      if (!/[\\/]katex[\\/]dist[\\/]katex(?:\.min)?\.css$/.test(id)) return null;
+      const trimmed = code.replace(/,\s*url\([^)]+\.(?:woff|ttf)\)\s*format\("(?:woff|truetype)"\)/g, '');
+      if (trimmed.includes('.ttf)') || trimmed.includes('.woff)')) this.error('katex.css changed its @font-face form: update boite-katex-woff2 in vite.config.ts');
+      return { code: trimmed, map: null };
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [lucideGlyph(), completeCatalogues(), svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), offlineParts(), prepaintMinify(), precompress()],
+  plugins: [lucideGlyph(), completeCatalogues(), katexWoff2(), svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), offlineParts(), prepaintMinify(), precompress()],
   base: './',
   define: { __BOITE_VERSION__: JSON.stringify(releaseVersion()) },
   // AudioWorklet modules must be same-origin files, never data URLs under the shell CSP.

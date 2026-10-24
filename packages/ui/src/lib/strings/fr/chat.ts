@@ -195,6 +195,17 @@ export const fr: Translation = {
     errorServerTitle: 'Le fournisseur est indisponible',
     errorServerHint: 'Réessayez dans un instant.',
     errorDetails: 'Détails techniques',
-    failedAttempts: '{count} tentatives en échec'
+    failedAttempts: '{count} tentatives en échec',
+    /** A Mermaid block of an answer, drawn (`lib/rich-markdown.ts`). */
+    diagram: {
+      label: 'Diagramme',
+      showCode: 'Code',
+      showDiagram: 'Diagramme',
+      enlarge: 'Agrandir',
+      failed: 'Ce diagramme n’a pas pu être dessiné : {reason}',
+      unavailable: 'Le diagramme n’a pas pu être dessiné ici.'
+    },
+    /** The tooltip of a formula KaTeX could not read, its source left as written. */
+    formulaFailed: 'Cette formule n’a pas pu être lue : {reason}'
   }
 };

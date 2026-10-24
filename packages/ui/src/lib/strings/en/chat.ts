@@ -229,6 +229,17 @@ export const strings = {
     errorServerTitle: 'The provider is unavailable',
     errorServerHint: 'Try again in a moment.',
     errorDetails: 'Technical details',
-    failedAttempts: '{count} failed attempts'
+    failedAttempts: '{count} failed attempts',
+    /** A Mermaid block of an answer, drawn (`lib/rich-markdown.ts`). */
+    diagram: {
+      label: 'Diagram',
+      showCode: 'Code',
+      showDiagram: 'Diagram',
+      enlarge: 'Enlarge',
+      failed: 'This diagram could not be drawn: {reason}',
+      unavailable: 'The diagram could not be drawn here.'
+    },
+    /** The tooltip of a formula KaTeX could not read, its source left as written. */
+    formulaFailed: 'This formula could not be read: {reason}'
   }
 } as const;

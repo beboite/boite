@@ -15,6 +15,9 @@
   import type { Message } from '@boite/contracts';
   import { answerPieces, viewAt, viewPart, type AnswerPiece } from '../lib/inline-view';
   import InlineView from './InlineView.svelte';
+  import { richMarkdown } from '../lib/rich-markdown';
+  import { viewerHost, type Gallery, type MediaItem } from '../lib/media-gallery';
+  import Deferred, { parts } from './Deferred.svelte';
 
   /**
    * `views` are the pages the answer's turn published (`turnViews`): a line
@@ -100,6 +103,23 @@
 
   let host = $state<HTMLDivElement>();
 
+  /**
+   * A drawn diagram opens in the timeline's viewer, or in one of its own where
+   * there is none (a file preview, a plan). Its picture is an object URL the
+   * viewer gives back once closed.
+   */
+  const viewers = viewerHost();
+  let viewing = $state<Gallery | null>(null);
+  function enlarge(item: MediaItem): void {
+    if (viewers) { viewers.open({ items: [item], index: 0 }); viewers.release(item.src); return; }
+    if (viewing) URL.revokeObjectURL(viewing.items[0]!.src);
+    viewing = { items: [item], index: 0 };
+  }
+  function closeViewer(): void {
+    if (viewing) URL.revokeObjectURL(viewing.items[0]!.src);
+    viewing = null;
+  }
+
   // Attach copy buttons once the final paragraph has reached the DOM.
   $effect(() => {
     void blocks;
@@ -116,7 +136,8 @@
   });
 
   function hangCopy(pre: HTMLPreElement): void {
-    if (pre.parentElement?.classList.contains('code-block')) return;
+    // A diagram's code has the diagram's own buttons.
+    if (pre.parentElement?.classList.contains('code-block') || pre.parentElement?.classList.contains('md-mermaid')) return;
     const wrap = document.createElement('div');
     wrap.className = 'code-block';
     pre.replaceWith(wrap);
@@ -154,7 +175,7 @@
 {#if groups && store && threadId}
   {@const end = groups.at(-1)}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="flow" data-testid="text-part" bind:this={host} use:selectionClicks onclick={follow}>
+  <div class="flow" data-testid="text-part" bind:this={host} use:selectionClicks use:richMarkdown={{ onenlarge: enlarge }} onclick={follow}>
     {#each groups as group (group.key)}
       {#if group.kind === 'view'}
         <InlineView part={viewPart(group.message)!} {store} {threadId} messageId={group.message.id} partIndex={0} />
@@ -172,7 +193,7 @@
   </div>
 {:else}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || tail.length > 0)} data-testid="text-part" bind:this={host} use:selectionClicks onclick={follow}>
+  <div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || tail.length > 0)} data-testid="text-part" bind:this={host} use:selectionClicks use:richMarkdown={{ onenlarge: enlarge }} onclick={follow}>
     {#each blocks as block, index (index)}
       <!-- Completed Markdown blocks stay mounted while the pending paragraph changes. -->
       <div class="paragraph" data-testid="paragraph">{@html renderBlock(block, rich)}</div>
@@ -184,6 +205,7 @@
     <ChatFile {store} {threadId} path={selected.path} line={selected.line} onclose={() => selected = null} />
   {/key}
 {/if}
+{#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer} floating>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={closeViewer} />{/snippet}</Deferred>{/if}
 
 <style>
   .prose {

@@ -108,6 +108,8 @@ export interface FakeClientOptions {
   longCopies?: number;
   /** Seeds one thread of forty messages and 11.5 MiB of tool calls, what `?fake=1&heavy=1` opens the list on. */
   heavy?: boolean;
+  /** Seeds one thread whose answer holds diagrams and formulas, what `?fake=1&diagrams=1` opens (`diagrams-thread.ts`). */
+  diagrams?: boolean;
   /** Seeds this many more threads at work, their load sampled every second: what `?fake=1&working=16` shows. */
   working?: number;
   /** Seeds this many threads that work without end, what `?fake=1&load=16` streams (`load.ts`). */
@@ -299,6 +301,7 @@ export class FakeContext {
   readonly long: boolean;
   readonly longCopies: number;
   readonly heavy: boolean;
+  readonly diagrams: boolean;
   readonly quotaExtras: boolean;
   brainLinkPermission: boolean;
   /**
@@ -371,6 +374,7 @@ export class FakeContext {
     this.long = options.long ?? false;
     this.longCopies = options.longCopies ?? 0;
     this.heavy = options.heavy ?? false;
+    this.diagrams = options.diagrams ?? false;
     const coreId = options.coreId ?? `fake-core-${secureId()}`;
     if (options.desktopApp) {
       this.serverUpdate = { ...this.serverUpdate, mode: 'manual', phase: 'idle', version: null, publishedAt: null, received: 0, total: null, error: null };
