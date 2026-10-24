@@ -12,8 +12,8 @@ let harness: TestCore;
 let page: BrowserPage;
 let restore: (() => void) | undefined;
 
-beforeAll(() => ensureProductionUi());
-afterAll(async () => { await page?.close(); await harness?.stop(); restore?.(); });
+beforeAll(() => ensureProductionUi(), 120_000);
+afterAll(async () => { await page?.close(); await harness?.stop(); restore?.(); }, 30_000);
 
 real('a bot project worker appears live in the project and opens as a conversation on desktop and phone', async () => {
   harness = await startTestCore();
