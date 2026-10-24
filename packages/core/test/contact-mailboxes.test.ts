@@ -192,3 +192,25 @@ test('a contact cannot use the group route, and removing it withdraws a reply al
   a.core.coordination.configure(source, { mode: 'brief', remote: true, resources: '', paused: false });
   expect(a.core.coordination.get(source).wakes).toBe(0);
 }, 30000);
+
+test('a remembered gateway gives way once it stops offering the contact and another member still does', async () => {
+  const { a, b, c, ci, source } = await routed();
+  const d = await startTestCore();
+  cores.push(d);
+  await a.core.group.invite().then(({ invite }) => d.core.group.join(invite));
+  d.core.contacts.setSettings({ minTier: 2 });
+  await d.core.contacts.join((await c.core.contacts.invite(false)).link);
+  const di = d.core.coordination.card().coreId;
+  await waitFor(() => c.core.contacts.linked(di));
+  await waitFor(() => a.core.group.peers().some(peer => peer.coreId === di));
+  expect((await a.core.coordination.mailboxes.contacts(source)).filter(entry => entry.coreId === ci)).toHaveLength(1);
+  const first = a.core.coordination.mailboxes.route(source, ci)!.via;
+  const gone = first === d.core.coordination.card().coreId ? d : b;
+  const other = gone === d ? b : d;
+  // The other gateway also opened one of this machine's projects, so the contact is already listed here.
+  const entry = { coreId: ci, name: 'C', minTier: 2, link: 'connected', offers: [], grants: [{ projectId: a.core.threads.require(source).projectId!, readThreads: false }] };
+  a.core.contacts.members.mirrored(other.core.coordination.card().coreId, { contacts: [entry] });
+  gone.core.contacts.remove(ci);
+  await a.core.coordination.mailboxes.contacts(source);
+  expect(a.core.coordination.mailboxes.route(source, ci)?.via).toBe(other.core.coordination.card().coreId);
+}, 30000);

@@ -91,13 +91,14 @@ export class ContactMailboxes {
     }));
     this.source(threadId);
     const result = [...local];
-    for (const { via, contact, admission } of replies.flat()) {
+    const offered = replies.flat();
+    for (const { via, contact, admission } of offered) {
       // A contact that opened this core's projects through that member is listed already, and still asked through a mailbox.
       const relayed = this.core.coordination.trusted().find(peer => peer.coreId === contact.coreId);
       if (contact.coreId === this.self() || (relayed && !this.core.contacts.isRelayPeer(relayed))) continue;
-      // Each listing refreshes the route's admission; a second gateway for the same contact does not replace the first.
+      // Each listing refreshes the route's admission; another gateway replaces it only once its own stops offering the contact.
       const existing = this.route(threadId, contact.coreId);
-      if (existing && existing.via !== via && result.some(entry => entry.coreId === contact.coreId)) continue;
+      if (existing && existing.via !== via && offered.some(entry => entry.via === existing.via && entry.contact.coreId === contact.coreId)) continue;
       this.remember(threadId, via, contact, admission);
       if (!result.some(entry => entry.coreId === contact.coreId)) result.push(contact);
     }
