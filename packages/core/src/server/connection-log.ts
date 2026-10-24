@@ -12,7 +12,7 @@ export const SLOW_RPC_WARN_MS = 10_000;
  * on another agent, a question to the user, a browser command. Their duration
  * is the wait, not a sign of a stalled core, so they never reach `warn`.
  */
-const HELD_METHODS = /^(delegation\.(wait|send)|collaboration\.(wait|send)|questions\.ask|agents\.decision\.request|browser\.|devices\.|panel\.|accounts\.login|providers\.(install|update|dryRun)|plugins\.(install|uninstall)|speech\.(install|transcribe|stream)|imports\.run|brain\.sync|core\.update)/;
+const HELD_METHODS = /^(delegation\.(wait|send)|collaboration\.(wait|send)|questions\.ask|secrets\.(ask|use)|agents\.decision\.request|browser\.|devices\.|panel\.|accounts\.login|providers\.(install|update|dryRun)|plugins\.(install|uninstall)|speech\.(install|transcribe|stream)|imports\.run|brain\.sync|core\.update)/;
 
 /**
  * A value an unauthenticated client chose, made safe for a log line: control,

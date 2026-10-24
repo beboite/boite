@@ -65,6 +65,9 @@ import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
 import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
+import { openSecretVault } from './platform/secret-vault.ts';
+import type { SecretVault } from './platform/types.ts';
+import { SecretStore } from './secrets/store.ts';
 import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
 import { DesktopUpdates } from './desktop-update.ts';
 
@@ -97,6 +100,8 @@ export interface CoreOptions {
   dataDirKind?: 'default' | 'custom';
   /** How often a resident core runs its retention passes; a test shortens the minute. */
   retentionPassMs?: number;
+  /** Where secrets are kept; tests pass a memory vault so no system store is touched. */
+  secretVault?: (dir: string) => Promise<SecretVault>;
 }
 
 /**
@@ -195,6 +200,7 @@ export class Core {
   /** What the user's own hooks did since this core started, for Settings. */
   readonly hooks: HookLedger;
   readonly terminals: TerminalStore;
+  readonly secrets: SecretStore;
   readonly stopArtifactRetention: () => Promise<void>;
   readonly artifactPreviews = new ArtifactPreviews(this);
   readonly browser = new AgentBrowser(this);
@@ -382,6 +388,9 @@ export class Core {
     this.brain = new BrainStore(this);
     this.hooks = new HookLedger(this);
     this.terminals = new TerminalStore(this);
+    this.secrets = new SecretStore(this, options.secretVault ?? openSecretVault);
+    this.logs.mask = text => this.secrets.maskAll(text);
+    this.procs.mask = (threadId, text) => this.secrets.mask(threadId, text);
 
     this.workforce = new AgentStore(this);
     this.pullRequests = new PullRequests(this);
@@ -415,6 +424,7 @@ export class Core {
     // What a dead core cut, and any resume planned before it died, goes on (`threads/auto-continue.ts`).
     this.threads.autoContinue.start(interrupted);
     this.threads.cards.restoreAsyncQuestions();
+    this.secrets.start();
     phase('startup.recovered', `Previous run recovered, ${recovered} unfinished turns`, { stuckTurns: recovered });
     queueMicrotask(() => {
       void this.drafts.recover().catch(error => this.log('warn', `draft recovery failed: ${String(error)}`));
@@ -570,6 +580,7 @@ export class Core {
       for (const threadId of this.threads.agentState.background.keys()) this.threads.agentState.cancelBackground(threadId);
     }
     shutdownDrivers();
+    this.secrets.stop();
     await this.accounts.closeLogins();
     await this.terminals.closeAll();
     // Off Windows this waits out the SIGKILL of a group that ignored SIGTERM,

@@ -133,7 +133,9 @@ export class TurnContexts {
     const progress = (phase: import('@boite/contracts').ThreadProgress['phase'], detail: string | null = null): void =>
       this.threads.progress.report(threadId, turn.id, phase, detail);
     const thinking = new Map<MessageId, { index: number; startedAt: number }>();
-    const publishPart = (messageId: MessageId, partIndex: number, part: MessagePart): void => {
+    const publishPart = (messageId: MessageId, partIndex: number, raw: MessagePart): void => {
+      // A secret in use on the thread never reaches the journal or a client in clear (docs/secrets.md).
+      const part = this.core.secrets.maskPart(threadId, raw);
       this.core.journal.append(
         { type: 'message.part', threadId, version: 1, payload: { messageId, partIndex, part } },
         () => this.core.journal.setMessagePart(messageId, partIndex, part),
@@ -199,6 +201,11 @@ export class TurnContexts {
       if (!segment.open) return;
       finishThinking(segment.id);
       segment.open = false;
+      // Streamed text is masked delta by delta; a value cut across two deltas is caught here, once whole.
+      const parts = this.core.secrets.masks.empty ? [] : this.core.journal.getMessage(segment.id)?.parts ?? [];
+      parts.forEach((part, index) => {
+        if ((part.type === 'text' || part.type === 'thinking') && this.core.secrets.maskPart(threadId, part) !== part) publishPart(segment.id, index, part);
+      });
       this.core.journal.append(
         { type: 'message.completed', threadId, version: 1, payload: { messageId: segment.id, state } },
         () => {
@@ -243,14 +250,15 @@ export class TurnContexts {
         answers.set(id, { role, segments: [{ id, open: true, next: 0 }], parts: new Map() });
         return id;
       },
-      delta: (driverId: MessageId, driverIndex: number, text: string): void => {
+      delta: (driverId: MessageId, driverIndex: number, raw: string): void => {
+        const text = this.core.secrets.mask(threadId, raw);
         const answer = answers.get(driverId);
         let slot = answer?.parts.get(driverIndex);
         if (text.length && slot && (slot.type === 'text' || slot.type === 'thinking') && answer?.role === 'assistant'
           && (answerAfter.has(turn.id) || slot.segment !== answer.segments.at(-1))) {
           slot = continueText(driverId, driverIndex, slot);
         }
-        if (slot) slot.length += text.length;
+        if (slot) slot.length += raw.length;
         const { messageId, partIndex } = route(driverId, driverIndex);
         finishThinking(messageId, partIndex);
         const last = partProgress.get(`${messageId}:${partIndex}`);

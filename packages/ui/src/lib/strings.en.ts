@@ -43,6 +43,7 @@ import { strings as imports } from './strings/en/imports';
 import { strings as agentShape } from './strings/en/agentShape';
 import { strings as media } from './strings/en/media';
 import { strings as btw } from './strings/en/btw';
+import { strings as secrets } from './strings/en/secrets';
 import { strings as slash } from './strings/en/slash';
 import { strings as activity } from './strings/en/activity';
 import { strings as mention } from './strings/en/mention';
@@ -131,6 +132,7 @@ export const strings = {
   ...agentShape,
   ...media,
   ...btw,
+  ...secrets,
   ...slash,
   ...activity,
   ...mention,

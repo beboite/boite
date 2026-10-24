@@ -94,12 +94,12 @@ export class ThreadCards {
   /**
    * Is anything of this thread still waiting on the user? An agent can run two
    * tools at once and raise a card for each, so answering one does not mean the
-   * turn is running again.
+   * turn is running again. A secret card holds the turn the same way.
    */
-  private waitingOn(threadId: ThreadId): boolean {
+  waitingOn(threadId: ThreadId): boolean {
     for (const entry of this.permissions.values()) if (entry.request.threadId === threadId) return true;
     for (const entry of this.questions.values()) if (entry.request.threadId === threadId && entry.request.async !== true) return true;
-    return false;
+    return this.core.secrets.waiting(threadId);
   }
 
   /** How many questions asked without stopping still wait on the user: the row says it needs them. */

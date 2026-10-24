@@ -1,5 +1,4 @@
-import { spawn as spawnNodeChild } from 'node:child_process';
-import type { ChildProcessByStdio } from 'node:child_process';
+import { spawn as spawnNodeChild, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 import type { AgentResourceSnapshot, ProcessRecord, Settings, ThreadId, ThreadLoad, TraceCapability, Turn } from '@boite/contracts';
 import type { Bus } from './bus.ts';
@@ -120,6 +119,7 @@ export interface ProcRegistryOptions {
  */
 export class ProcRegistry {
   readonly memory: MemoryGuard;
+  mask = (_threadId: ThreadId, text: string): string => text; // secrets: a shell can expand `boite secret run`'s variable into a traced command line
   private readonly unassigned = new Set<number>();
   private readonly startups = new Map<ThreadId, { pid: number; timer: ReturnType<typeof setTimeout> }>();
   private readonly exitTimers = new Map<number, ReturnType<typeof setTimeout>>();
@@ -501,6 +501,7 @@ export class ProcRegistry {
   }
 
   private track(threadId: ThreadId, record: ProcessRecord, control: Omit<Entry, 'record' | 'identity'>, identity: ProcessIdentity): void {
+    if (record.commandLine !== null) record.commandLine = this.mask(threadId, record.commandLine);
     const forgetting = this.forgetTimers.get(threadId);
     if (forgetting !== undefined) {
       clearTimeout(forgetting);

@@ -16,6 +16,12 @@ export interface Connection {
   readonly sentFrom?: SentFrom | null;
   /** Reached by a name other than this machine's loopback: a phone, a laptop, a tunnel. Unset counts as remote. */
   readonly remote?: boolean;
+  /**
+   * The bytes cannot be read on the way: this machine's own loopback, a
+   * Tailscale peer, or HTTPS terminated on this machine. Unset counts as plain;
+   * a secret is answered or deleted only where it is true.
+   */
+  readonly encrypted?: boolean;
   /** The client name hello gave (`shell`, `pwa`, `plugin`, `cli`); unset for tests that build a connection by hand. */
   readonly clientName?: string;
   sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void;
