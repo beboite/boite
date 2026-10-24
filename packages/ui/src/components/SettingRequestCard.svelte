@@ -4,7 +4,7 @@
   import { currentSetting, experimentOf, isExperimentKey, type QuestionAnswer, type Settings, type SettingAsk } from '@boite/contracts';
   import { readExperiments, setExperiment, subscribeExperiments } from '../lib/experiments';
   import { keepFocus } from '../lib/focus';
-  import { settingHeading, settingHint, settingLabel, settingPlaceText, settingsReachable, settingValueText } from '../lib/setting-requests';
+  import { retiredHint, settingHeading, settingHint, settingLabel, settingPlaceText, settingsReachable, settingValueText } from '../lib/setting-requests';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import InfoTip from './InfoTip.svelte';
@@ -152,7 +152,7 @@
     {/if}
     <p class="place ui-label" data-testid="setting-place">{place}</p>
     {#if retired}
-      <p class="hint" data-testid="setting-retired-hint">{strings.settingRequest.retired}</p>
+      <p class="hint" data-testid="setting-retired-hint">{retiredHint(change?.key ?? '')}</p>
     {:else if change && !canApply}
       <p class="hint" data-testid="setting-guest-hint">{strings.settingRequest.guestHint}</p>
     {:else if !reachable && !canApply}

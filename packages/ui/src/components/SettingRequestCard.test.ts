@@ -174,6 +174,9 @@ test('a card about a graduated experiment can only be refused: it writes no core
     });
     flushSync();
     expect(query('[data-testid=setting-retired-hint]').textContent).toContain('own switch');
+    // It keeps the name the user knows the switch by, not the raw key.
+    expect(document.body.textContent).toContain('Open chat links in their apps');
+    expect(document.body.textContent).not.toContain('experiment.open-chat-links');
     expect(query<HTMLInputElement>('[data-testid=setting-switch]').disabled).toBe(true);
     expect(document.querySelector('[data-testid=setting-apply]')).toBeNull();
     expect(save).not.toHaveBeenCalled();

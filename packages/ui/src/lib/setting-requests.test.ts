@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { readSettings, settledSetting, type RequestableKey, type Settings, type SettingAsk } from '@boite/contracts';
-import { settingsReachable, settingValueText } from './setting-requests';
+import { retiredHint, settingLabel, settingsReachable, settingValueText } from './setting-requests';
 
 const open = (page: SettingAsk['page'], section: string | null): SettingAsk => ({ kind: 'open', page, section });
 
@@ -37,4 +37,11 @@ test('a card about a graduated experiment is never settled by a core setting mov
   // Asked before the switch left the Experiments page: an old card in a thread.
   const card: SettingAsk = { kind: 'change', key: 'experiment.open-chat-links' as RequestableKey, value: true, previous: false, page: 'experiments', section: 'open-chat-links', sensitive: false, app: 'app-12345678' };
   expect(settledSetting(card, { agentCpuCapPercent: 40 } as Settings)).toBeNull();
+});
+
+test('a graduated experiment keeps its name, and one with no switch left says it is always on', () => {
+  expect(settingLabel('experiment.edge-scrollbars' as RequestableKey)).toBe('Edge scrollbars');
+  expect(settingLabel('experiment.press-preload' as RequestableKey)).toBe('Load on press');
+  expect(retiredHint('experiment.press-preload')).toBe('This experiment is now always on.');
+  expect(retiredHint('experiment.preview-comments')).toBe('This experiment has its own switch in Settings now.');
 });
