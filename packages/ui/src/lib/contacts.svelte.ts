@@ -191,8 +191,9 @@ export class ContactsView {
       });
       const current = attempt === this.#joinAttempt;
       if (contact) {
+        // A join stopped or replaced while its call was in flight still linked a contact: its words show unless newer ones do.
         if (current) this.joinWaiting = null;
-        this.joined = contact;
+        if (current || !this.joined) this.joined = contact;
         this.#put(contact);
         return contact;
       }
