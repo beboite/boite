@@ -50,6 +50,7 @@ export const strings = {
       warmProcessMinutes: 'Keep an agent warm after its turn',
       autoCompact: 'Automatic compaction',
       autoResumeLimitedThreads: 'Resume threads after a usage limit',
+      deviceStream: 'Live device stream',
     },
     /** What 0 means for the settings where it is not a number. */
     zero: {

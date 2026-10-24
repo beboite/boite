@@ -116,6 +116,8 @@ export const fr: Translation = {
     cacheKeepaliveHours: 'Pendant au plus',
     cacheKeepaliveHoursHint: "Compté depuis la fin du dernier tour de la conversation. Les relances s'arrêtent aussi quand les agents ont fini, quand vous écrivez ou arrêtez, et après autant de relances que coûterait un cache raté.",
     cacheKeepaliveUnit: 'heures',
+    deviceStream: "Flux en direct de l'appareil",
+    deviceStreamHint: "Le panneau Appareil affiche en direct la vidéo d'un téléphone Android branché à cette machine via scrcpy, qui transmet aussi les appuis, les glissements, les touches, tout texte et le presse-papiers. Les appuis et la saisie des agents passent aussi par scrcpy tant que le panneau affiche le téléphone. Si l'option est désactivée, le panneau actualise des captures d'écran et pilote le téléphone avec adb input.",
     material: 'Matériau de la fenêtre',
     workspace: 'Espace de travail',
     startIn: "L'appli s'ouvre sur",

@@ -135,8 +135,10 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['devices.open', 'booting one of them and showing it in its own conversation\'s Device panel'],
   ['devices.sessions', 'what its own conversation\'s Device panel has open, to wait for a boot'],
   ['devices.screenshot', 'one PNG of a device open in its own conversation'],
-  ['devices.input', 'taps, swipes, text and keys on a device open in its own conversation, as adb input would'],
+  ['devices.input', 'taps, swipes, text and keys on a device open in its own conversation, as adb input would, or through the live stream a viewer keeps up'],
   ['devices.close', 'removing a device from its own panel; powering it off closes it in every conversation, as the emulator\'s own window would'],
+  // devices.stream and devices.clipboard stay with the owner and paired devices: the video is for the person
+  // watching, a screenshot already gives the agent the screen, and the device's clipboard can hold what that person copied.
   ['questions.ask','a question card on its own thread that it does not wait on; the answer comes back as a message'],
   ['questions.list', 'read pending question cards on its own thread without creating another card; answers remain the user\'s'],
   ['agent.settings', 'the settings it may ask the user about, with their values and pages; credentials, accounts and browser profiles are not among them'],

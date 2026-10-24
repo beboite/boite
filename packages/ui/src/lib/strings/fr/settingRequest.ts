@@ -51,6 +51,7 @@ export const fr: Translation = {
       warmProcessMinutes: 'Garder un agent chaud après son tour',
       autoCompact: 'Compaction automatique',
       autoResumeLimitedThreads: 'Reprendre les conversations après une limite d\'usage',
+      deviceStream: "Flux en direct de l'appareil",
     },
     zero: {
       agentCpuCapPercent: 'Sans plafond',

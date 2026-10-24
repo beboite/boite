@@ -196,8 +196,12 @@ Simulators and Android emulators or phones on the machine that runs the core,
 and why a platform is missing. `open` boots one, shows it in the user's Device
 panel, waits until it is ready and prints the `adb -s <serial>` or
 `xcrun simctl` prefix that drives it. `screenshot`, `tap`, `swipe`, `type`,
-`key` and `close [--shutdown]` act on it. Details and limits are in
-[devices.md](devices.md).
+`key` and `close [--shutdown]` act on it. While the user's Device panel plays
+the device's live stream (the `deviceStream` setting), `tap`, `swipe`, `type`
+and `key` go through scrcpy and `type` accepts any text; `screenshot` stays
+an `adb screencap` PNG. With a phone plugged in and the setting off, `list`
+ends with one line that gives the `boite settings request deviceStream true`
+command. Details and limits are in [devices.md](devices.md).
 
 ## Pull requests linked to a conversation
 

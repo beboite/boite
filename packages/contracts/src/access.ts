@@ -85,6 +85,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // The Device panel on a phone. The core acts only on simulators and emulators its SDK lists, for the subscribed
   // conversation, runs no command a device names and returns no host path: what the phone could ask of the agent.
   'devices.list', 'devices.sessions', 'devices.frame', 'devices.input', 'devices.open', 'devices.close', 'devices.screenshot',
+  // The same screen as live video, and the device's clipboard for the copy the person watching makes: what the frames
+  // and a long press already show. Only for a device open in the subscribed conversation, with no command or path.
+  'devices.stream', 'devices.clipboard',
   'threads.create',
   // Composing a phone draft uses the same creation authority, with no prompt or arbitrary executable.
   'drafts.prepare', 'drafts.release',

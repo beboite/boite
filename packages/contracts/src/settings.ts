@@ -151,6 +151,13 @@ export interface Settings {
    */
   autoResumeLimitedThreads?: boolean;
   /**
+   * The Device panel shows an Android device as live H.264 video and drives it
+   * with real touches, Unicode text and the clipboard, through a scrcpy server
+   * the core pushes to the device (docs/devices.md, "Live stream"). Off, the
+   * panel polls screenshots and `adb shell input`. Missing reads as off.
+   */
+  deviceStream?: boolean;
+  /**
    * While this machine follows its group's settings home, what it keeps for
    * itself (`SyncKey`): each entry was changed here and the copy skips it.
    * Missing or empty: everything synced follows. Clients write it; the core
