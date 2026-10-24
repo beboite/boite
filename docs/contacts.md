@@ -148,6 +148,13 @@ after its last letter, even in a project not opened to it. A grant change
 reaches the contact as `contact.sync`, retried until heard, and becomes the
 contact's `offers`.
 
+**Share a project** reuses the new-thread project search: type a project,
+machine or folder name. Projects are grouped by machine and omit drafts,
+archived projects and existing grants. The menu includes connected owner
+machines linked to this contact's core identity. The shared list names each
+machine; sharing, reading, revoking and opening a board use its own Store,
+even when two machines have the same project ID.
+
 With the [project board](board.md) on, a contact's page shows each project
 shared with that contact as its board's four counts: to do, in progress, in
 review and done. A click opens the board in the project's last conversation.
