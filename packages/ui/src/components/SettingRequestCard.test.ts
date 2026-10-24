@@ -5,6 +5,7 @@ import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import AssistantMessage from './AssistantMessage.svelte';
 import SettingRequestCard from './SettingRequestCard.svelte';
+import { workspace, type Machine } from '../lib/workspace.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => {
@@ -183,5 +184,48 @@ test('a card about a graduated experiment can only be refused: it writes no core
   } finally {
     store.detach();
     client.close();
+  }
+});
+
+test('a card about another machine of the group flips that machine\'s switch, and says where to go when it is not here', async () => {
+  const machines: Machine[] = [];
+  for (const id of ['desk', 'printer-pc']) {
+    const store = new Store();
+    store.attach(new FakeClient({ delayMs: 0, coreId: id, coreName: id, publicUrl: `https://${id}.test` }));
+    await store.connect();
+    machines.push({ id, label: id, store });
+  }
+  const [desk, pc] = machines.map((machine) => machine.store) as [Store, Store];
+  try {
+    workspace.machines = machines;
+    await desk.client!.call('group.create', { name: 'Home' });
+    await pc.client!.call('group.join', { invite: (await desk.client!.call('group.invite', {})).invite });
+    await vi.waitFor(() => expect(desk.group?.cores).toHaveLength(2));
+    await desk.open('t-trace');
+    const { questionId } = await desk.client!.call('settings.request', { threadId: 't-trace', reason: 'Print on the USB printer', key: 'groupThreads', value: true, machine: 'printer-pc' });
+    const question = await asked(desk, questionId);
+    expect(question.setting).toMatchObject({ kind: 'change', key: 'groupThreads', previous: false, machine: { coreId: 'printer-pc', name: 'printer-pc' } });
+
+    // Not connected in this window: no switch, only where to change it.
+    workspace.machines = [machines[0]!];
+    card(desk, question);
+    expect(document.querySelector('[data-testid=setting-switch]')?.hasAttribute('disabled') ?? true).toBe(true);
+    expect(query('[data-testid=setting-machine-away]').textContent).toBe('printer-pc is not connected here: change it from printer-pc.');
+    await unmount(mounted!);
+    mounted = undefined;
+
+    // Connected: the switch writes that machine's setting, never this one's, and the card settles.
+    workspace.machines = machines;
+    card(desk, question);
+    expect(query('[data-testid=setting-place]').textContent).toContain('printer-pc');
+    const toggle = query<HTMLInputElement>('[data-testid=setting-switch]');
+    expect(toggle.checked).toBe(false);
+    toggle.click();
+    await vi.waitFor(() => expect(pc.settings?.groupThreads).toBe(true));
+    expect(desk.settings?.groupThreads ?? false).toBe(false);
+    await vi.waitFor(() => expect(desk.pendingQuestions.some((pending) => pending.id === questionId)).toBe(false));
+  } finally {
+    workspace.machines = [];
+    for (const store of [desk, pc]) { store.client?.close(); store.detach(); }
   }
 });

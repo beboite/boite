@@ -195,6 +195,14 @@ opened to it, and that member's requests back
 ([contacts](contacts.md#projects-of-the-other-machines-of-the-group)); a
 contact never sends them.
 
+Three more operations are sealed and group-only. `thread.start` asks a member
+to start a top-level thread in one of its projects for `boite thread new
+--machine`; the member refuses it while its own `groupThreads` setting is off,
+and keeps a ledger per starting thread so a retried request returns the same
+thread. `setting.read` returns that member's value of a setting it holds about
+the others (`groupThreads`), for a settings card, and `setting.changed` tells
+the other members that it changed, which settles their open cards.
+
 A group member can relay contact discovery, lookups, requests and letters
 through another member's durable virtual mailbox. The initiating core keeps
 the canonical exchange and wakes its own conversation. The gateway uses the
@@ -350,7 +358,9 @@ second time. Without an answer the message still arrives later.
 An agent can also start a new conversation in another project with
 `boite thread new <project> <brief>`; the [CLI page](cli.md) describes it. Its
 first answer comes back as a message from that conversation, and the same
-Communication settings decide whether the agent may start one.
+Communication settings decide whether the agent may start one. With
+`--machine <name>` it starts it on another machine of the group, when that
+machine's owner allowed it there.
 `boite projects add <folder>` registers a folder as a project first, under the
 same settings.
 

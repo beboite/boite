@@ -157,7 +157,7 @@
         {:else}
           <strong>{startedBy.title}</strong>
         {/if}
-        <span class="agent-project">{startedBy.project}</span>
+        <span class="agent-project">{startedBy.machine ? `${startedBy.project} · ${startedBy.machine}` : startedBy.project}</span>
       </span>
     </div>
   {/if}
