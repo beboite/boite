@@ -14,6 +14,7 @@ import { applyAtAuthority, progressAtAuthority, receipt } from './board-authorit
 import { sameProject, threadRef } from './project-policy.ts';
 import { fingerprint } from './project-journal.ts';
 import type { SharedPeerContext } from './projects.ts';
+import { bindBoard } from './access-scopes.ts';
 
 export class SharedBoard {
   readonly journal: SharedBoardJournal;
@@ -349,6 +350,7 @@ export class SharedBoard {
     this.core.bus.afterCommit(() => this.core.sharedProjects.journal.transaction(() => this.core.sharedProjects.journal.once(`board-start:${ctx.shared.id}:${cardId}`, claimId, assignment.worker, () => {
       const activity = this.core.activity.get(p.threadId);
       if (activity.goal || activity.loop) throw refused('worker: expected a thread with no existing goal or loop');
+      bindBoard(this.core, ctx, assignment.worker, cardId, claimId);
       this.core.activity.set({threadId: p.threadId, goal: {objective: current.card.text, review: true}}, {sharedProjectId: ctx.shared.id, cardId, claimId});
       return {ok: true};
     })));

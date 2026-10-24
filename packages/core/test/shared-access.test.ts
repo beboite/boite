@@ -1,0 +1,314 @@
+import { afterEach, expect, test } from 'bun:test';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { SharedProjectRef } from '@boite/contracts';
+import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { connect } from '../src/client.ts';
+import { thrown } from './settle.ts';
+import { sharedExecutionProtection } from '../src/contacts/compute-policy.ts';
+import { snapshot } from '../src/threads/checkpoint-files.ts';
+
+const cores: TestCore[] = [], dirs: string[] = [];
+afterEach(async () => {
+  for (const h of cores.splice(0).reverse()) await h.stop();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+async function git(h: TestCore, cwd: string, ...args: string[]) {
+  const p = h.core.procs.spawn('thr_fixture', 'git', args, { cwd });
+  const [out, err, code] = await Promise.all([new Response(p.proc.stdout).text(), new Response(p.proc.stderr).text(), p.exited]);
+  if (code !== 0) throw new Error(`git ${args[0]}: ${err}`);
+  return out.trim();
+}
+async function side() {
+  const dataDir = mkdtempSync(join(tmpdir(), 'boite-access-')); dirs.push(dataDir);
+  const h = await startTestCore({ dataDir }); cores.push(h);
+  h.core.contacts.selfUrl = async () => h.url;
+  const client = await h.connect();
+  const path = join(dataDir, 'project'); mkdirSync(path);
+  await git(h, path, 'init', '-b', 'main');
+  await git(h, path, 'remote', 'add', 'origin', 'https://example.invalid/fixtures/shared.git');
+  await git(h, path, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'base');
+  const project = await client.call('projects.add', { path });
+  const account = h.core.accounts.list().find(a => a.providerId === 'echo')!;
+  const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id });
+  h.core.contacts.setSettings({ minTier: 2 });
+  const coreId = h.core.coordination.card().coreId;
+  const ref: SharedProjectRef = { ownerCoreId: coreId, coreId, projectId: project.id };
+  return { h, client, path, ref, coreId, threadId: thread.id };
+}
+async function fixture() {
+  const a = await side(), b = await side();
+  await git(b.h, b.path, 'fetch', a.path, 'main'); await git(b.h, b.path, 'reset', '--hard', 'FETCH_HEAD');
+  await b.client.call('contacts.join', { link: (await a.client.call('contacts.invite', {})).link });
+  await waitFor(() => a.h.core.contacts.linked(b.coreId));
+  await a.client.call('contacts.grant', { coreId: b.coreId, projectId: a.ref.projectId, readThreads: true });
+  await b.client.call('contacts.grant', { coreId: a.coreId, projectId: b.ref.projectId, readThreads: true });
+  await waitFor(() => a.h.core.contacts.find(b.coreId)?.capabilities?.sharedProjects === 1);
+  const offered = await a.client.call('sharedProjects.offer', { coreId: b.coreId, projectId: a.ref.projectId, remote: b.ref, requestId: 'offer' });
+  const sharedProjectId = offered.shared.id;
+  await b.client.call('sharedProjects.decide', { sharedProjectId, accept: true, requestId: 'accept' });
+  await b.client.call('sharedProjects.configure', { sharedProjectId, computeThreadId: b.threadId, compute: {enabled: true, profiles: ['conversation'], permissionMode: 'default', maxConcurrent: null} });
+  const job = await a.client.call('sharedCompute.start', {threadId: a.threadId, sharedProjectId, requestId: 'job', host: b.ref, profileId: 'conversation', baseCommit: await git(a.h, a.path, 'rev-parse', 'HEAD'), task: '[sleep:90000]'});
+  const worker = b.h.core.threads.require(job.worker!.threadId);
+  const agent = await connect(b.h.url, b.h.core.agents.tokenFor(worker.id));
+  return {a, b, sharedProjectId, job, worker, agent};
+}
+
+test('shared file reads deny secret names and aliases while ordinary local work is unchanged', async () => {
+  const {b, worker, agent} = await fixture();
+  try {
+    writeFileSync(join(worker.cwd, '.env.production'), 'TOKEN=fixture-secret-canary');
+    writeFileSync(join(worker.cwd, 'readme.txt'), 'ordinary file');
+    symlinkSync('.env.production', join(worker.cwd, 'alias.txt'));
+    expect(await thrown(agent.call('files.read', {threadId: worker.id, path: '.env.production'}))).toThrow('shared file policy');
+    expect(await thrown(agent.call('files.read', {threadId: worker.id, path: 'alias.txt'}))).toThrow('shared file policy');
+    expect(await agent.call('files.read', {threadId: worker.id, path: 'readme.txt'})).toMatchObject({kind: 'text', text: 'ordinary file'});
+    writeFileSync(join(b.path, '.env.production'), 'TOKEN=local-only-canary');
+    expect(await b.client.call('files.read', {threadId: b.threadId, path: '.env.production'})).toMatchObject({text: 'TOKEN=local-only-canary'});
+  } finally {agent.close();}
+}, 30000);
+
+test('a shared board goal and its tracker cannot escape the no-tools boundary', async () => {
+  const {a, b, sharedProjectId, agent} = await fixture();
+  try {
+    for (const side of [a, b]) await side.client.call('sharedProjects.configure', {sharedProjectId, board: true});
+    const scope = {threadId: b.threadId, sharedProjectId};
+    const marker = join(b.path, 'board-shell-marker');
+    const add = await b.client.call('sharedBoard.apply', {...scope, command: {kind: 'add', cardId: 'escape', requestId: 'add', text: `[spawn:touch ${marker}]`}});
+    const claim = await b.client.call('sharedBoard.apply', {...scope, command: {kind: 'claim', cardId: 'escape', requestId: 'claim', expectedRevision: add.card!.revision, worker: {project: b.ref, threadId: b.threadId, address: {coreId: b.coreId, threadId: b.threadId}}}});
+    await b.client.call('sharedBoard.start', {...scope, cardId: 'escape', claimId: claim.card!.assignment!.claimId});
+    await waitFor(() => b.h.core.journal.lastTurn(b.threadId)?.finishedAt !== null);
+    expect(existsSync(marker)).toBe(false);
+    writeFileSync(join(b.path, '.env'), 'TOKEN=board-secret-canary');
+    expect(await thrown(b.client.call('files.read', {threadId: b.threadId, path: '.env'}))).toThrow('shared file policy');
+    const children = b.h.core.journal.listChildThreads().filter(t => t.parentThreadId === b.threadId && t.id !== b.h.core.sharedCompute.journal.worker(t.id)?.job.worker?.threadId);
+    expect(children.length).toBeGreaterThan(0);
+    // Capture a tracker scope before its parent is replaced. The old child never becomes a local unrestricted agent.
+    const child = children[0]!;
+    b.h.core.sharedAccess.bound(child.id);
+    const dormant = b.h.core.threads.create({projectId: b.ref.projectId, providerId: 'echo', accountId: b.h.core.threads.require(b.threadId).accountId}, {id: 'thr_dormant_shared', branch: null, parentThreadId: b.threadId});
+    const override = await b.client.call('sharedAccess.override', {sharedProjectId, requestId: 'board-override', override: {path: '.env', actions: ['read'], jobId: null, reason: 'fixture', expiresAt: Date.now() + 60000}});
+    expect(await b.client.call('files.read', {threadId: b.threadId, path: '.env'})).toMatchObject({text: 'TOKEN=board-secret-canary'});
+    await b.client.call('sharedAccess.revokeOverride', {sharedProjectId, overrideId: override.id});
+    writeFileSync(join(b.path, 'board.png'), 'ordinary board publication');
+    const published = await b.client.call('artifacts.publish', {threadId: b.threadId, path: 'board.png'});
+    const attachment = {threadId: b.threadId, messageId: published.id, partIndex: 0, ticket: true};
+    const ticket = await b.client.call('messages.attachment', attachment);
+    b.h.core.activity.set({threadId: b.threadId, goal: null});
+    expect(await b.client.call('files.read', {threadId: b.threadId, path: '.env'})).toMatchObject({text: 'TOKEN=board-secret-canary'});
+    expect(await thrown(b.client.call('files.read', {threadId: child.id, path: '.env'}))).toThrow('shared file policy');
+    expect(await thrown(b.client.call('files.read', {threadId: dormant.id, path: '.env'}))).toThrow('shared file policy');
+    expect((await fetch(`${b.h.url}${ticket.url}`)).status).toBe(404);
+    expect(await thrown(b.client.call('messages.attachment', attachment))).toThrow('shared file policy');
+  } finally {agent.close();}
+}, 30000);
+
+test('shared attachments cannot publish a secret through the alternate snapshot route', async () => {
+  const {b, worker, agent} = await fixture();
+  try {
+    await waitFor(() => b.h.core.journal.lastTurn(worker.id)?.status === 'running');
+    writeFileSync(join(worker.cwd, '.env'), 'TOKEN=snapshot-secret-canary');
+    expect(await thrown(agent.call('artifacts.publish', {threadId: worker.id, path: '.env'}))).toThrow('shared file policy');
+  } finally {agent.close();}
+}, 30000);
+
+test('shared inline pages cannot embed a credential file under a permitted JSON extension', async () => {
+  const {b, worker, agent} = await fixture();
+  try {
+    await waitFor(() => b.h.core.journal.lastTurn(worker.id)?.status === 'running');
+    writeFileSync(join(worker.cwd, 'credentials.json'), '{"password":"view-secret-canary"}');
+    writeFileSync(join(worker.cwd, 'index.html'), '<html><script src="credentials.json"></script><body>Fixture</body></html>');
+    b.h.core.browser.probe = async () => ({errors: [], heights: [100, 100]});
+    expect(await thrown(agent.call('artifacts.view', {threadId: worker.id, path: 'index.html'}))).toThrow('shared file policy');
+  } finally {agent.close();}
+}, 30000);
+
+test('a shared worker cannot read historical secrets by asking for an ordinary Git diff', async () => {
+  const {b, worker, agent} = await fixture();
+  try {
+    writeFileSync(join(worker.cwd, '.env'), 'TOKEN=git-secret-canary');
+    await git(b.h, worker.cwd, 'add', '.env');
+    await git(b.h, worker.cwd, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture');
+    rmSync(join(worker.cwd, '.env'));
+    expect(await thrown(agent.call('git.diff', {threadId: worker.id, path: '.env'}))).toThrow('shared file policy');
+    expect(await thrown(b.client.call('git.diff', {threadId: worker.id, path: '.env'}))).toThrow('shared file policy');
+  } finally {agent.close();}
+}, 30000);
+
+test('checked shared file tickets reject file and parent swaps instead of reading their replacement', async () => {
+  const {b, worker, agent} = await fixture();
+  try {
+    mkdirSync(join(worker.cwd, 'assets'));
+    writeFileSync(join(worker.cwd, 'assets', 'okay.png'), 'ordinary image');
+    writeFileSync(join(worker.cwd, '.env'), 'TOKEN=swap-secret-canary');
+    const first = await agent.call('files.read', {threadId: worker.id, path: 'assets/okay.png'});
+    if (first.kind === 'text') throw new Error('fixture expected a ticket');
+    rmSync(join(worker.cwd, 'assets', 'okay.png')); symlinkSync('../.env', join(worker.cwd, 'assets', 'okay.png'));
+    expect((await fetch(`${b.h.url}${first.url}`)).status).toBe(404);
+    rmSync(join(worker.cwd, 'assets', 'okay.png')); writeFileSync(join(worker.cwd, 'assets', 'okay.png'), 'ordinary image');
+    const second = await agent.call('files.read', {threadId: worker.id, path: 'assets/okay.png'});
+    if (second.kind === 'text') throw new Error('fixture expected a ticket');
+    renameSync(join(worker.cwd, 'assets'), join(worker.cwd, 'held-assets'));
+    symlinkSync(b.path, join(worker.cwd, 'assets'));
+    expect((await fetch(`${b.h.url}${second.url}`)).status).toBe(404);
+    expect(await thrown(agent.call('files.read', {threadId: worker.id, path: 'assets/okay.png'}))).toThrow('shared file policy');
+  } finally {agent.close();}
+}, 30000);
+
+test('host audit pages and revoked overrides survive restart with association-bound cursors', async () => {
+  const {a, b, worker, job, sharedProjectId, agent} = await fixture();
+  try {
+    const path = '.env'; writeFileSync(join(worker.cwd, path), 'TOKEN=restart-secret-canary');
+    const value = await b.client.call('sharedAccess.override', {sharedProjectId, requestId: 'durable', override: {path, actions: ['read'], jobId: job.id, reason: 'fixture', expiresAt: Date.now() + 60000}});
+    await b.client.call('sharedAccess.revokeOverride', {sharedProjectId, overrideId: value.id});
+    const stop = b.h.core.sharedAccess.onEvent(() => {throw new Error('fixture unavailable reviewer');});
+    for (let i = 0; i < 103; i++) expect(await thrown(agent.call('files.read', {threadId: worker.id, path}))).toThrow('shared file policy');
+    stop();
+    const p = {threadId: b.threadId, sharedProjectId};
+    const page = await b.client.call('sharedAccess.get', p);
+    expect(page.events).toHaveLength(100); expect(page.next).not.toBeNull();
+    const tail = await b.client.call('sharedAccess.get', {...p, after: page.next!});
+    expect(tail.events.length).toBeGreaterThan(0);
+    expect(tail.events.some(e => page.events.some(earlier => earlier.id === e.id))).toBe(false);
+    expect(await thrown(a.client.call('sharedAccess.get', {threadId: a.threadId, sharedProjectId, after: page.next!}))).toThrow('cursor');
+    agent.close(); await b.h.stop();
+    const restarted = await startTestCore({dataDir: b.h.dataDir}); cores.push(restarted);
+    const client = await restarted.connect();
+    const afterRestart = await client.call('sharedAccess.get', p);
+    expect(afterRestart).toEqual(page);
+    expect((await client.call('sharedAccess.overrides', {sharedProjectId})).find(o => o.id === value.id)?.revokedAt).not.toBeNull();
+    const last = tail.events.at(-1)!.id;
+    const later = (await client.call('sharedAccess.get', {...p, after: last})).events;
+    const earlierIds = new Set([...page.events, ...tail.events].map(e => e.id));
+    expect(later.every(e => !earlierIds.has(e.id))).toBe(true);
+    expect(JSON.stringify(later)).not.toContain('restart-secret-canary');
+  } finally {agent.close();}
+}, 30000);
+
+test('provider protection capabilities are explicit and no external tool provider claims an unimplemented sandbox', () => {
+  expect(sharedExecutionProtection('echo')).toEqual({supported: true, boundary: 'no-tools'});
+  for (const protocol of ['claude-sdk', 'codex-appserver', 'acp', 'muse', 'pi'] as const) {
+    const protection = sharedExecutionProtection(protocol);
+    expect(protection.supported).toBe(false);
+    if (!protection.supported) expect(protection.reason.length).toBeGreaterThan(20);
+  }
+});
+
+test('shared file checkpoints retain ordinary files and never snapshot protected file bytes', async () => {
+  const {b, worker, agent} = await fixture();
+  try {
+    for (const name of ['.env', 'server.pem', 'credentials.json', 'copied.txt']) writeFileSync(join(worker.cwd, name), 'TOKEN=checkpoint-secret-canary');
+    writeFileSync(join(worker.cwd, 'ordinary.txt'), 'normal checkpoint');
+    const saved = await snapshot(b.h.core, worker.id, worker.cwd, join(b.h.dataDir, 'fixture-checkpoint'));
+    expect(Object.keys(saved)).toContain('ordinary.txt');
+    for (const name of ['.env', 'server.pem', 'credentials.json', 'copied.txt']) expect(Object.keys(saved)).not.toContain(name);
+  } finally {agent.close();}
+}, 30000);
+
+test('binary and large-file tickets cannot slice around credential detection with Range', async () => {
+  const {worker, agent} = await fixture();
+  try {
+    writeFileSync(join(worker.cwd, 'report.png'), 'TOKEN=range-secret-canary');
+    writeFileSync(join(worker.cwd, 'report.log'), `${'ordinary line\n'.repeat(30000)}TOKEN=large-secret-canary`);
+    for (const path of ['report.png', 'report.log']) expect(await thrown(agent.call('files.read', {threadId: worker.id, path}))).toThrow('shared file policy');
+  } finally {agent.close();}
+}, 30000);
+
+test('remote transcript and search cannot republish a local credential-like answer', async () => {
+  const {a, b, sharedProjectId, agent} = await fixture();
+  try {
+    await b.client.call('turns.start', {threadId: b.threadId, prompt: 'TOKEN=transcript-secret-canary'});
+    await waitFor(() => b.h.core.journal.lastTurn(b.threadId)?.status === 'done');
+    const listed = await a.client.call('sharedProjects.threads', {threadId: a.threadId, sharedProjectId});
+    const target = listed.threads.find(t => t.ref.project.ownerCoreId === b.coreId && t.ref.threadId === b.threadId)!.ref;
+    const read = await a.client.call('sharedProjects.read', {threadId: a.threadId, sharedProjectId, target});
+    expect(JSON.stringify(read)).not.toContain('transcript-secret-canary');
+    const search = await a.client.call('sharedProjects.search', {threadId: a.threadId, sharedProjectId, query: 'transcript-secret-canary'});
+    expect(search.matches).toEqual([]);
+  } finally {agent.close();}
+}, 30000);
+
+test('canonical file admission covers secret variants, Windows spellings, traversal, symlinks and hard links', async () => {
+  const {b, worker, agent} = await fixture();
+  try {
+    const names = ['.env', '.env.example', '.env.local', '.env.production.local', '.envrc', '.dev.vars', 'id_ed25519', 'server.pem', 'server.key', 'credentials.json', 'secrets.yaml', '.npmrc', 'terraform.tfstate'];
+    for (const path of names) {
+      writeFileSync(join(worker.cwd, path), 'fixture');
+      expect(await thrown(agent.call('files.read', {threadId: worker.id, path}))).toThrow('shared file policy');
+    }
+    writeFileSync(join(worker.cwd, 'okay.txt'), 'fixture');
+    writeFileSync(join(worker.cwd, 'copied.txt'), '-----BEGIN OPENSSH PRIVATE KEY-----\nfixture\n-----END OPENSSH PRIVATE KEY-----');
+    mkdirSync(join(worker.cwd, '.aws')); writeFileSync(join(worker.cwd, '.aws', 'config'), 'fixture');
+    symlinkSync(b.path, join(worker.cwd, 'outside'));
+    symlinkSync('.aws', join(worker.cwd, 'aws-alias'));
+    linkSync(join(worker.cwd, '.env'), join(worker.cwd, 'hard-alias.txt'));
+    for (const path of ['.aws/config', 'aws-alias/config', 'hard-alias.txt', 'copied.txt', '../.env', 'outside/.env', 'C:\\project\\.env', 'C:okay.txt', '\\\\server\\share\\.env', '\\\\?\\C:\\project\\.env', 'okay.txt:secret', '.env. ', '.env\\..\\okay.txt'])
+      expect(await thrown(agent.call('files.read', {threadId: worker.id, path}))).toThrow('shared file policy');
+    const listed = await agent.call('files.list', {threadId: worker.id});
+    expect(listed.map(f => f.name)).toContain('okay.txt');
+    for (const name of [...names, '.aws', 'outside', 'aws-alias', 'hard-alias.txt']) expect(listed.map(f => f.name)).not.toContain(name);
+    expect(await thrown(agent.call('files.list', {threadId: worker.id, path: '.aws'}))).toThrow('shared file policy');
+  } finally {agent.close();}
+}, 30000);
+
+test('host overrides are exact, action/job/grant bound, expiring, revocable and durable without leaking paths', async () => {
+  const {a, b, sharedProjectId, job, worker, agent} = await fixture();
+  try {
+    const path = '.env.private.png'; writeFileSync(join(worker.cwd, path), 'TOKEN=override-secret-canary');
+    const input = {sharedProjectId, requestId: 'override', override: {path, actions: ['read' as const], jobId: job.id, reason: 'fixture owner consent', expiresAt: Date.now() + 60000}};
+    expect(await thrown(agent.call('sharedAccess.override', input))).toThrow('agent');
+    const override = await b.client.call('sharedAccess.override', input);
+    expect((await b.client.call('sharedAccess.override', input)).id).toBe(override.id);
+    expect((await b.client.call('sharedProjects.get', {threadId: b.threadId, sharedProjectId})).protection.activeOverrides).toBe(1);
+    expect((await a.client.call('sharedAccess.overrides', {sharedProjectId}))).toEqual([]);
+    const file = await agent.call('files.read', {threadId: worker.id, path});
+    if (file.kind === 'text') throw new Error('fixture expected a ticket');
+    expect(await (await fetch(`${b.h.url}${file.url}`)).text()).toBe('TOKEN=override-secret-canary');
+    expect(await thrown(agent.call('artifacts.publish', {threadId: worker.id, path}))).toThrow('shared file policy');
+    expect(await thrown(b.client.call('sharedAccess.override', {...input, requestId: 'execute', override: {...input.override, actions: ['execute']}}))).toThrow('execute');
+    expect(await thrown(b.client.call('sharedAccess.override', {...input, requestId: 'outside', override: {...input.override, path: '../outside.key'}}))).toThrow('shared file policy');
+    await b.client.call('sharedAccess.revokeOverride', {sharedProjectId, overrideId: override.id});
+    expect((await fetch(`${b.h.url}${file.url}`)).status).toBe(404);
+    expect(await thrown(agent.call('files.read', {threadId: worker.id, path}))).toThrow('shared file policy');
+    expect((await b.client.call('sharedAccess.override', input)).revokedAt).not.toBeNull();
+    const replacement = await b.client.call('sharedAccess.override', {...input, requestId: 'replacement'});
+    const stored = b.h.core.sharedAccess.journal.overrides(sharedProjectId).find(o => o.value.id === replacement.id)!;
+    stored.value.expiresAt = Date.now() - 1; b.h.core.sharedAccess.journal.putOverride(stored);
+    expect(await thrown(agent.call('files.read', {threadId: worker.id, path}))).toThrow('shared file policy');
+    const changed = await b.client.call('sharedAccess.override', {...input, requestId: 'changed'});
+    writeFileSync(join(worker.cwd, path), 'TOKEN=changed-version');
+    expect(await thrown(agent.call('files.read', {threadId: worker.id, path}))).toThrow('shared file policy');
+    expect(changed.path).toBe(path);
+    const page = await agent.call('sharedAccess.get', {threadId: worker.id, sharedProjectId});
+    const wire = JSON.stringify(page);
+    for (const secret of ['override-secret-canary', 'changed-version', path, worker.cwd, 'fixture owner consent']) expect(wire).not.toContain(secret);
+    expect(page.events.some(e => e.decision === 'denied' && e.classification === 'environment')).toBe(true);
+    const denied = page.events.find(e => e.decision === 'denied' && e.classification)!;
+    expect(b.h.core.sharedAccess.confirmed(denied.id, sharedProjectId)).toBe(true);
+    expect(b.h.core.sharedAccess.confirmed(denied.id, 'other')).toBe(false);
+  } finally {agent.close();}
+}, 30000);
+
+test('published message tickets, inline dependencies and ordinary binary tickets lose authority on override or grant revoke', async () => {
+  const {b, sharedProjectId, job, worker, agent} = await fixture();
+  try {
+    await waitFor(() => b.h.core.journal.lastTurn(worker.id)?.status === 'running');
+    writeFileSync(join(worker.cwd, '.env.png'), 'TOKEN=publication-secret-canary');
+    const override = await b.client.call('sharedAccess.override', {sharedProjectId, requestId: 'publish', override: {path: '.env.png', actions: ['publish'], jobId: job.id, reason: 'fixture', expiresAt: Date.now() + 60000}});
+    const message = await agent.call('artifacts.publish', {threadId: worker.id, path: '.env.png'});
+    const params = {threadId: worker.id, messageId: message.id, partIndex: 0, ticket: true};
+    const attachment = await b.client.call('messages.attachment', params);
+    expect(await (await fetch(`${b.h.url}${attachment.url}`)).text()).toBe('TOKEN=publication-secret-canary');
+    expect((await fetch(`${b.h.url}${attachment.url}`)).headers.get('cache-control')).toBe('no-store');
+    await b.client.call('sharedAccess.revokeOverride', {sharedProjectId, overrideId: override.id});
+    expect((await fetch(`${b.h.url}${attachment.url}`)).status).toBe(404);
+    expect(await thrown(b.client.call('messages.attachment', params))).toThrow('shared file policy');
+    writeFileSync(join(worker.cwd, 'okay.png'), 'ordinary bytes');
+    const file = await agent.call('files.read', {threadId: worker.id, path: 'okay.png'});
+    if (file.kind === 'text') throw new Error('fixture expected a ticket');
+    expect((await fetch(`${b.h.url}${file.url}`, {headers: {range: 'bytes=0-3'}})).status).toBe(206);
+    await b.client.call('sharedProjects.revoke', {sharedProjectId, requestId: 'revoke'});
+    expect((await fetch(`${b.h.url}${file.url}`)).status).toBe(404);
+  } finally {agent.close();}
+}, 30000);

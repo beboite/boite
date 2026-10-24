@@ -123,6 +123,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['sharedCompute.get', 'only its exact source job, with host-attested state and git provenance'],
   ['sharedCompute.send', 'external follow-up to its captured job, never a host-owner instruction'],
   ['sharedCompute.cancel', 'only its captured job; no parent or sibling control'],
+  ['sharedAccess.get', 'sanitized activity of its own association, never host overrides, paths or credentials'],
   ['collaboration.directory', 'opted-in contacts in this project and explicitly trusted machines'],
   ['threads.mergeBack', 'returning bounded conclusions only from this authenticated fork to its recorded origin, under existing coordination permissions'],
   ['collaboration.send', 'authenticated delivery as this thread to a separately authorized recipient'],

@@ -11,6 +11,7 @@ import { invalidParams, refused, RpcFailure } from '../errors.ts';
 import { SharedProjectJournal, fingerprint } from './project-journal.ts';
 import { accessRecord, initialAccess, offeredProject, projectRef, sameProject, sourceActor, threadRef } from './project-policy.ts';
 import { SharedProjectSubscriptions } from './project-subscriptions.ts';
+import { redactSharedText, redactSharedContact } from './file-policy.ts';
 
 export interface SharedPeerContext {
   shared: SharedProject;
@@ -92,6 +93,7 @@ export class SharedProjects {
   }
   scope(p: SharedProjectScope, connection?: Connection): SharedPeerContext {
     this.core.sharedCompute?.assertScope(p.threadId, p.sharedProjectId);
+    this.core.sharedAccess?.assertScope(p.threadId, p.sharedProjectId);
     const shared = this.require(p.sharedProjectId);
     this.assertActive(shared);
     const { local, remote } = this.endpoints(shared);
@@ -102,16 +104,17 @@ export class SharedProjects {
     const contact = this.core.contacts.find(remote.ownerCoreId);
     return { shared, local, remote, contact: { coreId: remote.ownerCoreId, name: contact?.name ?? 'Contact' },
       connection: contact && this.core.contacts.view(contact).link === 'connected' ? 'connected' : sameProject(shared.authority, remote) ? 'authority-unavailable' : 'offline',
-      protection: { defaultDeny: true, activeOverrides: 0, reviewer: 'off' } };
+      protection: { defaultDeny: true, activeOverrides: this.core.sharedAccess?.activeOverrides(shared.id) ?? 0, reviewer: 'off' } };
   }
   list(threadId: string, connection?: Connection): SharedProjectView[] {
     const thread = this.core.threads.require(threadId);
     if (!thread.projectId) return [];
-    const bound = this.core.sharedCompute?.associationFor(threadId);
+    const bound = this.core.sharedAccess?.bound(threadId)?.job.sharedProjectId ?? this.core.sharedCompute?.associationFor(threadId);
     return this.journal.all(thread.projectId).filter(shared => !bound || shared.id === bound).map(shared => { this.actor(threadId, this.endpoints(shared).local, connection); return this.view(shared); });
   }
   get(p: SharedProjectScope, connection?: Connection): SharedProjectView {
     this.core.sharedCompute?.assertScope(p.threadId, p.sharedProjectId);
+    this.core.sharedAccess?.assertScope(p.threadId, p.sharedProjectId);
     const shared = this.require(p.sharedProjectId);
     this.actor(p.threadId, this.endpoints(shared).local, connection);
     return this.view(shared);
@@ -324,6 +327,8 @@ export class SharedProjects {
     }));
     if (p.grantRevision !== shared.access[index].revision) throw refused('grantRevision: expected the current destination grant revision');
     const ctx: SharedPeerContext = { shared, local, remote, source, peerId };
+    const action = p.method.startsWith('compute.') ? 'compute' : p.method.startsWith('board.') ? 'board' : p.method === 'threads' ? 'directory' : 'read';
+    try {
     let result: unknown;
     if (p.method === 'view') result = shared;
     else if (p.method === 'threads') result = this.localThreads(ctx);
@@ -337,7 +342,12 @@ export class SharedProjects {
       result = await handler(p.params as never, ctx, requestId);
     }
     this.assertPeer(ctx);
+    if (!['changed', 'subscribe', 'board.changed', 'view'].includes(p.method)) this.core.sharedAccess.record(ctx, action, 'allowed', 'scoped-request');
     return result;
+    } catch (error) {
+      this.core.sharedAccess.record(ctx, action, 'denied', 'request-denied');
+      throw error;
+    }
   }
 
   localThreads(ctx: SharedPeerContext): SharedProjectThread[] {
@@ -345,7 +355,7 @@ export class SharedProjects {
     return this.core.journal.listThreads(ctx.local.projectId).filter(t => !t.archived && this.core.coordination.config(t.id).mode !== 'off' && this.core.coordination.config(t.id).remote)
       .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100).map(t => {
         const ref = { project: ctx.local, threadId: t.id, address: { coreId: ctx.local.ownerCoreId, threadId: t.id } };
-        const agent = { ...this.core.coordination.describe(t.id), sharedThread: ref };
+        const agent = { ...redactSharedContact(this.core.coordination.describe(t.id)), sharedThread: ref };
         return { ref, agent, machine: agent.machine, readThreads: ctx.source.project.ownerCoreId === this.self() || this.core.contacts.mayRead(ctx.peerId, t.id) };
       });
   }
@@ -372,7 +382,7 @@ export class SharedProjects {
   private localSearch(ctx: SharedPeerContext, query: unknown): AgentMatch[] {
     const entries = this.localThreads(ctx);
     const words = searchWords(query);
-    return [true, false].flatMap(read => searchContacts(this.core.journal.db, entries.filter(t => t.readThreads === read).map(t => t.agent), words, read));
+    return [true, false].flatMap(read => searchContacts(this.core.journal.db, entries.filter(t => t.readThreads === read).map(t => t.agent), words, read, redactSharedText));
   }
   async search(p: SharedProjectScope & { query: string }, connection?: Connection): Promise<{ matches: AgentMatch[]; unavailable: SharedProjectRef[] }> {
     const ctx = this.scope(p, connection);
@@ -403,7 +413,7 @@ export class SharedProjects {
     const limit = p.limit ?? 30;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw invalidParams('limit: expected 1 to 100');
     if (p.before !== undefined && !Number.isSafeInteger(p.before)) throw invalidParams('before: expected a timestamp');
-    return { contact: entry.agent, ...transcript(this.core.journal.db, target.threadId, limit, p.before, id => this.core.journal.streamingMessage(id)) };
+    return { contact: entry.agent, ...transcript(this.core.journal.db, target.threadId, limit, p.before, id => this.core.journal.streamingMessage(id), redactSharedText) };
   }
   async read(p: RpcParams<'sharedProjects.read'>, connection?: Connection): Promise<AgentTranscript> {
     const ctx = this.scope(p, connection);

@@ -104,8 +104,11 @@ alone is not a claim ID, since different agents may reuse it.
 authority and host execution policy, and persists its one-time `/goal2` start
 with the existing activity state. Restart pauses that activity as usual;
 replaying the start does not resume or replace it. Loss of the authority never
-elects a replacement. Providers with tools require the host file-protection
-admission hook; only the no-tools echo route is admitted by default.
+elects a replacement. File protection captures the checkout and grant revision
+before starting the goal, and children retain that scope after its replacement.
+Only echo in default mode is admitted: Claude, Codex, ACP, Muse and pi have no
+implemented selective secret-file isolation and protected board execution is
+refused. This remains a feature gap, rather than an external provider sandbox.
 
 A release first asks the exact worker host to stop that claim. A durable stop
 marker fences delayed starts, then the host removes only its core-tagged shared

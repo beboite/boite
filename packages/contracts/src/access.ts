@@ -38,6 +38,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'sharedProjects.list', 'sharedProjects.get', 'sharedProjects.threads', 'sharedProjects.search', 'sharedProjects.read', 'sharedProjects.subscribe',
   'sharedBoard.get', 'sharedBoard.apply', 'sharedBoard.start', // Board actions on a paired phone recheck bilateral consent and its canonical local worker.
   'sharedCompute.models', 'sharedCompute.list', 'sharedCompute.get', 'sharedCompute.send', 'sharedCompute.cancel', // Paired humans follow and cancel scoped jobs; admission and host policy stay owner/agent-only.
+  'sharedAccess.get', // Sanitized activity of an explicit association; host paths, overrides and reviewer configuration stay owner-only.
   // Dictation uses the owner's configured engine. Devices cannot change paths or credentials.
   'speech.status',
   'speech.transcribe',

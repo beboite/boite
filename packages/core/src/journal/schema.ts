@@ -8,8 +8,9 @@ import { parseJson } from './rows.ts';
 import { createSharedProjects } from '../contacts/project-journal.ts';
 import { createSharedBoard } from '../contacts/board-journal.ts';
 import { createSharedCompute } from '../contacts/compute-journal.ts';
+import { createSharedAccess } from '../contacts/access-journal.ts';
 
-export const SCHEMA_VERSION = 41;
+export const SCHEMA_VERSION = 42;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -456,6 +457,7 @@ export function migrate(db: Database, file: string): { from: number; to: number 
   createSharedProjects(db);
   createSharedBoard(db);
   createSharedCompute(db);
+  createSharedAccess(db);
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
   return { from: row?.user_version ?? 0, to: version };

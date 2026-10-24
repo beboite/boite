@@ -42,6 +42,8 @@ export class ArtifactPreviews {
       }
     });
     const thread = this.core.threads.require(threadId);
+    // A live neighbouring-asset origin has no immutable dependency scope. Shared jobs use a checked inline view.
+    this.core.sharedAccess.denyTool(threadId);
     if (thread.archived) throw refused('artifacts.preview needs an active thread');
     const found = existingInside(thread.cwd, path, 'file', 'artifacts.preview path');
     if (!/\.html?$/i.test(found.relative)) throw refused('artifacts.preview path must be an HTML file', { path });

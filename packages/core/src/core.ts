@@ -64,6 +64,7 @@ import { SharedBoard } from './contacts/board.ts';
 import type { RelaySink } from './group/relay.ts';
 import { Delegation } from './delegation.ts';
 import { SharedCompute } from './contacts/compute.ts';
+import { SharedAccess } from './contacts/access-policy.ts';
 import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
 import { HookLedger } from './hooks.ts';
@@ -195,6 +196,7 @@ export class Core {
   readonly sharedProjects: SharedProjects;
   readonly sharedBoard: SharedBoard;
   readonly sharedCompute: SharedCompute;
+  readonly sharedAccess: SharedAccess;
   readonly delegation: Delegation;
   readonly workflows: Workflows;
   readonly brain: BrainStore;
@@ -387,6 +389,7 @@ export class Core {
     this.sharedBoard = new SharedBoard(this);
     this.delegation = new Delegation(this);
     this.sharedCompute = new SharedCompute(this);
+    this.sharedAccess = new SharedAccess(this);
     this.workflows = new Workflows(this);
     this.brain = new BrainStore(this);
     this.hooks = new HookLedger(this);

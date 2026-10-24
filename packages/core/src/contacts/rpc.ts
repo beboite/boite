@@ -2,10 +2,12 @@
 import type { Core } from '../core.ts';
 import { registerSharedProjectMethods } from './projects.ts';
 import { registerSharedBoardMethods } from './board.ts';
+import { registerSharedAccess } from './access-policy.ts';
 
 export function registerContactMethods(core: Core): void {
   registerSharedProjectMethods(core);
   registerSharedBoardMethods(core);
+  registerSharedAccess(core);
   core.router.register('contacts.get', () => core.contacts.state());
   core.router.register('contacts.invite', p => core.contacts.invite(p.share, p.internet));
   core.router.register('contacts.cancelInvites', () => core.contacts.cancelInvites());

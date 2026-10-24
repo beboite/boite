@@ -8,7 +8,7 @@
  */
 import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
-import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { gzip, type InputType, type ZlibOptions } from 'node:zlib';
 import {
@@ -59,7 +59,7 @@ const kept = (address: string) => address === '' || /^(?:data:|blob:|#|javascrip
  * front of the user, or a local file that is missing, outside the working
  * directory or of a kind a page has no use for. Each problem names its line.
  */
-export function buildView(source: string, directory: string, cwd: string): BuiltView {
+export function buildView(source: string, directory: string, cwd: string, guard?: (path: string) => import('./contacts/access-policy.ts').SharedFilePermit | undefined): BuiltView {
   const problems: string[] = [];
   const edits: Edit[] = [];
   const lineOf = (offset: number) => source.slice(0, offset).split('\n').length;
@@ -77,13 +77,18 @@ export function buildView(source: string, directory: string, cwd: string): Built
     if (!mime) loaded = `${address} is not a file a view can embed (images, fonts, audio, video, .css, .js)`;
     else {
       try {
+        const permit = guard?.(isAbsolute(path) ? path : resolve(folder, path));
         const found = existingInside(cwd, isAbsolute(path) ? path : resolve(folder, path), 'file', 'local file');
         // Read through the descriptor of the file that was checked: a link swapped in since is not followed.
         const fd = openSync(found.real, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
         try {
           const stats = fstatSync(fd, { bigint: true });
+          permit?.opened?.(found.real, stats);
           if (!stats.isFile() || stats.dev !== found.stats.dev || stats.ino !== found.stats.ino) loaded = `${address} changed while it was opened`;
-          else loaded = stats.size > BigInt(VIEW_MAX_BYTES) ? `${address} is over 4 MB` : { mime, data: readFileSync(fd) };
+          else {
+            loaded = stats.size > BigInt(VIEW_MAX_BYTES) ? `${address} is over 4 MB` : { mime, data: readFileSync(fd) };
+            if (typeof loaded !== 'string') permit?.inspect(loaded.data);
+          }
         } finally { closeSync(fd); }
       } catch (error) { loaded = `${address}: ${messageOf(error)}`; }
     }
@@ -218,6 +223,9 @@ const notReady = (problems: string[]) => refused(`artifacts.view page is not rea
  */
 export async function publishView(core: Core, params: RpcParams<'artifacts.view'>): Promise<RpcResult<'artifacts.view'>> {
   const thread = core.threads.require(params.threadId);
+  const permit = core.sharedAccess.file(thread.id, params.path, 'publish');
+  const sources = [params.path];
+  const permits = permit ? [permit] : [];
   if (thread.archived) throw refused('artifacts.view needs an active thread', { threadId: thread.id });
   const turn = core.journal.lastTurn(thread.id);
   if (!turn) throw refused('artifacts.view needs a thread with a turn', { threadId: thread.id });
@@ -227,9 +235,17 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
   // Read through the handle of the file that was checked: a link swapped in since is refused.
   const handle = await openChecked(found.real, constants.O_RDONLY, found.stats.dev, found.stats.ino, 'artifacts.view path', params.path);
   let source: string;
-  try { source = await handle.readFile('utf8'); } finally { await handle.close(); }
+  try {
+    if (permit) permit.opened?.(found.real, await handle.stat({bigint: true}));
+    source = await handle.readFile('utf8');
+  } finally { await handle.close(); }
+  permit?.inspect(source);
   if (!source.trim()) throw refused('artifacts.view page is empty', { path: params.path });
-  const built = buildView(source, dirname(found.absolute), thread.cwd);
+  const built = buildView(source, dirname(found.absolute), thread.cwd, permit ? path => {
+    const logical = relative(thread.cwd, path).split(sep).join('/');
+    const dependency = core.sharedAccess.file(thread.id, logical, 'publish')!;
+    sources.push(logical); permits.push(dependency); return dependency;
+  } : undefined);
   if (built.problems.length) throw notReady(built.problems);
   const data = Buffer.from(viewDocument(built.html), 'utf8');
   if (data.length > VIEW_MAX_BYTES) throw refused(`artifacts.view page is ${(data.length / 1024 / 1024).toFixed(1)} MB with its files embedded; the limit is 4 MB. Use smaller images.`, { path: params.path });
@@ -246,7 +262,7 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
     await writeFile(`${destination}${VIEW_GZIP_SUFFIX}`, await gzipped(data, { level: 9 }), { flag: 'wx' });
     const name = basename(found.absolute);
     // The check loads the page exactly as a client will: from the view route, under its sandbox and policy, in a frame as wide as the client's.
-    const ticket = core.fileTickets.mint(destination, VIEW_MIME, Date.now(), name, undefined, true);
+    const ticket = core.fileTickets.mint(destination, VIEW_MIME, Date.now(), name, undefined, true, permit ? {check: () => {for (const p of permits) p.check();}, inspect: () => {for (const p of permits) p.check();}} : undefined);
     const probe = await core.browser.probe(`${core.baseUrl()}${VIEW_ROUTE}/${ticket}`, [VIEW_WIDTH, VIEW_NARROW_WIDTH].map(width => width + 2 * VIEW_BLEED));
     if (probe?.errors.length) throw notReady(probe.errors);
     const [height, narrowHeight] = probe?.heights ?? [];
@@ -257,10 +273,12 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
       source: found.relative,
     };
     if (core.threads.require(thread.id).archived) throw refused('artifacts.view needs an active thread', { threadId: thread.id });
+    for (const p of permits) p.check();
     const message: Message = {
       id: newId('msg_'), threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: Date.now(),
       parts: [{ type: 'artifact', id, name, mimeType: VIEW_MIME, bytes: data.length, view }],
     };
+    core.sharedAccess.published(thread.id, message.id, sources);
     core.journal.append({ type: 'artifact.published', threadId: thread.id, version: 1, payload: message }, () => core.journal.putMessage(message));
     committed = true;
     core.bus.emit('message.started', message);

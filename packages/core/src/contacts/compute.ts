@@ -9,7 +9,7 @@ import { assertDriverRunnable } from '../drivers/index.ts';
 import { modelsFor } from '../threads/selection.ts';
 import { type ChildRoute } from '../delegation/routes.ts';
 import { SharedComputeJournal, terminalCompute, type ComputeRecord } from './compute-journal.ts';
-import { computeInput, checkedComputeJob, sharedPermissionSupport } from './compute-policy.ts';
+import { computeInput, checkedComputeJob, sharedPermissionSupport, sharedExecutionProtection } from './compute-policy.ts';
 import { computeBase, computeGit, computeRepository } from './compute-git.ts';
 import { gitCommonDirOf } from './git-remote.ts';
 import { computePolicy, sameProject, threadRef } from './project-policy.ts';
@@ -31,8 +31,7 @@ export class SharedCompute {
   private closed = false;
   private readonly off: () => void;
   /** Protection service must report an actual execution boundary before admitting tools. */
-  protection: (ctx: SharedPeerContext, route: ChildRoute) => SharedExecutionProtection = (_ctx, route) => this.core.providers.require(route.providerId).protocol === 'echo'
-    ? { supported: true, boundary: 'no-tools' } : { supported: false, reason: 'host-enforced file protection is unavailable for this provider' };
+  protection: (ctx: SharedPeerContext, route: ChildRoute) => SharedExecutionProtection = (_ctx, route) => sharedExecutionProtection(this.core.providers.require(route.providerId).protocol);
   /** Called after capturing the prepared checkout, before starting its first provider turn. */
   guardStart: (ctx: SharedPeerContext, worker: SharedThreadRef, job: SharedComputeJob) => void | Promise<void> = (ctx, worker) => {
     const thread = this.core.threads.require(worker.threadId);

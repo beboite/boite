@@ -84,6 +84,7 @@ export class TurnContexts {
 
   /** Setup only: no journalled turn, no consumed deferred input and no message sink. */
   makeSessionContext(thread: ThreadSummary, provider: ProviderDescriptor, account: Account): SessionContext {
+    thread = this.core.sharedAccess.contextThread(thread);
     const threadId = thread.id;
     const backgroundOwner = { providerId: provider.id, sessionGeneration: thread.sessionGeneration ?? 0, parentTurnId: null };
     const current = (): boolean => this.core.journal.getThread(threadId)?.selectionVersion === thread.selectionVersion;
@@ -124,6 +125,7 @@ export class TurnContexts {
     carried: CarriedInput = {},
     resumePrompt?: string,
   ): TurnContext {
+    thread = this.core.sharedAccess.contextThread(thread);
     const threadId = thread.id;
     const backgroundOwner = { providerId: provider.id, sessionGeneration: thread.sessionGeneration ?? 0, parentTurnId: turn.id };
     const env = this.core.accounts.accountEnv(account, provider);
@@ -414,6 +416,7 @@ export class TurnContexts {
       // own door goes into the environment: everything a thread launches finds
       // the core, its token and the `boite` CLI, grandchildren included.
       spawn: (cmd: string, args: string[], opts?: SpawnOptions) => {
+        this.core.sharedAccess.denyTool(threadId);
         this.core.sharedCompute?.assertSpawn(threadId);
         const spawned = this.core.procs.spawn(threadId, cmd, args, {
           ...opts,
@@ -452,6 +455,7 @@ export class TurnContexts {
     session?: { resume: boolean; turnId?: TurnId },
   ): (cmd: string, args: string[], opts?: SpawnOptions) => SpawnedChild {
     return (cmd, args, opts) => {
+      this.core.sharedAccess.denyTool(threadId);
       this.core.sharedCompute?.assertSpawn(threadId);
       // The SDK drivers hand a whole environment here, so the agent's own
       // variables are merged onto theirs rather than added to `process.env`.

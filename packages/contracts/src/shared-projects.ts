@@ -179,7 +179,10 @@ export interface SharedComputeJob {
 
 export type SharedAccessAction = 'directory' | 'read' | 'letter' | 'board' | 'compute' | 'file' | 'tool' | 'attachment' | 'result';
 export type SharedSecretClass = 'environment' | 'private-key' | 'credential' | 'secret' | 'outside-project';
-/** Host-local, exact canonical relative file, optionally one job. Never a peer-supplied permission. */
+/** Host-local exact canonical relative file, bound to its inode, checkout and grant revision.
+ * A jobId binds the captured job checkout; null binds the registered project root only.
+ * execute is reserved and rejected until a host can enforce a selective execution boundary.
+ */
 export interface SharedFileOverride {
   id: string;
   sharedProjectId: string;

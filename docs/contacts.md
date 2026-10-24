@@ -518,16 +518,34 @@ continues to obey `minTier`. Require negotiated human-letter support, never
 fall back to an owner prompt on an older peer. None of these external letters
 answers an approval or changes host settings.
 
-Shared work denies environment variants, private keys, credentials, secrets
-and paths outside its allowed project by default. Enforce before reading and
-before releasing bytes, at file listing/read/tickets, git diffs/checkpoints,
-tool execution, attachment/published snapshot/HTML preview, transcript/search
-projection and compute/result boundaries. Canonicalize with the host OS,
-containment after symlink resolution and file-handle identity checks. Include
-Windows case, drive-relative, UNC, extended/device, alternate-stream and
-separator forms; do not trust lexical prefix checks. Revalidate a ticket and
-override at use time, including after revoke. Ordinary local sessions retain
+`contacts/access-policy.ts` binds shared compute workers, shared board goals
+and their children to the captured checkout, association and grant revision.
+It denies environment variants, private keys, credential directories/files,
+hard links and paths outside that checkout. Both the supplied spelling and
+the canonical target are classified. Foreign Windows drive-relative, UNC,
+device, stream and backslash spellings are rejected, including on Linux;
+internal paths use canonical relative slash notation. Open descriptors must
+match the authorized file identity, including its change timestamps.
+
+File listings omit denied entries. Reads inspect credential-like text before
+returning it, and scan complete binary/large files before issuing a ticket so
+a Range cannot skip that inspection. Tickets recheck file identity, live grants
+and overrides on use and while streaming. Secret checkpoint entries are
+omitted; ordinary files still get checkpoints. Shared Git RPCs and rewind are
+refused because historical blobs and configurable Git helpers have no selective
+file boundary. Fixed-argument internal compute Git operations remain separate.
+The process launch gates also reject unisolated tools, including an echo
+fixture's spawn command and delayed attempts. Ordinary local sessions retain
 their existing permissions.
+
+Published snapshots and self-contained HTML views inspect every source file
+and embedded dependency. Their durable source manifests keep the captured
+authority: changing/removing a source, changing a grant, or revoking/expiring
+an override makes subsequent snapshot tickets fail closed. Shared live previews
+are refused. Protected message/image tickets use `no-store`. Contact transcript,
+title, search and compute-result projections withhold credential-like text.
+Content detection is conservative pattern matching, not general data-loss
+prevention for encoded or obfuscated content.
 
 Reuse the credential directory/file classifications already in `workdir.ts`
 (`DEVICE_SECRET_DIRS` and `DEVICE_SECRET_FILE`), and extend them for this shared
@@ -538,14 +556,26 @@ also deny `.env` variants by default, including template-named variants unless
 the host explicitly permits that exact file.
 
 A host-only `SharedFileOverride` names one exact canonical relative file,
-actions, optional job, expiry and reason, and can be revoked. It neither
-disables the policy globally nor travels as remote authority. A route reports
+`read`/`publish` actions, optional job, expiry and reason, and can be revoked.
+Its durable record also binds the file identity, checkout and grant revision.
+`jobId: null` applies only to the registered project root, not copied job
+worktrees. Replaying a revoked creation receipt never restores it. `execute`
+is reserved and refused: an exact read override cannot authorize a process.
+Overrides neither disable the policy globally nor travel as remote authority.
+A route reports
 `SharedExecutionProtection`: enforced isolated process, no-tools execution, or
 unsupported with a reason. A prompt, resource cap, approval callback or the
 Codex workspace-write mode alone cannot guarantee file read isolation. Refuse
 protected shared execution when the actual process/tool boundary cannot
 enforce it. Keep the host's permission semantics; never silently substitute
 another driver/mode or enable bypass.
+
+Current `sharedExecutionProtection` admits only echo in its default no-tools
+route. Claude, Codex, ACP, Muse and pi advertise `supported: false` with a
+protocol-specific reason and are refused before a protected turn starts.
+There is no isolated external provider implementation yet. Consequently real
+provider shared compute and shared board execution remain unavailable; the
+deterministic fixture coverage does not complete that feature.
 
 | Driver | Existing boundary and limitation | Required shared admission |
 | --- | --- | --- |
@@ -566,10 +596,20 @@ execution must account for that limit, not claim a captured PID is an OS sandbox
 
 ### Activity review
 
-The host journals sanitized `SharedAccessEvent` metadata as part of admission:
+Schema 42 persists sanitized `SharedAccessEvent` metadata at enforced boundaries:
 association, attested actor, action, allow/deny, classification and a bounded
 core-generated reason. Never include secret bytes, raw tool arguments,
-credential-bearing paths or unrelated projects. A lazy host-configured reviewer
+credential-bearing paths or unrelated projects. `sharedAccess.get` pages these
+events by association-bound event-ID cursor; the host and paired devices can
+inspect history after revocation, while agents need a live own scope. Overrides
+remain owner-only and are stored separately from reviewable events.
+`core.sharedAccess.onEvent` supplies a post-persistence feed, and
+`confirmed(eventId, associationId)` recognizes only a locally journalled
+classified denial. Listener failure cannot change the deterministic decision.
+This feed adds no timer, SDK or model process. Verdict projection and the
+reviewer itself are not implemented by the file-policy service.
+
+A lazy host-configured reviewer
 uses the tool-free side-question path over only relevant events, with no owner
 or agent token, hooks, MCP, disk tools or ordinary conversation history.
 Persist a verdict and its evidence event IDs, reason and applied consequence.
@@ -610,7 +650,7 @@ only alongside enforcing handlers and scoped subscriptions.
 | `sharedBoard.get/apply` | Association + board consent | Planned: same; every board action | Planned: own association, add/edit/claim; no remove/Done/reopen Done |
 | `sharedCompute.models/list/get/send/cancel` | Host jobs or source scope | Planned: follow/steer/cancel existing jobs, no admission | Planned: own source jobs; no host policy or permission answers |
 | `sharedCompute.start` | Explicit host opt-in and supported protection | Denied | Planned: own source project, current grant and host-approved route |
-| `sharedAccess.get` | Sanitized scoped activity | Planned: same | Planned: own association metadata only |
+| `sharedAccess.get` | Sanitized scoped activity, including historical revocations | Same | Live own association metadata only |
 | `sharedAccess.overrides/override/revokeOverride` | Host only, exact local paths | Denied | Denied |
 | `contacts.sendHuman` | Attested human, allowed contact destination | Planned: same | Denied |
 | `sharedProjects.changed` | Explicit connection subscription | Same subscription | Own thread + association, invalidation only |

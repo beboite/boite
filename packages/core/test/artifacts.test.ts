@@ -111,7 +111,7 @@ test('large snapshots stay out of JSON, seek over HTTP, renew, survive restart a
   const reopened = new Journal(join(harness.dataDir, 'journal.db'));
   try {
     const tickets = new FileTickets();
-    const restored = readArtifact({ threads: harness.core.threads, journal: reopened, dataDir: harness.dataDir, fileTickets: tickets } as typeof harness.core, params);
+    const restored = readArtifact({ threads: harness.core.threads, journal: reopened, dataDir: harness.dataDir, fileTickets: tickets, sharedAccess: harness.core.sharedAccess } as typeof harness.core, params);
     expect(restored.bytes).toBe(bytes.length);
     expect(tickets.resolve(restored.url.split('/').at(-1)!)).not.toBeNull();
     expect(reopened.getMessage(sent.id)?.parts).toEqual(sent.parts);

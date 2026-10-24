@@ -3,7 +3,8 @@ import { constants, type BigIntStats } from 'node:fs';
 import { chmod, copyFile, link, lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, rmdir, symlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Core } from '../core.ts';
-import { refused } from '../errors.ts';
+import type { SharedFilePermit } from '../contacts/access-policy.ts';
+import { refused, RpcFailure } from '../errors.ts';
 import { git } from '../git/read.ts';
 import { BLOB_BYTE_LIMIT, decodeBlob, encodeBlob, errno, NO_LINK, readBlob, sharedBlob } from './checkpoint-store.ts';
 
@@ -81,7 +82,7 @@ export async function checkedPath(root: string, name: string, verified?: Set<str
 }
 
 /** One file at a time, bounded before allocation. Never follows a file symlink. */
-export async function readEntry(path: string, cached?: CachedFile): Promise<(CachedFile & { bytes?: Buffer }) | null> {
+export async function readEntry(path: string, cached?: CachedFile, permit?: SharedFilePermit): Promise<(CachedFile & { bytes?: Buffer }) | null> {
   let info;
   try { info = await lstat(path, { bigint: true }); } catch (error) {
     if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return null;
@@ -102,6 +103,7 @@ export async function readEntry(path: string, cached?: CachedFile): Promise<(Cac
   }
   const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
+    permit?.opened?.(await realpath(path), await handle.stat({ bigint: true }));
     const bytes = Buffer.alloc(Number(info.size) + 1);
     let size = 0;
     while (size < bytes.length) {
@@ -112,6 +114,7 @@ export async function readEntry(path: string, cached?: CachedFile): Promise<(Cac
     const after = await handle.stat({ bigint: true });
     if (size !== Number(info.size) || metadataOf(after) !== metadata) throw new Error(`${path}: file changed while saving the checkpoint`);
     const content = bytes.subarray(0, size);
+    permit?.inspect(content);
     return { entry: { hash: createHash('sha256').update(content).digest('hex'), mode: Number(info.mode) & 0o777 }, bytes: content, metadata, size };
   } finally { await handle.close(); }
 }
@@ -150,11 +153,20 @@ export async function snapshot(core: Core, threadId: string, root: string, objec
   const verified = new Set<string>();
   const folders = new Set<string>();
   let bytes = 0;
+  const protectedScope = core.sharedAccess.bound(threadId) !== null;
   for (const name of names) {
     const path = await checkedPath(root, name, verified);
     const cached = previous?.get(name);
     // Without a shared store, a hash cached for another folder has no blob here.
-    let saved = await readEntry(path, shared || cached?.objects === objects ? cached : undefined);
+    let saved;
+    try {
+      const permit = protectedScope ? core.sharedAccess.file(threadId, relative(core.threads.require(threadId).cwd, path).split(sep).join('/'), 'read', false, true) : undefined;
+      // A local cache may contain a credential under an ordinary name. Shared snapshots inspect the actual bytes.
+      saved = await readEntry(path, !protectedScope && (shared || cached?.objects === objects) ? cached : undefined, permit);
+    } catch (error) {
+      if (error instanceof RpcFailure && error.message.startsWith('shared file policy:')) continue;
+      throw error;
+    }
     if (!saved) continue;
     if (shared && !saved.bytes && needsBlob(saved.entry) && saved.objects !== objects && !await linkBlob(shared, objects, saved.entry.hash)) {
       // The shared blob is gone: read the file again.

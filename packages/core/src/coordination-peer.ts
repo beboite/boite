@@ -12,6 +12,7 @@ import { boundedBody, type Envelope } from './coordination-wire.ts';
 import { pack, SEALED, sealResponse, unpack, type Sealing } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, refused, RpcFailure } from './errors.ts';
+import { redactSharedText, redactSharedContact } from './contacts/file-policy.ts';
 
 /** What the desk reads of the coordination it answers for. */
 export interface PeerSide {
@@ -96,16 +97,16 @@ export class PeerDesk {
         if (!contact && envelope.operation.startsWith('contact.')) throw refused('operation: only a contact sends contact operations');
         if (contact && this.core.sharedProjects.hasContact(peer.coreId) && ['directory', 'search', 'read'].includes(envelope.operation)) throw refused('operation: associated projects require scoped contact.project queries');
         if (envelope.operation === 'contact.project') result = await this.core.sharedProjects.receive(peer.coreId, envelope.payload);
-        else if (envelope.operation === 'directory') result = contact ? this.side.contactDirectory(peer.coreId) : this.side.directory();
+        else if (envelope.operation === 'directory') result = contact ? this.side.contactDirectory(peer.coreId).map(redactSharedContact) : this.side.directory();
         else if (envelope.operation === 'deliver') result = this.side.receive(envelope.payload as AgentLetter, peer);
         else if (envelope.operation === 'search') {
           const words = searchWords(((envelope.payload as { words?: unknown })?.words as string[] | undefined)?.join?.(' '));
           if (contact) {
             // Chat is searched only where the owner let the contact read conversations.
-            const open = this.side.contactDirectory(peer.coreId);
+            const open = this.side.contactDirectory(peer.coreId).map(redactSharedContact);
             const readable = open.filter(entry => this.core.contacts.mayRead(peer.coreId, entry.threadId));
             const closed = open.filter(entry => !this.core.contacts.mayRead(peer.coreId, entry.threadId));
-            result = [...searchContacts(this.core.journal.db, readable, words, true), ...searchContacts(this.core.journal.db, closed, words, false)].slice(0, 100);
+            result = [...searchContacts(this.core.journal.db, readable, words, true, redactSharedText), ...searchContacts(this.core.journal.db, closed, words, false, redactSharedText)].slice(0, 100);
           } else result = searchContacts(this.core.journal.db, this.side.directory(), words, currentPeer.readThreads === true);
         } else if (envelope.operation === 'read') {
           if (!contact && !currentPeer.readThreads) throw refused('agents on this machine are not allowed to read conversations; enable their access in Machines on the destination');
@@ -117,7 +118,7 @@ export class PeerDesk {
           const entry = (contact ? this.side.contactDirectory(peer.coreId) : this.side.directory()).find(a => a.threadId === threadId);
           if (!entry) throw refused(contact ? 'read.threadId: not a thread of a project opened to you' : 'read.threadId: not a thread open to other machines');
           if (contact && !this.core.contacts.mayRead(peer.coreId, threadId)) throw refused('read.threadId: this owner has not let you read the conversations of that project (readThreads)');
-          result = { contact: entry, ...transcript(this.core.journal.db, threadId, limit as number, payload.before as number | undefined, id => this.core.journal.streamingMessage(id)) };
+          result = { contact: contact ? redactSharedContact(entry) : entry, ...transcript(this.core.journal.db, threadId, limit as number, payload.before as number | undefined, id => this.core.journal.streamingMessage(id), contact ? redactSharedText : undefined) };
         }
         else if (envelope.operation === 'receipt') {
           const payload = envelope.payload as { id: string; fromThreadId: string };

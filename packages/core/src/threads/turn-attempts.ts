@@ -154,6 +154,9 @@ export class TurnAttempts {
     let afterCapacity = false;
     for (;;) {
       attempt += 1;
+      // A retry or delayed provider preparation cannot outlive shared host consent.
+      this.core.sharedCompute?.assertTurn(threadId);
+      this.core.sharedAccess?.assertTurn(threadId);
       state.thread.permissionMode = permissions.mode;
       const note = afterUpdate;
       afterUpdate = null;

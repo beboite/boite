@@ -1,4 +1,4 @@
-import type { PermissionMode, Protocol, SharedComputeJob, SharedComputeStart } from '@boite/contracts';
+import type { PermissionMode, Protocol, SharedComputeJob, SharedComputeStart, SharedExecutionProtection } from '@boite/contracts';
 import { invalidParams, refused } from '../errors.ts';
 import { text } from '../coordination-letter.ts';
 import { projectRef, sameProject, threadRef } from './project-policy.ts';
@@ -19,6 +19,18 @@ export function sharedPermissionSupport(protocol: Protocol, mode: PermissionMode
   if (protocol === 'pi' || protocol === 'acp') return false;
   if (protocol === 'echo') return mode === 'default';
   return protocol === 'claude-sdk' || protocol === 'codex-appserver' || protocol === 'muse';
+}
+/** Approval callbacks, cwd and provider sandbox names do not attest selective secret-file isolation. */
+export function sharedExecutionProtection(protocol: Protocol): SharedExecutionProtection {
+  if (protocol === 'echo') return {supported: true, boundary: 'no-tools'};
+  const reason: Record<Exclude<Protocol, 'echo'>, string> = {
+    'claude-sdk': 'Claude tool hooks are not process isolation; selective secret read protection is unavailable',
+    'codex-appserver': 'Codex read approvals do not cover ordinary file reads; selective secret isolation is unavailable',
+    acp: 'ACP modes and approval coverage are provider-specific; protected shared execution is unavailable',
+    muse: 'Muse sandbox modes do not attest selective secret read denial; protected shared execution is unavailable',
+    pi: 'pi RPC has no enforceable approval gate or selective secret isolation',
+  };
+  return {supported: false, reason: reason[protocol]};
 }
 /** Project only the wire contract. A malicious peer's path/account/result extras never become local authority. */
 export function checkedComputeJob(raw: SharedComputeJob, expected: SharedComputeJob, repository: string): SharedComputeJob {
