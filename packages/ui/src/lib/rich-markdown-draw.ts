@@ -195,6 +195,8 @@ function copyByCommand(text: string): boolean {
   const field = document.createElement('textarea');
   field.className = 'md-copy-field';
   field.value = text;
+  // Read-only, so focusing it on a phone opens no keyboard; it can still be selected and copied.
+  field.readOnly = true;
   field.setAttribute('aria-hidden', 'true');
   document.body.append(field);
   field.focus({ preventScroll: true });

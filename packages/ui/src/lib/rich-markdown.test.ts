@@ -94,8 +94,10 @@ describe('richMarkdown', () => {
     // Plain HTTP: no navigator.clipboard, only the copy command, which copies the selection.
     vi.stubGlobal('navigator', { ...navigator, clipboard: undefined });
     let selected = '';
+    let readOnly = false;
     document.execCommand = vi.fn(() => {
       const field = document.activeElement as HTMLTextAreaElement;
+      readOnly = field.readOnly;
       selected = field.value.slice(field.selectionStart, field.selectionEnd);
       return true;
     });
@@ -103,6 +105,8 @@ describe('richMarkdown', () => {
       copy.focus();
       copy.click();
       expect(selected).toBe('flowchart LR\n  A --> B');
+      // Read-only: a phone opens no keyboard for it.
+      expect(readOnly).toBe(true);
       expect(copy.textContent).toBe('Copied');
       // The field goes, and focus comes back to the button.
       expect(document.querySelector('.md-copy-field')).toBeNull();
